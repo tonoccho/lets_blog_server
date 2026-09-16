@@ -15,7 +15,11 @@ export interface OperationLogRequest {
 }
 
 export interface FrontendErrorLogRequest {
-  message?: string;
+  /**
+     * @minLength 0
+     * @maxLength 65535
+     */
+  message: string;
   stack?: string;
   componentStack?: string;
   level?: string;
@@ -49,17 +53,17 @@ export interface OperationLog {
 
 export interface SortObject {
   empty?: boolean;
-  sorted?: boolean;
   unsorted?: boolean;
+  sorted?: boolean;
 }
 
 export interface PageableObject {
   offset?: number;
   sort?: SortObject;
+  unpaged?: boolean;
   paged?: boolean;
   pageNumber?: number;
   pageSize?: number;
-  unpaged?: boolean;
 }
 
 export interface PageOperationLog {

@@ -1,1 +1,2775 @@
-{"openapi":"3.1.0","info":{"title":"OpenAPI definition","version":"v0"},"servers":[{"url":"http://localhost:8080","description":"Generated server url"}],"paths":{"/api/taxonomy/resolve":{"post":{"tags":["taxonomy-controller"],"operationId":"resolve","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TaxonomyResolveRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/TaxonomyResolveResponse"}}}}}}},"/api/projects/{projectId}/preview/skeleton":{"post":{"tags":["article-preview-controller"],"operationId":"skeleton","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/RenderSkeletonRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ThemeSkeletonResponse"}}}}}}},"/api/projects/{id}/bulk-management/upload":{"post":{"tags":["bulk-management-controller"],"operationId":"runBulkOperationUpload","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"operationType","in":"query","required":true,"schema":{"type":"string","enum":["CATEGORY_CREATE","CATEGORY_EDIT","CATEGORY_DELETE","TAG_CREATE","TAG_EDIT","TAG_DELETE","PLUGIN_INSTALL","PLUGIN_ACTIVATE","PLUGIN_DEACTIVATE","PLUGIN_DELETE","THEME_INSTALL","THEME_ACTIVATE","THEME_DELETE","CATEGORY_FETCH","TAG_FETCH","PLUGIN_FETCH","THEME_FETCH","POST_FETCH","MEDIA_UPLOAD","POST_DELETE","POST_STATUS_UPDATE"]}}],"requestBody":{"content":{"multipart/form-data":{"schema":{"type":"object","properties":{"file":{"type":"string","format":"binary"}},"required":["file"]}}}},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/themes/reconcile":{"post":{"tags":["bulk-management-controller"],"operationId":"reconcileTheme","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReconcileStateRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/themes/delete-all":{"post":{"tags":["bulk-management-controller"],"operationId":"deleteThemeEverywhere","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeleteSlugRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/tags/sync":{"post":{"tags":["bulk-management-controller"],"operationId":"syncTag","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TermNameRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/tags/sync-all":{"post":{"tags":["bulk-management-controller"],"operationId":"syncAllTagsToMaster","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/tags/edit-sync":{"post":{"tags":["bulk-management-controller"],"operationId":"editTagAndSync","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/EditTermRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/tags/delete-all":{"post":{"tags":["bulk-management-controller"],"operationId":"deleteTagEverywhere","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TermNameRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/posts/status-update":{"post":{"tags":["bulk-management-controller"],"operationId":"updatePostStatusEverywhere","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"postType","in":"query","required":false,"schema":{"type":"string","default":"post"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdatePostStatusRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/posts/delete-all":{"post":{"tags":["bulk-management-controller"],"operationId":"deletePostEverywhere","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"postType","in":"query","required":false,"schema":{"type":"string","default":"post"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeleteSlugRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/plugins/reconcile":{"post":{"tags":["bulk-management-controller"],"operationId":"reconcilePlugin","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReconcileStateRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/plugins/delete-all":{"post":{"tags":["bulk-management-controller"],"operationId":"deletePluginEverywhere","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeleteSlugRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/categories/sync":{"post":{"tags":["bulk-management-controller"],"operationId":"syncCategory","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TermNameRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/categories/sync-all":{"post":{"tags":["bulk-management-controller"],"operationId":"syncAllCategoriesToMaster","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/categories/edit-sync":{"post":{"tags":["bulk-management-controller"],"operationId":"editCategoryAndSync","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/EditTermRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/categories/delete-all":{"post":{"tags":["bulk-management-controller"],"operationId":"deleteCategoryEverywhere","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TermNameRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/bulk-management/apply":{"post":{"tags":["bulk-management-controller"],"operationId":"applyBulkOperation","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ApplyToEnvironmentRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}},"/api/projects/{id}/bulk-management/apply-all":{"post":{"tags":["bulk-management-controller"],"operationId":"applyBulkOperationToAllEnvironments","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ApplyToAllEnvironmentsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/projects/{id}/asset-images/{generatedImageId}/upload":{"post":{"tags":["bulk-management-controller"],"operationId":"uploadAssetImage","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"generatedImageId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/BulkOperationLogResponse"}}}}}}}},"/api/posts/publish":{"post":{"tags":["post-controller"],"operationId":"publish","parameters":[{"name":"site","in":"query","required":true,"schema":{"type":"string"}},{"name":"title","in":"query","required":true,"schema":{"type":"string"}},{"name":"slug","in":"query","required":false,"schema":{"type":"string"}},{"name":"status","in":"query","required":false,"schema":{"type":"string","default":"draft"}},{"name":"categories","in":"query","required":false,"schema":{"type":"array","items":{"type":"string"}}},{"name":"tags","in":"query","required":false,"schema":{"type":"array","items":{"type":"string"}}},{"name":"wpPostId","in":"query","required":false,"schema":{"type":"string"}},{"name":"markdown","in":"query","required":true,"schema":{"type":"string"}},{"name":"featuredImageFilename","in":"query","required":false,"schema":{"type":"string"}},{"name":"imageReferences","in":"query","required":false,"schema":{"type":"array","items":{"type":"string"}}},{"name":"publishScheduledAt","in":"query","required":false,"schema":{"type":"string"}}],"requestBody":{"content":{"multipart/form-data":{"schema":{"type":"object","properties":{"images":{"type":"array","items":{"type":"string","format":"binary"}}}}}}},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PostPublishResponse"}}}}}}},"/api/internal/publishing/sites/{site}/media":{"post":{"tags":["cms-media-bridge-controller"],"operationId":"uploadMedia","parameters":[{"name":"site","in":"path","required":true,"schema":{"type":"string"}}],"requestBody":{"content":{"multipart/form-data":{"schema":{"type":"object","properties":{"file":{"type":"string","format":"binary"}},"required":["file"]}}}},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MediaUploadResult"}}}}}}},"/api/internal/publishing/sites/{siteKey}/authors":{"post":{"tags":["author-provisioning-internal-controller"],"operationId":"provisionAuthor","parameters":[{"name":"siteKey","in":"path","required":true,"schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/AuthorProvisioningBridgeRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AuthorProvisioningBridgeResponse"}}}}}}},"/api/internal/project/cms/test-connection":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"testConnection","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeConnectionCheckResponse"}}}}}}},"/api/internal/project/cms/provision":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"provision","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeProvisionRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeProvisionResponse"}}}}}}},"/api/internal/project/cms/list-active-plugins":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"listActivePlugins","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"type":"string"}}}}}}}},"/api/internal/project/cms/install-wp-cli":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"installWpCli","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/WpCliInstallResult"}}}}}}},"/api/internal/project/cms/has-author-capability":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"hasAuthorProvisioningCapability","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"boolean"}}}}}}},"/api/internal/project/cms/export-themes":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"exportThemes","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/octet-stream":{"schema":{"type":"string","format":"byte"}}}}}}},"/api/internal/project/cms/export-media":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"exportMedia","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/octet-stream":{"schema":{"type":"string","format":"byte"}}}}}}},"/api/internal/project/cms/export-database":{"post":{"tags":["cms-provisioning-bridge-controller"],"operationId":"exportDatabase","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeCredentialsRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CmsBridgeExportDatabaseResponse"}}}}}}},"/api/projects/{projectId}/preview/theme-css":{"get":{"tags":["article-preview-controller"],"operationId":"themeCss","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"siteId","in":"query","required":false,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ThemeCssResponse"}}}}}}},"/api/projects/{id}/bulk-management/themes/comparison":{"get":{"tags":["bulk-management-controller"],"operationId":"themeComparison","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"page","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":0}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusComparisonPage"}}}}}}},"/api/projects/{id}/bulk-management/tags/comparison":{"get":{"tags":["bulk-management-controller"],"operationId":"tagComparison","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"page","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":0}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/TermComparisonPage"}}}}}}},"/api/projects/{id}/bulk-management/posts/comparison":{"get":{"tags":["bulk-management-controller"],"operationId":"postComparison","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"postType","in":"query","required":false,"schema":{"type":"string","default":"post"}},{"name":"page","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":0}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PostComparisonPage"}}}}}}},"/api/projects/{id}/bulk-management/plugins/comparison":{"get":{"tags":["bulk-management-controller"],"operationId":"pluginComparison","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"page","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":0}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/StatusComparisonPage"}}}}}}},"/api/projects/{id}/bulk-management/categories/comparison":{"get":{"tags":["bulk-management-controller"],"operationId":"categoryComparison","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"page","in":"query","required":false,"schema":{"type":"integer","format":"int32","default":0}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/TermComparisonPage"}}}}}}},"/api/internal/publishing/projects/{projectId}/media-scan":{"get":{"tags":["cms-media-bridge-controller"],"operationId":"scanMedia","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"environment","in":"query","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MediaGcScanBridgeResponse"}}}}}}},"/api/internal/ai/projects/{projectId}/existing-tags":{"get":{"tags":["ai-existing-taxonomy-bridge-controller"],"operationId":"existingTags","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"type":"string"}}}}}}}},"/api/internal/ai/projects/{projectId}/existing-categories":{"get":{"tags":["ai-existing-taxonomy-bridge-controller"],"operationId":"existingCategories","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"type":"string"}}}}}}}},"/api/internal/ai/projects/{projectId}/existing-categories-with-parents":{"get":{"tags":["ai-existing-taxonomy-bridge-controller"],"operationId":"existingCategoriesWithParents","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/CategoryOption"}}}}}}}},"/api/projects/{projectId}/preview/preview-post":{"delete":{"tags":["article-preview-controller"],"operationId":"deletePreviewPost","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"siteId","in":"query","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"postId","in":"query","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"OK"}}}},"/api/posts/{site}/{wpPostId}":{"delete":{"tags":["post-controller"],"operationId":"delete","parameters":[{"name":"site","in":"path","required":true,"schema":{"type":"string"}},{"name":"wpPostId","in":"path","required":true,"schema":{"type":"string"}}],"responses":{"204":{"description":"No Content"}}}},"/api/internal/publishing/projects/{projectId}/media/{mediaId}":{"delete":{"tags":["cms-media-bridge-controller"],"operationId":"deleteMedia","parameters":[{"name":"projectId","in":"path","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"mediaId","in":"path","required":true,"schema":{"type":"string"}},{"name":"environment","in":"query","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"OK"}}}}},"components":{"schemas":{"TaxonomyResolveRequest":{"type":"object","properties":{"site":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}}}},"TaxonomyResolveResponse":{"type":"object","properties":{"categoryIds":{"type":"array","items":{"type":"string"}},"tagIds":{"type":"array","items":{"type":"string"}}}},"RenderSkeletonRequest":{"type":"object","properties":{"title":{"type":"string"},"contentHtml":{"type":"string"},"featuredImageDataUri":{"type":"string"},"siteId":{"type":"integer","format":"int64"},"existingPreviewPostId":{"type":"string"},"slug":{"type":"string"},"categories":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}}},"required":["contentHtml","title"]},"ThemeSkeletonResponse":{"type":"object","properties":{"html":{"type":"string"},"available":{"type":"boolean"},"reason":{"type":"string"},"eyecatchSpliced":{"type":"boolean"},"css":{"type":"string"},"previewPostId":{"type":"string"},"warning":{"type":"string"}}},"BulkOperationLogResponse":{"type":"object","properties":{"operationType":{"type":"string","enum":["CATEGORY_CREATE","CATEGORY_EDIT","CATEGORY_DELETE","TAG_CREATE","TAG_EDIT","TAG_DELETE","PLUGIN_INSTALL","PLUGIN_ACTIVATE","PLUGIN_DEACTIVATE","PLUGIN_DELETE","THEME_INSTALL","THEME_ACTIVATE","THEME_DELETE","CATEGORY_FETCH","TAG_FETCH","PLUGIN_FETCH","THEME_FETCH","POST_FETCH","MEDIA_UPLOAD","POST_DELETE","POST_STATUS_UPDATE"]},"sourceType":{"type":"string","enum":["SLUG","ZIP"]},"value":{"type":"string"},"categorySlug":{"type":"string"},"categoryParentSlug":{"type":"string"},"categoryTargetSlug":{"type":"string"},"categoryDescription":{"type":"string"},"originalFilename":{"type":"string"},"postStatus":{"type":"string"},"environment":{"type":"string"},"status":{"type":"string","enum":["SUCCESS","SKIPPED","FAILED"]},"level":{"type":"string","enum":["INFO","WARNING","ERROR"]},"errorMessage":{"type":"string"},"stackTrace":{"type":"string"},"createdAt":{"type":"string","format":"date-time"}}},"ReconcileStateRequest":{"type":"object","properties":{"slug":{"type":"string","minLength":1},"changes":{"type":"array","items":{"$ref":"#/components/schemas/StateChangeRequest"},"minItems":1}},"required":["changes","slug"]},"StateChangeRequest":{"type":"object","properties":{"environment":{"type":"string","minLength":1},"desiredStatus":{"type":"string","minLength":1}},"required":["desiredStatus","environment"]},"DeleteSlugRequest":{"type":"object","properties":{"slug":{"type":"string","minLength":1}},"required":["slug"]},"TermNameRequest":{"type":"object","properties":{"slug":{"type":"string","minLength":1}},"required":["slug"]},"EditTermRequest":{"type":"object","properties":{"targetSlug":{"type":"string","minLength":1},"value":{"type":"string","minLength":1},"slug":{"type":"string","minLength":1},"parentSlug":{"type":"string"},"description":{"type":"string"}},"required":["slug","targetSlug","value"]},"UpdatePostStatusRequest":{"type":"object","properties":{"slug":{"type":"string","minLength":1},"status":{"type":"string","minLength":1}},"required":["slug","status"]},"ApplyToEnvironmentRequest":{"type":"object","properties":{"environment":{"type":"string","minLength":1},"operationType":{"type":"string","enum":["CATEGORY_CREATE","CATEGORY_EDIT","CATEGORY_DELETE","TAG_CREATE","TAG_EDIT","TAG_DELETE","PLUGIN_INSTALL","PLUGIN_ACTIVATE","PLUGIN_DEACTIVATE","PLUGIN_DELETE","THEME_INSTALL","THEME_ACTIVATE","THEME_DELETE","CATEGORY_FETCH","TAG_FETCH","PLUGIN_FETCH","THEME_FETCH","POST_FETCH","MEDIA_UPLOAD","POST_DELETE","POST_STATUS_UPDATE"]},"value":{"type":"string"},"categorySlug":{"type":"string"},"categoryParentSlug":{"type":"string"},"categoryDescription":{"type":"string"},"categoryTargetSlug":{"type":"string"}},"required":["environment","operationType"]},"ApplyToAllEnvironmentsRequest":{"type":"object","properties":{"operationType":{"type":"string","enum":["CATEGORY_CREATE","CATEGORY_EDIT","CATEGORY_DELETE","TAG_CREATE","TAG_EDIT","TAG_DELETE","PLUGIN_INSTALL","PLUGIN_ACTIVATE","PLUGIN_DEACTIVATE","PLUGIN_DELETE","THEME_INSTALL","THEME_ACTIVATE","THEME_DELETE","CATEGORY_FETCH","TAG_FETCH","PLUGIN_FETCH","THEME_FETCH","POST_FETCH","MEDIA_UPLOAD","POST_DELETE","POST_STATUS_UPDATE"]},"value":{"type":"string","minLength":1}},"required":["operationType","value"]},"PostPublishResponse":{"type":"object","properties":{"wpPostId":{"type":"string"},"wpPostUrl":{"type":"string"},"status":{"type":"string"}}},"MediaUploadResult":{"type":"object","properties":{"id":{"type":"string"},"url":{"type":"string"}}},"AuthorProvisioningBridgeRequest":{"type":"object","properties":{"email":{"type":"string"},"wpRole":{"type":"string"},"firstName":{"type":"string"},"lastName":{"type":"string"},"displayName":{"type":"string"},"websiteUrl":{"type":"string"},"bio":{"type":"string"},"locale":{"type":"string"}}},"AuthorProvisioningBridgeResponse":{"type":"object","properties":{"cmsAuthorId":{"type":"string"}}},"CmsBridgeCredentialsRequest":{"type":"object","properties":{"cmsType":{"type":"string"},"credentials":{"type":"object","additionalProperties":{"type":"string"},"minProperties":1}},"required":["cmsType","credentials"]},"CmsBridgeConnectionCheckResponse":{"type":"object","properties":{"ok":{"type":"boolean"},"failureReason":{"type":"string"},"observedHostKeyFingerprint":{"type":"string"},"detail":{"type":"string"}}},"CmsBridgeProvisionRequest":{"type":"object","properties":{"cmsType":{"type":"string"},"credentials":{"type":"object","additionalProperties":{"type":"string"},"minProperties":1},"actorEmail":{"type":"string"}},"required":["cmsType","credentials"]},"CmsBridgeProvisionResponse":{"type":"object","properties":{"defaultCategoryId":{"type":"string"},"categoryError":{"type":"string"},"defaultTagId":{"type":"string"},"tagError":{"type":"string"},"authorId":{"type":"string"},"authorError":{"type":"string"}}},"WpCliInstallResult":{"type":"object","properties":{"message":{"type":"string"}}},"CmsBridgeExportDatabaseResponse":{"type":"object","properties":{"tablePrefix":{"type":"string"},"dumpBase64":{"type":"string"}}},"ThemeCssResponse":{"type":"object","properties":{"css":{"type":"string"},"available":{"type":"boolean"},"reason":{"type":"string"}}},"StatusComparisonPage":{"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/StatusComparisonRow"}},"page":{"type":"integer","format":"int32"},"size":{"type":"integer","format":"int32"},"totalCount":{"type":"integer","format":"int64"},"masterEnvironment":{"type":"string"}}},"StatusComparisonRow":{"type":"object","properties":{"slug":{"type":"string"},"local":{"$ref":"#/components/schemas/StatusEnvironmentValue"},"test":{"$ref":"#/components/schemas/StatusEnvironmentValue"},"production":{"$ref":"#/components/schemas/StatusEnvironmentValue"}}},"StatusEnvironmentValue":{"type":"object","properties":{"available":{"type":"boolean"},"error":{"type":"boolean"},"errorMessage":{"type":"string"},"status":{"type":"string"}}},"TermComparisonPage":{"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/TermComparisonRow"}},"page":{"type":"integer","format":"int32"},"size":{"type":"integer","format":"int32"},"totalCount":{"type":"integer","format":"int64"},"masterEnvironment":{"type":"string"}}},"TermComparisonRow":{"type":"object","properties":{"name":{"type":"string"},"slug":{"type":"string"},"local":{"$ref":"#/components/schemas/TermEnvironmentValue"},"test":{"$ref":"#/components/schemas/TermEnvironmentValue"},"production":{"$ref":"#/components/schemas/TermEnvironmentValue"}}},"TermEnvironmentValue":{"type":"object","properties":{"available":{"type":"boolean"},"error":{"type":"boolean"},"errorMessage":{"type":"string"},"slug":{"type":"string"},"parentSlug":{"type":"string"},"description":{"type":"string"}}},"PostComparisonPage":{"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/PostComparisonRow"}},"page":{"type":"integer","format":"int32"},"size":{"type":"integer","format":"int32"},"totalCount":{"type":"integer","format":"int64"},"postType":{"type":"string"}}},"PostComparisonRow":{"type":"object","properties":{"slug":{"type":"string"},"local":{"$ref":"#/components/schemas/PostEnvironmentValue"},"test":{"$ref":"#/components/schemas/PostEnvironmentValue"},"production":{"$ref":"#/components/schemas/PostEnvironmentValue"}}},"PostEnvironmentValue":{"type":"object","properties":{"available":{"type":"boolean"},"error":{"type":"boolean"},"errorMessage":{"type":"string"},"postId":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"}}},"CmsMediaReferenceScan":{"type":"object","properties":{"posts":{"type":"array","items":{"$ref":"#/components/schemas/CmsPostContentSummary"}},"settingsMediaIds":{"type":"object","additionalProperties":{"type":"string"}}}},"CmsMediaSummary":{"type":"object","properties":{"id":{"type":"string"},"guid":{"type":"string"},"title":{"type":"string"},"mimeType":{"type":"string"},"uploadedAt":{"type":"string"}}},"CmsPostContentSummary":{"type":"object","properties":{"id":{"type":"string"},"postType":{"type":"string"},"status":{"type":"string"},"content":{"type":"string"},"thumbnailId":{"type":"string"}}},"MediaGcScanBridgeResponse":{"type":"object","properties":{"media":{"type":"array","items":{"$ref":"#/components/schemas/CmsMediaSummary"}},"refs":{"$ref":"#/components/schemas/CmsMediaReferenceScan"}}},"CategoryOption":{"type":"object","properties":{"name":{"type":"string"},"parentName":{"type":"string"}}}}}}
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenAPI definition",
+    "version": "v0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "paths": {
+    "/api/taxonomy/resolve": {
+      "post": {
+        "tags": [
+          "taxonomy-controller"
+        ],
+        "operationId": "resolve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaxonomyResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxonomyResolveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/preview/skeleton": {
+      "post": {
+        "tags": [
+          "article-preview-controller"
+        ],
+        "operationId": "skeleton",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderSkeletonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeSkeletonResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/upload": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "runBulkOperationUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "operationType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CATEGORY_CREATE",
+                "CATEGORY_EDIT",
+                "CATEGORY_DELETE",
+                "TAG_CREATE",
+                "TAG_EDIT",
+                "TAG_DELETE",
+                "PLUGIN_INSTALL",
+                "PLUGIN_ACTIVATE",
+                "PLUGIN_DEACTIVATE",
+                "PLUGIN_DELETE",
+                "THEME_INSTALL",
+                "THEME_ACTIVATE",
+                "THEME_DELETE",
+                "CATEGORY_FETCH",
+                "TAG_FETCH",
+                "PLUGIN_FETCH",
+                "THEME_FETCH",
+                "POST_FETCH",
+                "MEDIA_UPLOAD",
+                "POST_DELETE",
+                "POST_STATUS_UPDATE"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/themes/reconcile": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "reconcileTheme",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/themes/delete-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "deleteThemeEverywhere",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteSlugRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/tags/sync": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "syncTag",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/tags/sync-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "syncAllTagsToMaster",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/tags/edit-sync": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "editTagAndSync",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditTermRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/tags/delete-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "deleteTagEverywhere",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/posts/status-update": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "updatePostStatusEverywhere",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "postType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "post"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePostStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/posts/delete-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "deletePostEverywhere",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "postType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "post"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteSlugRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/plugins/reconcile": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "reconcilePlugin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/plugins/delete-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "deletePluginEverywhere",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteSlugRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/categories/sync": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "syncCategory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/categories/sync-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "syncAllCategoriesToMaster",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/categories/edit-sync": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "editCategoryAndSync",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditTermRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/categories/delete-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "deleteCategoryEverywhere",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/apply": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "applyBulkOperation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyToEnvironmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkOperationLogResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/apply-all": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "applyBulkOperationToAllEnvironments",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyToAllEnvironmentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/asset-images/{generatedImageId}/upload": {
+      "post": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "uploadAssetImage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "generatedImageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BulkOperationLogResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/posts/publish": {
+      "post": {
+        "tags": [
+          "post-controller"
+        ],
+        "operationId": "publish",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "title",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "draft"
+            }
+          },
+          {
+            "name": "categories",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "wpPostId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "markdown",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "featuredImageFilename",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "imageReferences",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "publishScheduledAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostPublishResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/publishing/sites/{site}/media": {
+      "post": {
+        "tags": [
+          "cms-media-bridge-controller"
+        ],
+        "operationId": "uploadMedia",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/publishing/sites/{siteKey}/authors": {
+      "post": {
+        "tags": [
+          "author-provisioning-internal-controller"
+        ],
+        "operationId": "provisionAuthor",
+        "parameters": [
+          {
+            "name": "siteKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorProvisioningBridgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorProvisioningBridgeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/test-connection": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "testConnection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsBridgeConnectionCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/provision": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "provision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeProvisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsBridgeProvisionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/list-active-plugins": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "listActivePlugins",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/install-wp-cli": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "installWpCli",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WpCliInstallResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/has-author-capability": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "hasAuthorProvisioningCapability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/export-themes": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "exportThemes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/export-media": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "exportMedia",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/project/cms/export-database": {
+      "post": {
+        "tags": [
+          "cms-provisioning-bridge-controller"
+        ],
+        "operationId": "exportDatabase",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CmsBridgeCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsBridgeExportDatabaseResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/preview/theme-css": {
+      "get": {
+        "tags": [
+          "article-preview-controller"
+        ],
+        "operationId": "themeCss",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "siteId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeCssResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/themes/comparison": {
+      "get": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "themeComparison",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusComparisonPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/tags/comparison": {
+      "get": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "tagComparison",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermComparisonPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/posts/comparison": {
+      "get": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "postComparison",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "postType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "post"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostComparisonPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/plugins/comparison": {
+      "get": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "pluginComparison",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusComparisonPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/bulk-management/categories/comparison": {
+      "get": {
+        "tags": [
+          "bulk-management-controller"
+        ],
+        "operationId": "categoryComparison",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermComparisonPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/publishing/sites/{site}/project-id": {
+      "get": {
+        "tags": [
+          "cms-media-bridge-controller"
+        ],
+        "operationId": "siteProjectId",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteProjectIdBridgeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/publishing/projects/{projectId}/media-scan": {
+      "get": {
+        "tags": [
+          "cms-media-bridge-controller"
+        ],
+        "operationId": "scanMedia",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaGcScanBridgeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/ai/projects/{projectId}/existing-tags": {
+      "get": {
+        "tags": [
+          "ai-existing-taxonomy-bridge-controller"
+        ],
+        "operationId": "existingTags",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/ai/projects/{projectId}/existing-categories": {
+      "get": {
+        "tags": [
+          "ai-existing-taxonomy-bridge-controller"
+        ],
+        "operationId": "existingCategories",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/ai/projects/{projectId}/existing-categories-with-parents": {
+      "get": {
+        "tags": [
+          "ai-existing-taxonomy-bridge-controller"
+        ],
+        "operationId": "existingCategoriesWithParents",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryOption"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/preview/preview-post": {
+      "delete": {
+        "tags": [
+          "article-preview-controller"
+        ],
+        "operationId": "deletePreviewPost",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "siteId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/posts/{site}/{wpPostId}": {
+      "delete": {
+        "tags": [
+          "post-controller"
+        ],
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "wpPostId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/internal/publishing/projects/{projectId}/media/{mediaId}": {
+      "delete": {
+        "tags": [
+          "cms-media-bridge-controller"
+        ],
+        "operationId": "deleteMedia",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TaxonomyResolveRequest": {
+        "type": "object",
+        "properties": {
+          "site": {
+            "type": "string"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TaxonomyResolveResponse": {
+        "type": "object",
+        "properties": {
+          "categoryIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tagIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RenderSkeletonRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "contentHtml": {
+            "type": "string"
+          },
+          "featuredImageDataUri": {
+            "type": "string"
+          },
+          "siteId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "existingPreviewPostId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "contentHtml",
+          "title"
+        ]
+      },
+      "ThemeSkeletonResponse": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "eyecatchSpliced": {
+            "type": "boolean"
+          },
+          "css": {
+            "type": "string"
+          },
+          "previewPostId": {
+            "type": "string"
+          },
+          "warning": {
+            "type": "string"
+          }
+        }
+      },
+      "BulkOperationLogResponse": {
+        "type": "object",
+        "properties": {
+          "operationType": {
+            "type": "string",
+            "enum": [
+              "CATEGORY_CREATE",
+              "CATEGORY_EDIT",
+              "CATEGORY_DELETE",
+              "TAG_CREATE",
+              "TAG_EDIT",
+              "TAG_DELETE",
+              "PLUGIN_INSTALL",
+              "PLUGIN_ACTIVATE",
+              "PLUGIN_DEACTIVATE",
+              "PLUGIN_DELETE",
+              "THEME_INSTALL",
+              "THEME_ACTIVATE",
+              "THEME_DELETE",
+              "CATEGORY_FETCH",
+              "TAG_FETCH",
+              "PLUGIN_FETCH",
+              "THEME_FETCH",
+              "POST_FETCH",
+              "MEDIA_UPLOAD",
+              "POST_DELETE",
+              "POST_STATUS_UPDATE"
+            ]
+          },
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "SLUG",
+              "ZIP"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "categorySlug": {
+            "type": "string"
+          },
+          "categoryParentSlug": {
+            "type": "string"
+          },
+          "categoryTargetSlug": {
+            "type": "string"
+          },
+          "categoryDescription": {
+            "type": "string"
+          },
+          "originalFilename": {
+            "type": "string"
+          },
+          "postStatus": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "SKIPPED",
+              "FAILED"
+            ]
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "INFO",
+              "WARNING",
+              "ERROR"
+            ]
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "stackTrace": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReconcileStateRequest": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StateChangeRequest"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "changes",
+          "slug"
+        ]
+      },
+      "StateChangeRequest": {
+        "type": "object",
+        "properties": {
+          "environment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "desiredStatus": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "desiredStatus",
+          "environment"
+        ]
+      },
+      "DeleteSlugRequest": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      },
+      "TermNameRequest": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "slug"
+        ]
+      },
+      "EditTermRequest": {
+        "type": "object",
+        "properties": {
+          "targetSlug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parentSlug": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "targetSlug",
+          "value"
+        ]
+      },
+      "UpdatePostStatusRequest": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "slug",
+          "status"
+        ]
+      },
+      "ApplyToEnvironmentRequest": {
+        "type": "object",
+        "properties": {
+          "environment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operationType": {
+            "type": "string",
+            "enum": [
+              "CATEGORY_CREATE",
+              "CATEGORY_EDIT",
+              "CATEGORY_DELETE",
+              "TAG_CREATE",
+              "TAG_EDIT",
+              "TAG_DELETE",
+              "PLUGIN_INSTALL",
+              "PLUGIN_ACTIVATE",
+              "PLUGIN_DEACTIVATE",
+              "PLUGIN_DELETE",
+              "THEME_INSTALL",
+              "THEME_ACTIVATE",
+              "THEME_DELETE",
+              "CATEGORY_FETCH",
+              "TAG_FETCH",
+              "PLUGIN_FETCH",
+              "THEME_FETCH",
+              "POST_FETCH",
+              "MEDIA_UPLOAD",
+              "POST_DELETE",
+              "POST_STATUS_UPDATE"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "categorySlug": {
+            "type": "string"
+          },
+          "categoryParentSlug": {
+            "type": "string"
+          },
+          "categoryDescription": {
+            "type": "string"
+          },
+          "categoryTargetSlug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "environment",
+          "operationType"
+        ]
+      },
+      "ApplyToAllEnvironmentsRequest": {
+        "type": "object",
+        "properties": {
+          "operationType": {
+            "type": "string",
+            "enum": [
+              "CATEGORY_CREATE",
+              "CATEGORY_EDIT",
+              "CATEGORY_DELETE",
+              "TAG_CREATE",
+              "TAG_EDIT",
+              "TAG_DELETE",
+              "PLUGIN_INSTALL",
+              "PLUGIN_ACTIVATE",
+              "PLUGIN_DEACTIVATE",
+              "PLUGIN_DELETE",
+              "THEME_INSTALL",
+              "THEME_ACTIVATE",
+              "THEME_DELETE",
+              "CATEGORY_FETCH",
+              "TAG_FETCH",
+              "PLUGIN_FETCH",
+              "THEME_FETCH",
+              "POST_FETCH",
+              "MEDIA_UPLOAD",
+              "POST_DELETE",
+              "POST_STATUS_UPDATE"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "operationType",
+          "value"
+        ]
+      },
+      "PostPublishResponse": {
+        "type": "object",
+        "properties": {
+          "wpPostId": {
+            "type": "string"
+          },
+          "wpPostUrl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "MediaUploadResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthorProvisioningBridgeRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "wpRole": {
+            "type": "string"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "websiteUrl": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthorProvisioningBridgeResponse": {
+        "type": "object",
+        "properties": {
+          "cmsAuthorId": {
+            "type": "string"
+          }
+        }
+      },
+      "CmsBridgeCredentialsRequest": {
+        "type": "object",
+        "properties": {
+          "cmsType": {
+            "type": "string"
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "minProperties": 1
+          }
+        },
+        "required": [
+          "cmsType",
+          "credentials"
+        ]
+      },
+      "CmsBridgeConnectionCheckResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "failureReason": {
+            "type": "string"
+          },
+          "observedHostKeyFingerprint": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "CmsBridgeProvisionRequest": {
+        "type": "object",
+        "properties": {
+          "cmsType": {
+            "type": "string"
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "minProperties": 1
+          },
+          "actorEmail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cmsType",
+          "credentials"
+        ]
+      },
+      "CmsBridgeProvisionResponse": {
+        "type": "object",
+        "properties": {
+          "defaultCategoryId": {
+            "type": "string"
+          },
+          "categoryError": {
+            "type": "string"
+          },
+          "defaultTagId": {
+            "type": "string"
+          },
+          "tagError": {
+            "type": "string"
+          },
+          "authorId": {
+            "type": "string"
+          },
+          "authorError": {
+            "type": "string"
+          }
+        }
+      },
+      "WpCliInstallResult": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "CmsBridgeExportDatabaseResponse": {
+        "type": "object",
+        "properties": {
+          "tablePrefix": {
+            "type": "string"
+          },
+          "dumpBase64": {
+            "type": "string"
+          }
+        }
+      },
+      "ThemeCssResponse": {
+        "type": "object",
+        "properties": {
+          "css": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "StatusComparisonPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatusComparisonRow"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "masterEnvironment": {
+            "type": "string"
+          }
+        }
+      },
+      "StatusComparisonRow": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "local": {
+            "$ref": "#/components/schemas/StatusEnvironmentValue"
+          },
+          "test": {
+            "$ref": "#/components/schemas/StatusEnvironmentValue"
+          },
+          "production": {
+            "$ref": "#/components/schemas/StatusEnvironmentValue"
+          }
+        }
+      },
+      "StatusEnvironmentValue": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "TermComparisonPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TermComparisonRow"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "masterEnvironment": {
+            "type": "string"
+          }
+        }
+      },
+      "TermComparisonRow": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "local": {
+            "$ref": "#/components/schemas/TermEnvironmentValue"
+          },
+          "test": {
+            "$ref": "#/components/schemas/TermEnvironmentValue"
+          },
+          "production": {
+            "$ref": "#/components/schemas/TermEnvironmentValue"
+          }
+        }
+      },
+      "TermEnvironmentValue": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "parentSlug": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "PostComparisonPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostComparisonRow"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "totalCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "postType": {
+            "type": "string"
+          }
+        }
+      },
+      "PostComparisonRow": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "local": {
+            "$ref": "#/components/schemas/PostEnvironmentValue"
+          },
+          "test": {
+            "$ref": "#/components/schemas/PostEnvironmentValue"
+          },
+          "production": {
+            "$ref": "#/components/schemas/PostEnvironmentValue"
+          }
+        }
+      },
+      "PostEnvironmentValue": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "postId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SiteProjectIdBridgeResponse": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "CmsMediaReferenceScan": {
+        "type": "object",
+        "properties": {
+          "posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CmsPostContentSummary"
+            }
+          },
+          "settingsMediaIds": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CmsMediaSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "guid": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "uploadedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "CmsPostContentSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "postType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "thumbnailId": {
+            "type": "string"
+          }
+        }
+      },
+      "MediaGcScanBridgeResponse": {
+        "type": "object",
+        "properties": {
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CmsMediaSummary"
+            }
+          },
+          "refs": {
+            "$ref": "#/components/schemas/CmsMediaReferenceScan"
+          }
+        }
+      },
+      "CategoryOption": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "parentName": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,6 +9,7 @@ import type {
   MediaGcScanBridgeResponse,
   MediaUploadResult,
   ScanMediaParams,
+  SiteProjectIdBridgeResponse,
   UploadMediaBody
 } from '../openAPIDefinition.schemas';
 
@@ -54,6 +55,45 @@ if(uploadMediaBody?.file !== undefined) {
 
   const data: uploadMediaResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as uploadMediaResponse
+}
+
+
+export type siteProjectIdResponse200 = {
+  data: SiteProjectIdBridgeResponse
+  status: 200
+}
+
+export type siteProjectIdResponseSuccess = (siteProjectIdResponse200) & {
+  headers: Headers;
+};
+;
+
+export type siteProjectIdResponse = (siteProjectIdResponseSuccess)
+
+export const getSiteProjectIdUrl = (site: string,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/publishing/sites/${site}/project-id`
+}
+
+export const siteProjectId = async (site: string, options?: RequestInit): Promise<siteProjectIdResponse> => {
+
+  const res = await fetch(getSiteProjectIdUrl(site),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: siteProjectIdResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as siteProjectIdResponse
 }
 
 

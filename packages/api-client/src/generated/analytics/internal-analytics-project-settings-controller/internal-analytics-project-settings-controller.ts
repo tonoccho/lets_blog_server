@@ -53,19 +53,19 @@ export const googleAnalyticsStatus = async (projectId: number, options?: Request
 }
 
 
-export type setGoogleAnalyticsCredentialsResponse200 = {
+export type setGoogleAnalyticsCredentials1Response200 = {
   data: void
   status: 200
 }
 
-export type setGoogleAnalyticsCredentialsResponseSuccess = (setGoogleAnalyticsCredentialsResponse200) & {
+export type setGoogleAnalyticsCredentials1ResponseSuccess = (setGoogleAnalyticsCredentials1Response200) & {
   headers: Headers;
 };
 ;
 
-export type setGoogleAnalyticsCredentialsResponse = (setGoogleAnalyticsCredentialsResponseSuccess)
+export type setGoogleAnalyticsCredentials1Response = (setGoogleAnalyticsCredentials1ResponseSuccess)
 
-export const getSetGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
+export const getSetGoogleAnalyticsCredentials1Url = (projectId: number,) => {
 
 
 
@@ -73,8 +73,8 @@ export const getSetGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
 }
 
-export const setGoogleAnalyticsCredentials = async (projectId: number,
-    setGoogleAnalyticsCredentialsRequest: SetGoogleAnalyticsCredentialsRequest, options?: RequestInit): Promise<setGoogleAnalyticsCredentialsResponse> => {
+export const setGoogleAnalyticsCredentials1 = async (projectId: number,
+    setGoogleAnalyticsCredentialsRequest: SetGoogleAnalyticsCredentialsRequest, options?: RequestInit): Promise<setGoogleAnalyticsCredentials1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -82,7 +82,7 @@ export const setGoogleAnalyticsCredentials = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getSetGoogleAnalyticsCredentialsUrl(projectId),
+const res = await fetch(getSetGoogleAnalyticsCredentials1Url(projectId),
   {
     ...options,
     method: 'PUT',
@@ -94,24 +94,24 @@ const res = await fetch(getSetGoogleAnalyticsCredentialsUrl(projectId),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: setGoogleAnalyticsCredentialsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as setGoogleAnalyticsCredentialsResponse
+  const data: setGoogleAnalyticsCredentials1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as setGoogleAnalyticsCredentials1Response
 }
 
 
-export type clearGoogleAnalyticsCredentialsResponse200 = {
+export type clearGoogleAnalyticsCredentials1Response200 = {
   data: void
   status: 200
 }
 
-export type clearGoogleAnalyticsCredentialsResponseSuccess = (clearGoogleAnalyticsCredentialsResponse200) & {
+export type clearGoogleAnalyticsCredentials1ResponseSuccess = (clearGoogleAnalyticsCredentials1Response200) & {
   headers: Headers;
 };
 ;
 
-export type clearGoogleAnalyticsCredentialsResponse = (clearGoogleAnalyticsCredentialsResponseSuccess)
+export type clearGoogleAnalyticsCredentials1Response = (clearGoogleAnalyticsCredentials1ResponseSuccess)
 
-export const getClearGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
+export const getClearGoogleAnalyticsCredentials1Url = (projectId: number,) => {
 
 
 
@@ -119,9 +119,9 @@ export const getClearGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
 }
 
-export const clearGoogleAnalyticsCredentials = async (projectId: number, options?: RequestInit): Promise<clearGoogleAnalyticsCredentialsResponse> => {
+export const clearGoogleAnalyticsCredentials1 = async (projectId: number, options?: RequestInit): Promise<clearGoogleAnalyticsCredentials1Response> => {
 
-  const res = await fetch(getClearGoogleAnalyticsCredentialsUrl(projectId),
+  const res = await fetch(getClearGoogleAnalyticsCredentials1Url(projectId),
   {
     ...options,
     method: 'DELETE'
@@ -133,8 +133,8 @@ export const clearGoogleAnalyticsCredentials = async (projectId: number, options
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: clearGoogleAnalyticsCredentialsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as clearGoogleAnalyticsCredentialsResponse
+  const data: clearGoogleAnalyticsCredentials1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as clearGoogleAnalyticsCredentials1Response
 }
 
 
@@ -177,19 +177,19 @@ export const adSenseStatus = async (projectId: number, options?: RequestInit): P
 }
 
 
-export type setAdSenseSettingsResponse200 = {
+export type setAdSenseSettings1Response200 = {
   data: void
   status: 200
 }
 
-export type setAdSenseSettingsResponseSuccess = (setAdSenseSettingsResponse200) & {
+export type setAdSenseSettings1ResponseSuccess = (setAdSenseSettings1Response200) & {
   headers: Headers;
 };
 ;
 
-export type setAdSenseSettingsResponse = (setAdSenseSettingsResponseSuccess)
+export type setAdSenseSettings1Response = (setAdSenseSettings1ResponseSuccess)
 
-export const getSetAdSenseSettingsUrl = (projectId: number,) => {
+export const getSetAdSenseSettings1Url = (projectId: number,) => {
 
 
 
@@ -197,8 +197,8 @@ export const getSetAdSenseSettingsUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/analytics/projects/${projectId}/adsense`
 }
 
-export const setAdSenseSettings = async (projectId: number,
-    setAdSenseSettingsRequest: SetAdSenseSettingsRequest, options?: RequestInit): Promise<setAdSenseSettingsResponse> => {
+export const setAdSenseSettings1 = async (projectId: number,
+    setAdSenseSettingsRequest: SetAdSenseSettingsRequest, options?: RequestInit): Promise<setAdSenseSettings1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -206,7 +206,7 @@ export const setAdSenseSettings = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getSetAdSenseSettingsUrl(projectId),
+const res = await fetch(getSetAdSenseSettings1Url(projectId),
   {
     ...options,
     method: 'PUT',
@@ -218,24 +218,24 @@ const res = await fetch(getSetAdSenseSettingsUrl(projectId),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: setAdSenseSettingsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as setAdSenseSettingsResponse
+  const data: setAdSenseSettings1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as setAdSenseSettings1Response
 }
 
 
-export type clearAdSenseCredentialsResponse200 = {
+export type clearAdSenseCredentials1Response200 = {
   data: void
   status: 200
 }
 
-export type clearAdSenseCredentialsResponseSuccess = (clearAdSenseCredentialsResponse200) & {
+export type clearAdSenseCredentials1ResponseSuccess = (clearAdSenseCredentials1Response200) & {
   headers: Headers;
 };
 ;
 
-export type clearAdSenseCredentialsResponse = (clearAdSenseCredentialsResponseSuccess)
+export type clearAdSenseCredentials1Response = (clearAdSenseCredentials1ResponseSuccess)
 
-export const getClearAdSenseCredentialsUrl = (projectId: number,) => {
+export const getClearAdSenseCredentials1Url = (projectId: number,) => {
 
 
 
@@ -243,9 +243,9 @@ export const getClearAdSenseCredentialsUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/analytics/projects/${projectId}/adsense`
 }
 
-export const clearAdSenseCredentials = async (projectId: number, options?: RequestInit): Promise<clearAdSenseCredentialsResponse> => {
+export const clearAdSenseCredentials1 = async (projectId: number, options?: RequestInit): Promise<clearAdSenseCredentials1Response> => {
 
-  const res = await fetch(getClearAdSenseCredentialsUrl(projectId),
+  const res = await fetch(getClearAdSenseCredentials1Url(projectId),
   {
     ...options,
     method: 'DELETE'
@@ -257,24 +257,24 @@ export const clearAdSenseCredentials = async (projectId: number, options?: Reque
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: clearAdSenseCredentialsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as clearAdSenseCredentialsResponse
+  const data: clearAdSenseCredentials1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as clearAdSenseCredentials1Response
 }
 
 
-export type setAdSenseClientSecretResponse200 = {
+export type setAdSenseClientSecret1Response200 = {
   data: void
   status: 200
 }
 
-export type setAdSenseClientSecretResponseSuccess = (setAdSenseClientSecretResponse200) & {
+export type setAdSenseClientSecret1ResponseSuccess = (setAdSenseClientSecret1Response200) & {
   headers: Headers;
 };
 ;
 
-export type setAdSenseClientSecretResponse = (setAdSenseClientSecretResponseSuccess)
+export type setAdSenseClientSecret1Response = (setAdSenseClientSecret1ResponseSuccess)
 
-export const getSetAdSenseClientSecretUrl = (projectId: number,) => {
+export const getSetAdSenseClientSecret1Url = (projectId: number,) => {
 
 
 
@@ -282,8 +282,8 @@ export const getSetAdSenseClientSecretUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/analytics/projects/${projectId}/adsense/client-secret`
 }
 
-export const setAdSenseClientSecret = async (projectId: number,
-    setAdSenseClientSecretRequest: SetAdSenseClientSecretRequest, options?: RequestInit): Promise<setAdSenseClientSecretResponse> => {
+export const setAdSenseClientSecret1 = async (projectId: number,
+    setAdSenseClientSecretRequest: SetAdSenseClientSecretRequest, options?: RequestInit): Promise<setAdSenseClientSecret1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -291,7 +291,7 @@ export const setAdSenseClientSecret = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getSetAdSenseClientSecretUrl(projectId),
+const res = await fetch(getSetAdSenseClientSecret1Url(projectId),
   {
     ...options,
     method: 'PUT',
@@ -303,24 +303,24 @@ const res = await fetch(getSetAdSenseClientSecretUrl(projectId),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: setAdSenseClientSecretResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as setAdSenseClientSecretResponse
+  const data: setAdSenseClientSecret1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as setAdSenseClientSecret1Response
 }
 
 
-export type completeAdSenseOAuthResponse200 = {
+export type completeAdSenseOAuth1Response200 = {
   data: void
   status: 200
 }
 
-export type completeAdSenseOAuthResponseSuccess = (completeAdSenseOAuthResponse200) & {
+export type completeAdSenseOAuth1ResponseSuccess = (completeAdSenseOAuth1Response200) & {
   headers: Headers;
 };
 ;
 
-export type completeAdSenseOAuthResponse = (completeAdSenseOAuthResponseSuccess)
+export type completeAdSenseOAuth1Response = (completeAdSenseOAuth1ResponseSuccess)
 
-export const getCompleteAdSenseOAuthUrl = (projectId: number,) => {
+export const getCompleteAdSenseOAuth1Url = (projectId: number,) => {
 
 
 
@@ -328,8 +328,8 @@ export const getCompleteAdSenseOAuthUrl = (projectId: number,) => {
   return `http://localhost:8080/api/internal/analytics/projects/${projectId}/adsense/oauth-callback`
 }
 
-export const completeAdSenseOAuth = async (projectId: number,
-    completeAdSenseOAuthRequest: CompleteAdSenseOAuthRequest, options?: RequestInit): Promise<completeAdSenseOAuthResponse> => {
+export const completeAdSenseOAuth1 = async (projectId: number,
+    completeAdSenseOAuthRequest: CompleteAdSenseOAuthRequest, options?: RequestInit): Promise<completeAdSenseOAuth1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -337,7 +337,7 @@ export const completeAdSenseOAuth = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getCompleteAdSenseOAuthUrl(projectId),
+const res = await fetch(getCompleteAdSenseOAuth1Url(projectId),
   {
     ...options,
     method: 'POST',
@@ -349,8 +349,8 @@ const res = await fetch(getCompleteAdSenseOAuthUrl(projectId),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: completeAdSenseOAuthResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as completeAdSenseOAuthResponse
+  const data: completeAdSenseOAuth1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as completeAdSenseOAuth1Response
 }
 
 

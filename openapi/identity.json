@@ -1,1 +1,2244 @@
-{"openapi":"3.1.0","info":{"title":"OpenAPI definition","version":"v0"},"servers":[{"url":"http://localhost:8080","description":"Generated server url"}],"tags":[{"name":"Users","description":"ユーザー管理API"}],"paths":{"/api/users/{id}":{"get":{"tags":["Users"],"summary":"ユーザープロフィール取得","description":"指定されたユーザーのプロフィール情報を取得します","operationId":"getProfile","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"プロフィール情報を返す","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}}}},"put":{"tags":["Users"],"summary":"ユーザープロフィール更新","description":"指定されたユーザーのプロフィール情報を更新します","operationId":"updateProfile","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileUpdateRequest"}}},"required":true},"responses":{"200":{"description":"プロフィールが更新されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}}}},"delete":{"tags":["Users"],"summary":"ユーザーを削除","description":"指定されたユーザーを削除します(admin限定。自分自身は削除不可)","operationId":"delete","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"204":{"description":"ユーザーが削除されました"},"401":{"description":"認証ヘッダが無効"},"403":{"description":"admin権限が無い、または自分自身を削除しようとした"},"404":{"description":"ユーザーが見つかりません"}}},"patch":{"tags":["Users"],"summary":"ユーザー情報を更新","description":"指定されたユーザーのrole/passwordを更新します(admin限定。自分自身をadmin以外へ降格することは不可)","operationId":"update","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserUpdateRequest"}}},"required":true},"responses":{"200":{"description":"ユーザーが更新されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"403":{"description":"admin権限が無い、または自分自身をadmin以外へ降格しようとした","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}}}}},"/api/users/{id}/github-token":{"put":{"tags":["Users"],"summary":"GitHubトークンを更新","description":"指定されたユーザーのGitHubトークンを更新します","operationId":"updateGithubToken","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdateGithubTokenRequest"}}},"required":true},"responses":{"200":{"description":"トークンが更新されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}}}}},"/api/users":{"get":{"tags":["Users"],"summary":"全ユーザー一覧を取得","description":"システムに登録されているすべてのユーザーを取得します","operationId":"list","responses":{"200":{"description":"ユーザー一覧を返す","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/UserResponse"}}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/UserResponse"}}}}},"403":{"description":"admin権限がありません","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/UserResponse"}}}}}}},"post":{"tags":["Users"],"summary":"ユーザーを新規作成","description":"新しいユーザーアカウントを作成します","operationId":"create","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserCreateRequest"}}},"required":true},"responses":{"201":{"description":"ユーザーが作成されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"400":{"description":"リクエストボディが不正","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"403":{"description":"admin権限がありません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}}}}},"/api/users/{userId}/roles/{roleName}":{"post":{"tags":["Users"],"summary":"ロールを割り当て","description":"指定されたユーザーにロールを割り当てます(特権ロールはadmin限定)","operationId":"assignRole","parameters":[{"name":"userId","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"roleName","in":"path","description":"ロール名","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"ロールが割り当てられました","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}},"403":{"description":"ロール管理権限が無い、または特権ロールをadmin以外が操作しようとした","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}},"404":{"description":"ユーザーまたはロールが見つかりません","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}}}},"delete":{"tags":["Users"],"summary":"ロールを削除","description":"指定されたユーザーからロールを削除します(特権ロールはadmin限定)","operationId":"removeRole","parameters":[{"name":"userId","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}},{"name":"roleName","in":"path","description":"ロール名","required":true,"schema":{"type":"string"}}],"responses":{"200":{"description":"ロールが削除されました","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}},"403":{"description":"ロール管理権限が無い、または特権ロールをadmin以外が操作しようとした","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}},"404":{"description":"ユーザーまたはロールが見つかりません","content":{"application/json":{"schema":{"type":"object","additionalProperties":{"type":"string"}}}}}}}},"/api/users/{id}/reactivate":{"post":{"tags":["Users"],"summary":"ユーザーを再有効化","description":"無効化されたユーザーを再度有効化します","operationId":"reactivate","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"ユーザーが有効化されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"403":{"description":"admin権限がありません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"502":{"description":"Keycloak Admin APIの呼び出しに失敗しました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}}}}},"/api/users/{id}/deactivate":{"post":{"tags":["Users"],"summary":"ユーザーを無効化","description":"指定されたユーザーを無効化します(admin限定。自分自身は無効化不可。Keycloak登録済みの場合はKeycloak側も無効化)","operationId":"deactivate","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"ユーザーが無効化されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"403":{"description":"admin権限が無い、または自分自身を無効化しようとした","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}},"502":{"description":"Keycloak Admin APIの呼び出しに失敗しました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserResponse"}}}}}}},"/api/users/reconcile-keycloak":{"post":{"tags":["Users"],"summary":"Keycloakとの整合を確認し孤児ユーザーを無効化","description":"keycloak_sub設定済みのユーザーについてKeycloak側の存在を確認し、存在しなくなっていたユーザーを論理無効化します。","operationId":"reconcileKeycloak","responses":{"200":{"description":"無効化されたユーザーIDの一覧を返す","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReconciliationSummaryResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReconciliationSummaryResponse"}}}},"403":{"description":"admin権限がありません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReconciliationSummaryResponse"}}}},"502":{"description":"Keycloak Admin APIの呼び出しに失敗しました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReconciliationSummaryResponse"}}}}}}},"/api/users/migrate-to-keycloak":{"post":{"tags":["Users"],"summary":"既存ユーザーをKeycloakへ一括移行","description":"keycloak_sub未設定のユーザーをKeycloakへ登録し、パスワード再設定を要求します。userIdsを指定しない場合は対象全ユーザーが移行されます。","operationId":"migrateToKeycloak","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/MigrateToKeycloakRequest"}}}},"responses":{"200":{"description":"移行結果(成功/失敗の内訳)を返す","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MigrationSummaryResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MigrationSummaryResponse"}}}},"403":{"description":"admin権限がありません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/MigrationSummaryResponse"}}}}}}},"/api/users/{id}/preferences":{"patch":{"tags":["Users"],"summary":"ユーザー設定を更新","description":"指定されたユーザーの各種設定を更新します","operationId":"updatePreferences","parameters":[{"name":"id","in":"path","description":"ユーザーID","required":true,"schema":{"type":"integer","format":"int64"}}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdateUserPreferencesRequest"}}},"required":true},"responses":{"200":{"description":"設定が更新されました","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"401":{"description":"認証ヘッダが無効","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}},"404":{"description":"ユーザーが見つかりません","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}}}}},"/api/identity/me/preferences":{"patch":{"tags":["identity-controller"],"operationId":"updateMyPreferences","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/UpdateUserPreferencesRequest"}}},"required":true},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}}}}},"/api/roles":{"get":{"tags":["role-controller"],"operationId":"list_1","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"type":"array","items":{"$ref":"#/components/schemas/RoleResponse"}}}}}}}},"/api/identity/users/{id}/permissions":{"get":{"tags":["identity-controller"],"operationId":"userPermissions","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","format":"int64"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PermissionsResponse"}}}}}}},"/api/identity/me":{"get":{"tags":["identity-controller"],"operationId":"me","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/UserProfileResponse"}}}}}}},"/api/identity/me/permissions":{"get":{"tags":["identity-controller"],"operationId":"myPermissions","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/PermissionsResponse"}}}}}}}},"components":{"schemas":{"CustomLink":{"type":"object","properties":{"label":{"type":"string"},"url":{"type":"string"}}},"SocialLinks":{"type":"object","properties":{"facebook":{"type":"string"},"youtube":{"type":"string"},"whatsapp":{"type":"string"},"tiktok":{"type":"string"},"instagram":{"type":"string"},"wechat":{"type":"string"},"x":{"type":"string"},"threads":{"type":"string"},"github":{"type":"string"},"pinterest":{"type":"string"},"meetup":{"type":"string"},"line":{"type":"string"},"linkedin":{"type":"string"},"hatena":{"type":"string"}}},"UserProfileUpdateRequest":{"type":"object","properties":{"firstName":{"type":"string"},"lastName":{"type":"string"},"displayName":{"type":"string"},"nickname":{"type":"string"},"websiteUrl":{"type":"string"},"bio":{"type":"string"},"locale":{"type":"string"},"avatarUrl":{"type":"string"},"department":{"type":"string"},"position":{"type":"string"},"socialLinks":{"$ref":"#/components/schemas/SocialLinks"},"customLinks":{"type":"array","items":{"$ref":"#/components/schemas/CustomLink"}}}},"UserProfileResponse":{"type":"object","properties":{"id":{"type":"integer","format":"int64"},"email":{"type":"string"},"role":{"type":"string"},"roleNames":{"type":"array","items":{"type":"string"}},"firstName":{"type":"string"},"lastName":{"type":"string"},"displayName":{"type":"string"},"nickname":{"type":"string"},"websiteUrl":{"type":"string"},"bio":{"type":"string"},"locale":{"type":"string"},"timezone":{"type":"string"},"avatarUrl":{"type":"string"},"department":{"type":"string"},"position":{"type":"string"},"socialLinks":{"$ref":"#/components/schemas/SocialLinks"},"customLinks":{"type":"array","items":{"$ref":"#/components/schemas/CustomLink"}},"githubTokenConfigured":{"type":"boolean"},"createdAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"}}},"UpdateGithubTokenRequest":{"type":"object","properties":{"githubToken":{"type":"string","minLength":1}},"required":["githubToken"]},"UserCreateRequest":{"type":"object","properties":{"email":{"type":"string","minLength":1},"password":{"type":"string","minLength":1},"role":{"type":"string","minLength":1}},"required":["email","password","role"]},"UserResponse":{"type":"object","properties":{"id":{"type":"integer","format":"int64"},"email":{"type":"string"},"role":{"type":"string"},"roleNames":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"},"keycloakLinked":{"type":"boolean"},"createdAt":{"type":"string","format":"date-time"},"updatedAt":{"type":"string","format":"date-time"}}},"ReconciliationSummaryResponse":{"type":"object","properties":{"deactivatedUserIds":{"type":"array","items":{"type":"integer","format":"int64"}}}},"MigrateToKeycloakRequest":{"type":"object","properties":{"userIds":{"type":"array","items":{"type":"integer","format":"int64"}}}},"MigrationSummaryResponse":{"type":"object","properties":{"migratedUserIds":{"type":"array","items":{"type":"integer","format":"int64"}},"failedUserIds":{"type":"object","additionalProperties":{"type":"string"}}}},"UserUpdateRequest":{"type":"object","properties":{"role":{"type":"string"},"password":{"type":"string"}}},"UpdateUserPreferencesRequest":{"type":"object","properties":{"locale":{"type":"string","minLength":1},"timezone":{"type":"string","minLength":1}},"required":["locale","timezone"]},"RoleResponse":{"type":"object","properties":{"id":{"type":"integer","format":"int64"},"roleName":{"type":"string"},"displayName":{"type":"string"},"description":{"type":"string"},"permissions":{"type":"array","items":{"type":"string","enum":["USER_CREATE","USER_READ","USER_UPDATE","USER_DELETE","USER_ROLE_MANAGE","POST_CREATE","POST_READ","POST_UPDATE","POST_DELETE","POST_PUBLISH","SITE_CREATE","SITE_READ","SITE_UPDATE","SITE_DELETE","AUDIT_LOG_VIEW","AUDIT_LOG_DELETE","SYSTEM_CONFIG","ROLE_MANAGE"]},"uniqueItems":true}}},"PermissionsResponse":{"type":"object","properties":{"userId":{"type":"integer","format":"int64"},"permissions":{"type":"array","items":{"type":"string","enum":["USER_CREATE","USER_READ","USER_UPDATE","USER_DELETE","USER_ROLE_MANAGE","POST_CREATE","POST_READ","POST_UPDATE","POST_DELETE","POST_PUBLISH","SITE_CREATE","SITE_READ","SITE_UPDATE","SITE_DELETE","AUDIT_LOG_VIEW","AUDIT_LOG_DELETE","SYSTEM_CONFIG","ROLE_MANAGE"]}}}}}}}
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenAPI definition",
+    "version": "v0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "初回セットアップ関連API"
+    },
+    {
+      "name": "Users",
+      "description": "ユーザー管理API"
+    }
+  ],
+  "paths": {
+    "/api/users/{id}": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザープロフィール取得",
+        "description": "指定されたユーザーのプロフィール情報を取得します",
+        "operationId": "getProfile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "プロフィール情報を返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザープロフィール更新",
+        "description": "指定されたユーザーのプロフィール情報を更新します",
+        "operationId": "updateProfile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserProfileUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "プロフィールが更新されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザーを削除",
+        "description": "指定されたユーザーを削除します(admin限定。自分自身は削除不可)",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "ユーザーが削除されました"
+          },
+          "401": {
+            "description": "認証ヘッダが無効"
+          },
+          "403": {
+            "description": "admin権限が無い、または自分自身を削除しようとした"
+          },
+          "404": {
+            "description": "ユーザーが見つかりません"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザー情報を更新",
+        "description": "指定されたユーザーのrole/passwordを更新します(admin限定。自分自身をadmin以外へ降格することは不可)",
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ユーザーが更新されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限が無い、または自分自身をadmin以外へ降格しようとした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/github-token": {
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "GitHubトークンを更新",
+        "description": "指定されたユーザーのGitHubトークンを更新します",
+        "operationId": "updateGithubToken",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGithubTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "トークンが更新されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/users/{userId}": {
+      "put": {
+        "tags": [
+          "project-user-controller"
+        ],
+        "operationId": "updateUserRole",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "project-user-controller"
+        ],
+        "operationId": "removeUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "全ユーザー一覧を取得",
+        "description": "システムに登録されているすべてのユーザーを取得します",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "ユーザー一覧を返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限がありません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザーを新規作成",
+        "description": "新しいユーザーアカウントを作成します",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "ユーザーが作成されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "リクエストボディが不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限がありません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{userId}/roles/{roleName}": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ロールを割り当て",
+        "description": "指定されたユーザーにロールを割り当てます(特権ロールはadmin限定)",
+        "operationId": "assignRole",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "roleName",
+            "in": "path",
+            "description": "ロール名",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ロールが割り当てられました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ロール管理権限が無い、または特権ロールをadmin以外が操作しようとした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーまたはロールが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ロールを削除",
+        "description": "指定されたユーザーからロールを削除します(特権ロールはadmin限定)",
+        "operationId": "removeRole",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "roleName",
+            "in": "path",
+            "description": "ロール名",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ロールが削除されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ロール管理権限が無い、または特権ロールをadmin以外が操作しようとした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーまたはロールが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/reactivate": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザーを再有効化",
+        "description": "無効化されたユーザーを再度有効化します",
+        "operationId": "reactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ユーザーが有効化されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限がありません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Keycloak Admin APIの呼び出しに失敗しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/deactivate": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザーを無効化",
+        "description": "指定されたユーザーを無効化します(admin限定。自分自身は無効化不可。Keycloak登録済みの場合はKeycloak側も無効化)",
+        "operationId": "deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ユーザーが無効化されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限が無い、または自分自身を無効化しようとした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Keycloak Admin APIの呼び出しに失敗しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/avatar": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "アバター画像を取得",
+        "description": "アップロード済みのアバター画像(JPEG、512x512)を返します。",
+        "operationId": "getAvatar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "アバター画像を返す",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本人またはadmin権限がありません",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つからない、またはアバター未設定",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "アバター画像をアップロード",
+        "description": "プロフィール編集画面でクライアント側(Canvas)で切り抜いた正方形画像をアップロードします。image/jpeg・image/png・image/webpのみ受理し、サーバー側で512x512へ変換のうえメタ情報を削除します。",
+        "operationId": "uploadAvatar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "アバターが更新されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "対応していない画像形式、または画像として読み込めません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本人またはadmin権限がありません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "アップロードサイズが上限(20MB)を超えています",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/reconcile-keycloak": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Keycloakとの整合を確認し孤児ユーザーを無効化",
+        "description": "keycloak_sub設定済みのユーザーについてKeycloak側の存在を確認し、存在しなくなっていたユーザーを論理無効化します。",
+        "operationId": "reconcileKeycloak",
+        "responses": {
+          "200": {
+            "description": "無効化されたユーザーIDの一覧を返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationSummaryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限がありません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationSummaryResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Keycloak Admin APIの呼び出しに失敗しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationSummaryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/migrate-to-keycloak": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "既存ユーザーをKeycloakへ一括移行",
+        "description": "keycloak_sub未設定のユーザーをKeycloakへ登録し、パスワード再設定を要求します。userIdsを指定しない場合は対象全ユーザーが移行されます。",
+        "operationId": "migrateToKeycloak",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateToKeycloakRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "移行結果(成功/失敗の内訳)を返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationSummaryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationSummaryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "admin権限がありません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationSummaryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/users": {
+      "get": {
+        "tags": [
+          "project-user-controller"
+        ],
+        "operationId": "listUsers",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectUserResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "project-user-controller"
+        ],
+        "operationId": "addUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddProjectUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/users/{userId}/sync": {
+      "post": {
+        "tags": [
+          "project-user-controller"
+        ],
+        "operationId": "syncUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectUserSyncSiteResult"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/identity/user-site-authors": {
+      "post": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "cacheUserSiteAuthor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheUserSiteAuthorBridgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/internal/identity/project-users/{projectId}/sites/{siteId}/reconcile-roles": {
+      "post": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "reconcileRolesForSite",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/setup": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "初期管理者をセットアップ",
+        "description": "最初の管理者ユーザーをセットアップします",
+        "operationId": "setup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "管理者がセットアップされました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "リクエストボディが不正",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/preferences": {
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "ユーザー設定を更新",
+        "description": "指定されたユーザーの各種設定を更新します",
+        "operationId": "updatePreferences",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ユーザーID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPreferencesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "設定が更新されました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証ヘッダが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/identity/me/preferences": {
+      "patch": {
+        "tags": [
+          "identity-controller"
+        ],
+        "operationId": "updateMyPreferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPreferencesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/roles": {
+      "get": {
+        "tags": [
+          "role-controller"
+        ],
+        "operationId": "list_1",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RoleResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/project-users": {
+      "get": {
+        "tags": [
+          "project-user-controller"
+        ],
+        "operationId": "listAll",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectUserSummaryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/identity/users/{userId}/project-ids": {
+      "get": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "projectIdsForUser",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/identity/users/{userId}/github-token": {
+      "get": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "userGithubToken",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserGithubTokenBridgeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/identity/user-site-authors/{userId}/{siteId}": {
+      "get": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "findUserSiteAuthor",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "siteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSiteAuthorBridgeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/identity/roles": {
+      "get": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "roles",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RoleOptionResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/identity/projects/{projectId}/members/{userId}": {
+      "get": {
+        "tags": [
+          "internal-project-user-controller"
+        ],
+        "operationId": "isProjectMember",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/identity/users/{id}/permissions": {
+      "get": {
+        "tags": [
+          "identity-controller"
+        ],
+        "operationId": "userPermissions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/identity/me": {
+      "get": {
+        "tags": [
+          "identity-controller"
+        ],
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/identity/me/permissions": {
+      "get": {
+        "tags": [
+          "identity-controller"
+        ],
+        "operationId": "myPermissions",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/setup-status": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "セットアップ状態を確認",
+        "description": "システムのセットアップが必要かどうかを確認します",
+        "operationId": "setupStatus",
+        "responses": {
+          "200": {
+            "description": "セットアップ状態を返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CustomLink": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "SocialLinks": {
+        "type": "object",
+        "properties": {
+          "facebook": {
+            "type": "string"
+          },
+          "youtube": {
+            "type": "string"
+          },
+          "whatsapp": {
+            "type": "string"
+          },
+          "tiktok": {
+            "type": "string"
+          },
+          "instagram": {
+            "type": "string"
+          },
+          "wechat": {
+            "type": "string"
+          },
+          "x": {
+            "type": "string"
+          },
+          "threads": {
+            "type": "string"
+          },
+          "github": {
+            "type": "string"
+          },
+          "pinterest": {
+            "type": "string"
+          },
+          "meetup": {
+            "type": "string"
+          },
+          "line": {
+            "type": "string"
+          },
+          "linkedin": {
+            "type": "string"
+          },
+          "hatena": {
+            "type": "string"
+          }
+        }
+      },
+      "UserProfileUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": "string"
+          },
+          "websiteUrl": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string"
+          },
+          "socialLinks": {
+            "$ref": "#/components/schemas/SocialLinks"
+          },
+          "customLinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomLink"
+            }
+          }
+        }
+      },
+      "UserProfileResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "roleNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": "string"
+          },
+          "websiteUrl": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string"
+          },
+          "department": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string"
+          },
+          "socialLinks": {
+            "$ref": "#/components/schemas/SocialLinks"
+          },
+          "customLinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CustomLink"
+            }
+          },
+          "githubTokenConfigured": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpdateGithubTokenRequest": {
+        "type": "object",
+        "properties": {
+          "githubToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "githubToken"
+        ]
+      },
+      "UpdateProjectUserRequest": {
+        "type": "object",
+        "properties": {
+          "wpRole": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "wpRole"
+        ]
+      },
+      "UserCreateRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 1
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "role"
+        ]
+      },
+      "UserResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "roleNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "keycloakLinked": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReconciliationSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "deactivatedUserIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      },
+      "MigrateToKeycloakRequest": {
+        "type": "object",
+        "properties": {
+          "userIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      },
+      "MigrationSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "migratedUserIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "failedUserIds": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AddProjectUserRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "wpRole": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "userId",
+          "wpRole"
+        ]
+      },
+      "ProjectUserSyncSiteResult": {
+        "type": "object",
+        "properties": {
+          "siteId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "siteKey": {
+            "type": "string"
+          },
+          "siteName": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "type": "string"
+          }
+        }
+      },
+      "CacheUserSiteAuthorBridgeRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "siteId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cmsAuthorId": {
+            "type": "string"
+          }
+        }
+      },
+      "SignupRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "minLength": 1
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 2147483647,
+            "minLength": 8
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "UserUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateUserPreferencesRequest": {
+        "type": "object",
+        "properties": {
+          "locale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "locale",
+          "timezone"
+        ]
+      },
+      "RoleResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "roleName": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "USER_CREATE",
+                "USER_READ",
+                "USER_UPDATE",
+                "USER_DELETE",
+                "USER_ROLE_MANAGE",
+                "POST_CREATE",
+                "POST_READ",
+                "POST_UPDATE",
+                "POST_DELETE",
+                "POST_PUBLISH",
+                "SITE_CREATE",
+                "SITE_READ",
+                "SITE_UPDATE",
+                "SITE_DELETE",
+                "AUDIT_LOG_VIEW",
+                "AUDIT_LOG_DELETE",
+                "SYSTEM_CONFIG",
+                "ROLE_MANAGE"
+              ]
+            },
+            "uniqueItems": true
+          }
+        }
+      },
+      "ProjectUserResponse": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "email": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "wpRole": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectUserSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "wpRole": {
+            "type": "string"
+          }
+        }
+      },
+      "UserGithubTokenBridgeResponse": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "encryptedToken": {
+            "type": "string",
+            "format": "byte"
+          }
+        }
+      },
+      "UserSiteAuthorBridgeResponse": {
+        "type": "object",
+        "properties": {
+          "cmsAuthorId": {
+            "type": "string"
+          }
+        }
+      },
+      "RoleOptionResponse": {
+        "type": "object",
+        "properties": {
+          "roleName": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "PermissionsResponse": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "USER_CREATE",
+                "USER_READ",
+                "USER_UPDATE",
+                "USER_DELETE",
+                "USER_ROLE_MANAGE",
+                "POST_CREATE",
+                "POST_READ",
+                "POST_UPDATE",
+                "POST_DELETE",
+                "POST_PUBLISH",
+                "SITE_CREATE",
+                "SITE_READ",
+                "SITE_UPDATE",
+                "SITE_DELETE",
+                "AUDIT_LOG_VIEW",
+                "AUDIT_LOG_DELETE",
+                "SYSTEM_CONFIG",
+                "ROLE_MANAGE"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

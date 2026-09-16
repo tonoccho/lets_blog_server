@@ -4,6 +4,24 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
+export interface SetProjectGoogleAnalyticsCredentialsRequest {
+  /** @minLength 1 */
+  propertyId: string;
+  /** @minLength 1 */
+  serviceAccountJson: string;
+}
+
+export interface SetProjectAdSenseSettingsRequest {
+  /** @minLength 1 */
+  accountId: string;
+  clientId?: string;
+}
+
+export interface SetProjectAdSenseClientSecretRequest {
+  /** @minLength 1 */
+  clientSecret: string;
+}
+
 export interface SetGoogleAnalyticsCredentialsRequest {
   /** @minLength 1 */
   propertyId: string;
@@ -77,6 +95,18 @@ export interface AdSenseReportResponse {
   errorMessage?: string;
   dailyDataPoints?: AdSenseDailyDataPointResponse[];
   platformBreakdown?: AdSensePlatformBreakdownResponse[];
+}
+
+export interface ProjectGoogleAnalyticsStatusResponse {
+  configured?: boolean;
+  propertyId?: string;
+}
+
+export interface ProjectAdSenseStatusResponse {
+  configured?: boolean;
+  accountId?: string;
+  clientId?: string;
+  hasClientSecret?: boolean;
 }
 
 export interface GoogleAnalyticsStatusResponse {

@@ -79,6 +79,7 @@ export interface ConnectedServiceStatusDetailResponse {
   errorMessage?: string;
   targetUrl?: string;
   checkedAt?: string;
+  impact?: string;
 }
 
 export type ContainerStatusResponseStatus = typeof ContainerStatusResponseStatus[keyof typeof ContainerStatusResponseStatus];

@@ -10,19 +10,19 @@ import type {
 } from '../openAPIDefinition.schemas';
 
 
-export type generate1Response200 = {
+export type generate2Response200 = {
   data: StaticContentResponse
   status: 200
 }
 
-export type generate1ResponseSuccess = (generate1Response200) & {
+export type generate2ResponseSuccess = (generate2Response200) & {
   headers: Headers;
 };
 ;
 
-export type generate1Response = (generate1ResponseSuccess)
+export type generate2Response = (generate2ResponseSuccess)
 
-export const getGenerate1Url = (siteId: number,) => {
+export const getGenerate2Url = (siteId: number,) => {
 
 
 
@@ -34,8 +34,8 @@ export const getGenerate1Url = (siteId: number,) => {
  * サイトのプラグイン構成をもとにLLMで静的コンテンツを生成します
  * @summary 静的コンテンツを生成
  */
-export const generate1 = async (siteId: number,
-    generateStaticContentRequest: GenerateStaticContentRequest, options?: RequestInit): Promise<generate1Response> => {
+export const generate2 = async (siteId: number,
+    generateStaticContentRequest: GenerateStaticContentRequest, options?: RequestInit): Promise<generate2Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -43,7 +43,7 @@ export const generate1 = async (siteId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getGenerate1Url(siteId),
+const res = await fetch(getGenerate2Url(siteId),
   {
     ...options,
     method: 'POST',
@@ -55,8 +55,8 @@ const res = await fetch(getGenerate1Url(siteId),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: generate1Response['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as generate1Response
+  const data: generate2Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as generate2Response
 }
 
 

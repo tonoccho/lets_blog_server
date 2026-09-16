@@ -4,33 +4,6 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
-export type SiteUpdateRequestCredentials = {[key: string]: string};
-
-export interface SiteUpdateRequest {
-  name?: string;
-  credentials?: SiteUpdateRequestCredentials;
-}
-
-export type SiteResponseCmsType = typeof SiteResponseCmsType[keyof typeof SiteResponseCmsType];
-
-
-export const SiteResponseCmsType = {
-  WORDPRESS: 'WORDPRESS',
-} as const;
-
-export interface SiteResponse {
-  id?: number;
-  name?: string;
-  siteKey?: string;
-  cmsType?: SiteResponseCmsType;
-  baseUrl?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  connectionCheckStatus?: string;
-  managedWordpress?: boolean;
-  sshConfigured?: boolean;
-}
-
 export interface SaveTagDesignSettingRequest {
   /** @minLength 1 */
   presetId: string;
@@ -72,6 +45,38 @@ export interface TagDesignSettingResponse {
   htmlTemplate?: string;
 }
 
+export type SiteUpdateRequestCredentials = {[key: string]: string};
+
+export interface SiteUpdateRequest {
+  name?: string;
+  credentials?: SiteUpdateRequestCredentials;
+}
+
+export type SiteResponseCmsType = typeof SiteResponseCmsType[keyof typeof SiteResponseCmsType];
+
+
+export const SiteResponseCmsType = {
+  WORDPRESS: 'WORDPRESS',
+} as const;
+
+export interface SiteResponse {
+  id?: number;
+  name?: string;
+  siteKey?: string;
+  cmsType?: SiteResponseCmsType;
+  baseUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  connectionCheckStatus?: string;
+  managedWordpress?: boolean;
+  sshConfigured?: boolean;
+}
+
+export interface SetProjectGithubTokenRequest {
+  /** @minLength 1 */
+  githubToken: string;
+}
+
 export interface ProjectUpdateRequest {
   /** @minLength 1 */
   name: string;
@@ -102,6 +107,16 @@ export interface UpdateProjectGithubRepositoryRequest {
 
 export interface SetGithubTokenBridgeRequest {
   encryptedToken?: string;
+}
+
+export interface GenerateTagDesignRequest {
+  /** @minLength 1 */
+  prompt: string;
+}
+
+export interface GenerateTagDesignResponse {
+  htmlTemplate?: string;
+  cssContent?: string;
 }
 
 export interface SshKeyPairCreateRequest {
@@ -224,16 +239,6 @@ export interface ProjectCreateRequest {
   slug: string;
 }
 
-export interface GenerateTagDesignRequest {
-  /** @minLength 1 */
-  prompt: string;
-}
-
-export interface GenerateTagDesignResponse {
-  htmlTemplate?: string;
-  cssContent?: string;
-}
-
 export interface ProjectEnvironmentBindRequest {
   environment: string;
   siteId: number;
@@ -246,6 +251,19 @@ export interface SyncEnvironmentRequest {
   to: string;
   /** @minItems 1 */
   targets: string[];
+}
+
+export interface TagDesignPresetResponse {
+  id?: string;
+  label?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  accentColor?: string;
+}
+
+export interface TagDesignSettingsOverviewResponse {
+  presets?: TagDesignPresetResponse[];
+  settings?: TagDesignSettingResponse[];
 }
 
 export interface SshKeyPairSummaryResponse {
@@ -279,17 +297,8 @@ export interface SiteDetailResponse {
   configuredSecretFields?: string[];
 }
 
-export interface TagDesignPresetResponse {
-  id?: string;
-  label?: string;
-  backgroundColor?: string;
-  textColor?: string;
-  accentColor?: string;
-}
-
-export interface TagDesignSettingsOverviewResponse {
-  presets?: TagDesignPresetResponse[];
-  settings?: TagDesignSettingResponse[];
+export interface ProjectApiKeyStatusResponse {
+  configured?: boolean;
 }
 
 export interface TagDesignBridgeResponse {
@@ -356,6 +365,16 @@ export interface GithubTokenBridgeResponse {
   encryptedToken?: string;
 }
 
+export interface GithubAccessResponse {
+  token?: string;
+  owner?: string;
+  repo?: string;
+}
+
+export interface ProjectEligibilityResponse {
+  hasProductionSite?: boolean;
+}
+
 export type List1Params = {
 sortBy?: string;
 sortOrder?: string;
@@ -372,5 +391,9 @@ sortOrder?: string;
 
 export type TagDesignParams = {
 projectId?: number;
+};
+
+export type GithubAccessParams = {
+actorUserId: number;
 };
 

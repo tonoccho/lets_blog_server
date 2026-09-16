@@ -4,6 +4,81 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
+export interface UpdateImageGenerationSizeDefaultsRequest {
+  /**
+     * @minimum 64
+     * @maximum 2048
+     */
+  defaultGeneratedImageWidth?: number;
+  /**
+     * @minimum 64
+     * @maximum 2048
+     */
+  defaultGeneratedImageHeight?: number;
+  widthMultipleOf8?: boolean;
+  heightMultipleOf8?: boolean;
+}
+
+export interface ProjectImageSettingsResponse {
+  projectId?: number;
+  imageProvider?: string;
+  comfyuiCheckpoint?: string;
+  defaultNegativePrompt?: string;
+  defaultQualityPrompt?: string;
+  defaultGeneratedImageWidth?: number;
+  defaultGeneratedImageHeight?: number;
+  defaultArticleImageLongEdgePx?: number;
+  blockSexualContent?: boolean;
+  blockViolentContent?: boolean;
+  blockDiscriminatoryContent?: boolean;
+}
+
+export interface UpdateImageGenerationPromptDefaultsRequest {
+  /**
+     * @minLength 0
+     * @maxLength 1000
+     */
+  defaultNegativePrompt?: string;
+  /**
+     * @minLength 0
+     * @maxLength 500
+     */
+  defaultQualityPrompt?: string;
+}
+
+export interface UpdateImageContentFilterSettingsRequest {
+  blockSexualContent?: boolean;
+  blockViolentContent?: boolean;
+  blockDiscriminatoryContent?: boolean;
+}
+
+export interface UpdateArticleImageResizeDefaultRequest {
+  /**
+     * @minimum 64
+     * @maximum 4096
+     */
+  defaultArticleImageLongEdgePx?: number;
+}
+
+export interface SelectImageProviderRequest {
+  provider?: string;
+}
+
+export interface ImageProviderListResponse {
+  availableProviders?: string[];
+  selected?: string;
+}
+
+export interface SelectComfyUiCheckpointRequest {
+  /** @minLength 1 */
+  checkpointName: string;
+}
+
+export interface ComfyUiCheckpointListResponse {
+  checkpoints?: string[];
+  selected?: string;
+}
+
 export interface UpdateGeneratedImageTagsRequest {
   tags?: string[];
 }
@@ -21,6 +96,7 @@ export interface GeneratedImageDetailResponse {
   width?: number;
   height?: number;
   batchSize?: number;
+  batchIndex?: number;
   checkpoint?: string;
   loraName?: string;
   loraWeight?: number;
@@ -98,6 +174,24 @@ export interface GenerationJobSummary {
   updatedAt?: string;
 }
 
+export interface InstallComfyUiCheckpointRequest {
+  /** @minLength 1 */
+  downloadUrl: string;
+  /**
+     * @minLength 1
+     * @pattern ^[A-Za-z0-9_.-]+$
+     */
+  fileName: string;
+}
+
+export interface GenerationJobResponse {
+  id?: number;
+  type?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface MediaUploadResult {
   id?: string;
   url?: string;
@@ -116,6 +210,7 @@ export interface CreateGeneratedImageRequest {
   width?: number;
   height?: number;
   batchSize?: number;
+  batchIndex?: number;
   checkpoint?: string;
   loraName?: string;
   loraWeight?: number;
@@ -148,6 +243,70 @@ export interface DeleteComfyUiCheckpointCommand {
   fileName: string;
 }
 
+export interface AiImageRequest {
+  /** @minLength 1 */
+  prompt: string;
+  negativePrompt?: string;
+  /**
+     * @minimum 1
+     * @maximum 150
+     */
+  steps?: number;
+  /**
+     * @minimum 0
+     * @maximum 30
+     */
+  cfgScale?: number;
+  samplerName?: string;
+  scheduler?: string;
+  /** @maximum 4294967295 */
+  seed?: number;
+  /**
+     * @minimum 64
+     * @maximum 2048
+     */
+  width?: number;
+  /**
+     * @minimum 64
+     * @maximum 2048
+     */
+  height?: number;
+  /**
+     * @minimum 1
+     * @maximum 16
+     */
+  batchSize?: number;
+  /**
+     * @minimum 1
+     * @maximum 16
+     */
+  batchCount?: number;
+  checkpoint?: string;
+  loraName?: string;
+  /**
+     * @minimum 0
+     * @maximum 2
+     */
+  loraWeight?: number;
+  projectId?: number;
+  widthMultipleOf8?: boolean;
+  heightMultipleOf8?: boolean;
+}
+
+export interface AiImageResponse {
+  id?: number;
+  fileName?: string;
+  dataBase64?: string;
+  mimeType?: string;
+  seed?: number;
+  batchIndex?: number;
+}
+
+export interface AiImageBatchResponse {
+  images?: AiImageResponse[];
+  failedRepeats?: number;
+}
+
 export interface UnreferencedMediaItem {
   mediaId?: string;
   guid?: string;
@@ -162,6 +321,10 @@ export interface MediaGarbageCollectionScanResponse {
   totalMediaCount?: number;
   referencedMediaCount?: number;
   unreferencedMediaCount?: number;
+}
+
+export interface ArticleImageLongEdgePxBridgeResponse {
+  value?: number;
 }
 
 export interface GeneratedImageSummaryResponse {
@@ -180,6 +343,18 @@ export interface DiagramSummaryResponse {
   name?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ImageGenerationOptionsResponse {
+  checkpoints?: string[];
+  selectedCheckpoint?: string;
+  samplers?: string[];
+  schedulers?: string[];
+  loras?: string[];
+  defaultWidth?: number;
+  defaultHeight?: number;
+  defaultNegativePrompt?: string;
+  defaultQualityPrompt?: string;
 }
 
 export type Delete1Params = {
@@ -205,5 +380,9 @@ projectId?: number;
 
 export type ScanParams = {
 environment: string;
+};
+
+export type ImageOptionsParams = {
+projectId?: number;
 };
 

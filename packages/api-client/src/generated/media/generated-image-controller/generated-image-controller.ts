@@ -150,19 +150,19 @@ const res = await fetch(getCreateUrl(),
 }
 
 
-export type get1Response200 = {
+export type get2Response200 = {
   data: GeneratedImageDetailResponse
   status: 200
 }
 
-export type get1ResponseSuccess = (get1Response200) & {
+export type get2ResponseSuccess = (get2Response200) & {
   headers: Headers;
 };
 ;
 
-export type get1Response = (get1ResponseSuccess)
+export type get2Response = (get2ResponseSuccess)
 
-export const getGet1Url = (id: number,) => {
+export const getGet2Url = (id: number,) => {
 
 
 
@@ -170,9 +170,9 @@ export const getGet1Url = (id: number,) => {
   return `http://localhost:8080/api/generated-images/${id}`
 }
 
-export const get1 = async (id: number, options?: RequestInit): Promise<get1Response> => {
+export const get2 = async (id: number, options?: RequestInit): Promise<get2Response> => {
 
-  const res = await fetch(getGet1Url(id),
+  const res = await fetch(getGet2Url(id),
   {
     ...options,
     method: 'GET'
@@ -184,8 +184,8 @@ export const get1 = async (id: number, options?: RequestInit): Promise<get1Respo
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: get1Response['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as get1Response
+  const data: get2Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as get2Response
 }
 
 

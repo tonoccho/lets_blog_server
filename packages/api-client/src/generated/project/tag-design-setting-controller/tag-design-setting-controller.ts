@@ -13,19 +13,19 @@ import type {
 } from '../openAPIDefinition.schemas';
 
 
-export type saveResponse200 = {
+export type save1Response200 = {
   data: TagDesignSettingResponse
   status: 200
 }
 
-export type saveResponseSuccess = (saveResponse200) & {
+export type save1ResponseSuccess = (save1Response200) & {
   headers: Headers;
 };
 ;
 
-export type saveResponse = (saveResponseSuccess)
+export type save1Response = (save1ResponseSuccess)
 
-export const getSaveUrl = (projectId: number,
+export const getSave1Url = (projectId: number,
     tagType: 'TOC' | 'BLOGCARD' | 'AMAZON',) => {
 
 
@@ -34,9 +34,9 @@ export const getSaveUrl = (projectId: number,
   return `http://localhost:8080/api/projects/${projectId}/tag-design-settings/${tagType}`
 }
 
-export const save = async (projectId: number,
+export const save1 = async (projectId: number,
     tagType: 'TOC' | 'BLOGCARD' | 'AMAZON',
-    saveTagDesignSettingRequest: SaveTagDesignSettingRequest, options?: RequestInit): Promise<saveResponse> => {
+    saveTagDesignSettingRequest: SaveTagDesignSettingRequest, options?: RequestInit): Promise<save1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -44,7 +44,7 @@ export const save = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getSaveUrl(projectId,tagType),
+const res = await fetch(getSave1Url(projectId,tagType),
   {
     ...options,
     method: 'PUT',
@@ -56,24 +56,24 @@ const res = await fetch(getSaveUrl(projectId,tagType),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: saveResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as saveResponse
+  const data: save1Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as save1Response
 }
 
 
-export type generate2Response200 = {
+export type generate3Response200 = {
   data: GenerateTagDesignResponse
   status: 200
 }
 
-export type generate2ResponseSuccess = (generate2Response200) & {
+export type generate3ResponseSuccess = (generate3Response200) & {
   headers: Headers;
 };
 ;
 
-export type generate2Response = (generate2ResponseSuccess)
+export type generate3Response = (generate3ResponseSuccess)
 
-export const getGenerate2Url = (projectId: number,
+export const getGenerate3Url = (projectId: number,
     tagType: 'TOC' | 'BLOGCARD' | 'AMAZON',) => {
 
 
@@ -82,9 +82,9 @@ export const getGenerate2Url = (projectId: number,
   return `http://localhost:8080/api/projects/${projectId}/tag-design-settings/${tagType}/generate`
 }
 
-export const generate2 = async (projectId: number,
+export const generate3 = async (projectId: number,
     tagType: 'TOC' | 'BLOGCARD' | 'AMAZON',
-    generateTagDesignRequest: GenerateTagDesignRequest, options?: RequestInit): Promise<generate2Response> => {
+    generateTagDesignRequest: GenerateTagDesignRequest, options?: RequestInit): Promise<generate3Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -92,7 +92,7 @@ export const generate2 = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getGenerate2Url(projectId,tagType),
+const res = await fetch(getGenerate3Url(projectId,tagType),
   {
     ...options,
     method: 'POST',
@@ -104,24 +104,24 @@ const res = await fetch(getGenerate2Url(projectId,tagType),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: generate2Response['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as generate2Response
+  const data: generate3Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as generate3Response
 }
 
 
-export type getOverviewResponse200 = {
+export type getOverview1Response200 = {
   data: TagDesignSettingsOverviewResponse
   status: 200
 }
 
-export type getOverviewResponseSuccess = (getOverviewResponse200) & {
+export type getOverview1ResponseSuccess = (getOverview1Response200) & {
   headers: Headers;
 };
 ;
 
-export type getOverviewResponse = (getOverviewResponseSuccess)
+export type getOverview1Response = (getOverview1ResponseSuccess)
 
-export const getGetOverviewUrl = (projectId: number,) => {
+export const getGetOverview1Url = (projectId: number,) => {
 
 
 
@@ -129,9 +129,9 @@ export const getGetOverviewUrl = (projectId: number,) => {
   return `http://localhost:8080/api/projects/${projectId}/tag-design-settings`
 }
 
-export const getOverview = async (projectId: number, options?: RequestInit): Promise<getOverviewResponse> => {
+export const getOverview1 = async (projectId: number, options?: RequestInit): Promise<getOverview1Response> => {
 
-  const res = await fetch(getGetOverviewUrl(projectId),
+  const res = await fetch(getGetOverview1Url(projectId),
   {
     ...options,
     method: 'GET'
@@ -143,8 +143,8 @@ export const getOverview = async (projectId: number, options?: RequestInit): Pro
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: getOverviewResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getOverviewResponse
+  const data: getOverview1Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as getOverview1Response
 }
 
 

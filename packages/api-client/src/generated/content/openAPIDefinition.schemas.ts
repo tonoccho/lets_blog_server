@@ -4,6 +4,18 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
+export interface UpdateCssSelectorPrefixRequest {
+  /**
+     * @minLength 0
+     * @maxLength 100
+     */
+  cssSelectorPrefix?: string;
+}
+
+export interface ProjectContentSettingsResponse {
+  cssSelectorPrefix?: string;
+}
+
 export interface ProjectContentSettingsBridgeResponse {
   cssSelectorPrefix?: string;
 }

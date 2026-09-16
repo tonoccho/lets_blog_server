@@ -5,8 +5,11 @@
  * OpenAPI spec version: v0
  */
 import type {
+  GithubAccessParams,
+  GithubAccessResponse,
   GithubTokenBridgeResponse,
   ProjectBridgeResponse,
+  ProjectEligibilityResponse,
   ProjectIdResponse,
   SetGithubTokenBridgeRequest,
   SiteBridgeResponse
@@ -134,6 +137,45 @@ export const clearGithubToken = async (projectId: number, options?: RequestInit)
 
   const data: clearGithubTokenResponse['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as clearGithubTokenResponse
+}
+
+
+export type accessibleSiteIdsResponse200 = {
+  data: number[]
+  status: 200
+}
+
+export type accessibleSiteIdsResponseSuccess = (accessibleSiteIdsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type accessibleSiteIdsResponse = (accessibleSiteIdsResponseSuccess)
+
+export const getAccessibleSiteIdsUrl = (userId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/project/users/${userId}/site-ids`
+}
+
+export const accessibleSiteIds = async (userId: number, options?: RequestInit): Promise<accessibleSiteIdsResponse> => {
+
+  const res = await fetch(getAccessibleSiteIdsUrl(userId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: accessibleSiteIdsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as accessibleSiteIdsResponse
 }
 
 
@@ -329,6 +371,93 @@ export const project = async (projectId: number, options?: RequestInit): Promise
 
   const data: projectResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as projectResponse
+}
+
+
+export type githubAccessResponse200 = {
+  data: GithubAccessResponse
+  status: 200
+}
+
+export type githubAccessResponseSuccess = (githubAccessResponse200) & {
+  headers: Headers;
+};
+;
+
+export type githubAccessResponse = (githubAccessResponseSuccess)
+
+export const getGithubAccessUrl = (projectId: number,
+    params: GithubAccessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `http://localhost:8080/api/internal/project/projects/${projectId}/github-access?${stringifiedParams}` : `http://localhost:8080/api/internal/project/projects/${projectId}/github-access`
+}
+
+export const githubAccess = async (projectId: number,
+    params: GithubAccessParams, options?: RequestInit): Promise<githubAccessResponse> => {
+
+  const res = await fetch(getGithubAccessUrl(projectId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: githubAccessResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as githubAccessResponse
+}
+
+
+export type projectEligibilityResponse200 = {
+  data: ProjectEligibilityResponse
+  status: 200
+}
+
+export type projectEligibilityResponseSuccess = (projectEligibilityResponse200) & {
+  headers: Headers;
+};
+;
+
+export type projectEligibilityResponse = (projectEligibilityResponseSuccess)
+
+export const getProjectEligibilityUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/project/projects/${projectId}/eligibility`
+}
+
+export const projectEligibility = async (projectId: number, options?: RequestInit): Promise<projectEligibilityResponse> => {
+
+  const res = await fetch(getProjectEligibilityUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: projectEligibilityResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as projectEligibilityResponse
 }
 
 

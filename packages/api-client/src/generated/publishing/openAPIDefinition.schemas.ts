@@ -363,6 +363,10 @@ export interface PostComparisonPage {
   postType?: string;
 }
 
+export interface SiteProjectIdBridgeResponse {
+  projectId?: number;
+}
+
 export type CmsMediaReferenceScanSettingsMediaIds = {[key: string]: string};
 
 export interface CmsPostContentSummary {

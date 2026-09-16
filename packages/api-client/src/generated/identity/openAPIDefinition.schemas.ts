@@ -69,6 +69,11 @@ export interface UpdateGithubTokenRequest {
   githubToken: string;
 }
 
+export interface UpdateProjectUserRequest {
+  /** @minLength 1 */
+  wpRole: string;
+}
+
 export interface UserCreateRequest {
   /** @minLength 1 */
   email: string;
@@ -102,6 +107,36 @@ export type MigrationSummaryResponseFailedUserIds = {[key: string]: string};
 export interface MigrationSummaryResponse {
   migratedUserIds?: number[];
   failedUserIds?: MigrationSummaryResponseFailedUserIds;
+}
+
+export interface AddProjectUserRequest {
+  userId: number;
+  /** @minLength 1 */
+  wpRole: string;
+}
+
+export interface ProjectUserSyncSiteResult {
+  siteId?: number;
+  siteKey?: string;
+  siteName?: string;
+  success?: boolean;
+  errorMessage?: string;
+}
+
+export interface CacheUserSiteAuthorBridgeRequest {
+  userId?: number;
+  siteId?: number;
+  cmsAuthorId?: string;
+}
+
+export interface SignupRequest {
+  /** @minLength 1 */
+  email: string;
+  /**
+     * @minLength 8
+     * @maxLength 2147483647
+     */
+  password: string;
 }
 
 export interface UserUpdateRequest {
@@ -148,6 +183,33 @@ export interface RoleResponse {
   permissions?: RoleResponsePermissionsItem[];
 }
 
+export interface ProjectUserResponse {
+  userId?: number;
+  email?: string;
+  displayName?: string;
+  wpRole?: string;
+}
+
+export interface ProjectUserSummaryResponse {
+  projectId?: number;
+  userId?: number;
+  wpRole?: string;
+}
+
+export interface UserGithubTokenBridgeResponse {
+  configured?: boolean;
+  encryptedToken?: string;
+}
+
+export interface UserSiteAuthorBridgeResponse {
+  cmsAuthorId?: string;
+}
+
+export interface RoleOptionResponse {
+  roleName?: string;
+  displayName?: string;
+}
+
 export type PermissionsResponsePermissionsItem = typeof PermissionsResponsePermissionsItem[keyof typeof PermissionsResponsePermissionsItem];
 
 
@@ -192,4 +254,10 @@ export type RemoveRole401 = {[key: string]: string};
 export type RemoveRole403 = {[key: string]: string};
 
 export type RemoveRole404 = {[key: string]: string};
+
+export type UploadAvatarBody = {
+  file: Blob;
+};
+
+export type SetupStatus200 = {[key: string]: boolean};
 

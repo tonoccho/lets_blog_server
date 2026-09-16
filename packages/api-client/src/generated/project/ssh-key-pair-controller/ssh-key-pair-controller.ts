@@ -50,19 +50,19 @@ export const list = async ( options?: RequestInit): Promise<listResponse> => {
 }
 
 
-export type generateResponse200 = {
+export type generate1Response200 = {
   data: SshKeyPairGeneratedResponse
   status: 200
 }
 
-export type generateResponseSuccess = (generateResponse200) & {
+export type generate1ResponseSuccess = (generate1Response200) & {
   headers: Headers;
 };
 ;
 
-export type generateResponse = (generateResponseSuccess)
+export type generate1Response = (generate1ResponseSuccess)
 
-export const getGenerateUrl = () => {
+export const getGenerate1Url = () => {
 
 
 
@@ -70,7 +70,7 @@ export const getGenerateUrl = () => {
   return `http://localhost:8080/api/ssh-key-pairs`
 }
 
-export const generate = async (sshKeyPairCreateRequest: SshKeyPairCreateRequest, options?: RequestInit): Promise<generateResponse> => {
+export const generate1 = async (sshKeyPairCreateRequest: SshKeyPairCreateRequest, options?: RequestInit): Promise<generate1Response> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -78,7 +78,7 @@ export const generate = async (sshKeyPairCreateRequest: SshKeyPairCreateRequest,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getGenerateUrl(),
+const res = await fetch(getGenerate1Url(),
   {
     ...options,
     method: 'POST',
@@ -90,8 +90,8 @@ const res = await fetch(getGenerateUrl(),
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: generateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as generateResponse
+  const data: generate1Response['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as generate1Response
 }
 
 

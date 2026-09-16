@@ -18,6 +18,7 @@ import type {
   RemoveRole404,
   UpdateGithubTokenRequest,
   UpdateUserPreferencesRequest,
+  UploadAvatarBody,
   UserCreateRequest,
   UserProfileResponse,
   UserProfileUpdateRequest,
@@ -704,6 +705,140 @@ export const deactivate = async (id: number, options?: RequestInit): Promise<dea
 
   const data: deactivateResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as deactivateResponse
+}
+
+
+export type getAvatarResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type getAvatarResponse401 = {
+  data: Blob
+  status: 401
+}
+
+export type getAvatarResponse403 = {
+  data: Blob
+  status: 403
+}
+
+export type getAvatarResponse404 = {
+  data: Blob
+  status: 404
+}
+
+export type getAvatarResponseSuccess = (getAvatarResponse200) & {
+  headers: Headers;
+};
+export type getAvatarResponseError = (getAvatarResponse401 | getAvatarResponse403 | getAvatarResponse404) & {
+  headers: Headers;
+};
+
+export type getAvatarResponse = (getAvatarResponseSuccess | getAvatarResponseError)
+
+export const getGetAvatarUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/users/${id}/avatar`
+}
+
+/**
+ * アップロード済みのアバター画像(JPEG、512x512)を返します。
+ * @summary アバター画像を取得
+ */
+export const getAvatar = async (id: number, options?: RequestInit): Promise<getAvatarResponse> => {
+
+  const res = await fetch(getGetAvatarUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.blob();
+  const data: getAvatarResponse['data'] = body as getAvatarResponse['data']
+  return { data, status: res.status, headers: res.headers } as getAvatarResponse
+}
+
+
+export type uploadAvatarResponse200 = {
+  data: UserProfileResponse
+  status: 200
+}
+
+export type uploadAvatarResponse400 = {
+  data: UserProfileResponse
+  status: 400
+}
+
+export type uploadAvatarResponse401 = {
+  data: UserProfileResponse
+  status: 401
+}
+
+export type uploadAvatarResponse403 = {
+  data: UserProfileResponse
+  status: 403
+}
+
+export type uploadAvatarResponse404 = {
+  data: UserProfileResponse
+  status: 404
+}
+
+export type uploadAvatarResponse413 = {
+  data: UserProfileResponse
+  status: 413
+}
+
+export type uploadAvatarResponseSuccess = (uploadAvatarResponse200) & {
+  headers: Headers;
+};
+export type uploadAvatarResponseError = (uploadAvatarResponse400 | uploadAvatarResponse401 | uploadAvatarResponse403 | uploadAvatarResponse404 | uploadAvatarResponse413) & {
+  headers: Headers;
+};
+
+export type uploadAvatarResponse = (uploadAvatarResponseSuccess | uploadAvatarResponseError)
+
+export const getUploadAvatarUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/users/${id}/avatar`
+}
+
+/**
+ * プロフィール編集画面でクライアント側(Canvas)で切り抜いた正方形画像をアップロードします。image/jpeg・image/png・image/webpのみ受理し、サーバー側で512x512へ変換のうえメタ情報を削除します。
+ * @summary アバター画像をアップロード
+ */
+export const uploadAvatar = async (id: number,
+    uploadAvatarBody?: UploadAvatarBody, options?: RequestInit): Promise<uploadAvatarResponse> => {
+    const formData = new FormData();
+if(uploadAvatarBody?.file !== undefined) {
+ formData.append(`file`, uploadAvatarBody.file);
+ }
+
+  const res = await fetch(getUploadAvatarUrl(id),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body: formData
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: uploadAvatarResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as uploadAvatarResponse
 }
 
 
