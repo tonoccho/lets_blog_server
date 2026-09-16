@@ -50,6 +50,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
 VHOST = "infra/shared-host/20-localhost.conf"
+GITLAB_VHOST = "infra/shared-host/10-server.tonoccho.local.conf"
 OVERRIDE_COMPOSE = "docker-compose.shared-host.yml"
 BASE_COMPOSE = "docker-compose.yml"
 SETUP_SCRIPT = "scripts/setup-shared-host-proxy.sh"
@@ -190,6 +191,82 @@ class VhostIsSafeToLoadIntoTheSharedProxy(unittest.TestCase):
         """採用理由と危険性が設定ファイル自身に残っていること(受入基準4)。"""
         comments = read(VHOST)
         for keyword in ("#1038", "ポート", "起動時", "GitLab", "server.tonoccho.local"):
+            with self.subTest(keyword=keyword):
+                self.assertIn(keyword, comments)
+
+
+class GitlabVhostResolvesItsUpstreamLazily(unittest.TestCase):
+    """#1043 の手段: infra-proxy が読む GitLab vhost が、GitLab 停止に巻き込まれず起動できる。
+
+    `infra/shared-host/20-localhost.conf`(#1038)で解決済みの同じ問題 — `proxy_pass` の
+    宛先を直書きすると nginx が**起動時**に名前解決し、上流が居ないと nginx 自体が
+    起動できない — が、GitLab 自身の vhost にも存在する。同じ形(変数 + resolver)で直す。
+    """
+
+    def setUp(self):
+        self.assertTrue(exists(GITLAB_VHOST), "%s が無い" % GITLAB_VHOST)
+        self.conf = strip_comments(read(GITLAB_VHOST))
+
+    def test_serves_the_gitlab_hostname_on_80_and_443(self):
+        self.assertRegex(self.conf, r"listen\s+80\s*;", "80番の server が無い")
+        self.assertRegex(self.conf, r"listen\s+443\s+ssl", "443番の ssl server が無い")
+        self.assertRegex(
+            self.conf, r"server_name\s+server\.tonoccho\.local\s*;",
+            "server_name server.tonoccho.local が無い",
+        )
+
+    def test_has_the_gitlab_location(self):
+        self.assertRegex(self.conf, r"location\s+/gitlab\s*\{")
+
+    def test_resolves_the_upstream_lazily(self):
+        """**回帰させてはいけない検査(#1043)。**
+
+        `proxy_pass http://gitlab:80;` のように上流名を直書きすると、nginx は
+        **起動時**に名前解決する。`infra-gitlab` が起動していない状態で `infra-proxy` を
+        起動・reload すると解決に失敗して nginx 自体が起動できず、**GitLab ごと落ちる**。
+        変数経由にすると解決がリクエスト時になり、上流が居なければ 502 を返すだけで済む。
+        """
+        self.assertRegex(
+            self.conf,
+            r"resolver\s+127\.0\.0\.11\b",
+            "Docker 組み込み DNS の resolver が無い。変数経由の proxy_pass は解決できない",
+        )
+        self.assertIn("ipv6=off", self.conf, "resolver に ipv6=off が無い")
+        self.assertIn(
+            "valid=10s", self.conf,
+            "resolver に valid=10s が無い。20-localhost.conf(#1038)の形に揃っていない",
+        )
+        self.assertRegex(
+            self.conf,
+            r"proxy_pass\s+\$",
+            "proxy_pass が変数経由でない(起動時解決に戻っている)",
+        )
+        self.assertNotRegex(
+            self.conf,
+            r"proxy_pass\s+https?://",
+            "proxy_pass にホスト名を直書きしている。起動時解決に戻り GitLab ごと落ちる",
+        )
+
+    def test_upstream_is_gitlab_over_plain_http(self):
+        self.assertRegex(self.conf, r"set\s+\$\w+\s+http://gitlab:80\s*;")
+
+    def test_preserves_the_subpath_passthrough(self):
+        """GitLab は `relative_url_root=/gitlab` で動く。`proxy_pass` に URI を付けて
+        しまうと転送されるパスが変わり、`/gitlab` サブパス構成が壊れる。変数化しても
+        `proxy_pass $upstream;` のように URI 無しのままであること。
+        """
+        m = re.search(r"proxy_pass\s+(\$\w+)(?P<rest>[^;]*);", self.conf)
+        self.assertIsNotNone(m, "proxy_pass が見つからない")
+        self.assertEqual(
+            "", m.group("rest").strip(),
+            "proxy_pass に変数以外の URI が付いている。/gitlab サブパスの転送が変わる: %r"
+            % m.group(0),
+        )
+
+    def test_explains_why_it_is_shaped_this_way(self):
+        """採用理由と危険性が設定ファイル自身に残っていること。"""
+        comments = read(GITLAB_VHOST)
+        for keyword in ("#1043", "起動時", "GitLab", "gitlab"):
             with self.subTest(keyword=keyword):
                 self.assertIn(keyword, comments)
 
@@ -508,6 +585,7 @@ class SetupScriptApply(SetupScriptBase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         placed = self.placed_files()
         self.assertIn("proxy/conf.d/20-localhost.conf", placed)
+        self.assertIn("proxy/conf.d/10-server.tonoccho.local.conf", placed)
         self.assertIn("proxy/certs/localhost.crt", placed)
         self.assertIn("proxy/certs/localhost.key", placed)
 
@@ -517,6 +595,15 @@ class SetupScriptApply(SetupScriptBase):
             os.path.join(self.infra, "proxy", "conf.d", "20-localhost.conf"), encoding="utf-8"
         ) as f:
             self.assertEqual(read(VHOST), f.read())
+
+    def test_placed_gitlab_vhost_matches_the_repository(self):
+        """#1043: GitLab vhost も同じ配置元から反映されること。"""
+        self.run_setup()
+        with open(
+            os.path.join(self.infra, "proxy", "conf.d", "10-server.tonoccho.local.conf"),
+            encoding="utf-8",
+        ) as f:
+            self.assertEqual(read(GITLAB_VHOST), f.read())
 
     def test_connects_the_proxy_to_the_lbs_network(self):
         self.run_setup()
@@ -563,6 +650,13 @@ class SetupScriptRollsBackOnInvalidConfig(SetupScriptBase):
     def test_removes_the_placed_vhost(self):
         self.run_setup(FAKE_NGINX_T_FAILS="1")
         self.assertNotIn("proxy/conf.d/20-localhost.conf", self.placed_files())
+
+    def test_removes_the_placed_gitlab_vhost(self):
+        """#1043: 撤去は片方のvhostだけに留まらない。"""
+        self.run_setup(FAKE_NGINX_T_FAILS="1")
+        self.assertNotIn(
+            "proxy/conf.d/10-server.tonoccho.local.conf", self.placed_files()
+        )
 
 
 class CountingGitlabHandler(BaseHTTPRequestHandler):

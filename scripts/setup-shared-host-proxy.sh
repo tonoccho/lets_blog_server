@@ -52,6 +52,11 @@ VHOST_SRC="$REPO_ROOT/infra/shared-host/$VHOST_NAME"
 CERT_SRC="$REPO_ROOT/certs/localhost.crt"
 KEY_SRC="$REPO_ROOT/certs/localhost.key"
 
+# issue #1043: GitLab 自身の vhost。上流(gitlab:80)の起動時解決を変数 + resolver に
+# 直したもの。20-localhost.conf と同じ配置元・同じ検証手順で反映する。
+GITLAB_VHOST_NAME="10-server.tonoccho.local.conf"
+GITLAB_VHOST_SRC="$REPO_ROOT/infra/shared-host/$GITLAB_VHOST_NAME"
+
 INFRA_DIR="${INFRA_DIR:-/home/seiji/src/infra}"
 PROXY_CONTAINER="${PROXY_CONTAINER:-infra-proxy}"
 LBS_NETWORK="${LBS_NETWORK:-${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}_lbs-net}"
@@ -64,6 +69,7 @@ CERT_DST_DIR="$INFRA_DIR/proxy/certs"
 VHOST_DST="$CONF_DST_DIR/$VHOST_NAME"
 CERT_DST="$CERT_DST_DIR/localhost.crt"
 KEY_DST="$CERT_DST_DIR/localhost.key"
+GITLAB_VHOST_DST="$CONF_DST_DIR/$GITLAB_VHOST_NAME"
 
 MODE="apply"
 case "${1:-}" in
@@ -144,7 +150,7 @@ same_file() {
 
 # ---------------------------------------------------------------- 事前条件
 
-for f in "$VHOST_SRC" "$CERT_SRC" "$KEY_SRC"; do
+for f in "$VHOST_SRC" "$GITLAB_VHOST_SRC" "$CERT_SRC" "$KEY_SRC"; do
     if [ ! -f "$f" ]; then
         echo "エラー: $f が見つかりません。" >&2
         if [ "$f" != "$VHOST_SRC" ]; then
@@ -178,6 +184,16 @@ if [ "$MODE" = "check" ]; then
     else
         status=1
         echo "✗ vhost が配置されていません ($VHOST_DST)"
+    fi
+
+    if same_file "$GITLAB_VHOST_SRC" "$GITLAB_VHOST_DST"; then
+        echo "✓ GitLab vhost が配置されています ($GITLAB_VHOST_DST)"
+    elif [ -f "$GITLAB_VHOST_DST" ]; then
+        status=1
+        echo "✗ 配置済みの GitLab vhost がリポジトリの内容と一致しません ($GITLAB_VHOST_DST)"
+    else
+        status=1
+        echo "✗ GitLab vhost が配置されていません ($GITLAB_VHOST_DST)"
     fi
 
     for pair in "$CERT_SRC:$CERT_DST" "$KEY_SRC:$KEY_DST"; do
@@ -275,7 +291,8 @@ rollback() {
 echo "1) 証明書と vhost を配置します"
 if ! place "$CERT_SRC" "$CERT_DST" \
     || ! place "$KEY_SRC" "$KEY_DST" \
-    || ! place "$VHOST_SRC" "$VHOST_DST"; then
+    || ! place "$VHOST_SRC" "$VHOST_DST" \
+    || ! place "$GITLAB_VHOST_SRC" "$GITLAB_VHOST_DST"; then
     echo "✗ ファイルの配置に失敗しました。" >&2
     rollback
     exit 1
