@@ -39,5 +39,11 @@ COPY --from=build /workspace/services/media/build/runtime-libs ./runtime-libs
 RUN apt-get update \
     && java -cp "runtime-libs/*" com.microsoft.playwright.CLI install --with-deps chromium \
     && rm -rf ./runtime-libs /var/lib/apt/lists/*
+# PlaywrightConfig#playwright の Playwright.create() は、アプリが実際に使うchromiumだけでなく
+# firefox/webkitの存在も検査し、無ければCDNから約200MBダウンロードする。イメージにはchromiumしか
+# 焼き込んでいないため、このダウンロードを止めないと実行時(#1020でBrowserが@Lazy化されたため、
+# 起動時ではなく最初のユーザーリクエスト時)に走ってしまう(issue #1048)。
+# chromium installより後に置くこと。前に置くと上のRUNの導入自体がスキップされてしまう。
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
