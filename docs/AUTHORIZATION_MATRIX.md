@@ -1079,18 +1079,18 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | DELETE .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | POST .../adsense/oauth-callback | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | Next.js側OAuthコールバックからのサーバー間呼び出し。ブラウザ直叩き想定ではないが、チェック自体はある |
 
-## ProjectContentSettingsController (1エンドポイント、ベースパス `/api/projects/{projectId}`)
+## ProjectContentSettingsController (2エンドポイント、ベースパス `/api/projects/{projectId}`)
 
 content-service所有(issue #576、#913)。実装は`GET /content-settings`と`PUT /css-selector-prefix`の
-計2エンドポイントを持つが、`PUT`は移設前の記載のまま「## ProjectController」節の
-`PUT /api/projects/{id}/css-selector-prefix`行に残っている(#991のスコープ外。節の再編は行わない)。
-ここには issue #991時点で未記載だった`GET`のみを追加する。
+計2エンドポイントを持つ。`PUT`行は移設前「## ProjectController」節に記載されていたが、#1049で
+本節へ移設した。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/projects/{projectId}/content-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectContentSettingsController.java:43-47` |
+| PUT /api/projects/{id}/css-selector-prefix | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 
-## ProjectController (43エンドポイント、ベースパス `/api/projects`)
+## ProjectController (38エンドポイント、ベースパス `/api/projects`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1103,11 +1103,6 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | DELETE /api/projects/{id}/environments/{environment} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | PUT /api/projects/{id}/master-environment | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | PUT /api/projects/{id}/github-repository | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
-| PUT /api/projects/{id}/css-selector-prefix | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
-| PUT /api/projects/{id}/image-generation-prompt-defaults | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
-| PUT /api/projects/{id}/image-generation-size-defaults | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
-| PUT /api/projects/{id}/article-image-resize-default | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
-| PUT /api/projects/{id}/image-content-filter-settings | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/environments/sync | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/bulk-management/apply | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/bulk-management/apply-all | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
@@ -1153,16 +1148,19 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | GET .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `GoogleAnalyticsReportService.getReport()`内 |
 | GET .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `AdSenseReportService.getReport()`内 |
 
-## ProjectImageSettingsController (1エンドポイント、ベースパス `/api/projects/{id}`)
+## ProjectImageSettingsController (5エンドポイント、ベースパス `/api/projects/{id}`)
 
 media-service所有(issue #583)。実装は`GET /image-settings`と4件の`PUT`(画像生成プロンプト/サイズ
-既定値・記事画像リサイズ既定値・コンテンツフィルタ設定)の計5エンドポイントを持つが、`PUT`4件は
-legacy-apiからの移設前の記載のまま「## ProjectController」節に残っている(#991のスコープ外。
-節の再編は行わない)。ここには issue #991時点で未記載だった`GET`のみを追加する。
+既定値・記事画像リサイズ既定値・コンテンツフィルタ設定)の計5エンドポイントを持つ。`PUT`4件は
+legacy-apiからの移設前「## ProjectController」節に記載されていたが、#1049で本節へ移設した。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/projects/{id}/image-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectImageSettingsController.java:50-58` |
+| PUT /api/projects/{id}/image-generation-prompt-defaults | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| PUT /api/projects/{id}/image-generation-size-defaults | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| PUT /api/projects/{id}/article-image-resize-default | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| PUT /api/projects/{id}/image-content-filter-settings | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 
 ## ProjectMediaGarbageCollectionController (2エンドポイント、ベースパス `/api/projects/{id}/media-garbage-collection`)
 
