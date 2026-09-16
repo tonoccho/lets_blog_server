@@ -128,6 +128,53 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
   await expect(page.locator('#password')).toBeVisible();
 });
 
+/**
+ * issue #1052: JS無効時に/loginから自力でログインを開始できることの検証。
+ *
+ * `javaScriptEnabled: false` の別コンテキストを使う(初回セットアップのJS無効シナリオ
+ * (下の「JavaScriptを無効にして初回セットアップ画面から空白だけのパスワードで送信する」)と
+ * 同じ手法)。共有の`page`フィクスチャ自体はJS有効のままにしておきたいため、別コンテキストに
+ * する。
+ */
+When('JavaScriptを無効にしてログイン画面を開く', async ({ page, ctx }) => {
+  const browser = page.context().browser();
+  if (!browser) {
+    throw new Error('ブラウザインスタンスを取得できない(JS無効コンテキストを作成できない)');
+  }
+  const noJsContext = await browser.newContext({ ignoreHTTPSErrors: true, javaScriptEnabled: false });
+  const noJsPage = await noJsContext.newPage();
+  await noJsPage.goto('/login');
+  ctx.noJsLoginPage = noJsPage;
+  ctx.noJsLoginContext = noJsContext;
+});
+
+Then('JavaScriptが必要である旨の案内とログインを開始する手段が表示される', async ({ ctx }) => {
+  const noJsPage = ctx.noJsLoginPage as Page;
+  // `<noscript>` の中身はブラウザのアクセシビリティツリーに含まれないため、それに依存する
+  // getByText/text= エンジンでは(JS無効で実際に描画されていても)絶対にヒットしない。
+  // DOM の textContent を見る CSS の :has-text() を使う。
+  await expect(
+    noJsPage.locator('p:has-text("JavaScript")'),
+    'JS無効時にJavaScriptが必要である旨の案内が表示されない'
+  ).toBeVisible({ timeout: 10000 });
+  await expect(
+    noJsPage.locator('[data-testid="nojs-login-submit"]'),
+    'JS無効時にログインを開始する手段(フォーム/ボタン)が表示されない'
+  ).toBeVisible();
+});
+
+Then('その手段からKeycloakのホスト型ログイン画面へ到達できる', async ({ ctx }) => {
+  const noJsPage = ctx.noJsLoginPage as Page;
+  try {
+    await noJsPage.locator('[data-testid="nojs-login-submit"]').click();
+    await noJsPage.waitForURL(new RegExp(`${REALM_BASE}/`), { timeout: 15000 });
+    await expect(noJsPage.locator('#username')).toBeVisible();
+    await expect(noJsPage.locator('#password')).toBeVisible();
+  } finally {
+    await (ctx.noJsLoginContext as BrowserContext).close();
+  }
+});
+
 // 「前提」でも「もし」でも同じ意味なので Step で定義する(Given と When の両方に一致する)。
 Step('一般ユーザーとしてログインする', async ({ page }) => {
   await loginViaKeycloak(page, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
