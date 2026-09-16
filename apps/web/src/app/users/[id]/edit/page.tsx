@@ -74,7 +74,7 @@ export default async function UserProfileEditPage({
       content: (
         <PersonalPreferencesForm
           locale={profile.locale ?? "ja_JP"}
-          timezone={profile.timezone ?? "Asia/Tokyo"}
+          timezone={profile.timezone}
           timezoneOptions={getTimezoneOptions()}
         />
       ),

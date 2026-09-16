@@ -6,6 +6,7 @@ import com.letsblog.identity.domain.User;
 import com.letsblog.identity.dto.MigrationSummaryResponse;
 import com.letsblog.identity.dto.ReconciliationSummaryResponse;
 import com.letsblog.identity.dto.UpdateGithubTokenRequest;
+import com.letsblog.identity.dto.UpdateUserPreferencesRequest;
 import com.letsblog.identity.dto.UserCreateRequest;
 import com.letsblog.identity.dto.UserProfileResponse;
 import com.letsblog.identity.dto.UserProfileUpdateRequest;
@@ -838,6 +839,37 @@ class UserServiceTest {
         assertEquals("new-jit@example.com", response.email());
         assertTrue(response.keycloakLinked());
         assertTrue(response.enabled());
+    }
+
+    /**
+     * issue #1259: 個人設定のタイムゾーンは任意の上書きであり、{@code null}を渡すと
+     * 「ブラウザのタイムゾーンに従う(未設定)」へ戻せる。{@code ZoneId.of(null)}は
+     * {@code NullPointerException}を投げるため、{@code null}を特別扱いしないと
+     * 不正な値と区別できず400になってしまう(要件5)。
+     */
+    @Test
+    void updateUserPreferences_timezoneにnullを渡すと未設定に戻せる_issue1259() {
+        UserService service = service();
+        User user = buildUser();
+        user.setTimezone("Asia/Tokyo");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserProfileResponse response = service.updateUserPreferences(1L, new UpdateUserPreferencesRequest("ja", null));
+
+        assertNull(response.timezone());
+        assertNull(user.getTimezone());
+    }
+
+    /** 不正な値(空文字を含む)は従来どおり400相当の例外にする。 */
+    @Test
+    void updateUserPreferences_不正なタイムゾーンは例外になる_issue1259() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateUserPreferences(1L, new UpdateUserPreferencesRequest("ja", "Not/AZone")));
     }
 
     private User buildUser() {

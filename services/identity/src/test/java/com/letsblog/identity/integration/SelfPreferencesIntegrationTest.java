@@ -145,4 +145,23 @@ class SelfPreferencesIntegrationTest {
                         .with(JwtTestFixtures.jwtRequestPostProcessor(KEYCLOAK_SUB, "user")))
                 .andExpect(status().isBadRequest());
     }
+
+    /**
+     * issue #1259: 個人設定のタイムゾーンは任意の上書き。{@code timezone: null}を送ると
+     * 「ブラウザのタイムゾーンに従う(未設定)」へ戻せる(要件5)。setUp()で"Asia/Tokyo"を
+     * 設定済みのユーザーが対象。
+     */
+    @Test
+    @DisplayName("timezoneにnullを送ると未設定に戻る")
+    void timezoneにnullを送ると未設定に戻る() throws Exception {
+        mockMvc.perform(request(HttpMethod.PATCH, PATH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"locale\":\"ja\",\"timezone\":null}")
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(KEYCLOAK_SUB, "user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.timezone").value(org.hamcrest.Matchers.nullValue()));
+
+        User reloaded = userRepository.findById(userId).orElseThrow();
+        assertThat(reloaded.getTimezone()).isNull();
+    }
 }

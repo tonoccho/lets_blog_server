@@ -133,7 +133,12 @@ export interface UpdatePreferencesState {
   success?: boolean;
 }
 
-/** 個人設定(言語・タイムゾーン)。システム画面から移動(issue #185)。本人の設定のみ変更する。 */
+/**
+ * 個人設定(言語・タイムゾーン)。システム画面から移動(issue #185)。本人の設定のみ変更する。
+ *
+ * issue #1259: タイムゾーンは任意の上書き。空文字(「ブラウザに従う(未設定)」の選択)は
+ * エラーにせず、identity-service側へnullとして送る(言語は未選択を許さない)。
+ */
 export async function updatePreferencesAction(
   _prevState: UpdatePreferencesState,
   formData: FormData
@@ -141,10 +146,11 @@ export async function updatePreferencesAction(
   await requireSession();
 
   const locale = String(formData.get("locale") ?? "").trim();
-  const timezone = String(formData.get("timezone") ?? "").trim();
+  const timezoneInput = String(formData.get("timezone") ?? "").trim();
+  const timezone = timezoneInput === "" ? null : timezoneInput;
 
-  if (!locale || !timezone) {
-    return { error: "言語とタイムゾーンを選択してください。" };
+  if (!locale) {
+    return { error: "言語を選択してください。" };
   }
 
   // 自ユーザーの解決はidentity-service側が検証済みJWTのsubから行う(issue #784)。

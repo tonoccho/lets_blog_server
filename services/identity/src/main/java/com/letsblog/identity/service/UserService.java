@@ -399,10 +399,14 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
 
-        try {
-            ZoneId.of(request.timezone());
-        } catch (DateTimeException e) {
-            throw new IllegalArgumentException("不正なタイムゾーンです: " + request.timezone());
+        // issue #1259: timezoneはnullを「ブラウザのタイムゾーンに従う(未設定)」として許す
+        // (任意の上書き)。空文字などnull以外の不正な値はZoneId.ofがDateTimeExceptionで弾く。
+        if (request.timezone() != null) {
+            try {
+                ZoneId.of(request.timezone());
+            } catch (DateTimeException e) {
+                throw new IllegalArgumentException("不正なタイムゾーンです: " + request.timezone());
+            }
         }
 
         user.setLocale(request.locale());

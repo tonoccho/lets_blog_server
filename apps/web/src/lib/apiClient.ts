@@ -712,9 +712,13 @@ export async function getAvatarBytes(id: number): Promise<{ body: ArrayBuffer; c
   return { body: await res.arrayBuffer(), contentType: res.headers.get('content-type') ?? 'image/jpeg' };
 }
 
+/**
+ * issue #1259: 個人設定のタイムゾーンは任意の上書き。`timezone: null`は
+ * 「ブラウザのタイムゾーンに従う(未設定)」への変更を表す。
+ */
 export interface UpdateUserPreferencesInput {
   locale: string;
-  timezone: string;
+  timezone: string | null;
 }
 
 export function updateUserPreferences(

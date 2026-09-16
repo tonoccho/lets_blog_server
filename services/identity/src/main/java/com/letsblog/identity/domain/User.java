@@ -75,10 +75,12 @@ public class User {
     @Column(name = "locale", length = 10)
     private String locale;
 
+    // issue #1259: 個人設定のタイムゾーンは任意の上書き。未設定(null)のユーザーは
+    // 閲覧者のブラウザのタイムゾーンに従う(getViewerTimeZone())。
     // JPAのINSERTは全カラムを明示するため、DBカラムのDEFAULT句は新規作成時に効かない。
-    // ここでのフィールド初期値が実質的なデフォルト値になる。
+    // ここでフィールド初期値を持たせない(=null)ことが、実質的な既定値になる。
     @Column(name = "timezone", length = 50)
-    private String timezone = "Asia/Tokyo";
+    private String timezone;
 
     @Column(name = "avatar_url", length = 500)
     private String avatarUrl;
