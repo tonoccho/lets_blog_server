@@ -113,6 +113,29 @@ class UnmeasurableProductionCode(unittest.TestCase):
         self.assertIn("計測対象外", out)
         self.assertNotIn("カバレッジレポートが見つかりません", out)
 
+    def test_flyway_migration_sql_does_not_fail(self):
+        """#1330: `services/<svc>/src/main/resources/db/migration/**/*.sql` は
+        `^services/[^/]+/src/` に字面上マッチするが、JaCoCoはコンパイル済みJavaバイトコード
+        しか計測できないため、SQLファイルにレポートは原理的に存在しない。
+        """
+        code, out = run_main(
+            [
+                "services/identity/src/main/resources/db/migration/"
+                "V3__make_timezone_optional_override.sql"
+            ]
+        )
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_flyway_migration_sql_is_reported_as_unmeasurable(self):
+        _, out = run_main(
+            [
+                "services/identity/src/main/resources/db/migration/"
+                "V3__make_timezone_optional_override.sql"
+            ]
+        )
+        self.assertIn("計測対象外", out)
+
     def test_extension_ts_only_does_not_fail(self):
         """#1272: 拡張ホスト層(コマンド登録)は jest で原理的に到達できない。"""
         code, out = run_main(["apps/extension/src/extension.ts"])
@@ -279,6 +302,10 @@ class MeasurabilityClassifier(unittest.TestCase):
         "apps/extension/src/extension.ts",
         "apps/extension/src/askAiPanel.ts",
         "apps/extension/src/frontMatterCompletionProvider.ts",
+        # #1330: JaCoCoはコンパイル済みJavaバイトコードしか計測できず、Flyway移行(.sql)
+        # にレポートは原理的に存在しない。
+        "services/identity/src/main/resources/db/migration/V3__make_timezone_optional_override.sql",
+        "services/content/src/main/resources/db/migration/V5__add_index.sql",
     ]
 
     def test_measurable_trees(self):

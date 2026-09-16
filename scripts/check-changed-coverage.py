@@ -104,6 +104,10 @@ UNMEASURABLE_OVERRIDE_PATTERNS = [
     r"^apps/extension/src/extension\.ts$",
     r"^apps/[^/]+/src/.*Panel\.ts$",
     r"^apps/[^/]+/src/.*CompletionProvider\.ts$",
+    # #1330: Flyway移行(services/<svc>/src/main/resources/db/migration/**/*.sql)は
+    # JaCoCoがコンパイル済みJavaバイトコードしか計測できないため、レポートが
+    # 原理的に存在しない。
+    r"^services/[^/]+/src/main/resources/db/migration/.*\.sql$",
 ]
 
 UNMEASURABLE_OVERRIDE_RE = [re.compile(p) for p in UNMEASURABLE_OVERRIDE_PATTERNS]
