@@ -9,6 +9,7 @@ import {
   fetchAccessToken,
   loginAsAdmin,
   loginAsUser,
+  withAccountLock,
 } from '../support';
 import {
   criticalOrSeriousViolations,
@@ -133,15 +134,27 @@ async function keyboardOnlyCreateProject(ctx: Record<string, unknown>, page: Pag
   await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
   await page.waitForLoadState('load');
 
-  await page.locator('#username').focus();
-  await page.keyboard.type(E2E_ADMIN_EMAIL);
-  await page.keyboard.press('Tab');
-  await page.keyboard.type(E2E_ADMIN_PASSWORD);
-  await page.locator('#kc-login').focus();
-  await page.keyboard.press('Enter');
+  // issue #1295: helpers.tsのloginViaKeycloakを通らない直書きのキーボード操作ログイン。
+  // 同じアカウント単位ロックで囲み、機構1(quick login)への対処を経路によらず揃える。
+  // e2e-login-guard:locked
+  // レビュー差し戻し(note 8148): これも実フォーム送信を伴う対話ログインなので、
+  // loginViaKeycloak(helpers.ts)と同じ120秒のロック待ちタイムアウトに揃える。
+  await withAccountLock(
+    E2E_ADMIN_EMAIL,
+    async () => {
+      await page.locator('#username').focus();
+      await page.keyboard.type(E2E_ADMIN_EMAIL);
+      await page.keyboard.press('Tab');
+      await page.keyboard.type(E2E_ADMIN_PASSWORD);
+      // e2e-login-guard:locked
+      await page.locator('#kc-login').focus();
+      await page.keyboard.press('Enter');
 
-  await expect(page).toHaveURL('/', { timeout: 30000 });
-  await page.waitForLoadState('load');
+      await expect(page).toHaveURL('/', { timeout: 30000 });
+      await page.waitForLoadState('load');
+    },
+    { timeoutMs: 120_000 }
+  );
 
   await page.goto('/projects', { waitUntil: 'load' });
 

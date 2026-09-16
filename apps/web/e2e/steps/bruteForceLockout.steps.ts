@@ -120,6 +120,8 @@ async function attemptLogin(
   email: string,
   password: string
 ): Promise<{ ok: boolean; status: number; body: { access_token?: string; error?: string; error_description?: string } }> {
+  // e2e-login-guard:already-disposable — このファイル全体が使い捨てアカウント専用
+  // (issue #1295。ファイル冒頭のコメント「なぜ使い捨てアカウントを使うか」参照)。
   const response = await request.post('/auth/realms/letsblog/protocol/openid-connect/token', {
     form: {
       grant_type: 'password',

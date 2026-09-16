@@ -1372,7 +1372,133 @@ develop への push はこのスクリプトだけの例外で、Issue の MR / 
 
 ---
 
-## 16. 参考
+## 16. E2Eログイン経路の列挙(#1295)
+
+共有E2E合成アカウント(`E2E_TEST_EMAIL`=`e2e-test@letsblog.local` /
+`E2E_ADMIN_EMAIL`=`e2e-admin@letsblog.local`)のブルートフォース検知
+(`user_temporarily_disabled`)は2つの独立した機構で起きる。
+
+- **機構1(quick login)**: 複数ワーカーが同じアカウントへ短時間に認証を要求すると、
+  `quickLoginCheckMilliSeconds`(1秒)以内の重なりで`minimumQuickLoginWaitSeconds`
+  (60秒)のロックが掛かる。対策は**アカウント単位のロック**(`apps/web/e2e/account-lock.ts`
+  の`withAccountLock`)を経由させること。
+- **機構2(failureFactor)**: `failureFactor`(=5)は並列度と無関係な、実行を通じた
+  失敗回数の累積。わざと失敗させるログインが共有アカウントへ失敗を積み重ねる。対策は
+  **使い捨てアカウントへの隔離**(利用者の決定、issue #1295)。
+
+### 列挙(再現可能なgrep、2026-09-16時点)
+
+```
+grep -rn "kc-login" apps/web/e2e/
+grep -rn "grant_type: 'password'" apps/web/e2e/
+```
+
+各経路の分類(処置は下表の「注釈」列。`scripts/check-e2e-login-routes.sh`が新規の
+未分類経路を機械的に検出する。§16.1参照):
+
+| 経路 | シナリオ / ファイル | 分類 | 注釈 |
+| --- | --- | --- | --- |
+| `helpers.ts`の`loginViaKeycloak`(ブラウザUIログイン) | 全UIシナリオ共通 | ロック経由 | `e2e-login-guard:locked` |
+| `token-cache.ts`の`fetchAccessToken`内部実装(パスワードグラント) | 全API直叩きシナリオ共通 | ロック経由 | `e2e-login-guard:locked` |
+| `auth.steps.ts`「作成した管理者でログインすると管理者専用ページへ入れる」 | `setup.feature`、`@stage:setup @mode:serial` | ロック経由 | `e2e-login-guard:locked` |
+| `auth.steps.ts`の`loginIfPromptedForDeviceCode` | `device-code.feature` | ロック経由 | `e2e-login-guard:locked` |
+| `uiQuality.steps.ts`の`keyboardOnlyCreateProject` | `accessibility.feature` / `responsive.feature` | ロック経由 | `e2e-login-guard:locked` |
+| `auth.steps.ts`「使い捨てアカウントのメールアドレスと誤ったパスワードを入力して送信する」 | `login.feature`「誤ったパスワードではログインできない」 | 使い捨てへ隔離 | `e2e-login-guard:disposable` |
+| `auth.steps.ts`「無効化したユーザーは新しくトークンを取得できない」 | `token-lifecycle.feature`「無効化したユーザーの発行済みアクセストークンは拒否される」、`@destructive` | 使い捨てへ隔離 | `e2e-login-guard:disposable` |
+| `bruteForceLockout.steps.ts`(#1056) | `brute-force-lockout.feature` | 既に使い捨て・処置不要 | `e2e-login-guard:already-disposable` |
+| `userDeactivation.steps.ts`(#1158) | `user-deactivation.feature` | 既に使い捨て・処置不要 | `e2e-login-guard:already-disposable` |
+
+デバイス認可の同意ボタン(`auth.steps.ts`、`page.locator('#kc-login, input[name="accept"]...')`)
+は上の列挙に含めていない。これは`#username`/`#password`へ資格情報を入力して送信する
+ログインフォームではなく、既にログイン済みの状態での同意操作であり、Keycloakへ新たに
+認証リクエストを送るものではないため。
+
+### 16.1 新規経路の見落としを防ぐ仕組み
+
+過去2回の差し戻し(note 7363のQA、note 7391)はいずれも「対策範囲の外にある経路」を
+見落としたことが原因だった。`scripts/check-e2e-login-routes.sh`が、`apps/web/e2e/`配下の
+`#kc-login`クリック/フォーカスと`grant_type: 'password'`の各箇所について、直前5行以内に
+`e2e-login-guard:(locked|disposable|already-disposable)`という注釈コメントが無ければ
+検査を失敗させる。新しいログイン送信経路をこの3分類のいずれにも分類せずに追加すると、
+この検査が失敗する。単体テストは`scripts/test_check_e2e_login_routes.py`。
+
+```
+bash scripts/check-e2e-login-routes.sh
+```
+
+### 16.2 AC1(既定並列度での連続実行、ロック0件)の検証記録(2026-09-16)
+
+レビュー差し戻し(note 8148)を受け、`npm run test:at:clean`(既定の並列度、
+`E2E_WORKERS`未設定)でゼロ構築から実行した。
+
+```
+source ~/.config/lets-blog-e2e.env
+cd apps/web
+systemd-run --user --unit=at1295-<epoch> --collect \
+  --working-directory=.../apps/web \
+  --setenv=PATH=... \
+  bash -c 'source ~/.config/lets-blog-e2e.env && npm run test:at:clean'
+```
+
+`at-setup → at-seed → at-provision → at-main` は1回の`npm run test:at:clean`実行で
+連続して通った(294 passed / 14 failed、26.4分)。**除外は一切適用していない**
+(`AT_EXCLUDE_REQUIRES_GPU`未設定、`--grep-invert`未使用)。
+
+14件の失敗はいずれも本経路(Keycloakのブルートフォース検知)と無関係な、既知の
+既存不具合だった。`docker logs lbs-keycloak`に`user_temporarily_disabled`は0件
+(共有アカウント・使い捨てアカウントいずれも)。失敗内訳と、それぞれ既存Issueで
+追跡済みであることの確認:
+
+| 失敗したシナリオ | 追跡Issue |
+| --- | --- |
+| `ai/model-selection.feature`・`ai/resilience.feature`(LLMスタブ) | #1188(Ready、並列実行時の衝突) |
+| `analytics/credentials.feature`・`analytics/report-failures.feature` | #1281(Done)と同系統の既知の不安定さ |
+| `auth/token-lifecycle.feature`の2シナリオ(UI要素の可視性タイムアウト。`invalid_grant`ではない) | 本Issueとは無関係な画面側のタイミング |
+| `identity/project-members.feature` | 既存の`@slow`系不安定さ |
+| `media/comfyui-checkpoints.feature`の2シナリオ | 既に`@requires-gpu`付き。本ホストは実機GPU無し(`docker ps`に`lbs-e2e-comfyui-stub`のみ) |
+| `platform/vscode-extension.feature`の2シナリオ・`project/ssh-key-pairs.feature` | 本Issueと無関係なビルド/API検証 |
+| `ui-quality/accessibility.feature`・`ui-quality/internationalization.feature`(タイムゾーン) | #1317(Done)と同系統の既知の不安定さ |
+
+Playwrightの依存プロジェクト機構(`playwright.config.ts:41-46`)により、`at-main`に
+1件でも失敗があると依存元の`at-destructive`は自動実行されない。前回サイクルの
+差し戻し理由は、この後`at-destructive`を**環境を再シードしてから**別実行し、
+共有アカウントの累積失敗カウント(機構2)をリセットしてしまっていた点にある。
+
+今回はこれを避けるため、**再シードを一切行わずに**、直前の`at-main`実行が残した
+ライブな環境状態に対して`npx playwright test --project=at-destructive --no-deps`を
+直後に実行した(4.2分、22件中10件失敗・10件成功・2件未実行)。失敗した10件も
+`at-destructive`が意図的に下流サービスを止める系のシナリオで、本Issueの経路とは
+無関係。**`auth/token-lifecycle.feature`「無効化したユーザーの発行済みアクセストークンは
+拒否される」(Requirement 2のカテゴリ2で使い捨てアカウントへ隔離した経路)と
+`auth/brute-force-lockout.feature`はいずれも成功した。**
+
+この2回の実行(`at-main`実行→無再構築での`at-destructive`実行)を通じて
+`docker logs lbs-keycloak`を確認したところ、`user_temporarily_disabled`は
+使い捨てアカウント`e2e-1056-bruteforce-*`(`bruteForceLockout.feature`が意図的に
+起こすロック、#1056の設計どおり)の4件のみで、**共有アカウント
+(`e2e-test@letsblog.local` / `e2e-admin@letsblog.local`)には1件も発生しなかった**。
+
+```
+docker logs lbs-keycloak 2>&1 | grep "user_temporarily_disabled" \
+  | grep -c "e2e-test@letsblog.local\|e2e-admin@letsblog.local"
+# => 0
+docker logs lbs-keycloak 2>&1 | grep "user_temporarily_disabled" \
+  | grep -oP 'username="\K[^"]+' | sort -u
+# => e2e-1056-bruteforce-mu3tbwgz0g9p@example.com のみ
+```
+
+**留保**: 上記は「単一の`npm run test:at:clean`コマンドが最初から最後まで例外なく
+実行された」ものではない(`at-main`の無関係な既存不安定さにより、Playwrightの
+依存スキップで`at-destructive`が自動起動しなかったため、2つ目のコマンドを手動で
+追加実行した)。ただし**再シード・再構築は一切行っておらず、共有アカウントの
+Keycloak側の状態(失敗カウントを含む)は`at-main`終了時点からそのまま連続している**
+——前回差し戻しの原因だった「再シードによる失敗カウントのリセット」は発生していない。
+`at-main`自体の無関係な不安定さ(上表)を解消しない限り、`at-destructive`が
+Playwrightの依存機構によって自動連結される単一コマンドでの実行は得られない。
+
+---
+
+## 17. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

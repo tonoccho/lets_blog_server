@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import { prefetchAccessTokensForAllE2eAccounts } from '../helpers';
 
 /**
  * 段階2: 受け入れテスト環境のシード(issue #945 / AT-19)。
@@ -14,10 +15,19 @@ import { expect, test } from '@playwright/test';
  * 回したいとき、Playwright を通さずシードできる)。
  *
  * 段階順: reset(スクリプト) → at-setup → **at-seed** → at-provision → at-main
+ *
+ * issue #1295フォローアップ(レビュー指摘、note 7363): シード完了直後、両方のE2E合成
+ * アカウントのアクセストークンをここで一度だけ先取りする(`prefetchAccessTokensForAllE2eAccounts`)。
+ * `at-seed`は単一プロセス・単一テストとして必ずこの後続の並列ワーカー(`at-provision`/
+ * `at-main`)より先に完了するため、ここで書いた共有キャッシュファイルにより、後続の
+ * 全ワーカーが起動直後から実HTTPリクエストなしでトークンを再利用できる。これにより
+ * 「複数ワーカーがほぼ同時に起動し、同じアカウントへ独立にトークンを要求する」という
+ * 障害モード(#1295本体の再現条件)そのものを回避する。詳細は`../token-cache`のコメントと
+ * 実装報告(issue #1295コメント)参照。
  */
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 
-test('受け入れテスト環境にシードを投入する', () => {
+test('受け入れテスト環境にシードを投入する', async ({ request }) => {
   // provision-e2e-keycloak-users.sh は Keycloak Admin CLI とユーザー作成APIを叩くため、
   // 30秒では終わらないことがある。
   test.setTimeout(180_000);
@@ -42,4 +52,9 @@ test('受け入れテスト環境にシードを投入する', () => {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   console.log(output);
+
+  // シードでアカウントが作成された直後(=作成前に呼ぶと401になる)、後続の並列ワーカーが
+  // 起動する前にここで両アカウント分のトークンを一度だけ取得しておく(#1295フォローアップ)。
+  console.log('[e2e] 両E2Eアカウントのアクセストークンを先取りします(ワーカー起動前)');
+  await prefetchAccessTokensForAllE2eAccounts(request);
 });

@@ -15,6 +15,7 @@ import {
   fetchAccessToken,
   getNextAuthSecret,
   loginViaKeycloak,
+  withAccountLock,
 } from '../support';
 import {
   AUTH_GATED_PATHS,
@@ -36,6 +37,82 @@ const E2E_CLIENT_ID = 'letsblog-e2e';
 /** 初回セットアップで作る管理者。#945 の seed が資格情報を整える相手と同じにする。 */
 const SETUP_ADMIN_EMAIL = process.env.E2E_PROVISION_ADMIN_EMAIL ?? E2E_ADMIN_EMAIL;
 const SETUP_ADMIN_PASSWORD = process.env.E2E_PROVISION_ADMIN_PASSWORD ?? E2E_ADMIN_PASSWORD;
+
+/**
+ * issue #1295(利用者の決定(a)): 意図的に失敗させるログイン・意図的にトークンを失効させる
+ * 検証は、共有のE2E固定アカウント(`E2E_TEST_EMAIL`/`E2E_ADMIN_EMAIL`)へ一切触れず、
+ * このファイルが自分で作る使い捨てのKeycloakアカウントに対して行う。
+ *
+ * `apps/web/e2e/steps/bruteForceLockout.steps.ts`(#1056)が同じ理由で同じ手法
+ * (`docker exec`で`kcadm.sh`を叩き、実際にログインできるユーザーを直接作る)を
+ * 既に使っている。このファイルではローカルDB側のUserは不要(Keycloak側の資格情報と
+ * ブルートフォース検知だけが対象)なため、同じくローカルDBを経由しない。
+ *
+ * `kcadm`/`kcadmLogin`/`KEYCLOAK_REALM` 自体は、このファイル内で issue #1053
+ * (`revokeKeycloakSsoSession`)向けに既に定義済みのものを再利用する
+ * (関数宣言はモジュール内で巻き上げられるため、定義順に依存しない)。
+ */
+function uniqueSuffix(): string {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** 実際にKeycloakへログインできる使い捨てユーザーを作る(bruteForceLockout.steps.tsと同型)。 */
+function createLoginableKeycloakUser(email: string, password: string): string {
+  kcadmLogin();
+  kcadm([
+    'create', 'users', '-r', KEYCLOAK_REALM,
+    '-s', `username=${email}`,
+    '-s', `email=${email}`,
+    '-s', 'enabled=true',
+    '-s', 'emailVerified=true',
+    '-s', 'firstName=E2E',
+    '-s', 'lastName=AuthDisposable',
+    '-s', 'requiredActions=[]',
+  ]);
+  const usersJson = kcadm(['get', 'users', '-r', KEYCLOAK_REALM, '-q', `email=${email}`, '--fields', 'id']);
+  const users = JSON.parse(usersJson) as { id: string }[];
+  if (users.length === 0) {
+    throw new Error(`Keycloakに ${email} を作成できませんでした`);
+  }
+  const keycloakUserId = users[0].id;
+  kcadm(['set-password', '-r', KEYCLOAK_REALM, '--userid', keycloakUserId, '--new-password', password]);
+  return keycloakUserId;
+}
+
+function deleteKeycloakUser(keycloakUserId: string): void {
+  kcadmLogin();
+  // 既に削除済みでも失敗を無視する(後片付けの冪等性)。
+  try {
+    kcadm(['delete', `users/${keycloakUserId}`, '-r', KEYCLOAK_REALM]);
+  } catch {
+    // no-op
+  }
+}
+
+/**
+ * `POST /api/users`(管理者によるユーザー作成)はローカルDBとKeycloak双方にユーザーを
+ * 作るが、Keycloak側のパスワードまでは設定しない(userDeactivation.steps.ts冒頭の
+ * コメント参照)。実際にログイン・トークン取得できるようKeycloak側の資格情報を整える。
+ */
+function provisionLoginableKeycloakCredential(email: string, password: string): void {
+  kcadmLogin();
+  const usersJson = kcadm(['get', 'users', '-r', KEYCLOAK_REALM, '-q', `email=${email}`, '--fields', 'id']);
+  const users = JSON.parse(usersJson) as { id: string }[];
+  if (users.length === 0) {
+    throw new Error(`Keycloakに ${email} が見つかりません`);
+  }
+  const keycloakUserId = users[0].id;
+  kcadm(['set-password', '-r', KEYCLOAK_REALM, '--userid', keycloakUserId, '--new-password', password]);
+  // VERIFY_PROFILEが有効なレルムのため、firstName/lastNameが空だとパスワードグラントが
+  // "Account is not fully set up" で失敗する(userDeactivation.steps.ts参照)。
+  kcadm([
+    'update', `users/${keycloakUserId}`, '-r', KEYCLOAK_REALM,
+    '-s', 'requiredActions=[]',
+    '-s', 'emailVerified=true',
+    '-s', 'firstName=E2E',
+    '-s', 'lastName=TokenLifecycle',
+  ]);
+}
 
 // ----------------------------------------------------------------- ログイン
 
@@ -64,9 +141,19 @@ Then('ログアウトボタンが表示される', async ({ page }) => {
   await expect(page.locator('button:has-text("ログアウト")')).toBeVisible({ timeout: 5000 });
 });
 
-When('一般ユーザーのメールアドレスと誤ったパスワードを入力して送信する', async ({ page }) => {
+Given('誤ったパスワード検証用の使い捨てアカウントを作成する', async ({ ctx }) => {
+  const suffix = uniqueSuffix();
+  const email = `e2e-1295-wrongpassword-${suffix}@example.com`;
+  const password = `E2e1295WrongPw!${suffix}`;
+  ctx.wrongPasswordEmail = email;
+  ctx.wrongPasswordKeycloakUserId = createLoginableKeycloakUser(email, password);
+});
+
+When('使い捨てアカウントのメールアドレスと誤ったパスワードを入力して送信する', async ({ page, ctx }) => {
   await page.waitForURL(new RegExp(`${REALM_BASE}/`), { timeout: 15000 });
-  await page.locator('#username').fill(E2E_TEST_EMAIL);
+  await page.locator('#username').fill(ctx.wrongPasswordEmail as string);
+  // e2e-login-guard:disposable — このアカウントは直前のステップで作った使い捨て
+  // アカウント(issue #1295)であり、共有のE2E固定アカウントには一切触れない。
   await page.locator('#password').fill('WrongPassword123!');
   await page.locator('#kc-login').click();
 });
@@ -350,9 +437,16 @@ Then('作成した管理者でログインすると管理者専用ページへ�
   await expect(page).toHaveURL(new RegExp(`${REALM_BASE}/`), { timeout: 30000 });
   await page.waitForLoadState('load');
 
-  await page.locator('#username').fill(SETUP_ADMIN_EMAIL);
-  await page.locator('#password').fill(SETUP_ADMIN_PASSWORD);
-  await page.locator('#kc-login').click();
+  // issue #1295: SETUP_ADMIN_EMAIL(既定は共有E2E_ADMIN_EMAIL)へ実際にKeycloak認証を
+  // 送る唯一の直書き経路。@stage:setup @mode:serialで他と並列には走らないが、
+  // Requirement 3の検査に「恒久的な例外」を1件残さないため、fetchAccessToken/
+  // loginViaKeycloakと同じアカウント単位ロックを経由させる。
+  // e2e-login-guard:locked
+  await withAccountLock(SETUP_ADMIN_EMAIL, async () => {
+    await page.locator('#username').fill(SETUP_ADMIN_EMAIL);
+    await page.locator('#password').fill(SETUP_ADMIN_PASSWORD);
+    await page.locator('#kc-login').click();
+  });
 
   await completeKeycloakProfileIfPrompted(page);
 
@@ -516,9 +610,21 @@ const DEVICE_STATUS_URL_PATTERN = /\/protocol\/openid-connect\/auth\/device\/sta
 async function loginIfPromptedForDeviceCode(page: Page): Promise<void> {
   const usernameField = page.locator('#username');
   if (await usernameField.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await usernameField.fill(E2E_ADMIN_EMAIL);
-    await page.locator('#password').fill(E2E_ADMIN_PASSWORD);
-    await page.locator('#kc-login').click();
+    // issue #1295: helpers.tsのloginViaKeycloakを通らない直書きのブラウザログイン。
+    // 同じアカウント単位ロックで囲み、機構1(quick login)への対処を経路によらず揃える。
+    // e2e-login-guard:locked
+    // レビュー差し戻し(note 8148): これも実フォーム送信を伴う対話ログインなので、
+    // loginViaKeycloak(helpers.ts)と同じ120秒のロック待ちタイムアウトに揃える。
+    await withAccountLock(
+      E2E_ADMIN_EMAIL,
+      async () => {
+        await usernameField.fill(E2E_ADMIN_EMAIL);
+        await page.locator('#password').fill(E2E_ADMIN_PASSWORD);
+        // e2e-login-guard:locked
+        await page.locator('#kc-login').click();
+      },
+      { timeoutMs: 120_000 }
+    );
   }
 }
 
@@ -610,6 +716,44 @@ Given('一般ユーザーのアクセストークンを取得する', async ({ r
   ctx.userToken = await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
 });
 
+/**
+ * issue #1295(利用者の決定(a)): 「無効化したユーザーの発行済みアクセストークンは
+ * 拒否される」(token-lifecycle.feature、`@destructive`)は、共有アカウント自体を
+ * 無効化・再有効化する(`auth.steps.ts`旧実装)ため、意図的失敗こそ無いものの
+ * 共有アカウントに実害(再有効化漏れによる巻き添え)が及びうる経路だった。
+ * `userDeactivation.steps.ts`(#1158)が既に確立している「使い捨てアカウントを作って
+ * 無効化・振る舞いを確かめる」手法を、このシナリオにもそのまま適用する。
+ */
+Given(
+  'トークンライフサイクル検証用の使い捨てアカウントを作成し、アクセストークンを取得する',
+  async ({ request, ctx }) => {
+    const suffix = uniqueSuffix();
+    const email = `e2e-1295-tokenlifecycle-${suffix}@example.com`;
+    const password = `E2e1295TokenLc!${suffix}`;
+
+    const adminToken = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+    const created = await request.post('/api/users', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      data: { email, password, role: 'user' },
+    });
+    expect(
+      created.ok(),
+      `検証用アカウントの作成に失敗しました (status=${created.status()}): ${await created.text()}`
+    ).toBe(true);
+
+    // POST /api/users の password はローカルDBにしか反映されない(userDeactivation.steps.ts
+    // 冒頭のコメント参照)ため、実際にログイン・トークン取得できるようKeycloak側の資格情報を
+    // 別途整える。
+    provisionLoginableKeycloakCredential(email, password);
+
+    ctx.tokenLifecycleEmail = email;
+    ctx.tokenLifecyclePassword = password;
+    ctx.userId = ((await created.json()) as { id: number }).id;
+    // e2e-login-guard:disposable — 直前で作った使い捨てアカウント(issue #1295)。
+    ctx.userToken = await fetchAccessToken(request, email, password);
+  }
+);
+
 Given('そのトークンで保護APIへアクセスできる', async ({ request, ctx }) => {
   const response = await request.get('/api/identity/me', {
     headers: { Authorization: `Bearer ${ctx.userToken as string}` },
@@ -648,10 +792,12 @@ Then('無効化したユーザーは新しくトークンを取得できない',
     `${REALM_BASE}/protocol/openid-connect/token`,
     {
       form: {
+        // e2e-login-guard:disposable — issue #1295: このシナリオが自分で作った使い捨て
+        // アカウント(ctx.tokenLifecycleEmail)。共有アカウントには一切触れない。
         grant_type: 'password',
         client_id: E2E_CLIENT_ID,
-        username: E2E_TEST_EMAIL,
-        password: E2E_TEST_PASSWORD,
+        username: ctx.tokenLifecycleEmail as string,
+        password: ctx.tokenLifecyclePassword as string,
       },
     }
   );
@@ -660,13 +806,8 @@ Then('無効化したユーザーは新しくトークンを取得できない',
     '無効化したユーザーが新しいトークンを取得できてしまった'
   ).toBeGreaterThanOrEqual(400);
 
-  // 後片付け: 以降のシナリオが一般ユーザーを使えるよう元へ戻す。
-  // 受け入れテストは毎回リセットから始まる(#945)が、同じ実行の中の他シナリオは
-  // このユーザーを使うため、ここで戻さないと後続が巻き添えで落ちる。
-  const reactivate = await request.post(`/api/users/${ctx.userId as number}/reactivate`, {
-    headers: { Authorization: `Bearer ${ctx.adminToken as string}` },
-  });
-  expect(reactivate.ok(), `再有効化に失敗 (status=${reactivate.status()})`).toBe(true);
+  // issue #1295: このシナリオは使い捨てアカウントを使うため、共有アカウントを再有効化する
+  // 後始末は不要になった。使い捨てアカウント自体の削除は After({tags: '@auth'}) で行う。
 });
 
 When('不正なセッションで保護ページを開く', async ({ page }) => {
@@ -891,11 +1032,35 @@ function readEnvValue(key: string): string {
   return match[1].trim();
 }
 
+const KCADM_LOCK_RETRY_ATTEMPTS = 5;
+const KCADM_LOCK_RETRY_DELAY_MS = 200;
+
+/**
+ * issue #1295: `kcadm.sh`はコンテナ内の単一ファイル(`/opt/keycloak/.keycloak/kcadm.config`)
+ * にセッションを保存しており、複数ワーカーから同時に`docker exec ... kcadm.sh`を呼ぶと
+ * "Failed to get lock on ...kcadm.config"で失敗しうる。これはKeycloakのブルートフォース
+ * 検知(本Issueが対象とするアカウント単位ロック)とは無関係な、kcadmコマンド自身の排他
+ * である。このIssueで新設した使い捨てアカウント作成(`createLoginableKeycloakUser`・
+ * `provisionLoginableKeycloakCredential`)が、既存の`revokeKeycloakSsoSession`(#1053)と
+ * 同じ`kcadm`ヘルパーを共有しつつ並列ワーカーで同時に呼ばれるようになったため、
+ * 短い再試行で吸収する(根本対策である「kcadm呼び出し自体の直列化」は#1056/#1158の
+ * 既存ファイルにも及ぶため本Issueのスコープ外。別途 #1328 で追跡)。
+ */
 function kcadm(args: string[]): string {
-  return execFileSync('docker', ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args], {
-    encoding: 'utf-8',
-    timeout: 30_000,
-  });
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return execFileSync('docker', ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args], {
+        encoding: 'utf-8',
+        timeout: 30_000,
+      });
+    } catch (error) {
+      const output = `${(error as { stdout?: string }).stdout ?? ''}${(error as { stderr?: string }).stderr ?? ''}`;
+      if (attempt >= KCADM_LOCK_RETRY_ATTEMPTS || !output.includes('Failed to get lock')) {
+        throw error;
+      }
+      execFileSync('sleep', [String(KCADM_LOCK_RETRY_DELAY_MS / 1000)]);
+    }
+  }
 }
 
 function kcadmLogin(): void {
@@ -1016,4 +1181,27 @@ After({ tags: '@auth' }, async ({ ctx, request }) => {
   if (projectId !== undefined) {
     await request.delete(`/api/projects/${projectId}`, { headers });
   }
+});
+
+// issue #1295: 意図的な失敗ログイン検証用に作った使い捨てKeycloakアカウントの後片付け。
+After({ tags: '@auth' }, async ({ ctx }) => {
+  const keycloakUserId = ctx.wrongPasswordKeycloakUserId as string | undefined;
+  if (keycloakUserId === undefined) {
+    return;
+  }
+  deleteKeycloakUser(keycloakUserId);
+});
+
+// issue #1295: トークンライフサイクル検証用に作った使い捨てアカウント(ローカルDB+Keycloak
+// 双方)の後片付け。UserService#deleteが両方から削除する(userDeactivation.steps.tsと同型)。
+After({ tags: '@auth' }, async ({ ctx, request }) => {
+  const userId = ctx.userId as number | undefined;
+  const email = ctx.tokenLifecycleEmail as string | undefined;
+  if (email === undefined || userId === undefined) {
+    return;
+  }
+  const adminToken = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+  await request.delete(`/api/users/${userId}`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
 });

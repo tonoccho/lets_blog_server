@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { expect } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
+import { fetchAccessToken as fetchAccessTokenInternal } from './token-cache';
+import { withAccountLock } from './account-lock';
 
 /**
  * E2E専用の合成アカウント(issue #564で導入、#588で各specの重複定義をここへ集約)。
@@ -99,27 +101,52 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
  * どちらも「URL 到達をアサートし、続けて load を待つ」という同じ2行の形で書いてある以上、
  * 値を非対称にしておく理由も無いので合わせた(この timeout が掛かるのは URL 到達までで、
  * 続く {@code waitForLoadState('load')} は既定の timeout を使う)。
+ *
+ * <p><b>issue #1295フォローアップ(QAのFAIL、note 7391): アカウント単位のクロスプロセスロック
+ * で囲む。</b>ここが実際にKeycloakのホスト型ログインフォームへ値を入力してsubmitする、
+ * 実認証リクエストを送る唯一の箇所である(clientId="letsblog-web"、Authorization Code
+ * フロー)。`fetchAccessToken`(パスワードグラント、clientId="letsblog-e2e")向けに実装した
+ * アカウント単位クロスプロセスロック({@link withAccountLock}、実体は`./account-lock`)は
+ * このブラウザ経由の経路を一切通っておらず、QAが受け入れテストを既定の並列度で実行した際に
+ * `user_temporarily_disabled`を2件再現した(fetchAccessToken側の対策だけでは閉じない
+ * 別経路だった)。両経路が同じアカウント単位ロックファイルを取り合うことで、
+ * 同一アカウントに対する実Keycloak認証リクエストは、パスワードグラントか対話ログインかを
+ * 問わず同時に1本までに揃い、`quickLoginCheckMilliSeconds`(1秒)以内に同一アカウントへの
+ * 認証試行が重なる状況そのものが起きなくなる。
+ *
+ * <p>ロック獲得後の実行時間は、`fetchAccessToken`の実HTTPリクエスト1本(既定タイムアウト
+ * 30秒)より長くなりうる(ページ遷移・フォーム操作・ログイン後のコールバック待ちを含む)ため、
+ * ロック待ちのタイムアウトは既定の30秒ではなく120秒に伸ばしてある(既定の並列度4ワーカーが
+ * 同じアカウントで待ち行列を作っても、待ち時間の合計が30秒を超えて誤ってタイムアウトしない
+ * ようにするため)。
  */
 export async function loginViaKeycloak(page: Page, email: string, password: string): Promise<void> {
-  await page.goto('/login', { waitUntil: 'commit' });
-  await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
-  await page.waitForLoadState('load');
+  await withAccountLock(
+    email,
+    async () => {
+      await page.goto('/login', { waitUntil: 'commit' });
+      await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
+      await page.waitForLoadState('load');
 
-  await page.locator('#username').fill(email);
-  await page.locator('#password').fill(password);
-  await page.locator('#kc-login').click();
+      await page.locator('#username').fill(email);
+      await page.locator('#password').fill(password);
+      // e2e-login-guard:locked — このメソッド全体がwithAccountLockで囲まれている(issue #1295)。
+      await page.locator('#kc-login').click();
 
-  // VERIFY_PROFILE等の追加required actionが出た場合のみ処理する(通常のログインでは出ない)。
-  if (await page.locator('#firstName').isVisible({ timeout: 3000 }).catch(() => false)) {
-    await page.locator('#firstName').fill('E2E');
-    await page.locator('#lastName').fill('Test');
-    await page.locator('input[type="submit"]').first().click();
-  }
+      // VERIFY_PROFILE等の追加required actionが出た場合のみ処理する(通常のログインでは出ない)。
+      if (await page.locator('#firstName').isVisible({ timeout: 3000 }).catch(() => false)) {
+        await page.locator('#firstName').fill('E2E');
+        await page.locator('#lastName').fill('Test');
+        await page.locator('input[type="submit"]').first().click();
+      }
 
-  // ログイン後のコールバック(Keycloak → /api/auth/callback/keycloak → /)の待機。
-  // 上の待機と書き方・timeout を揃えてある(#1017 でこの形にした)。
-  await expect(page).toHaveURL('/', { timeout: 30000 });
-  await page.waitForLoadState('load');
+      // ログイン後のコールバック(Keycloak → /api/auth/callback/keycloak → /)の待機。
+      // 上の待機と書き方・timeout を揃えてある(#1017 でこの形にした)。
+      await expect(page).toHaveURL('/', { timeout: 30000 });
+      await page.waitForLoadState('load');
+    },
+    { timeoutMs: 120_000 }
+  );
 }
 
 /** admin権限の合成アカウントでログインする(呼び出し側の重複を減らすための薄いラッパー)。 */
@@ -141,8 +168,6 @@ export function loginAsUser(page: Page): Promise<void> {
  * アクセストークンから sub と realm_access.roles が落ちる。その状態のトークンでは
  * identity-serviceの /api/identity/me が403になり、下流サービスの認可が通らない。
  */
-const E2E_CLIENT_ID = 'letsblog-e2e';
-
 /**
  * ブラウザを介さずAPIを直接叩くテスト(記事公開など、Web UIに機能が存在せずVSCode拡張が
  * gateway経由で行っている操作)のためにKeycloakからアクセストークンを取得する(issue #588)。
@@ -155,30 +180,45 @@ const E2E_CLIENT_ID = 'letsblog-e2e';
  * (CurrentActorService / KeycloakRealmRoleConverter)ため、このトークンで
  * ブラウザ経由と同じ権限の呼び出しができる。
  * ローカル開発スタック(https://localhost)専用の手段であり、本番の認証フローには影響しない。
+ *
+ * issue #1295: `fetchAccessToken`のアカウント単位キャッシュ/同時呼び出しの合流、および
+ * issue #1295フォローアップ(レビュー指摘、note 7363): ワーカー(別OSプロセス)をまたいだ
+ * 排他。実体は`./token-cache`に分離してある(理由: 複数プロセスをまたいだ排他を検証する
+ * `token-cross-process.test.ts`が、子プロセス側で`@playwright/test`本体の重い実行時依存
+ * (`expect`等)を引きずらずにこのロジックだけを読み込めるようにするため)。
+ * 実装の詳細・設計根拠は`./token-cache`のコメントを参照。ここでは再エクスポートし、
+ * 呼び出し側(80箇所以上のステップ定義)の import 元を変えずに済むようにする。
  */
-export async function fetchAccessToken(
-  request: APIRequestContext,
-  email: string,
-  password: string
-): Promise<string> {
-  const response = await request.post('/auth/realms/letsblog/protocol/openid-connect/token', {
-    form: {
-      grant_type: 'password',
-      client_id: E2E_CLIENT_ID,
-      username: email,
-      password,
-    },
-  });
-  if (!response.ok()) {
-    throw new Error(
-      `Keycloakからのトークン取得に失敗しました (status=${response.status()}): ${await response.text()}`
-    );
-  }
-  const body = (await response.json()) as { access_token?: string };
-  if (!body.access_token) {
-    throw new Error('Keycloakのレスポンスにaccess_tokenが含まれていません');
-  }
-  return body.access_token;
+export {
+  fetchAccessToken,
+  _resetAccessTokenCacheForTests,
+  _sharedTokenCacheFilePathForTests,
+} from './token-cache';
+
+/**
+ * issue #1295: `fetchAccessToken`/`loginViaKeycloak`以外の箇所(ステップ定義に直書きされた
+ * `#kc-login`送信)からも、同じアカウント単位クロスプロセスロックを使えるよう再エクスポートする。
+ * 実体は`./account-lock`のコメント参照。
+ */
+export { withAccountLock } from './account-lock';
+
+/**
+ * issue #1295フォローアップ: 受け入れテスト全体の最初(`at-seed`段階、単一プロセス)で
+ * 両方のE2E合成アカウントのトークンを一度だけ先取りする。
+ *
+ * `at-seed`はPlaywrightの依存プロジェクト機構により、`at-provision`/`at-main`等の
+ * 並列ワーカーが起動する**前**に、単一のテスト・単一のプロセスとして必ず実行し終える
+ * (`playwright.config.ts`の`dependencies`)。ここで両アカウント分のトークンを取得して
+ * `./token-cache`の共有キャッシュファイルへ書いておけば、後続の全ワーカーは起動直後から
+ * 共有キャッシュを読むだけで済み、複数ワーカーが同時に実HTTPリクエストを送る状況
+ * (レビュー指摘、note 7363)そのものを回避できる。
+ *
+ * `seed.setup.ts`から呼ぶ(Keycloakへユーザーを作成した直後。作成前に呼ぶと
+ * アカウントが存在せず401になる)。
+ */
+export async function prefetchAccessTokensForAllE2eAccounts(request: APIRequestContext): Promise<void> {
+  await fetchAccessTokenInternal(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
+  await fetchAccessTokenInternal(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
 }
 
 /**
