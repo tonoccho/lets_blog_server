@@ -345,9 +345,15 @@ Chromiumがそのまま参照するため、Linuxのような追加ツールは�
 テーマ/プラグイン設定)で動作確認したい場合、プロジェクトの「マスタ環境」(テストまたは本番)から
 ローカル環境へデータを同期できる(issue #325)。
 
-**前提条件**: 同期元(マスタ環境)・同期先(ローカル)の両方が、このアプリで自動構築(managed)した
-WordPress環境である必要がある。SSH接続/REST接続で外部のWordPressホスティングを紐付けている
-プロジェクトでは、この方法によるDB・メディアの一括同期は現時点では未対応(将来の拡張予定)。
+**前提条件**:
+
+- 同期先(ローカル)は、このアプリで自動構築(managed)したWordPress環境である必要がある
+  (`ProjectEnvironmentSyncService#resolveManagedSite`)。本番環境は同期先に指定できない。
+- 同期元(マスタ環境)は、managed環境に加えて、SSH接続で外部のWordPressホスティングを
+  紐付けているサイトも指定できる(issue #511、`ProjectEnvironmentSyncService#syncFromSshManagedSite`)。
+  ただし同期元がSSH管理サイトの場合、同期できる対象はDB・メディア・テーマに限られ、
+  プラグインは同期できない(`SSH_SOURCE_SUPPORTED_TARGETS`)。
+- REST接続で紐付けているプロジェクトを同期元にする経路は、現時点では未対応(将来の拡張予定)。
 
 **手順**:
 
