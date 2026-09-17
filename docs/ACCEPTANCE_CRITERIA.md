@@ -189,15 +189,15 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 | --- | --- | --- | --- | --- | --- |
 | AC-AI-001 | 下書き生成 (`/api/ai/draft`) | 白紙から書き始めなくてよい | テーマを与えると記事の下書きが返る | `ai/generation.feature` › 下書き生成に見出しと要望を渡すと、スタブの決定的な下書きがそのまま返る(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-002 | 質問 (`/api/ai/ask`) | 執筆中の疑問をその場で解ける | 質問に対する回答が返る | `ai/generation.feature` › セクション生成に追加の指示を続けると、直前の生成を踏まえた壁打ちの再生成を依頼できる(`@api`)。`/api/ai/ask`(AiAskRequest)は history を持たないため、対象を history/message を持つ `/api/ai/section` の壁打ち再生成に合わせて検証する(issue #1146。feature内のコメント参照) | 実装済み(`@stub` `@api`) |
-| AC-AI-003 | タグ提案 (`/api/ai/tags`) | 分類を考える手間が減る | 本文からタグ候補が返る | — | 未着手(`@stub`) |
-| AC-AI-004 | 校正 (`/api/ai/proofread`) | 誤字や言い回しを直せる | 本文に対する指摘が返る | — | 未着手(`@stub`) |
+| AC-AI-003 | タグ提案 (`/api/ai/tags`) | 分類を考える手間が減る | 本文からタグ候補が返る | `ai/tag-and-proofread.feature` › タグ提案が、本文に基づくカテゴリ候補とタグ候補として返る(`@api`) | 実装済み(`@stub` `@api`、issue #1004) |
+| AC-AI-004 | 校正 (`/api/ai/proofread`) | 誤字や言い回しを直せる | 本文に対する指摘が返る | `ai/tag-and-proofread.feature` › 校正チェックが、本文中の該当箇所を指す指摘として返る(`@api`) | 実装済み(`@stub` `@api`、issue #1004) |
 | AC-AI-005 | セクション生成 (`/api/ai/section`) | 見出し単位で書き足せる | 見出しを与えるとその節の本文が返る | `ai/generation.feature` › セクション生成が、指定した見出し配下の本文として返る(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-006 | Web検索付き質問 | 最新情報を踏まえた回答が得られる | Brave Search APIキー設定時、検索結果を根拠にした回答が返る。未設定・呼び出し失敗時はフェイルオープンし、検索結果なしで回答が返る(エラーにしない) | `ai/web-search.feature` › プロジェクトのBrave Search APIキーが設定されていると、壁打ちの回答がWeb検索結果を踏まえて生成される(`@api`)。同 › Brave Search呼び出しが失敗すると、壁打ちの回答はWeb検索結果なしでフェイルオープンする(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-007 | 画像プロンプト生成 | 記事に合う画像を頼みやすい | `POST /api/projects/{projectId}/ai/generate-image-prompt` が本文に沿ったプロンプトを返す | `ai/generation.feature` › 画像プロンプト生成が、記事内容に基づくプロンプト文字列を返す(`@api`) | 実装済み(`@stub` `@api`) |
 | AC-AI-008 | LLMプロバイダの選択 | 用途に応じてAIを切り替えられる | `PUT /ai-models/llm/provider/selection` の選択が以後の生成に使われる | `ai/model-selection.feature` › プロバイダーを切り替えると、以後の生成が切り替え先へ向かう(`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148) | 実装済み(`@stub` `@api`) |
 | AC-AI-009 | LLMモデルの選択 | 精度とコストを選べる | `PUT /ai-models/llm/models/selection` の選択が以後の生成に使われる | `ai/model-selection.feature` › 利用可能なLLMモデル一覧が取得でき、選択したモデルが以後の生成要求に反映される(`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148) | 実装済み(`@stub` `@api`) |
 | AC-AI-010 | Brave Search APIキー管理 | 検索機能を自分の鍵で使える | `GET/PUT/DELETE /api-keys/brave-search-api-key` の結果が検索付き質問の可否に反映される。保存後のキーは平文で再表示されない | `ai/web-search.feature` › プロジェクトのBrave Search APIキーを保存・削除でき、保存後のキーは平文で再表示されない(`@api`) | 実装済み(`@stub` `@api`) |
-| AC-AI-011 | 生成ジョブの照会 | 長い生成の進捗を追える | `GET /api/generation-jobs` と `/{id}` が状態(実行中/完了/失敗)を返す | — | 未着手 |
+| AC-AI-011 | 生成ジョブの照会 | 長い生成の進捗を追える | `GET /api/generation-jobs` と `/{id}` が状態(実行中/完了/失敗)を返す。AI執筆支援(draft/ask/section)は同期呼び出しで非同期ジョブ経路を持たないため、実ジョブを作る唯一の到達可能な経路(メディアガベージコレクション削除)を題材に検証する(issue #1151のDecision Record) | `ai/generation-job.feature` › 起動直後の生成ジョブは、ID照会でも一覧でも実行中として現れる / 削除できるメディアが1件も無いジョブは、最終的に失敗として理由付きで返る(`@api`)。完了状態は`media/media-garbage-collection.feature`で既に確認済み | 実装済み(`@api`、issue #1151) |
 | AC-AI-012 | LLMのレート制限 | 429でも生の例外ログではなく次の行動が分かる | LLMが429を返したとき、`AiServiceException`経由でHTTP 502・`error`にレート制限と分かる文言が返る | `ai/resilience.feature` › LLMが429を返したとき、利用者にレート制限と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
 | AC-AI-013 | LLMのタイムアウト/接続断 | 生成が固まらず再試行できる | LLMがタイムアウト/接続断したとき、速やかに失敗が返り、直後の通常リクエストは成功する | `ai/resilience.feature` › LLMがタイムアウトしたとき、UIが固まらず速やかに失敗が返り再試行できる(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
 | AC-AI-014 | LLM接続設定の不備 | 生成前に設定不備と分かる | プロバイダのAPIキーが未設定/不正なとき、LLM呼び出し前に設定不備の文言で失敗する | `ai/resilience.feature` › LLM接続設定が未設定/不正なとき、生成前に設定不備と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
