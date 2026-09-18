@@ -116,14 +116,34 @@ function provisionLoginableKeycloakCredential(email: string, password: string): 
 
 // ----------------------------------------------------------------- ログイン
 
+// issue #1078: helpers.ts の loginViaKeycloak(issue #1017)と同じ理由で、goto を load
+// 完了まで待たせない。/login はマウント時に signIn("keycloak") を呼ぶだけの画面で、
+// 即座にKeycloakのホスト型ログイン画面へクライアント側リダイレクトする。既定の
+// waitUntil: 'load' のままだと、このリダイレクトが /login 自身の load イベントより先に
+// 発火した場合、goto の待機中に別のナビゲーションが始まったとみなされ
+// `net::ERR_ABORTED; maybe frame was detached?` で落ちることがある(#1017と同型の競合)。
 When('ログイン画面を開く', async ({ page }) => {
-  await page.goto('/login');
+  await page.goto('/login', { waitUntil: 'commit' });
 });
 
 Then('Keycloakのホスト型ログイン画面が表示される', async ({ page }) => {
   // /login はマウント時に signIn("keycloak") を呼ぶだけの画面で、Keycloak の
   // ホスト型ログイン画面(reverse-proxy 経由 /auth/realms/letsblog/...)へ遷移する。
-  await page.waitForURL(new RegExp(`${REALM_BASE}/`), { timeout: 15000 });
+  // issue #1078: 直前の goto が waitUntil: 'commit' になった(#1017と同じ理由)ため、
+  // この時点ではまだリダイレクトが終わっていないことがある。waitForURL ではなく
+  // expect(...).toHaveURL でポーリングし、続けて load 完了を待ってから
+  // フォーム要素の可視性を確かめる(helpers.ts の loginViaKeycloakと同じ書き方)。
+  //
+  // timeout を 15 秒から 30 秒へ引き上げたのは、helpers.ts の loginViaKeycloak が
+  // 同じ変更をしたときと同じ理由による(#1017、helpers.ts の該当コメント参照)。
+  // goto が load を待たなくなった結果、これまで goto 自身のナビゲーション待機
+  // (既定30秒)が負担していた /login の読み込み時間が、この待機に含まれるようになる。
+  // 15 秒のままだと、変更前より待てる時間が短くなる。
+  // なお playwright.config.ts は timeout を上書きしていないので、シナリオ全体は
+  // Playwright 既定の30秒で打ち切られる。つまりこの30秒は上限であって保証ではなく、
+  // 「シナリオが許す限り待つ」を意味する(helpers.ts の 30000 も同じ意味になる)。
+  await expect(page).toHaveURL(new RegExp(`${REALM_BASE}/`), { timeout: 30000 });
+  await page.waitForLoadState('load');
   await expect(page.locator('#username')).toBeVisible();
   await expect(page.locator('#password')).toBeVisible();
 });
@@ -197,7 +217,13 @@ Given('誤ったパスワード検証用の使い捨てアカウントを作成�
 });
 
 When('使い捨てアカウントのメールアドレスと誤ったパスワードを入力して送信する', async ({ page, ctx }) => {
-  await page.waitForURL(new RegExp(`${REALM_BASE}/`), { timeout: 15000 });
+  // issue #1078: 直前の「ログイン画面を開く」の goto が waitUntil: 'commit' になった
+  // (#1017と同じ理由)ため、この時点ではまだ /login からKeycloakへのクライアント側
+  // リダイレクトが終わっていないことがある。waitForURL ではなく expect(...).toHaveURL で
+  // ポーリングし、到達後に load 完了を待ってからフォームへ入力する。
+  // timeout を30秒にした理由は「Keycloakのホスト型ログイン画面が表示される」と同じ(#1017)。
+  await expect(page).toHaveURL(new RegExp(`${REALM_BASE}/`), { timeout: 30000 });
+  await page.waitForLoadState('load');
   await page.locator('#username').fill(ctx.wrongPasswordEmail as string);
   // e2e-login-guard:disposable — このアカウントは直前のステップで作った使い捨て
   // アカウント(issue #1295)であり、共有のE2E固定アカウントには一切触れない。
@@ -223,6 +249,16 @@ Then('ログイン画面へ戻される', async ({ page }) => {
   // `/login` を経由せず Keycloak の認可エンドポイントへ直行することがある
   // (どちらになるかは NextAuth のリダイレクトと Keycloak の応答のタイミング次第)。
   // 確かめたいのは「もう保護ページには居られず、認証を求められること」なので両方を受ける。
+  //
+  // issue #1078での判断: このステップは goto を呼んでいない。直前の「ログアウトする」も
+  // ボタンの click() であり、goto と違って呼び出し元は遷移完了(load)を待たない。#1017/
+  // #1078の競合は「goto が既定の waitUntil: 'load' で待っている最中に、ページ内の
+  // クライアント側リダイレクトが割り込んで元のナビゲーション待ちを中断させ
+  // ERR_ABORTED になる」形であり、goto 自身の呼び出しの中で起きる。ここでは goto を
+  // 呼んでいない(waitForURL はクリック後の遷移完了を単に待つだけで、何かのナビゲーション
+  // 待機と競合してはいない)ため、同種の競合は当てはまらない。したがって、
+  // 述語(predicate)を使ったこの waitForURL はそのまま残す
+  // (predicate は expect(page).toHaveURL でも受け付けられるが、書き換える理由が無い)。
   await page.waitForURL(
     (url) => url.pathname.startsWith('/login') || url.pathname.startsWith('/auth/realms/letsblog'),
     { timeout: 15000 }
@@ -232,8 +268,15 @@ Then('ログイン画面へ戻される', async ({ page }) => {
 Then('保護ページを開くと認証を求められる', async ({ page }) => {
   // events.signOut で Keycloak 側のSSOセッションも終了させているため、
   // 保護ページへ直接入ろうとすると再び資格情報を求められる。
-  await page.goto('/');
-  await page.waitForURL(new RegExp(`/(login|${REALM_BASE.slice(1)})`), { timeout: 10000 });
+  // issue #1078: helpers.ts の loginViaKeycloak(issue #1017)と同じ理由で、goto を load
+  // 完了まで待たせない。/ から /login あるいはKeycloakへのクライアント側リダイレクトが
+  // goto 自身の load 待機と競合し ERR_ABORTED になりうるため、waitUntil: 'commit' にした
+  // 上で expect(...).toHaveURL によるポーリングへ切り替える。
+  // timeout を10秒から30秒へ引き上げた理由も上と同じ(#1017)。goto が / の読み込みを
+  // 待たなくなった分、到達待ちがこの待機に寄る。ここは / → /login → Keycloak と
+  // 2段のリダイレクトを経ることがあるので、元の10秒は特に短い。
+  await page.goto('/', { waitUntil: 'commit' });
+  await expect(page).toHaveURL(new RegExp(`/(login|${REALM_BASE.slice(1)})`), { timeout: 30000 });
 });
 
 // ----------------------------------------------------------------- 権限
