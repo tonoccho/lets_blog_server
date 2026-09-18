@@ -13,14 +13,21 @@
 #   手順として実行できる形にする。
 #
 # 何を消すか:
-#   system_settings の llm_* / image_llm_* / comfyui_base_url の行だけ。
-#   他の設定(メール・レート制限・Webの公開URL等)には触れない。
+#   system_settings の llm_* / image_llm_* / comfyui_base_url / upload_rate_limit_requests
+#   の行だけ。他の設定(メール・Webの公開URL等)には触れない。
 #   行を消すと環境変数の既定値へ戻る。
 #
 #   comfyui_base_url も対象である(#1106)。ComfyUI の向き先も管理APIから保存できる
 #   設定キーなので、行が入ると docker-compose.e2e-stubs.yml の
 #   COMFYUI_BASE_URL=http://comfyui-stub:8080 が黙って無視され、comfyui-stub ではなく
 #   実 ComfyUI(GPUの無いホストには存在しない)へ出ていく。
+#
+#   upload_rate_limit_requests も対象である(#1286 / #1351)。gateway 自体は
+#   UPLOAD_RATE_LIMIT_REQUESTS を環境変数からしか読まず(DBは読まない)ので、この行が
+#   残っていても現状の gateway の挙動は変わらない。対象にするのは
+#   「overlay が差し替える設定キーは全てDBから消す」という不変条件を保つためであり、
+#   AppSettingService 側からは resolve() がDB優先で解決するため、管理画面から値が
+#   保存されていれば AppSettingService 経由の参照はその値を返す。
 #
 # 使い方:
 #   ./scripts/e2e-clear-llm-db-overrides.sh          # ドライラン(消す行を表示するだけ)
@@ -62,7 +69,7 @@ KEYS="'llm_api_key','llm_base_url','llm_model','llm_available_models',\
 'llm_request_timeout_seconds','llm_provider','llm_claude_api_key','llm_claude_model',\
 'llm_ollama_base_url','llm_ollama_model',\
 'image_llm_api_key','image_llm_base_url',\
-'comfyui_base_url'"
+'comfyui_base_url','upload_rate_limit_requests'"
 
 run_sql() {
   docker exec -i "$MYSQL_CONTAINER" \
