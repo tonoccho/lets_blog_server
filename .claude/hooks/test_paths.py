@@ -169,6 +169,11 @@ class NeutralClassification(unittest.TestCase):
         ".gitlab-ci.yml",
         ".gitlab/issue_templates/default.md",
         ".gitlab/merge_request_templates/default.md",
+        # #1321: リポジトリ直下の setup.sh。利用者がホストで直接実行する導入
+        # スクリプトで、処理は既に中立の scripts/*.sh へ委譲している。どの
+        # Dockerfile / docker-compose からも呼ばれない(#1208 の
+        # apps/*/docker-entrypoint.sh とは異なる)。
+        "setup.sh",
     ]
 
     def test_neutral_is_neither(self):

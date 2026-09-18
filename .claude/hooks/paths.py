@@ -135,6 +135,16 @@ PRODUCTION_PATTERNS = [
 #       「名前が . で始まる」は中立の根拠にならない。dotfile が増えたときに
 #       黙って中立へ落ちるのを防ぐため、ワイルドカード(\.[^/]+$)は置かない。
 #       新しい dotfile はここに足す=そのとき分類を決める、という運用にする。
+#   setup.sh(リポジトリ直下、個別指定。#1321)
+#       利用者がホストで直接実行する導入スクリプト(#960)。処理は既に中立の
+#       scripts/generate-certs.sh・check-env.sh・wait-for-stack-healthy.sh へ
+#       委譲しており、どの Dockerfile / docker-compose*.yml の ENTRYPOINT/CMD
+#       からも呼ばれない(grep で確認済み)。#1208 が apps/*/docker-entrypoint.sh
+#       をプロダクション扱いにした根拠(実行時イメージの ENTRYPOINT として
+#       出荷物の振る舞いを決める)は当てはまらず、`^scripts/` を中立とする根拠
+#       (開発・運用の道具で出荷物に入らない)に当てはまる。ワイルドカードでは
+#       なく `^setup\.sh$` の個別指定にするのは、直下の他のファイルを
+#       まとめて中立化しないため。
 NEUTRAL_PATTERNS = [
     r"^\.claude/",
     r"^docs/",
@@ -161,6 +171,7 @@ NEUTRAL_PATTERNS = [
     r"(^|/)\.env\.example$",
     r"(^|/)\.env\.local\.example$",
     r"(^|/)\.node-version$",
+    r"^setup\.sh$",
 ]
 
 # Claude Code のサブエージェントが作る git worktree(#1036)。
