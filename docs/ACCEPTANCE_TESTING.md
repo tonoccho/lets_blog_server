@@ -680,6 +680,7 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 | `lets_blog_server_rabbitmq_data` | キューとメッセージ | 前回実行のメッセージが残ると非同期シナリオの結果が変わる |
 | `lets_blog_server_generated_images` | 生成画像の保存領域 | テストが作った成果物 |
 | `lets_blog_server_bulk_upload_files` | 一括アップロードの一時ファイル | テストが作った成果物 |
+| `lets_blog_server_avatar_images` | identity-service のアバター画像(`AVATAR_STORAGE_PATH: /app/data/avatars`) | テストが作った成果物 |
 | `lets_blog_server_comfyui_output` | ComfyUI の output | テストが作った成果物 |
 | `lets_blog_server_penpot_postgres` | Penpot の DB | 既定は破棄。再構築コストが問題になれば保全へ移す(#965 Open Questions) |
 | `lets_blog_server_penpot_assets` | Penpot のアセット | 同上 |
