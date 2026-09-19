@@ -88,6 +88,30 @@ class GenerationJobControllerReexportTest(unittest.TestCase):
                 % removed_name,
             )
 
+    def test_index_ts_explicitly_reexports_project_api_key_status_response_from_ai(self):
+        """index.ts が ProjectApiKeyStatusResponse を ai から明示的に再エクスポートしている。
+
+        ai/openAPIDefinition.schemas と project/openAPIDefinition.schemas が同名の
+        ProjectApiKeyStatusResponse をそれぞれ export しており(内容は同一)、
+        index.ts が両方を `export *` で再エクスポートすると tsc --noEmit が
+        TS2308(曖昧な再エクスポート)で失敗する(#1325)。#809 と同じ方針で、
+        既存側(ai)を正として明示的に re-export することを固定する。
+        """
+        with open(INDEX_TS, encoding="utf-8") as f:
+            content = f.read()
+        explicit_reexport = re.search(
+            r"export type \{[^}]*\bProjectApiKeyStatusResponse\b[^}]*\}\s*from\s*"
+            r"'\./generated/ai/openAPIDefinition\.schemas';",
+            content,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            explicit_reexport,
+            "index.ts が ProjectApiKeyStatusResponse を "
+            "'./generated/ai/openAPIDefinition.schemas' から明示的に "
+            "re-export していない(#1325)",
+        )
+
     def test_api_client_typecheck_passes(self):
         """`tsc --noEmit` が通ること(#1299が固定する本体)。"""
         node_modules = os.path.join(API_CLIENT_DIR, "node_modules")

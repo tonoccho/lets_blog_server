@@ -248,9 +248,13 @@ export * from './generated/platform/vscode-extension-controller/vscode-extension
 // 新サービス側のクライアントが必要になったら、そのときに使う側の事情に合わせて
 // `export { x as yFromProject }` の形で別名エクスポートを足すこと
 // (既存のcontent側 deleteCustomTag と同じパターン)。
+//
+// ProjectApiKeyStatusResponse は project 側の同名の型(内容は同一)と衝突するため、
+// 上記の方針どおり既存側(ai)を正として明示的に追加した(#1325)。
 export type {
   BraveSearchApiKeyStatusResponse,
   CategoryOption,
+  ProjectApiKeyStatusResponse,
   SetBraveSearchApiKeyRequest,
 } from './generated/ai/openAPIDefinition.schemas';
 export {
