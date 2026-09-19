@@ -431,10 +431,23 @@ When('操作ログ画面を開く', async ({ page }) => {
   await page.goto('/operation-logs', { waitUntil: 'load' });
 });
 
+// entry.createdAt はゾーン情報の無いISO文字列(例: "2026-09-19T00:31:59")で、バックエンド
+// (`UnifiedLogEntryResponse` の `LocalDateTime`)は一貫してこれをUTCの壁時計値として送出
+// している(#1236 の `normalizeToUtcIfOffsetMissing`、#1314 と同じ前提)。`new Date(iso)` は
+// オフセット無し文字列を**このステップを実行するNodeプロセスのローカルタイムゾーン**として
+// 解釈するため(ECMAScript仕様)、そのまま渡すと実行ホストのタイムゾーンがUTCでない場合に
+// 期待値だけがずれる(#1352、Pacific/AucklandホストでUTC+12ぶんずれて再現)。オフセット
+// (`Z` または `±HH:MM`)が既に付いている値は #1237 が直った後の形なので、そのまま扱う。
+function withUtcOffsetIfMissing(iso: string): string {
+  const timePart = iso.includes('T') ? iso.slice(iso.indexOf('T') + 1) : iso;
+  const hasOffset = /[Zz]$/.test(timePart) || /[+-]\d{2}:?\d{2}$/.test(timePart);
+  return hasOffset ? iso : `${iso}Z`;
+}
+
 Then('表示される日時がAmerica\\/New_Yorkでの換算値と一致する', async ({ ctx, page }) => {
   const iso = ctx.at18TimezoneEntryIso as string;
   const marker = ctx.at18TimezoneMarker as string;
-  const expected = new Date(iso).toLocaleString('ja-JP', {
+  const expected = new Date(withUtcOffsetIfMissing(iso)).toLocaleString('ja-JP', {
     timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
