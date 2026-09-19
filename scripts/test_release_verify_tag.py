@@ -920,6 +920,46 @@ class JestCountsParser(unittest.TestCase):
         self.assertIsNone(counts)
 
 
+class CredentialEnvLoader(unittest.TestCase):
+    """#1356: 資格情報ファイルは `export` 前置き・引用符付きの行を含む(シェルで`source`する書式)。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="rvt-cred-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def write_env_file(self, content, rel="lets-blog-e2e.env"):
+        p = os.path.join(self.tmp, rel)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(content)
+        return p
+
+    def test_export_prefix_and_quotes_are_stripped(self):
+        path = self.write_env_file(
+            'export KEY1="value1"\n'
+            "export KEY2='value2'\n"
+            "KEY3=value3\n"
+            "\n"
+            "# a comment\n"
+        )
+        self.assertEqual(
+            {"KEY1": "value1", "KEY2": "value2", "KEY3": "value3"},
+            rvt.load_credential_env(path),
+        )
+
+    def test_value_containing_equals_sign_keeps_only_first_split(self):
+        path = self.write_env_file("export KEY4='a=b'\n")
+        self.assertEqual({"KEY4": "a=b"}, rvt.load_credential_env(path))
+
+    def test_surrounding_whitespace_is_stripped(self):
+        path = self.write_env_file("  export KEY5 = value5  \n")
+        self.assertEqual({"KEY5": "value5"}, rvt.load_credential_env(path))
+
+    def test_nonexistent_path_returns_empty_dict(self):
+        self.assertEqual(
+            {}, rvt.load_credential_env(os.path.join(self.tmp, "does-not-exist.env"))
+        )
+
+
 class PlaywrightJsonCountsParser(unittest.TestCase):
     """要件5: playwright --reporter=json の出力から expected/unexpected/skipped/flaky を抽出する。"""
 

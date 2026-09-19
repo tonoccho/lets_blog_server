@@ -325,6 +325,11 @@ def copy_gitignored_inputs(main_worktree, checkout_dir):
 def load_credential_env(path):
     """`~/.config/lets-blog-e2e.env` を読み込み、dict で返す(要件2)。
 
+    このファイルはシェルで `set -a; . ~/.config/lets-blog-e2e.env` として
+    `source` することも前提の書式(`docs/ACCEPTANCE_TESTING.md` §10)なので、
+    `export ` の前置きと、値を囲む `"..."` / `'...'` の一重の引用符を、
+    `source` した場合と同じ値になるよう読み取り時に外す(#1356)。
+
     ファイルが無ければ空dict(資格情報を要求しない手順まで失敗させないため)。
     """
     result = {}
@@ -336,7 +341,13 @@ def load_credential_env(path):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
-            result[k.strip()] = v.strip()
+            k = k.strip()
+            if k.startswith("export ") or k.startswith("export\t"):
+                k = k[len("export"):].strip()
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+                v = v[1:-1]
+            result[k] = v
     return result
 
 
