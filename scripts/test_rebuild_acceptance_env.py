@@ -93,6 +93,7 @@ DESTROYED_VOLUMES = [
     "wordpress_sites",
     "bulk_upload_files",
     "generated_images",
+    "avatar_images",
 ]
 PRESERVED_VOLUMES = ["comfyui_models", "ollama_models"]
 VOLUME_PREFIX = "lets_blog_server_"
@@ -759,6 +760,31 @@ class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
                     self.text,
                     "ボリューム %s が破棄・保全のどちらにも現れない" % name,
                 )
+
+    def test_fixture_volume_lists_match_the_script(self):
+        """このテストの偽 docker が持つ `DESTROYED_VOLUMES` / `PRESERVED_VOLUMES` は、
+        スクリプトの `DESTROY_VOLUMES` / `PRESERVE_VOLUMES` と一致していなければならない。
+
+        一致していないと、偽 docker は一覧に無いボリュームを作らず、`rebuild-acceptance-env.sh`
+        の事後検証が「作り直されていない」と誤って NG を出す(#1327: avatar_images が
+        #1288 でスクリプト側に追加された後、fixture 側の一覧が追随していなかった)。
+        """
+        destroy_match = re.search(r"readonly\s+DESTROY_VOLUMES=\(([^)]*)\)", self.text, re.S)
+        preserve_match = re.search(r"readonly\s+PRESERVE_VOLUMES=\(([^)]*)\)", self.text, re.S)
+        self.assertIsNotNone(destroy_match, "DESTROY_VOLUMES を読み取れなかった")
+        self.assertIsNotNone(preserve_match, "PRESERVE_VOLUMES を読み取れなかった")
+        script_destroy = set(destroy_match.group(1).split())
+        script_preserve = set(preserve_match.group(1).split())
+        self.assertEqual(
+            script_destroy,
+            set(DESTROYED_VOLUMES),
+            "fixture の DESTROYED_VOLUMES がスクリプトの DESTROY_VOLUMES と食い違う",
+        )
+        self.assertEqual(
+            script_preserve,
+            set(PRESERVED_VOLUMES),
+            "fixture の PRESERVED_VOLUMES がスクリプトの PRESERVE_VOLUMES と食い違う",
+        )
 
     def test_probe_names_are_confined_to_the_wipe_probe_prefix(self):
         """スクリプトが作るアカウントは at-wipe-probe- 接頭辞に限る(#965 §2)。"""
