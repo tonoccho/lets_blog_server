@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import type { ConnectedServiceStatus, ConnectedServiceStatusDetail } from "@/lib/apiClient";
-import { formatDateTime } from "@/lib/formatDate";
+import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 
 const POLL_INTERVAL_MS = 30000;
 
@@ -25,14 +25,6 @@ function StatusIcon({ status }: { status: ConnectedServiceStatus["status"] }) {
   if (status === "WARNING") return <AlertTriangle className={className} aria-hidden="true" />;
   return <XCircle className={className} aria-hidden="true" />;
 }
-
-/**
- * 個人設定TZが未設定のときの、マウント前(サーバー描画時点)のプレースホルダー(issue #1362)。
- * ブラウザTZはマウント後にしか分からず、サーバー描画と同じ値を先に出せないため、
- * 両者で同じ固定文字列を描いてハイドレーション不一致を避ける
- * (前例: ThemeSwitcher.tsx:23-58 の mounted フラグ方式)。
- */
-const TIMEZONE_PENDING_PLACEHOLDER = "読み込み中…";
 
 export function ConnectedServiceStatusPanel({
   initialStatuses,

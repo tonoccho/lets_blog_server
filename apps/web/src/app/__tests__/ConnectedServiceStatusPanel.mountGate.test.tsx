@@ -12,6 +12,11 @@ import type { ConnectedServiceStatusDetail } from "@/lib/apiClient";
  * 手法は効くが、同じファイル内の他のテスト(SSEで`lastUpdatedAt`を更新する等、実際の
  * `useEffect`実行を必要とするテスト)を巻き添えにしてしまうため、この検証だけを
  * 専用ファイルへ分離した。
+ *
+ * issue #1363: `TIMEZONE_PENDING_PLACEHOLDER` はこのファイルが元々ローカル定数として
+ * 持っていたが、`ImageGalleryGrid.tsx` 等3つ目以降の利用先が増えたため `formatDate.ts` へ
+ * 共有化した(Requirement 2)。このモックは実モジュールを差し替えるため、
+ * 実装がその値を import できるよう明示的に含める。
  */
 jest.mock("react", () => ({
   __esModule: true,
@@ -21,6 +26,7 @@ jest.mock("react", () => ({
 
 jest.mock("@/lib/formatDate", () => ({
   formatDateTime: jest.fn(() => "FORMATTED_CHECKED_AT"),
+  TIMEZONE_PENDING_PLACEHOLDER: "読み込み中…",
 }));
 
 import { ConnectedServiceStatusPanel } from "../ConnectedServiceStatusPanel";

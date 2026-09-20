@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClient";
-import { formatDateTime } from "@/lib/formatDate";
+import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 import { deleteGeneratedImageAction, getGeneratedImageAction, updateGeneratedImageTagsAction } from "./actions";
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -28,6 +28,14 @@ export function ImageGalleryGrid({
   const [activeTag, setActiveTag] = useState<string | null>(null);
   /** 「この画像の設定をコピー」ボタンの一時的なフィードバック表示(issue #437)。 */
   const [settingsCopied, setSettingsCopied] = useState(false);
+  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
+  // 一致させるため、issue #1362と同じ形。issue #1363)。個人設定TZがあるときはSSR/
+  // クライアントで常に同じ文字列になるためこのフラグを見ない。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -192,7 +200,13 @@ export function ImageGalleryGrid({
                     ))}
                   </div>
                 )}
-                <p className="text-neutral-400">{formatDateTime(image.createdAt, timezone)}</p>
+                <p className="text-neutral-400">
+                  {timezone
+                    ? formatDateTime(image.createdAt, timezone)
+                    : mounted
+                      ? formatDateTime(image.createdAt)
+                      : TIMEZONE_PENDING_PLACEHOLDER}
+                </p>
               </div>
             </button>
           ))}
@@ -338,7 +352,13 @@ export function ImageGalleryGrid({
                     {detail.loraName ? `${detail.loraName} (weight: ${detail.loraWeight})` : "-"}
                   </dd>
                   <dt className="font-semibold">作成日時</dt>
-                  <dd className="text-neutral-600 dark:text-neutral-400">{formatDateTime(detail.createdAt, timezone)}</dd>
+                  <dd className="text-neutral-600 dark:text-neutral-400">
+                    {timezone
+                      ? formatDateTime(detail.createdAt, timezone)
+                      : mounted
+                        ? formatDateTime(detail.createdAt)
+                        : TIMEZONE_PENDING_PLACEHOLDER}
+                  </dd>
                 </dl>
               </>
             )}

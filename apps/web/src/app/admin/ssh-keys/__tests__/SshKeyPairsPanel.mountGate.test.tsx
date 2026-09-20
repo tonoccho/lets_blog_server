@@ -8,6 +8,11 @@ import type { SavedSshKeyPair } from "@/lib/apiClient";
  * (`"use client"`を持つコンポーネントでは`jest.spyOn(React, "useEffect")`が効かず、
  * `jest.mock("react", ...)`によるモジュール差し替えが必要。他のテストを巻き添えに
  * しないためファイルを分離する)。
+ *
+ * issue #1363: `TIMEZONE_PENDING_PLACEHOLDER` はこのファイルが元々ローカル定数として
+ * 持っていたが、`ImageGalleryGrid.tsx` 等3つ目以降の利用先が増えたため `formatDate.ts` へ
+ * 共有化した(Requirement 2)。このモックは実モジュールを差し替えるため、
+ * 実装がその値を import できるよう明示的に含める。
  */
 jest.mock("react", () => ({
   __esModule: true,
@@ -17,6 +22,7 @@ jest.mock("react", () => ({
 
 jest.mock("@/lib/formatDate", () => ({
   formatDateTime: jest.fn(() => "FORMATTED_CREATED_AT"),
+  TIMEZONE_PENDING_PLACEHOLDER: "読み込み中…",
 }));
 
 // SshKeyPairsPanel.tsx が実際に import する ./actions は next/cache 経由でReactの内部APIに

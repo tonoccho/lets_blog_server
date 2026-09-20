@@ -1,5 +1,6 @@
 import type { APIRequestContext, APIResponse, BrowserContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
+import type { ScenarioContext } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -86,9 +87,26 @@ Given('個人設定のタイムゾーンを未設定にする', async ({ ctx, re
 
 // ------------------------------------------------------- ブラウザTZを指定してページを開く
 
-const TARGET_PAGES: Record<string, { path: string; heading: string }> = {
-  ダッシュボード: { path: '/', heading: 'ダッシュボード' },
-  SSH鍵管理ページ: { path: '/admin/ssh-keys', heading: 'SSH鍵管理' },
+/**
+ * `path`を関数にしてあるのは、`/projects/${projectId}/posts`のような動的パスを
+ * 静的な文字列で持てないため。`pageInventory.ts:63`の`path: (f) => ...`の慣習(issue #944)
+ * に合わせ、シナリオ間の値渡し(`ctx`)から必要な値を都度組み立てる
+ * (issue #1363、親issue #1261 分割B)。
+ */
+const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; heading: string }> = {
+  ダッシュボード: { path: () => '/', heading: 'ダッシュボード' },
+  SSH鍵管理ページ: { path: () => '/admin/ssh-keys', heading: 'SSH鍵管理' },
+  // media.steps.ts が issue #1236 で既に「...生成画像ギャラリーを開く」という同名の
+  // Whenステップを持つため、targetNameは末尾に「画面」を付けて区別する
+  // (bddgen: "Multiple definitions matched scenario step" を実測で確認済み)。
+  生成画像ギャラリー画面: { path: () => '/image-gallery', heading: '生成画像ギャラリー' },
+  サイト一覧: { path: () => '/sites', heading: 'サイト' },
+  // `publishLifecycle.steps.ts`の「公開検証用のWordPressサイトがあり、プロジェクトの
+  // テスト環境に紐づいている」が設定する`ctx.publishProjectId`を使う。
+  投稿履歴: {
+    path: (ctx) => `/projects/${ctx.publishProjectId as number}/posts`,
+    heading: '投稿履歴',
+  },
 };
 
 /**
@@ -97,7 +115,7 @@ const TARGET_PAGES: Record<string, { path: string; heading: string }> = {
  * 専用の `BrowserContext` / `Page` を作り、その中でログインする。
  */
 When(
-  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ)を開く$/,
+  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|生成画像ギャラリー画面|サイト一覧|投稿履歴)を開く$/,
   async ({ ctx, page }, timezoneId: string, targetName: string) => {
     const target = TARGET_PAGES[targetName];
     const browser = page.context().browser();
@@ -122,8 +140,15 @@ When(
     ctx.panelTzPage = tzPage;
 
     await loginViaKeycloak(tzPage, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
-    await tzPage.goto(target.path, { waitUntil: 'networkidle' });
-    await expect(tzPage.getByRole('heading', { name: target.heading })).toBeVisible({ timeout: 30_000 });
+    await tzPage.goto(target.path(ctx), { waitUntil: 'networkidle' });
+    // `level: 1` で見出しレベルを絞る。`/sites`は「サイト」(h1)と「サイトを登録」(h2、
+    // SiteCreationPanel)の両方を`name`の部分一致(既定)が拾ってしまい、
+    // `strict mode violation: ... resolved to 2 elements`で落ちることを実測で確認した
+    // (issue #1363)。対象5画面はいずれもページ本体の見出しがh1であるため
+    // (`page.tsx`各ファイルの`<h1>`を確認済み)、全エントリに一律で付けてよい。
+    await expect(tzPage.getByRole('heading', { name: target.heading, level: 1 })).toBeVisible({
+      timeout: 30_000,
+    });
     // ハイドレーション後の再描画にも猶予を見る(media.steps.ts #1236 と同じ理由)。
     await tzPage.waitForTimeout(1000);
   }
@@ -259,6 +284,156 @@ Then(
   }
 );
 
+// ------------------------------------------------------- issue #1363: 生成画像ギャラリーの作成日時
+
+/**
+ * ギャラリーのフィクスチャ自体は media.steps.ts の既存Given「seedを持たないChatGPT画像が
+ * ギャラリーにある」をシナリオ側でそのまま再利用する(`ctx.mediaImageId`が立つ)。
+ * ここではその画像の永続化された`createdAt`を取り直し(SSH鍵ペアと同じ理由。POST直後の
+ * エコー値は1秒程度ずれ得る)、一覧のキャプションに表示された値と突き合わせる。
+ */
+Then(
+  /^生成画像ギャラリーのその画像の作成日時が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx, request }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const imageId = ctx.mediaImageId as number;
+    const headers = await adminHeaders(request);
+
+    const listResponse = await request.get('/api/generated-images', { headers });
+    expect(
+      listResponse.ok(),
+      `生成画像一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+    ).toBe(true);
+    const items = await parseJsonOrThrow<{ id: number; createdAt: string }[]>(
+      listResponse,
+      '生成画像一覧の取得'
+    );
+    const persisted = items.find((item) => item.id === imageId);
+    expect(persisted, `生成画像(id=${imageId})が一覧に見つかりません`).toBeTruthy();
+    const createdAt = (persisted as { createdAt: string }).createdAt;
+
+    const card = tzPage.locator(`button:has(img[src="/image-gallery/${imageId}/file"])`);
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    const displayed = (await card.locator('p.text-neutral-400').textContent())?.trim() ?? '';
+
+    const expected = new Date(withUtcOffsetIfMissing(createdAt)).toLocaleString('ja-JP', { timeZone });
+    expect(displayed).toBe(expected);
+  }
+);
+
+// ------------------------------------------------------- issue #1363: サイト一覧の登録日
+
+interface TzSiteFixture {
+  id: number;
+  siteKey: string;
+  createdAt: string;
+}
+
+/**
+ * `cross-cutting.steps.ts`の`registerSiteFixture`(issue #830)と同じ最小限のボディで
+ * サイトを登録する。POSTのレスポンスは`createdAt`を返さないため、SSH鍵ペアと同じく
+ * `GET /api/sites`で永続化された値を取り直す。
+ */
+Given('TZ検証用のサイトが1件登録されている', async ({ ctx, request }) => {
+  const headers = await adminHeaders(request);
+  const siteKey = `e2e-1363-tz-${uniqueSuffix()}`;
+  const createResponse = await request.post('/api/sites', {
+    headers,
+    data: {
+      name: `TZ検証用サイト ${siteKey}`,
+      siteKey,
+      cmsType: 'WORDPRESS',
+      credentials: {
+        transport: 'AGENT',
+        baseUrl: 'http://wordpress',
+        username: 'e2e-1363-fixture',
+        appPassword: 'e2e-1363 fixture app password',
+      },
+    },
+  });
+  expect(
+    createResponse.ok(),
+    `TZ検証用のサイト登録に失敗しました (status=${createResponse.status()}): ${await createResponse.text()}`
+  ).toBe(true);
+  const created = await parseJsonOrThrow<{ id: number }>(createResponse, 'TZ検証用のサイト登録');
+
+  const listResponse = await request.get('/api/sites', { headers });
+  expect(
+    listResponse.ok(),
+    `サイト一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+  ).toBe(true);
+  const items = await parseJsonOrThrow<{ id: number; siteKey: string; createdAt: string }[]>(
+    listResponse,
+    'サイト一覧の取得'
+  );
+  const persisted = items.find((item) => item.id === created.id);
+  expect(persisted, `登録したサイト(id=${created.id})が一覧に見つかりません`).toBeTruthy();
+
+  const fixture: TzSiteFixture = {
+    id: created.id,
+    siteKey,
+    createdAt: (persisted as { createdAt: string }).createdAt,
+  };
+  ctx.panelTzSite = fixture;
+});
+
+Then(
+  /^そのサイトの登録日が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const fixture = ctx.panelTzSite as TzSiteFixture;
+    const row = tzPage.locator(`tr:has-text("${fixture.siteKey}")`);
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    const displayed = (await row.locator('td').nth(5).textContent())?.trim() ?? '';
+
+    const expected = new Date(withUtcOffsetIfMissing(fixture.createdAt)).toLocaleString('ja-JP', {
+      timeZone,
+    });
+    expect(displayed).toBe(expected);
+  }
+);
+
+// ------------------------------------------------------- issue #1363: 投稿履歴の最終投稿日時
+
+/**
+ * 投稿フィクスチャ自体は publishLifecycle.steps.ts の既存Given/When
+ * 「公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている」
+ * 「記事を新規公開する」をシナリオ側でそのまま再利用する(`ctx.publishProjectId`
+ * `ctx.newPostSlug`が立つ)。`lastPublishedAt`は公開レスポンスに含まれないため、
+ * `GET /api/posts`から取り直す(SSH鍵ペア・サイトと同じ理由)。
+ */
+Then(
+  /^その投稿の最終投稿日時が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx, request }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const slug = ctx.newPostSlug as string;
+    const headers = await adminHeaders(request);
+
+    const listResponse = await request.get('/api/posts', { headers });
+    expect(
+      listResponse.ok(),
+      `投稿一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+    ).toBe(true);
+    const items = await parseJsonOrThrow<{ slug: string | null; lastPublishedAt: string | null }[]>(
+      listResponse,
+      '投稿一覧の取得'
+    );
+    const persisted = items.find((item) => item.slug === slug);
+    expect(persisted, `投稿(slug=${slug})が一覧に見つかりません`).toBeTruthy();
+    const lastPublishedAt = (persisted as { lastPublishedAt: string | null }).lastPublishedAt;
+    expect(lastPublishedAt, `投稿(slug=${slug})にlastPublishedAtがありません`).toBeTruthy();
+
+    const row = tzPage.locator(`tr:has-text("${slug}")`);
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    const displayed = (await row.locator('td').nth(5).textContent())?.trim() ?? '';
+
+    const expected = new Date(withUtcOffsetIfMissing(lastPublishedAt as string)).toLocaleString('ja-JP', {
+      timeZone,
+    });
+    expect(displayed).toBe(expected);
+  }
+);
+
 // ------------------------------------------------------- 後片付け
 
 After({ tags: '@panel-timezone' }, async ({ ctx, request }) => {
@@ -271,6 +446,11 @@ After({ tags: '@panel-timezone' }, async ({ ctx, request }) => {
   const fixture = ctx.panelTzKeyPair as TzKeyPairFixture | undefined;
   if (fixture) {
     await request.delete(`/api/ssh-key-pairs/${fixture.id}`, { headers });
+  }
+
+  const siteFixture = ctx.panelTzSite as TzSiteFixture | undefined;
+  if (siteFixture) {
+    await request.delete(`/api/sites/${siteFixture.id}`, { headers });
   }
 
   // 「個人設定のタイムゾーンを「X」に変更する」(media.steps.ts)、または本ファイルの

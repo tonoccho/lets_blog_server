@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PostSummary } from "@/lib/apiClient";
-import { formatDateTime } from "@/lib/formatDate";
+import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 
 type SortColumn = "siteName" | "status" | "lastPublishedAt" | null;
 type SortOrder = "asc" | "desc";
@@ -10,6 +10,14 @@ type SortOrder = "asc" | "desc";
 export function PostsTable({ posts: initialPosts, timezone }: { posts: PostSummary[]; timezone: string | null }) {
   const [sortBy, setSortBy] = useState<SortColumn>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
+  // 一致させるため、issue #1362と同じ形。issue #1363)。個人設定TZがあるときはSSR/
+  // クライアントで常に同じ文字列になるためこのフラグを見ない。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   const sortedPosts = useMemo(() => {
     if (sortBy) {
@@ -84,10 +92,22 @@ export function PostsTable({ posts: initialPosts, timezone }: { posts: PostSumma
               </td>
               <td className="px-4 py-2">{post.categories.length > 0 ? post.categories.join(", ") : "-"}</td>
               <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
-                {post.lastPublishedAt ? formatDateTime(post.lastPublishedAt, timezone) : "-"}
+                {post.lastPublishedAt
+                  ? timezone
+                    ? formatDateTime(post.lastPublishedAt, timezone)
+                    : mounted
+                      ? formatDateTime(post.lastPublishedAt)
+                      : TIMEZONE_PENDING_PLACEHOLDER
+                  : "-"}
               </td>
               <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
-                {post.publishScheduledAt ? formatDateTime(post.publishScheduledAt, timezone) : "-"}
+                {post.publishScheduledAt
+                  ? timezone
+                    ? formatDateTime(post.publishScheduledAt, timezone)
+                    : mounted
+                      ? formatDateTime(post.publishScheduledAt)
+                      : TIMEZONE_PENDING_PLACEHOLDER
+                  : "-"}
               </td>
             </tr>
           ))}

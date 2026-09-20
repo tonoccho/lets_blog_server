@@ -1,3 +1,15 @@
+/**
+ * 個人設定TZが未設定のときの、マウント前(サーバー描画時点)のプレースホルダー
+ * (issue #1362、親issue #1261 分割A)。ブラウザTZはマウント後にしか分からず、サーバー
+ * 描画と同じ値を先に出せないため、両者で同じ固定文字列を描いてハイドレーション不一致を
+ * 避ける(前例: ThemeSwitcher.tsx:23-58 の mounted フラグ方式)。
+ *
+ * 元は`ConnectedServiceStatusPanel.tsx`と`SshKeyPairsPanel.tsx`がそれぞれ同じ値を
+ * ローカル定数として重複して持っていたが、3つ目以降の利用先(`ImageGalleryGrid.tsx`
+ * 等、issue #1363)が増えたためここへ共有化した(issue #1363 Requirement 2)。
+ */
+export const TIMEZONE_PENDING_PLACEHOLDER = "読み込み中…";
+
 function getDefaultTimeZone(): string {
   if (typeof Intl !== "undefined" && Intl.DateTimeFormat) {
     try {
