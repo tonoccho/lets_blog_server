@@ -62,6 +62,58 @@
     分割Bの`その投稿の最終投稿日時が...`とは別に用意し、この2シナリオだけ分割Bと同じ
     `@publishing @slow @mode:serial`を付けている。
 
+  ## issue #1366(親issue #1261 分割B-2)による拡張
+
+  分割Bの一覧系(`ImageGalleryGrid`・`SiteListTable`・`PostsTable`)とは異なり、
+  `ArticlePlanSessionList`(`/projects/{id}/plan`の壁打ち一覧)はタイムゾーンを受け取る
+  経路そのものが無く、独自の`formatSessionDate()`が`new Date(iso).getFullYear()`等の
+  ローカル取得で作成日(`YYYYMMDD`、区切りなし)を組み立てていた。`plan/page.tsx`に
+  `getViewerTimeZone()`を足し、`ArticlePlanWorkspace`を経由して`ArticlePlanSessionList`へ
+  渡す経路を新設した。表示形式が`YYYYMMDD`(区切りなし)で`ViewerDateTime`
+  (`formatDateTime`のロケール文字列をそのまま描く作り)とは差し替えできないため、
+  `ViewerDateTime`は使わず`PostsTable`と同じ「ゲートを直接書く」形にした
+  (Readiness Report参照)。
+
+  壁打ちセッションのフィクスチャは`article-plan/planning-session.feature`(issue #935)と
+  同じ、既存のスタブ利用チャット経由で作る(`articlePlan.steps.ts`の
+  「記事計画用のプロジェクトが用意されている」「記事計画画面を開く」
+  「壁打ちで「X」と発言する」をそのまま再利用する)。`createdAt`は
+  `ArticlePlanSessionSummaryResponse.java`の`LocalDateTime`(オフセット無し)なので、
+  他のTZシナリオと同じく`GET /api/projects/{id}/article-plan/sessions`から永続化された
+  値を再取得する。
+
+  **タイムゾーンを固定文字列で書かない理由(レビュー指摘、2026-09-20)**: `createdAt`は
+  実行時刻(サーバ、UTC)そのものなので、`Asia/Tokyo`や`Pacific/Auckland`のような固定の
+  タイムゾーン名をシナリオに書くと、UTCの暦日とたまたま一致する時間帯(実測: それぞれ
+  15:00-23:59 UTC・12:00-23:59 UTC)に実行すると、直していない実装(生の`createdAt`の
+  暦日をそのまま出すだけ)でもたまたま一致してPASSしてしまい、実行する時刻によっては
+  バグを検出できない。下の2シナリオは、実際に作られたセッションの`createdAt`を取得した
+  「後」に、UTCの生の暦日と必ず食い違うタイムゾーン(`Pacific/Kiritimati`・`Pacific/Niue`の
+  組み合わせ。2つの一致時間帯が重ならないよう選んでいるため、どちらか一方は必ず食い違う。
+  詳細は`panelTimezone.steps.ts`の`pickDivergentTimezone`のコメント参照)をその場で選んで
+  使うため、実行するどの時刻でも直していない実装は必ず失敗する。
+
+  @stub @plan
+  シナリオ: 個人設定TZが設定されているなら、ブラウザTZに関係なく壁打ち一覧の作成日が個人設定TZ換算で表示される
+    前提 管理者としてログインする
+    かつ 記事計画用のプロジェクトが用意されている
+    かつ 記事計画画面を開く
+    かつ 壁打ちで「TZ検証用の発言」と発言する
+    もし そのセッションの作成日が暦日をまたぐタイムゾーンを個人設定にし、対極のタイムゾーンをブラウザTZにして管理者としてログインし、記事計画を開く
+    ならば 壁打ち一覧のセッションの作成日が、選んだタイムゾーンへの換算値のYYYYMMDDと一致する
+    かつ コンソールにハイドレーションエラーが記録されない
+
+  @stub @plan
+  シナリオ: 個人設定TZが未設定なら、ブラウザTZ換算(暦日をまたぐ値)で壁打ち一覧の作成日が表示される
+    前提 個人設定のタイムゾーンを未設定にする
+    かつ 管理者としてログインする
+    かつ 記事計画用のプロジェクトが用意されている
+    かつ 記事計画画面を開く
+    かつ 壁打ちで「TZ検証用の発言」と発言する
+    もし そのセッションの作成日が暦日をまたぐタイムゾーンをブラウザTZにして管理者としてログインし、記事計画を開く
+    ならば 壁打ち一覧のセッションの作成日が、選んだタイムゾーンへの換算値のYYYYMMDDと一致する
+    かつ コンソールにハイドレーションエラーが記録されない
+
   シナリオ: 個人設定TZがAsia/Tokyoなら、ブラウザTZに関係なく接続サービス詳細のチェック時刻がTokyo換算で表示される
     前提 個人設定のタイムゾーンを「Asia/Tokyo」に変更する
     もし ブラウザのタイムゾーンを「Pacific/Auckland」にして管理者としてログインし、ダッシュボードを開く

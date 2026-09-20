@@ -1,14 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { ArticlePlanSessionSummary } from "@/lib/apiClient";
-
-function formatSessionDate(iso: string): string {
-  const d = new Date(iso);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}${mm}${dd}`;
-}
+import { formatDateYYYYMMDD, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 
 export function ArticlePlanSessionList({
   sessions,
@@ -17,6 +11,7 @@ export function ArticlePlanSessionList({
   onNewChat,
   isLoading,
   error,
+  timezone,
 }: {
   sessions: ArticlePlanSessionSummary[];
   activeSessionId: number | null;
@@ -24,7 +19,17 @@ export function ArticlePlanSessionList({
   onNewChat: () => void;
   isLoading: boolean;
   error?: string;
+  timezone: string | null;
 }) {
+  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
+  // 一致させるため、issue #1362と同じ形。issue #1366)。個人設定TZがあるときはSSR/
+  // クライアントで常に同じ文字列になるためこのフラグを見ない(PostsTable.tsxと同じ形)。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+
   return (
     <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <div className="mb-3 flex items-center justify-between">
@@ -59,7 +64,12 @@ export function ArticlePlanSessionList({
                   #{s.githubIssueNumber}
                 </span>
               )}
-              {formatSessionDate(s.createdAt)}-{s.title}
+              {timezone
+                ? formatDateYYYYMMDD(s.createdAt, timezone)
+                : mounted
+                  ? formatDateYYYYMMDD(s.createdAt)
+                  : TIMEZONE_PENDING_PLACEHOLDER}
+              -{s.title}
             </button>
           ))}
         </div>

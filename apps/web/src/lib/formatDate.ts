@@ -56,6 +56,49 @@ function normalizeToUtcIfOffsetMissing(iso: string): string {
   return `${iso}Z`;
 }
 
+/**
+ * 日時文字列を、指定タイムゾーン(未指定ならブラウザ既定TZ)での暦日として
+ * `YYYYMMDD`(区切りなし)形式で返す(issue #1366、親issue #1261 分割B-2)。
+ *
+ * `ArticlePlanSessionList.tsx`の旧`formatSessionDate()`は
+ * `new Date(iso).getFullYear()/getMonth()/getDate()`で日付を組み立てていた。この形は
+ * 「解釈」(`new Date(iso)`)と「取り出し」(`getFullYear()`等)の両方が実行環境の
+ * ローカルタイムに揃っているため、実行環境のTZが変わっても出力が変わらない(#1279の実測:
+ * UTC/Pacific/Auckland/America/New_Yorkのいずれでも同じ文字列になる)。だが指定
+ * タイムゾーンへ従わせる経路が無く、常に実行環境(SSRコンテナ=UTC、ブラウザ=閲覧者TZ)の
+ * 暦日をそのまま出していた。
+ *
+ * ここで`Z`を付けてUTCとして解釈させながら、取り出しを`getFullYear()`等のローカル取得の
+ * ままにすると、**そこで初めて環境差が生まれて壊れる**(issue #1366のProblem実測:
+ * `Pacific/Auckland`だけ日付が繰り上がらず、UTCと同じ暦日のままになる)。「解釈」の基準
+ * (UTCへの正規化)と「取り出し」の基準を必ず一致させる必要があるため、取り出しも
+ * `Intl.DateTimeFormat(..., { timeZone }).formatToParts()`で明示したタイムゾーンに揃える。
+ * `getFullYear()`等のローカル取得は使わない。
+ *
+ * オフセット付き入力・空文字・パース不能な文字列の挙動は退行させない(旧#1279
+ * Requirement 3)。パース不能な結果(`Invalid Date`)をそのまま`Intl.DateTimeFormat`へ
+ * 渡すと`RangeError`を投げる(実測)ため、その場合は例外を投げず、旧実装と同じ
+ * `NaNNaNNaN`(`getFullYear()`等がNaNを返す挙動)を返す。
+ */
+export function formatDateYYYYMMDD(iso: string, timeZone?: string | null): string {
+  const date = new Date(normalizeToUtcIfOffsetMissing(iso));
+  if (Number.isNaN(date.getTime())) {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    return `${yyyy}${mm}${dd}`;
+  }
+  const tz = timeZone ?? getDefaultTimeZone();
+  const parts = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}${get("month")}${get("day")}`;
+}
+
 export function formatDateTime(iso: string, timeZone?: string | null): string {
   const tz = timeZone ?? getDefaultTimeZone();
   return new Date(normalizeToUtcIfOffsetMissing(iso)).toLocaleString("ja-JP", { timeZone: tz });

@@ -15,6 +15,7 @@ export function ArticlePlanWorkspace({
   initialIssueTitle,
   initialIssueSession,
   initialIssueStructure,
+  timezone,
 }: {
   projectId: number;
   initialSessions: ArticlePlanSessionSummary[];
@@ -22,6 +23,7 @@ export function ArticlePlanWorkspace({
   initialIssueTitle: string | null;
   initialIssueSession: ArticlePlanSessionDetail | null;
   initialIssueStructure: string | null;
+  timezone: string | null;
 }) {
   const [history, setHistory] = useState<PlanChatMessage[]>(initialIssueSession?.history ?? []);
   const [sessionId, setSessionId] = useState<number | null>(initialIssueSession?.id ?? null);
@@ -102,6 +104,7 @@ export function ArticlePlanWorkspace({
         onNewChat={handleNewChat}
         isLoading={isSwitchingSession}
         error={sessionError}
+        timezone={timezone}
       />
 
       <div className="grid gap-8 lg:grid-cols-2">

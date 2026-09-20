@@ -7,7 +7,7 @@ import {
   getArticlePlanSessionByIssue,
   getArticlePlanIssueDescription,
 } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ProjectSectionNav } from "../ProjectSectionNav";
 import { ArticlePlanWorkspace } from "./ArticlePlanWorkspace";
@@ -31,7 +31,7 @@ export default async function ArticlePlanPage({
     notFound();
   }
 
-  const [sessions, issues, issueSession, allIssues, issueDescription] = await Promise.all([
+  const [sessions, issues, issueSession, allIssues, issueDescription, timezone] = await Promise.all([
     listArticlePlanSessions(projectId).catch(() => []),
     project.githubRepository
       ? listArticlePlanIssues(projectId, "open").catch(() => [])
@@ -45,6 +45,7 @@ export default async function ArticlePlanPage({
     issueNumber && project.githubRepository
       ? getArticlePlanIssueDescription(projectId, issueNumber).catch(() => null)
       : Promise.resolve(null),
+    getViewerTimeZone(),
   ]);
   const issueTitle = issueNumber ? allIssues.find((i) => i.number === issueNumber)?.title ?? null : null;
   const issueStructure = issueDescription?.body ?? null;
@@ -81,6 +82,7 @@ export default async function ArticlePlanPage({
         initialIssueTitle={issueTitle}
         initialIssueSession={issueSession}
         initialIssueStructure={issueStructure}
+        timezone={timezone}
       />
 
       {project.githubRepository && (

@@ -615,6 +615,213 @@ Then(
   }
 );
 
+// ------------------------------------------------------- issue #1366: 壁打ち一覧の作成日
+
+/**
+ * 壁打ちセッションのフィクスチャは`articlePlan.steps.ts`の既存Given/When
+ * 「記事計画用のプロジェクトが用意されている」「記事計画画面を開く」
+ * 「壁打ちで「X」と発言する」をシナリオ側でそのまま再利用する(`ctx.plan.projectId`が
+ * 立つ)。`ArticlePlanSessionSummary.createdAt`はオフセット無し(Java `LocalDateTime`)
+ * なので、他のフィクスチャと同じ理由(生成直後のエコー値が永続化値と1秒程度ずれ得る)で
+ * `GET /api/projects/{id}/article-plan/sessions`から取り直す。
+ *
+ * 表示形式は`YYYYMMDD`(区切りなし、`ArticlePlanSessionList.tsx`)であり、他のTZ
+ * シナリオ(`toLocaleString`のロケール文字列)と異なるため、期待値は
+ * `formatDate.ts`の`formatDateYYYYMMDD`と同じアルゴリズム
+ * (UTCとして正規化 → `Intl.DateTimeFormat(..., { timeZone }).formatToParts()`)で
+ * 独自に組み立てる(SSH鍵ペア等の`withUtcOffsetIfMissing` + `toLocaleString`の再実装と
+ * 同じ考え方)。
+ */
+function toYyyymmdd(iso: string, timeZone: string): string {
+  const date = new Date(withUtcOffsetIfMissing(iso));
+  const parts = new Intl.DateTimeFormat('ja-JP', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}${get('month')}${get('day')}`;
+}
+
+/**
+ * セッションの`createdAt`は「今」(サーバ時刻、UTC)なので、固定のタイムゾーン名を
+ * シナリオに書くと、UTCの暦日とたまたま一致する時間帯(実測: `Asia/Tokyo`なら
+ * 15:00-23:59 UTC、`Pacific/Auckland`なら12:00-23:59 UTC)にシナリオを実行すると、
+ * 直していない実装(生の`createdAt`の暦日をそのまま出すだけ)でもたまたま一致して
+ * PASSしてしまい、RED/GREENの証拠にならない(レビュー指摘、2026-09-20実測)。
+ *
+ * `Pacific/Kiritimati`(UTC+14)と`Pacific/Niue`(UTC-11)の2つを候補にする。差が25時間
+ * (24時間の1日より長い)あるため、この2つの暦日は互いに常に食い違う(検証は下記)。
+ * さらに、それぞれ単独でもUTCの生の暦日と食い違う時間帯・一致する時間帯を持つが、
+ * 2つの「一致する時間帯」が重ならないよう選んだ組み合わせなので、どの`createdAt`でも
+ * 少なくとも一方は必ずUTCの生の暦日と食い違う。
+ *
+ *   UTC時刻hに対する暦日のズレ(0=UTCと同じ日、以下UTCからの日数):
+ *     Kiritimati(+14): h<10 で 0(一致)、h>=10 で +1(食い違う)
+ *     Niue(-11):        h<11 で -1(食い違う)、h>=11 で 0(一致)
+ *   「一致する」区間は Kiritimati が [0,10)、Niue が [11,24) で重ならず、
+ *   「食い違う」区間の和集合 [10,24) ∪ [0,11) は [0,24) 全体を覆う。
+ *   つまりどのhでも少なくとも一方は必ず食い違う。
+ *
+ * 実際に作られたセッションの`createdAt`を取得した「後」に、その場でどちらが食い違うかを
+ * 判定して使う(壁時計の「今」を先読みで仮定しない、レビュー指摘のとおり)。
+ */
+const DIVERGENT_TIMEZONE_A = 'Pacific/Kiritimati'; // UTC+14
+const DIVERGENT_TIMEZONE_B = 'Pacific/Niue'; // UTC-11
+
+/**
+ * `chosen`は必ずUTCの生の暦日と食い違うタイムゾーン、`other`はもう一方(`chosen`とは
+ * 常に暦日が食い違う、上記コメントの検証済み)。数式上「両方とも一致してしまう」ことは
+ * 起こり得ないが、万一の実装ミスを無言でPASSさせないよう、その場合は例外で気付けるようにする
+ * (レビュー指摘: 「暦日が一致する時間帯に無言でPASSする」ことを避ける)。
+ */
+function pickDivergentTimezone(createdAt: string): { chosen: string; other: string } {
+  const raw = toYyyymmdd(createdAt, 'UTC');
+  const a = toYyyymmdd(createdAt, DIVERGENT_TIMEZONE_A);
+  if (a !== raw) {
+    return { chosen: DIVERGENT_TIMEZONE_A, other: DIVERGENT_TIMEZONE_B };
+  }
+  const b = toYyyymmdd(createdAt, DIVERGENT_TIMEZONE_B);
+  if (b === raw) {
+    throw new Error(
+      `想定外: createdAt=${createdAt} の生の暦日(UTC)=${raw} が、`
+        + `${DIVERGENT_TIMEZONE_A}(${a})にも${DIVERGENT_TIMEZONE_B}(${b})にも一致してしまいました`
+        + '(数式上あり得ないはずです。DIVERGENT_TIMEZONE_A/Bの選定を見直してください)'
+    );
+  }
+  return { chosen: DIVERGENT_TIMEZONE_B, other: DIVERGENT_TIMEZONE_A };
+}
+
+interface PlanSessionFixture {
+  id: number;
+  createdAt: string;
+}
+
+/** `articlePlan.steps.ts`が作ったセッションの永続化された`createdAt`を取り直す。 */
+async function fetchPlanSessionCreatedAt(
+  request: APIRequestContext, projectId: number
+): Promise<PlanSessionFixture> {
+  const headers = await adminHeaders(request);
+  const listResponse = await request.get(`/api/projects/${projectId}/article-plan/sessions`, { headers });
+  expect(
+    listResponse.ok(),
+    `壁打ちセッション一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+  ).toBe(true);
+  const items = await parseJsonOrThrow<PlanSessionFixture[]>(listResponse, '壁打ちセッション一覧の取得');
+  expect(items.length, `プロジェクト(id=${projectId})に壁打ちセッションが見つかりません`).toBeGreaterThan(0);
+  return items[0];
+}
+
+/** `plan/page.tsx`の見出しは`{プロジェクト名} — 記事計画`(部分一致で拾える)。 */
+async function openPlanPageWithTimezone(
+  ctx: ScenarioContext, page: Page, projectId: number, timezoneId: string
+): Promise<void> {
+  const browser = page.context().browser();
+  if (!browser) {
+    throw new Error('ブラウザインスタンスを取得できない(TZ指定のコンテキストを作成できない)');
+  }
+  const tzContext = await browser.newContext({ ignoreHTTPSErrors: true, timezoneId });
+  const tzPage = await tzContext.newPage();
+  const consoleErrors: string[] = [];
+  tzPage.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text());
+    }
+  });
+  tzPage.on('pageerror', (err) => {
+    consoleErrors.push(err.message);
+  });
+  ctx.panelTzContext = tzContext;
+  ctx.mediaTzConsoleErrors = consoleErrors;
+  ctx.panelTzPage = tzPage;
+
+  await loginViaKeycloak(tzPage, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+  await tzPage.goto(`/projects/${projectId}/plan`, { waitUntil: 'networkidle' });
+  await expect(tzPage.getByRole('heading', { name: '記事計画', level: 1 })).toBeVisible({ timeout: 30_000 });
+  await tzPage.waitForTimeout(1000);
+}
+
+When(
+  'そのセッションの作成日が暦日をまたぐタイムゾーンを個人設定にし、対極のタイムゾーンをブラウザTZにして管理者としてログインし、記事計画を開く',
+  async ({ ctx, page, request }) => {
+    const projectId = (ctx.plan as { projectId: number }).projectId;
+    const session = await fetchPlanSessionCreatedAt(request, projectId);
+    const { chosen, other } = pickDivergentTimezone(session.createdAt);
+    ctx.planSessionCreatedAt = session.createdAt;
+    ctx.planDivergentTimezone = chosen;
+
+    // 個人設定TZを`chosen`に変更する(media.steps.tsの「個人設定のタイムゾーンを「X」に
+    // 変更する」と同じAPI呼び出しの形。restoreは同じフィールド名を使う既存のAfterフックに
+    // 任せる)。
+    const headers = await adminHeaders(request);
+    const me = await request.get('/api/identity/me', { headers });
+    expect(me.ok(), `自ユーザー情報の取得に失敗しました (status=${me.status()})`).toBe(true);
+    const profile = await parseJsonOrThrow<{ locale: string | null; timezone: string | null }>(
+      me,
+      '自ユーザー情報の取得'
+    );
+    ctx.mediaOriginalTimezone = profile.timezone;
+    ctx.mediaOriginalLocale = profile.locale;
+    const patchResponse = await request.patch('/api/identity/me/preferences', {
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      data: { locale: profile.locale ?? 'ja', timezone: chosen },
+    });
+    expect(
+      patchResponse.ok(),
+      `タイムゾーンの変更に失敗しました (status=${patchResponse.status()}): ${await patchResponse.text()}`
+    ).toBe(true);
+
+    await openPlanPageWithTimezone(ctx, page, projectId, other);
+  }
+);
+
+When(
+  'そのセッションの作成日が暦日をまたぐタイムゾーンをブラウザTZにして管理者としてログインし、記事計画を開く',
+  async ({ ctx, page, request }) => {
+    const projectId = (ctx.plan as { projectId: number }).projectId;
+    const session = await fetchPlanSessionCreatedAt(request, projectId);
+    const { chosen } = pickDivergentTimezone(session.createdAt);
+    ctx.planSessionCreatedAt = session.createdAt;
+    ctx.planDivergentTimezone = chosen;
+
+    await openPlanPageWithTimezone(ctx, page, projectId, chosen);
+  }
+);
+
+Then(
+  '壁打ち一覧のセッションの作成日が、選んだタイムゾーンへの換算値のYYYYMMDDと一致する',
+  async ({ ctx }) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const createdAt = ctx.planSessionCreatedAt as string;
+    const timeZone = ctx.planDivergentTimezone as string;
+
+    // `ArticlePlanSessionList.tsx`のボタンは`{YYYYMMDD}-{title}`(GitHub Issue番号バッジは
+    // このプロジェクトには紐づいていないため付かない)。
+    const sessionButton = tzPage.locator('button', { hasText: /^\d{8}-/ }).first();
+    await expect(sessionButton).toBeVisible({ timeout: 10_000 });
+    const displayed = ((await sessionButton.textContent()) ?? '').trim();
+    const displayedDate = displayed.slice(0, 8);
+
+    const raw = toYyyymmdd(createdAt, 'UTC');
+    const expected = toYyyymmdd(createdAt, timeZone);
+    // `pickDivergentTimezone`の選定どおりであれば`raw !== expected`は常に成り立つはず。
+    // ここが崩れていたら、たとえ`displayedDate === expected`でも「無言でPASSする」
+    // レビュー指摘そのものになるため、検証の前提が壊れていないかを先に確かめる。
+    expect(
+      expected,
+      `選んだタイムゾーン「${timeZone}」への換算値「${expected}」が生の暦日(UTC)「${raw}」と`
+        + `一致してしまいました(createdAt=${createdAt})。pickDivergentTimezoneの前提が崩れています。`
+    ).not.toBe(raw);
+    expect(
+      displayedDate,
+      `表示された作成日「${displayedDate}」(全体: 「${displayed}」)が、`
+        + `${timeZone}換算の期待値「${expected}」と一致しません(createdAt=${createdAt}、`
+        + `生の暦日(UTC)=${raw})`
+    ).toBe(expected);
+  }
+);
+
 // ------------------------------------------------------- 後片付け
 
 After({ tags: '@panel-timezone' }, async ({ ctx, request }) => {
