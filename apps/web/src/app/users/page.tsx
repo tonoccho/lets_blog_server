@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { listUsers, listProjects, listAllProjectUsers } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone, getViewerProfile } from "@/lib/session";
-import { formatDateTime } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { UserForm } from "./UserForm";
 import { DeleteUserButton } from "./DeleteUserButton";
 
@@ -69,7 +69,9 @@ export default async function UsersPage() {
                   </td>
                   <td className="px-4 py-2">{user.email}</td>
                   <td className="px-4 py-2 font-mono">{user.role}</td>
-                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">{formatDateTime(user.createdAt, timezone)}</td>
+                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
+                    <ViewerDateTime iso={user.createdAt} personalTimeZone={timezone} />
+                  </td>
                   <td className="px-4 py-2 text-right">
                     <div className="flex justify-end gap-3">
                       <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">

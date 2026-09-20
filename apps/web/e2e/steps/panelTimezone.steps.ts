@@ -107,6 +107,12 @@ const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; hea
     path: (ctx) => `/projects/${ctx.publishProjectId as number}/posts`,
     heading: '投稿履歴',
   },
+  // issue #1364(親issue #1261 分割C)。`users/page.tsx:30`・`projects/page.tsx:14`の見出し。
+  ユーザー管理: { path: () => '/users', heading: 'ユーザー管理' },
+  プロジェクト: { path: () => '/projects', heading: 'プロジェクト' },
+  // トップレベル`/posts`一覧(`posts/page.tsx:15`の見出しは`投稿履歴`だが、`TARGET_PAGES`の
+  // キーが既存の`投稿履歴`(`/projects/{id}/posts`)と重複しないよう区別する)。
+  投稿履歴一覧: { path: () => '/posts', heading: '投稿履歴' },
 };
 
 /**
@@ -115,7 +121,7 @@ const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; hea
  * 専用の `BrowserContext` / `Page` を作り、その中でログインする。
  */
 When(
-  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|生成画像ギャラリー画面|サイト一覧|投稿履歴)を開く$/,
+  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|生成画像ギャラリー画面|サイト一覧|投稿履歴一覧|投稿履歴|ユーザー管理|プロジェクト)を開く$/,
   async ({ ctx, page }, timezoneId: string, targetName: string) => {
     const target = TARGET_PAGES[targetName];
     const browser = page.context().browser();
@@ -144,8 +150,10 @@ When(
     // `level: 1` で見出しレベルを絞る。`/sites`は「サイト」(h1)と「サイトを登録」(h2、
     // SiteCreationPanel)の両方を`name`の部分一致(既定)が拾ってしまい、
     // `strict mode violation: ... resolved to 2 elements`で落ちることを実測で確認した
-    // (issue #1363)。対象5画面はいずれもページ本体の見出しがh1であるため
-    // (`page.tsx`各ファイルの`<h1>`を確認済み)、全エントリに一律で付けてよい。
+    // (issue #1363)。`/projects`も同様に「プロジェクト」(h1)と「プロジェクトを作成」
+    // (h2、`ProjectForm.tsx:31`)が部分一致で衝突する(issue #1364)。対象8画面はいずれも
+    // ページ本体の見出しがh1であるため(`page.tsx`各ファイルの`<h1>`を確認済み)、
+    // 全エントリに一律で付けてよい。
     await expect(tzPage.getByRole('heading', { name: target.heading, level: 1 })).toBeVisible({
       timeout: 30_000,
     });
@@ -434,6 +442,179 @@ Then(
   }
 );
 
+// ------------------------------------------------------- issue #1364: ユーザー一覧の登録日
+
+interface TzUserFixture {
+  id: number;
+  email: string;
+  createdAt: string;
+}
+
+/**
+ * `userManagement.steps.ts`等の`POST /api/users`パターン(issue #1159)を踏襲する。
+ * POSTのレスポンスは`createdAt`を返すが、SSH鍵ペア・サイトと同じ理由(1秒程度ずれ得る)で
+ * `GET /api/users`から永続化された値を取り直す。
+ */
+Given('TZ検証用のユーザーが1件登録されている', async ({ ctx, request }) => {
+  const headers = await adminHeaders(request);
+  const suffix = uniqueSuffix();
+  const email = `e2e-1364-tz-${suffix}@example.com`;
+  const createResponse = await request.post('/api/users', {
+    headers,
+    data: { email, password: `E2e1364Tz!${suffix}`, role: 'user' },
+  });
+  expect(
+    createResponse.ok(),
+    `TZ検証用のユーザー登録に失敗しました (status=${createResponse.status()}): ${await createResponse.text()}`
+  ).toBe(true);
+  const created = await parseJsonOrThrow<{ id: number; email: string }>(createResponse, 'TZ検証用のユーザー登録');
+
+  const listResponse = await request.get('/api/users', { headers });
+  expect(
+    listResponse.ok(),
+    `ユーザー一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+  ).toBe(true);
+  const items = await parseJsonOrThrow<{ id: number; email: string; createdAt: string }[]>(
+    listResponse,
+    'ユーザー一覧の取得'
+  );
+  const persisted = items.find((item) => item.id === created.id);
+  expect(persisted, `登録したユーザー(id=${created.id})が一覧に見つかりません`).toBeTruthy();
+
+  const fixture: TzUserFixture = {
+    id: created.id,
+    email,
+    createdAt: (persisted as { createdAt: string }).createdAt,
+  };
+  ctx.panelTzUser = fixture;
+});
+
+Then(
+  /^そのユーザーの登録日が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const fixture = ctx.panelTzUser as TzUserFixture;
+    const row = tzPage.locator(`tr:has-text("${fixture.email}")`);
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    // `users/page.tsx`の列構成: 参加プロジェクト(0)・メールアドレス(1)・権限(2)・登録日(3)。
+    const displayed = (await row.locator('td').nth(3).textContent())?.trim() ?? '';
+
+    const expected = new Date(withUtcOffsetIfMissing(fixture.createdAt)).toLocaleString('ja-JP', {
+      timeZone,
+    });
+    expect(displayed).toBe(expected);
+  }
+);
+
+// ------------------------------------------------------- issue #1364: プロジェクト一覧の作成日
+
+interface TzProjectFixture {
+  id: number;
+  slug: string;
+  createdAt: string;
+}
+
+/**
+ * `diagram.steps.ts`等の`POST /api/projects`パターン(issue #937)を踏襲する。POSTの
+ * レスポンスは`createdAt`を返すが、他のフィクスチャと同じ理由で`GET /api/projects`から
+ * 永続化された値を取り直す。
+ */
+Given('TZ検証用のプロジェクトが1件登録されている', async ({ ctx, request }) => {
+  const headers = await adminHeaders(request);
+  const suffix = uniqueSuffix();
+  const slug = `e2e-1364-tz-${suffix}`;
+  const createResponse = await request.post('/api/projects', {
+    headers,
+    data: { name: `TZ検証用プロジェクト ${suffix}`, slug },
+  });
+  expect(
+    createResponse.ok(),
+    `TZ検証用のプロジェクト作成に失敗しました (status=${createResponse.status()}): ${await createResponse.text()}`
+  ).toBe(true);
+  const created = await parseJsonOrThrow<{ id: number }>(createResponse, 'TZ検証用のプロジェクト作成');
+
+  const listResponse = await request.get('/api/projects', { headers });
+  expect(
+    listResponse.ok(),
+    `プロジェクト一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+  ).toBe(true);
+  const items = await parseJsonOrThrow<{ id: number; slug: string; createdAt: string }[]>(
+    listResponse,
+    'プロジェクト一覧の取得'
+  );
+  const persisted = items.find((item) => item.id === created.id);
+  expect(persisted, `作成したプロジェクト(id=${created.id})が一覧に見つかりません`).toBeTruthy();
+
+  const fixture: TzProjectFixture = {
+    id: created.id,
+    slug,
+    createdAt: (persisted as { createdAt: string }).createdAt,
+  };
+  ctx.panelTzProject = fixture;
+});
+
+Then(
+  /^そのプロジェクトの作成日が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const fixture = ctx.panelTzProject as TzProjectFixture;
+    const row = tzPage.locator(`tr:has-text("${fixture.slug}")`);
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    // `projects/page.tsx`の列構成: 名前(0)・slug(1)・環境(2)・作成日(3)。
+    const displayed = (await row.locator('td').nth(3).textContent())?.trim() ?? '';
+
+    const expected = new Date(withUtcOffsetIfMissing(fixture.createdAt)).toLocaleString('ja-JP', {
+      timeZone,
+    });
+    expect(displayed).toBe(expected);
+  }
+);
+
+// ------------------------------------------------------- issue #1364: 投稿一覧(トップレベル/posts)の最終投稿日時
+
+/**
+ * 投稿フィクスチャ自体は分割B(issue #1363)と同じくpublishLifecycle.steps.tsの既存
+ * Given/When「公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている」
+ * 「記事を新規公開する」をシナリオ側でそのまま再利用する(`ctx.publishProjectId`
+ * `ctx.newPostSlug`が立つ)。トップレベル`/posts`は`GET /api/posts`(全プロジェクト横断)を
+ * 見るため、`/projects/{id}/posts`向けの`その投稿の最終投稿日時が...`と同じ考え方で
+ * `lastPublishedAt`を取り直すが、`posts/page.tsx`はカテゴリ列を持たないため列位置が異なる
+ * (末尾の列がそのまま最終投稿日時)。列構成の違いを理由に別のThenステップとして用意する。
+ */
+Then(
+  /^投稿一覧のその投稿の最終投稿日時が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx, request }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const slug = ctx.newPostSlug as string;
+    const headers = await adminHeaders(request);
+
+    const listResponse = await request.get('/api/posts', { headers });
+    expect(
+      listResponse.ok(),
+      `投稿一覧の取得に失敗しました (status=${listResponse.status()}): ${await listResponse.text()}`
+    ).toBe(true);
+    const items = await parseJsonOrThrow<{ slug: string | null; lastPublishedAt: string | null }[]>(
+      listResponse,
+      '投稿一覧の取得'
+    );
+    const persisted = items.find((item) => item.slug === slug);
+    expect(persisted, `投稿(slug=${slug})が一覧に見つかりません`).toBeTruthy();
+    const lastPublishedAt = (persisted as { lastPublishedAt: string | null }).lastPublishedAt;
+    expect(lastPublishedAt, `投稿(slug=${slug})にlastPublishedAtがありません`).toBeTruthy();
+
+    // `posts/page.tsx`の列構成: サイト(0)・WP投稿ID(1)・スラッグ(2)・ステータス(3)・
+    // 最終投稿日時(4、カテゴリ列が無いため末尾)。
+    const row = tzPage.locator(`tr:has-text("${slug}")`);
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    const displayed = (await row.locator('td').last().textContent())?.trim() ?? '';
+
+    const expected = new Date(withUtcOffsetIfMissing(lastPublishedAt as string)).toLocaleString('ja-JP', {
+      timeZone,
+    });
+    expect(displayed).toBe(expected);
+  }
+);
+
 // ------------------------------------------------------- 後片付け
 
 After({ tags: '@panel-timezone' }, async ({ ctx, request }) => {
@@ -451,6 +632,16 @@ After({ tags: '@panel-timezone' }, async ({ ctx, request }) => {
   const siteFixture = ctx.panelTzSite as TzSiteFixture | undefined;
   if (siteFixture) {
     await request.delete(`/api/sites/${siteFixture.id}`, { headers });
+  }
+
+  const userFixture = ctx.panelTzUser as TzUserFixture | undefined;
+  if (userFixture) {
+    await request.delete(`/api/users/${userFixture.id}`, { headers });
+  }
+
+  const projectFixture = ctx.panelTzProject as TzProjectFixture | undefined;
+  if (projectFixture) {
+    await request.delete(`/api/projects/${projectFixture.id}`, { headers });
   }
 
   // 「個人設定のタイムゾーンを「X」に変更する」(media.steps.ts)、または本ファイルの

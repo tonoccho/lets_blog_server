@@ -1,6 +1,6 @@
 import { listPosts } from "@/lib/apiClient";
 import { requireSession, getViewerTimeZone } from "@/lib/session";
-import { formatDateTime } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { PostsTable } from "./PostsTable";
 
 export default async function PostsPage() {
@@ -46,7 +46,11 @@ export default async function PostsPage() {
                   <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs">{post.status}</span>
                 </td>
                 <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
-                  {post.lastPublishedAt ? formatDateTime(post.lastPublishedAt, timezone) : "-"}
+                  {post.lastPublishedAt ? (
+                    <ViewerDateTime iso={post.lastPublishedAt} personalTimeZone={timezone} />
+                  ) : (
+                    "-"
+                  )}
                 </td>
               </tr>
             ))}

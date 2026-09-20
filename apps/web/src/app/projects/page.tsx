@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { listProjects } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
-import { formatDateTime } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { ProjectForm } from "./ProjectForm";
 import { ProjectsTable } from "./ProjectsTable";
 
@@ -69,7 +69,9 @@ export default async function ProjectsPage() {
                     </span>
                   </div>
                 </td>
-                <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">{formatDateTime(project.createdAt, timezone)}</td>
+                <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
+                  <ViewerDateTime iso={project.createdAt} personalTimeZone={timezone} />
+                </td>
                 <td className="px-4 py-2 text-right space-x-2">
                   <Link href={`/projects/${project.id}/plan`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
                     計画
