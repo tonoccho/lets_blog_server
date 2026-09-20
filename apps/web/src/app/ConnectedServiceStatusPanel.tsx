@@ -26,17 +26,39 @@ function StatusIcon({ status }: { status: ConnectedServiceStatus["status"] }) {
   return <XCircle className={className} aria-hidden="true" />;
 }
 
+/**
+ * 個人設定TZが未設定のときの、マウント前(サーバー描画時点)のプレースホルダー(issue #1362)。
+ * ブラウザTZはマウント後にしか分からず、サーバー描画と同じ値を先に出せないため、
+ * 両者で同じ固定文字列を描いてハイドレーション不一致を避ける
+ * (前例: ThemeSwitcher.tsx:23-58 の mounted フラグ方式)。
+ */
+const TIMEZONE_PENDING_PLACEHOLDER = "読み込み中…";
+
 export function ConnectedServiceStatusPanel({
   initialStatuses,
   initialDetail,
+  personalTimeZone,
 }: {
   initialStatuses: ConnectedServiceStatus[];
   /** admin向けの詳細診断情報(issue #199)。非adminまたは取得失敗時はnull(セクション自体を表示しない)。 */
   initialDetail: ConnectedServiceStatusDetail[] | null;
+  /**
+   * 個人設定(システム画面)で保存したタイムゾーン(issue #1362、親issue #1261 分割A)。
+   * 未設定(null)ならマウント後に解決したブラウザのタイムゾーンで表示する。
+   */
+  personalTimeZone: string | null;
 }) {
   const [statuses, setStatuses] = useState(initialStatuses);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [live, setLive] = useState(false);
+  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
+  // 一致させるため、issue #1362)。個人設定TZがあるときはSSR/クライアントで常に同じ
+  // 文字列になるためこのフラグを見ない。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
   // 取得失敗を握り潰さず画面に出す(issue #876)。以前は `if (!res.ok) return;` で
   // 捨てていたため、認証エラー(401)でも「データが無い」ようにしか見えなかった。
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -125,7 +147,7 @@ export function ConnectedServiceStatusPanel({
           )}
           {lastUpdatedAt && (
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              最終更新: {lastUpdatedAt.toLocaleTimeString("ja-JP")}
+              最終更新: {lastUpdatedAt.toLocaleTimeString("ja-JP", { timeZone: personalTimeZone ?? undefined })}
             </span>
           )}
         </div>
@@ -184,7 +206,11 @@ export function ConnectedServiceStatusPanel({
                       {detail.targetUrl ?? "-"}
                     </td>
                     <td className="py-2 text-neutral-700 dark:text-neutral-300">
-                      {formatDateTime(detail.checkedAt)}
+                      {personalTimeZone
+                        ? formatDateTime(detail.checkedAt, personalTimeZone)
+                        : mounted
+                          ? formatDateTime(detail.checkedAt)
+                          : TIMEZONE_PENDING_PLACEHOLDER}
                     </td>
                   </tr>
                 ))}

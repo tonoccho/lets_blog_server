@@ -1,11 +1,29 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { GeneratedSshKeyPair, SavedSshKeyPair } from "@/lib/apiClient";
 import { formatDateTime } from "@/lib/formatDate";
 import { createSshKeyPairAction, deleteSshKeyPairAction } from "./actions";
 
-export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) {
+/**
+ * 個人設定TZが未設定のときの、マウント前(サーバー描画時点)のプレースホルダー(issue #1362)。
+ * ブラウザTZはマウント後にしか分からず、サーバー描画と同じ値を先に出せないため、
+ * 両者で同じ固定文字列を描いてハイドレーション不一致を避ける
+ * (前例: ThemeSwitcher.tsx:23-58 の mounted フラグ方式)。
+ */
+const TIMEZONE_PENDING_PLACEHOLDER = "読み込み中…";
+
+export function SshKeyPairsPanel({
+  keyPairs,
+  personalTimeZone,
+}: {
+  keyPairs: SavedSshKeyPair[];
+  /**
+   * 個人設定(システム画面)で保存したタイムゾーン(issue #1362、親issue #1261 分割A)。
+   * 未設定(null)ならマウント後に解決したブラウザのタイムゾーンで表示する。
+   */
+  personalTimeZone: string | null;
+}) {
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -14,6 +32,14 @@ export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) 
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletePending, startDeleteTransition] = useTransition();
+  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
+  // 一致させるため、issue #1362)。個人設定TZがあるときはSSR/クライアントで常に同じ
+  // 文字列になるためこのフラグを見ない。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   function handleGenerate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -159,7 +185,11 @@ export function SshKeyPairsPanel({ keyPairs }: { keyPairs: SavedSshKeyPair[] }) 
                       />
                     </td>
                     <td className="py-2 pr-4 whitespace-nowrap text-neutral-600 dark:text-neutral-400">
-                      {formatDateTime(keyPair.createdAt)}
+                      {personalTimeZone
+                        ? formatDateTime(keyPair.createdAt, personalTimeZone)
+                        : mounted
+                          ? formatDateTime(keyPair.createdAt)
+                          : TIMEZONE_PENDING_PLACEHOLDER}
                     </td>
                     <td className="py-2 pr-4">
                       <button

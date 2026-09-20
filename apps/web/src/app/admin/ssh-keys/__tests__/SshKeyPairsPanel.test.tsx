@@ -8,6 +8,11 @@ import { formatDateTime } from "@/lib/formatDate";
  * issue #1236: `new Date(keyPair.createdAt).toLocaleString("ja-JP")` を直接呼んでいたため、
  * オフセット無しの日時文字列(バックエンドのLocalDateTime由来)が実行環境のTZでパースされ、
  * SSRとブラウザで表示がずれ得た。共有ヘルパ`formatDateTime`を経由するよう変更する。
+ *
+ * issue #1362: 個人設定TZ(`personalTimeZone`)を受け取る経路を追加した。個人設定TZが
+ * あるときはSSR/クライアントで同じ文字列になるためgate不要。無いときは、マウント後に
+ * しか解決できないブラウザTZを使うため、マウント前は固定プレースホルダーを描く
+ * (前例: ThemeSwitcher.tsx:23-58のmountedフラグ方式)。
  */
 jest.mock("@/lib/formatDate", () => ({
   formatDateTime: jest.fn(() => "FORMATTED_CREATED_AT"),
@@ -42,25 +47,26 @@ describe("SshKeyPairsPanel", () => {
   beforeEach(() => {
     createMock.mockReset();
     deleteMock.mockReset();
+    (formatDateTime as jest.Mock).mockClear();
     window.confirm = jest.fn();
   });
 
   it("生成フォームはmethod=\"post\"を持つ", () => {
-    const { container } = render(<SshKeyPairsPanel keyPairs={[]} />);
+    const { container } = render(<SshKeyPairsPanel keyPairs={[]} personalTimeZone={null} />);
 
     const form = container.querySelector("form");
     expect(form?.getAttribute("method")).toBe("post");
   });
 
   it("保存済みの鍵ペアが無ければその旨を表示する", () => {
-    render(<SshKeyPairsPanel keyPairs={[]} />);
+    render(<SshKeyPairsPanel keyPairs={[]} personalTimeZone={null} />);
 
     expect(screen.getByText("保存済みのSSH鍵ペアはありません。")).toBeInTheDocument();
   });
 
   it("生成に失敗するとエラーを表示する", async () => {
     createMock.mockResolvedValue({ error: "名前が既に使用されています" });
-    render(<SshKeyPairsPanel keyPairs={[]} />);
+    render(<SshKeyPairsPanel keyPairs={[]} personalTimeZone={null} />);
 
     fireEvent.change(screen.getByPlaceholderText("production-deploy"), { target: { value: "dup" } });
     fireEvent.click(screen.getByRole("button", { name: "SSH鍵ペアを生成" }));
@@ -77,7 +83,7 @@ describe("SshKeyPairsPanel", () => {
         privateKeyPem: "-----BEGIN OPENSSH PRIVATE KEY-----",
       },
     });
-    render(<SshKeyPairsPanel keyPairs={[]} />);
+    render(<SshKeyPairsPanel keyPairs={[]} personalTimeZone={null} />);
 
     fireEvent.change(screen.getByPlaceholderText("production-deploy"), { target: { value: "new-pair" } });
     fireEvent.click(screen.getByRole("button", { name: "SSH鍵ペアを生成" }));
@@ -92,7 +98,7 @@ describe("SshKeyPairsPanel", () => {
 
   it("削除確認をキャンセルすると削除アクションを呼ばない", () => {
     (window.confirm as jest.Mock).mockReturnValue(false);
-    render(<SshKeyPairsPanel keyPairs={[keyPair()]} />);
+    render(<SshKeyPairsPanel keyPairs={[keyPair()]} personalTimeZone={null} />);
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
@@ -102,7 +108,7 @@ describe("SshKeyPairsPanel", () => {
   it("削除確認を承認すると削除アクションを呼び、失敗時はエラーを表示する", async () => {
     (window.confirm as jest.Mock).mockReturnValue(true);
     deleteMock.mockResolvedValue({ error: "削除に失敗しました" });
-    render(<SshKeyPairsPanel keyPairs={[keyPair()]} />);
+    render(<SshKeyPairsPanel keyPairs={[keyPair()]} personalTimeZone={null} />);
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
@@ -112,9 +118,20 @@ describe("SshKeyPairsPanel", () => {
     });
   });
 
-  it("作成日時は共有ヘルパformatDateTime経由で表示する(issue #1236)", () => {
+  it("個人設定TZが設定されているとき、作成日時はformatDateTimeにそのTZを渡す(issue #1362、gateなし)", () => {
     const pair = keyPair({ createdAt: "2026-09-08T20:03:35" });
-    render(<SshKeyPairsPanel keyPairs={[pair]} />);
+    render(<SshKeyPairsPanel keyPairs={[pair]} personalTimeZone="Asia/Tokyo" />);
+
+    expect(formatDateTime).toHaveBeenCalledWith(pair.createdAt, "Asia/Tokyo");
+    expect(screen.getByText("FORMATTED_CREATED_AT")).toBeInTheDocument();
+  });
+
+  // 「マウント前は固定プレースホルダーを表示する」は SshKeyPairsPanel.mountGate.test.tsx で
+  // 検証する(このファイルで検証しない理由は同ファイルの先頭コメント参照)。
+
+  it("個人設定TZが未設定のとき、マウント後はformatDateTimeをTZ引数無しで呼ぶ(issue #1362)", () => {
+    const pair = keyPair({ createdAt: "2026-09-08T20:03:35" });
+    render(<SshKeyPairsPanel keyPairs={[pair]} personalTimeZone={null} />);
 
     expect(formatDateTime).toHaveBeenCalledWith(pair.createdAt);
     expect(screen.getByText("FORMATTED_CREATED_AT")).toBeInTheDocument();

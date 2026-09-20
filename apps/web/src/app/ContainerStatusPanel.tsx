@@ -29,7 +29,19 @@ function StatusIcon({ status }: { status: ContainerStatus["status"] }) {
  * このアプリを構成するDockerコンテナ(lbs-*)の稼働状況を表示する(issue #280)。
  * ConnectedServiceStatusPanelと同じSSE+ポーリングフォールバックの構成を踏襲する。
  */
-export function ContainerStatusPanel({ initialStatuses }: { initialStatuses: ContainerStatus[] }) {
+export function ContainerStatusPanel({
+  initialStatuses,
+  personalTimeZone,
+}: {
+  initialStatuses: ContainerStatus[];
+  /**
+   * 個人設定(システム画面)で保存したタイムゾーン(issue #1362、親issue #1261 分割A)。
+   * `lastUpdatedAt`は初期値nullでマウント後の更新でしか入らないため、SSRとクライアントの
+   * 初期描画は常に一致しており、ここではmountedフラグによるgateは要らない(ThemeSwitcher
+   * のような「マウント前に確定できない値をSSRにも描く」ケースではない)。
+   */
+  personalTimeZone: string | null;
+}) {
   const [statuses, setStatuses] = useState(initialStatuses);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [live, setLive] = useState(false);
@@ -118,7 +130,7 @@ export function ContainerStatusPanel({ initialStatuses }: { initialStatuses: Con
           )}
           {lastUpdatedAt && (
             <span className="text-xs text-neutral-500 dark:text-neutral-400">
-              最終更新: {lastUpdatedAt.toLocaleTimeString("ja-JP")}
+              最終更新: {lastUpdatedAt.toLocaleTimeString("ja-JP", { timeZone: personalTimeZone ?? undefined })}
             </span>
           )}
         </div>

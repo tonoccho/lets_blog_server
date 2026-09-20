@@ -7,7 +7,7 @@ import {
   getConnectedServiceStatusDetail,
   getContainerStatuses,
 } from "@/lib/apiClient";
-import { requireSession } from "@/lib/session";
+import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { ConnectedServiceStatusPanel } from "./ConnectedServiceStatusPanel";
 import { ContainerStatusPanel } from "./ContainerStatusPanel";
 
@@ -18,14 +18,16 @@ export default async function DashboardPage() {
   const session = await requireSession();
   const isAdmin = session?.user.role === "admin";
 
-  const [sites, posts, jobs, serviceStatuses, serviceStatusDetail, containerStatuses] = await Promise.all([
-    listSites().catch(() => []),
-    listPosts().catch(() => []),
-    listGenerationJobs().catch(() => []),
-    getConnectedServiceStatuses().catch(() => []),
-    isAdmin ? getConnectedServiceStatusDetail().catch(() => null) : Promise.resolve(null),
-    getContainerStatuses().catch(() => []),
-  ]);
+  const [sites, posts, jobs, serviceStatuses, serviceStatusDetail, containerStatuses, personalTimeZone] =
+    await Promise.all([
+      listSites().catch(() => []),
+      listPosts().catch(() => []),
+      listGenerationJobs().catch(() => []),
+      getConnectedServiceStatuses().catch(() => []),
+      isAdmin ? getConnectedServiceStatusDetail().catch(() => null) : Promise.resolve(null),
+      getContainerStatuses().catch(() => []),
+      getViewerTimeZone(),
+    ]);
 
   const cards = [
     { label: "登録サイト数", value: sites.length, href: "/sites" },
@@ -48,8 +50,12 @@ export default async function DashboardPage() {
           </Link>
         ))}
       </div>
-      <ConnectedServiceStatusPanel initialStatuses={serviceStatuses} initialDetail={serviceStatusDetail} />
-      <ContainerStatusPanel initialStatuses={containerStatuses} />
+      <ConnectedServiceStatusPanel
+        initialStatuses={serviceStatuses}
+        initialDetail={serviceStatusDetail}
+        personalTimeZone={personalTimeZone}
+      />
+      <ContainerStatusPanel initialStatuses={containerStatuses} personalTimeZone={personalTimeZone} />
     </div>
   );
 }

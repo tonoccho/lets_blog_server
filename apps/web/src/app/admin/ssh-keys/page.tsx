@@ -1,10 +1,13 @@
-import { requireAdminSession } from "@/lib/session";
+import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { listSshKeyPairs } from "@/lib/apiClient";
 import { SshKeyPairsPanel } from "./SshKeyPairsPanel";
 
 export default async function AdminSshKeysPage() {
   await requireAdminSession();
-  const keyPairs = await listSshKeyPairs().catch(() => []);
+  const [keyPairs, personalTimeZone] = await Promise.all([
+    listSshKeyPairs().catch(() => []),
+    getViewerTimeZone(),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -16,7 +19,7 @@ export default async function AdminSshKeysPage() {
           へ手動で追記してください。
         </p>
       </div>
-      <SshKeyPairsPanel keyPairs={keyPairs} />
+      <SshKeyPairsPanel keyPairs={keyPairs} personalTimeZone={personalTimeZone} />
     </div>
   );
 }
