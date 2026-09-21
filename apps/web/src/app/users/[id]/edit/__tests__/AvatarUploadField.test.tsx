@@ -160,6 +160,14 @@ describe("AvatarUploadField", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
+  it("ファイル入力はラベルで紐付いたアクセシブルな名前を持つ(axeのlabelルール対策、issue #1358)", () => {
+    render(<AvatarUploadField userId={1} initialAvatarUrl={null} />);
+
+    const input = screen.getByLabelText("アバター画像") as HTMLInputElement;
+
+    expect(input).toBe(screen.getByTestId("avatar-file-input"));
+  });
+
   it("ファイル選択をキャンセルした場合(filesが空)は何も起きない", () => {
     render(<AvatarUploadField userId={1} initialAvatarUrl={null} />);
     const input = screen.getByTestId("avatar-file-input") as HTMLInputElement;

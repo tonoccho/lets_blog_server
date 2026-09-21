@@ -138,14 +138,17 @@ export function AvatarUploadField({
         />
       )}
 
-      <input
-        ref={fileInputRef}
-        data-testid="avatar-file-input"
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        onChange={handleFileChange}
-        className="text-sm"
-      />
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">アバター画像</span>
+        <input
+          ref={fileInputRef}
+          data-testid="avatar-file-input"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={handleFileChange}
+          className="text-sm"
+        />
+      </label>
 
       {localError && (
         <p data-testid="avatar-upload-error" className="text-sm text-red-600">
