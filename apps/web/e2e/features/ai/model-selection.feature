@@ -1,5 +1,5 @@
 # language: ja
-@api @stub @ai @mode:serial
+@api @stub @ai @mode:serial @stub-isolation:llm
 機能: LLMモデル・プロバイダーの選択
 
   プロジェクトごとに選んだLLMモデル・プロバイダーが、以後の生成要求に使われることを
@@ -20,13 +20,19 @@
   設定されていないこと(LlmClient#generate参照)を利用し、切り替え先での成否と、
   切り替え前(OPENAI、スタブへ向く)でスタブが受けた内容の両方で確認する。
 
-  ## なぜ `@mode:serial` か
+  ## なぜ `@mode:serial` か、および `@stub-isolation:llm`(issue #1188)
 
   LLMスタブが受け取ったリクエストの `model` の履歴(`recentModels`)は、リクエスト単位ではなく
-  スタブ全体の状態であり、上限件数を超えると古いものから捨てられる。他のfeature(このスタブを
-  共有する generation.feature 等)と完全に隔離することはできない(playwright-bddはファイルを
-  またぐ直列化の手段を持たないため)が、少なくとも同一ファイル内の2シナリオを直列化しておく
-  ことで、この機能内で発生しうる押し出しは避ける。
+  スタブ全体の状態であり、上限件数を超えると古いものから捨てられる。`@mode:serial` は
+  同一ファイル内の2シナリオを直列化し、この機能内で発生しうる押し出しを避ける
+  (`@mode:serial`はplaywright-bddではファイルをまたいで効かないため、これだけでは
+  generation.feature等**他ファイル**からの押し出しは防げない)。
+
+  他ファイルからの押し出し、および他ファイルによる `ai/resilience.feature` の
+  注入横取り(このファイル自身の生成要求が横取り側になりうる)は、`@stub-isolation:llm`
+  タグ(`apps/web/playwright.config.ts`の`at-llm-exclusive`、`workers:1`)が
+  LLMスタブへ触れる全ファイルを1レーンへ集めて完全直列化することで防ぐ。詳細は
+  `playwright.config.ts`の`at-llm-exclusive`コメントと`docs/ACCEPTANCE_TESTING.md` §9。
 
   シナリオ: 利用可能なLLMモデル一覧が取得でき、選択したモデルが以後の生成要求に反映される
     前提 AI設定用のプロジェクトが用意されている

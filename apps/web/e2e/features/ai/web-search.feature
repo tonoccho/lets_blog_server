@@ -1,5 +1,5 @@
 # language: ja
-@api @stub @ai @mode:serial
+@api @stub @ai @mode:serial @stub-isolation:llm
 機能: 壁打ちのBrave Search併用とプロジェクト単位APIキー管理
 
   記事プランの壁打ち(`POST /api/projects/{projectId}/article-plan/chat`、

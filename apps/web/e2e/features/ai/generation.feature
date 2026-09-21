@@ -1,5 +1,5 @@
 # language: ja
-@api @stub @ai
+@api @stub @ai @stub-isolation:llm
 機能: AI生成(下書き・壁打ち・セクション・画像プロンプト)の正常系
 
   下書き生成・セクション生成(壁打ちの再生成を含む)・画像プロンプト生成が、入力を正しく

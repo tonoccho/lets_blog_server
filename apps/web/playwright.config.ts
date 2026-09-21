@@ -79,12 +79,77 @@ const atProvision = defineBddProject({
  */
 const excludeRequiresGpu = process.env.AT_EXCLUDE_REQUIRES_GPU === '1' ? ' and not @requires-gpu' : '';
 
-/** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。 */
+/** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。
+ * `@stub-isolation:llm`(下の at-llm-exclusive)も除く(issue #1188)。 */
 const atMain = defineBddProject({
   ...BDD_COMMON,
   name: 'at-main',
   outputDir: '.features-gen/at-main',
-  tags: 'not @stage:setup and not @stage:provision and not @destructive' + excludeRequiresGpu,
+  tags:
+    'not @stage:setup and not @stage:provision and not @destructive and not @stub-isolation:llm'
+    + excludeRequiresGpu,
+});
+
+/**
+ * issue #1188: `llm-stub`(共有・単一プロセス)へ実際にトラフィックを送る、または
+ * `POST /__control/force` でその共有状態を仕込む/読む、全シナリオの専用レーン。
+ *
+ * ## レースの原因
+ *
+ * `playwright.config.ts` は `fullyParallel: true` で、`@mode:serial`
+ * (`node_modules/playwright-bdd/dist/generate/specialTags.js` の `extractMode`)は
+ * **同一 .feature ファイル内**のシナリオしか直列化しない。そのため
+ * `ai/resilience.feature`(`POST /__control/force` で429/遅延を仕込み、
+ * `stubRequestCount('llm')` で受信件数も検証する)が `at-main` の一部として動くと、
+ * 同じ `llm-stub` へ通常系のリクエストを送る**別ファイル**
+ * (`ai/generation.feature` 等)が別workerで並列に走り、
+ *
+ *   1. 仕込んだ429/遅延を横取りする(2026-09-08 に実測: `ai/generation.feature`
+ *      が502、`ai/resilience.feature` の429シナリオが200)。
+ *   2. `stubRequestCount('llm')` の前後比較(「LLMスタブは一度も呼び出されていない」)も
+ *      同じ理由で壊れる — 注入ではなく受信件数だけを見るシナリオも被害者になる
+ *      (2026-09-19 のリリース検証で実測: 15 → 16)。
+ *
+ * `infra/e2e-stubs/lib/stub.js` の状態(`forced` / `requests`)はスタブプロセス単位で
+ * ただ1つしかなく、テストごとの分離トークンを持たない。相関IDをサービス境界
+ * (gateway → ai-service)越しに通す変更はプロダクションコードの変更を要するため、
+ * このIssueのScope(playwright.config.ts / infra/e2e-stubs/lib/stub.js の注入機構)外
+ * ―― 実際に採ったのは、`llm-stub` へ触れる全ファイルを1つのプロジェクトへ集め、
+ * `workers: 1` で内部を完全直列化する案。
+ *
+ * ## `@stub-isolation:llm` を付けたファイル
+ *
+ *   - `ai/generation.feature`         通常系(下書き・壁打ち・セクション・画像プロンプト)
+ *   - `ai/resilience.feature`         注入元(429・タイムアウト)+ 受信件数の前後比較
+ *   - `ai/model-selection.feature`    通常系(モデル選択の反映は履歴なので単体では耐性があるが、
+ *                                     resilience.feature の仕込みを横取りしうる側でもある)
+ *   - `ai/review-step-suggestions.feature` 通常系(`/api/projects/{id}/ai/review-steps/**`)
+ *   - `ai/tag-and-proofread.feature`  通常系(`/api/ai/tags` `/api/ai/proofread`)
+ *   - `ai/web-search.feature`         通常系(`/api/projects/{id}/article-plan/chat` が llm を使う)
+ *   - `stubs/external-stubs.feature`  llmを含む全スタブへ決定性・注入の直接プローブを送る
+ *
+ * `ai/authorization.feature`・`ai/review-step-model-settings.feature` は設定CRUDのみで
+ * 実際の生成呼び出しが無いため対象外。`ai/generation-job.feature` は既に `@destructive` で
+ * 独立実行される(at-destructiveは`at-main`同様このプロジェクトの完了後に走る、下記参照)。
+ * `platform/system-settings.feature` のLLM切替シナリオは既存の `@destructive` で
+ * 同じ理由から既に単独実行されており、変更不要。
+ *
+ * `at-provision` に依存するのみ(`at-main` には依存しない)ので、`at-main` の無関係な
+ * シナリオとは並列に走る — 全体の実行時間はほぼ増えない。増えるのはこのレーン内の
+ * シナリオが互いに直列化される分だけで、`at-main` 全体の所要時間の方が長い前提であれば
+ * 実質的なコストはない。
+ *
+ * GA/AdSenseスタブ(`ga-stub` / `adsense-stub`)にも同型の構造的リスクが実在する
+ * (`analytics/report-failures.feature` が注入・`analytics/dashboard-report.feature` 等が
+ * 通常系で同じスタブを読む)ことをissue #1188で確認済みだが、対処はこのIssueのAcceptance
+ * Criteriaの対象外(確認のみが要件)。対処はissue #1372で追跡する。
+ * `docs/ACCEPTANCE_TESTING.md` §9 に記録した。
+ */
+const atLlmExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-llm-exclusive',
+  outputDir: '.features-gen/at-llm-exclusive',
+  tags: '@stub-isolation:llm' + excludeRequiresGpu,
 });
 
 /**
@@ -171,7 +236,7 @@ export default defineConfig({
     // 受け入れテストが必要になった時点で AT-18 がプロジェクトを追加する。
     //
     // `--project=at-destructive` を指定すれば、依存する at-setup → at-seed →
-    // at-provision → at-main も Playwright が自動で先に実行する。
+    // at-provision → at-main → at-llm-exclusive も Playwright が自動で先に実行する。
     // 段階を個別に指定する必要はない。
     {
       ...atSetup,
@@ -198,9 +263,23 @@ export default defineConfig({
       dependencies: ['at-provision'],
     },
     {
+      // at-main と並列に走る(同じ at-provision にのみ依存)。llm-stub に触れるシナリオが
+      // at-main の他シナリオと同時実行されないよう、以下の at-destructive はこれと
+      // at-main の両方の完了を待つ(issue #1188)。
+      ...atLlmExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-provision'],
+      // このプロジェクト内の同時実行を1に固定する(TestProject.workers、Playwright 1.40+)。
+      // グローバルの`workers`(E2E_WORKERSでの上書きを含む)より優先してこのプロジェクトだけを
+      // 制限するため、他プロジェクトの並列度には影響しない。
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
-      dependencies: ['at-main'],
+      // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive も
+      // llm-stub の共有状態に触れるため、at-main と同様に完了を待ってから始める(issue #1188)。
+      dependencies: ['at-main', 'at-llm-exclusive'],
     },
     {
       ...atCrossBrowserFirefox,

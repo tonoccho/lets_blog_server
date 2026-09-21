@@ -520,9 +520,86 @@ curl      http://127.0.0.1:18081/__control/state    # 仕込みと受信件数
 > **この経路はスタブ全体の状態を変える。** 同じスタブへ注入するシナリオを並列に走らせると
 > 互いの仕込みを奪い合う。使うシナリオには **`@mode:serial`** を付け、同じスタブを触る
 > シナリオを複数の `.feature` に散らさないこと。
+>
+> **ただし `@mode:serial` だけでは、注入しない側(別ファイルの通常系シナリオ)との衝突は
+> 防げない。** 下の「`@mode:serial` は同一ファイル内しか直列化しない」を参照。
+> `llm-stub` はこれに対処済み(`@stub-isolation:llm`)。GA/AdSenseスタブは
+> 同型のリスクが確認済みだが未対処(issue #1188、下記)。
 
 `stubRequestCount()` は「サービスが実際に外部を呼んだか」の確認に使える。
 キャッシュが効いて外部を呼ばなかったのか、呼んで失敗したのかを区別できる。
+
+#### `@mode:serial` は同一ファイル内しか直列化しない(issue #1188)
+
+`playwright.config.ts` は `fullyParallel: true` で、`@mode:serial`
+(playwright-bddの`describe.configure`。`node_modules/playwright-bdd/dist/generate/
+specialTags.js` の `extractMode`)は**同一 `.feature` ファイル内**のシナリオしか
+直列化しない。これは、注入する側同士の衝突は防ぐが、**注入しない側**(通常系で同じ
+スタブを呼ぶ別ファイルの既存シナリオ)との衝突は防がない。
+
+再現手順(2026-09-08、issue #1149の実装中に発見):
+
+```bash
+cd apps/web
+rm -rf .features-gen && npx bddgen
+npx playwright test --project=at-main --no-deps \
+  --grep "AI生成(下書き|下書き・壁打ち)|AI生成の異常系"
+```
+
+- `ai/generation.feature` › セクション生成の壁打ち再生成 → 502(注入した429を横取り)
+- `ai/resilience.feature` › 429シナリオ → 200(注入前に別ファイルのリクエストが消費)
+
+2026-09-19のリリース検証では、**注入していない**シナリオ(`ai/resilience.feature`の
+「LLM接続設定が未設定/不正なとき…」、`stubRequestCount('llm')` の前後比較のみ)も
+同じ原因で失敗した(受信件数が要求前後で 15 → 16 に変化)。原因は`@mode:serial`の
+file-scopedな限界そのものであり、注入の有無を問わず「同じスタブへ触れるシナリオが
+別ファイルで並列に走る」こと自体が問題である。
+
+**LLMスタブへの対処**: `llm-stub` へ実トラフィックを送る、または制御エンドポイントで
+その共有状態(`forced` / `requests`)を仕込む/読む全シナリオに `@stub-isolation:llm`
+タグを付け、`apps/web/playwright.config.ts` の専用プロジェクト `at-llm-exclusive`
+(`workers: 1`)へ集約した。対象: `ai/generation.feature`・`ai/resilience.feature`・
+`ai/model-selection.feature`・`ai/review-step-suggestions.feature`・
+`ai/tag-and-proofread.feature`・`ai/web-search.feature`・`stubs/external-stubs.feature`
+(いずれもLLMスタブへ実際にリクエストを送る)。`ai/authorization.feature`・
+`ai/review-step-model-settings.feature` は設定CRUDのみで実際の生成呼び出しが無いため
+対象外、`ai/generation-job.feature`と`platform/system-settings.feature`のLLM切替
+シナリオは既存の`@destructive`で既に単独実行されており対象外(いずれもコメントに
+根拠を記載)。
+
+`at-llm-exclusive` は `at-provision` にのみ依存し、`at-main` とは依存関係が無いため
+**`at-main`の無関係なシナリオとは並列に走る** — スイート全体の実行時間はほぼ増えない。
+増えるのはこのレーン内のシナリオ同士が直列化される分だけで、`at-main`全体の所要時間
+より短いことが実質コストゼロの前提になる(実測値は計測していない。桁が変わるほど
+大きくなるとは考えにくい、という設計時の判断)。`at-destructive`は`at-main`と
+`at-llm-exclusive`の両方の完了を待つ(`dependencies: ['at-main', 'at-llm-exclusive']`)
+よう変更した — `at-destructive`の「他に誰も走っていない」前提を保つため。
+
+`test:at` / `test:at:clean` は `--project=at-destructive` を起動するため、依存関係
+(`at-setup → at-seed → at-provision → { at-main, at-llm-exclusive } → at-destructive`)
+経由で `at-llm-exclusive` も自動的に実行される — 起動コマンドの変更は不要。
+単一ファイルだけを実行したい場合は対象プロジェクトが変わる点に注意:
+
+```bash
+# 変更前(このIssueより前): resilience.feature は at-main の一部だった
+npx playwright test --project=at-main --no-deps --grep "AI生成の異常系"
+
+# 変更後: llm-stubに触れるファイルは at-llm-exclusive に移った
+npx playwright test --project=at-llm-exclusive --no-deps --grep "AI生成の異常系"
+```
+
+**採らなかった案**: スタブ側にテストごとの分離トークンを持たせる案(制御エンドポイントの
+状態をテスト単位でキーイングする)は、実際にスタブを呼ぶのはテストではなくサービス
+(gateway → ai-service)であるため、相関IDをサービス境界を越えて伝播させるプロダクション
+コードの変更が要る。このIssueのScope(`playwright.config.ts` の変更、または
+`infra/e2e-stubs/lib/stub.js` の注入機構そのもの)を超えるため採らなかった。
+
+**GA/AdSenseスタブは同型のリスクが実在するが未対処**(issue #1188のAcceptance
+Criteriaは確認のみを要求): `analytics/report-failures.feature`(`@mode:serial`、
+`ga-stub` / `adsense-stub` へ制御エンドポイントで注入)と、`analytics/dashboard-report.feature`
+(`@mode:serial`無し、同じスタブへ通常系のリクエストを送る)が同じ形の関係にある。
+`llm-stub`と同じ対処(専用の直列プロジェクトへの集約)は技術的に転用できるはずだが、
+本Issueのスコープではない。対処はissue #1372で追跡する。
 
 ### 資格情報の不正を再現する
 

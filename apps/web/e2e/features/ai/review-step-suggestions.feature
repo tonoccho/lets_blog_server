@@ -1,5 +1,5 @@
 # language: ja
-@api @stub @ai
+@api @stub @ai @stub-isolation:llm
 機能: レビューステップ単位の指摘生成(JAPANESE / PROOFREADING)
 
   多段レビュー(#1210)のステップ別指摘生成APIの枠組みと、そのうち2ステップ

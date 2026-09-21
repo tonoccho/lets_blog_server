@@ -1,5 +1,5 @@
 # language: ja
-@api @stub @ai
+@api @stub @ai @stub-isolation:llm
 機能: タグ提案と校正チェック
 
   記事本文からカテゴリ候補・タグ候補を提案し(`POST /api/ai/tags`)、本文中の問題箇所を

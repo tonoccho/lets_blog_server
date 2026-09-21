@@ -1,5 +1,5 @@
 # language: ja
-@api @stub @ai @mode:serial
+@api @stub @ai @mode:serial @stub-isolation:llm
 機能: AI生成の異常系(レート制限・タイムアウト・接続設定不備)
 
   外部LLMが失敗したとき、利用者が生の例外や空の500ではなく次の行動を取れる情報を
@@ -12,15 +12,22 @@
 
   ジョブ記録(親シナリオ12・13)は対象外(issue #1149のスコープ外、兄弟issue)。
 
-  ## `@mode:serial` の理由
+  ## `@mode:serial` の理由、および `@stub-isolation:llm`(issue #1188)
 
   レート制限・タイムアウトのシナリオは `POST /__control/force` でLLMスタブ全体の
-  状態を変える(`infra/e2e-stubs/lib/stub.js`)。同じスタブへ同様に注入する
-  シナリオが並列に走ると互いの仕込みを奪い合うため、`@mode:serial` は**機能単位**で
-  付ける(playwright-bddは`describe.configure`をフィーチャー単位のタグからのみ生成する。
-  シナリオ単位のタグでは直列化されない)。設定不備のシナリオはスタブの状態を変えないが、
-  同じ理由で1ファイルに同居させたこの機能では一緒に直列化される
-  (`ai/generation.feature`の兄弟、docs/ACCEPTANCE_TESTING.md §9)。
+  状態を変える(`infra/e2e-stubs/lib/stub.js`)。同じ機能内の3シナリオが互いの
+  仕込みを奪い合わないよう `@mode:serial` を付ける(playwright-bddは
+  `describe.configure`をフィーチャー単位のタグからのみ生成する。シナリオ単位の
+  タグでは直列化されない)。設定不備のシナリオはスタブの状態を変えないが、
+  同じ理由で1ファイルに同居させたこの機能では一緒に直列化される。
+
+  `@mode:serial`は**同一ファイル内**にしか効かない。`ai/generation.feature`等
+  **別ファイル**が同じLLMスタブへ通常系のリクエストを送ると、注入した429/遅延を
+  横取りしたり(2026-09-08実測)、「LLMスタブは一度も呼び出されていない」の前後
+  比較(41行目)を狂わせたりする(2026-09-19実測、15→16)。これを防ぐのが
+  `@stub-isolation:llm` — `apps/web/playwright.config.ts`の`at-llm-exclusive`
+  プロジェクト(`workers:1`)がこのタグを持つ全ファイルを1レーンへ集めて完全直列化する。
+  詳細は同ファイルのコメントと `docs/ACCEPTANCE_TESTING.md` §9。
 
   シナリオ: LLMが429を返したとき、利用者にレート制限と分かるメッセージが出る
     前提 LLMが次のリクエストで429を返すよう仕込む

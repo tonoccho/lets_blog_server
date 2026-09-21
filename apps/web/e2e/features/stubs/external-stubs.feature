@@ -1,5 +1,5 @@
 # language: ja
-@stub @api
+@stub @api @stub-isolation:llm
 機能: 外部依存スタブ
 
   受け入れテストは外部SaaSに依存しない(#928 / AT-2)。
