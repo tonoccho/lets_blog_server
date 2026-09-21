@@ -1,5 +1,5 @@
 # language: ja
-@ui-quality @ui @i18n @panel-timezone
+@ui-quality @ui @i18n @panel-timezone @account-isolation:timezone
 機能: ダッシュボード/管理画面パネルの日時表示とハイドレーション不一致の防止
 
   `ConnectedServiceStatusPanel`(ダッシュボードの管理者向け詳細診断)と`SshKeyPairsPanel`
@@ -35,7 +35,8 @@
     `publishing/publish-lifecycle.feature`(issue #1171)の
     「公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている」と
     「記事を新規公開する」をそのまま再利用する。WordPress自動構築を伴う重い経路のため、
-    この2シナリオだけ`@publishing @slow @mode:serial`を追加で付けている。
+    この2シナリオには`@publishing @slow`を追加で付けている(直列化は
+    ファイル単位の`@account-isolation:timezone`が担う。issue #1374参照)。
 
   ## issue #1364(親issue #1261 分割C)による拡張
 
@@ -59,8 +60,9 @@
     「記事を新規公開する」をそのまま再利用する。`/posts`は`GET /api/posts`(全プロジェクト
     横断)を見るため、分割Bが`/projects/{id}/posts`で公開した投稿がそのままここにも現れる。
     ただし表の列構成が異なる(カテゴリ列が無い)ため、セル位置を突き合わせる`Then`ステップは
-    分割Bの`その投稿の最終投稿日時が...`とは別に用意し、この2シナリオだけ分割Bと同じ
-    `@publishing @slow @mode:serial`を付けている。
+    分割Bの`その投稿の最終投稿日時が...`とは別に用意し、この2シナリオにも分割Bと同じ
+    `@publishing @slow`を付けている(直列化はファイル単位の`@account-isolation:timezone`
+    が担う。issue #1374参照)。
 
   ## issue #1366(親issue #1261 分割B-2)による拡張
 
@@ -92,6 +94,27 @@
   組み合わせ。2つの一致時間帯が重ならないよう選んでいるため、どちらか一方は必ず食い違う。
   詳細は`panelTimezone.steps.ts`の`pickDivergentTimezone`のコメント参照)をその場で選んで
   使うため、実行するどの時刻でも直していない実装は必ず失敗する。
+
+  ## issue #1374: 既定の並列実行でのシナリオ間の競合
+
+  このファイルの18シナリオは全て、`panelTimezone.steps.ts`/`media.steps.ts`の
+  「個人設定のタイムゾーンを「X」に変更する」「個人設定のタイムゾーンを未設定にする」で
+  **単一の共有管理者アカウント**(`E2E_ADMIN_EMAIL`)の`/api/identity/me/preferences`を
+  直接書き換える。`fullyParallel: true`の既定の並列数では、複数ワーカーがこれを同時に
+  書き換えて奪い合い、期待した換算値と実際の表示がずれる形で大量に失敗する
+  (2026-09-21実測: 14/18失敗)。同じ管理者設定は`media/image-gallery.feature`・
+  `ui-quality/internationalization.feature`の各1シナリオも書き換えるため、
+  このファイル単体を直列化するだけでは実際の実行(`npm run test:at`)での衝突は残らない。
+  ファイル冒頭のタグ`@account-isolation:timezone`により、この3ファイルの該当シナリオを
+  `playwright.config.ts`の専用プロジェクト`at-timezone-exclusive`(`workers: 1`、
+  `at-main`と並列)へ集約して直列化する(#1188の`at-llm-exclusive`と同型の対処。
+  詳細は`playwright.config.ts`のコメント、`docs/ACCEPTANCE_TESTING.md` §9参照)。
+
+  以前あった173・182・219・228行目のシナリオ単位`@mode:serial`は、playwright-bddが
+  素のシナリオでは`describe.configure`を生成しないため**生成物に一切反映されておらず**、
+  効果が無かった(`docs/ACCEPTANCE_TESTING.md` §9参照)。ファイル全体を専用プロジェクトへ
+  移した今は、そのプロジェクトの`workers: 1`がファイル内の直列化(WordPress公開を伴う
+  4シナリオを含む)を代わりに担うため、このタグは削除した。
 
   @stub @plan
   シナリオ: 個人設定TZが設定されているなら、ブラウザTZに関係なく壁打ち一覧の作成日が個人設定TZ換算で表示される
@@ -170,7 +193,7 @@
     ならば そのサイトの登録日が「Pacific/Auckland」への換算値と一致する
     かつ コンソールにハイドレーションエラーが記録されない
 
-  @publishing @slow @mode:serial
+  @publishing @slow
   シナリオ: 個人設定TZがAsia/Tokyoなら、ブラウザTZに関係なく投稿履歴の最終投稿日時がTokyo換算で表示される
     前提 個人設定のタイムゾーンを「Asia/Tokyo」に変更する
     かつ 公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている
@@ -179,7 +202,7 @@
     ならば その投稿の最終投稿日時が「Asia/Tokyo」への換算値と一致する
     かつ コンソールにハイドレーションエラーが記録されない
 
-  @publishing @slow @mode:serial
+  @publishing @slow
   シナリオ: 個人設定TZが未設定なら、ブラウザTZ(Pacific/Auckland)換算で投稿履歴の最終投稿日時が表示される
     前提 個人設定のタイムゾーンを未設定にする
     かつ 公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている
@@ -216,7 +239,7 @@
     ならば そのプロジェクトの作成日が「Pacific/Auckland」への換算値と一致する
     かつ コンソールにハイドレーションエラーが記録されない
 
-  @publishing @slow @mode:serial
+  @publishing @slow
   シナリオ: 個人設定TZがAsia/Tokyoなら、ブラウザTZに関係なく投稿一覧の最終投稿日時がTokyo換算で表示される
     前提 個人設定のタイムゾーンを「Asia/Tokyo」に変更する
     かつ 公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている
@@ -225,7 +248,7 @@
     ならば 投稿一覧のその投稿の最終投稿日時が「Asia/Tokyo」への換算値と一致する
     かつ コンソールにハイドレーションエラーが記録されない
 
-  @publishing @slow @mode:serial
+  @publishing @slow
   シナリオ: 個人設定TZが未設定なら、ブラウザTZ(Pacific/Auckland)換算で投稿一覧の最終投稿日時が表示される
     前提 個人設定のタイムゾーンを未設定にする
     かつ 公開検証用のWordPressサイトがあり、プロジェクトのテスト環境に紐づいている

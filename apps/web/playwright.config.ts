@@ -80,13 +80,15 @@ const atProvision = defineBddProject({
 const excludeRequiresGpu = process.env.AT_EXCLUDE_REQUIRES_GPU === '1' ? ' and not @requires-gpu' : '';
 
 /** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。
- * `@stub-isolation:llm`(下の at-llm-exclusive)も除く(issue #1188)。 */
+ * `@stub-isolation:llm`(下の at-llm-exclusive)、`@account-isolation:timezone`
+ * (下の at-timezone-exclusive、issue #1374)も除く。 */
 const atMain = defineBddProject({
   ...BDD_COMMON,
   name: 'at-main',
   outputDir: '.features-gen/at-main',
   tags:
-    'not @stage:setup and not @stage:provision and not @destructive and not @stub-isolation:llm'
+    'not @stage:setup and not @stage:provision and not @destructive'
+    + ' and not @stub-isolation:llm and not @account-isolation:timezone'
     + excludeRequiresGpu,
 });
 
@@ -150,6 +152,69 @@ const atLlmExclusive = defineBddProject({
   name: 'at-llm-exclusive',
   outputDir: '.features-gen/at-llm-exclusive',
   tags: '@stub-isolation:llm' + excludeRequiresGpu,
+});
+
+/**
+ * issue #1374: 共有の管理者アカウント(`E2E_ADMIN_EMAIL`)の個人設定TZ
+ * (`PATCH /api/identity/me/preferences`)を書き換える全シナリオの専用レーン。
+ * #1188(`at-llm-exclusive`、上記)と同型の構造的問題への、同型の対処。
+ *
+ * ## レースの原因
+ *
+ * `panel-timezone-hydration.feature`(issue #1362/#1363/#1364/#1366、18シナリオ)・
+ * `media/image-gallery.feature`・`ui-quality/internationalization.feature`は、いずれも
+ * 同じ共有管理者アカウントの個人設定TZを直接書き換える(`panelTimezone.steps.ts`の
+ * 「個人設定のタイムゾーンを未設定にする」、`media.steps.ts`の「個人設定のタイムゾーンを
+ * 「X」に変更する」、`uiQuality.steps.ts`の「個人設定のタイムゾーンをAmerica/New_Yorkに
+ * 変更する」)。`fullyParallel: true`の下で複数ワーカーが同時にこれを書き換えると、
+ * 片方が変更した直後にもう片方が上書きし、期待した換算値と実際の表示がずれる
+ * (2026-09-21実測: このファイル単体でも14/18が失敗。回ごとに失敗数が変わるのが
+ * 競合の証拠)。
+ *
+ * ## `@mode:serial` ではなく専用プロジェクトを選んだ理由
+ *
+ * `panel-timezone-hydration.feature`は173・182・219・228行目に`@mode:serial`(素の
+ * シナリオへのタグ)を持っていたが、**生成物に一切反映されていなかった**:
+ * playwright-bddの`Formatter.test()`(`node_modules/playwright-bdd/dist/generate/
+ * formatter.js:82-106`)は、素のシナリオを`describe.configure`で包む条件を
+ * `specialTags.retries !== undefined`にしており、`@mode:serial`(`specialTags.mode`)
+ * だけでは満たさない。`describeConfigure`(`formatter.js:156`)に実際に到達するのは
+ * 機能ファイル自身のタグ(`file.js`の`renderDescribe`→`formatter.describe`)か
+ * シナリオアウトライン(`renderScenarioOutline`→同じく`formatter.describe`)の場合のみで、
+ * このファイルにアウトラインは無い。したがって仮に4シナリオ間だけを直列化できたとしても、
+ * 同じ管理者設定を書き換える**別ファイル**(`image-gallery.feature`・
+ * `internationalization.feature`)との衝突は防げない(`@mode:serial`はファイル内限定、
+ * `docs/ACCEPTANCE_TESTING.md` §9)。ファイル単位の直列化を3ファイル分積み上げるより、
+ * `at-llm-exclusive`と同じ「専用プロジェクト+`workers: 1`」の方が構造がシンプルで、
+ * 3ファイルをまたぐ衝突も一度に解消できる。
+ *
+ * ## `@account-isolation:timezone` を付けた範囲
+ *
+ *   - `ui-quality/panel-timezone-hydration.feature`(機能ファイル全体、issue #1374)
+ *     18シナリオ全てが個人設定TZを書き換えるため、ファイル単位のタグにした。
+ *     173・182・219・228行目にあった効果の無い`@mode:serial`は削除した——このプロジェクトの
+ *     `workers: 1`により、ファイル全体(WordPress公開を伴う4シナリオを含む)が既に
+ *     完全直列化されるため、シナリオ単位の直列化は不要になった。
+ *   - `media/image-gallery.feature`の「ブラウザとプロフィールのタイムゾーンが異なっていても
+ *     生成画像ギャラリーはハイドレーションエラー無く開ける」(1シナリオのみ)
+ *   - `ui-quality/internationalization.feature`の「日付・時刻が利用者のタイムゾーン設定に
+ *     従って表示される」(1シナリオのみ)
+ *
+ * 後者2ファイルは他の大半のシナリオが個人設定TZに触れないため、ファイル単位ではなく
+ * **シナリオ単位**でタグを付けた。シナリオ単位のタグは(`@mode:serial`と異なり)
+ * タグ式によるプロジェクトの振り分けには問題無く反映される——`renderTest`
+ * (`file.js`)は`pickle.tags`(シナリオ自身のタグ)をそのままテストのタグとして使い、
+ * `isSkippedByTagsExpression`もこれを見るため、この除外・振り分けの仕組みは
+ * `describe.configure`のような「機能ファイル/アウトラインだけ」という制限を持たない。
+ *
+ * `at-provision`に依存するのみ(`at-main`には依存しない)ので、`at-main`の無関係な
+ * シナリオとは並列に走る——全体の実行時間はほぼ増えない。
+ */
+const atTimezoneExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-timezone-exclusive',
+  outputDir: '.features-gen/at-timezone-exclusive',
+  tags: '@account-isolation:timezone' + excludeRequiresGpu,
 });
 
 /**
@@ -236,8 +301,8 @@ export default defineConfig({
     // 受け入れテストが必要になった時点で AT-18 がプロジェクトを追加する。
     //
     // `--project=at-destructive` を指定すれば、依存する at-setup → at-seed →
-    // at-provision → at-main → at-llm-exclusive も Playwright が自動で先に実行する。
-    // 段階を個別に指定する必要はない。
+    // at-provision → at-main → at-llm-exclusive → at-timezone-exclusive も
+    // Playwright が自動で先に実行する。段階を個別に指定する必要はない。
     {
       ...atSetup,
       use: { ...devices['Desktop Chrome'] },
@@ -275,11 +340,22 @@ export default defineConfig({
       workers: 1,
     },
     {
+      // at-main / at-llm-exclusive と並列に走る(同じ at-provision にのみ依存)。共有管理者の
+      // 個人設定TZに触れるシナリオが他と同時実行されないよう、以下の at-destructive は
+      // これらすべての完了を待つ(issue #1374)。
+      ...atTimezoneExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-provision'],
+      // このプロジェクト内の同時実行を1に固定する(at-llm-exclusiveと同じ理由)。
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
-      // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive も
-      // llm-stub の共有状態に触れるため、at-main と同様に完了を待ってから始める(issue #1188)。
-      dependencies: ['at-main', 'at-llm-exclusive'],
+      // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive /
+      // at-timezone-exclusive も共有状態に触れるため、at-main と同様に完了を待ってから
+      // 始める(issue #1188、issue #1374)。
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive'],
     },
     {
       ...atCrossBrowserFirefox,

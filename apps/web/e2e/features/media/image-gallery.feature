@@ -65,7 +65,15 @@
   # して解釈していたため、SSR(コンテナ、TZ=UTC)とブラウザで表示結果が食い違い、
   # ハイドレーション不一致が発生していた。ブラウザTZをプロフィールTZと意図的に違えて開き、
   # コンソールにハイドレーションエラーが1件も記録されないことを確認する。
+  #
+  # 下のシナリオは共有管理者アカウントの個人設定TZを書き換える。既定の並列実行では
+  # `ui-quality/panel-timezone-hydration.feature`・`ui-quality/internationalization.feature`
+  # の同種シナリオと衝突するため、`@account-isolation:timezone` で専用プロジェクト
+  # `at-timezone-exclusive` へ隔離する(issue #1374、詳細は `playwright.config.ts` 参照)。
+  # このシナリオ以外はこのファイルの共有資源に触れないため、ファイル単位ではなく
+  # シナリオ単位でタグを付けている。
 
+  @account-isolation:timezone
   シナリオ: ブラウザとプロフィールのタイムゾーンが異なっていても生成画像ギャラリーはハイドレーションエラー無く開ける
     前提 プロンプト「E2E gallery timezone mismatch fixture」の生成画像がギャラリーにある
     かつ 個人設定のタイムゾーンを「Asia/Tokyo」に変更する

@@ -601,6 +601,72 @@ Criteriaは確認のみを要求): `analytics/report-failures.feature`(`@mode:se
 `llm-stub`と同じ対処(専用の直列プロジェクトへの集約)は技術的に転用できるはずだが、
 本Issueのスコープではない。対処はissue #1372で追跡する。
 
+#### シナリオ単位の `@mode:serial` は生成物に一切反映されない(issue #1374)
+
+上の見出しは「`@mode:serial` は同一ファイル内しか直列化しない」という**機能ファイル単位の
+タグは効くこと**を前提にした限界を述べている。issue #1374 で見つかったのは、それより
+手前の、さらに狭い問題である: **素のシナリオ(Scenario、Scenario Outline ではない)に
+直接付けた `@mode:serial` は、機能ファイル単位のタグと違って生成物に一切反映されない。**
+
+原因は playwright-bdd の `Formatter`(`node_modules/playwright-bdd/dist/generate/
+formatter.js`)が `describe.configure(...)`(`describeConfigure()`、`formatter.js:156-163`。
+`mode` を含む)を呼び出す条件が、呼び出し元によって異なることにある:
+
+- **機能ファイル(Feature)・Scenario Outline**: `file.js` の `renderDescribe()` /
+  `renderScenarioOutline()` はどちらも `formatter.describe(name, specialTags, lines)` を呼び、
+  `Formatter.describe()`(`formatter.js:31-44`)は無条件に `describeConfigure(specialTags)`
+  を呼ぶ。つまりタグが必ず反映される。
+- **素の Scenario**: `file.js` の `renderScenario()` は `formatter.test(...)` を呼ぶ。
+  `Formatter.test()`(`formatter.js:82-106`)が `describeConfigure()` を呼ぶのは
+  `specialTags.retries !== undefined`(`formatter.js:100`)のときだけで、`@mode:serial`
+  だけを付けても `specialTags.retries` は `undefined` のままなので、この条件を満たさない。
+  結果として `describe.configure` はテストファイルのどこにも生成されず、
+  タグは `test(title, { tag: [...] }, ...)` の `tag` 配列に残るだけの飾りになる
+  (タグ式によるプロジェクト振り分けには使えるが、直列化には効かない)。
+
+`panel-timezone-hydration.feature` の173・182・219・228行目(#1362〜#1366のマージで
+行番号が移動する前は89・98・139・148行目)にあった `@mode:serial` は、いずれも素の
+シナリオへの直接タグで、アウトラインでもファイル単位でもなかった。生成された
+`.features-gen/at-main/ui-quality/panel-timezone-hydration.feature.spec.js` を
+`grep describe.configure` で確認すると **0件**(2026-09-21実測)——4シナリオのどの2つも
+実際には直列化されていなかった。
+
+この4シナリオが直列化を必要としていた理由(WordPress自動構築を伴う重い経路)自体は
+issue #1374 のスコープでは解消していない。ファイル冒頭に付けた `@account-isolation:timezone`
+(下記)によりファイル全体が `workers: 1` の専用プロジェクトへ移り、ファイル内の18
+シナリオ全てが結果として直列に実行されるようになったため、直列化の意図はタグを
+削除しても引き続き満たされている。`@mode:serial` そのものが直列化の手段として機能した
+わけではない。
+
+**この節と #1188 の節の違いを取り違えないこと**: #1188 の節は「機能ファイル単位のタグは
+効くが、ファイルをまたぐ衝突は防げない」、この節は「素のシナリオ単位のタグ**そのものが
+効かない**」という、別の限界を指す。両方を回避するには、直列化したい範囲を機能ファイル
+単位(またはアウトライン)のタグにするか、本節や #1188 と同じ「専用プロジェクト +
+`workers: 1`」に頼るしかない。
+
+**共有管理者アカウントの個人設定TZへの対処**: `panel-timezone-hydration.feature`
+(18シナリオ全て)・`media/image-gallery.feature`・`ui-quality/internationalization.feature`
+は、いずれも共有管理者アカウント(`E2E_ADMIN_EMAIL`)の `PATCH /api/identity/me/preferences`
+を直接書き換える(`panelTimezone.steps.ts` の「個人設定のタイムゾーンを未設定にする」、
+`media.steps.ts` の「個人設定のタイムゾーンを「X」に変更する」、`uiQuality.steps.ts` の
+「個人設定のタイムゾーンをAmerica/New_Yorkに変更する」)。`llm-stub` とは異なり実際の
+スタブではなく本物のバックエンドだが、「複数ワーカーが同じ共有・単一の状態を同時に
+書き換えて奪い合う」という構造は `at-llm-exclusive` と同型であるため、同じ対処
+(`@account-isolation:timezone` タグ + 専用プロジェクト `at-timezone-exclusive`、
+`workers: 1`、`at-provision` にのみ依存)を転用した。既定の並列数での実測:
+`panel-timezone-hydration.feature` 単体で14/18失敗(2026-09-21)。
+
+`panel-timezone-hydration.feature` は18シナリオ全てが対象のため機能ファイル単位で
+タグを付けたが、`image-gallery.feature`・`internationalization.feature` は対象が
+各1シナリオのみのため、シナリオ単位でタグを付けた。シナリオ単位のタグは
+(`@mode:serial` と異なり)タグ式による振り分けには問題無く反映される——`file.js` の
+`renderTest()` は `pickle.tags`(シナリオ自身のタグ)をそのままテストのタグとして使い、
+`isSkippedByTagsExpression()` もこれを見るため、`describe.configure` のような
+「機能ファイル/アウトラインだけ」という制限を持たない。2026-09-21に
+`rm -rf .features-gen && npx bddgen` の生成物で実際に確認済み: 該当1シナリオずつが
+`at-timezone-exclusive` へ、残りは元のプロジェクト(`at-main` / `at-destructive`)に
+留まる。
+
 ### 資格情報の不正を再現する
 
 制御エンドポイントを使わず、**特定の値を登録するだけ**で認証失敗を起こせる。

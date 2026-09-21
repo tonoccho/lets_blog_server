@@ -21,6 +21,13 @@
     もし ページを再読み込みする
     ならば ヘッダーのラベルは英語表示のままである
 
+  # 下のシナリオは共有管理者アカウントの個人設定TZを書き換える。既定の並列実行では
+  # `ui-quality/panel-timezone-hydration.feature`・`media/image-gallery.feature`の
+  # 同種シナリオと衝突するため、`@account-isolation:timezone` で専用プロジェクト
+  # `at-timezone-exclusive` へ隔離する(issue #1374、詳細は `playwright.config.ts` 参照)。
+  # このシナリオ以外はこのファイルの共有資源に触れないため、ファイル単位ではなく
+  # シナリオ単位でタグを付けている。
+  @account-isolation:timezone
   シナリオ: 日付・時刻が利用者のタイムゾーン設定に従って表示される
     前提 管理者としてログイン済みである
     かつ 操作ログに記録される操作を1件実行しておく
