@@ -104,10 +104,21 @@ UNMEASURABLE_OVERRIDE_PATTERNS = [
     r"^apps/extension/src/extension\.ts$",
     r"^apps/[^/]+/src/.*Panel\.ts$",
     r"^apps/[^/]+/src/.*CompletionProvider\.ts$",
-    # #1330: Flyway移行(services/<svc>/src/main/resources/db/migration/**/*.sql)は
-    # JaCoCoがコンパイル済みJavaバイトコードしか計測できないため、レポートが
-    # 原理的に存在しない。
-    r"^services/[^/]+/src/main/resources/db/migration/.*\.sql$",
+    # #1330 / #1379: `services/<svc>/src/` 配下で JaCoCo が計測できるのはコンパイル済み
+    # JVM バイトコードだけなので、レポートに現れうるのは `.java` と `.kt` **だけ**である。
+    # それ以外(`.sql` の Flyway 移行、`.yml` / `.properties` の設定、`.xml` のログ定義、
+    # テンプレートや静的リソース)は、どれだけテストを書いてもレポートに載らない。
+    #
+    # #1330 は同じ問題を `.sql` 1拡張子だけ免除して塞いだ。その結果、次に別の拡張子へ
+    # 差分が入った最初のブランチで再発した(#1379: #1190 が `services/gateway/src/main/
+    # resources/application.yml` を変え、`glab mr create` のカバレッジガードが止まった)。
+    # 拡張子を足し続ける限り3回目が来るので、規則の側を一般化する。
+    #
+    # `.tsx` を除外しなかった(上記)のとは事情が違う。あちらは `apps/*/src/` に jest で
+    # 実測される `.tsx` が多数あるため拡張子で厳密に区切る必要があったが、ここは
+    # 「JVM バイトコードにコンパイルされない = 原理的に計測不能」であり、免除漏れの
+    # 危険が無い。
+    r"^services/[^/]+/src/(?!.*\.(?:java|kt)$)",
 ]
 
 UNMEASURABLE_OVERRIDE_RE = [re.compile(p) for p in UNMEASURABLE_OVERRIDE_PATTERNS]

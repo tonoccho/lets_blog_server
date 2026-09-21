@@ -136,6 +136,21 @@ class UnmeasurableProductionCode(unittest.TestCase):
         )
         self.assertIn("計測対象外", out)
 
+    def test_service_resource_yaml_does_not_fail(self):
+        """#1379: `services/<svc>/src/main/resources/**` の設定ファイルも同じ理由で
+        レポートが存在しない。#1330 は `.sql` 1拡張子だけを免除したため、
+        `application.yml` に差分が入った最初のブランチ(#1190)で
+        `glab mr create` のカバレッジガードが止まった。
+        """
+        code, out = run_main(["services/gateway/src/main/resources/application.yml"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_service_resource_yaml_is_reported_as_unmeasurable(self):
+        _, out = run_main(["services/gateway/src/main/resources/application.yml"])
+        self.assertIn("services/gateway/src/main/resources/application.yml", out)
+        self.assertIn("計測対象外", out)
+
     def test_extension_ts_only_does_not_fail(self):
         """#1272: 拡張ホスト層(コマンド登録)は jest で原理的に到達できない。"""
         code, out = run_main(["apps/extension/src/extension.ts"])
@@ -306,7 +321,47 @@ class MeasurabilityClassifier(unittest.TestCase):
         # にレポートは原理的に存在しない。
         "services/identity/src/main/resources/db/migration/V3__make_timezone_optional_override.sql",
         "services/content/src/main/resources/db/migration/V5__add_index.sql",
+        # #1379: 同じ理由は `.sql` 以外のリソースにもそのまま当てはまる。#1330 は拡張子を
+        # 1つだけ免除したため、`application.yml` に差分が入った最初のブランチで再発した。
+        "services/gateway/src/main/resources/application.yml",
+        "services/platform/src/main/resources/application-test.properties",
+        "services/ai/src/main/resources/logback-spring.xml",
     ]
+
+    # #1379: JaCoCo が計測できるのはコンパイル済み JVM バイトコードだけなので、
+    # `services/*/src/` 配下で計測対象になりうるのは `.java` と `.kt` **だけ**である。
+    # 拡張子を1つずつ免除していく形(#1330)は、新しい拡張子の差分が初めて入るたびに
+    # `glab mr create` を止めるので、一般規則として持つ。
+    NON_JVM_UNDER_SERVICES_SRC = [
+        "services/gateway/src/main/resources/application.yml",
+        "services/gateway/src/main/resources/application.yaml",
+        "services/identity/src/main/resources/messages.properties",
+        "services/content/src/main/resources/logback.xml",
+        "services/ai/src/main/resources/prompts/default.txt",
+        "services/media/src/main/resources/static/index.html",
+        "services/platform/src/main/resources/schema.json",
+        "services/identity/src/main/resources/templates/mail.ftl",
+    ]
+
+    JVM_UNDER_SERVICES_SRC = [
+        "services/identity/src/main/java/com/example/identity/UserService.java",
+        "services/content/src/main/kotlin/com/example/content/Post.kt",
+    ]
+
+    def test_non_jvm_files_under_services_src_are_unmeasurable(self):
+        """#1379: `services/*/src/` 配下で `.java`/`.kt` 以外はレポートが原理的に出ない。
+
+        拡張子の列挙ではなく一般規則であることを、ここで守る。
+        """
+        for path in self.NON_JVM_UNDER_SERVICES_SRC:
+            with self.subTest(path=path):
+                self.assertFalse(ccc.is_measurable(path))
+
+    def test_jvm_sources_under_services_src_stay_measurable(self):
+        """#1379: 一般規則にしても `.java`/`.kt` の免除漏れを作らないこと。"""
+        for path in self.JVM_UNDER_SERVICES_SRC:
+            with self.subTest(path=path):
+                self.assertTrue(ccc.is_measurable(path))
 
     def test_measurable_trees(self):
         for path in self.MEASURABLE:
