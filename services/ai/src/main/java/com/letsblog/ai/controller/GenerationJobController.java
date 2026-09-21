@@ -45,8 +45,16 @@ public class GenerationJobController {
      */
     @GetMapping
     public List<GenerationJobResponse> list() {
+        // generation_jobs.created_atは秒精度(V1__create_ai_tables.sqlのDATETIME列)のため、
+        // createdAtだけでは同一秒に作られた複数ジョブが同値になり、安定ソートの結果
+        // findAll()のDB取得順(通常ID昇順)がそのまま残って「新しい順」の契約が崩れる
+        // (issue #1332、#934/#1147のシナリオが同一秒の別ジョブを誤って拾った実例)。
+        // IDはAUTO_INCREMENTで単調増加するため、第2キーの降順タイブレークに使うことで、
+        // createdAtの精度に関わらず作成順を一意に決定できる。
         return generationJobRepository.findAll().stream()
-                .sorted(Comparator.comparing(GenerationJob::getCreatedAt).reversed())
+                .sorted(Comparator.comparing(GenerationJob::getCreatedAt)
+                        .thenComparing(GenerationJob::getId)
+                        .reversed())
                 .map(job -> new GenerationJobResponse(
                         job.getId(), job.getType(), job.getStatus(), job.getCreatedAt(), job.getUpdatedAt()))
                 .toList();
