@@ -1,5 +1,5 @@
 # language: ja
-@identity @api
+@identity @api @mode:serial
 機能: プロジェクトメンバーの追加・変更・除外
 
   「プロジェクトに入れた人だけがそのプロジェクトを見られる」ことを利用者視点で固定する
