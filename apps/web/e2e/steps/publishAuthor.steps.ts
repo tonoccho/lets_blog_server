@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
+import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { After, Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -38,10 +38,6 @@ const AUTHOR_SITE_ADMIN_USER = 'at66authoradmin';
 
 /** WordPress自動構築の待ち上限。分単位でかかりうる。 */
 const PROVISION_TIMEOUT_MS = 600_000;
-
-const KEYCLOAK_CONTAINER = 'lbs-keycloak';
-const KEYCLOAK_REALM = 'letsblog';
-const KCADM_BIN = '/opt/keycloak/bin/kcadm.sh';
 
 interface SiteFixture {
   id: number;
@@ -170,36 +166,6 @@ async function adoptExistingManagedSite(
     `既存WordPressの取り込みに失敗しました (status=${adopted.status()}): ${await adopted.text()}`
   ).toBe(true);
   return (await adopted.json()) as SiteFixture;
-}
-
-function readEnvValue(key: string): string {
-  const envPath = path.join(REPO_ROOT, '.env');
-  const content = fs.readFileSync(envPath, 'utf-8');
-  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  if (!match) {
-    throw new Error(`.env に ${key} が見つかりません`);
-  }
-  return match[1].trim();
-}
-
-function kcadm(args: string[]): string {
-  return execFileSync(
-    'docker',
-    ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args],
-    { encoding: 'utf-8', timeout: 30_000 }
-  );
-}
-
-function kcadmLogin(): void {
-  const username = readEnvValue('KEYCLOAK_ADMIN_USERNAME');
-  const password = readEnvValue('KEYCLOAK_ADMIN_PASSWORD');
-  kcadm([
-    'config', 'credentials',
-    '--server', 'http://localhost:8080/auth',
-    '--realm', 'master',
-    '--user', username,
-    '--password', password,
-  ]);
 }
 
 /**

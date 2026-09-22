@@ -1,7 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
+import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { After, Given, Then, When } from './fixtures';
 import { expect } from '../support';
 
@@ -31,9 +29,6 @@ import { expect } from '../support';
  * (`e2e/features/auth/token-lifecycle.feature`の無効化シナリオと同じ考え方)。
  */
 
-const KEYCLOAK_CONTAINER = 'lbs-keycloak';
-const KEYCLOAK_REALM = 'letsblog';
-const KCADM_BIN = '/opt/keycloak/bin/kcadm.sh';
 const E2E_CLIENT_ID = 'letsblog-e2e';
 
 /**
@@ -42,37 +37,6 @@ const E2E_CLIENT_ID = 'letsblog-e2e';
  * 実装と無関係な理由で赤/緑が入れ替わる。
  */
 const BRUTE_FORCE_FAILURE_FACTOR = 5;
-
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
-
-function readEnvValue(key: string): string {
-  const envPath = path.join(REPO_ROOT, '.env');
-  const content = fs.readFileSync(envPath, 'utf-8');
-  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  if (!match) {
-    throw new Error(`.env に ${key} が見つかりません`);
-  }
-  return match[1].trim();
-}
-
-function kcadm(args: string[]): string {
-  return execFileSync('docker', ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args], {
-    encoding: 'utf-8',
-    timeout: 30_000,
-  });
-}
-
-function kcadmLogin(): void {
-  const username = readEnvValue('KEYCLOAK_ADMIN_USERNAME');
-  const password = readEnvValue('KEYCLOAK_ADMIN_PASSWORD');
-  kcadm([
-    'config', 'credentials',
-    '--server', 'http://localhost:8080/auth',
-    '--realm', 'master',
-    '--user', username,
-    '--password', password,
-  ]);
-}
 
 function uniqueSuffix(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

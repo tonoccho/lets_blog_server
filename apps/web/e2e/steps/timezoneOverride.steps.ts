@@ -1,7 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import type { APIRequestContext } from '@playwright/test';
+import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -15,43 +13,9 @@ import {
  * issue #1259: 個人設定のタイムゾーンを任意の上書きにする、のステップ定義。
  *
  * `userManagement.steps.ts` / `avatarUpload.steps.ts` と同様、ステップ定義ファイルは
- * 兄弟issueと相乗りしない方針のため、必要なヘルパーはこのファイル内に閉じて持つ。
+ * 兄弟issueと相乗りしない方針のため、必要なヘルパーはこのファイル内に閉じて持つ
+ * (Keycloak側の資格情報整え(kcadm経由)は共有モジュール`../kcadm`、issue #1328)。
  */
-
-const KEYCLOAK_CONTAINER = 'lbs-keycloak';
-const KEYCLOAK_REALM = 'letsblog';
-const KCADM_BIN = '/opt/keycloak/bin/kcadm.sh';
-
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
-
-function readEnvValue(key: string): string {
-  const envPath = path.join(REPO_ROOT, '.env');
-  const content = fs.readFileSync(envPath, 'utf-8');
-  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  if (!match) {
-    throw new Error(`.env に ${key} が見つかりません`);
-  }
-  return match[1].trim();
-}
-
-function kcadm(args: string[]): string {
-  return execFileSync('docker', ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args], {
-    encoding: 'utf-8',
-    timeout: 30_000,
-  });
-}
-
-function kcadmLogin(): void {
-  const username = readEnvValue('KEYCLOAK_ADMIN_USERNAME');
-  const password = readEnvValue('KEYCLOAK_ADMIN_PASSWORD');
-  kcadm([
-    'config', 'credentials',
-    '--server', 'http://localhost:8080/auth',
-    '--realm', 'master',
-    '--user', username,
-    '--password', password,
-  ]);
-}
 
 function provisionLoginableKeycloakCredential(email: string, password: string): void {
   kcadmLogin();

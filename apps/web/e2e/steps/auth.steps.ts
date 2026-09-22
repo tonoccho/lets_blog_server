@@ -1,9 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
 import { decode, encode } from 'next-auth/jwt';
 import type { JWT } from 'next-auth/jwt';
+import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { After, Given, Step, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -48,9 +46,8 @@ const SETUP_ADMIN_PASSWORD = process.env.E2E_PROVISION_ADMIN_PASSWORD ?? E2E_ADM
  * 既に使っている。このファイルではローカルDB側のUserは不要(Keycloak側の資格情報と
  * ブルートフォース検知だけが対象)なため、同じくローカルDBを経由しない。
  *
- * `kcadm`/`kcadmLogin`/`KEYCLOAK_REALM` 自体は、このファイル内で issue #1053
- * (`revokeKeycloakSsoSession`)向けに既に定義済みのものを再利用する
- * (関数宣言はモジュール内で巻き上げられるため、定義順に依存しない)。
+ * `kcadm`/`kcadmLogin`/`KEYCLOAK_REALM` は共有モジュール(`../kcadm`、issue #1328)から
+ * importする。
  */
 function uniqueSuffix(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -1102,67 +1099,6 @@ async function writeTokenLifecycleSessionCookie(
   await page.context().clearCookies({ name: new RegExp(`^${SESSION_COOKIE_NAME.replace(/[.]/g, '\\.')}(\\.\\d+)?$`) });
   await page.context().addCookies(newCookies.map(({ name, value: v, ...rest }) => ({ ...rest, name, value: v })));
   void chunkNames;
-}
-
-const KEYCLOAK_CONTAINER = 'lbs-keycloak';
-const KEYCLOAK_REALM = 'letsblog';
-const KCADM_BIN = '/opt/keycloak/bin/kcadm.sh';
-/** リポジトリルート(apps/web/e2e/steps から4階層上)。`.env`からKeycloakのmaster管理者資格情報を読む。 */
-const KCADM_REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
-
-/** userDeactivation.steps.ts と同じ形(docker exec で kcadm.sh を叩く)。ステップ定義ファイルは
- * 兄弟issueと相乗りしない方針のため、小さいこのヘルパーはここに複製する。 */
-function readEnvValue(key: string): string {
-  const envPath = path.join(KCADM_REPO_ROOT, '.env');
-  const content = fs.readFileSync(envPath, 'utf-8');
-  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  if (!match) {
-    throw new Error(`.env に ${key} が見つかりません`);
-  }
-  return match[1].trim();
-}
-
-const KCADM_LOCK_RETRY_ATTEMPTS = 5;
-const KCADM_LOCK_RETRY_DELAY_MS = 200;
-
-/**
- * issue #1295: `kcadm.sh`はコンテナ内の単一ファイル(`/opt/keycloak/.keycloak/kcadm.config`)
- * にセッションを保存しており、複数ワーカーから同時に`docker exec ... kcadm.sh`を呼ぶと
- * "Failed to get lock on ...kcadm.config"で失敗しうる。これはKeycloakのブルートフォース
- * 検知(本Issueが対象とするアカウント単位ロック)とは無関係な、kcadmコマンド自身の排他
- * である。このIssueで新設した使い捨てアカウント作成(`createLoginableKeycloakUser`・
- * `provisionLoginableKeycloakCredential`)が、既存の`revokeKeycloakSsoSession`(#1053)と
- * 同じ`kcadm`ヘルパーを共有しつつ並列ワーカーで同時に呼ばれるようになったため、
- * 短い再試行で吸収する(根本対策である「kcadm呼び出し自体の直列化」は#1056/#1158の
- * 既存ファイルにも及ぶため本Issueのスコープ外。別途 #1328 で追跡)。
- */
-function kcadm(args: string[]): string {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      return execFileSync('docker', ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args], {
-        encoding: 'utf-8',
-        timeout: 30_000,
-      });
-    } catch (error) {
-      const output = `${(error as { stdout?: string }).stdout ?? ''}${(error as { stderr?: string }).stderr ?? ''}`;
-      if (attempt >= KCADM_LOCK_RETRY_ATTEMPTS || !output.includes('Failed to get lock')) {
-        throw error;
-      }
-      execFileSync('sleep', [String(KCADM_LOCK_RETRY_DELAY_MS / 1000)]);
-    }
-  }
-}
-
-function kcadmLogin(): void {
-  const username = readEnvValue('KEYCLOAK_ADMIN_USERNAME');
-  const password = readEnvValue('KEYCLOAK_ADMIN_PASSWORD');
-  kcadm([
-    'config', 'credentials',
-    '--server', 'http://localhost:8080/auth',
-    '--realm', 'master',
-    '--user', username,
-    '--password', password,
-  ]);
 }
 
 /**

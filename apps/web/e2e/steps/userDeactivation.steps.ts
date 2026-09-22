@@ -1,7 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
+import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { After, Given, Step, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
 
@@ -34,43 +32,6 @@ import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '.
  * 無関係な並列シナリオを巻き添えにする」状況(`apps/web/playwright.config.ts`のコメント)には
  * 当たらない。
  */
-
-const KEYCLOAK_CONTAINER = 'lbs-keycloak';
-const KEYCLOAK_REALM = 'letsblog';
-const KCADM_BIN = '/opt/keycloak/bin/kcadm.sh';
-
-/** リポジトリルート(apps/web/e2e/steps から4階層上)。`.env`からKeycloakのmaster管理者資格情報を読む。 */
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
-
-function readEnvValue(key: string): string {
-  const envPath = path.join(REPO_ROOT, '.env');
-  const content = fs.readFileSync(envPath, 'utf-8');
-  const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-  if (!match) {
-    throw new Error(`.env に ${key} が見つかりません`);
-  }
-  return match[1].trim();
-}
-
-function kcadm(args: string[]): string {
-  return execFileSync(
-    'docker',
-    ['exec', KEYCLOAK_CONTAINER, KCADM_BIN, ...args],
-    { encoding: 'utf-8', timeout: 30_000 }
-  );
-}
-
-function kcadmLogin(): void {
-  const username = readEnvValue('KEYCLOAK_ADMIN_USERNAME');
-  const password = readEnvValue('KEYCLOAK_ADMIN_PASSWORD');
-  kcadm([
-    'config', 'credentials',
-    '--server', 'http://localhost:8080/auth',
-    '--realm', 'master',
-    '--user', username,
-    '--password', password,
-  ]);
-}
 
 /**
  * 検証用アカウントに実際にログインできるだけのKeycloak資格情報を整える
