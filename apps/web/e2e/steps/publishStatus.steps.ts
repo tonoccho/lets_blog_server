@@ -408,13 +408,30 @@ When('一括管理画面のポスト\\/ページタブでステータス変更�
   const row = page.locator('tbody tr').filter({ hasText: slug });
   await expect(row).toBeVisible({ timeout: 30000 });
 
+  // このセレクトは`<option value="">ステータス変更…</option>`(プレースホルダー、
+  // PostComparisonTable.tsx:181)を常時描画するため、options.first()がattachedになる
+  // のを待つだけでは実データの到着を待てない。実選択肢はfetchPostStatusesAction()
+  // (同32-36行)の解決後にまとめて追加されるので、プレースホルダー分(1件)を超えて
+  // 選択肢が増えるまでポーリングする(#1359)。
   const options = row.locator('select option');
-  await expect(options.first()).toBeAttached({ timeout: 15000 });
+  await expect
+    .poll(() => options.count(), {
+      timeout: 15000,
+      message:
+        'ステータス変更セレクトの選択肢がプレースホルダーのみのまま増えない' +
+        '(fetchPostStatusesActionの解決を待てていない可能性)',
+    })
+    .toBeGreaterThan(1);
   const uiOptions = await options.evaluateAll((elements) =>
     (elements as HTMLOptionElement[])
       .map((el) => ({ value: el.value, label: el.textContent ?? '' }))
       .filter((opt) => opt.value !== '')
   );
+  expect(
+    uiOptions.length,
+    '選択肢の増加を確認した直後にもかかわらずUI側が空配列だった' +
+      '(プレースホルダー以外の選択肢が描画されていない可能性)'
+  ).toBeGreaterThan(0);
   ctx.uiPostStatusOptions = uiOptions;
 });
 
