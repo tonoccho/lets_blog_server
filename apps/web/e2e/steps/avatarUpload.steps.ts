@@ -155,12 +155,19 @@ Given('そのメンバーは切り抜き済みのアバターを保存済みで�
     multipart: { file: { name: 'initial-avatar.png', mimeType: 'image/png', buffer: png } },
   });
   expect(response.ok(), `事前アバター保存に失敗しました (status=${response.status()})`).toBe(true);
-  // GET /api/users/{id}/avatar はサーバー側で512x512のJPEGへ変換したうえで配信する
-  // (AvatarController.getAvatar)。ここでアップロードした生PNGのバイト列をそのまま
-  // 「変更されていないこと」の比較基準にすると、変換前後でフォーマットが異なるため
-  // 何もしなくても必ず不一致になる。実際に配信されるバイト列は、ログイン後
-  // (page.requestがCookie認証を持つ状態)に「そのメンバーでプロフィール編集画面を開く」で
-  // 取得し直す(#1313)。
+  // 512x512のJPEGへの変換は**アップロード時**に行われる(AvatarService.uploadAvatar が
+  // AvatarImageProcessor.process を通してから保存する)。GET /api/users/{id}/avatar は
+  // 保存済みのバイト列をそのまま返すだけで、取得時に画像処理は走らない
+  // (AvatarController.getAvatar → AvatarService.loadAvatar)。
+  //
+  // いずれにせよ、ここでアップロードした生PNGのバイト列をそのまま「変更されていないこと」の
+  // 比較基準にはできない。保存されているのは変換後のJPEGなので、何もしなくても必ず不一致に
+  // なる。実際に配信されるバイト列は、ログイン後(page.requestがCookie認証を持つ状態)に
+  // 「そのメンバーでプロフィール編集画面を開く」で取得し直す(#1313)。
+  //
+  // 以前このコメントは「GETが変換したうえで配信する」と書いていたが事実と異なった(#1376)。
+  // その誤解のまま、このステップの後続でタイムアウトが出たときに「GETがハングしている」と
+  // 見立てて起票してしまったので、実装に合わせて直す。
   ctx.avatarUploadHasPresetAvatar = true;
 });
 
