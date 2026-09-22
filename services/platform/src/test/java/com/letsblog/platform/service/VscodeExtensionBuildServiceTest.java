@@ -8,6 +8,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,5 +71,43 @@ class VscodeExtensionBuildServiceTest {
         VscodeExtensionBuildException exception =
                 assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
         assertTrue(exception.getMessage().contains("version"));
+    }
+
+    /**
+     * issue #1190: 出力ファイル名がバージョン番号のみに基づく固定パスだったため、
+     * 並行リクエストの一方が他方のビルド成果物を`Files.deleteIfExists`で削除し
+     * 500(FileNotFoundException)になっていた。リクエストごとに一意な出力先を
+     * 割り当てることで、この衝突が起こり得ないことを保証する。
+     */
+    @Test
+    void allocateRequestOutputDir_呼び出しごとに一意なディレクトリを返す() {
+        VscodeExtensionBuildService service = service();
+        Path outputRoot = buildDir.resolve("output");
+
+        Path first = service.allocateRequestOutputDir(outputRoot);
+        Path second = service.allocateRequestOutputDir(outputRoot);
+
+        assertNotEquals(first, second);
+        assertEquals(outputRoot, first.getParent());
+        assertEquals(outputRoot, second.getParent());
+    }
+
+    /**
+     * issue #1190: リクエスト専用の出力先ディレクトリはレスポンス送出後に残り続けると
+     * ディスクを食い潰すため、ダウンロード完了後に確実に削除できることを検証する。
+     */
+    @Test
+    void cleanupAfterDownload_リクエスト専用の出力先ディレクトリを削除する() throws IOException {
+        VscodeExtensionBuildService service = service();
+        Path requestOutputDir = buildDir.resolve("output").resolve("req-uuid");
+        Files.createDirectories(requestOutputDir);
+        Path vsix = requestOutputDir.resolve("letsblog-vscode-1.0.0.vsix");
+        Files.writeString(vsix, "dummy vsix content");
+        VscodeExtensionBuildService.BuiltExtension built =
+                new VscodeExtensionBuildService.BuiltExtension(vsix, "letsblog-vscode-1.0.0.vsix", requestOutputDir);
+
+        service.cleanupAfterDownload(built);
+
+        assertFalse(Files.exists(requestOutputDir));
     }
 }

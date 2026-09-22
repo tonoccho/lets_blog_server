@@ -398,6 +398,19 @@ app:
       #
       # /api/dashboard/**(DashboardController、コンテナ状態SSE・接続サービス状態)は分析ドメイン
       # ではないため含めない(上のdashboard-statusルート。platform-serviceへ明示ルーティング、#695)。
+      # response-timeoutは、このルートに同居するVscodeExtensionController(VSCode拡張の
+      # .vsixオンデマンドビルド配布、issue #696、C10-4)のビルド時間に合わせて上書きする
+      # (issue #1190、症状B)。2026-09-19のリリース検証(develop f261d2bd、run
+      # 20260919T204741Z-2375325)の実測で、npm ci → npm run compile → npx vsce package の
+      # 1回のビルドは47〜53秒かかっており、既定の60秒(default-response-timeout)は1回分
+      # だけでも既に際どい。以前はbuildLockでビルド全体を直列化するだけだったため、
+      # 2並列が直列に走ると100秒近くに達し確実に504になっていた。#1190で後続リクエストを
+      # 進行中のビルドに合流させるようにしたため、複数並列でも待ち時間は1回分のビルド時間
+      # で済むが、npmキャッシュが冷えている等の遅い環境にも耐えられるよう、実測の最大値
+      # (53秒)に3倍弱の余裕を持たせた180秒にする(下の ai系ルートと同じ180秒。理由も
+      # 同型: 同期的に完了を待つ処理であり、既定の60秒のままだと下流がまだビルドしている
+      # 最中にgatewayだけが504で切ってしまう)。前段のnginx(location /api/、
+      # proxy_read_timeout 1200s)がこの180秒を頭打ちにすることは無い。
       - id: platform
         uri: ${PLATFORM_SERVICE_URI:http://platform:8080}
         paths:
@@ -410,6 +423,7 @@ app:
           # プロジェクト/サイトに紐付かないアプリ全体のグローバル設定(SystemSettingController/
           # AppSettingController)の所有権をplatform-serviceへ移管した(issue #693)。
           - /api/system-settings/**
+        response-timeout: 180s
       # ログ読み取り・記録APIはlog-writerへ移設した(#572)。
       - id: log
         uri: ${LOG_SERVICE_URI:http://log-writer:8080}
