@@ -26,6 +26,7 @@ import {
   type PageFixtures,
 } from '../support/pageInventory';
 import { describeFailures, sweepAllPages, type PageVisitFailure } from '../support/pageSweep';
+import { clickUntilVisible } from '../support/retryClick';
 import {
   compareKeySets,
   findMissingTranslations,
@@ -525,10 +526,13 @@ When('ビューポート幅{int}pxでモバイル用ナビゲーションを開�
   await page.goto('/', { waitUntil: 'load' });
 
   const openButton = page.getByRole('button', { name: messagesJa.header.openMenu });
-  await openButton.click();
-
   const dialog = page.getByRole('dialog', { name: messagesJa.header.navigation });
-  await expect(dialog).toBeVisible();
+  // issue #1360: `goto`直後はReactのハイドレーションが完了しておらず、サーバ描画済みの
+  // ハンバーガーボタンをクリックしても空振りすることがある(#1360本文、#1381参照)。
+  // このボタンは開閉トグルのため、`clickUntilVisible`のstate-aware化(#1360で追加)
+  // により、再試行時に既にダイアログが見えていれば2回目のクリックを送らず、
+  // 誤って閉じてしまう事故を避けている。
+  await clickUntilVisible(openButton, dialog);
 
   const firstLink = dialog.getByRole('link').first();
   const href = await firstLink.getAttribute('href');

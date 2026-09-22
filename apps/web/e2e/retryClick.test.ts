@@ -5,7 +5,9 @@
  * Reactのハイドレーションが完了し`onClick`が結びつく前ではPlaywrightのactionability
  * チェック(visible / stable / enabled / receives events)を全て通過しても`click()`
  * 自体は何も起こらない。標識を待つのではなく「期待した結果が出るまでクリックし直す」
- * 共有ヘルパー(`./support/retryClick`)の単体テスト。
+ * 共有ヘルパー(`./support/retryClick`)の単体テスト。issue #1360で、クリック直前に
+ * `expected`が既に見えていればクリックを撃たないstate-aware化のテストを追加した
+ * (トグル、たとえばハンバーガーメニューの開閉に対する残存リスクの緩和)。
  *
  * このファイルを`e2e/support/`ではなく`e2e/`直下(helpers.test.ts / account-lock.test.ts
  * と同じ場所)に置くのは、`playwright.config.ts`の`steps: ['e2e/steps/**\/*.ts',
@@ -95,8 +97,12 @@ describe('clickUntilVisible(issue #1381: goto/reload直後のクリック空振�
   test('1回目のクリックが空振りしても、再試行して期待した要素が出れば成功する', async () => {
     const click = jest.fn(async () => {});
     const waitFor = rejectNTimesThenResolve(1);
+    const isVisible = jest.fn(async () => false);
     const trigger = fakeLocator({ click });
-    const expected = fakeLocator({ waitFor: waitFor as unknown as Locator['waitFor'] });
+    const expected = fakeLocator({
+      isVisible: isVisible as unknown as Locator['isVisible'],
+      waitFor: waitFor as unknown as Locator['waitFor'],
+    });
 
     await clickUntilVisible(trigger, expected);
 
@@ -107,8 +113,9 @@ describe('clickUntilVisible(issue #1381: goto/reload直後のクリック空振�
   test('成功する場合に無駄なクリックを繰り返さない', async () => {
     const click = jest.fn(async () => {});
     const waitFor = jest.fn(async () => {});
+    const isVisible = jest.fn(async () => false);
     const trigger = fakeLocator({ click });
-    const expected = fakeLocator({ waitFor });
+    const expected = fakeLocator({ isVisible: isVisible as unknown as Locator['isVisible'], waitFor });
 
     await clickUntilVisible(trigger, expected);
 
@@ -118,8 +125,12 @@ describe('clickUntilVisible(issue #1381: goto/reload直後のクリック空振�
   test('期待した要素が最後まで出なければ、制限時間で失敗する(無限に待たない)', async () => {
     const click = jest.fn(async () => {});
     const waitFor = alwaysReject();
+    const isVisible = jest.fn(async () => false);
     const trigger = fakeLocator({ click });
-    const expected = fakeLocator({ waitFor: waitFor as unknown as Locator['waitFor'] });
+    const expected = fakeLocator({
+      isVisible: isVisible as unknown as Locator['isVisible'],
+      waitFor: waitFor as unknown as Locator['waitFor'],
+    });
     const startedAt = Date.now();
 
     await expect(clickUntilVisible(trigger, expected, { timeoutMs: 300 })).rejects.toThrow();
@@ -128,4 +139,95 @@ describe('clickUntilVisible(issue #1381: goto/reload直後のクリック空振�
     expect(elapsedMs).toBeLessThan(2_000);
     expect(click.mock.calls.length).toBeGreaterThan(1);
   }, 10_000);
+});
+
+describe('clickUntilVisible(issue #1360: 既に目的の状態ならクリックを撃たないstate-aware化)', () => {
+  function fakeLocator(overrides: Partial<Locator>): Locator {
+    return overrides as unknown as Locator;
+  }
+
+  /**
+   * issue #1360: `clickUntilVisible`はトグル(ハンバーガーメニューの開閉など、同じ
+   * ボタンへの再クリックが状態を反転させてしまう操作)に対して残存リスクを持つ
+   * (`support/retryClick.ts`冒頭のコメント参照)。1回目のクリックが実際には効いて
+   * いたのに、Reactの再描画コミットが`visibleTimeoutMs`を超えて遅れると、再試行が
+   * 2回目のクリックを撃って既に開いた状態を閉じてしまう。
+   *
+   * 対策として、**2回目以降の**試行に限り、クリックの直前に`expected`が既に見えて
+   * いないかを確認し、見えていればクリックをスキップする(#1381レビューでの提案を
+   * #1360のレビュー指摘で絞り込んだもの)。これは「状態は変わったがまだ描画されて
+   * いない」極狭の窓までは消せないが、再試行時点で既に描画が追いついている場合の
+   * 誤クリックは防げる。
+   *
+   * 【1回目をスキップしてはいけない理由】この確認を1回目にも効かせると、`expected`が
+   * 入室時点で既に見えている場合にクリックが**一度も行われない**まま成功扱いになる。
+   * 例えば将来の退行で`HeaderNav`の`isOpen`が初期値`true`になったり、ドロワーが無条件
+   * 描画になったりすると、開くボタンが完全に壊れていてもシナリオが通ってしまう。
+   * それはこの受け入れテストが検出すべき欠陥そのものなので、1回目は必ずクリックする。
+   */
+
+  test('expected が既に見えていても、1回目は必ずクリックする(壊れたトリガーを見逃さない)', async () => {
+    const click = jest.fn(async () => {});
+    const isVisible = jest.fn(async () => true);
+    const waitFor = jest.fn(async () => {});
+    const trigger = fakeLocator({ click });
+    const expected = fakeLocator({ isVisible: isVisible as unknown as Locator['isVisible'], waitFor });
+
+    await clickUntilVisible(trigger, expected);
+
+    expect(click).toHaveBeenCalledTimes(1);
+    // 1回目はisVisibleを見ずに必ずクリックする。
+    expect(isVisible).not.toHaveBeenCalled();
+  });
+
+  test('expected がまだ見えていない場合は従来どおりクリックしてから出現を待つ', async () => {
+    const click = jest.fn(async () => {});
+    const isVisible = jest.fn(async () => false);
+    const waitFor = jest.fn(async () => {});
+    const trigger = fakeLocator({ click });
+    const expected = fakeLocator({ isVisible: isVisible as unknown as Locator['isVisible'], waitFor });
+
+    await clickUntilVisible(trigger, expected);
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(waitFor).toHaveBeenCalledTimes(1);
+  });
+
+  test('1回目のクリック後に描画待ちが尽きても、再試行時に既に見えていればクリックし直さずに回復する(トグルを誤って閉じ直さない)', async () => {
+    const click = jest.fn(async () => {});
+    // 再試行時にはReactの再描画がコミット済みになりtrueを返す想定
+    // (1回目のクリックは実際には効いていた)。
+    const isVisible = jest.fn(async () => true);
+    // waitForは常に失敗させる。もし製品コードが再試行のたびに無条件でクリックし直すなら、
+    // 2回目のクリックがトグルを閉じてしまい、click呼び出し回数が2以上になる。
+    const waitFor = alwaysReject();
+    const trigger = fakeLocator({ click });
+    const expected = fakeLocator({
+      isVisible: isVisible as unknown as Locator['isVisible'],
+      waitFor: waitFor as unknown as Locator['waitFor'],
+    });
+
+    await clickUntilVisible(trigger, expected, { timeoutMs: 1_000 });
+
+    // 1回目はisVisibleを見ずにクリックし、2回目以降は見えているのでクリックしない。
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(isVisible.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  test('再試行時でも expected が見えていなければクリックし直す', async () => {
+    const click = jest.fn(async () => {});
+    const isVisible = jest.fn(async () => false);
+    const waitFor = rejectNTimesThenResolve(1);
+    const trigger = fakeLocator({ click });
+    const expected = fakeLocator({
+      isVisible: isVisible as unknown as Locator['isVisible'],
+      waitFor: waitFor as unknown as Locator['waitFor'],
+    });
+
+    await clickUntilVisible(trigger, expected);
+
+    // 1回目(isVisibleを見ない)+ 2回目(見たがfalse)の計2回。
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(isVisible).toHaveBeenCalledTimes(1);
+  });
 });
