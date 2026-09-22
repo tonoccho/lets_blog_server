@@ -105,7 +105,7 @@ describe("SshKeyPairsPanel", () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
-  it("削除確認を承認すると削除アクションを呼び、失敗時はエラーを表示する", async () => {
+  it("削除確認を承認すると削除アクションを呼び、失敗時は行が残りエラーを表示する(issue #1361 AC3)", async () => {
     (window.confirm as jest.Mock).mockReturnValue(true);
     deleteMock.mockResolvedValue({ error: "削除に失敗しました" });
     render(<SshKeyPairsPanel keyPairs={[keyPair()]} personalTimeZone={null} />);
@@ -116,6 +116,45 @@ describe("SshKeyPairsPanel", () => {
       expect(deleteMock).toHaveBeenCalledWith(1);
       expect(screen.getByText("削除に失敗しました")).toBeInTheDocument();
     });
+    expect(screen.getByText("production-deploy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "削除" })).toBeInTheDocument();
+  });
+
+  /**
+   * issue #1361: サーバコンポーネントのprops(`keyPairs`)のみに一覧が依存しており、
+   * `deleteSshKeyPairAction`が呼び出す`revalidatePath`によるサーバ再描画がマウント済みの
+   * クライアントコンポーネントへ届かない(あるいは届くタイミングが不定)ケースがあった。
+   * サーバの再描画を待たずに、削除成功が確定した時点でローカル状態から行を消す。
+   */
+  it("削除に成功すると手動リロードなしで一覧から行が消える(issue #1361 AC1)", async () => {
+    (window.confirm as jest.Mock).mockReturnValue(true);
+    deleteMock.mockResolvedValue({});
+    render(<SshKeyPairsPanel keyPairs={[keyPair()]} personalTimeZone={null} />);
+
+    expect(screen.getByText("production-deploy")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    await waitFor(() => {
+      expect(deleteMock).toHaveBeenCalledWith(1);
+      expect(screen.queryByText("production-deploy")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("保存済みのSSH鍵ペアはありません。")).toBeInTheDocument();
+  });
+
+  it("削除に成功した鍵ペアだけが一覧から消え、他の行は残る(issue #1361)", async () => {
+    (window.confirm as jest.Mock).mockReturnValue(true);
+    deleteMock.mockResolvedValue({});
+    const other = keyPair({ id: 2, name: "other-pair" });
+    render(<SshKeyPairsPanel keyPairs={[keyPair(), other]} personalTimeZone={null} />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "削除" })[0]);
+
+    await waitFor(() => {
+      expect(deleteMock).toHaveBeenCalledWith(1);
+      expect(screen.queryByText("production-deploy")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("other-pair")).toBeInTheDocument();
   });
 
   it("個人設定TZが設定されているとき、作成日時はformatDateTimeにそのTZを渡す(issue #1362、gateなし)", () => {

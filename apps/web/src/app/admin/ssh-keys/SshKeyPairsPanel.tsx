@@ -24,6 +24,20 @@ export function SshKeyPairsPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deletePending, startDeleteTransition] = useTransition();
+  /**
+   * issue #1361: 一覧は`keyPairs`(サーバコンポーネントのprops)のみに依存していたため、
+   * `deleteSshKeyPairAction`が呼ぶ`revalidatePath`によるサーバ再描画がマウント済みの
+   * このクライアントコンポーネントへ届くタイミングに一覧の更新が左右されていた
+   * (2026-09-19のリリース検証で1分以上更新されなかった実例あり)。
+   * `revalidatePath`はサーバ側キャッシュの整合性(次回ナビゲーション・再読み込み時の
+   * 再取得)のために`actions.ts`側にそのまま残しつつ、画面上の即時反映は削除の成功が
+   * 確定した時点でローカル状態から行を除くことで保証する(サーバの再描画到着を待たない)。
+   * 生成(create)時の一覧反映は本issueのOut of Scope(現行でも`generated`は別枠表示のみで
+   * 一覧へは反映されない)であるため、propsが変わるたびにこのローカル状態を作り直す同期は
+   * 持たない。ページ遷移・再読み込みでコンポーネントごと作り直されれば、その時点のpropsで
+   * 初期化し直される。
+   */
+  const [items, setItems] = useState<SavedSshKeyPair[]>(keyPairs);
   // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
   // 一致させるため、issue #1362)。個人設定TZがあるときはSSR/クライアントで常に同じ
   // 文字列になるためこのフラグを見ない。
@@ -58,6 +72,8 @@ export function SshKeyPairsPanel({
       const result = await deleteSshKeyPairAction(id);
       if (result.error) {
         setDeleteError(result.error);
+      } else {
+        setItems((prev) => prev.filter((keyPair) => keyPair.id !== id));
       }
       setDeletingId(null);
     });
@@ -145,7 +161,7 @@ export function SshKeyPairsPanel({
       <section className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
         <h2 className="font-medium">保存済みのSSH鍵ペア</h2>
         {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
-        {keyPairs.length === 0 ? (
+        {items.length === 0 ? (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">保存済みのSSH鍵ペアはありません。</p>
         ) : (
           <div className="overflow-x-auto">
@@ -159,7 +175,7 @@ export function SshKeyPairsPanel({
                 </tr>
               </thead>
               <tbody>
-                {keyPairs.map((keyPair) => (
+                {items.map((keyPair) => (
                   <tr key={keyPair.id} className="border-b border-neutral-100 dark:border-neutral-800/60 align-top">
                     <td className="py-2 pr-4">
                       <p className="font-medium">{keyPair.name}</p>
