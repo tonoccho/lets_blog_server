@@ -8,6 +8,7 @@ import {
   fetchAccessToken,
   loginViaKeycloak,
 } from '../support';
+import { clickUntilVisible } from '../support/retryClick';
 
 /**
  * issue #1259: 個人設定のタイムゾーンを任意の上書きにする、のステップ定義。
@@ -116,7 +117,15 @@ When('そのメンバーで個人設定タブを開く', async ({ page, ctx }) =
   const { userId, email, password } = fixture(ctx);
   await loginViaKeycloak(page, email, password);
   await page.goto(`/users/${userId}/edit`);
-  await page.getByRole('button', { name: '個人設定' }).click();
+  // issue #1381: `goto`直後はReactのハイドレーションが完了しておらず、サーバ描画済みの
+  // タブボタンをクリックしても空振りすることがある(#1381本文参照)。「個人設定」タブは
+  // べき等な切り替えのみで開閉トグルではないため(apps/web/src/components/Tabs.tsxの
+  // Tabsコンポーネントは`setActiveTabId`を呼ぶだけで、同じタブへの再クリックは
+  // 何も閉じない)、`clickUntilVisible`で再試行しても安全。
+  await clickUntilVisible(
+    page.getByRole('button', { name: '個人設定' }),
+    page.locator('[data-testid="timezone-select"]')
+  );
 });
 
 When(/^タイムゾーンで「ブラウザに従う\(未設定\)」を選んで保存する$/, async ({ page }) => {
@@ -127,7 +136,11 @@ When(/^タイムゾーンで「ブラウザに従う\(未設定\)」を選んで
 
 Then(/^画面を再読み込みしても「ブラウザに従う\(未設定\)」が選択されている$/, async ({ page }) => {
   await page.reload();
-  await page.getByRole('button', { name: '個人設定' }).click();
+  // issue #1381: `reload`直後も`goto`直後と同じハイドレーション未完了の空振りが起こりうる。
+  await clickUntilVisible(
+    page.getByRole('button', { name: '個人設定' }),
+    page.locator('[data-testid="timezone-select"]')
+  );
   await expect(page.locator('[data-testid="timezone-select"]')).toHaveValue('');
 });
 
