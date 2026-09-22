@@ -1,4 +1,4 @@
-import { expect, type Locator } from '@playwright/test';
+import { expect, type Dialog, type Locator, type Page } from '@playwright/test';
 
 /**
  * issue #1381: `page.goto` / `page.reload` 直後にサーバ描画済みのボタンをクリックする
@@ -55,6 +55,24 @@ import { expect, type Locator } from '@playwright/test';
  * べき等な操作(タブ切り替えなど)に対しても、2回目以降のこの確認は無駄なクリックを
  * 減らす方向にしか働かないため、両方の用途に対して`clickUntilVisible`自体の既定の
  * 挙動として組み込んである(呼び分けの必要はない)。
+ *
+ * ### 例外: `trigger`と`expected`が排他的に入れ替わる操作(#1385)
+ *
+ * 上の「使ってはいけない場面」は主にトグル(再クリックで状態を反転させてしまう操作)を
+ * 想定しているが、**`trigger`をクリックすると`expected`が現れると同時に`trigger`自身が
+ * 条件描画で消える**設計(例: 「設定を削除」ボタンは対象が設定済みの間だけ描画され、
+ * 削除に成功すると「未設定」の表示と入れ替わりに消える)であれば、削除のような一見
+ * 副作用の強い操作にも安全に使える。1回目のクリックが実際には効いていて`expected`の
+ * 出現待ちだけが`visibleTimeoutMs`超過で失敗しても、再試行時に`expected`が既に見えて
+ * いればクリックはスキップされる(前述のstate-aware化)。仮にそのタイミングでも
+ * `expected`がまだ描画されていなければ`trigger`はDOMから既に取り除かれているため、
+ * 再クリックは物理的に起こり得ない(要素を待つactionabilityチェックで足止めされる
+ * だけで、実際に2回目の操作が飛ぶことはない)。加えて、対象の操作自体がドメインとして
+ * 冪等(既に削除済みの状態へもう一度「削除」を試みても実害が無い)であることも安全性の
+ * 根拠にしている。
+ *
+ * `window.confirm()`のようなネイティブダイアログを伴う操作と組み合わせる場合は、
+ * 下記{@link withDialogAccepted}も併用すること。
  *
  * ## タイムアウトの既定値
  *
@@ -124,4 +142,36 @@ export async function clickUntilVisible(
     await trigger.click();
     await expected.waitFor({ state: 'visible', timeout: options?.visibleTimeoutMs ?? DEFAULT_VISIBLE_TIMEOUT_MS });
   }, options);
+}
+
+/**
+ * `action`の実行中、ネイティブダイアログ(`window.confirm()`など)を毎回自動でacceptする(#1385)。
+ *
+ * ## なぜ`page.once('dialog', ...)`では足りないか
+ *
+ * `page.once`は1回受けたら自動的に外れる。削除ボタンのクリックのように`window.confirm()`を
+ * 出す操作を、ハイドレーション前の空振り対策として`clickUntilVisible`で再試行すると、
+ * 2回目以降に出るダイアログは誰にも受けられなくなる。未処理のダイアログはPlaywrightが
+ * **自動でdismiss**するため、再試行のクリックは確認ダイアログを閉じるだけで、対象の操作
+ * (削除)は永久に実行されない。これが実際にrelease run 20260922T100609Z-3364342で
+ * GA資格情報の削除を1件だけ失敗させた原因である。`page.on`は`action`の中で何度ダイアログが
+ * 出ても毎回受ける。
+ *
+ * ## `page.off`を必ず呼ぶ理由
+ *
+ * `page.on`で登録したハンドラを外さずに残すと、同じ`page`を使う同一シナリオの後続ステップに
+ * まで登録が漏れる。後続ステップが独自に`page.once('dialog', ...)`でダイアログを待って
+ * いても、先に登録済みの本ヘルパーのハンドラがイベントを消費してしまい、後続側の
+ * ハンドラには何も届かない。`action`が例外を投げた場合でも外れるよう、`finally`で行う。
+ */
+export async function withDialogAccepted<T>(page: Page, action: () => Promise<T>): Promise<T> {
+  const acceptDialog = (dialog: Dialog): void => {
+    void dialog.accept();
+  };
+  page.on('dialog', acceptDialog);
+  try {
+    return await action();
+  } finally {
+    page.off('dialog', acceptDialog);
+  }
 }

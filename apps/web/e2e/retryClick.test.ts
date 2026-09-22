@@ -36,8 +36,8 @@
  * `clickUntilVisible`はこの2メソッドしか呼ばないため、フェイクで挙動を十分に再現できる。
  */
 
-import type { Locator } from '@playwright/test';
-import { clickUntilVisible, retryUntilPass } from './support/retryClick';
+import type { Dialog, Locator, Page } from '@playwright/test';
+import { clickUntilVisible, retryUntilPass, withDialogAccepted } from './support/retryClick';
 
 /** 呼ばれた回数を記録しつつ、指定回数だけ拒否してからresolveする関数を作る。 */
 function rejectNTimesThenResolve(times: number): jest.Mock<Promise<void>, []> {
@@ -229,5 +229,85 @@ describe('clickUntilVisible(issue #1360: 既に目的の状態ならクリック
     // 1回目(isVisibleを見ない)+ 2回目(見たがfalse)の計2回。
     expect(click).toHaveBeenCalledTimes(2);
     expect(isVisible).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('withDialogAccepted(issue #1385: window.confirm()を伴う操作を再試行できるようにする)', () => {
+  /**
+   * issue #1385: `page.once('dialog', ...)`は1回受けたら外れる。削除ボタンの
+   * クリックのように`window.confirm()`を出す操作を`clickUntilVisible`で再試行すると、
+   * 2回目以降に出るダイアログは誰にも受けられずPlaywrightが自動でdismissしてしまい、
+   * 再試行のクリックは確認ダイアログを閉じるだけで操作自体は永久に実行されない。
+   * `page.on`(`once`ではない)で毎回受け、`action`を終えたら`page.off`で必ず外す
+   * (外し忘れると同一シナリオの後続ステップの`page.once('dialog', ...)`より先に
+   * 本ヘルパーのハンドラがダイアログを消費してしまう)。
+   *
+   * 実ブラウザを使わず、`on` / `off`だけを実装したフェイクの`Page`で検証する。
+   */
+  function fakePage(): { page: Page; handlers: Set<(dialog: Dialog) => void> } {
+    const handlers = new Set<(dialog: Dialog) => void>();
+    const page = {
+      on: jest.fn((event: string, handler: (dialog: Dialog) => void) => {
+        if (event === 'dialog') {
+          handlers.add(handler);
+        }
+        return page;
+      }),
+      off: jest.fn((event: string, handler: (dialog: Dialog) => void) => {
+        if (event === 'dialog') {
+          handlers.delete(handler);
+        }
+        return page;
+      }),
+    } as unknown as Page;
+    return { page, handlers };
+  }
+
+  test('actionの実行中だけダイアログハンドラを登録し、終了後は必ず外す', async () => {
+    const { page, handlers } = fakePage();
+
+    await withDialogAccepted(page, async () => {
+      expect(handlers.size).toBe(1);
+    });
+
+    expect(handlers.size).toBe(0);
+    expect(page.on).toHaveBeenCalledWith('dialog', expect.any(Function));
+    expect(page.off).toHaveBeenCalledWith('dialog', expect.any(Function));
+  });
+
+  test('actionが例外を投げても、ハンドラは外れる(finally)', async () => {
+    const { page, handlers } = fakePage();
+
+    await expect(
+      withDialogAccepted(page, async () => {
+        throw new Error('action failed');
+      })
+    ).rejects.toThrow('action failed');
+
+    expect(handlers.size).toBe(0);
+  });
+
+  test('登録したハンドラは、actionの中で出たダイアログを毎回acceptする(page.onceの1回きりの制約を持たない)', async () => {
+    const { page, handlers } = fakePage();
+    const accept1 = jest.fn(async () => {});
+    const accept2 = jest.fn(async () => {});
+
+    await withDialogAccepted(page, async () => {
+      for (const handler of handlers) {
+        handler({ accept: accept1 } as unknown as Dialog);
+        handler({ accept: accept2 } as unknown as Dialog);
+      }
+    });
+
+    expect(accept1).toHaveBeenCalledTimes(1);
+    expect(accept2).toHaveBeenCalledTimes(1);
+  });
+
+  test('actionの戻り値をそのまま返す', async () => {
+    const { page } = fakePage();
+
+    const result = await withDialogAccepted(page, async () => 'ok');
+
+    expect(result).toBe('ok');
   });
 });

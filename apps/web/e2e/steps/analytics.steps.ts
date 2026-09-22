@@ -9,6 +9,12 @@ import {
   fetchAccessToken,
 } from '../support';
 import { forceStubDelay, forceStubStatus, resetStub } from '../support/stubs';
+import {
+  clickUntilVisible,
+  DEFAULT_VISIBLE_TIMEOUT_MS,
+  retryUntilPass,
+  withDialogAccepted,
+} from '../support/retryClick';
 
 /**
  * Analytics(Google Analytics / AdSense)の受け入れシナリオを支えるステップ定義
@@ -345,6 +351,19 @@ function adSenseSettingsPath(projectId: number): string {
   return `/projects/${projectId}/settings/adsense`;
 }
 
+/**
+ * `heading`の出現は**サーバ描画**で満たされるため、この待ちはReactのハイドレーション
+ * 完了より前に解決しうる。Next.js(このプロジェクトが使うバージョン。
+ * `node_modules/next/dist/docs/`参照)はハイドレーション完了を検出できる標識を公開して
+ * いない — `instrumentation-client.js`はハイドレーション**開始前**に実行される専用の
+ * フックであり(`01-app/03-api-reference/03-file-conventions/instrumentation-client.md`
+ * 「Execution timing」)完了後のフックは無く、`preventing-flash-before-hydration.md`が
+ * 扱う`suppressHydrationWarning`+インラインスクリプトの手法もハイドレーション前に
+ * DOMを直接書き換えて見た目のズレを消すためのもので、ハイドレーション完了そのものを
+ * 通知する仕組みではない。製品コード側にも標識となる`data-*`属性やクライアント専用の
+ * 目印は存在しない(`apps/web/src`調査済み)。したがって`openSettings`自体を「完了まで
+ * 待つ」形に直す手段は無く、#1381/#1360と同じ「クリックし直す」方針を続ける(#1385)。
+ */
 async function openSettings(page: Page, path: string, heading: RegExp): Promise<void> {
   await page.goto(path, { waitUntil: 'commit' });
   await expect(page.getByRole('heading', { name: heading })).toBeVisible({ timeout: 30_000 });
@@ -355,11 +374,29 @@ When(
   async ({ ctx, page }, propertyId: string) => {
     const project = currentProject(ctx);
     await openSettings(page, gaSettingsPath(project.id), /Google Analytics設定$/);
-    await page.locator('input[name="propertyId"]').fill(propertyId);
-    await page
-      .locator('textarea[name="serviceAccountJson"]')
-      .fill(serviceAccountJson('at13-acceptance@at13.iam.gserviceaccount.com'));
-    await page.getByRole('button', { name: '保存', exact: true }).click();
+
+    // goto直後はハイドレーション前の可能性があり、fill()はDOMの値を書き換えても、
+    // ハイドレーション完了時の最初のレンダリングでReactの制御コンポーネントがstate
+    // (サーバ描画時の空文字列)へ戻してしまう(#1317実測: goto直後のselectOptionが
+    // DOM操作としては成功するのにlocalStorageに書かれず値が戻る)。クリックだけでなく
+    // fill()から含めてやり直す必要がある(#1385)。
+    //
+    // 【冪等性についての注記】retryClick.tsの`clickUntilVisible`は「べき等な操作にのみ
+    // 使うこと」としているが、ここではその制約を持つヘルパーは使わず、より緩い
+    // `retryUntilPass`で「同じ値によるfill+保存」全体を再試行している。再試行のたびに
+    // 書き込む値は毎回同一(`propertyId`と固定のサービスアカウントJSON)であり、
+        // 既に保存済みの値をもう一度同じ値で上書き保存しても実害は無いため安全である。
+    await retryUntilPass(async () => {
+      await page.locator('input[name="propertyId"]').fill(propertyId);
+      await page
+        .locator('textarea[name="serviceAccountJson"]')
+        .fill(serviceAccountJson('at13-acceptance@at13.iam.gserviceaccount.com'));
+      await page.getByRole('button', { name: '保存', exact: true }).click();
+      await page
+        .getByText('保存しました。')
+        .first()
+        .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+    });
   }
 );
 
@@ -373,8 +410,25 @@ Then(
 When('そのプロジェクトのGoogle Analytics設定を削除する', async ({ ctx, page }) => {
   const project = currentProject(ctx);
   await openSettings(page, gaSettingsPath(project.id), /Google Analytics設定$/);
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '設定を削除', exact: true }).click();
+
+  // goto直後はハイドレーション前の可能性があり、そのままだと「設定を削除」のクリックが
+  // onClickの未結線で空振りする(#1385)。clickUntilVisibleで再試行できるようにするが、
+  // 削除ボタンはwindow.confirm()を出すため、page.once('dialog', ...)のままでは2回目
+  // 以降のダイアログを誰も受けられずPlaywrightに自動でdismissされてしまう。
+  // withDialogAcceptedでaction中は毎回acceptし、終了後は必ずpage.offで外す(このシナリオの
+  // 後続ステップに登録が漏れないように)。
+  //
+  // 【冪等性についての注記】削除は「設定済みの間だけ描画される」ボタンをクリックする
+  // 操作で、成功すると同じ描画コミットでボタン自身が消え「未設定」の表示と入れ替わる。
+  // 万一1回目のクリックが実際には効いていて表示待ちだけが失敗した場合でも、再試行時に
+  // 「未設定」が既に見えていればクリックはスキップされ(clickUntilVisibleのstate-aware化)、
+  // まだ見えていなければボタンは既にDOMから無いため2回目の削除が物理的に飛ぶことはない。
+  await withDialogAccepted(page, () =>
+    clickUntilVisible(
+      page.getByRole('button', { name: '設定を削除', exact: true }),
+      page.getByText('未設定', { exact: true })
+    )
+  );
 });
 
 Then('Google Analytics設定のAPI応答は未設定を示す', async ({ ctx, request }) => {
@@ -393,10 +447,21 @@ Then('Google Analytics設定のAPI応答は未設定を示す', async ({ ctx, re
 When('そのプロジェクトのGoogle AdSense設定でパブリッシャーIDとOAuthクライアントを保存する', async ({ ctx, page }) => {
   const project = currentProject(ctx);
   await openSettings(page, adSenseSettingsPath(project.id), /Google AdSense設定$/);
-  await page.locator('input[name="accountId"]').fill(ADSENSE_ACCOUNT_ID);
-  await page.locator('input[name="clientId"]').fill(ADSENSE_CLIENT_ID);
-  await page.locator('input[name="clientSecret"]').fill(clientSecret(ctx));
-  await page.getByRole('button', { name: 'まとめて保存', exact: true }).click();
+  const secret = clientSecret(ctx);
+
+  // GA設定の保存ステップと同じ理由(#1385): goto直後のfill()はハイドレーション完了時の
+  // 最初のレンダリングでReactのstateへ戻されうるため、fill()から含めて再試行する。
+  // 同じ値による再送信でありべき等なので安全(上のGA保存ステップの注記を参照)。
+  await retryUntilPass(async () => {
+    await page.locator('input[name="accountId"]').fill(ADSENSE_ACCOUNT_ID);
+    await page.locator('input[name="clientId"]').fill(ADSENSE_CLIENT_ID);
+    await page.locator('input[name="clientSecret"]').fill(secret);
+    await page.getByRole('button', { name: 'まとめて保存', exact: true }).click();
+    await page
+      .getByText('保存しました。')
+      .first()
+      .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+  });
 });
 
 Then('Google AdSense設定にクライアントシークレットが設定済みとして表示される', async ({ page }) => {
