@@ -15,6 +15,7 @@ import {
   loginViaKeycloak,
   withAccountLock,
 } from '../support';
+import { extractKeycloakSessionId } from '../support/keycloakSession';
 import {
   AUTH_GATED_PATHS,
   DOMAIN_SERVICES,
@@ -1102,7 +1103,8 @@ async function writeTokenLifecycleSessionCookie(
 }
 
 /**
- * KeycloakのSSOセッション自体を終了させる(issue #1053)。
+ * KeycloakのSSOセッションのうち、このシナリオ自身が使っているブラウザセッションだけを
+ * 終了させる(issue #1053 / #1329)。
  *
  * Cookieのrefresh_token値を壊すだけでは、KeycloakのSSOセッション自体は生きたままなので、
  * `/login`が呼ぶ`signIn("keycloak")`はKeycloak側で無言のまま自動的に再認証してしまい
@@ -1111,15 +1113,25 @@ async function writeTokenLifecycleSessionCookie(
  * セッションも同時に失効している)とは違う状態であり、「再ログインを促される」の検証には
  * ならない。SSOセッション自体もここで終了させ、実際にKeycloakのホスト型ログイン画面が
  * 出ることを保証する。
+ *
+ * 【issue #1329】旧実装は`kcadm create users/{id}/logout`でユーザーID全体のSSOセッションを
+ * 終了させていたため、同じ`E2E_ADMIN_EMAIL`を使う別の同時実行中シナリオ(既定の並列度では
+ * `token-lifecycle.feature`内の複数シナリオが同時に走りうる)のセッションまで巻き添えで
+ * 終了させ、2026-09-16のAC検証で実際に落ちた。渡された`token`(このシナリオ自身の
+ * NextAuthセッションCookieをdecodeしたもの)が保持するKeycloak発行のidToken/accessToken
+ * から`sid`クレーム(=このシナリオ自身のセッションID)だけを取り出し
+ * (`extractKeycloakSessionId`)、`DELETE /admin/realms/{realm}/sessions/{session}`
+ * (kcadm経由では`kcadm delete sessions/{sid}`)でその1セッションだけを終了させる。
+ * 他の同時実行中シナリオのセッションには触れない。
  */
-function revokeKeycloakSsoSession(email: string): void {
-  kcadmLogin();
-  const usersJson = kcadm(['get', 'users', '-r', KEYCLOAK_REALM, '-q', `email=${email}`, '--fields', 'id']);
-  const users = JSON.parse(usersJson) as { id: string }[];
-  if (users.length === 0) {
-    throw new Error(`Keycloakに ${email} が見つかりません`);
+function revokeKeycloakSsoSession(token: JWT): void {
+  const rawToken = token.idToken ?? token.accessToken;
+  if (!rawToken) {
+    throw new Error('セッションCookieにidToken/accessTokenが含まれていない(SSOセッションを特定できない)');
   }
-  kcadm(['create', `users/${users[0].id}/logout`, '-r', KEYCLOAK_REALM, '-b', '{}']);
+  const sid = extractKeycloakSessionId(rawToken);
+  kcadmLogin();
+  kcadm(['delete', `sessions/${sid}`, '-r', KEYCLOAK_REALM]);
 }
 
 /**
@@ -1132,9 +1144,9 @@ function revokeKeycloakSsoSession(email: string): void {
  * 自体もここで終了させる(理由は{@link revokeKeycloakSsoSession}参照)。
  */
 Given('リフレッシュトークンが使えない状態にする', async ({ page }) => {
-  revokeKeycloakSsoSession(E2E_ADMIN_EMAIL);
-
   const { template, chunkNames, secret, token } = await readTokenLifecycleSessionCookie(page);
+  revokeKeycloakSsoSession(token);
+
   const tampered: JWT = {
     ...token,
     accessTokenExpires: Date.now() - 1000,
