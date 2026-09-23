@@ -59,6 +59,17 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1388: 未設定時の既定(RabbitMQ Javaクライアントの既定接続タイムアウト60秒)のままだと、
+    # RabbitMQ停止直後にJVMの名前解決キャッシュ(既定30秒、java.securityのnetworkaddress.cache.ttl
+    # 未設定時の既定)が古いIPを生かしている間の接続試行が、gatewayのdefault-response-timeout(60秒、
+    # projectルートに個別の上書きは無い)と競合して504になる(実機で確認: docker compose stop
+    # rabbitmq直後の1回目の呼び出しで60.013秒。30秒の窓を外すとUnknownHostExceptionで1ms未満の
+    # 高速失敗になり再現しない)。AuditLogService/DomainEventPublisherは発行失敗を
+    # catch (AmqpException) で握りつぶし監査ログ・ドメインイベントの喪失として記録するだけなので
+    # (このIssueの受け入れ範囲内)、接続確立自体をgatewayの応答時間より十分短く諦めさせれば良い。
+    # project-serviceの他の内部クライアント(IdentityClient/IdentityBridgeClient/
+    # CmsProvisioningBridgeClient/AiGenerationClient)と同じ接続タイムアウトの慣例(3秒)に合わせる。
+    connection-timeout: 3s
 
 app:
   # CMSプロビジョニングブリッジ(/api/internal/project/cms/**、CmsProvisioningBridgeClient参照)の
