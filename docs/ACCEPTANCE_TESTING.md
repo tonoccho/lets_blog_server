@@ -858,6 +858,53 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
   依存元を「失敗」ではなく**スキップ**として報告する。プロビジョニングが失敗したときに
   大量の失敗が並んで原因が埋もれる、という事態を避けるための設計である。
 
+### `at-destructive` は内部も直列(`workers: 1`、#1387)
+
+`dependencies` が担保するのは「**他のプロジェクト**が走っていないこと」だけで、
+**この段階のシナリオ同士**はグローバルの `workers` でそのまま並列に走る。24シナリオが
+それぞれ別のサービスを止めるので、互いの停止に巻き込まれる。
+
+2026-09-23 のリリース検証(develop `d6a48a3a`)で **5件が落ちた**。実行ログは
+`Running 355 tests using 4 workers` で、連番 `[339] media-service停止` /
+`[340] log-writer停止` / `[342] Penpot停止` / `[343][344] RabbitMQ停止` /
+`[345] log-writer停止` が同時に走っていた。
+
+決め手は `cross-cutting/service-degradation.feature:24`。**media-service を止める**
+シナリオなのに、エラーは**自分が止めていない content-service** が到達不能だった:
+
+```
+media-service の停止が記事の公開を止めている (status=409):
+content-serviceのレンダリング呼び出しに失敗しました:
+I/O error on POST request for "http://content:8080/api/internal/content/render/pre-image"
+```
+
+`logging/async-path.feature:7` のログインが `net::ERR_NETWORK_CHANGED` で落ちたのも
+同じ理由と見ている(コンテナの停止・起動が docker のネットワークを揺らす)。
+**ホスト側の回線断は否定済み** —— `net-watchdog.service` が該当時間帯に2分ごと走り、
+毎回復旧動作なしで正常終了している。
+
+したがって `at-destructive` プロジェクトに `workers: 1` を置いた。`at-llm-exclusive`(#1188)・
+`at-timezone-exclusive`(#1374)と同じ手法で、`TestProject.workers` はグローバルの
+`workers`(`E2E_WORKERS` での上書きを含む)より優先される。
+
+**所要時間の代償**: 直列化前の `at-destructive` 段階は 24 シナリオを 4 ワーカーで回していた。
+直列化後の実測は下記のとおり。
+
+| 条件 | 結果 | 所要時間 |
+| --- | --- | --- |
+| 直列化前(4ワーカー) | 18 passed / **6 failed** | 3分00秒 |
+| 直列化後 1回目 | 23 passed / 1 failed | 7分07秒 |
+| 直列化後 2回目 | **24 passed** | 6分59秒 |
+| 直列化後 3回目 | 23 passed / 1 failed | 7分01秒 |
+
+直列化で **6件中5件が消えた**。所要時間は 3分 → 7分の4分増で、リリース検証全体(約38分)に
+対しては許容範囲。
+
+残る1件(`logging/async-path.feature:7`「RabbitMQが停止していても業務操作は成功する」)は
+**並列干渉ではない別原因**で、3回中2回落ちる。単独実行では2回とも成功する(20.8秒 / 45.9秒)。
+**#1388** として切り出した — RabbitMQ 停止中のプロジェクト作成が接続待ちでブロックし、
+ゲートウェイが 504 を返す。
+
 ### 段階タグ
 
 `@stage:setup` / `@stage:provision` は**段階の割り当てにしか使わない**。

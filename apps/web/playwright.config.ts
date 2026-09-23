@@ -228,6 +228,33 @@ const atTimezoneExclusive = defineBddProject({
  * Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:serial` は同一ファイル内だけ)。
  * 段階を1つ足して「この段階が走るときは他に誰も走っていない」状態を作るのが、
  * この構成で表現できる唯一の確実な隔離である。
+ *
+ * ## この段階の**内部**も直列化する(issue #1387)
+ *
+ * 「他に誰も走っていない」を `dependencies` で担保しても、**この段階のシナリオ同士**は
+ * グローバルの `workers`(既定はCPU由来、実測4)でそのまま並列に走っていた。24シナリオが
+ * それぞれ別のサービスを止めるので、互いの停止に巻き込まれる。
+ *
+ * 2026-09-23 のリリース検証(develop `d6a48a3a`、run `20260922T221642Z-3414881`)で
+ * **5件が落ちた**。実行ログは `Running 355 tests using 4 workers` で、連番
+ * `[339] media-service停止` / `[340] log-writer停止` / `[342] Penpot停止` /
+ * `[343][344] RabbitMQ停止` / `[345] log-writer停止` が同時に走っている。
+ *
+ * 決定的だったのは `service-degradation.feature:24`。**media-service を止める**シナリオ
+ * なのに、エラーは**自分が止めていない content-service** が到達不能だった:
+ *
+ *   media-service の停止が記事の公開を止めている (status=409):
+ *   content-serviceのレンダリング呼び出しに失敗しました:
+ *   I/O error on POST request for "http://content:8080/api/internal/content/render/pre-image"
+ *
+ * `async-path.feature:7` のログインが `net::ERR_NETWORK_CHANGED` で落ちたのも同じ理由と
+ * 見ている(コンテナの停止・起動が docker のネットワークを揺らす)。ホスト側の回線断は
+ * 否定済み —— `net-watchdog.service` が該当時間帯に2分ごと走り、毎回復旧動作なしで
+ * 正常終了している。
+ *
+ * したがって `workers: 1` で内部も完全に直列化する。`at-llm-exclusive`(#1188)・
+ * `at-timezone-exclusive`(#1374)と同じ手法で、`TestProject.workers` はグローバルの
+ * `workers`(`E2E_WORKERS` での上書きを含む)より優先される。
  */
 const atDestructive = defineBddProject({
   ...BDD_COMMON,
@@ -400,6 +427,11 @@ export default defineConfig({
       // at-timezone-exclusive も共有状態に触れるため、at-main と同様に完了を待ってから
       // 始める(issue #1188、issue #1374)。
       dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive'],
+      // この段階の**内部**も直列化する(issue #1387)。dependencies は他プロジェクトの
+      // 完了しか担保せず、24シナリオ同士は既定の並列度でそのまま走っていた。それぞれが
+      // 別のサービスを止めるため互いの停止に巻き込まれ、2026-09-23 のリリース検証で
+      // 5件が落ちた。詳細は上の atDestructive の doc を参照。
+      workers: 1,
     },
     {
       ...atCrossBrowserFirefox,
