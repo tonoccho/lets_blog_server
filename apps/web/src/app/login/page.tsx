@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { signIn } from "next-auth/react";
 import { startNoJsLoginAction } from "./actions";
 
@@ -25,12 +25,54 @@ const AUTO_REDIRECT_TIMEOUT_MS = 3000;
  * サーバー側で代行する)を常に置くことで、JS無効時にも利用者が自力でログインを開始できる
  * ようにする。JS有効時は、自動リダイレクトが一定時間で成立しなかった場合の救済として同じ
  * フォームを表示する。
+ *
+ * issue #1393: signInの発行はマウントにつき1回に限る。React StrictModeはmount時の
+ * effectを2回実行する(Next.js App Routerのdevは`reactStrictMode`が既定true —
+ * node_modules/next/dist/docs/01-app/03-api-reference/05-config/01-next-config-js/
+ * reactStrictMode.md)。ガードが無いと`signIn()`が2回呼ばれ、Keycloakの認可
+ * エンドポイントへのトップレベル遷移が2本競合する。実害は3つあり、いずれも
+ * リリース検証 run 8(`20260924T020450Z-869889`)で実測している:
+ *
+ *   1. 2本目が`next-auth.state`クッキーを上書きするため、先行する
+ *      `/api/auth/callback/keycloak`が必ず弾かれる。`[next-auth][error]
+ *      [OAUTH_CALLBACK_ERROR] state mismatch`が44件出ており、そのたびに
+ *      `/api/auth/error` → `/login?…&error=OAuthCallback`へ遷移していた。
+ *   2. 競合した片方が499(client closed request)で中断される。
+ *
+ * アクセスログ上の比は`GET /login` 291件 : `POST /api/auth/signin/keycloak` 538件、
+ * 修正後は209件 : 188件(≒1:1)で`state mismatch`は0件になった。
+ *
+ * <p><b>`chrome-error://chromewebdata/`との因果は推論であって実測ではない。</b>
+ * リリース検証を止めていた失敗(`logging/async-path.feature`のログインが
+ * `chrome-error://chromewebdata/`で30秒タイムアウトする)は、当初この遷移競合が
+ * 原因だと考えた。しかし競合する2本の遷移がその失敗の瞬間に存在したことを示すログは
+ * 取れておらず、修正後も同じ失敗が1度再現している(その1度は直前のat-main実行が
+ * 中断した異常な状態から始まっていた)。上の1と2は実例まで追跡できているが、
+ * 3つ目を断定してはならない。#1391で「一過性の接続断」という見立てを実測で外している。
+ *
+ * <p>それでもこのガードが正しいことは、上の1と2だけで十分に正当化される —
+ * `state mismatch`を44件から0件にしたのは実測値である。
+ *
+ * <p><b>ガードするのは`signIn`の発行だけである。</b>useEffectの本体全体をrefで
+ * 早期returnすると、StrictModeの2回目で`setTimeout`が張られず、上の#1052の
+ * 手動フォールバックが永久に表示されなくなる(`__tests__/page.test.tsx`の
+ * 「signInをガードしても手動フォールバック(#1052)は3秒後に出る」がこれを固定している)。
+ *
+ * <p>`reactStrictMode: false`で黙らせる選択は採らない。StrictModeは
+ * 「二重実行に耐えない副作用」を検出するための仕組みで、ここで検出されたのは
+ * 迂回してよい誤検知ではなく本物の欠陥である。
  */
 export default function LoginPage() {
   const [showManualFallback, setShowManualFallback] = useState(false);
+  // issue #1393: StrictModeによるeffectの二重実行でsignInを2回発行しないための番兵。
+  const signInStartedRef = useRef(false);
 
   useEffect(() => {
-    void signIn("keycloak", { callbackUrl: "/" });
+    if (!signInStartedRef.current) {
+      signInStartedRef.current = true;
+      void signIn("keycloak", { callbackUrl: "/" });
+    }
+    // タイマーはガードの外に置く。中に入れると2回目のマウントでフォールバックが出ない(#1052)。
     const timer = setTimeout(() => setShowManualFallback(true), AUTO_REDIRECT_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, []);
