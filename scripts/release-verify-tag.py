@@ -575,8 +575,23 @@ DEFAULT_STEPS = [
     {
         # 要件5: `test`タスクが全11モジュールに残すJUnit XMLを集計し、
         # 終了コードだけでは見えないskippedを検出する(要件4)。
+        #
+        # issue #1415: `-Dlbs.dockerAvailable=true` を渡す。
+        # `HikariDeadConnectionRecoveryIntegrationTest`(#1095: mysqlコンテナを再作成すると
+        # 確立済みのHikariCP接続がサイレントに応答不能になる障害の再現・検証)は
+        # `@EnabledIfSystemProperty(named = "lbs.dockerAvailable", matches = "true")` を持ち、
+        # `services/publishing/build.gradle` が既定 `false` を転送する。これを渡さないと
+        # 当該2件が常にskipされ、上のゼロ許容(要件4)に自分自身が掛かって失敗する。
+        #
+        # リリース検証は必ずdockerのある環境で走る(直前の受け入れテストが
+        # docker composeのスタックを丸ごと使う)ため、ここで有効にしてよい。
+        # テストが使う使い捨てMySQLコンテナ(`DisposableMysqlContainer`)は`lbs-mysql`とは
+        # 無関係で、共有スタックを壊さない。実測では2件が86秒で通る。
+        #
+        # `build.gradle` 側の既定 `false` は据え置く。dockerの無い開発環境で
+        # `./gradlew test` が落ちるのは開発体験の後退であり、そちらの設計は意図的である。
         "name": "backend-gradle-test-lint",
-        "argv": ["./gradlew", "test", "lint"],
+        "argv": ["./gradlew", "test", "lint", "-Dlbs.dockerAvailable=true"],
         "cwd": "",
         "touches_stack": True,
         "counts_parser": "junit_xml_glob",

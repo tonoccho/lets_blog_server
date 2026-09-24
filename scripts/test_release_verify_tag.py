@@ -1562,5 +1562,42 @@ class MainWorktreeHooksPathIsUnaffectedByReleaseVerification(Harness):
         )
 
 
+class BackendGradleStepEnablesDockerGatedTests(unittest.TestCase):
+    """issue #1415: `backend-gradle-test-lint` が docker 必須のテストを実行すること。
+
+    `HikariDeadConnectionRecoveryIntegrationTest`(#1095: mysqlコンテナ再作成で
+    HikariCPの確立済み接続がサイレントに死ぬ障害の再現・検証)は
+    `@EnabledIfSystemProperty(named = "lbs.dockerAvailable", matches = "true")` を持ち、
+    `services/publishing/build.gradle` が既定 `false` を転送する。
+
+    リリース検証がプロパティ無しで `./gradlew test lint` を呼んでいたため、この2件は
+    **常にスキップ**されていた。本スクリプトの方針は「ゼロ許容(failed/skipped/
+    did not run/flaky が全て0)」なので、結果としてリリース検証は自分自身を失敗させる
+    (run 12 = `20260924T223530Z-105449`: `passed=2744 failed=0 skipped=2` で失敗)。
+
+    リリース検証は必ず docker のある環境で走る(受け入れテストが docker compose の
+    スタックを丸ごと使う)。実測でも有効化すれば 86 秒で 2/2 通る。
+    """
+
+    def test_passes_lbs_docker_available_true(self):
+        step = next(
+            s for s in rvt.DEFAULT_STEPS if s["name"] == "backend-gradle-test-lint"
+        )
+        self.assertIn(
+            "-Dlbs.dockerAvailable=true",
+            step["argv"],
+            "docker必須のテストがskipされ、ゼロ許容ポリシーでリリース検証が失敗する",
+        )
+
+    def test_still_runs_test_and_lint_tasks(self):
+        """プロパティを足すだけで、実行するタスクは変えない。"""
+        step = next(
+            s for s in rvt.DEFAULT_STEPS if s["name"] == "backend-gradle-test-lint"
+        )
+        self.assertEqual("./gradlew", step["argv"][0])
+        self.assertIn("test", step["argv"])
+        self.assertIn("lint", step["argv"])
+
+
 if __name__ == "__main__":
     unittest.main()
