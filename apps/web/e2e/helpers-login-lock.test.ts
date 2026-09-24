@@ -47,6 +47,11 @@ function createFakePage() {
     goto: jest.fn().mockResolvedValue(undefined),
     waitForLoadState: jest.fn().mockResolvedValue(undefined),
     locator: jest.fn(() => createFakeLocator()),
+    // issue #1403: `loginViaKeycloak` はKeycloakのログイン画面が出ているかどうかを
+    // URLで判定するようになったため、フェイクにも `url()` が要る。ここは
+    // 「ログイン手順がロックの中で走る」ことだけを見るテストなので、
+    // フォーム操作を通る側(レルムURL)を返しておく。
+    url: jest.fn(() => 'https://localhost/auth/realms/letsblog/protocol/openid-connect/auth'),
   };
 }
 

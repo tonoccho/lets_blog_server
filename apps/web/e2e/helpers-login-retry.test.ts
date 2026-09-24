@@ -170,3 +170,82 @@ describe('loginViaKeycloak(issue #1391: 一過性の行き止まりURLからの�
     expect(page.goto).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * issue #1403: 撮り直しの適用範囲を**ログイン導線全体**へ広げる。
+ *
+ * #1391 が入れた撮り直しは1段目(`/login` → Keycloakへのリダイレクト待ち)しか守って
+ * いなかった。リリース検証 run 9(`20260924T050201Z-2030601`)では、認証も
+ * コールバックも成功したうえで**最後の `GET /` だけ**がブラウザ側で中断され
+ * (nginx が 499 を0バイトで記録)、2段目の `toHaveURL('/')`(`helpers.ts:198`)が
+ * 30秒ポーリングして失敗した。`"GET / HTTP/1.1" 499` はその run 全体(355シナリオ、
+ * 数百回のログイン)で**この1件だけ**で、偶発的なトップレベル遷移の中断である。
+ *
+ * 2回目の試行では、1回目で `login-actions/authenticate` が302を返していれば
+ * Keycloak側のSSOセッションが既に成立しており、`/login` はフォームを出さずに
+ * `/` まで素通しになる。この経路も扱えないと、存在しない `#username` を
+ * 埋めようとして別の失敗になる。
+ */
+describe('loginViaKeycloak(issue #1403: 導線全体の撮り直し)', () => {
+  beforeEach(() => {
+    withAccountLockMock.mockClear();
+    toHaveURLMock.mockReset();
+  });
+
+  test('2段目(コールバック→/の待機)が行き止まりURLに落ちたら撮り直す', async () => {
+    toHaveURLMock
+      .mockResolvedValueOnce(undefined) // 1回目の1段目: Keycloakのフォームまで到達
+      .mockRejectedValueOnce(new Error('Timeout: 30000ms 待っても一致しなかった')) // 1回目の2段目で中断
+      .mockResolvedValue(undefined); // 2回目は通る
+    const page = createFakePage([
+      'https://localhost/auth/realms/letsblog/protocol/openid-connect/auth', // フォームあり
+      'chrome-error://chromewebdata/', // 行き止まり判定
+      'https://localhost/', // 2回目: SSO成立済みで素通し
+    ]);
+
+    await loginViaKeycloak(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+
+    expect(page.goto).toHaveBeenCalledTimes(2);
+    expect(page.goto).toHaveBeenNthCalledWith(2, '/login', { waitUntil: 'commit' });
+  });
+
+  test('2回目にKeycloakのフォームが出ない(SSO成立済み)場合、資格情報を再送しない', async () => {
+    toHaveURLMock
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Timeout: 30000ms 待っても一致しなかった'))
+      .mockResolvedValue(undefined);
+    const page = createFakePage([
+      'https://localhost/auth/realms/letsblog/protocol/openid-connect/auth',
+      'chrome-error://chromewebdata/',
+      'https://localhost/', // レルムURLではない = フォームは出ていない
+    ]);
+
+    await loginViaKeycloak(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+
+    // フォーム操作は1回目のみ: #username / #password / #kc-login / #firstName の4回。
+    // 2回目もフォームを触ると8回になる。
+    expect(page.locator).toHaveBeenCalledTimes(4);
+  });
+
+  test('2段目が2回とも行き止まりなら、握り潰さずに元のエラーで失敗する', async () => {
+    toHaveURLMock
+      .mockResolvedValueOnce(undefined) // 1回目の1段目
+      .mockRejectedValueOnce(new Error('Timeout: 30000ms 待っても一致しなかった')) // 1回目の2段目
+      .mockResolvedValueOnce(undefined) // 2回目の1段目
+      .mockRejectedValueOnce(new Error('Timeout: 30000ms 待っても一致しなかった')) // 2回目の2段目
+      .mockResolvedValue(undefined);
+    const page = createFakePage([
+      'https://localhost/auth/realms/letsblog/protocol/openid-connect/auth',
+      'chrome-error://chromewebdata/',
+      'https://localhost/auth/realms/letsblog/protocol/openid-connect/auth',
+      'chrome-error://chromewebdata/',
+      'https://localhost/',
+    ]);
+
+    await expect(loginViaKeycloak(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD)).rejects.toThrow(
+      /Timeout: 30000ms/
+    );
+
+    expect(page.goto).toHaveBeenCalledTimes(2);
+  });
+});

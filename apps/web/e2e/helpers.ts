@@ -152,53 +152,84 @@ function isTransientLoginDeadEnd(url: string): boolean {
   return TRANSIENT_LOGIN_DEAD_END_PATTERNS.some((pattern) => pattern.test(url));
 }
 
+/** Keycloakのホスト型ログイン画面のURL(レルム配下)。 */
+const KEYCLOAK_REALM_PATTERN = /\/auth\/realms\/letsblog\//;
+
 /**
- * `/login`へ遷移し、Keycloakのレルムへリダイレクトされるまで待つ(issue #1391)。
- * 行き止まりURL({@link isTransientLoginDeadEnd})に落ちた場合だけ、`/login`から
- * もう一度撮り直す(最大2回試行。1回の一過性断を前提にしており、断が繰り返す場合や
- * 実際のログイン障害はそのまま失敗させる)。
+ * 1段目の待機で受け入れるURL: Keycloakのホスト型ログイン画面**または**ログイン後の`/`。
+ *
+ * 後者を含めるのは issue #1403 の撮り直しのためである。2回目の試行に入る時点で
+ * 1回目の`login-actions/authenticate`が既に302を返していることがあり、その場合
+ * Keycloak側のSSOセッションが成立しているので、`/login`はログイン画面を出さずに
+ * `/api/auth/callback/keycloak`経由で`/`まで素通しになる。レルムURLだけを待つと
+ * この経路で30秒待ち続けてしまう。
  */
-async function gotoLoginAndWaitForKeycloakRedirect(page: Page): Promise<void> {
-  const maxAttempts = 2;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    await page.goto('/login', { waitUntil: 'commit' });
-    try {
-      await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
-      return;
-    } catch (error) {
-      if (attempt >= maxAttempts || !isTransientLoginDeadEnd(page.url())) {
-        throw error;
-      }
-      // 行き止まりURLに落ちた1回目の失敗のみ再試行する。ループの次周で /login を撮り直す。
+const KEYCLOAK_FORM_OR_HOME_PATTERN = /(\/auth\/realms\/letsblog\/)|(^https?:\/\/[^/]+\/$)/;
+
+/**
+ * ログイン導線を**1回**通す(issue #1403)。`/login`への遷移から、
+ * Keycloakのフォーム操作を経て、ログイン後の`/`へ到達するまで。
+ *
+ * <p>Keycloakのログイン画面が出ていない場合(SSOセッション成立済み)はフォーム操作を
+ * 飛ばす。資格情報を再送しないため、Keycloakの`failureFactor`を余計に積み上げない。
+ */
+async function runLoginAttempt(page: Page, email: string, password: string): Promise<void> {
+  await page.goto('/login', { waitUntil: 'commit' });
+  await expect(page).toHaveURL(KEYCLOAK_FORM_OR_HOME_PATTERN, { timeout: 30000 });
+
+  if (KEYCLOAK_REALM_PATTERN.test(page.url())) {
+    await page.waitForLoadState('load');
+
+    await page.locator('#username').fill(email);
+    await page.locator('#password').fill(password);
+    // e2e-login-guard:locked — このメソッド全体がwithAccountLockで囲まれている(issue #1295)。
+    await page.locator('#kc-login').click();
+
+    // VERIFY_PROFILE等の追加required actionが出た場合のみ処理する(通常のログインでは出ない)。
+    if (await page.locator('#firstName').isVisible({ timeout: 3000 }).catch(() => false)) {
+      await page.locator('#firstName').fill('E2E');
+      await page.locator('#lastName').fill('Test');
+      await page.locator('input[type="submit"]').first().click();
     }
   }
+
+  // ログイン後のコールバック(Keycloak → /api/auth/callback/keycloak → /)の待機。
+  // 上の待機と書き方・timeout を揃えてある(#1017 でこの形にした)。
+  await expect(page).toHaveURL('/', { timeout: 30000 });
+  await page.waitForLoadState('load');
 }
 
 export async function loginViaKeycloak(page: Page, email: string, password: string): Promise<void> {
   await withAccountLock(
     email,
     async () => {
-      await gotoLoginAndWaitForKeycloakRedirect(page);
-      await page.waitForLoadState('load');
-
-      await page.locator('#username').fill(email);
-      await page.locator('#password').fill(password);
-      // e2e-login-guard:locked — このメソッド全体がwithAccountLockで囲まれている(issue #1295)。
-      await page.locator('#kc-login').click();
-
-      // VERIFY_PROFILE等の追加required actionが出た場合のみ処理する(通常のログインでは出ない)。
-      if (await page.locator('#firstName').isVisible({ timeout: 3000 }).catch(() => false)) {
-        await page.locator('#firstName').fill('E2E');
-        await page.locator('#lastName').fill('Test');
-        await page.locator('input[type="submit"]').first().click();
+      const maxAttempts = 2;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          await runLoginAttempt(page, email, password);
+          return;
+        } catch (error) {
+          if (attempt >= maxAttempts || !isTransientLoginDeadEnd(page.url())) {
+            throw error;
+          }
+          // 行き止まりURLに落ちた1回目の失敗のみ撮り直す。ループの次周で /login からやり直す。
+        }
       }
-
-      // ログイン後のコールバック(Keycloak → /api/auth/callback/keycloak → /)の待機。
-      // 上の待機と書き方・timeout を揃えてある(#1017 でこの形にした)。
-      await expect(page).toHaveURL('/', { timeout: 30000 });
-      await page.waitForLoadState('load');
     },
-    { timeoutMs: 120_000 }
+    // ロック**待ち**の上限。撮り直しで試行が2回になるぶん、保持時間が従来の倍に
+    // なりうるので 120秒 → 240秒へ広げた(issue #1403)。
+    //
+    // **これは見積りであって上限の証明ではない。** 明示的な timeout を持つのは
+    // `toHaveURL` の30秒2つと `isVisible` の3秒だけで、`page.goto`・
+    // `waitForLoadState('load')`・ロケータ操作には個別の timeout が無く
+    // (`playwright.config.ts` に `use.actionTimeout` / `use.navigationTimeout` の
+    // 指定も無い)、実際にはシナリオ自身の timeout(既定90秒、`@timeout:600000`
+    // 付きなら600秒)までしか縛られていない。したがって保持時間の真の上限は
+    // 「240秒」ではなくシナリオの timeout である。
+    // ここを厳密にしたい場合は個々の待機に timeout を付ける必要があるが、
+    // 新たな打ち切りは新たな不安定要因にもなるため、本Issueの範囲では
+    // 数字を増やすだけに留め、根拠の質をこのコメントに正直に書き残す。
+    { timeoutMs: 240_000 }
   );
 }
 
