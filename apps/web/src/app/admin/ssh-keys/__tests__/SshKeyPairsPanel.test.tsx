@@ -175,4 +175,16 @@ describe("SshKeyPairsPanel", () => {
     expect(formatDateTime).toHaveBeenCalledWith(pair.createdAt);
     expect(screen.getByText("FORMATTED_CREATED_AT")).toBeInTheDocument();
   });
+
+  /**
+   * issue #1413 の対の観点。マウント前はボタンを `disabled` にするが、
+   * マウント後(=ハイドレーション完了後)は従来どおり押せなければならない。
+   * この2件が揃って初めて「押せない時間帯だけを塞いだ」と言える
+   * (マウント前の確認は `SshKeyPairsPanel.mountGate.test.tsx` にある)。
+   */
+  it("マウント後は生成ボタンを押せる(issue #1413で塞ぐのはハイドレーション前だけ)", () => {
+    render(<SshKeyPairsPanel keyPairs={[]} personalTimeZone={null} />);
+
+    expect(screen.getByRole("button", { name: "SSH鍵ペアを生成" })).toBeEnabled();
+  });
 });

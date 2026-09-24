@@ -57,4 +57,31 @@ describe("SshKeyPairsPanel(マウント前)", () => {
     expect(screen.queryByText("FORMATTED_CREATED_AT")).not.toBeInTheDocument();
     expect(screen.getByText("読み込み中…")).toBeInTheDocument();
   });
+
+  /**
+   * issue #1413: ハイドレーション完了前は生成ボタンを押せないようにする。
+   *
+   * `<form onSubmit={handleGenerate} method="post">` の `method="post"` は #1051 の
+   * 緩和策(JS未実行時に素のGET送信へフォールバックして入力値がURL・アクセスログ・
+   * Refererへ漏れるのを防ぐ)であって、JS無効時に機能させるためのものではない。
+   * `/admin/ssh-keys` にPOSTハンドラは無く、#1051 本文も「サーバー側は GET を処理
+   * しないため、利用者から見ると『作成ボタンを押しても何も起きない』だけ」と述べている。
+   *
+   * ハイドレーション前は `onSubmit` が未結線なので、クリックはネイティブPOSTになり
+   * ページが遷移し、鍵は生成されず入力値だけが失われる。リリース検証 run 11
+   * (`20260924T194725Z-3220380`)はこれで停止した — Playwrightのログに
+   * `navigated to "https://localhost/admin/ssh-keys"` が残っている。
+   *
+   * 受け入れテスト側の再試行では直せない。`retryClick.ts` の `clickUntilVisible` は
+   * ヘルパー自身が「べき等な操作にのみ使うこと。送信系に使うと二重実行になる」と
+   * 明記しており、鍵ペア生成は非べき等だからである。
+   *
+   * Playwright の actionability チェックは `enabled` を待つため、製品側でここを塞げば
+   * 受け入れテストは無変更のまま競合が消える。
+   */
+  it("マウント前は生成ボタンを押せない(ネイティブPOSTへのフォールバックを塞ぐ、issue #1413)", () => {
+    render(<SshKeyPairsPanel keyPairs={[]} personalTimeZone={null} />);
+
+    expect(screen.getByRole("button", { name: "SSH鍵ペアを生成" })).toBeDisabled();
+  });
 });

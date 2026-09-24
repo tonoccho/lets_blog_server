@@ -112,9 +112,21 @@ export function SshKeyPairsPanel({
             </label>
           </div>
           {generateError && <p className="text-sm text-red-600">{generateError}</p>}
+          {/* issue #1413: ハイドレーション完了(mounted)までは押せないようにする。
+              未結線の状態で押されると `onSubmit` が走らず、`method="post"` の
+              ネイティブ送信にフォールバックしてページが遷移し、鍵は生成されずに
+              入力値だけが失われる(`/admin/ssh-keys` にPOSTハンドラは無い)。
+              `method="post"` 自体は #1051 の緩和策(素のGET送信で入力値がURL・
+              アクセスログ・Refererへ漏れるのを防ぐ)なので残す。多重防御である。
+              リリース検証 run 11 はこの経路で停止した(Playwrightのログに
+              `navigated to "https://localhost/admin/ssh-keys"` が残っている)。
+              受け入れテスト側の再試行では直せない —— `retryClick.ts` の
+              `clickUntilVisible` は「べき等な操作にのみ使うこと」と明記しており、
+              鍵ペアの生成は非べき等だからである。Playwright の actionability
+              チェックは `enabled` を待つため、ここを塞げばテストは無変更で安定する。 */}
           <button
             type="submit"
-            disabled={generatePending}
+            disabled={generatePending || !mounted}
             className="rounded bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700 disabled:opacity-50"
           >
             {generatePending ? "生成中…" : "SSH鍵ペアを生成"}
