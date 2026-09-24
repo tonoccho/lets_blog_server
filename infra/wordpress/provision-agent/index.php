@@ -1258,10 +1258,28 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // issue #1070: 対象が存在しない場合、`wp post delete`は投稿タイプを判定できず
     // (「Posts of type '' do not support being sent to trash.」)非0で終了するが、これは
     // 呼び出し側の入力ミスであり、エージェント/wp-cliの実行そのものの失敗(500)とは区別する。
-    // `/wp-cli/post-exists`と同じ`wp post get --field=ID`で削除前に存在確認する。
-    [$existsCode, , ] = runWp(['post', 'get', $postId, '--field=ID', "--path=$sitePath", '--allow-root']);
-    if ($existsCode !== 0) {
+    // 削除前に存在確認し、対象なしを404で返す。
+    //
+    // issue #1326: 存在確認は `--field=ID` ではなく `--field=post_status` で行い、
+    // **ゴミ箱(`trash`)も「削除済み」として404にする**。
+    //
+    // `--force`を付けない1回目の削除はWordPressコアの既定どおりゴミ箱へ移動するだけで、
+    // 投稿の実体は残る。`--field=ID`はゴミ箱の投稿も返すため、#1070の存在確認は
+    // これを「存在する」と判定し、2回目の削除がそのまま実行されていた。WordPressコアは
+    // 既に`trash`の投稿への`wp_delete_post()`を恒久削除として扱うので、
+    // **2回目の削除要求が記事を復旧不能に破壊していた**(実測: 1回目
+    // `Success: Trashed post 6.` → 2回目 `Success: Deleted post 6.`)。
+    //
+    // 削除要求の再送(タイムアウト後のリトライ等)でゴミ箱の記事が失われるのは事故なので、
+    // ゴミ箱にある時点で「もう削除済み」と見なして404を返し、実削除は行わない。
+    // この経路からゴミ箱の恒久削除はできなくなるが、それはWordPress管理画面の役目であり、
+    // 本APIの`DELETE`は「ゴミ箱へ送る」までを責務とする(下の`--force`なしの選択と一貫する)。
+    [$statusCode, $statusOut, ] = runWp(['post', 'get', $postId, '--field=post_status', "--path=$sitePath", '--allow-root']);
+    if ($statusCode !== 0) {
         respond(404, ['error' => "投稿 '$postId' が見つかりません"]);
+    }
+    if (trim($statusOut) === 'trash') {
+        respond(404, ['error' => "投稿 '$postId' は既に削除済み(ゴミ箱)です"]);
     }
 
     // --forceを付けない = WordPressコアのwp_delete_post()既定挙動(ゴミ箱対応の投稿タイプはゴミ箱へ移動)に委ねる。

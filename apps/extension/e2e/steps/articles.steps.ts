@@ -274,6 +274,41 @@ Then('削除は対象なしとして区別される', (world) => {
   }
 });
 
+/**
+ * 2回目の削除要求が content-service 側の記録を壊していないことを確かめる(issue #1326)。
+ *
+ * <p><b>このステップが見ているのは WordPress の実体ではない。</b>
+ * `lookupExistingPost` が叩く `GET /api/posts/{site}/by-slug/{slug}` は content-service の
+ * 自前DBを返すだけで、WordPress へ問い合わせていない。その `status` は
+ * `PostDeleteService#delete` が `cmsAdapter.deletePost()` の成功後に呼ぶ
+ * `contentServiceClient.markTrashed(...)` が無条件に `"trash"` を書いた値である
+ * (`InternalPostBridgeController#markTrashed` は既存値を見ずに `setStatus("trash")` する)。
+ *
+ * したがって**「WordPress の行が恒久削除されたが content-service の記録だけ trash のまま」
+ * という状態をこのステップは検知できない。**修正前のコード(2回目が恒久削除に成功する)でも
+ * このステップは通ってしまう。レビューでこの点を指摘され、当初の
+ * 「記事がゴミ箱に残り続けることを固定する」という説明は過大だったので改めた。
+ *
+ * <p>それでも残す価値はある。2回目の削除要求が content-service の記録そのものを消す、
+ * あるいは別のステータスへ書き換えるという回帰は、これで検知できる。
+ *
+ * <p>WordPress 側の行が保全されていることは、この受け入れテスト層からは確認できない
+ * (拡張の API クライアントに WordPress の実体を問い合わせる経路が無い)。
+ * 実測としては wp-cli で直接確認してあり(1回目 `Trashed` → 修正後は
+ * `post_status=trash` のまま 404、行は残存)、自動テストとしての確認は **#1412** で追う。
+ */
+Then('記事の記録は削除されずゴミ箱のまま残る', async (world) => {
+  const scope = w(world);
+  const slug = (scope as unknown as { slug: string }).slug;
+  const lookup = await apiClient.lookupExistingPost(scope.token, scope.site.siteKey, slug, scope.actor);
+  if (!lookup) {
+    throw new Error('再削除で content-service の記事記録が消えています');
+  }
+  if (lookup.status !== 'trash') {
+    throw new Error(`content-service の記事記録がゴミ箱状態ではありません: status=${String(lookup.status)}`);
+  }
+});
+
 Then('削除した記事はスラッグ照会で公開済みとして返らない', async (world) => {
   const scope = w(world);
   const slug = (scope as unknown as { slug: string }).slug;
