@@ -119,13 +119,66 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
  * ロック待ちのタイムアウトは既定の30秒ではなく120秒に伸ばしてある(既定の並列度4ワーカーが
  * 同じアカウントで待ち行列を作っても、待ち時間の合計が30秒を超えて誤ってタイムアウトしない
  * ようにするため)。
+ *
+ * <p><b>issue #1391: `/login`直後の一過性の接続断からの再試行。</b> `@destructive`シナリオが
+ * コンテナを再起動した直後(例: `diagram.steps.ts`の`stopService(ctx, 'penpot-frontend')`)、
+ * 共有Dockerブリッジネットワークの再構成に伴う一過性の接続断が、直後の最初の操作——
+ * `signIn("keycloak")`が内部で発行する`/api/auth/csrf`・`/api/auth/providers`への
+ * クライアント側fetch、またはKeycloakへのトップレベル遷移そのもの——を1回だけ巻き込む
+ * ことがある(実測は実装報告に記録: `docker logs lbs-web`に
+ * `[next-auth][error][CLIENT_FETCH_ERROR] Failed to fetch`が残っていた)。
+ *
+ * <p>ホストからの疎通確認(`global-setup.ts`と同じ発想を`startService`の復旧待ちに足す案)は
+ * この断を検知できない。実測(`docker compose stop/start penpot-frontend`前後で
+ * `curl`・keep-aliveの`requests.Session`を200ms間隔で反復)では、ホストから
+ * `https://localhost/`への到達性は一度も失われなかった——断はキープアライブ接続の再利用に
+ * 限って一瞬だけ起きるとみられ、疎通確認のような新規接続のプローブでは観測できない。
+ *
+ * <p>NextAuthのこのクライアント側フローに再試行は無いため、1回の断が
+ * `/api/auth/error`や`chrome-error://chromewebdata/`という「それ以上進行しない」状態に
+ * 固定され、後続の{@code toHaveURL}のポーリングはタイムアウトまで同じURLを観測し続ける
+ * (実際の失敗ログでは57回にわたって同じURLが記録されていた)。断そのものを消せない以上、
+ * `/login`から撮り直す再試行で復旧する({@link isTransientLoginDeadEnd}が行き止まりURLと
+ * 判定した場合のみ。実際のログイン障害は再試行せずそのまま失敗させる)。
+ *
+ * <p>タイムアウトを延ばして誤魔化しているのではない(#843の轍を踏まない)。各試行のtimeout
+ * (30秒)は変えておらず、行き止まりURLを検知したときだけ`/login`から撮り直す、という
+ * 別の戦略を足しているだけである。
  */
+const TRANSIENT_LOGIN_DEAD_END_PATTERNS = [/^chrome-error:\/\//, /\/api\/auth\/error(\?|$)/];
+
+/** issue #1391: 一過性の接続断が固定化した「それ以上進行しないURL」かどうかを判定する。 */
+function isTransientLoginDeadEnd(url: string): boolean {
+  return TRANSIENT_LOGIN_DEAD_END_PATTERNS.some((pattern) => pattern.test(url));
+}
+
+/**
+ * `/login`へ遷移し、Keycloakのレルムへリダイレクトされるまで待つ(issue #1391)。
+ * 行き止まりURL({@link isTransientLoginDeadEnd})に落ちた場合だけ、`/login`から
+ * もう一度撮り直す(最大2回試行。1回の一過性断を前提にしており、断が繰り返す場合や
+ * 実際のログイン障害はそのまま失敗させる)。
+ */
+async function gotoLoginAndWaitForKeycloakRedirect(page: Page): Promise<void> {
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await page.goto('/login', { waitUntil: 'commit' });
+    try {
+      await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
+      return;
+    } catch (error) {
+      if (attempt >= maxAttempts || !isTransientLoginDeadEnd(page.url())) {
+        throw error;
+      }
+      // 行き止まりURLに落ちた1回目の失敗のみ再試行する。ループの次周で /login を撮り直す。
+    }
+  }
+}
+
 export async function loginViaKeycloak(page: Page, email: string, password: string): Promise<void> {
   await withAccountLock(
     email,
     async () => {
-      await page.goto('/login', { waitUntil: 'commit' });
-      await expect(page).toHaveURL(/\/auth\/realms\/letsblog\//, { timeout: 30000 });
+      await gotoLoginAndWaitForKeycloakRedirect(page);
       await page.waitForLoadState('load');
 
       await page.locator('#username').fill(email);
