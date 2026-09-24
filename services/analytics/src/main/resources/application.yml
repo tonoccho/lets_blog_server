@@ -60,6 +60,15 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路と同じ欠陥をspring.rabbitmqを持つ全サービスで
+    # 塞ぐ。本サービス自身はEventMessageListenerでletsblog.eventsを消費するだけで、HTTPリクエスト
+    # スレッドから同期的にconvertAndSendを呼ぶコード(AuditLogService相当)は持たない
+    # (RabbitMqConnectionTimeoutTestのJavadoc参照)ため直接の504リスクは無いが、同じ
+    # spring.rabbitmqブロックを持つ他8サービスと足並みを揃え、将来同期publish経路が
+    # 足された際に同じ欠陥を持ち込まないようにする。本サービスの内部クライアント
+    # (IdentityBridgeClient/ProjectBridgeClient、いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))
+    # と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
     # letsblog.eventsコンシューマー(EventMessageListener)のリトライ→DLQポリシー(issue #580)。
     # content-serviceと同じ設定(docs/EVENT_DRIVEN_ARCHITECTURE.md参照)。
     listener:

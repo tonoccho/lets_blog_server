@@ -90,6 +90,16 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路の横展開。RabbitMQ停止直後、JVMの
+    # 名前解決キャッシュ(既定30秒)が古いIPを生かしている間に接続を試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayの応答時間(platformルートは180秒に上書きされているが、この
+    # ロック待ちは同じConnectionFactoryを使う他の全呼び出しも足止めする)と競合して504になる。
+    # AuditLogServiceがrabbitTemplate.convertAndSendをHTTPリクエストスレッド上で同期的に呼び、
+    # 失敗はAmqpExceptionとしてcatchするだけの設計なので、接続確立自体を十分短く諦めさせればよい。
+    # 本サービスの内部クライアント(LetsBlogServiceStatusServiceのCONNECT_TIMEOUT =
+    # Duration.ofSeconds(3))と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
   # AppSettingServiceのメール送信設定項目(mail_host/mail_port/mail_username/mail_password)の
   # 環境変数フォールバック値。legacy-api版と同じくSMTP送信自体は行わない(唯一の利用者だった
   # MailSenderServiceはissue #566で撤去済み。Web管理画面からの表示・編集項目としてのみ残る)。

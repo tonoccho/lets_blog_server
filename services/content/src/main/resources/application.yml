@@ -64,6 +64,15 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路の横展開。RabbitMQ停止直後、JVMの
+    # 名前解決キャッシュ(既定30秒)が古いIPを生かしている間に接続を試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayの応答時間と競合して504になる。AuditLogServiceがrabbitTemplate
+    # .convertAndSendをHTTPリクエストスレッド上で同期的に呼び、失敗はAmqpExceptionとしてcatch
+    # するだけの設計(監査ログの喪失は許容範囲)なので、接続確立自体をgatewayの応答時間より
+    # 十分短く諦めさせればよい。本サービスの内部クライアント(IdentityBridgeClient/
+    # ProjectBridgeClient、いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
     # letsblog.eventsコンシューマー(EventMessageListener)のリトライ→DLQポリシー(issue #580)。
     # 3回まで再試行(1秒→2秒→4秒のバックオフ)し、それでも失敗したメッセージはrequeueされず
     # (default-requeue-rejected: false)、各キューのx-dead-letter-exchange設定によりletsblog.events.dlx

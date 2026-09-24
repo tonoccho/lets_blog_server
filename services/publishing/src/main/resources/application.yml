@@ -92,6 +92,16 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路の横展開。RabbitMQ停止直後、JVMの
+    # 名前解決キャッシュ(既定30秒)が古いIPを生かしている間に接続を試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayの応答時間と競合して504になる。AuditLogService/
+    # DomainEventPublisherがrabbitTemplate.convertAndSendをHTTPリクエストスレッド上で同期的に
+    # 呼び、失敗はAmqpExceptionとしてcatchするだけの設計なので、接続確立自体をgatewayの応答時間
+    # より十分短く諦めさせればよい。本サービスの内部クライアント(ProjectServiceClient/
+    # ContentServiceClient/IdentityBridgeClient等、いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))
+    # と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
 
 app:
   # サイト本体・CMS認証情報(project-serviceが所有、#575設計判断2)の内部ブリッジ呼び出し先

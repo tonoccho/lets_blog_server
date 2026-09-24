@@ -64,6 +64,20 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路の横展開。RabbitMQ停止直後、JVMの
+    # 名前解決キャッシュ(既定30秒)が古いIPを生かしている間に接続を試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayの応答時間と競合して504になる。本サービスでHTTPリクエスト
+    # スレッド上を走るのはDomainEventPublisher#publishImageGeneratedだけで、
+    # GeneratedImageCreationServiceを経てGeneratedImageController#createから同期的に呼ばれる
+    # (gatewayのmediaルート、60秒既定)。AuditLogServiceの方はMediaGarbageCollectionJobRunner
+    # #runDeleteからしか呼ばれず、そちらは@Async("mediaGarbageCollectionExecutor")の背景
+    # スレッドなのでリクエストを塞がない(#1390のレビュー指摘)。
+    # 失敗はAmqpExceptionとしてcatchするだけの設計なので、接続確立自体をgatewayの応答時間
+    # より十分短く諦めさせればよい。本サービスの内部クライアント(PlatformServiceClient/
+    # IdentityBridgeClient/ProjectServiceClient、いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))
+    # と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
 
 # ComfyUI/PlantUML/Penpotへの接続情報。legacy-apiのapplication.ymlから該当プロパティをそのまま
 # 移設した(#573)。stage1時点ではRenderController(PlantUML/Recharts/Penpot)のみが実際にこれらを

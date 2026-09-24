@@ -62,6 +62,15 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: 2026-09-23、#1388(project-serviceのみ)適用後のat-destructive実測で確定。
+    # RabbitMQ停止直後、JVMの名前解決キャッシュ(既定30秒)が古いIPを生かしている間に
+    # OperationLogService#recordがrabbitTemplate.convertAndSendを試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayのlogルートの応答時間(60秒)と競合してPOST /api/operation-logsが
+    # 504になった。失敗はAmqpExceptionとしてcatchし同期DB書き込みへフォールバックするだけの
+    # 設計なので、接続確立自体をgatewayの応答時間より十分短く諦めさせればよい。log-writer自身に
+    # 内部HTTPクライアントの先例は無いため、project-service等の慣例と同じ3秒にする。
+    connection-timeout: 3s
     listener:
       simple:
         # issue #1059: #466の「default-requeue-rejected: true」は一時的な失敗(DB接続断等)を
