@@ -7,6 +7,7 @@ Claude Code のフック(.claude/hooks/guard.py)はエージェントの操作�
 検査するもの:
   1. フェーズ分離 — テストコードとプロダクションコードを同じコミットに入れない
   2. テストの黙殺 — @Disabled / test.skip などを追加しない
+     (マージコミットでは、1 は免除、2 は MERGE_HEAD 側に既にある記述に限り免除 — #1125)
   3. テストファースト — プロダクションコードのコミットより前に、
      このブランチにテストコードの変更が存在すること
 
@@ -55,7 +56,19 @@ def staged_files():
     return [p for p in out.splitlines() if p.strip()]
 
 
+def merge_in_progress():
+    """マージコミットを作成中(`MERGE_HEAD` あり)なら True(#1125)。
+
+    マージコミットでは `git diff --cached` が HEAD との差分、つまり取り込む側の全コミット分を
+    返す。CLAUDE.md → Merge Conflicts が許す「衝突解決コミットは機械的な突き合わせ」という
+    例外を実装に反映するための判定。
+    """
+    return run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"]) is not None
+
+
 def check_phase_separation(files):
+    if merge_in_progress():
+        return
     tests, prod = classify(files)
     if tests and prod:
         fail(
@@ -69,7 +82,14 @@ def check_phase_separation(files):
         )
 
 
+def present_in_merge_head(path, pattern):
+    """`MERGE_HEAD` 側の同じパスに既に黙殺パターンがあれば True(継承した記述)。"""
+    content = run(["git", "show", "MERGE_HEAD:%s" % path]) or ""
+    return re.search(pattern, content) is not None
+
+
 def check_silencers(files):
+    merging = merge_in_progress()
     for path in files:
         if not (is_test(path) or is_production(path)):
             continue
@@ -77,6 +97,8 @@ def check_silencers(files):
         added = "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
         for pattern, label in SILENCERS:
             if re.search(pattern, added):
+                if merging and present_in_merge_head(path, pattern):
+                    continue
                 fail(
                     "テストを黙らせる変更が含まれています: %s (%s)" % (label, path),
                     "失敗しているテストは直すものであって、skip / ignore / 削除するものではありません。\n"
