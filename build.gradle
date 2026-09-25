@@ -19,6 +19,35 @@ subprojects {
         }
     }
 
+    // #1109: `docker compose up -d --force-recreate <svc>` は mysql もオーバレイ無しで作り直し、
+    // 127.0.0.1:3306 の公開を黙って外す。DB依存テストが変更と無関係に大量に落ちるので、
+    // 到達できないときは「環境要因」と明示して警告する。失敗にはしない(DB非依存の単体テストは動かす)。
+    plugins.withId('java') {
+        tasks.withType(Test).configureEach {
+            doFirst {
+                try {
+                    def host = System.getenv('TEST_DB_HOST') ?: '127.0.0.1'
+                    def port = (System.getenv('TEST_DB_PORT') ?: '3306') as int
+                    def socket = new java.net.Socket()
+                    try {
+                        socket.connect(new java.net.InetSocketAddress(host, port), 1000)
+                    } catch (IOException e) {
+                        logger.warn("""
+                            |WARNING: ${host}:${port} に到達できません。これは環境要因(3306が公開されていない)です。
+                            |  DB依存テストは FlywaySqlUnableToConnectToDbException / ConnectException で落ちます。
+                            |  コードの不具合ではありません。復旧:
+                            |    docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
+                            |  詳細: scripts/check-test-db.sh --reachability / docs/TEST_DOCUMENTATION.md""".stripMargin())
+                    } finally {
+                        socket.close()
+                    }
+                } catch (Exception e) {
+                    logger.info("test DB reachability check skipped: ${e}")
+                }
+            }
+        }
+    }
+
     plugins.withId('checkstyle') {
         checkstyle {
             configFile = rootProject.file('config/checkstyle.xml')

@@ -395,6 +395,28 @@ or `rabbitmq` never becomes healthy, everything that depends on them stays stuck
 
 ---
 
+### Host `./gradlew test` Fails With Flyway/ConnectException After `--force-recreate <svc>`
+
+**Problem (#1109):** `docker compose up -d --force-recreate <svc>` (base file only) also recreates
+`mysql` through `depends_on`, **without** the `docker-compose.host-tests.yml` overlay, so
+`127.0.0.1:3306` silently stops being published. Containers stay healthy, but every
+`@SpringBootTest` on the host fails with `FlywaySqlUnableToConnectToDbException` /
+`java.net.ConnectException` (e.g. 53 of 232 in `:services:media:test`) — unrelated to your change.
+
+**Detection:** the Gradle `test` task prints a `WARNING` saying this is environmental
+(3306 not published) with the recovery command; or run
+`bash scripts/check-test-db.sh --reachability` (exit 1 when unreachable).
+
+**Recovery:** `docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql`
+(see #1095 below for the dependent-services pool caveat when mysql is recreated).
+
+**Why not always publish 3306 in `docker-compose.yml`:** rejected — it would collide with other
+holders of host port 3306 (loop-engineering `lbs-test-db`, multiple stacks/worktrees, AT env,
+release verification) and pollutes the base file; the overlay stays opt-in. See
+`docs/TEST_DOCUMENTATION.md` → テスト用MySQLの前提.
+
+---
+
 ### `mysql` Container Recreated While Dependent Services Are Already Running
 
 **Problem (#1095):** `docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql`

@@ -42,6 +42,26 @@ bash scripts/check-test-db.sh
 
 到達性・資格情報・必要なスキーマ10件の有無を見て、足りないものと対処を出す。
 
+#### `--force-recreate <svc>` で公開が黙って外れる(#1109)
+
+`docker compose up -d --force-recreate media gateway` のように**素の `docker-compose.yml` だけ**で
+一部のサービスを作り直すと、`depends_on` で参照される `lbs-mysql` も**オーバレイ無しの設定で**
+作り直され、`127.0.0.1:3306` の公開が外れる(`docker ps` のポート欄が `127.0.0.1:3306->3306/tcp`
+から `3306/tcp` に変わる)。コンテナは healthy のままなので、スタックの健全性チェックは何も言わない。
+その後の `./gradlew :services:media:test` は `@SpringBootTest` 系(232件中53件など)が
+`FlywaySqlUnableToConnectToDbException` で落ち、**変更と無関係なテストが赤くなる**。
+
+- **復旧**: `docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql`
+- **検知**: Gradle の `test` タスクは開始時に `127.0.0.1:3306`(`TEST_DB_HOST` / `TEST_DB_PORT` で変更可)へ
+  接続を試み、到達できなければ「環境要因(3306が公開されていない)」と復旧コマンドを含む
+  `WARNING` を出す。失敗にはしない(DB非依存の単体テストは動かすため)。単独では
+  `bash scripts/check-test-db.sh --reachability`(別名 `--port-only`。到達可なら 0、不可なら 1)。
+- **恒久策の判断(不採用)**: `docker-compose.yml` で `127.0.0.1:3306:3306` を常時公開すればオーバレイ
+  自体が不要になるが、採用しない。理由: (1) ホストの 3306 を持つ他の保持者(loop-engineering の
+  `lbs-test-db`、複数スタック/worktree、AT環境、リリース検証)と衝突する。(2) 全環境が使うベース
+  ファイルを、ホスト側テストという一部の用途のために汚す。オーバレイは opt-in のままにし、
+  外れたことを上の検知で即座に分かるようにする。
+
 #### 実行方法は2つ
 
 **A) コンテナの中で回す(推奨)**

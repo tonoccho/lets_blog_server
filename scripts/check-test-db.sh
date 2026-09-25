@@ -20,7 +20,9 @@
 # 既定では TEST_DB_HOST=127.0.0.1 を見るので、このスクリプト自身はIPv6の影響を受けない。
 #
 # 使い方:
-#   bash scripts/check-test-db.sh
+#   bash scripts/check-test-db.sh                 # 到達性 + 資格情報 + スキーマ
+#   bash scripts/check-test-db.sh --reachability  # TCP到達性だけ(別名 --port-only)。
+#                                                 # Gradle の test 前段(build.gradle)が使う軽量モード(#1109)
 #
 # 終了コード: 0 = 揃っている / 1 = 揃っていない
 
@@ -62,6 +64,25 @@ remedy() {
     echo
     echo "    詳細は docs/TEST_DOCUMENTATION.md の「テスト用MySQLの前提」を参照。"
 }
+
+REACHABILITY_ONLY=0
+case "${1:-}" in
+    --reachability|--port-only) REACHABILITY_ONLY=1 ;;
+esac
+
+if [ "$REACHABILITY_ONLY" = 1 ]; then
+    # #1109: docker compose up -d --force-recreate <svc> は depends_on 経由で mysql も
+    # オーバレイ無しで作り直し、127.0.0.1:3306 の公開を黙って外す。コンテナは healthy のままなので
+    # 気付けない。到達性だけを見て、環境要因だと明示する。
+    if timeout 5 bash -c "exec 3<>/dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
+        echo "✓ ${HOST}:${PORT} に到達できます"
+        exit 0
+    fi
+    echo "✗ ${HOST}:${PORT} に到達できません。これは環境要因(3306が公開されていない)です。"
+    echo "  コードの不具合ではありません。DB依存テストは接続エラーで落ちます。"
+    echo "  復旧: docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql"
+    exit 1
+fi
 
 echo "接続先: ${USER}@${HOST}:${PORT}"
 
