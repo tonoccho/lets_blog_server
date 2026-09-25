@@ -1,6 +1,6 @@
 {
   "name": "penpot-design-ai-assistant",
-  "version": "0.4.1-DEVELOP",
+  "version": "0.4.1",
   "description": "AI Design Assistant plugin for Penpot",
   "license": "MIT",
   "main": "src/plugin.ts",

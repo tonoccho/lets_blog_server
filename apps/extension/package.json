@@ -2,7 +2,7 @@
   "name": "letsblog-vscode",
   "displayName": "Let's Blog",
   "description": "Markdownで執筆した記事を仲介APIサーバー経由でWordPressへ投稿するVSCode拡張",
-  "version": "0.4.1-DEVELOP",
+  "version": "0.4.1",
   "publisher": "letsblog",
   "private": true,
   "license": "MIT",
