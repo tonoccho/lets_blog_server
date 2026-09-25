@@ -1216,7 +1216,7 @@ identity-service所有(RBAC、issue #653系)。
 | POST /api/ssh-key-pairs | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `SshKeyPairService.generate()`内 |
 | DELETE /api/ssh-key-pairs/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `SshKeyPairService.delete()`内 |
 
-## SystemSettingController (3エンドポイント、ベースパス `/api/system-settings`)
+## SystemSettingController (4エンドポイント、ベースパス `/api/system-settings`)
 
 platform-service所有(issue #693)。未認証401はplatform-serviceの`SecurityConfig`が担う(#705)。
 
@@ -1225,6 +1225,7 @@ platform-service所有(issue #693)。未認証401はplatform-serviceの`Security
 | GET /api/system-settings/brave-search-api-key | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | `SystemSettingService.getBraveSearchApiKeyStatus()`にrequireAdmin()が無い(設定値そのものは返さず、設定済みか否か/設定元のみ) |
 | PUT /api/system-settings/brave-search-api-key | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `SystemSettingService.setBraveSearchApiKey()`内 |
 | DELETE /api/system-settings/brave-search-api-key | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `SystemSettingService.clearBraveSearchApiKey()`内 |
+| GET /api/system-settings/site-admin-path | requireAuthenticated(service層) | 401 | 該当なし | 認可OK | 現状維持 | `AppSettingService.getSiteAdminPath()`内(#1079)。非adminのサイト一覧が必要とする秘匿でない値のため、adminは要求しない |
 
 ## TagDesignSettingController (3エンドポイント、ベースパス `/api/projects/{projectId}/tag-design-settings`)
 
@@ -1294,11 +1295,14 @@ grep -rn "認可不要:" services/*/src/main/java --include=*.java
 
 `AuthorizationCoverageContract` は `requireAuthenticated` も認可呼び出しとして数える。
 厳密には認証の再確認であって認可ではないため、**これだけを持つエンドポイントは
-「認証済みなら誰でも」と同義**である。現在の該当は1件だけで、いずれも意図的:
+「認証済みなら誰でも」と同義**である。現在の該当は2件で、いずれも意図的:
 
 - `SystemSettingService#getBraveSearchApiKeyStatus`(`GET /api/system-settings/brave-search-api-key`)
   — 設定済みか否かと設定元だけを返す読み取り専用で、値は返さない。admin 限定にしない判断は
   #693 のレビューで決めたもの(legacy-api 版も admin 以外の認証済み利用者から到達できた)。
+- `AppSettingService#getSiteAdminPath`(`GET /api/system-settings/site-admin-path`)
+  — 管理画面パスのグローバル既定値(#1079)。非 admin にも開かれるサイト一覧のリンク生成に必要な
+  秘匿でない値のため admin を要求しない。保存時の検証で絶対 URL・`//`・スキーム付きを拒否している。
 
 新たに `requireAuthenticated` だけのエンドポイントを足す場合は、ここに理由を追記すること。
 
@@ -1327,7 +1331,7 @@ grep -rn "認可不要:" services/*/src/main/java --include=*.java
 - `SiteController`: `POST /api/sites`, `POST /api/sites/managed-wordpress`,
   `POST /api/sites/managed-wordpress/adopt`, `GET /api/sites`,
   `POST /api/sites/{id}/test-connection`
-- `SystemSettingController`: `GET /api/system-settings/brave-search-api-key`
+- `SystemSettingController`: `GET /api/system-settings/brave-search-api-key`, `GET /api/system-settings/site-admin-path`
 - `TaxonomyController`: `POST /api/taxonomy/resolve`
 - `VscodeExtensionController`: `GET /api/system/vscode-extension`
 

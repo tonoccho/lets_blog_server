@@ -54,6 +54,7 @@ function allSettings(): AppSetting[] {
     setting({ key: 'mail_password', label: 'メール送信パスワード', secret: true, value: null }),
     setting({ key: 'app_mail_from', label: 'メール送信元アドレス', value: 'noreply@example.com' }),
     setting({ key: 'app_web_base_url', label: 'Webフロントの公開URL', value: 'https://localhost' }),
+    setting({ key: 'site_admin_path', label: '管理画面パス', value: 'wp-admin' }),
     setting({
       key: 'upload_rate_limit_requests',
       label: 'レート制限',
@@ -86,6 +87,20 @@ describe('AppSettingsPanel', () => {
     const llmSection = field('llm_provider')!.closest('section')
     expect(llmSection).toContainElement(baseUrl)
     expect(llmSection).toContainElement(model)
+  })
+
+  it('管理画面パスの設定項目を専用グループに描画し、説明文で用途を案内する(issue #1079)', () => {
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    const input = field('site_admin_path') as HTMLInputElement
+    expect(input).not.toBeNull()
+    expect(input.value).toBe('wp-admin')
+    const section = input.closest('section')!
+    expect(section.querySelector('h2')!.textContent).toBe('サイトの管理画面パス')
+    const description = section.querySelector('p')!.textContent ?? ''
+    expect(description).toContain('サイト一覧の管理画面リンク')
+    expect(description).toContain('サイトごとの上書き')
+    expect(description).toContain('空欄で保存すると環境変数の値に戻')
   })
 
   it('外部LLMサービス連携の説明文がOLLAMAとOPENAIの設定共用を謳わない', () => {

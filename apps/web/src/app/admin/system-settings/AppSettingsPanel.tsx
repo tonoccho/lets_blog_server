@@ -45,6 +45,14 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
     keys: ["app_web_base_url"],
   },
   {
+    title: "サイトの管理画面パス",
+    description:
+      "サイト一覧の管理画面リンクに使われる、管理画面パスのグローバル既定値です(既定 wp-admin)。" +
+      "サイトごとの上書きは別途設定します。同一オリジンの相対パスのみ指定でき、" +
+      "空欄で保存すると環境変数の値に戻ります。",
+    keys: ["site_admin_path"],
+  },
+  {
     title: "レート制限",
     description:
       "画像生成・ファイルアップロードの一定時間あたりの上限リクエスト数です。-1を指定すると無制限になります。",

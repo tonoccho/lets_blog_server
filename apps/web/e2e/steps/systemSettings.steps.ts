@@ -234,3 +234,88 @@ Then(
     expect(response.status(), `応答本文: ${await response.text()}`).toBe(403);
   }
 );
+
+// ---- 管理画面パス(グローバル既定値、issue #1079) ----
+
+const SITE_ADMIN_PATH_INPUT = 'input[name="site_admin_path"]';
+const SITE_ADMIN_PATH_LABEL = '管理画面パス';
+
+When('システム設定画面を開く', async ({ page }) => {
+  await page.goto('/admin/system-settings', { waitUntil: 'commit' });
+  await expect(page.getByRole('heading', { name: 'システム設定' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(SITE_ADMIN_PATH_INPUT)).toBeVisible({ timeout: 30_000 });
+});
+
+Then(
+  '管理画面パスの設定項目に値{string}と設定元{string}が表示される',
+  async ({ page }, value: string, source: string) => {
+    const input = page.locator(SITE_ADMIN_PATH_INPUT);
+    await expect(input).toHaveValue(value, { timeout: 30_000 });
+    await expect(page.locator('label').filter({ has: input })).toContainText(source);
+  }
+);
+
+async function saveSiteAdminPath(page: import('@playwright/test').Page, value: string) {
+  await page.locator(SITE_ADMIN_PATH_INPUT).fill(value);
+  await page.getByRole('button', { name: 'まとめて保存' }).click();
+}
+
+When('管理画面パスに{string}を入力してまとめて保存する', async ({ page }, value: string) => {
+  await saveSiteAdminPath(page, value);
+});
+
+When('管理画面パスに{int}文字の値を入力してまとめて保存する', async ({ page }, length: number) => {
+  await saveSiteAdminPath(page, 'a'.repeat(length));
+});
+
+When(
+  'Webフロントの公開URLを変更し、管理画面パスに{string}を入力してまとめて保存する',
+  async ({ ctx, page }, value: string) => {
+    const webBaseUrl = page.locator('input[name="app_web_base_url"]');
+    ctx.systemSettingsWebBaseUrlBefore = await webBaseUrl.inputValue();
+    await webBaseUrl.fill(`https://e2e1079-${Date.now()}.example.com`);
+    await saveSiteAdminPath(page, value);
+  }
+);
+
+Then('保存に成功する', async ({ page }) => {
+  await expect(page.getByText('保存しました。')).toBeVisible({ timeout: 30_000 });
+});
+
+Then('保存が拒否されエラーが表示される', async ({ page }) => {
+  await expect(page.getByText('この保存操作での変更は反映されていません')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('保存しました。')).toHaveCount(0);
+  await expect(page.getByText(new RegExp(`site_admin_path|${SITE_ADMIN_PATH_LABEL}`)).first()).toBeVisible();
+});
+
+Then('Webフロントの公開URLは保存前の値のままである', async ({ ctx, page }) => {
+  await expect(page.locator('input[name="app_web_base_url"]')).toHaveValue(
+    ctx.systemSettingsWebBaseUrlBefore as string,
+    { timeout: 30_000 }
+  );
+});
+
+Then(
+  '一般ユーザーとして管理画面パスを取得すると、管理者の設定画面と同じ解決済みの値が返る',
+  async ({ request }) => {
+    const expected = (await fetchAppSettings(request)).find((s) => s.key === 'site_admin_path');
+    expect(expected, 'site_admin_pathの設定項目が見つかりません').toBeDefined();
+    const response = await request.get('/api/system-settings/site-admin-path', {
+      headers: { Authorization: `Bearer ${await userToken(request)}` },
+    });
+    expect(response.status(), `応答本文: ${await response.text()}`).toBe(200);
+    expect(((await response.json()) as { path: string }).path).toBe(expected!.value);
+  }
+);
+
+Then('認証なしで管理画面パスを取得すると401で拒否される', async ({ request }) => {
+  const response = await request.get('/api/system-settings/site-admin-path');
+  expect(response.status(), `応答本文: ${await response.text()}`).toBe(401);
+});
+
+Then('一般ユーザーとしてアプリ設定の一覧を要求すると403で拒否される', async ({ request }) => {
+  const response = await request.get('/api/system-settings/app-settings', {
+    headers: { Authorization: `Bearer ${await userToken(request)}` },
+  });
+  expect(response.status(), `応答本文: ${await response.text()}`).toBe(403);
+});

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * プロジェクト/サイトに紐付かない、業務系のアプリ全体設定(外部LLMサービス連携・メール送信・
@@ -53,6 +54,11 @@ public class AppSettingService {
     static final String APP_MAIL_FROM = "app_mail_from";
     static final String APP_WEB_BASE_URL = "app_web_base_url";
     static final String UPLOAD_RATE_LIMIT_REQUESTS = "upload_rate_limit_requests";
+    static final String SITE_ADMIN_PATH = "site_admin_path";
+
+    private static final int SITE_ADMIN_PATH_MAX_LENGTH = 200;
+    private static final Pattern URL_SCHEME_PREFIX = Pattern.compile("^[A-Za-z][A-Za-z0-9+.\\-]*:.*", Pattern.DOTALL);
+    private static final Pattern WHITESPACE_OR_CONTROL = Pattern.compile(".*[\\s\\p{Cntrl}].*", Pattern.DOTALL);
 
     /**
      * upload_rate_limit_requestsにこの値を指定すると、画像生成/アップロードのレート制限を
@@ -92,7 +98,8 @@ public class AppSettingService {
             new Definition(MAIL_PASSWORD, "メール送信パスワード", true),
             new Definition(APP_MAIL_FROM, "メール送信元アドレス", false),
             new Definition(APP_WEB_BASE_URL, "Webフロントの公開URL", false),
-            new Definition(UPLOAD_RATE_LIMIT_REQUESTS, "画像生成/アップロードのレート制限(リクエスト数)", false));
+            new Definition(UPLOAD_RATE_LIMIT_REQUESTS, "画像生成/アップロードのレート制限(リクエスト数)", false),
+            new Definition(SITE_ADMIN_PATH, "管理画面パス(既定 wp-admin)", false));
 
     private final SystemSettingRepository repository;
     private final CredentialCipher credentialCipher;
@@ -122,7 +129,8 @@ public class AppSettingService {
             @Value("${spring.mail.password:}") String mailPasswordEnvDefault,
             @Value("${app.mail.from}") String appMailFromEnvDefault,
             @Value("${app.web.base-url}") String appWebBaseUrlEnvDefault,
-            @Value("${UPLOAD_RATE_LIMIT_REQUESTS:10}") String uploadRateLimitRequestsEnvDefault) {
+            @Value("${UPLOAD_RATE_LIMIT_REQUESTS:10}") String uploadRateLimitRequestsEnvDefault,
+            @Value("${app.site-admin-path:wp-admin}") String siteAdminPathEnvDefault) {
         this.repository = repository;
         this.credentialCipher = credentialCipher;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -147,6 +155,7 @@ public class AppSettingService {
         defaults.put(APP_MAIL_FROM, appMailFromEnvDefault);
         defaults.put(APP_WEB_BASE_URL, appWebBaseUrlEnvDefault);
         defaults.put(UPLOAD_RATE_LIMIT_REQUESTS, uploadRateLimitRequestsEnvDefault);
+        defaults.put(SITE_ADMIN_PATH, siteAdminPathEnvDefault);
         this.envDefaults = defaults;
     }
 
@@ -226,6 +235,7 @@ public class AppSettingService {
             case MAIL_PORT -> requirePort(key, value);
             case APP_MAIL_FROM -> requireEmailLike(key, value);
             case UPLOAD_RATE_LIMIT_REQUESTS -> requirePositiveIntOrUnlimited(key, value);
+            case SITE_ADMIN_PATH -> requireRelativePath(key, value);
             default -> {
                 // その他の項目(APIキー・ホスト名・モデル名等)は形式チェックを行わない。
             }
@@ -264,6 +274,30 @@ public class AppSettingService {
             }
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(key + " は1〜65535の整数を指定してください", e);
+        }
+    }
+
+    /**
+     * 管理画面パスは非adminにも見えるサイト一覧のリンクhrefになるため、オープンリダイレクトの踏み台に
+     * ならないよう同一オリジン内の相対パスに限定する(issue #1079)。先頭の"/"は許容する(保存値はそのまま)。
+     */
+    private void requireRelativePath(String key, String value) {
+        if (value.length() > SITE_ADMIN_PATH_MAX_LENGTH) {
+            throw new IllegalArgumentException(key + " は" + SITE_ADMIN_PATH_MAX_LENGTH + "文字以内で指定してください");
+        }
+        if (URL_SCHEME_PREFIX.matcher(value).matches() || value.startsWith("//")) {
+            throw new IllegalArgumentException(key + " にはURL(スキーム付き・//始まり)ではなく相対パスを指定してください");
+        }
+        if (WHITESPACE_OR_CONTROL.matcher(value).matches()) {
+            throw new IllegalArgumentException(key + " に空白文字・制御文字は使用できません");
+        }
+        if (value.indexOf('\\') >= 0) {
+            throw new IllegalArgumentException(key + " にバックスラッシュ(\\)は使用できません");
+        }
+        for (String segment : value.split("/")) {
+            if (segment.equals("..")) {
+                throw new IllegalArgumentException(key + " に「..」のパスセグメントは使用できません");
+            }
         }
     }
 
@@ -397,6 +431,17 @@ public class AppSettingService {
     @Transactional(readOnly = true)
     public String getAppWebBaseUrl() {
         return resolve(APP_WEB_BASE_URL);
+    }
+
+    /**
+     * 管理画面パスのグローバル既定値(DB → 環境変数 → wp-admin)。サイト一覧が非adminにも開かれるため、
+     * adminではなくログイン済みであることだけを要求する(issue #1079。前例: SystemSettingService#
+     * getBraveSearchApiKeyStatus)。他のゲッターと異なり認可チェックを内包するので、内部ブリッジ用途では使わない。
+     */
+    @Transactional(readOnly = true)
+    public String getSiteAdminPath() {
+        adminAuthorizationService.requireAuthenticated();
+        return resolve(SITE_ADMIN_PATH);
     }
 
     /**

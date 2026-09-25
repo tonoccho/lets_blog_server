@@ -6,6 +6,8 @@ import com.letsblog.platform.domain.SystemSetting;
 import com.letsblog.platform.repository.SystemSettingRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -48,7 +50,7 @@ class AppSettingServiceTest {
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
                 "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
-                "http://localhost:3000", "10");
+                "http://localhost:3000", "10", "wp-admin");
     }
 
     @Test
@@ -588,7 +590,7 @@ class AppSettingServiceTest {
                 "", "",
                 "", "", "",
                 "", "587", "", "", "",
-                "", "10");
+                "", "10", "");
     }
 
     @Test
@@ -666,5 +668,122 @@ class AppSettingServiceTest {
         service.updateSettings(Map.of("upload_rate_limit_requests", "50"));
 
         verify(repository).save(any());
+    }
+
+    // ---- site_admin_path(issue #1079) ----
+
+    @Test
+    void getSiteAdminPath_DB未設定なら環境変数既定のwp_adminを返す() {
+        AppSettingService service = service();
+        when(repository.findById("site_admin_path")).thenReturn(Optional.empty());
+
+        assertEquals("wp-admin", service.getSiteAdminPath());
+    }
+
+    @Test
+    void getSiteAdminPath_DB設定があればそれを優先する() {
+        AppSettingService service = service();
+        when(repository.findById("site_admin_path"))
+                .thenReturn(Optional.of(new SystemSetting("site_admin_path", credentialCipher.encrypt("secret-admin"))));
+
+        assertEquals("secret-admin", service.getSiteAdminPath());
+    }
+
+    @Test
+    void getSiteAdminPath_認証だけ要求しadminは要求しない() {
+        AppSettingService service = service();
+        when(repository.findById("site_admin_path")).thenReturn(Optional.empty());
+
+        service.getSiteAdminPath();
+
+        verify(adminAuthorizationService).requireAuthenticated();
+        verify(adminAuthorizationService, never()).requireAdmin();
+    }
+
+    @Test
+    void getSiteAdminPath_未認証ならForbiddenやUnauthorizedをそのまま伝える() {
+        AppSettingService service = service();
+        doThrow(new ForbiddenException("認証が必要です")).when(adminAuthorizationService).requireAuthenticated();
+
+        assertThrows(ForbiddenException.class, service::getSiteAdminPath);
+    }
+
+    @Test
+    void getAllSettings_site_admin_pathは非秘匿で環境変数由来として返る() {
+        AppSettingService service = service();
+        when(repository.findById(any())).thenReturn(Optional.empty());
+
+        AppSettingService.SettingStatus status = service.getAllSettings().stream()
+                .filter(s -> s.key().equals("site_admin_path")).findFirst().orElseThrow();
+
+        assertTrue(!status.secret());
+        assertEquals("wp-admin", status.value());
+        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, status.source());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "secret-admin", "/wp-admin", "a/b/c", "wp-admin/", "a..b", "./x", "wp_admin.php"})
+    void updateSettings_site_admin_pathは同一オリジンの相対パスなら保存する(String value) {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        service.updateSettings(Map.of("site_admin_path", value));
+
+        verify(repository).save(any());
+    }
+
+    @Test
+    void updateSettings_site_admin_pathは200文字ちょうどなら保存する() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        service.updateSettings(Map.of("site_admin_path", "a".repeat(200)));
+
+        verify(repository).save(any());
+    }
+
+    @Test
+    void updateSettings_site_admin_pathは空文字なら未設定に戻す() {
+        AppSettingService service = service();
+
+        service.updateSettings(Map.of("site_admin_path", ""));
+
+        verify(repository).deleteById("site_admin_path");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "javascript:alert(1)", "data:text/html,x", "http://evil.example.com", "https://evil.example.com/wp-admin",
+            "//evil.example.com", "../../etc", "a/../b", "/..", "wp admin", "wp\tadmin", "wp\u0000admin",
+            " wp-admin", "/\\evil.example.com", "\\\\evil.example.com", "wp\\admin"})
+    void updateSettings_site_admin_pathの不正値は例外で保存されない(String value) {
+        AppSettingService service = service();
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("site_admin_path", value)));
+
+        assertTrue(e.getMessage().contains("site_admin_path"));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void updateSettings_site_admin_pathが201文字なら例外で保存されない() {
+        AppSettingService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("site_admin_path", "a".repeat(201))));
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void updateSettings_site_admin_pathが不正なら同時に送られた他の項目も保存されない() {
+        AppSettingService service = service();
+
+        assertThrows(IllegalArgumentException.class, () -> service.updateSettings(
+                Map.of("llm_api_key", "new-key", "site_admin_path", "javascript:alert(1)")));
+
+        verify(repository, never()).save(any());
     }
 }

@@ -84,10 +84,11 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/backup/download"),
                 new Endpoint("POST", "/api/backup/restore"),
 
-                // -- SystemSettingController (3、issue #693) --
+                // -- SystemSettingController (4、issue #693 / #1079) --
                 new Endpoint("GET", "/api/system-settings/brave-search-api-key"),
                 new Endpoint("PUT", "/api/system-settings/brave-search-api-key"),
                 new Endpoint("DELETE", "/api/system-settings/brave-search-api-key"),
+                new Endpoint("GET", "/api/system-settings/site-admin-path"),
 
                 // -- AppSettingController (2、issue #693) --
                 new Endpoint("GET", "/api/system-settings/app-settings"),

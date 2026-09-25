@@ -2,6 +2,8 @@ package com.letsblog.platform.controller;
 
 import com.letsblog.platform.dto.BraveSearchApiKeyStatusResponse;
 import com.letsblog.platform.dto.SetBraveSearchApiKeyRequest;
+import com.letsblog.platform.dto.SiteAdminPathResponse;
+import com.letsblog.platform.service.AppSettingService;
 import com.letsblog.platform.service.SystemSettingService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -24,9 +26,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class SystemSettingController {
 
     private final SystemSettingService systemSettingService;
+    private final AppSettingService appSettingService;
 
-    public SystemSettingController(SystemSettingService systemSettingService) {
+    public SystemSettingController(SystemSettingService systemSettingService, AppSettingService appSettingService) {
         this.systemSettingService = systemSettingService;
+        this.appSettingService = appSettingService;
+    }
+
+    /** 管理画面パスのグローバル既定値(解決済み)。ログイン済みなら非adminも取得できる(issue #1079)。 */
+    @GetMapping("/site-admin-path")
+    public SiteAdminPathResponse getSiteAdminPath() {
+        return new SiteAdminPathResponse(appSettingService.getSiteAdminPath());
     }
 
     @GetMapping("/brave-search-api-key")
