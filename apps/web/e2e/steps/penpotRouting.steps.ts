@@ -180,3 +180,62 @@ Then('その全てが名前解決でき TCP 接続もできる', async ({ ctx })
   }
   expect(offenders, `到達できない中継先がある:\n  ${offenders.join('\n  ')}`).toEqual([]);
 });
+
+/** nginx が応答を一時ファイルへ書き出したときにログへ出す文言(issue #1092)。 */
+const BUFFERED_TO_TEMP_FILE = 'buffered to a temporary file';
+
+/**
+ * 一時ファイルへの書き出しは、上流の応答が速くクライアントへ送り切れないうちに次のデータが
+ * 届いたときに起きる。単発のアクセスでは再現が不安定(数回に1回)なため、同時アクセスで
+ * 確実に発生させる。実際にも複数の利用者・アセット取得が並ぶ状況である。
+ *
+ * gzip を受け付けるクライアントでは reverse-proxy が圧縮しながら送るため溢れにくく、
+ * 警告は圧縮を求めないクライアント(内部の fetch や curl 等。#1092 の警告も該当)で出る。
+ * よって `Accept-Encoding: identity` で圧縮無しの経路を通す。
+ */
+When('未認証で Penpot の入口へ同時に {int} 回アクセスする', async ({ ctx, request }, count: number) => {
+  const since = rfc3339SecondsAgo();
+  const responses = await Promise.all(
+    Array.from({ length: count }, () => request.get(`${PENPOT_ENTRY}/`, { headers: { 'Accept-Encoding': 'identity' } })),
+  );
+  const first = responses[0];
+  ctx.penpotResponse = {
+    status: first.status(),
+    body: await first.text(),
+    url: `${PENPOT_ENTRY}/`,
+    since,
+  } satisfies ProbedResponse;
+});
+
+Then('その間に reverse-proxy は応答を一時ファイルへバッファしていない', async ({ ctx }) => {
+  const { since, url } = seen(ctx);
+  // ログイン画面の HTML は約267KBあり、小さなバッファ設定では毎回一時ファイルへ溢れる。
+  expect(ctx.penpotResponse && (ctx.penpotResponse as ProbedResponse).body.length,
+    `${url} の応答が小さすぎて、バッファ溢れを再現できていない`).toBeGreaterThan(100_000);
+  const offenders = dockerLogsSince(REVERSE_PROXY, since)
+    .split('\n')
+    .filter((line) => line.includes(BUFFERED_TO_TEMP_FILE));
+  expect(offenders, `${url} の応答が一時ファイルへバッファされている:\n  ${offenders.join('\n  ')}`)
+    .toEqual([]);
+});
+
+/**
+ * WebSocket の中継回帰(#1092 AC2)。バッファ設定の変更が Upgrade 中継を壊さないことを、
+ * 稼働中の設定の `location /penpot/` ブロックで固定する。実 WebSocket 接続には Penpot の
+ * 認証済みセッションが要り、このシナリオ群(未認証)の範囲を超えるため、設定の
+ * サービスレベル確認とする(文書化された例外)。
+ */
+When('稼働中の reverse-proxy から location \\/penpot\\/ の設定を取り出す', async ({ ctx }) => {
+  const conf = docker(['exec', REVERSE_PROXY, 'cat', NGINX_CONF_IN_CONTAINER]);
+  const start = conf.indexOf('location /penpot/ {');
+  expect(start, '稼働中の設定に location /penpot/ が無い').toBeGreaterThanOrEqual(0);
+  const end = conf.indexOf('\n    }', start);
+  ctx.penpotLocation = conf.slice(start, end);
+});
+
+Then('その設定は HTTP\\/1.1 の Upgrade と Connection upgrade を中継する', async ({ ctx }) => {
+  const block = ctx.penpotLocation as string;
+  expect(block).toMatch(/^\s*proxy_http_version\s+1\.1\s*;/m);
+  expect(block).toMatch(/^\s*proxy_set_header\s+Upgrade\s+\$http_upgrade\s*;/m);
+  expect(block).toMatch(/^\s*proxy_set_header\s+Connection\s+"upgrade"\s*;/m);
+});

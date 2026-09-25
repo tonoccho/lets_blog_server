@@ -28,3 +28,11 @@
   シナリオ: reverse-proxy の全ての中継先へ到達できる
     もし 稼働中の reverse-proxy から中継先を全て取り出す
     ならば その全てが名前解決でき TCP 接続もできる
+
+  シナリオ: Penpot のログイン画面の応答が一時ファイルへバッファされない
+    もし 未認証で Penpot の入口へ同時に 20 回アクセスする
+    ならば その間に reverse-proxy は応答を一時ファイルへバッファしていない
+
+  シナリオ: /penpot/ は WebSocket の中継設定を保っている
+    もし 稼働中の reverse-proxy から location /penpot/ の設定を取り出す
+    ならば その設定は HTTP/1.1 の Upgrade と Connection upgrade を中継する
