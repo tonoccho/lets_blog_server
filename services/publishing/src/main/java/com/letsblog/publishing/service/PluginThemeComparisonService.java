@@ -13,7 +13,6 @@ import com.letsblog.publishing.dto.StatusEnvironmentValue;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -67,34 +66,28 @@ public class PluginThemeComparisonService {
         this.sshOperations = sshOperations;
     }
 
-    @Transactional(readOnly = true)
     public StatusComparisonPage listPluginComparison(Long projectId, int page, int size) {
         return listComparison(projectId, page, size, false);
     }
 
-    @Transactional(readOnly = true)
     public StatusComparisonPage listThemeComparison(Long projectId, int page, int size) {
         return listComparison(projectId, page, size, true);
     }
 
-    @Transactional
     public List<BulkOperationLog> reconcilePlugin(
             Long projectId, String slug, List<StateChangeRequest> changes, Long actorId) {
         return reconcile(projectId, slug, changes, actorId, false);
     }
 
-    @Transactional
     public List<BulkOperationLog> reconcileTheme(
             Long projectId, String slug, List<StateChangeRequest> changes, Long actorId) {
         return reconcile(projectId, slug, changes, actorId, true);
     }
 
-    @Transactional
     public List<BulkOperationLog> deletePluginEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, false);
     }
 
-    @Transactional
     public List<BulkOperationLog> deleteThemeEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, true);
     }

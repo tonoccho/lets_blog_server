@@ -12,7 +12,6 @@ import com.letsblog.publishing.dto.TermEnvironmentValue;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -36,6 +35,14 @@ import java.util.Objects;
  * {@link WordPressSshOperations}経由で取得する。SSHのみで解決する環境が複数あり同一ホストを共有している
  * 場合は、{@link WordPressSshOperations#fetchTermsForEnvironments}で1回の接続にまとめる。
  * 取得に失敗した環境は「対象外」ではなく「エラー」として扱い、作業ログにも記録する。
+ *
+ * <p><b>トランザクション(issue #1124)。</b>このクラス(および{@link BulkManagementService}・
+ * {@code PluginThemeComparisonService}・{@code PostComparisonService})には{@code @Transactional}を
+ * 付けない。publishing-serviceはDBテーブルを所有せず(プロジェクト/サイト情報はproject-service、
+ * BulkOperationLogは非永続の値オブジェクト)、これらのメソッドがDBへ触れることは無い。
+ * にもかかわらず{@code @Transactional}を付けると、開始時にHikariCPのコネクションを取得し、
+ * HTTP/SSHのリモートI/Oの所要時間だけそれを保持してしまう(2026-09-06/07の障害、issue #1122/#1123)。
+ * 将来DB永続化を足す場合は、リモートI/Oの後の短いトランザクション(TransactionTemplate等)に限ること。
  *
  * <p>legacy-apiの{@code com.letsblog.api.service.TermComparisonService}をpublishing-serviceへ
  * 移設したもの(issue #708、Epic #551 C6-2)。
@@ -65,56 +72,46 @@ public class TermComparisonService {
         this.sshOperations = sshOperations;
     }
 
-    @Transactional(readOnly = true)
     public TermComparisonPage listCategoryComparison(Long projectId, int page, int size) {
         return listComparison(projectId, page, size, true);
     }
 
-    @Transactional(readOnly = true)
     public TermComparisonPage listTagComparison(Long projectId, int page, int size) {
         return listComparison(projectId, page, size, false);
     }
 
-    @Transactional
     public List<BulkOperationLog> syncCategory(Long projectId, String slug, Long actorId) {
         return sync(projectId, slug, actorId, true);
     }
 
-    @Transactional
     public List<BulkOperationLog> syncTag(Long projectId, String slug, Long actorId) {
         return sync(projectId, slug, actorId, false);
     }
 
-    @Transactional
     public List<BulkOperationLog> deleteCategoryEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, true);
     }
 
-    @Transactional
     public List<BulkOperationLog> deleteTagEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, false);
     }
 
-    @Transactional
     public List<BulkOperationLog> editCategoryAndSync(
             Long projectId, String oldSlug, String value, String slug, String parentSlug, String description,
             Long actorId) {
         return editAndSync(projectId, oldSlug, value, slug, parentSlug, description, actorId, true);
     }
 
-    @Transactional
     public List<BulkOperationLog> editTagAndSync(
             Long projectId, String oldSlug, String value, String slug, String parentSlug, String description,
             Long actorId) {
         return editAndSync(projectId, oldSlug, value, slug, parentSlug, description, actorId, false);
     }
 
-    @Transactional
     public List<BulkOperationLog> syncAllCategoriesToMaster(Long projectId, Long actorId) {
         return syncAllToMaster(projectId, actorId, true);
     }
 
-    @Transactional
     public List<BulkOperationLog> syncAllTagsToMaster(Long projectId, Long actorId) {
         return syncAllToMaster(projectId, actorId, false);
     }

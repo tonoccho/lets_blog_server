@@ -35,8 +35,8 @@ import java.util.Map;
  * <p><b>タイムアウト(issue #1123)。</b>接続/リードタイムアウトを設定せずに{@link RestClient}を
  * 組み立てると、provision-agentが固着(issue #1122)して応答を返さなくなったとき、JDK
  * {@link HttpClient}は応答を無期限に待つ。この呼び出しは
- * {@code TermComparisonService}の{@code @Transactional(readOnly = true)}の内側で行われるため、
- * 待っているスレッドはJDBCコネクションを握ったままになり、HikariCPのプール(既定10)が
+ * (issue #1124以前は){@code TermComparisonService}の{@code @Transactional(readOnly = true)}の
+ * 内側で行われていたため、待っているスレッドはJDBCコネクションを握ったままになり、HikariCPのプール(既定10)が
  * 10並行リクエストで枯渇し、publishing-service全体のDBアクセスが道連れで失敗する
  * (2026-09-06/07に実際に発生)。platform-serviceの{@code ConnectedServiceStatusService}が
  * 同じ依存先に対して既に行っている、{@code HttpClient.connectTimeout}+

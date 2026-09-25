@@ -14,7 +14,6 @@ import com.letsblog.publishing.dto.PostEnvironmentValue;
 import com.letsblog.common.util.StackTraceUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -60,7 +59,6 @@ public class PostComparisonService {
         this.bulkManagementService = bulkManagementService;
     }
 
-    @Transactional(readOnly = true)
     public PostComparisonPage listComparison(Long projectId, String postType, int page, int size) {
         Project project = getProject(projectId);
         Map<String, EnvironmentPosts> byEnvironment = resolvePostsByEnvironment(project, postType);
@@ -86,7 +84,6 @@ public class PostComparisonService {
         return new PostComparisonPage(pageItems, page, size, totalCount, postType);
     }
 
-    @Transactional
     public List<BulkOperationLog> deleteEverywhere(Long projectId, String postType, String slug, Long actorId) {
         Project project = getProject(projectId);
         Map<String, EnvironmentPosts> byEnvironment = resolvePostsByEnvironment(project, postType);
@@ -111,7 +108,6 @@ public class PostComparisonService {
         return results;
     }
 
-    @Transactional
     public List<BulkOperationLog> updateStatusEverywhere(
             Long projectId, String postType, String slug, String newStatus, Long actorId) {
         Project project = getProject(projectId);

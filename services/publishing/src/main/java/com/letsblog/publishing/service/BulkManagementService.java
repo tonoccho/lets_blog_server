@@ -16,7 +16,6 @@ import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -82,7 +81,6 @@ public class BulkManagementService {
      * カテゴリ/タグの比較テーブル(新規追加・編集はマスター環境のみ、削除・同期は非マスター環境も含む)・
      * プラグイン/テーマの状態反映(環境ごとのセル単位)のいずれからも呼ばれる共通経路。
      */
-    @Transactional
     public BulkOperationLog applyToEnvironment(
             Long projectId, String environment, BulkOperationType type, String value,
             String categorySlug, String categoryParentSlug, String categoryDescription,
@@ -100,7 +98,6 @@ public class BulkManagementService {
      * {@link #executeFromUpload}と同様、1環境の失敗(SSH未設定等)が他環境の実行を止めないよう、
      * resolveSite/applyToSiteの失敗はFAILEDのBulkOperationLogとして記録し次の環境へ進む。
      */
-    @Transactional
     public List<BulkOperationLog> applyToAllEnvironments(
             Long projectId, BulkOperationType type, String value, Long actorId) {
         if (!type.supportsZipUpload()) {
@@ -126,7 +123,6 @@ public class BulkManagementService {
         return results;
     }
 
-    @Transactional
     public List<BulkOperationLog> executeFromUpload(
             Long projectId, BulkOperationType type, MultipartFile file, Long actorId) throws IOException {
         if (!type.supportsZipUpload()) {
@@ -198,7 +194,6 @@ public class BulkManagementService {
      * (issue #468。ComfyUI生成画像はPNGのため容量が大きい)。全環境で同じ結果を使い回すため、
      * 環境ループの前に1回だけ行う。
      */
-    @Transactional
     public List<BulkOperationLog> uploadImageToAllEnvironments(
             Long projectId, byte[] data, String filename, String contentType, Long actorId) {
         Project project = getProject(projectId);
@@ -261,7 +256,6 @@ public class BulkManagementService {
      * カテゴリ/タグ/プラグイン/テーマのようなwp-cliアクション文字列を経由せず、CmsAdapterへ直接委譲する
      * (投稿一覧取得(listPosts)と同じCmsAdapter経由でmanaged/SSHが解決される)。
      */
-    @Transactional
     public BulkOperationLog deletePostAtEnvironment(
             Long projectId, String environment, Site site, String postId, String postType, String slug, Long actorId) {
         String status;
@@ -284,7 +278,6 @@ public class BulkManagementService {
     /**
      * 指定環境の1投稿/ページのステータスを変更する(PostComparisonService#updateStatusEverywhereが環境ごとに呼ぶ)。
      */
-    @Transactional
     public BulkOperationLog updatePostStatusAtEnvironment(
             Long projectId, String environment, Site site, String postId, String postType, String slug,
             String newStatus, Long actorId) {
