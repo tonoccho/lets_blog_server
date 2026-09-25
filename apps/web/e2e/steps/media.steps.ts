@@ -1334,3 +1334,24 @@ After({ tags: '@media' }, async ({ ctx, request }) => {
     });
   }
 });
+
+Then('パネル内の全てのラベルが対応する入力と結びついている', async ({ page }) => {
+  // htmlFor が対応する id の要素を指していないラベルの数を、パネルの描画結果から数える(issue #1114)。
+  const result = await page.evaluate(() => {
+    const heading = Array.from(document.querySelectorAll('h1,h2,h3,h4')).find(
+      (h) => h.textContent?.trim() === 'アセット画像生成'
+    );
+    // 見出しは「見出し+閉じる」だけの div に入っているので、パネル全体である section まで遡る。
+    const root = heading?.closest('section');
+    const labels = root ? Array.from(root.querySelectorAll('label')) : [];
+    return {
+      total: labels.length,
+      unbound: labels
+        .filter((l) => !l.htmlFor || document.getElementById(l.htmlFor) !== l.control)
+        .map((l) => l.textContent?.trim()),
+    };
+  });
+  // ラベルを1つも拾えないまま通る(空振り)のを防ぐ。パネルの常設ラベルは10個以上ある。
+  expect(result.total).toBeGreaterThanOrEqual(10);
+  expect(result.unbound).toEqual([]);
+});

@@ -344,9 +344,13 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             </div>
             {chatOpen && (
               <>
-                <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+                <label
+                  htmlFor="asset-chat-provider"
+                  className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400"
+                >
                   <span>AIプロバイダー</span>
                   <select
+                    id="asset-chat-provider"
                     value={chatProvider}
                     onChange={(e) => setChatProvider(e.target.value)}
                     disabled={chatLoading}
@@ -406,8 +410,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium">prompt</label>
+            <label htmlFor="asset-prompt" className="block text-sm font-medium">prompt</label>
             <textarea
+              id="asset-prompt"
               className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -420,8 +425,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium">negative prompt</label>
+            <label htmlFor="asset-negative-prompt" className="block text-sm font-medium">negative prompt</label>
             <textarea
+              id="asset-negative-prompt"
               className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
@@ -430,8 +436,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-sm font-medium">steps</label>
+              <label htmlFor="asset-steps" className="block text-sm font-medium">steps</label>
               <input
+                id="asset-steps"
                 type="number"
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={steps}
@@ -441,8 +448,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">cfg scale</label>
+              <label htmlFor="asset-cfg-scale" className="block text-sm font-medium">cfg scale</label>
               <input
+                id="asset-cfg-scale"
                 type="number"
                 step={0.1}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
@@ -451,8 +459,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">seed(空欄でランダム)</label>
+              <label htmlFor="asset-seed" className="block text-sm font-medium">seed(空欄でランダム)</label>
               <input
+                id="asset-seed"
                 type="text"
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={seed}
@@ -462,8 +471,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium">sampler</label>
+              <label htmlFor="asset-sampler" className="block text-sm font-medium">sampler</label>
               <select
+                id="asset-sampler"
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={samplerName}
                 onChange={(e) => setSamplerName(e.target.value)}
@@ -476,8 +486,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium">scheduler</label>
+              <label htmlFor="asset-scheduler" className="block text-sm font-medium">scheduler</label>
               <select
+                id="asset-scheduler"
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={scheduler}
                 onChange={(e) => setScheduler(e.target.value)}
@@ -492,8 +503,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
-              <label className="block text-sm font-medium">width</label>
+              <label htmlFor="asset-width" className="block text-sm font-medium">width</label>
               <input
+                id="asset-width"
                 type="number"
                 step={8}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
@@ -502,8 +514,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">height</label>
+              <label htmlFor="asset-height" className="block text-sm font-medium">height</label>
               <input
+                id="asset-height"
                 type="number"
                 step={8}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
@@ -549,8 +562,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             合計枚数に上限はありませんが、枚数に比例して時間がかかり、最大の256枚では非常に長時間かかります。
           </p>
           <div>
-            <label className="block text-sm font-medium">checkpoint</label>
+            <label htmlFor="asset-checkpoint" className="block text-sm font-medium">checkpoint</label>
             <select
+              id="asset-checkpoint"
               className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
               value={checkpoint}
               onChange={(e) => setCheckpoint(e.target.value)}
@@ -564,8 +578,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium">LoRA</label>
+              <label htmlFor="asset-lora" className="block text-sm font-medium">LoRA</label>
               <select
+                id="asset-lora"
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={loraName}
                 onChange={(e) => setLoraName(e.target.value)}
@@ -580,8 +595,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             </div>
             {loraName && (
               <div>
-                <label className="block text-sm font-medium">LoRA weight</label>
+                <label htmlFor="asset-lora-weight" className="block text-sm font-medium">LoRA weight</label>
                 <input
+                  id="asset-lora-weight"
                   type="number"
                   step={0.1}
                   min={0}

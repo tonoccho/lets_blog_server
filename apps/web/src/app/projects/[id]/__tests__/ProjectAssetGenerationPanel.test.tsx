@@ -1038,3 +1038,46 @@ describe('ProjectAssetGenerationPanel 配色 (issue #1107)', () => {
     expect(offenders).toEqual([])
   })
 })
+
+describe('ProjectAssetGenerationPanel ラベルと入力の結合 (issue #1114)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue({
+      ...OPTIONS,
+      loras: ['style.safetensors'],
+    })
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
+  })
+
+  it('全ての<label>がhtmlForで対応する入力のidと結びついている', async () => {
+    await openPanel()
+    openChatSection()
+    await waitFor(() => {
+      expect(screen.getByLabelText('LoRA')).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByLabelText('LoRA'), { target: { value: 'style.safetensors' } })
+
+    const labels = Array.from(document.querySelectorAll('label'))
+    expect(labels.length).toBeGreaterThan(10)
+    for (const label of labels) {
+      expect(label.htmlFor).not.toBe('')
+      const target = document.getElementById(label.htmlFor)
+      expect(target).not.toBeNull()
+      expect(label.control).toBe(target)
+    }
+  })
+
+  it('全ての入力に付いたidはパネル内で重複しない', async () => {
+    await openPanel()
+    openChatSection()
+    const ids = Array.from(document.querySelectorAll('[id]')).map((e) => e.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('ラベル文言でprompt・seed・checkpointの入力を取得できる', async () => {
+    await openPanel()
+    expect(screen.getByLabelText('prompt')).toBeInstanceOf(HTMLTextAreaElement)
+    expect(screen.getByLabelText('seed(空欄でランダム)')).toBeInstanceOf(HTMLInputElement)
+    expect(screen.getByLabelText('checkpoint')).toBeInstanceOf(HTMLSelectElement)
+  })
+})
