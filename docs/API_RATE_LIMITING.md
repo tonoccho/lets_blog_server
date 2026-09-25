@@ -6,36 +6,235 @@ The Let's Blog API implements rate limiting and comprehensive input validation t
 
 ## Rate Limiting
 
+Rate limiting is enforced **at the gateway** (`services/gateway`,
+`com.letsblog.gateway.config.RateLimitWebFilter`), which is the single entry point for every
+`/api/**` request since issue #560. The limits themselves come from
+`services/gateway/src/main/resources/application.yml` (`app.rate-limit.*`, bound by
+`RateLimitProperties`) and are implemented with Resilience4j `RateLimiter`s that reject
+immediately (`timeoutDuration: 0`) instead of queueing.
+
+### Partition granularity (issue #749)
+
+Since issue #584, Web's server-side (BFF) calls — Server Components, Server Actions and Route
+Handlers — also go through the gateway, so a single process-wide `api-global` bucket was shared by
+browser traffic and by every backend call made while rendering an admin screen. Measured on the
+real gateway access log (24h, 2026-08-29), `api-global` demand peaked at **239 req/min** against a
+100 req/min ceiling and produced **399 `429` responses**, i.e. the incident of issue #464 was
+recurring.
+
+`api-global` is therefore split **per client**, and internal (BFF) traffic gets its own bucket:
+
+| Request | Detected by | Bucket | Partition key |
+| --- | --- | --- | --- |
+| External (browser, VSCode extension, …) — always arrives via nginx | `X-Forwarded-For` present | `api-global` | **last** entry of `X-Forwarded-For` (`ip:<addr>`) |
+| Internal (Web BFF) with an access token | no `X-Forwarded-For`, `Authorization: Bearer` | `api-internal` | JWT `sub` (`user:<sub>`) |
+| Internal without a token (e.g. `proxy.ts` calling `/api/auth/setup-status`) | no `X-Forwarded-For`, no token | `api-internal` | peer address (`peer:<addr>`) |
+
+Rationale for these choices:
+
+- **Last** `X-Forwarded-For` entry, not the first: nginx appends the address it actually observed
+  (`$proxy_add_x_forwarded_for`), so a client-supplied `X-Forwarded-For` can only prepend values.
+  With exactly one trusted proxy in front of the gateway, the last entry cannot be spoofed.
+- **JWT `sub` only for internal requests**: the filter runs before Spring Security's chain
+  (`Ordered.HIGHEST_PRECEDENCE + 1`), so the token is parsed *without* signature verification;
+  invalid tokens are still rejected downstream with 401. Keying external traffic by `sub` would let
+  an attacker mint unlimited random `sub`s and get unlimited buckets, so external traffic is always
+  keyed by IP.
+- **`auth-endpoint` / `upload-endpoint` / `operation-log-endpoint` stay process-wide.** The first
+  two are deliberately *total* ceilings (brute-force resistance, and protection against GPU/disk
+  exhaustion by image generation and uploads — the upload limit is also the value that issue #444
+  exposes in the admin UI). `operation-log-endpoint` only ever receives internal writes and its
+  300 req/min ceiling already has ample headroom.
+- Per-client `RateLimiter` instances are kept in memory, capped at 10,000 keys; clients beyond the
+  cap share a single fallback bucket so the map cannot grow without bound.
+
+Note for the "run `npm run dev` on the host" setup (see `docs/setup.md`): Web then reaches the
+gateway through nginx, so its BFF calls carry `X-Forwarded-For` and are counted as **external**
+traffic for the host's IP. Raise `API_RATE_LIMIT_REQUESTS` if that becomes a limitation.
+
 ### Configuration
 
-Rate limiting is configured in `application.yml` using Resilience4j. Three rate limiter profiles are available:
+#### 1. External API Rate Limiter (`api-global`)
+- **Default Limit**: 100 requests per 1 minute, **per external client IP**
+- **Environment Variable**: `API_RATE_LIMIT_REQUESTS` (default: 100), `API_RATE_LIMIT_PERIOD`
+- **Applies to**: All API endpoints except auth, upload and operation logs
+- **Value rationale**: browser-originated traffic (dashboard SSE and its 30s polling fallback)
+  peaked at 54 req/min for a single source IP in the measurement above, so the pre-#749 value is
+  kept — only its unit changed from "whole process" to "per client".
 
-#### 1. Global API Rate Limiter (`api-global`)
-- **Default Limit**: 100 requests per 1 minute
-- **Environment Variable**: `API_RATE_LIMIT_REQUESTS` (default: 100)
-- **Applies to**: All API endpoints except auth and upload
+##### Acceptance-test override (issue #1132)
+
+The `@api`-tagged acceptance-test suite (`apps/web/e2e/features/**`, ~150 scenarios) reaches the
+gateway through nginx (`https://localhost`) like a real browser, so every scenario's fixture
+traffic — `POST /api/projects`, `/api/diagrams`, `/api/custom-tag-templates`, etc. — is *external*
+by the detection rule above, and Playwright always runs from a single host. The per-client
+partitioning that #749 added does not help here: from the gateway's point of view the whole suite
+is **one client**, so it collapses back onto the same "process-wide 100 req/min" problem that
+#749 fixed for real users, just for a different caller.
+
+Measured against this bucket alone (`docker-compose.yml` + `docker-compose.e2e-stubs.yml`,
+`--project=at-main --grep "@api" --grep-invert "@slow"`, 4 Playwright workers, reverse-proxy
+access log, 2026-09-11): a sliding 60-second window peaked at **136 requests** to paths that fall
+into `api-global` — and that is itself an undercount, because roughly half the scenarios in that
+run aborted early on unrelated Keycloak credential failures (issue #1097, already tracked,
+unrelated to this bucket) before making their full sequence of fixture calls. At the production
+default of 100 req/min this reproduces the exact failure the Issue describes: unrelated scenarios
+fail with `429 {"error":"Rate limit exceeded"}` while building fixtures, well before the scenario's
+own acceptance criteria are evaluated.
+
+Candidates considered (Issue #1132 Requirements, in the Issue's own preference order):
+
+1. **Raise `API_RATE_LIMIT_REQUESTS` only for the acceptance-test configuration** (chosen).
+2. Split `api-global` further, e.g. by a per-scenario/per-worker synthetic key. Rejected: the
+   partitioning already exists (#749) and doesn't help, because the confound here is that the
+   *whole suite* is legitimately one external client (one host reaching the gateway through
+   nginx) — there is no additional identity to split by without inventing one purely for tests
+   (which is exactly what caused the unrelated #995 worker-collision problem for a different
+   bucket; not worth reopening that pattern here).
+3. Reduce fixture-call volume or add waits. Rejected per the Issue's own ranking: this is real
+   fixture-building traffic the scenarios need, and hard-coded waits both slow the suite and
+   violate this repo's "no hardcoded waits" convention (`docs/ACCEPTANCE_TESTING.md` §6).
+
+**The production default (100 req/60s) is deliberately left unchanged.** Its rationale — real
+browser-originated traffic peaking at 54 req/min per client IP — is unrelated to acceptance-test
+volume, and there is no evidence that value is wrong for production use. Only the acceptance-test
+environment overrides it.
+
+**Value chosen: `API_RATE_LIMIT_REQUESTS=1000`**, set in `docker-compose.e2e-stubs.yml` on the
+`gateway` service (always overlaid onto `docker-compose.yml` for acceptance-test runs — see
+`scripts/rebuild-acceptance-env.sh`, `docs/ACCEPTANCE_TESTING.md` §9). This gives roughly 7x
+headroom over the measured (undercounted) 136 req/60s peak — comparable in spirit to the ~2.5x
+headroom `api-internal`'s 600 req/min keeps over its own measured peak, but generous on purpose
+here because the measurement is known to be an undercount and the acceptance-test environment
+carries no brute-force/resource-exhaustion concern this limiter is meant to police (it is a
+single trusted Playwright process on an isolated docker network, not internet-facing traffic).
+Raising it does not weaken anything this limiter defends against in production, because the
+production default is untouched.
+
+#### 1b. Internal (BFF) API Rate Limiter (`api-internal`)
+- **Default Limit**: 600 requests per 1 minute, **per logged-in user** (JWT `sub`)
+- **Environment Variable**: `INTERNAL_API_RATE_LIMIT_REQUESTS` (default: 600),
+  `INTERNAL_API_RATE_LIMIT_PERIOD`
+- **Applies to**: the same endpoints as `api-global`, when the request comes from inside `lbs-net`
+  (i.e. the `web` container's BFF calls)
+- **Value rationale**: the heaviest admin screen (project detail) issues ~12 backend calls per
+  render and a back-to-back tour of dashboard / project detail / post list / site management costs
+  ~27 calls; measured peak demand was 239 req/min. 600 gives ~2.5x headroom over the measured peak
+  while still capping a runaway client loop.
 
 #### 2. Authentication Rate Limiter (`auth-endpoint`)
-- **Default Limit**: 5 requests per 1 minute
+- **Default Limit**: 5 requests per 1 minute, **process-wide** (not partitioned)
 - **Environment Variable**: `AUTH_RATE_LIMIT_REQUESTS` (default: 5)
-- **Applies to**: `/auth/*`, `/login`, `/register` endpoints
-- **Purpose**: Prevents brute force attacks
+- **Applies to**: paths that actually pass through the gateway and contain `/auth/`, `/login`
+  or `/register` — in practice `/api/auth/**` (identity-service's one-time setup flow,
+  `AuthSetupController`). See issues #781 and #321, both about this `/api/auth/**` path.
+- **Does not apply to**: the read-only status checks `/api/auth/setup-status` and
+  `/api/auth/totp/status`, which use `api-global` / `api-internal` instead
+- **Purpose**: Prevents brute force attacks against the gateway-routed setup/login endpoints
+- **Does NOT apply to `/auth/*`** (Keycloak's hosted login and token endpoint,
+  `/auth/realms/letsblog/...`). `infra/nginx/conf.d/default.conf`'s `location /auth/` proxies
+  directly to Keycloak and never reaches the gateway, so `RateLimitWebFilter` — and this
+  `auth-endpoint` bucket — never sees that traffic, no matter how the name reads. The password
+  Keycloak actually verifies is protected by Keycloak's own brute force detection instead
+  (`bruteForceProtected` in `infra/keycloak/realm-export.json`, enabled by issue #1056; see
+  `scripts/apply-keycloak-bruteforce-protection.sh` for reflecting it onto an already-running
+  environment). Do not confuse the two: #781/#321 are about the gateway-routed `/api/auth/**`
+  covered by this bucket; #1056 is about the separate `/auth/*` path that this bucket never
+  touches.
 
 #### 3. Upload Rate Limiter (`upload-endpoint`)
-- **Default Limit**: 10 requests per 1 hour
+- **Default Limit**: 10 requests per 1 hour, **process-wide** (not partitioned)
 - **Environment Variable**: `UPLOAD_RATE_LIMIT_REQUESTS` (default: 10)
-- **Applies to**: `/upload/*`, `/image/*` endpoints (actual file uploads and AI image generation)
-- **Does not apply to**: lightweight metadata/settings endpoints under the same paths, e.g.
-  `/api/ai/image-options`, `/api/projects/{id}/image-generation-prompt-defaults`,
-  `/api/projects/{id}/image-generation-size-defaults` — these use `api-global` instead so
-  that opening the asset-generation panel or changing defaults doesn't consume the same
-  quota as the actual upload/generation calls (see issue #442)
+- **Applies to** (allowlist, issue #999): only the actual heavy upload/generation calls —
+  `POST /api/media/upload`, `POST /api/ai/image` (exact match, so it doesn't catch
+  `/api/ai/image-options`), `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`,
+  and `POST /api/projects/{id}/bulk-management/upload` (a real multipart file upload, not an
+  image, but resource-intensive in the same way)
+- **Does not apply to**: any other endpoint, including every image-related metadata/settings
+  endpoint under `/api/projects/{id}/**` (e.g. `image-settings`,
+  `image-content-filter-settings`, `article-image-resize-default`,
+  `ai-models/image/provider[/selection]`) and `/api/generated-images/**` — these use
+  `api-global` instead
+- **Why an allowlist and not a blocklist**: before #999, this was a blocklist (`/upload` or
+  `/image` substring match, with a short exception list for known-lightweight paths). Every new
+  lightweight image-related endpoint had to be remembered and added to the exception list, and
+  when it wasn't (e.g. `GET /api/projects/{id}/image-settings`, added in #913), it silently
+  shared the 10-req/hour quota with real uploads — opening the project detail page alone could
+  exhaust it. The allowlist inverts this: a new lightweight endpoint is safe by default, and
+  only genuinely heavy operations need to be added here
 - **Purpose**: Prevents resource exhaustion
-- **Admin-configurable request count**: the request-count limit (but not the period) can be
-  overridden from the admin Web UI at `/admin/system-settings` (`upload_rate_limit_requests`),
-  without restarting the API server. The override is stored in the `system_settings` table and
-  falls back to `UPLOAD_RATE_LIMIT_REQUESTS` when left blank. Setting it to `-1` disables this
-  rate limiter entirely (unlimited requests). See issue #444.
+- **Partitioning**: none — process-wide, deliberately (see "Partition granularity" above)
+- **Admin-configurable request count** (*not in effect at the gateway*): before #560, while rate
+  limiting lived in the pre-split service, the request-count limit (but not the period) could be
+  overridden from the admin
+  Web UI at `/admin/system-settings` (`upload_rate_limit_requests`), stored in the
+  `system_settings` table, with `-1` disabling the limiter. The gateway has no database, so since
+  issue #560 only the static defaults above apply; re-introducing a dynamic override is issue
+  #444's scope.
+
+##### Acceptance-test override (issue #1286)
+
+`docker-compose.e2e-stubs.yml`'s override of `API_RATE_LIMIT_REQUESTS` for `api-global`
+(issue #1132, above) left `upload-endpoint` untouched. `apps/web/e2e/features/media/
+image-generation.feature`'s header comment documents the acceptance-test suite's entire
+consumption of this bucket: `image-batch-count.feature` (5), `asset-image-batch-form.feature`
+(2), `image-generation-chatgpt.feature` (2) and `image-settings.feature` (1) account for the 10
+scenarios that run without `@slow` (`test:at:fast`), and `image-generation.feature` itself adds 2
+more that only run with `@slow` (the full `test:at` / `test:at:clean`). A full run therefore
+consumes exactly **12** against a process-wide bucket whose production default is **10 per
+hour** — 2 over the limit, so whichever of the 12 calls lands last always gets `429`. Re-running
+the same full suite within the same hour lands on the same (not yet refreshed) bucket, so a
+second run needs the same 12 again before the first hour's window rolls over.
+
+Reproduced directly against the running `gateway` container (bypassing Playwright, since the
+bucket is process-wide and does not depend on which caller hits it) on 2026-09-15, with the
+acceptance-test overlay's `UPLOAD_RATE_LIMIT_REQUESTS` at its then-current state (unset, i.e. the
+production default of 10):
+
+```
+$ docker exec lbs-gateway sh -c 'for i in $(seq 1 12); do
+    curl -s -o /dev/null -w "call $i: %{http_code}\n" -X POST http://localhost:8080/api/ai/image \
+      -H "Content-Type: application/json" -d "{}"
+  done'
+call 1: 401
+...
+call 10: 401
+call 11: 429
+call 12: 429
+```
+
+(`401` because the probe carries no token — the bucket is consumed by `RateLimitWebFilter`
+before Spring Security's chain runs, so an unauthenticated call still counts.) Two further calls
+immediately after (simulating a same-hour re-run) both returned `429` as well, confirming the
+bucket does not recover mid-hour.
+
+**The production default (10 req/hour) is deliberately left unchanged.** It exists to bound
+resource exhaustion from real image generation / upload traffic (`docs/API_RATE_LIMITING.md`
+"Purpose" above), and there is no evidence that value is wrong for production use — the failure
+above is purely an acceptance-test-suite volume problem, and #444 (not this Issue) is the place to
+reconsider admin-configurability of the production value.
+
+**Value chosen: `UPLOAD_RATE_LIMIT_REQUESTS=40`**, set in `docker-compose.e2e-stubs.yml` on the
+`gateway` service (always overlaid onto `docker-compose.yml` for acceptance-test runs — see
+`scripts/rebuild-acceptance-env.sh`, `docs/ACCEPTANCE_TESTING.md` §9). The floor this bucket must
+clear to satisfy this Issue's acceptance criteria is **24** — a full run's 12, twice, to survive a
+same-hour re-run without any `429`. 40 keeps roughly 1.7x headroom over that floor, enough for an
+extra partial re-run of a single failing scenario during debugging within the same hour without
+requiring a wait, while staying far short of a value that would mask a real resource-exhaustion
+regression in this bucket's purpose. `apps/web/e2e/support/gateway.ts#gatewayUploadEndpointLimit`
+and `apps/web/e2e/features/cross-cutting/rate-limit.feature` read the actual configured value from
+the container rather than assuming either the production default or this overlay's value, mirroring
+`gatewayApiGlobalLimit` (#1132) — so this check stays correct even if the chosen value here changes
+later.
+
+#### 4. Operation Log Rate Limiter (`operation-log-endpoint`)
+- **Default Limit**: 300 requests per 1 minute, **process-wide** (not partitioned)
+- **Environment Variable**: `OPERATION_LOG_RATE_LIMIT_REQUESTS` (default: 300),
+  `OPERATION_LOG_RATE_LIMIT_PERIOD`
+- **Applies to**: `/api/operation-logs*`
+- **Purpose**: the Web BFF records one operation-log entry per backend call (issue #143), so this
+  traffic is roughly 1:1 with `api-internal` traffic. It was split out of `api-global` by issue
+  #464 so that logging cannot starve the functional endpoints.
 
 ### Response Codes
 
@@ -128,44 +327,41 @@ public ResponseEntity<SiteResponse> createSite(@Valid @RequestBody CreateSiteReq
 
 ## Configuration Examples
 
-### Disable Rate Limiting for Specific Endpoints
+### Change which bucket an endpoint uses
 
-Modify `WebConfig.java`:
-
-```java
-@Override
-public void addInterceptors(InterceptorRegistry registry) {
-    registry.addInterceptor(rateLimitInterceptor)
-            .addPathPatterns("/api/**")
-            .excludePathPatterns(
-                    "/api/health",
-                    "/api/metrics",
-                    "/api/public/**"  // Add public endpoints here
-            );
-}
-```
+Bucket classification lives in one place:
+`RateLimitWebFilter#getRateLimiterName(String requestPath)`. Add the path there (and a test case in
+`RateLimitWebFilterTest`) rather than introducing per-endpoint configuration. Paths that are not
+`/api/**` (e.g. `/actuator/health`) never reach the filter's classification in a meaningful way
+because only the gateway's `/api/**` routes are exposed through nginx.
 
 ### Adjust Rate Limits for Production
 
 Environment variables:
 
 ```bash
-# Tighter limits for production
+# Tighter limits for production (set on the gateway container)
 export API_RATE_LIMIT_REQUESTS=100
-export API_RATE_LIMIT_PERIOD=1m
+export API_RATE_LIMIT_PERIOD=60s
+export INTERNAL_API_RATE_LIMIT_REQUESTS=600
+export INTERNAL_API_RATE_LIMIT_PERIOD=60s
 export AUTH_RATE_LIMIT_REQUESTS=5
-export AUTH_RATE_LIMIT_PERIOD=1m
+export AUTH_RATE_LIMIT_PERIOD=60s
+export OPERATION_LOG_RATE_LIMIT_REQUESTS=300
+export OPERATION_LOG_RATE_LIMIT_PERIOD=60s
 export UPLOAD_RATE_LIMIT_REQUESTS=10
-export UPLOAD_RATE_LIMIT_PERIOD=1h
+export UPLOAD_RATE_LIMIT_PERIOD=3600s
 ```
 
 ### Docker Compose Configuration
 
 ```yaml
-api:
+gateway:
   environment:
     API_RATE_LIMIT_REQUESTS: 100
+    INTERNAL_API_RATE_LIMIT_REQUESTS: 600
     AUTH_RATE_LIMIT_REQUESTS: 5
+    OPERATION_LOG_RATE_LIMIT_REQUESTS: 300
     UPLOAD_RATE_LIMIT_REQUESTS: 10
 ```
 
@@ -219,11 +415,14 @@ Monitor these metrics in production:
 
 ### Logging
 
-Rate limit violations are logged at WARN level:
+The gateway does not emit a dedicated WARN line for rejections; rejected requests show up in the
+gateway access log written by `CorrelationIdWebFilter` with `status=429`:
 
 ```
-WARN com.letsblog.api.config.RateLimitInterceptor - Rate limit exceeded for /api/posts (limiter: api-global)
+INFO c.l.g.config.CorrelationIdWebFilter : gateway request: method=GET path=/api/projects status=429 duration_ms=1 correlation_id=...
 ```
+
+To count them: `docker logs lbs-gateway | grep "status=429"`.
 
 ## Troubleshooting
 
@@ -250,7 +449,12 @@ WARN com.letsblog.api.config.RateLimitInterceptor - Rate limit exceeded for /api
 
 ## Related Files
 
-- `application.yml` - Rate limiter configuration
-- `api/src/main/java/com/letsblog/api/config/RateLimitInterceptor.java` - Rate limit enforcement
-- `api/src/main/java/com/letsblog/api/config/WebConfig.java` - Web configuration
-- `api/src/main/java/com/letsblog/api/config/GlobalExceptionHandler.java` - Error handling
+- `services/gateway/src/main/resources/application.yml` - Rate limiter configuration
+  (`app.rate-limit.*`)
+- `services/gateway/src/main/java/com/letsblog/gateway/config/RateLimitWebFilter.java` - Rate limit
+  enforcement, bucket classification and client partitioning
+- `services/gateway/src/main/java/com/letsblog/gateway/config/RateLimitProperties.java` - Bucket
+  defaults
+- `services/gateway/src/test/java/com/letsblog/gateway/config/RateLimitWebFilterTest.java` - Bucket
+  classification and partitioning tests
+- `infra/nginx/conf.d/default.conf` - sets the `X-Forwarded-For` chain the partitioning relies on

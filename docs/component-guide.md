@@ -1872,7 +1872,7 @@ Footer
 ### 5.1 コンポーネントファイル構造
 
 ```
-web/src/components/
+apps/web/src/components/
 ├── ui/
 │   ├── Button.tsx (基本コンポーネント)
 │   ├── Input.tsx

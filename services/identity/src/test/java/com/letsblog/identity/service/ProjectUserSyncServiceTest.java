@@ -1,0 +1,161 @@
+package com.letsblog.identity.service;
+
+import com.letsblog.identity.client.ProjectServiceClient;
+import com.letsblog.identity.client.PublishingServiceClient;
+import com.letsblog.identity.client.PublishingServiceException;
+import com.letsblog.identity.domain.ProjectUser;
+import com.letsblog.identity.domain.User;
+import com.letsblog.identity.dto.ProjectUserSyncSiteResult;
+import com.letsblog.identity.repository.ProjectUserRepository;
+import com.letsblog.identity.repository.UserRepository;
+import com.letsblog.identity.repository.UserSiteAuthorRepository;
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * issue #1242: メンバー個別のユーザー情報再同期({@code syncUserProfileToProjectSites})。
+ *
+ * <p>{@code addUserToProject}/{@code updateUserProjectRole}と異なりこの経路は
+ * {@code @Transactional}を持たない(要件3: 一部の環境が失敗しても成功した環境の結果を保持する)。
+ * サイトごとに独立して結果を積み上げ、監査ログには成功/失敗の一覧を渡すことを検証する。
+ */
+@ExtendWith(MockitoExtension.class)
+class ProjectUserSyncServiceTest {
+
+    @Mock
+    private ProjectServiceClient projectServiceClient;
+
+    @Mock
+    private ProjectUserRepository projectUserRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private PublishingServiceClient publishingServiceClient;
+
+    @Mock
+    private UserSiteAuthorRepository userSiteAuthorRepository;
+
+    @Mock
+    private AuditLogService auditLogService;
+
+    private ProjectUserSyncService service() {
+        return new ProjectUserSyncService(
+                projectServiceClient, projectUserRepository, userRepository,
+                publishingServiceClient, userSiteAuthorRepository, auditLogService);
+    }
+
+    private User buildUser() {
+        User user = new User();
+        user.setId(42L);
+        user.setEmail("member@example.com");
+        user.setFirstName("Taro");
+        user.setLastName("Yamada");
+        user.setDisplayName("Taro Yamada");
+        user.setWebsiteUrl("https://example.com/taro");
+        user.setBio("bio");
+        user.setLocale("ja");
+        return user;
+    }
+
+    private ProjectServiceClient.ProjectBridge buildProject() {
+        return new ProjectServiceClient.ProjectBridge(1L, "p", "p-slug", "test", 10L, 20L, null, null);
+    }
+
+    @Test
+    void 対象がプロジェクトメンバーでなければ例外を投げ何も同期しない() {
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 42L)).thenReturn(Optional.empty());
+
+        assertThrows(ProjectUserNotFoundException.class, () -> service().syncUserProfileToProjectSites(1L, 42L));
+
+        verify(publishingServiceClient, never()).provisionAuthor(any(), any());
+        verify(auditLogService, never()).logProjectUserSyncAction(anyLong(), anyLong(), anyList());
+    }
+
+    @Test
+    void 全サイトへの同期に成功すると全件successで監査ログに記録する() {
+        ProjectUser projectUser = new ProjectUser(1L, 42L, "author");
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 42L)).thenReturn(Optional.of(projectUser));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProject());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(buildUser()));
+
+        ProjectServiceClient.SiteBridge localSite =
+                new ProjectServiceClient.SiteBridge(10L, "local-key", "ローカル", "https://local.example.com");
+        ProjectServiceClient.SiteBridge testSite =
+                new ProjectServiceClient.SiteBridge(20L, "test-key", "テスト", "https://test.example.com");
+        when(projectServiceClient.getSite(10L)).thenReturn(Optional.of(localSite));
+        when(projectServiceClient.getSite(20L)).thenReturn(Optional.of(testSite));
+
+        when(publishingServiceClient.provisionAuthor(eq("local-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("101"));
+        when(publishingServiceClient.provisionAuthor(eq("test-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("202"));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), anyLong())).thenReturn(Optional.empty());
+
+        List<ProjectUserSyncSiteResult> results = service().syncUserProfileToProjectSites(1L, 42L);
+
+        assertEquals(2, results.size());
+        assertTrue(results.stream().allMatch(ProjectUserSyncSiteResult::success));
+
+        ArgumentCaptor<PublishingServiceClient.AuthorProvisioningRequest> requestCaptor =
+                ArgumentCaptor.forClass(PublishingServiceClient.AuthorProvisioningRequest.class);
+        verify(publishingServiceClient).provisionAuthor(eq("local-key"), requestCaptor.capture());
+        assertEquals("author", requestCaptor.getValue().wpRole());
+        assertEquals("member@example.com", requestCaptor.getValue().email());
+
+        verify(auditLogService).logProjectUserSyncAction(eq(1L), eq(42L), eq(results));
+    }
+
+    @Test
+    void 一部のサイトが失敗しても他方の結果は保持され両方が監査ログへ渡る() {
+        ProjectUser projectUser = new ProjectUser(1L, 42L, "editor");
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 42L)).thenReturn(Optional.of(projectUser));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProject());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(buildUser()));
+
+        ProjectServiceClient.SiteBridge okSite =
+                new ProjectServiceClient.SiteBridge(10L, "ok-key", "OK", "https://ok.example.com");
+        ProjectServiceClient.SiteBridge ngSite =
+                new ProjectServiceClient.SiteBridge(20L, "ng-key", "NG", "https://ng.example.com");
+        when(projectServiceClient.getSite(10L)).thenReturn(Optional.of(okSite));
+        when(projectServiceClient.getSite(20L)).thenReturn(Optional.of(ngSite));
+
+        when(publishingServiceClient.provisionAuthor(eq("ok-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("101"));
+        when(publishingServiceClient.provisionAuthor(eq("ng-key"), any()))
+                .thenThrow(new PublishingServiceException("接続に失敗しました", null));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), anyLong())).thenReturn(Optional.empty());
+
+        List<ProjectUserSyncSiteResult> results = service().syncUserProfileToProjectSites(1L, 42L);
+
+        assertEquals(2, results.size());
+        ProjectUserSyncSiteResult okResult = results.stream().filter(r -> r.siteId().equals(10L)).findFirst().orElseThrow();
+        ProjectUserSyncSiteResult ngResult = results.stream().filter(r -> r.siteId().equals(20L)).findFirst().orElseThrow();
+        assertTrue(okResult.success());
+        assertFalse(ngResult.success());
+        assertEquals("接続に失敗しました", ngResult.errorMessage());
+
+        // 失敗したサイト分のuser_site_authors書き込みは行われない(保存できるcmsAuthorIdが無いため)。
+        verify(userSiteAuthorRepository, times(1)).save(any());
+        verify(auditLogService).logProjectUserSyncAction(eq(1L), eq(42L), eq(results));
+    }
+}

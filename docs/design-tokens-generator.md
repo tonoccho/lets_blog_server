@@ -5,7 +5,7 @@
 `design-tokens.json` は唯一の真実の源（Single Source of Truth）です。このドキュメントは、Design Tokens JSON から以下を自動生成する方法を説明します：
 
 1. **CSS 変数ファイル** (`src/styles/tokens.css`)
-2. **Tailwind Config 拡張** (`web/tailwind.config.ts`)
+2. **Tailwind Config 拡張** (`apps/web/tailwind.config.ts`)
 3. **React Constants** (`src/constants/design-tokens.ts`)
 4. **型定義** (`src/types/tokens.d.ts`)
 
@@ -80,7 +80,7 @@
  *
  * 生成ファイル:
  *   - src/styles/tokens.css (CSS 変数)
- *   - web/tailwind.config.generated.ts (Tailwind theme)
+ *   - apps/web/tailwind.config.generated.ts (Tailwind theme)
  *   - src/constants/design-tokens.ts (React constants)
  *   - src/types/tokens.d.ts (TypeScript 型定義)
  */
@@ -450,7 +450,7 @@ function main() {
   // Generate Tailwind Config
   console.log('📝 Generating Tailwind Config...');
   const tailwind = generateTailwindConfig();
-  const tailwindPath = path.join(__dirname, '../web/tailwind.config.generated.ts');
+  const tailwindPath = path.join(__dirname, '../apps/web/tailwind.config.generated.ts');
   fs.writeFileSync(tailwindPath, tailwind);
   console.log(`✅ ${tailwindPath}`);
 
@@ -492,7 +492,7 @@ node scripts/generate-design-tokens.js
 # 📝 Generating CSS Variables...
 # ✅ src/styles/tokens.css
 # 📝 Generating Tailwind Config...
-# ✅ web/tailwind.config.generated.ts
+# ✅ apps/web/tailwind.config.generated.ts
 # 📝 Generating React Constants...
 # ✅ src/constants/design-tokens.ts
 # 📝 Generating TypeScript Definitions...
@@ -807,10 +807,13 @@ export function ThemeToggle() {
 
 ## 8. CI/CD 統合
 
-### GitHub Actions 例
+### CI パイプライン例
+
+> このリポジトリに CI は無い(#1027)。以下は、将来 CI を持つ判断に変わった
+> ときのための構成例である。実際に置かれている定義ではない。
 
 ```yaml
-# .github/workflows/design-tokens.yml
+# CI 定義の例
 
 name: Update Design Tokens
 

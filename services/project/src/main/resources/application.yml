@@ -1,0 +1,101 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.project: DEBUG
+  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # issue #589: health に加えて info / metrics も公開する。
+        # 認証ゲート(ADR-0008)の PUBLIC_PATHS に /actuator/** が入っているため、
+        # 秘匿情報を含みうるエンドポイント(env / configprops / heapdump 等)は公開しない。
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)/ai-service(#574)/content-service(#576)と同じ理由: 明示的な
+  # producesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、orvalが生成するTypeScript
+  # クライアントの型付けが崩れる。既定の応答Content-Typeを明示することでこれを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-project
+  datasource:
+    # issue #1095: mysqlコンテナ再作成後も再起動なしで自力回復できるよう、ai-serviceの
+    # application.ymlと同じ理由でconnectTimeout/socketTimeoutを設定する。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_project?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_project}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_project}
+    hikari:
+      # issue #1095: ai-serviceのapplication.ymlと同じ理由で、プール枯渇時にヘルスチェックを
+      # 含む全呼び出しがsocketTimeoutの自力回復を待たず早く失敗するようconnection-timeoutを縮める。
+      connection-timeout: 10000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # sites/projects/ssh_key_pairs/static_content/tag_design_settingsのスキーマ所有権をproject-service
+  # へ移管した(#577 stage 1)。専用スキーマ(lbs_project、ADR-0004)なので、legacy-api側のV1〜とは
+  # 無関係の独立したマイグレーション履歴としてV1から開始する。既存データの移行は別途行う。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1388: 未設定時の既定(RabbitMQ Javaクライアントの既定接続タイムアウト60秒)のままだと、
+    # RabbitMQ停止直後にJVMの名前解決キャッシュ(既定30秒、java.securityのnetworkaddress.cache.ttl
+    # 未設定時の既定)が古いIPを生かしている間の接続試行が、gatewayのdefault-response-timeout(60秒、
+    # projectルートに個別の上書きは無い)と競合して504になる(実機で確認: docker compose stop
+    # rabbitmq直後の1回目の呼び出しで60.013秒。30秒の窓を外すとUnknownHostExceptionで1ms未満の
+    # 高速失敗になり再現しない)。AuditLogService/DomainEventPublisherは発行失敗を
+    # catch (AmqpException) で握りつぶし監査ログ・ドメインイベントの喪失として記録するだけなので
+    # (このIssueの受け入れ範囲内)、接続確立自体をgatewayの応答時間より十分短く諦めさせれば良い。
+    # project-serviceの他の内部クライアント(IdentityClient/IdentityBridgeClient/
+    # CmsProvisioningBridgeClient/AiGenerationClient)と同じ接続タイムアウトの慣例(3秒)に合わせる。
+    connection-timeout: 3s
+
+app:
+  # CMSプロビジョニングブリッジ(/api/internal/project/cms/**、CmsProvisioningBridgeClient参照)の
+  # 呼び出し先。issue #577 stage2ではlegacy-apiが所有していたためlegacy-api-uriを使っていたが、
+  # issue #710でCmsProvisioningBridgeController/ProvisioningServiceの所有権がpublishing-serviceへ
+  # 移ったため、CmsProvisioningBridgeClientの向き先をこちらへ切り替えた(Epic #551 C6-4)。
+  publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
+  # identity-serviceが所有するドメイン(project_users のメンバー判定・所属プロジェクトID、
+  # 利用者個人のGitHubトークン)への内部ブリッジ(IdentityBridgeClient)と、
+  # 操作者解決(CurrentActorService)の呼び出し先。issue #583で project_users の所有権が
+  # legacy-api から identity-service へ移ったため、legacy-api-uri は不要になった。
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
+  ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
+  # ssh_key_pairs.private_key_encrypted / sites.credentials_encryptedの暗号化/復号(CredentialCipher、
+  # lbs-common)。全サービス共通のAES-256-GCM鍵(legacy-api/ai-service/media-serviceと同じ値を使う)。
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+  # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(issue #577 stage2、
+  # WordPressProvisioningClient/WordPressSyncClient/WordPressAgentPluginsClientが使う)。
+  # legacy-apiと同じ値(同一エージェントを共有する)。
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  wordpress-provision-token: ${WP_PROVISION_TOKEN:}
+
+# KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-serviceの
+# SecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と
+# 期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}

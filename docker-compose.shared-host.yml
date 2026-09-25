@@ -1,0 +1,34 @@
+# ホストの 80/443 を他スタックと共有する環境向けの、任意適用のオーバーライド(issue #1038)。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.shared-host.yml up -d
+#
+# 既存の docker-compose.host-tests.yml / docker-compose.e2e-stubs.yml と同じく、
+# `-f` で**明示的に足す**ものである。コミット済みの docker-compose.yml の既定
+# (ホストを占有できる環境向けに 80/443 を公開する)は変えない。
+#
+# ## なぜ必要か
+#
+# この開発機では GitLab を提供する infra-proxy が先に 0.0.0.0:80 と 0.0.0.0:443 を
+# 占有している。その状態で reverse-proxy を作り直すと、Docker はネットワーク接続時に
+# ポート公開を行うため、
+#
+#     Bind for 0.0.0.0:80 failed: port is already allocated
+#
+# でネットワーク接続そのものが失敗し、**コンテナはどのネットワークにも所属しないまま
+# running になる**。ポートが公開されないだけでは済まず、web にも gateway にも到達できない。
+#
+# そこでポート公開をやめ、代わりに infra-proxy 側へ server_name localhost の vhost を足して
+# https://localhost を lbs-reverse-proxy へ中継させる(infra/shared-host/20-localhost.conf、
+# 適用は scripts/setup-shared-host-proxy.sh)。localhost と server.tonoccho.local は
+# どちらも 127.0.0.1 に解決されるため、分離できる軸は Host ヘッダ / SNI しか無い。
+#
+# 詳細と採らなかった案は docs/ACCEPTANCE_TESTING.md を参照。
+#
+# ## `ports: []` ではなく `!override` である理由
+#
+# compose はオーバーライドの `ports` を**マージ**するため、`ports: []` と書いても
+# ベース側の "80:80" / "443:443" は残る。打ち消すには `!override` タグが要る
+# (docker compose v2.24+。この環境は v5.5.0)。
+services:
+  reverse-proxy:
+    ports: !override []

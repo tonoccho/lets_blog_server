@@ -1,0 +1,234 @@
+server:
+  port: 8080
+  tomcat:
+    # issue #1061: Tomcatは上限超過でリクエストを打ち切ったあと、未読のリクエストボディを
+    # 読み捨ててから応答を返す。読み捨てる量の上限が max-swallow-size(既定2MB)で、これを
+    # 超える残りがあると応答を返さずにコネクションを閉じるため、クライアントには413ではなく
+    # 接続リセットが見える。バックアップアーカイブは数十MB〜数百MBになるため、既定のままでは
+    # 「サイズが原因だと分かる応答を返す」という目的が実サイズでは達成できない。
+    # 値は下の max-request-size と同じにする(nginx / Server Action がそもそも通す最大量と
+    # 同じなので、既に受け入れている負荷を超える新しい負荷にはならない)。
+    max-swallow-size: 512MB
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.platform: DEBUG
+  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # issue #589: health に加えて info / metrics も公開する。
+        # 認証ゲート(ADR-0008)の PUBLIC_PATHS に /actuator/** が入っているため、
+        # 秘匿情報を含みうるエンドポイント(env / configprops / heapdump 等)は公開しない。
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # 他サービスと同じ理由: 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、
+  # orvalが生成するTypeScriptクライアントの型付けが崩れる。既定の応答Content-Typeを明示することで
+  # これを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-platform
+  servlet:
+    multipart:
+      # issue #1061: 未設定だとSpring Bootの既定(1ファイル1MB / リクエスト全体10MB)が効き、
+      # バックアップの復元(POST /api/backup/restore)が失敗していた。全サービスのMySQLスキーマ +
+      # Keycloak PostgreSQL + 生成画像ファイルを収めた実在のアーカイブが1MBを下回ることは
+      # まずないため、この復旧経路は事実上まったく機能していなかった。
+      #
+      # 値の根拠は「送り側の経路が通す最大量へ受け側を合わせる」(nginx側を下げるのではない)。
+      # この経路は ブラウザ → nginx の location /(infra/nginx/conf.d/default.conf:271、500M)
+      # → web の Server Action(apps/web/next.config.ts の bodySizeLimit /
+      #   proxyClientMaxBodySize がいずれも 500mb。apps/web/src/app/admin/backup/actions.ts)
+      # → gateway(docker-compose.yml の LETS_BLOG_GATEWAY_URL=http://gateway:8080。lbs-net 内の
+      #   直通なので nginx は通らない)→ platform であり、500M まで届く。
+      # max-request-size は 500MB のファイル1つ + confirm/acknowledgeKeyMismatch のフォーム項目が
+      # 収まるよう 512MB とする(こちらが先に効いて500MBのファイルが弾かれるのを避けるため)。
+      max-file-size: 500MB
+      max-request-size: 512MB
+      # 0 は「閾値なし = 常にディスクへ退避する」(Spring Bootの既定値と同じ)。上限を500MBまで
+      # 引き上げた以上、multipartのパース時点でヒープに載せない意図をここで明示しておく。
+      # BackupService は MultipartFile#getInputStream で逐次読むので、ヒープにも載らない。
+      file-size-threshold: 0B
+  datasource:
+    # issue #1095: mysqlコンテナ再作成後も再起動なしで自力回復できるよう、ai-serviceの
+    # application.ymlと同じ理由でconnectTimeout/socketTimeoutを設定する。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_platform?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_platform}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_platform}
+    hikari:
+      # issue #1095: ai-serviceのapplication.ymlと同じ理由で、プール枯渇時にヘルスチェックを
+      # 含む全呼び出しがsocketTimeoutの自力回復を待たず早く失敗するようconnection-timeoutを縮める。
+      connection-timeout: 10000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # system_settingsのスキーマ所有権をplatform-serviceへ移管した(issue #693)。専用スキーマ
+  # (lbs_platform、ADR-0004)なので、legacy-api側のV1〜とは無関係の独立したマイグレーション履歴として
+  # V1から開始する。既存データの移行はscripts/migrate-system-settings-to-lbs-platform.sqlを参照
+  # (V1適用後に実行する運用)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路の横展開。RabbitMQ停止直後、JVMの
+    # 名前解決キャッシュ(既定30秒)が古いIPを生かしている間に接続を試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayの応答時間(platformルートは180秒に上書きされているが、この
+    # ロック待ちは同じConnectionFactoryを使う他の全呼び出しも足止めする)と競合して504になる。
+    # AuditLogServiceがrabbitTemplate.convertAndSendをHTTPリクエストスレッド上で同期的に呼び、
+    # 失敗はAmqpExceptionとしてcatchするだけの設計なので、接続確立自体を十分短く諦めさせればよい。
+    # 本サービスの内部クライアント(LetsBlogServiceStatusServiceのCONNECT_TIMEOUT =
+    # Duration.ofSeconds(3))と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
+  # AppSettingServiceのメール送信設定項目(mail_host/mail_port/mail_username/mail_password)の
+  # 環境変数フォールバック値。legacy-api版と同じくSMTP送信自体は行わない(唯一の利用者だった
+  # MailSenderServiceはissue #566で撤去済み。Web管理画面からの表示・編集項目としてのみ残る)。
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+
+app:
+  # issue #589: ダッシュボードに Let's Blog 自身の9サービスの状態を出すため、gateway の
+  # 集約ヘルス(/actuator/health)を読む。各サービスを個別に叩かないのは、同じ判定が
+  # 2箇所に分かれて食い違うのを避けるため(LetsBlogServiceStatusService のJavadoc参照)。
+  gateway-uri: ${GATEWAY_URI:http://gateway:8080}
+  # issue #589: RabbitMQ のキュー滞留・DLQ 滞留の判定に Management HTTP API を使う。
+  # AMQP の接続だけでは各キューの滞留数を取れない。
+  rabbitmq-management-uri: ${RABBITMQ_MANAGEMENT_URI:http://rabbitmq:15672}
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+  mail:
+    from: ${APP_MAIL_FROM:noreply@letsblog.example.com}
+  web:
+    base-url: ${APP_WEB_BASE_URL:http://localhost:3000}
+  llm-base-url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  llm-api-key: ${LLM_API_KEY:}
+  llm-model: ${LLM_MODEL:gpt-4o-mini}
+  llm-available-models: ${LLM_AVAILABLE_MODELS:gpt-4o-mini,gpt-4o,gpt-4.1-mini}
+  llm-request-timeout-seconds: ${LLM_REQUEST_TIMEOUT_SECONDS:120}
+  # issue #1086: 既定プロバイダはローカルのOllama。外部LLMのAPIキーを .env に設定しなくても
+  # AI執筆支援が動く状態を既定にする。DB(system_settings)に値があればそちらが優先される。
+  llm-provider: ${LLM_PROVIDER:OLLAMA}
+  llm-claude-api-key: ${LLM_CLAUDE_API_KEY:}
+  llm-claude-model: ${LLM_CLAUDE_MODEL:claude-3-5-haiku-20241022}
+  # OLLAMA専用の接続設定(issue #1086)。OPENAIと共用していた llm-base-url / llm-model を
+  # 分離した。LlmClientが {baseUrl}/chat/completions へPOSTするため /v1 まで含める
+  # (http://ollama:11434 だけでは404になる)。
+  llm-ollama-base-url: ${LLM_OLLAMA_BASE_URL:http://ollama:11434/v1}
+  llm-ollama-model: ${LLM_OLLAMA_MODEL:qwen2.5:7b-instruct}
+  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
+  image-llm-api-key: ${IMAGE_LLM_API_KEY:}
+  image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
+  brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
+  # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
+  # legacy-apiのapiコンテナが持っていた同名プロパティと同じ。
+  plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
+  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
+  # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
+  # 本サービスのみに限定する(Epic #551の方針。docker-compose.ymlのdocker-socket-proxy定義参照)。
+  docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
+  # 自分が属するdocker composeプロジェクト名(issue #803)。docker-socket-proxyはホストの
+  # Dockerデーモン全体を見ているため、コンテナ名の lbs- 前方一致だけだと同一ホスト上の
+  # 別プロジェクトのコンテナ(例: 開発環境のテストハーネスが起動する lbs-test-db)まで
+  # ダッシュボードに載る。com.docker.compose.project ラベルと突き合わせて除外する。
+  # 未設定の場合は従来どおり前方一致のみで判定する(絞れないことを理由に一覧を空にすると、
+  # 設定漏れの環境で本物の障害と区別が付かなくなるため)。
+  compose-project-name: ${COMPOSE_PROJECT_NAME:}
+  # CurrentActorServiceのisAdmin/自分自身のuserId解決のため、呼び出し元のBearerトークンをそのまま
+  # identity-serviceの/api/identity/meへ転送して問い合わせる(log-writer(#572)/content-service(#576)/
+  # project-service(#577)と同じ暫定策。platform-serviceはusersテーブルへクロススキーマアクセス
+  # できない=ADR-0004のクロススキーマ禁止のため)。
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # BackupService(issue #694)が生成画像ファイルをバックアップ/リストアする際の保存先。
+  # legacy-apiのapiコンテナが持っていた同名プロパティと同じ(#573以降、実体はmedia-serviceが
+  # 書き込むgenerated_images volumeを共有マウントする)。
+  generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
+  # VscodeExtensionBuildService(issue #696、C10-4でlegacy-apiから移設)がシステム画面向けに
+  # VSCode拡張機能の.vsixをオンデマンドビルドする際のソース(読み取り専用マウント)/
+  # 書き込み可能な作業ディレクトリ。legacy-apiのapiコンテナが持っていた同名プロパティと同じ
+  # (docker-compose.ymlのplatformサービス定義の./extension:/app/extension-src:ro参照)。
+  vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
+  vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
+  # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ + Keycloak PostgreSQLを横断して
+  # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
+  # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(既定値
+  # lbs_backup、infra/mysql/init/01-create-service-schemas.shが作成・付与するスキーマ限定の権限)を使う。
+  # KeycloakのPostgreSQLは元々そのDB専用のkeycloakユーザーしか存在しないため、その認証情報を
+  # そのまま流用する(docker-compose.ymlのkeycloak-postgres定義参照)。
+  backup:
+    mysql:
+      host: ${BACKUP_MYSQL_HOST:mysql}
+      port: ${BACKUP_MYSQL_PORT:3306}
+      user: ${BACKUP_MYSQL_USER:lbs_backup}
+      password: ${BACKUP_MYSQL_PASSWORD:}
+      schemas: ${BACKUP_MYSQL_SCHEMAS:lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log,lets_blog}
+    postgres:
+      host: ${BACKUP_POSTGRES_HOST:keycloak-postgres}
+      port: ${BACKUP_POSTGRES_PORT:5432}
+      user: ${BACKUP_POSTGRES_USER:keycloak}
+      password: ${BACKUP_POSTGRES_PASSWORD:}
+      database: ${BACKUP_POSTGRES_DATABASE:keycloak}
+
+# KeycloakのJWT検証。他サービスのSecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる
+# 自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # AdminPasswordResetRunner(緊急パスワードリセット、issue #693)がKeycloak Admin REST APIを
+  # 呼び出すための設定。legacy-api/identity-serviceと同じletsblog-servicesクライアントの
+  # サービスアカウント(realm-management#manage-usersロール)を使う。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
+
+---
+# admin-password-resetプロファイル専用設定(issue #697)。AdminPasswordResetRunnerは
+# @Profile("admin-password-reset")によりコンポーネント自体は有効化されるが、それだけでは
+# Webサーバーの起動有無は制御されない(server.port: 8080は上のデフォルト設定のまま固定される)。
+# 稼働中のplatformコンテナ(既に8080を使用中)に対してこのプロファイルで追加起動すると、
+# ポート競合(Web server failed to start. Port 8080 was already in use.)で失敗する
+# (#693で新規に混入したものではなく、legacy-api版から同一構造で存在していたバグ)。
+#
+# spring.main.web-application-type: none(Webサーバー自体を起動しない)は、当初この用途に最小の
+# 変更として検討したが、AuditLogAspect(@Aspect @Component、issue #693で移設した@AuditLog
+# ADVICEの実装)がリクエストスコープのCurrentActorService(HttpServletRequestに依存)を
+# コンストラクタ注入しており、web application context自体が無いとこの依存を解決できずアプリ
+# 起動そのものが失敗する(#697のQAで確認)。AdminPasswordResetRunnerは@AuditLogを使わないが、
+# AuditLogAspectはコンポーネントスキャンで無条件にBean化されるため、web-application-typeでは
+# 対応できない。
+#
+# 代わりにserver.port: 0(OSに空いているポートを動的に割り当てる)を使う。Webサーバー自体は
+# 引き続き起動する(HttpServletRequestのBeanスコープは維持される)が、稼働中コンテナのポート8080とは
+# 衝突しない。QAで動作確認済み(issue #697のコメント参照)。
+spring:
+  config:
+    activate:
+      on-profile: admin-password-reset
+
+server:
+  port: 0

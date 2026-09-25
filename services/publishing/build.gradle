@@ -1,0 +1,76 @@
+// publishing-service (#707): legacy-apiのcms/*パッケージ(CmsAdapter/WordPressAdapter/エージェント・
+// SSH操作)、PostPublishService/PostDeleteService、PostControllerの公開・削除エンドポイントを
+// 抽出した(Epic #551 C6-1)。サイト認証情報・投稿(posts)テーブル・著者マッピング
+// (user_site_authors)は自身で持たず、project-service/content-service/legacy-apiへの内部ブリッジ
+// 経由で読み書きする。スキーマ分離(lbs_publishing)により他サービスから独立する。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':packages:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // ContentServiceClient/ProjectServiceClient/LegacyApiBridgeClient/IdentityClient等がcom.fasterxml.
+    // jackson.databind.ObjectMapper/JsonNodeを直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・
+    // 既定ObjectMapperはJackson3系(tools.jackson)に変わったため。legacy-api/project-service等と同じ構成)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
+
+    // 現時点では自身が所有するドメインテーブルは無い(posts/user_site_authors等はいずれも他サービス
+    // 所有)が、Flyway基盤自体は他サービスと同じ構成で用意しておく(issue #707要件1、将来分割2の
+    // bulk_operation_logs移管(#572で事前決定)等が乗る前提)。
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-mysql'
+    implementation 'com.mysql:mysql-connector-j'
+
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    // @AuditLog(PostPublishService/PostDeleteService)のAOP実装(AuditLogAspect)に使う。
+    // legacy-api/project-service等と同じ構成。
+    implementation 'org.springframework.boot:spring-boot-starter-aspectj'
+
+    // WordPressSshOperations(SSHトランスポート、legacy-apiのcms/sshパッケージから移設)。
+    implementation 'com.hierynomus:sshj:0.38.0'
+
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation testFixtures(project(':packages:lbs-common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // issue #1123: WordPressBulkManagementClientHikariPoolTestがHikariCPのプール枯渇を
+    // 検証するために使う、実DB不要のインメモリJDBCドライバ。
+    testImplementation 'com.h2database:h2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // issue #1095: HikariDeadConnectionRecoveryIntegrationTestは実DockerコンテナでHikariCPの
+    // 障害復旧を検証するため、既定では@EnabledIfSystemPropertyでスキップされる。
+    // `./gradlew :services:publishing:test -Dlbs.dockerAvailable=true` のように明示指定した
+    // ときだけ実行されるよう、Gradle起動時の-DをフォークしたテストJVMへ転送する
+    // (Gradleの-Dはビルドプロセス自身のJVMプロパティであり、テストは別JVMで動くため
+    // 明示的な転送が無いと届かない)。
+    systemProperty 'lbs.dockerAvailable', System.getProperty('lbs.dockerAvailable', 'false')
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}

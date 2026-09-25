@@ -1,9 +1,0 @@
-CREATE TABLE user_site_authors (
-  user_id BIGINT NOT NULL,
-  site_id BIGINT NOT NULL,
-  cms_author_id VARCHAR(255) NOT NULL,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_id, site_id),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
-);

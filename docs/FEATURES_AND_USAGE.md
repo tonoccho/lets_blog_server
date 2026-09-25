@@ -243,15 +243,21 @@ your latest message, and returns `{ "prompt": "<generated prompt>" }`. Each call
 2. Optionally use the chat box (see above) to generate a starting prompt. Plain **Enter** in the
    chat box inserts a newline; **Ctrl+Enter** (**Cmd+Enter** on macOS) sends the message.
 3. Review/adjust the parameter form, then click **生成** or press **Ctrl+Enter**/**Cmd+Enter**
-   anywhere else in the panel to generate (up to `batchSize`, max 4, images per request).
+   anywhere else in the panel to generate. **batch size** (max 16) is how many images one
+   generation produces; **batch count** (max 16) is how many times that generation is repeated
+   with a fresh seed, so a request asks for `batchSize × batchCount` images (up to 256). There is
+   no cap on the total, but the time grows in proportion — 256 images take a very long time.
 4. On the result, click **アイキャッチとして設定** to save the image under `assets/` and set it as
    the article's `featured_image` in front matter, or **アセットとして追加** to save it under
    `assets/` and insert a Markdown image reference at the cursor.
 5. **Escape** cancels an in-flight chat or image-generation request.
 
 This calls `POST /api/ai/image` with the prompt and parameters (`projectId` is a field in the
-request body, not part of the URL), and returns up to `batchSize` base64-encoded images plus a
-persisted image ID for each.
+request body, not part of the URL), and returns `batchSize × batchCount` base64-encoded images
+plus a persisted image ID for each. The extension raises its own request timeout to match the
+server's budget for the requested number of images (capped at nginx's 3600s), so a large batch is
+not cut off client-side while the server is still generating; `letsBlog.requestTimeoutMs` still
+wins when it is set higher.
 
 ### Generating Images (Web Admin Panel)
 
@@ -260,8 +266,8 @@ persisted image ID for each.
    image size).
 2. Use **チャットでプロンプトを作成** (see the chat-to-image workflow above) to fill the prompt,
    or type one directly.
-3. Adjust parameters and click **生成**. Up to 4 result thumbnails appear in a grid; click one to
-   select it.
+3. Adjust parameters and click **生成**. `batchSize × batchCount` result thumbnails appear in a
+   grid; click one to select it.
 4. Click **アセットとして追加(全環境へアップロード)** to upload the selected image as a project
    asset to every configured environment (local/test/production).
 
@@ -364,15 +370,6 @@ Manage user accounts in **Settings** → **Users**:
 - **Create new users** - Add team members
 - **Set permissions** - Admin/Editor/Viewer roles
 - **Manage access** - Enable/disable accounts
-
-### API Configuration
-
-For advanced users integrating with external tools:
-
-1. Navigate to **Settings** → **API**
-2. View your API key
-3. Click **Generate New Key** to rotate key
-4. Use key in header: `X-API-Key: your_key_here`
 
 ### System Maintenance
 

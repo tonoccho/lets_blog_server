@@ -1,0 +1,21 @@
+# issue #762: ホストから ./gradlew test を実行するための、任意適用のオーバーライド。
+#
+# 各サービスの src/test/resources/application-test.yml は接続先を
+# jdbc:mysql://localhost:3306/... に固定している(ADR-0006: Testcontainersは使わず実MySQLを使う)。
+# ところが docker-compose.yml の mysql サービスはホストにポートを公開していないため、
+# ホストから実行した Gradle は FlywaySqlUnableToConnectToDbException / ConnectException で
+# 軒並み落ちる。これは環境要因の失敗であって、本物の失敗を埋もれさせる。
+#
+# このファイルを重ねると、開発スタックの MySQL を 127.0.0.1:3306 にだけ公開する。
+# ループバックに限定しているのは、外部へ DB を晒さないため。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
+#   ./gradlew :services:content:test   # 等、DBを使うサービスのテスト
+#
+# 注意: 127.0.0.1:3306 を使うコンテナ(loop-engineering の lbs-test-db など)が
+# 既に起動していると衝突する。どちらか一方だけを起動すること。
+# 接続先が揃っているかは scripts/check-test-db.sh で確認できる。
+services:
+  mysql:
+    ports:
+      - "127.0.0.1:3306:3306"

@@ -1,0 +1,2078 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "OpenAPI definition",
+    "version": "v0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "paths": {
+    "/api/projects/{id}/image-generation-size-defaults": {
+      "put": {
+        "tags": [
+          "project-image-settings-controller"
+        ],
+        "operationId": "updateImageGenerationSizeDefaults",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateImageGenerationSizeDefaultsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectImageSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/image-generation-prompt-defaults": {
+      "put": {
+        "tags": [
+          "project-image-settings-controller"
+        ],
+        "operationId": "updateImageGenerationPromptDefaults",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateImageGenerationPromptDefaultsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectImageSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/image-content-filter-settings": {
+      "put": {
+        "tags": [
+          "project-image-settings-controller"
+        ],
+        "operationId": "updateImageContentFilterSettings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateImageContentFilterSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectImageSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/article-image-resize-default": {
+      "put": {
+        "tags": [
+          "project-image-settings-controller"
+        ],
+        "operationId": "updateArticleImageResizeDefault",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateArticleImageResizeDefaultRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectImageSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/ai-models/image/provider/selection": {
+      "put": {
+        "tags": [
+          "project-image-model-controller"
+        ],
+        "operationId": "selectImageProvider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectImageProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageProviderListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/ai-models/comfyui/checkpoints/selection": {
+      "put": {
+        "tags": [
+          "project-image-model-controller"
+        ],
+        "operationId": "selectCheckpoint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectComfyUiCheckpointRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComfyUiCheckpointListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generated-images/{id}/tags": {
+      "put": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "updateTags",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGeneratedImageTagsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/diagrams/{id}": {
+      "get": {
+        "tags": [
+          "diagram-controller"
+        ],
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagramDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "diagram-controller"
+        ],
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDiagramRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagramDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "diagram-controller"
+        ],
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/render/recharts": {
+      "post": {
+        "tags": [
+          "render-controller"
+        ],
+        "operationId": "renderRecharts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RechartsChartConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RechartsRenderResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/render/plantuml": {
+      "post": {
+        "tags": [
+          "render-controller"
+        ],
+        "operationId": "renderPlantUml",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlantUmlRenderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/render/penpot/design-file": {
+      "post": {
+        "tags": [
+          "render-controller"
+        ],
+        "operationId": "createPenpotDesignFile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PenpotDesignFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PenpotDesignFileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/media-garbage-collection/delete": {
+      "post": {
+        "tags": [
+          "project-media-garbage-collection-controller"
+        ],
+        "operationId": "delete_1",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaGarbageCollectionDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationJobSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/ai-models/comfyui/checkpoints/install": {
+      "post": {
+        "tags": [
+          "project-image-model-controller"
+        ],
+        "operationId": "installCheckpoint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallComfyUiCheckpointRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationJobResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/upload": {
+      "post": {
+        "tags": [
+          "media-controller"
+        ],
+        "operationId": "upload",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generated-images": {
+      "get": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "list",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GeneratedImageSummaryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGeneratedImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/diagrams": {
+      "get": {
+        "tags": [
+          "diagram-controller"
+        ],
+        "operationId": "list_1",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DiagramSummaryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "diagram-controller"
+        ],
+        "operationId": "create_1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDiagramRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagramDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/comfyui/checkpoints/install": {
+      "post": {
+        "tags": [
+          "comfy-ui-checkpoint-controller"
+        ],
+        "operationId": "install",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallComfyUiCheckpointCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/comfyui/checkpoints/delete": {
+      "post": {
+        "tags": [
+          "comfy-ui-checkpoint-controller"
+        ],
+        "operationId": "delete_2",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteComfyUiCheckpointCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ai/image": {
+      "post": {
+        "tags": [
+          "image-generation-controller"
+        ],
+        "operationId": "image",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiImageBatchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/media-garbage-collection/scan": {
+      "get": {
+        "tags": [
+          "project-media-garbage-collection-controller"
+        ],
+        "operationId": "scan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaGarbageCollectionScanResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/image-settings": {
+      "get": {
+        "tags": [
+          "project-image-settings-controller"
+        ],
+        "operationId": "get_1",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectImageSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/ai-models/image/provider": {
+      "get": {
+        "tags": [
+          "project-image-model-controller"
+        ],
+        "operationId": "listImageProvider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageProviderListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/ai-models/comfyui/checkpoints": {
+      "get": {
+        "tags": [
+          "project-image-model-controller"
+        ],
+        "operationId": "listCheckpoints",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComfyUiCheckpointListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/media/projects/{projectId}/article-image-long-edge-px": {
+      "get": {
+        "tags": [
+          "internal-project-image-settings-controller"
+        ],
+        "operationId": "articleImageLongEdgePx",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArticleImageLongEdgePxBridgeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generated-images/{id}": {
+      "get": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "get_2",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "delete_3",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/generated-images/{id}/file": {
+      "get": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "getImageFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/diagrams/{id}/svg": {
+      "get": {
+        "tags": [
+          "diagram-controller"
+        ],
+        "operationId": "getSvg",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/image-options": {
+      "get": {
+        "tags": [
+          "image-generation-controller"
+        ],
+        "operationId": "imageOptions",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageGenerationOptionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/ai-models/comfyui/checkpoints/{fileName}": {
+      "delete": {
+        "tags": [
+          "project-image-model-controller"
+        ],
+        "operationId": "deleteCheckpoint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "fileName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationJobResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "UpdateImageGenerationSizeDefaultsRequest": {
+        "type": "object",
+        "properties": {
+          "defaultGeneratedImageWidth": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 2048,
+            "minimum": 64
+          },
+          "defaultGeneratedImageHeight": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 2048,
+            "minimum": 64
+          },
+          "widthMultipleOf8": {
+            "type": "boolean"
+          },
+          "heightMultipleOf8": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProjectImageSettingsResponse": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "imageProvider": {
+            "type": "string"
+          },
+          "comfyuiCheckpoint": {
+            "type": "string"
+          },
+          "defaultNegativePrompt": {
+            "type": "string"
+          },
+          "defaultQualityPrompt": {
+            "type": "string"
+          },
+          "defaultGeneratedImageWidth": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "defaultGeneratedImageHeight": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "defaultArticleImageLongEdgePx": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "blockSexualContent": {
+            "type": "boolean"
+          },
+          "blockViolentContent": {
+            "type": "boolean"
+          },
+          "blockDiscriminatoryContent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UpdateImageGenerationPromptDefaultsRequest": {
+        "type": "object",
+        "properties": {
+          "defaultNegativePrompt": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 0
+          },
+          "defaultQualityPrompt": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 0
+          }
+        }
+      },
+      "UpdateImageContentFilterSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "blockSexualContent": {
+            "type": "boolean"
+          },
+          "blockViolentContent": {
+            "type": "boolean"
+          },
+          "blockDiscriminatoryContent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UpdateArticleImageResizeDefaultRequest": {
+        "type": "object",
+        "properties": {
+          "defaultArticleImageLongEdgePx": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 4096,
+            "minimum": 64
+          }
+        }
+      },
+      "SelectImageProviderRequest": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          }
+        }
+      },
+      "ImageProviderListResponse": {
+        "type": "object",
+        "properties": {
+          "availableProviders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected": {
+            "type": "string"
+          }
+        }
+      },
+      "SelectComfyUiCheckpointRequest": {
+        "type": "object",
+        "properties": {
+          "checkpointName": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "checkpointName"
+        ]
+      },
+      "ComfyUiCheckpointListResponse": {
+        "type": "object",
+        "properties": {
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateGeneratedImageTagsRequest": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GeneratedImageDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "negativePrompt": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cfgScale": {
+            "type": "number",
+            "format": "double"
+          },
+          "samplerName": {
+            "type": "string"
+          },
+          "scheduler": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "batchSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "batchIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "checkpoint": {
+            "type": "string"
+          },
+          "loraName": {
+            "type": "string"
+          },
+          "loraWeight": {
+            "type": "number",
+            "format": "double"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateDiagramRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "xml": {
+            "type": "string"
+          },
+          "svg": {
+            "type": "string"
+          }
+        }
+      },
+      "DiagramDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "xml": {
+            "type": "string"
+          },
+          "svg": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RechartsChartConfig": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "xAxisKey": {
+            "type": "string"
+          },
+          "seriesKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stacked": {
+            "type": "boolean"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "textColor": {
+            "type": "string"
+          },
+          "gridColor": {
+            "type": "string"
+          },
+          "yAxisLabel": {
+            "type": "string"
+          }
+        }
+      },
+      "RechartsRenderResponse": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string"
+          }
+        }
+      },
+      "PlantUmlRenderRequest": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "PenpotDesignFileRequest": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "promptContext": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileName"
+        ]
+      },
+      "PenpotDesignFileResponse": {
+        "type": "object",
+        "properties": {
+          "fileId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "MediaGarbageCollectionDeleteRequest": {
+        "type": "object",
+        "properties": {
+          "mediaIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "mediaIds"
+        ]
+      },
+      "GenerationJobSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InstallComfyUiCheckpointRequest": {
+        "type": "object",
+        "properties": {
+          "downloadUrl": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.-]+$"
+          }
+        },
+        "required": [
+          "downloadUrl",
+          "fileName"
+        ]
+      },
+      "GenerationJobResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MediaUploadResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateGeneratedImageRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "negativePrompt": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cfgScale": {
+            "type": "number",
+            "format": "double"
+          },
+          "samplerName": {
+            "type": "string"
+          },
+          "scheduler": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "batchSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "batchIndex": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "checkpoint": {
+            "type": "string"
+          },
+          "loraName": {
+            "type": "string"
+          },
+          "loraWeight": {
+            "type": "number",
+            "format": "double"
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tagsJson": {
+            "type": "string"
+          },
+          "imageData": {
+            "type": "string",
+            "format": "byte"
+          }
+        },
+        "required": [
+          "imageData",
+          "mimeType",
+          "prompt",
+          "provider"
+        ]
+      },
+      "CreateDiagramRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "xml": {
+            "type": "string"
+          },
+          "svg": {
+            "type": "string"
+          }
+        }
+      },
+      "InstallComfyUiCheckpointCommand": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "downloadUrl": {
+            "type": "string",
+            "minLength": 1
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "downloadUrl",
+          "fileName",
+          "jobId"
+        ]
+      },
+      "DeleteComfyUiCheckpointCommand": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "fileName",
+          "jobId"
+        ]
+      },
+      "AiImageRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "negativePrompt": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 150,
+            "minimum": 1
+          },
+          "cfgScale": {
+            "type": "number",
+            "format": "double",
+            "maximum": 30.0,
+            "minimum": 0.0
+          },
+          "samplerName": {
+            "type": "string"
+          },
+          "scheduler": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer",
+            "format": "int64",
+            "maximum": 4294967295
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 2048,
+            "minimum": 64
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 2048,
+            "minimum": 64
+          },
+          "batchSize": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 16,
+            "minimum": 1
+          },
+          "batchCount": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 16,
+            "minimum": 1
+          },
+          "checkpoint": {
+            "type": "string"
+          },
+          "loraName": {
+            "type": "string"
+          },
+          "loraWeight": {
+            "type": "number",
+            "format": "double",
+            "maximum": 2.0,
+            "minimum": 0.0
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "widthMultipleOf8": {
+            "type": "boolean"
+          },
+          "heightMultipleOf8": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      },
+      "AiImageBatchResponse": {
+        "type": "object",
+        "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiImageResponse"
+            }
+          },
+          "failedRepeats": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AiImageResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "dataBase64": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "seed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "batchIndex": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "MediaGarbageCollectionScanResponse": {
+        "type": "object",
+        "properties": {
+          "environment": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UnreferencedMediaItem"
+            }
+          },
+          "totalMediaCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "referencedMediaCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unreferencedMediaCount": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "UnreferencedMediaItem": {
+        "type": "object",
+        "properties": {
+          "mediaId": {
+            "type": "string"
+          },
+          "guid": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "uploadedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ArticleImageLongEdgePxBridgeResponse": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "GeneratedImageSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "checkpoint": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "provider": {
+            "type": "string"
+          }
+        }
+      },
+      "DiagramSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ImageGenerationOptionsResponse": {
+        "type": "object",
+        "properties": {
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selectedCheckpoint": {
+            "type": "string"
+          },
+          "samplers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "schedulers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "loras": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultWidth": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "defaultHeight": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "defaultNegativePrompt": {
+            "type": "string"
+          },
+          "defaultQualityPrompt": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

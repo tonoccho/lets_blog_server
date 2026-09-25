@@ -1,14 +1,106 @@
 # Logging and Monitoring Setup
 
-This document describes the structured logging and metrics collection framework for the Let's Blog API.
+This document describes the logging and metrics collection framework across the Let's Blog
+multi-service architecture (gateway + domain services, see
+[DOCKER_COMPOSE_ARCHITECTURE.md](./DOCKER_COMPOSE_ARCHITECTURE.md) and the
+[architecture decision records](./adr/), or the tracking issue #551).
 
 ## Overview
 
-The API uses a comprehensive logging and monitoring strategy that includes:
-- **Structured Logging**: JSON-formatted logs with contextual information
+The platform uses a logging and monitoring strategy that includes:
+- **Correlation ID / distributed tracing**: a single ID assigned at the gateway and propagated
+  across every synchronous HTTP hop and every asynchronous RabbitMQ message, so one request's
+  full path can be reconstructed by grepping logs across services (issue #582, C13)
+- **Structured Logging**: JSON-formatted logs with contextual information (currently rolled out
+  to `legacy-api`; see [Structured JSON logging rollout status](#structured-json-logging-rollout-status))
 - **Request/Response Logging**: HTTP traffic logging with performance metrics
 - **Metrics Collection**: Micrometer-based metrics for monitoring application health
 - **Log Levels**: Configurable log levels for different environments
+
+## Correlation ID and Distributed Tracing
+
+### How a correlation ID is assigned and propagated
+
+1. **gateway** (`services/gateway/.../CorrelationIdWebFilter`) is the single entry point for all
+   client traffic. For every request it reads the `X-Correlation-Id` request header; if the
+   client didn't send one, it generates a new UUID. The resolved value is set on both the
+   downstream request (forwarded by `ProxyHandler`, which copies all headers) and the response
+   sent back to the client. Gateway itself also emits one access-log line per request
+   (`gateway request: method=... path=... status=... duration_ms=... correlation_id=...`)
+   so the entry point shows up in a trace, not just the backend services.
+2. **Every servlet-based service** (`legacy-api`, `identity`, `content`, `media`, `ai`,
+   `analytics`, `log-writer`) registers `com.letsblog.common.web.CorrelationIdFilter`
+   (lbs-common) as a `@Bean` in a small `CorrelationIdConfig` class. This filter mirrors the
+   gateway's behavior for the servlet stack: it reads/generates the header, stores it in SLF4J
+   MDC under the key `correlationId`, sets it back on the response, and clears it once the
+   request finishes. It runs at `Ordered.HIGHEST_PRECEDENCE`, i.e. before Spring Security, so
+   even 401/403 responses are logged with a correlation ID.
+3. **Synchronous service-to-service calls** made through the shared
+   `com.letsblog.common.client.SyncServiceClient` (issue #581, C12) automatically forward the
+   calling thread's MDC correlation ID as an `X-Correlation-Id` header — callers do not need to
+   set this themselves.
+4. **Asynchronous processing via RabbitMQ** (`letsblog.events` / `letsblog.logs`) carries the
+   correlation ID as a message header, not a payload field (so existing event/message record
+   types didn't need to change):
+   - Publishers attach `com.letsblog.common.messaging.CorrelationIdMessagePostProcessor` to
+     their `RabbitTemplate` via `setBeforePublishPostProcessors(...)`. It copies the publishing
+     thread's MDC correlation ID onto the outgoing message header.
+   - Consumers attach `com.letsblog.common.messaging.CorrelationIdListenerAdvice` to their
+     `SimpleRabbitListenerContainerFactory` via `setAdviceChain(...)`. It reads the header off
+     the raw AMQP message before the `@RabbitListener` method runs, puts it into MDC for the
+     duration of that method, and removes it afterward — so the listener's logs (and anything
+     it calls, e.g. `IdempotentEventHandler`) carry the same ID as the request that originally
+     triggered the publish.
+   - If a message has no correlation header (e.g. it predates this change, or was published by
+     code outside an HTTP/MDC context), the consumer simply runs without setting MDC.
+
+### Tracing a request end-to-end
+
+With the above in place, pick a correlation ID (from a response header, or from any log line)
+and grep every service's logs for it — including `docker compose logs` if running locally:
+
+```bash
+docker compose logs --no-color | grep '<the-correlation-id>'
+```
+
+Because every hop (gateway access log, each service's request log via
+`CorrelationIdFilter`/`HttpLoggingFilter`, and any RabbitMQ-triggered log lines) carries the
+same ID, the output can be sorted by timestamp to reconstruct the full path of one request,
+including the asynchronous parts.
+
+### Micrometer Tracing: evaluated, deferred
+
+The original scope for this work considered adopting **Micrometer Tracing** (span/trace IDs,
+propagation via `micrometer-tracing-bridge-brave` or `-otel`, and an exporter such as Zipkin).
+This was evaluated and deliberately deferred for now:
+
+- None of the services currently depend on `micrometer-tracing`; only `legacy-api` has
+  `spring-boot-starter-micrometer-metrics` (plain metrics, not tracing).
+- The acceptance criteria for this issue are satisfied by the simpler MDC/header-based
+  correlation ID described above (grep-based tracing), without the added operational cost of
+  running/maintaining a trace collector and exporter across nine services.
+- Full span-based tracing (with parent/child spans per hop, latency breakdowns per span, etc.)
+  remains valuable for deeper performance investigation and should be tracked as a separate,
+  explicit issue if/when that need arises — it is a materially larger effort (tracer wiring,
+  context propagation across WebFlux/servlet/RabbitMQ boundaries, an exporter/backend) than
+  correlation-ID propagation.
+
+### Structured JSON logging rollout status
+
+Only `legacy-api` currently has `logstash-logback-encoder` + a custom `logback-spring.xml`
+(JSON output in the `prod` profile, plain text in other profiles — both patterns now include
+`[%X{correlationId}]`). The other services (`identity`, `content`, `media`, `ai`, `analytics`,
+`log-writer`) don't have a custom Logback configuration; they use Spring Boot's default console
+appender with `logging.pattern.console` set in `application.yml` to include
+`[%X{correlationId}]`, which is enough for grep-based tracing but is plain text, not JSON.
+Rolling `logstash-logback-encoder` out to the other services (for log-aggregation tooling that
+expects JSON) is a reasonable follow-up but is a separate, orthogonal piece of work from
+correlation ID propagation — consider filing it as its own issue if needed.
+
+`gateway` is a reactive (WebFlux) service; MDC is thread-bound and doesn't propagate reliably
+across Reactor operators without additional context-propagation wiring, so its access log line
+passes the correlation ID as a plain log argument instead of relying on MDC (see
+`CorrelationIdWebFilter` above).
 
 ## Logging Architecture
 
@@ -148,13 +240,14 @@ The `HttpLoggingFilter` automatically logs all HTTP requests and responses with 
 The following paths are not logged to reduce noise:
 - `/api/health`
 - `/api/metrics`
-- `/api-docs`
+- `/v3/api-docs`
 - `/swagger-ui`
 
 ### Example Log Output
 
 ```json
 {
+  "correlation_id": "b3f1c9de-6e3a-4a7e-9c2f-1a2b3c4d5e6f",
   "method": "POST",
   "path": "/api/posts",
   "status": 201,
@@ -165,6 +258,11 @@ The following paths are not logged to reduce noise:
   "request_body": "{\"title\":\"New Post\",\"content\":\"...\"}"
 }
 ```
+
+`correlation_id` (issue #582) is read from MDC (set by `CorrelationIdFilter`, which always runs
+before `HttpLoggingFilter`). It's also available as a top-level field in the JSON encoder output
+via `includeContext=true` even without this explicit field, but `HttpLoggingFilter` includes it
+directly for consistency between the JSON and plain-text log formats.
 
 ## Metrics Collection with Micrometer
 
@@ -326,6 +424,80 @@ filebeat.inputs:
 output.elasticsearch:
   hosts: ["localhost:9200"]
   index: "lets-blog-api-%{+yyyy.MM.dd}"
+```
+
+## サービスの死活監視(issue #589)
+
+サービスが11個(gateway + 9ドメイン + Keycloak)になった構成では、「どれが落ちているか」が
+一目で分からないと運用できない。判定は次の3層に分かれている。
+
+### 1. 各サービスの `/actuator/health`
+
+全サービスが `health` / `info` / `metrics` を公開する。認証ゲート(ADR-0008)の
+`PUBLIC_PATHS` に `/actuator/**` が入っているため<b>未認証で到達できる</b>。
+`env` / `configprops` / `heapdump` のような秘匿情報を含みうるものは公開していない。
+
+```bash
+docker exec lbs-content curl -s http://localhost:8080/actuator/health
+```
+
+docker compose の healthcheck もこのエンドポイントを使う(`x-actuator-healthcheck`)。
+
+### 2. gateway の集約ヘルス
+
+gateway は下流9サービスの `/actuator/health` を集約する
+(`services/gateway/.../DownstreamHealthConfig`、#560 / #643 / #743)。
+どのサービスが不健全かはコンポーネント名で分かる。
+
+```bash
+docker exec lbs-gateway curl -s http://localhost:8080/actuator/health | jq '.components | with_entries(select(.key | endswith("Service")))'
+```
+
+```json
+{
+  "identityService": { "status": "UP" },
+  "contentService":  { "status": "DOWN" }
+}
+```
+
+サービスを増やしたときは `DownstreamHealthConfig` に Bean を足す。
+`DownstreamHealthConfigContractTest` が `services/` 配下のディレクトリを列挙して
+突き合わせるので、足し忘れるとテストが落ちる。
+
+### 3. ダッシュボード(Web)
+
+`/`(ログイン後のトップ)の「接続サービスの状態」に次を表示する。実装は
+platform-service の `ConnectedServiceStatusService`。
+
+| 区分 | 対象 |
+|---|---|
+| 外部依存 | データベース、LLM、ComfyUI、PlantUML、WordPress プロビジョニングエージェント、Penpot、Brave Search |
+| **Let's Blog 自身の9サービス** | identity / project / content / media / ai / analytics / publishing / platform / log-writer(#589で追加) |
+| **RabbitMQ のキュー滞留・DLQ 滞留** | 全キュー(#589で追加) |
+
+自サービスの状態は **gateway の集約ヘルスを展開**して得る(各サービスを個別に叩かない)。
+同じ判定が2箇所に分かれて食い違うのを避けるため。gateway へ到達できない場合は9件すべてを
+「判定不能(ERROR)」として返す。判定できないものを「正常」に見せないため。
+
+管理者向けの詳細診断(`GET /api/dashboard/service-status/detail`)には
+**「停止時の影響」**の列がある。サービス名だけでは、落ちたときに何が使えなくなるか
+運用する人が判断できないため(`LetsBlogServiceStatusService.IMPACT`)。
+
+### RabbitMQ の滞留判定
+
+判定には Management HTTP API(`/api/queues`)を使う。AMQP の接続だけでは各キューの
+滞留数を取れない。
+
+| 条件 | 判定 | 理由 |
+|---|---|---|
+| `*.dlq` に1件でもある | **ERROR** | リトライ上限を超えて処理できなかったイベントが確実に存在する。投稿公開後のキャッシュ無効化やプロジェクト削除の後始末が実行されていない |
+| 通常キューが100件以上 | WARNING | コンシューマーが追いつけていない。本システムのイベントは人の操作に紐づくもので、定常的に積み上がる性質ではない |
+| Management API へ到達できない | WARNING | 滞留の有無が判定できないだけで、ブローカーの死活は他の経路でも分かる |
+
+DLQ の中身を見るには:
+
+```bash
+docker exec lbs-rabbitmq rabbitmqctl list_queues name messages | grep '\.dlq'
 ```
 
 ## Monitoring and Alerting

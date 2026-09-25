@@ -1,4 +1,0 @@
-ALTER TABLE sites
-    ADD COLUMN managed_wordpress BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN wp_slug VARCHAR(100),
-    ADD COLUMN wp_db_name VARCHAR(100);

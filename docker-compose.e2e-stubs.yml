@@ -1,0 +1,222 @@
+# 受け入れテスト用の外部依存スタブ一式(issue #928 / AT-2)。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
+#
+# 受け入れテストは外部SaaSに依存しない。実キーが要る依存(LLM / Google Analytics /
+# AdSense / Brave Search / OpenAI画像生成 / GitHub)を、決定的に応答するスタブへ置き換える。
+# ComfyUI は外部SaaSではないが、GPU が要り実生成が遅いので、枚数と seed の決定的な検証の
+# ためだけにスタブを併置する(#1106。実生成の検証は #936 が実機で行う)。
+# 詳細と使い方は docs/ACCEPTANCE_TESTING.md の「外部依存スタブ」節を参照。
+#
+# #843 で導入した docker-compose.e2e-llm-stub.yml は本ファイルへ統合し、削除した。
+# オーバーライドを依存ごとに増やすと起動手順が破綻するため、1本にまとめる方針。
+#
+# ## 落とし穴: システム設定(DB)が環境変数より優先される
+#
+# LLM の baseUrl / APIキーは platform-service の system_settings(DB)に値があると
+# そちらが優先される(AppSettingService が正)。環境変数だけ差し替えても実サービスへ
+# 出ていく。受け入れテストの前に scripts/e2e-clear-llm-db-overrides.sh で DB 側を空にすること。
+#
+# ## ホスト公開ポート
+#
+# 各スタブは 127.0.0.1 のみに公開する。受け入れテストが制御エンドポイント
+# (POST /__control/force など)でエラーを注入し、/__control/state で呼ばれた回数を
+# 確認するために必要。外部へは開けない。
+
+x-stub-base: &stub-base
+  image: node:22-alpine
+  restart: unless-stopped
+  # マウント先(/app)を working_dir にしない(#1000)。
+  #
+  # ヘルスチェックは docker exec と同じ経路で走り、その cwd はコンテナの WorkingDir に
+  # なる。healthcheck: には -w に当たる指定が無いので、cwd を選べるのはここだけである。
+  # runc 1.4.0 は exec の cwd がバインドマウント経由でマウント名前空間のルート外を指す場合、
+  # プロセスの起動そのものを拒否する:
+  #
+  #   OCI runtime exec failed: exec failed: unable to start container process:
+  #   current working directory is outside of container mount namespace root
+  #
+  # 拒否されるのはプロセスが動き出す前なので、test: の中に cd を書いても回避できない。
+  # working_dir=/app のままだとスタブ6本が起動直後から恒常的に unhealthy になり、
+  # condition: service_healthy で待つ ai / platform / analytics が起動を完了できない。
+  # ソースの持ち込み方(読み取り専用の /app マウント)とスタブの機能は変えていない。
+  # 起動は下の command が絶対パス(/app/<name>/server.js)で指す。
+  working_dir: /
+  volumes:
+    - ./infra/e2e-stubs:/app:ro
+  environment:
+    PORT: "8080"
+  networks:
+    - lbs-net
+  healthcheck:
+    # localhost ではなく 127.0.0.1 を使う。node:22-alpine の busybox wget は localhost を
+    # ::1 へ先に解決し、サーバーが IPv4 の 0.0.0.0 にしか bind していないため接続拒否になる。
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+
+services:
+  # api-global のレート制限を受け入れテスト用に引き上げる(issue #1132)。
+  #
+  # `@api` シナリオは nginx 経由(https://localhost)で gateway を叩くため、gateway からは
+  # 外部の実クライアントと区別が付かない。api-global はクライアント単位に分割済みだが
+  # (issue #749)、受け入れテストの実行元は常に1台の Playwright プロセスなので、
+  # 分割してもスイート全体が「1クライアント」に潰れる。本番既定の100req/分のままだと、
+  # フィクスチャ構築の呼び出しだけで枠を使い切り、無関係なシナリオが429で落ちる。
+  #
+  # 本番既定値(API_RATE_LIMIT_REQUESTS 未設定 = 100)はここでは変更しない。
+  # 値の根拠(実測とヘッドルームの計算)は docs/API_RATE_LIMITING.md
+  # 「Acceptance-test override (issue #1132)」を参照。docs/ACCEPTANCE_TESTING.md §9 にも
+  # 同じ内容を要約している。
+  #
+  # upload-endpoint(画像生成/アップロード)の枠も同じ理由で受け入れテスト用に引き上げる
+  # (issue #1286)。`image-generation.feature` 冒頭の内訳どおり、`@slow` を含む全件実行の
+  # 消費はちょうど12で、既定値10(1時間に10回、プロセス全体で1バケット)を2つ超える。
+  # 1時間以内の再実行も429無しでまかなうには、同じ1時間の枠の中で少なくとも24
+  # (12 × 2回)を吸収できる必要がある。
+  #
+  # 本番既定値(UPLOAD_RATE_LIMIT_REQUESTS 未設定 = 10)はここでは変更しない。
+  # 値の根拠は docs/API_RATE_LIMITING.md「Acceptance-test override (issue #1286)」を参照。
+  # docs/ACCEPTANCE_TESTING.md §9 にも同じ内容を要約している。
+  gateway:
+    environment:
+      API_RATE_LIMIT_REQUESTS: "1000"
+      UPLOAD_RATE_LIMIT_REQUESTS: "40"
+
+  llm-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-llm-stub
+    command: ["node", "/app/llm/server.js"]
+    ports:
+      - "127.0.0.1:18081:8080"
+
+  ga-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-ga-stub
+    command: ["node", "/app/google-analytics/server.js"]
+    ports:
+      - "127.0.0.1:18082:8080"
+
+  adsense-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-adsense-stub
+    command: ["node", "/app/adsense/server.js"]
+    ports:
+      - "127.0.0.1:18083:8080"
+
+  brave-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-brave-stub
+    command: ["node", "/app/brave-search/server.js"]
+    ports:
+      - "127.0.0.1:18084:8080"
+
+  image-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-image-stub
+    command: ["node", "/app/openai-image/server.js"]
+    ports:
+      - "127.0.0.1:18085:8080"
+
+  github-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-github-stub
+    command: ["node", "/app/github/server.js"]
+    ports:
+      - "127.0.0.1:18086:8080"
+
+  # ComfyUI(issue #1106)。実機は NVIDIA ランタイムが要り、1枚あたり数十秒かかるため、
+  # batch size 16 の枚数検証も「リピートごとに seed が変わる」ことの確認も実行時間に乗らない。
+  # スタブが引き受けるのは枚数と seed の決定的な検証だけで、画像の見た目は再現しない。
+  # #936(AT-10)の実生成シナリオ(@slow)は実機の ComfyUI を使い続ける(併用)。
+  comfyui-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-comfyui-stub
+    command: ["node", "/app/comfyui/server.js"]
+    ports:
+      - "127.0.0.1:18087:8080"
+
+  # ---- 各サービスの向き先をスタブへ ----
+
+  # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
+  # (system_settings の所有者、issue #693)。両方を向けないと、DBに設定が無い環境で
+  # platform 側の既定値(本物のエンドポイント)が使われてしまう(#843)。
+  ai:
+    environment:
+      # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
+      LLM_BASE_URL: http://llm-stub:8080
+      # スタブは Authorization を検証しないが、未設定だと呼び出し前に弾かれる経路があるため値を入れる。
+      LLM_API_KEY: e2e-stub-key
+      BRAVE_SEARCH_BASE_URL: http://brave-stub:8080
+      GITHUB_API_BASE_URL: http://github-stub:8080
+    depends_on:
+      llm-stub:
+        condition: service_healthy
+      brave-stub:
+        condition: service_healthy
+      github-stub:
+        condition: service_healthy
+
+  platform:
+    environment:
+      LLM_BASE_URL: http://llm-stub:8080
+      LLM_API_KEY: e2e-stub-key
+      # issue #1086: 既定プロバイダの環境変数既定値は OLLAMA になった。受け入れテスト環境には
+      # ollama コンテナを持ち込まない(GPU依存とスタブ方針を崩さないため)ので、AT では
+      # OPENAI に固定してスタブへ向ける。scripts/e2e-clear-llm-db-overrides.sh が DB 上書きを
+      # 消すため、ここで固定しないと環境変数既定の OLLAMA がそのまま効く。
+      LLM_PROVIDER: OPENAI
+      # 上の固定が何かの拍子に外れても(DBに llm_provider=OLLAMA が残っている等)、
+      # 存在しない ollama コンテナではなくスタブへ向くようにしておく。
+      LLM_OLLAMA_BASE_URL: http://llm-stub:8080
+      LLM_OLLAMA_MODEL: e2e-stub-model
+      # media-service は画像生成の接続設定を platform の
+      # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
+      # したがって ChatGPT 画像生成の向き先はここで決まる。
+      IMAGE_LLM_BASE_URL: http://image-stub:8080
+      IMAGE_LLM_API_KEY: e2e-stub-image-key
+      # ComfyUI の向き先も同じ経路で決まる(issue #1106)。media-service は
+      # ComfyUiClient が呼ぶ都度 platform の image-generation-config から baseUrl を取るので、
+      # **ここを向けないと media 側だけ差し替えてもスタブへは届かない**。
+      # platform 自身の ConnectedServiceStatusService(連携サービスの状況)も
+      # この値の /system_stats を叩くため、スタブがその経路を実装している。
+      COMFYUI_BASE_URL: http://comfyui-stub:8080
+    depends_on:
+      llm-stub:
+        condition: service_healthy
+      image-stub:
+        condition: service_healthy
+      comfyui-stub:
+        condition: service_healthy
+
+  # 画像生成の実行者。向き先そのものは上の platform が決める(DB > 環境変数の順に解決される
+  # AppSettingService が正、issue #531)。
+  #
+  # **現時点で media の Java コードはこの値を読んでいない**(#1106 のレビュー指摘)。
+  # media の application.yml は app.comfyui-base-url を宣言しているが @Value 注入する
+  # コードが無く、ComfyUiClient は呼ぶ都度 configProvider.comfyUiBaseUrl()
+  # (= platform の /api/internal/platform/image-generation-config)から baseUrl を取る。
+  # したがってこの行は現状では効いていない。**防御として残している**: media が
+  # app.comfyui-base-url を直接読む形に戻ったとき、GPUの無いホストで実 ComfyUI へ
+  # 出ていく経路を作らないため。消すと、その変更が黙って実機に向く。
+  media:
+    environment:
+      COMFYUI_BASE_URL: http://comfyui-stub:8080
+    depends_on:
+      comfyui-stub:
+        condition: service_healthy
+
+  analytics:
+    environment:
+      GOOGLE_ANALYTICS_DATA_API_BASE_URL: http://ga-stub:8080
+      # サービスアカウントJSONに token_uri が書かれているとそちらが優先される。
+      # スタブ用のJSONには token_uri を入れないこと(docs/ACCEPTANCE_TESTING.md)。
+      GOOGLE_ANALYTICS_OAUTH_TOKEN_URI: http://ga-stub:8080/token
+      ADSENSE_DATA_API_BASE_URL: http://adsense-stub:8080
+      GOOGLE_OAUTH_TOKEN_URI: http://adsense-stub:8080/token
+    depends_on:
+      ga-stub:
+        condition: service_healthy
+      adsense-stub:
+        condition: service_healthy

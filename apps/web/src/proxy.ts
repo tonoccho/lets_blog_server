@@ -1,0 +1,127 @@
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
+import { gatewayUrl } from "@/lib/apiBaseUrl";
+
+// /signupはissue #564でKeycloakのregistrationAllowed=false(自己登録オフ)に伴い削除した。
+const PUBLIC_PATHS = ["/login", "/setup"];
+const ADMIN_ONLY_PREFIXES = ["/users", "/admin"];
+
+async function needsInitialSetup(): Promise<boolean> {
+  try {
+    // /api/auth/setup-status はログイン前でも到達できる公開エンドポイントのため認証ヘッダー不要。
+    // ベースURLの組み立てはapiClient.tsと共通のgatewayUrl()に集約している(issue #584)。
+    const res = await fetch(gatewayUrl("/api/auth/setup-status"), {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      return false;
+    }
+    const data = (await res.json()) as { needsSetup: boolean };
+    return data.needsSetup;
+  } catch {
+    return false;
+  }
+}
+
+// /users/{id}/edit だけの自己アクセス例外(issue #1313)。
+// page.tsx(apps/web/src/app/users/[id]/edit/page.tsx)は自分自身のIDであれば
+// admin以外でも編集画面を開ける設計(issue #784のisSelf分岐)だが、そのロジックは
+// ADMIN_ONLY_PREFIXESによってミドルウェア段階で一律ブロックされ、一度も到達していなかった
+// (#1313調査: avatar-upload.featureの5シナリオが`[data-testid="avatar-file-input"]`の
+// タイムアウトで落ちる原因は、この一律ブロックによる`/`へのサイレントリダイレクトだった)。
+// 末尾は"/edit"自身のみに絞る(末尾スラッシュのみ許容)。`(\/.*)?`のように配下を
+// 丸ごと許すと、将来"/users/{id}/edit/"配下にadmin専用の別ルートが増えたとき、
+// このミドルウェアを一切触らないまま自己アクセス例外が自動的にそこへも及んでしまう
+// (レビュー指摘、issue #1313)。
+const SELF_EDIT_PATH_PATTERN = /^\/users\/(\d+)\/edit\/?$/;
+
+/**
+ * トークンの自己主張ではなく、identity-serviceに問い合わせて確定した自分のIDを返す。
+ * ミドルウェア(edge)はKeycloakのsub(UUID)しか持たず、ローカルの数値IDを知らないため
+ * (apps/web/src/lib/apiClient.tsのgetMyProfile()と同じ理由)。取得できなければnull
+ * (呼び出し側はフェイルクローズし、admin限定ブロックを維持する)。
+ */
+async function fetchOwnUserId(accessToken: string): Promise<number | null> {
+  try {
+    const res = await fetch(gatewayUrl("/api/identity/me"), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = (await res.json()) as { id: number };
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
+const OPERATION_ID_HEADER = "x-operation-id";
+
+/**
+ * リクエストごとに操作IDを発番し、リクエストヘッダーに載せて後段(Server Component/Server Action)へ渡す。
+ * apiClient.tsのapiFetch()がこのIDを操作ログの紐付けキーとして使い、
+ * 1回のブラウザ操作で発生した複数のバックエンドAPI呼び出しを1つの操作としてまとめる(issue #143)。
+ */
+function withOperationId(request: NextRequest): Headers {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(OPERATION_ID_HEADER, crypto.randomUUID());
+  return requestHeaders;
+}
+
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const requestHeaders = withOperationId(request);
+
+  if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
+  // /client-errors はブラウザのerror boundaryが投げる fire-and-forget のビーコンを受ける
+  // Route Handler(issue #791)。ここでリダイレクトを返しても、送信側はレスポンスを見ないので
+  // 意味が無いばかりか、未認証エラー1件ごとに needsInitialSetup() のgateway呼び出しが1件増える。
+  // 認証の判定はハンドラ自身がgetSession()で行い、未認証なら記録せず204を返す
+  // (apps/web/src/app/client-errors/route.ts、docs/AUTHORIZATION_MATRIX.md参照)。
+  //
+  // matcherの否定先読みではなくここで弾いているのは、先読みが前方一致になるため。
+  // `(?!...|client-errors|...)` と書くと /client-errors-foo や /client-errors/nested のような
+  // 「client-errorsで始まる別のルート」まで除外され、そこにページを足した時点で
+  // 認証ゲートが無言で外れる(ADR-0008が本方式の最大のリスクとして挙げている型の事故)。
+  // 完全一致で判定すればその穴は構造的に生じない。PUBLIC_PATHSがstartsWithなので、
+  // そちらに足すのではなく専用の早期returnにしている。
+  if (pathname === "/client-errors") {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+
+  // token.errorは"RefreshAccessTokenError"(アクセストークンのリフレッシュ失敗。auth.tsのjwt
+  // コールバック参照)。リフレッシュ済みの生きたアクセストークンが無い状態なので、未ログインと
+  // 同様に扱いKeycloakへの再ログインを促す。
+  if (!token || token.error) {
+    if (await needsInitialSetup()) {
+      return NextResponse.redirect(new URL("/setup", request.url));
+    }
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (ADMIN_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix)) && token.role !== "admin") {
+    const selfEditMatch = pathname.match(SELF_EDIT_PATH_PATTERN);
+    if (selfEditMatch && typeof token.accessToken === "string") {
+      const requestedId = selfEditMatch[1];
+      const ownId = await fetchOwnUserId(token.accessToken);
+      if (ownId !== null && String(ownId) === requestedId) {
+        return NextResponse.next({ request: { headers: requestHeaders } });
+      }
+    }
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
+export const config = {
+  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
+};

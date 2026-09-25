@@ -1,538 +1,1081 @@
-# CLAUDE.md
+# Project Development Rules
 
-## Role
+## Core Principle
 
-You are an AI coding agent working on this repository.
+This project uses a structured AI-assisted development workflow.
 
-Your primary task is to implement GitHub Issues accurately and safely.
+Do not jump directly from an informal user request to code implementation.
 
-GitHub Issues are the primary source of task requirements.
+All feature development should follow:
 
-Do not treat assumptions, guesses, or inferred requirements as confirmed requirements.
-
----
-
-# 1. General Workflow
-
-When asked to work on a GitHub Issue, follow this workflow:
-
-1. Read and understand the Issue.
-2. Inspect the current repository state.
-3. Inspect relevant existing code before making changes.
-4. Identify the smallest reasonable set of changes required.
-5. Create or switch to an appropriate working branch.
-6. Implement the changes.
-7. Run relevant tests, linters, formatters, and type checks.
-8. Review the resulting diff.
-9. Fix any problems found during verification.
-10. Commit the changes.
-11. Push the working branch to GitHub.
-12. Create or update a Pull Request.
-13. Clearly report what was changed and what verification was performed.
-
-Do not skip verification merely because the change appears simple.
+1. Requirement clarification
+2. Issue definition
+3. Ready
+4. Analysis
+5. Implementation planning
+6. Implementation
+7. Review
+8. QA
+9. Done
+10. Retrospective and rule improvement
 
 ---
 
-# 2. GitHub Issue Rules
+# Source of Truth
 
-Before modifying code, read the relevant GitHub Issue using GitHub CLI when necessary.
+GitLab Issues are the source of truth for development work.
 
-For example:
+Do not create independent TODO files for issue status management.
+
+Do not begin implementation unless the task is sufficiently defined.
+
+The expected workflow is:
+
+Inbox
+→ Backlog
+→ Ready
+→ In Progress
+→ Review
+→ QA
+→ Done
+
+## How status is represented
+
+This is the single definition of how an Issue's status is stored and changed. Every skill and
+agent defers to it. Do not restate it differently anywhere else — if you find a second
+definition in `.claude/`, that is a bug to fix, not a variant to follow.
+
+Status is a **label**, named `status::<Stage>`:
+
+`status::Inbox` `status::Backlog` `status::Ready` `status::In Progress` `status::Review`
+`status::QA` `status::Done`
+
+Priority is a label too: `priority::P0` / `priority::P1` / `priority::P2`.
+
+GitLab CE has no single-select field and no scoped labels (those are Premium), so **nothing
+stops an Issue from carrying two status labels at once, or none.** GitHub Projects made that
+impossible; here it is only a convention, and the workflow depends on it. Exactly one
+`status::` label, always.
+
+## How to change status
+
+Remove the old label and add the new one **in the same call**. Never as two calls:
 
 ```bash
-gh issue view <issue-number>
+glab api "projects/:id/issues/<iid>" --method PUT \
+  -f "remove_labels=status::Ready" -f "add_labels=status::In Progress"
 ```
 
-Treat the Issue as the specification for the task.
+Two separate calls leave the Issue with zero or two status labels in between. An Issue with no
+status label appears in no board column and is invisible to `work-next` and to triage; an Issue
+with two is in no defined stage at all.
 
-Pay attention to:
+Never write the whole label set with `labels=` — that silently drops `epic`, `bug` and every
+other label the Issue carries. Only `add_labels` / `remove_labels`.
 
-* Problem description
-* Expected behavior
-* Acceptance criteria
-* Constraints
-* Related Issues
-* Existing discussion and comments
-
-If the Issue contains explicit acceptance criteria, all of them must be addressed.
-
-## Do not silently expand the scope
-
-Do not implement additional features simply because they seem useful.
-
-If you discover a potentially useful improvement that is outside the Issue's scope:
-
-1. Do not implement it automatically.
-2. Mention it in the final report.
-3. Suggest creating a separate Issue if appropriate.
-
-## Ambiguous requirements
-
-If the Issue is ambiguous but a reasonable interpretation can be made without changing the intended behavior, choose the least invasive interpretation.
-
-If ambiguity could materially change the behavior, stop and ask for clarification rather than inventing requirements.
-
----
-
-# 3. Repository Inspection
-
-Before editing files:
-
-* Check the current Git status.
-* Inspect the repository structure.
-* Identify the relevant application/module.
-* Read existing implementations before creating new ones.
-* Look for existing tests.
-* Look for project-specific documentation.
-* Check package/build configuration when relevant.
-
-Start with commands such as:
+To read the current status:
 
 ```bash
-git status
-git branch --show-current
-git log -5 --oneline
+glab issue view <iid> -F json --jq '[.labels[] | select(startswith("status::"))]'
 ```
 
-Do not assume the repository is clean.
+### How "exactly one" is enforced
 
-If there are pre-existing uncommitted changes:
+In two layers, for the same reason squash is (see **Enforcement** → Where squash is enforced):
+neither layer sees what the other sees.
 
-* Do not overwrite them.
-* Do not reset them.
-* Do not discard them.
-* Determine whether they are related to the current task.
-* Preserve unrelated user changes.
-
----
-
-# 4. Branching Strategy
-
-- Never work directly on `main` unless explicitly instructed.
-- Never create branches from `main` unless explicitly instructed.
-- Always create branches from `develop` unless explicitly instructed.
-- Never merge working branches to `develop` without PR.
-- Never merge working branches to `main` without PRNever merge working branches to `main` without PR..
-
-For an Issue, prefer:
-
-```text
-fix/issue-<number>
-```
-
-for bug fixes, and:
-
-```text
-feature/issue-<number>
-```
-
-for new functionality.
-
-Examples:
-
-```text
-fix/issue-42
-feature/issue-57
-```
-
-Before creating a branch, verify the current Git state.
-
-Do not delete existing branches unless explicitly instructed.
-
----
-
-# 5. Coding Principles
-
-Prefer:
-
-* Small, focused changes
-* Existing project conventions
-* Existing abstractions
-* Simple implementations
-* Readable code
-* Minimal dependencies
-* Backward compatibility
-
-Avoid:
-
-* Unnecessary refactoring
-* Large unrelated changes
-* Introducing new dependencies without a clear reason
-* Rewriting working code unnecessarily
-* Changing public APIs without justification
-* "Cleaning up" unrelated code
-
-The goal is to solve the Issue, not to redesign the entire project.
-
----
-
-# 6. Existing Code Has Priority
-
-Before creating a new implementation, search the repository for existing functionality that may already solve part of the problem.
-
-Prefer modifying or reusing existing code over creating duplicate functionality.
-
-Follow the project's existing:
-
-* Naming conventions
-* Directory structure
-* Error handling
-* Logging
-* Testing patterns
-* Formatting
-* Architectural patterns
-
-Do not introduce a new architectural pattern merely because you personally prefer it.
-
----
-
-# 7. Tests and Verification
-
-After making changes, run the tests relevant to the modified code.
-
-Also run the project's standard verification commands when available.
-
-Typical examples include:
-
-```bash
-npm test
-npm run lint
-npm run typecheck
-```
-
-or the equivalent commands for the project's language/framework.
-
-Do not claim that tests passed unless you actually ran them.
-
-If tests fail:
-
-1. Determine whether the failure is caused by your changes.
-2. Fix the issue if it is within the current task.
-3. Re-run the relevant tests.
-
-If a test cannot be run because of an environmental problem, clearly report that fact.
-
-Never hide a failed test.
-
----
-
-# 8. Diff Review
-
-Before committing, inspect:
-
-```bash
-git status
-git diff
-```
-
-Verify that:
-
-* Only intended files were modified.
-* No debugging code remains.
-* No secrets or credentials were added.
-* No unrelated changes were accidentally included.
-* The implementation matches the Issue.
-
-If unexpected changes appear, investigate them before committing.
-
----
-
-# 9. Security
-
-Never commit:
-
-* Passwords
-* API keys
-* Access tokens
-* Private keys
-* Credentials
-* `.env` files containing secrets
-* Personal sensitive data
-
-If credentials are encountered during the task, do not expose them in commits, comments, or Pull Requests.
-
-Do not weaken authentication, authorization, validation, or security controls merely to make tests pass.
-
----
-
-# 10. Destructive Operations
-
-Do not perform destructive operations without explicit confirmation.
-
-Examples include:
-
-```bash
-git reset --hard
-git clean -fd
-git push --force
-git branch -D
-```
-
-Also avoid deleting files or database data unless the Issue explicitly requires it and the consequences are understood.
-
-Never use force-push on shared branches unless explicitly instructed.
-
----
-
-# 11. Commit Rules
-
-Create commits that clearly describe the change.
-
-Prefer:
-
-```text
-Fix login timeout handling
-Add password reset link
-Handle missing configuration file
-```
-
-Avoid vague messages such as:
-
-```text
-update
-fix
-changes
-work
-```
-
-When appropriate, reference the Issue number.
-
-For example:
-
-```text
-Fix password reset link (#42)
-```
-
-Do not create meaningless intermediate commits merely to save progress unless necessary.
-
----
-
-# 12. Pull Request Rules
-
-When the task is complete, create a Pull Request unless explicitly instructed otherwise.
-
-The Pull Request should contain:
-
-* A concise summary
-* What was changed
-* How it was tested
-* Any limitations or unresolved issues
-
-When appropriate, link the Pull Request to the Issue using:
-
-```text
-Closes #<issue-number>
-```
-
-or another appropriate GitHub closing keyword.
-
-Example:
-
-```text
-Closes #42
-```
-
-Do not claim that the Issue is resolved if the implementation is incomplete.
-
----
-
-# 13. GitHub CLI
-
-Use GitHub CLI when GitHub interaction is required.
-
-Useful commands include:
-
-```bash
-gh issue view <number>
-gh issue comment <number> --body "..."
-gh pr create
-gh pr view
-gh pr comment
-```
-
-Before performing GitHub operations, verify that the correct repository and account are being used.
-
-Do not modify or close unrelated Issues or Pull Requests.
-
----
-
-# 14. Issue Comments
-
-When appropriate, update the Issue or Pull Request with useful information.
-
-Comments should be concise and factual.
-
-For example:
-
-```text
-Implemented the requested change and opened PR #57.
-
-Verification:
-- Unit tests: passed
-- Lint: passed
-- Type check: passed
-```
-
-Do not post speculative information as fact.
-
-Do not spam the Issue with progress updates unless requested.
-
----
-
-# 15. Handling Failures
-
-If the task cannot be completed:
-
-Do not pretend it is complete.
-
-Instead, report:
-
-1. What was attempted.
-2. What was successfully changed.
-3. What failed.
-4. The exact error or relevant failure.
-5. What remains to be done.
-
-If the failure is caused by the environment rather than the code, explicitly distinguish the two.
-
----
-
-# 16. Final Response
-
-After completing the task, provide a concise summary containing:
-
-## Changes
-
-What was implemented.
-
-## Verification
-
-Which tests/checks were run and their results.
-
-## Git
-
-The commit hash and branch name when available.
-
-## Pull Request
-
-The Pull Request number or URL when available.
-
-## Notes
-
-Any limitations, warnings, or follow-up work.
-
-Do not claim success unless the implementation has actually been verified.
-
----
-
-# 17. Important Behavioral Rules
-
-The following rules have priority over convenience:
-
-1. Do not modify unrelated code.
-2. Do not invent requirements.
-3. Do not silently ignore acceptance criteria.
-4. Do not overwrite the user's existing uncommitted work.
-5. Do not commit secrets.
-6. Do not bypass failing tests without explanation.
-7. Do not push directly to `main`.
-8. Do not use destructive Git commands without explicit confirmation.
-9. Do not claim that something works without verification.
-10. When uncertain about a requirement that materially affects implementation, ask before proceeding.
-
-The objective is not to make the largest possible change.
-
-The objective is to make the **smallest correct, tested, reviewable change that completely satisfies the GitHub Issue**.
-
----
-
-# 18. API Client Code Generation
-
-The API client for TypeScript/JavaScript projects is auto-generated from the OpenAPI specification.
-
-## Workflow
-
-1. **OpenAPI Spec**: The Spring Boot API server generates an OpenAPI 3.0 spec at `/v3/api-docs` using `springdoc-openapi`.
-
-2. **Client Generation**: Use `orval` to generate a type-safe TypeScript client:
-
-   ```bash
-   # From project root:
-   npx orval --config orval.config.js
-   ```
-
-3. **Output**: Generated client code is placed in `sdk/api-client/src/generated/`.
-
-4. **Usage**: Import and use from `@api-client` path alias:
-
-   ```typescript
-   import { listSites, type Site } from '@api-client';
-   ```
-
-## Setup
-
-* **orval.config.js**: Main configuration file (root directory)
-* **openapi.json**: Downloaded OpenAPI spec (regenerated before running orval)
-* **sdk/api-client/**: Generated client library package
-* **web/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
-* **extension/tsconfig.json**: Includes path alias `@api-client` → `../sdk/api-client/src`
-
-## Regenerating the Client
-
-After API changes, regenerate the client:
-
-```bash
-# In web or extension directory:
-npm run generate:api-client
-```
-
-This script fetches the latest OpenAPI spec and regenerates client code.
-
----
-
-## 19. GitHub Actions CI/CD Workflows
-
-This repository uses GitHub Actions to automate testing, linting, and validation on every push and pull request.
-
-### Workflow Overview
-
-| Workflow | Trigger | Purpose |
+| Layer | Catches | Blind to |
 | --- | --- | --- |
-| **API Tests and Coverage** | Push to main/develop; API path changes | Run unit tests with JaCoCo coverage, lint checks, and upload coverage to Codecov |
-| **Frontend Tests** | Push to main/develop; web path changes | TypeScript type checking, Next.js build, linting, unit tests, and E2E tests |
-| **Extension Build** | Push to main/develop; extension path changes | TypeScript compilation and extension manifest validation |
+| `guard.py` → `check_status_label_integrity` | agent and CLI label changes, at the moment of the mistake | the GitLab web UI, and shell indirection |
+| `scripts/check-issue-labels.sh` | anything, including web-UI edits | only after the fact |
 
-#### Running Locally
+The hook refuses exactly two things, both decidable from the command text alone — it never
+queries the Issue's current labels, so it stays fast and needs no network:
 
-Before pushing, run the same checks locally to catch issues early:
+- `labels=` — a wholesale overwrite. It silently drops `epic`, `bug` and everything else.
+- adding a `status::` without removing one in the same call, or removing without adding.
+
+Creating an Issue (`glab issue create --label status::Inbox,...`) is not a transition and is
+not refused; that is where the first status comes from.
+
+Run the script when you suspect drift, and after any manual editing in the web UI:
 
 ```bash
-# API
-cd api
-./gradlew lint test
-
-# Frontend
-cd web
-npm run lint
-npm run build  # Includes TypeScript type checking
-
-# Extension
-cd extension
-npm run compile
+scripts/check-issue-labels.sh
 ```
 
-### Workflow Status
+It reports `0` and `2+` separately, because they are different failures. **Zero is the dangerous
+one**: an Issue with no `status::` label appears in no board column and is invisible to
+`work-next` and to triage, so nothing ever complains about it. Two means the Issue is in no
+defined stage at all.
 
-Workflow status badges are displayed in the README.md. You can also view detailed reports on the [Actions page](https://github.com/tonoccho/lets_blog_server/actions).
+### Legal Transitions
 
-### Understanding Failures
+This is the single definition of which `status::` → `status::` transitions are legitimate.
+`guard.py` → `check_status_label_integrity` encodes this table as data (a set of `(from, to)`
+tuples with a comment pointing back here) — it does not restate the rationale below. If the
+table here changes, update `guard.py` to match; do not let the two drift.
 
-If a workflow fails:
+#1023's uniqueness check (above) does not catch a transition that skips stages — the Issue
+still carries exactly one `status::` label before and after, so nothing about "exactly one"
+is violated by `status::Ready → status::Done`. That is a different failure (#1031): **no stage
+was actually passed through**, even though the label looks fine at every moment.
 
-1. **Check the workflow log** on the Actions page
-2. **Identify which step failed** (lint, test, build, etc.)
-3. **Run that step locally** to reproduce the error
-4. **Fix the issue** and commit/push again
+| Kind | Transition | Driven by |
+| --- | --- | --- |
+| Forward | `Inbox → Backlog` | `triage-backlog` |
+| Forward | `Backlog → Ready` | `ready-issue` |
+| Forward | `Ready → In Progress` | `work-next` Step 6 |
+| Forward | `In Progress → Review` | `work-next` Step 7 |
+| Forward | `Review → QA` | `review-issue` APPROVED |
+| Forward | `QA → Done` | `complete-issue`, after confirming the merge |
+| Rollback | `Review → In Progress` | `review-issue` CHANGES REQUIRED |
+| Rollback | `QA → In Progress` | `qa-issue` FAIL |
+| Rollback | `Ready → Backlog` | `work-next` Step 4 |
+| Rollback | `Review → Backlog` | `review-issue` REQUIREMENT CLARIFICATION |
+| Rollback | `In Progress → Ready` | re-assessment after two rollbacks in one cycle (see **Implementation runs on Sonnet**) |
 
-The workflow will automatically re-run on your next push.
+This table was checked against every skill that changes a `status::` label
+(`triage-backlog`, `ready-issue`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`) as
+of #1031, and every transition those skills perform is listed above. **Default is reject, not
+warn**: an unlisted transition is refused outright by `guard.py`, because a warning is easy to
+ignore under the unattended loop that this rule exists to protect (see **Autonomous Task
+Execution**). If a future skill change needs a transition not in this table, add it here and to
+`guard.py`'s `LEGAL_STATUS_TRANSITIONS` in the same change — do not work around the guard.
+
+Only the (from, to) pair is checked, from the `remove_labels=` / `add_labels=` values of a
+single paired call — the same command text `check_status_label_integrity` already parses for
+the uniqueness check. This stays command-text-only, exactly like the uniqueness check: no
+network call, no query of the Issue's current labels.
+
+**Historical transitions are not validated.** This only gates new label changes going forward;
+it says nothing about how an Issue reached its current label.
+
+### Merge precondition (#1031)
+
+`complete-issue` reads the Issue's `status::` label before merging (Step 2 of its skill), but
+that is a documented procedure, not a mechanical guarantee — #959 is exactly the case where an
+Issue was merged while still `status::In Progress`, despite the skill instructions.
+
+Three options were considered (see #1031 for the full text):
+
+- **A** — have `guard.py` query the GitLab API before allowing `glab mr merge`, to confirm the
+  Issue is in `status::QA`. Rejected: it would make the hook depend on the network and a token,
+  which #1023 deliberately avoided for `check_status_label_integrity`, and the merge command
+  alone does not carry the Issue number as a syntactic guarantee.
+- **B** — rely solely on `complete-issue`'s Step 2 documentation. Rejected as the *only*
+  mechanism: it is exactly what #959 shows is not enough on its own.
+- **C** (chosen) — extend `scripts/check-issue-labels.sh` to detect the inconsistency after the
+  fact.
+
+**First attempt, and why it was wrong.** The first cut of C flagged every `state: closed` Issue
+that did not carry `status::Done`, on the theory that no MR lookup was needed: every Merge
+Request `merge-request` opens has a description containing `Closes #<issue-number>`
+(`.claude/skills/merge-request/SKILL.md`), and GitLab acts on that itself — merging such an MR
+auto-closes the linked Issue independently of its labels. That theory is correct for Issues
+merge-request actually closed, but the check as written could not tell those apart from
+everything else that is `state: closed`: an independent review ran it against this project and
+found **47 false positives** — almost all historical Issues that predate the `status::`
+labelling convention (#1023), or Issues closed manually for reasons unrelated to merging
+(duplicate, wontfix). It also queried only `per_page=100` with no pagination on either the
+open- or closed-Issue list, so Issues beyond page 1 (this project has 490 closed Issues) were
+silently never inspected at all. Flagging every historically-closed Issue also directly violated
+this Issue's own Out of Scope #4 (existing Issues' transition history is not judged).
+
+**What replaced it.** `check-issue-labels.sh` now narrows the check two ways before flagging
+anything, and paginates both list queries to completion (loop until an empty page, not a single
+`per_page=100` request):
+
+1. **Cutoff** — only closed Issues whose `closed_at` is on or after `2026-09-03T02:44:25Z` (the
+   merge time of #1023, `!1025`) are examined. Before that, `status::` labelling was not yet the
+   established convention, so a missing `status::Done` says nothing about a skipped stage — it is
+   exactly the historical-transition judgment Out of Scope #4 forbids.
+2. **MR cross-check** — for a candidate that survives the cutoff, `check-issue-labels.sh` calls
+   `issues/<iid>/closed_by` and only flags it if a **merged** Merge Request is in the result. An
+   Issue closed manually (duplicate, wontfix, etc.) is not the #959 pattern and is left alone.
+
+Run live against this project after the fix: the violation count dropped from 47 to **1** — #1110
+(closed by the merged `!1056`, still carrying `status::Inbox`), a genuine, currently-unresolved
+instance of the #959 pattern that the fix correctly surfaces rather than hides.
+
+This keeps `guard.py` network-free (Option A's cost) while going beyond a documentation-only
+promise (Option B's gap) — the same division of labour the uniqueness check already uses
+between prevention (`guard.py`) and after-the-fact detection (`check-issue-labels.sh`). The
+cross-check does cost `check-issue-labels.sh` one API call per surviving candidate, but that
+script was never claimed to be network-free — only `guard.py` was.
+
+---
+
+# Agent Responsibilities
+
+## project-planner
+
+Responsible for:
+
+- Understanding user requests
+- Clarifying requirements
+- Identifying missing requirements
+- Investigating the existing project when necessary
+- Defining scope
+- Defining acceptance criteria
+- Identifying dependencies
+- Creating or updating implementation-ready issues
+
+Must NOT:
+
+- Implement production code
+- Make architectural changes without documenting them
+- Mark an issue Ready when important requirements are unknown
+
+---
+
+## implementer
+
+Responsible for:
+
+- Reading the issue
+- Investigating the existing codebase
+- Identifying affected areas
+- Creating an implementation plan
+- Implementing the approved scope
+- Adding or updating tests
+- Running relevant validation
+
+Must NOT:
+
+- Expand scope without justification
+- Implement unrelated refactoring
+- Change product requirements
+- Mark work Done
+
+---
+
+## reviewer
+
+Responsible for independently reviewing implementation.
+
+Review:
+
+- Requirement compliance
+- Architecture consistency
+- Code quality
+- Security concerns
+- Regression risk
+- Unnecessary complexity
+- Scope creep
+- Missing tests
+
+Reviewer should not approve implementation merely because tests pass.
+
+---
+
+## qa
+
+Responsible for validating the completed behavior from the user's perspective.
+
+QA must verify acceptance criteria.
+
+QA should focus on:
+
+- Expected user behavior
+- Edge cases
+- Regression behavior
+- Error handling
+- End-to-end flows where appropriate
+
+QA does not assume implementation is correct.
+
+---
+
+# Model Selection
+
+Every skill and agent declares a model in its frontmatter. **A frontmatter declaration is a
+request, not a guarantee.** The session's model is set by the CLI (`--model`), and a skill's
+declaration may or may not override it. Never assume a stage ran on the model it declares —
+measure it (see **How to check what actually ran**) before relying on it.
+
+## What each stage declares
+
+| Kind of work | Model |
+| --- | --- |
+| Running commands (git, `gh`) with no judgment | `haiku` |
+| Comparing simple properties (status, priority, dependency counts) | `haiku` |
+| Verifying tests or inspecting Issues | `sonnet` |
+| Merging a Merge Request (irreversible; gated on preconditions) | `sonnet` |
+| Implementing production code | `sonnet` — see **Implementation runs on Sonnet** |
+| Authoring Issues | `opus` |
+
+Resulting assignments:
+
+- `haiku` — `git-workflow`, `triage-backlog`, `ready-issue`
+- `sonnet` — `merge-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`,
+  `implement-issue`; the `reviewer`, `qa` and `implementer` agents
+- `opus` — `plan-issue`, `discover-issues`
+
+Two deliberate exceptions:
+
+- `ready-issue` runs on `haiku` because its selection step is a property comparison, but it delegates the readiness evaluation to `project-planner` on `sonnet` — judging an Issue means reading and assessing it.
+- The `project-planner` agent keeps `model: inherit`. It is called both for Issue creation (opus) and Issue assessment (haiku/sonnet), so the calling skill decides.
+
+## What actually ran
+
+**A frontmatter declaration is a request, not a guarantee** — measure it, do not assume it. A
+2026-09-02 measurement across three unattended cycles found every stage but `work-next` running
+on a model it had not declared, and `implement-issue` never once reaching the `opus` it asked
+for. Never assume a stage ran on the model it declares.
+
+The measurement table, the three findings, and the `jq` command that reproduces them (including
+why a subagent's model cannot be read from these transcripts) are in
+`docs/WORKFLOW_RULE_RATIONALE.md` → モデル選択. Closing the gap is #1011.
+
+## Implementation runs on Sonnet
+
+This section previously ended with "Never edit production code on anything below Opus." **That
+rule is withdrawn.** No hook ever enforced it, and the measurement above shows it never held —
+every implementation response ran on Sonnet.
+
+By the user's decision (2026-09-02), implementation runs on **Sonnet by default**, and Opus is
+reserved for escalation rather than spent up front:
+
+- The unattended loop invokes `--model sonnet --effort medium`. There is no
+  `claude-work-next.sh`; the two runners are `~/.local/bin/claude-auto-cycle.sh`
+  (discover → triage → ready → work-next) and `~/.local/bin/claude-auto-queue.sh`
+  (a fixed list of Issues, in order). Both live outside this repository.
+- When an Issue is rolled back from `Review` or `QA` to `In progress` **twice within one
+  cycle**, the loop stops implementing, returns the Issue to `Ready`, and re-assesses its
+  readiness on **Opus** in a fresh context. Repeated rollbacks are treated as evidence of a
+  defective Issue definition, not of an under-powered implementation model.
+
+Do not reinstate an "Opus only" rule for production code without also making it enforceable.
+An unenforced model rule is exactly what produced the three-way mismatch above.
+
+---
+
+# Autonomous Task Execution
+
+Once a task is started via `work-next` (or an equivalent "implement the next task" request), it must proceed through Implementation → Review → QA → Merge Request → Merge without stopping to ask the user whether to continue at each stage. The merge is a squash merge performed by `complete-issue`; once QA has passed and the Merge Request is open, it does not need a separate confirmation.
+
+A recoverable stage outcome — implementation issues, Review `CHANGES REQUIRED`, QA `FAIL` — must loop back into implementation automatically and retry. Do not pause for user confirmation before retrying.
+
+The workflow may still stop before the Merge Request is merged, but only for a genuine blocker:
+
+- A requirement ambiguity only the user can resolve (Review `REQUIREMENT CLARIFICATION`, or a blocking question raised during implementation).
+- QA `BLOCKED` (verification itself cannot proceed).
+- A per-stage retry limit is exceeded without resolving the problem (see `work-next`).
+- The Merge Request cannot be merged as-is for a reason this workflow may not fix on its own:
+  a draft, or a blocked merge state (branch protection, a required check that cannot pass).
+  A **merge conflict is not one of these** — resolve it on the working branch per
+  **Merge Conflicts**. Never force a merge past any of them.
+- A live-system mutation would require explicit confirmation (see existing Keycloak / production DB rules).
+- Two well-evidenced verdicts on the same Issue disagree and only the user can settle it
+  (see **Dependency Resolution** → When a verdict contradicts a recent one).
+
+Otherwise, do not halt the workflow short of a merged Merge Request and a `Done` Issue.
+
+---
+
+# Read-Only Stages
+
+This is the single definition of "read-only". `discover-issues`, `triage-backlog`, and
+`ready-issue` defer to it, as does every agent they spawn. Do not restate it differently
+anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
+variant to follow.
+
+These three stages never change the repository. They read the codebase and the Issue tracker,
+form a judgment, and record that judgment in GitLab. That is their entire output.
+
+## What must not change
+
+While one of these stages is running, nothing in the working tree may be written — not
+production code, not tests, not configuration, not migrations, not documentation, not
+`.claude/` itself. "Production code" is not the boundary; the boundary is **any file in the
+repository**.
+
+Not permitted:
+
+- `Edit`, `Write`, `NotebookEdit`
+- Shell writes into a repository path: `>`, `>>`, `sed -i`, `patch`, `tee`, `mv`, `rm`, `cp`
+- Commands that write as a side effect: formatters, `--fix` linters, code generators,
+  dependency installs that touch a lockfile, database migrations, builds that commit artifacts
+- Any `git` command that changes state: `add`, `commit`, `checkout`, `switch`, `branch`,
+  `merge`, `rebase`, `stash`, `restore`, `reset`, `push`
+
+Read-only inspection is expected and encouraged: `cat`, `sed -n`, `grep`, `find`, `git log`,
+`git diff`, `git show`, `glab issue view`, `scripts/issue-dependency-status.sh`.
+
+Scratch notes go to the session scratchpad directory, never into the repository.
+
+## What may change
+
+Only GitLab Issue state, and only the mutations listed for that stage:
+
+| Stage | Permitted GitLab mutations |
+| --- | --- |
+| `discover-issues` | Create new Issues in `Inbox` with `Priority` set; comment on an existing Issue when the finding is already covered by it |
+| `triage-backlog` | Move `Inbox → Backlog`; set `Priority` on each Issue it moves |
+| `ready-issue` | Move `Backlog → Ready`; post the Readiness Report as a comment; rewrite Epic shorthand in the Issue body to `#<number>` (required by **Dependency Resolution** → Recording dependencies) |
+
+Anything not listed is out of bounds — including closing an Issue, which stays the user's call.
+
+## When a read-only stage finds something it wants to fix
+
+Do not fix it. That is the point of the stage. File it — or comment on the Issue that already
+covers it — per **Scope Control**, and report it. A one-line "obvious" fix is still a code
+change, and a stage that is trusted to only read must actually only read.
+
+If a stage cannot complete its judgment without changing a file, that is a blocker to report,
+not a reason to make the change.
+
+---
+
+# Implementation Rules
+
+Before editing code:
+
+1. Read the relevant GitLab Issue.
+2. Read relevant architecture and development documentation.
+3. Inspect existing implementations.
+4. Prefer existing patterns over inventing new ones.
+5. Identify the smallest change that satisfies the requirements.
+
+After editing code:
+
+1. Run relevant tests.
+2. Run linting where available.
+3. Run type checks where available.
+4. Check for unintended changes.
+5. Compare the implementation against acceptance criteria.
+
+---
+
+# Test-First Implementation
+
+This is the single definition of how implementation proceeds. `work-next`, `implement-issue`,
+the `implementer` agent, and `review-issue` all defer to it. Do not restate it differently
+anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
+variant to follow.
+
+Every Issue is implemented test-first:
+
+1. **RED — write the acceptance tests.** Translate the Issue's Acceptance Criteria into Gherkin
+   scenarios, run them, and confirm every new scenario **fails**. Record the failure output.
+2. **GREEN — change the production code.** Only after red has been recorded for the criterion
+   being implemented.
+3. **Repeat** in small cycles, one criterion (or one unit of behavior) at a time.
+
+A new acceptance test that passes before any production code changed is not evidence of correct
+behavior — it means the scenario does not actually exercise the criterion. Fix the scenario
+until it fails, and fails for the right reason (the behavior is missing, not a typo in a
+selector or a step definition). Never skip the red step, and never write it up as done without
+the failure output to show for it.
+
+## Where the tests live
+
+| Kind | Location | Runner |
+| --- | --- | --- |
+| Acceptance (Gherkin) | `apps/web/e2e/features/**/*.feature` — Japanese keywords (`機能:` / `シナリオ:` / `前提` / `もし` / `ならば`); step definitions in `apps/web/e2e/steps/` | `npm run test:at` (`playwright-bdd`; stage projects `at-setup` → `at-seed` → `at-provision` → `at-main` → `at-destructive`, selected by `@stage:` tags) |
+| Frontend unit | `apps/web/src/**/*.test.ts(x)` | `npm run test`, `npm run test:coverage` (jest) |
+| Backend unit / integration | `services/<svc>/src/test/**` | `./gradlew :services:<svc>:test` (JUnit + JaCoCo) |
+
+Write the Gherkin scenario wherever the criterion is reachable through the product — that is
+the whole point of an acceptance test. When a criterion genuinely cannot be reached from the
+web UI (an internal service contract, a migration, an operational behavior), say so explicitly
+in the implementation report, name why, and express the criterion as a service-level test
+instead. That is a documented exception, not a silent one.
+
+## Never edit tests and production code in the same phase
+
+An edit phase is either a **test phase** or a **production phase**. Never both.
+
+- **Test phase**: only test code changes — `**/*.feature`, `apps/web/e2e/**`,
+  `**/*.test.ts(x)`, `**/*.spec.ts`, `**/src/test/**`, `**/src/testFixtures/**`, and
+  test-only fixtures and helpers. Production code is not touched, not even a one-character fix.
+- **Production phase**: only production code changes. No test file is touched — not to adjust
+  an assertion, not to fix an import, not to make something compile.
+
+Commit each phase separately (`test: …` for a test phase; `feat:` / `fix:` / `refactor:` for a
+production phase) so the alternation is visible in history. Verify it before every commit:
+
+```bash
+git diff --cached --name-only
+```
+
+Every path in that list must be on the same side of the line. If it is not, unstage and split.
+
+When a production change makes existing tests stop compiling (a renamed method, a changed
+signature), finish and commit the production phase, then do the mechanical test adaptation as
+the next test phase. The phases alternate; they never merge into one edit. The branch must be
+green before it is pushed.
+
+## Coverage
+
+Tests must cover the production code this Issue adds or changes to at least **90% C1
+(branch/decision) and 90% C2 (condition)**.
+
+- **Scope: the code this Issue changed**, not the repository as a whole. Pre-existing coverage
+  debt in files you did not touch is not this Issue's problem — and is never an excuse for
+  leaving new code uncovered.
+- **JVM**: JaCoCo's `BRANCH` counter — `./gradlew :services:<svc>:test jacocoTestReport`,
+  report at `services/<svc>/build/reports/jacoco/test/html/index.html`. The compiler
+  short-circuits `&&` / `||` into separate bytecode branches, so this counter reflects
+  condition coverage, not merely decision coverage.
+- **Frontend**: jest's `branches` metric — `npm run test:coverage` (v8 provider), read per
+  changed file, not from the global summary.
+- Report the measured numbers **for the changed files**, together with the command that
+  produced them. "Tests pass" is not a coverage report.
+- The repository-wide thresholds (`apps/web/jest.config.ts` → `coverageThreshold`, currently
+  40) are a floor for legacy code and a separate concern. Do not lower them, and do not raise
+  them as a side effect of an Issue. Breaking this floor is detected automatically — see
+  **Git hook** → `scripts/git-hooks/pre-commit` below — rather than depending on a developer
+  remembering to run `npm run test:coverage` by hand (#1040).
+
+- **Production code no coverage runner reaches** carries no numeric target — `apps/*/webviews/`,
+  `infra/e2e-stubs/**`, `next.config.ts`. It is verified by acceptance tests instead. See
+  **Enforcement** → Coverage check for the exact rule; the exemption is the coverage gate's
+  alone and does not relax phase separation or test-first for those files.
+
+If a branch genuinely cannot be reached from a test, name it and say why in the implementation
+report. Do not pad the number with tests that assert nothing.
+
+## Never skip a test
+
+A failing test is fixed, never silenced. Do not add `@Disabled`, `@Ignore`, `test.skip`,
+`it.skip`, `xit`, `describe.skip`, `test.fixme`, a `@skip` / `@fixme` tag, a `--grep-invert`
+exclusion, or a `testPathIgnorePatterns` entry to make a run green. Do not delete a failing
+test, and do not weaken an assertion until it stops failing.
+
+When a test fails, **fix the production code first** — a failing test is evidence about the
+code until proven otherwise. Change the test only when the test case itself is demonstrably
+inappropriate: it asserts behavior the Issue's Acceptance Criteria do not require, or it
+encodes an assumption this Issue deliberately changed. When you do change one, report which
+test, and why the old assertion was wrong.
+
+**The one exception**: by the user's decision (#1318, 2026-09-15), scenarios tagged
+`@requires-gpu` (GPU-only ComfyUI behavior this host cannot run) are excluded from release
+verification via a generation-time `tags` expression in `apps/web/playwright.config.ts`
+(`AT_EXCLUDE_REQUIRES_GPU=1`, not `--grep-invert`), and the excluded list is recorded in the
+release run log and tag annotation — see `docs/ACCEPTANCE_TESTING.md` → `@requires-gpu`.
+
+---
+
+# Issue Provenance
+
+This is the single definition of the `user-request` label. `plan-issue`, `discover-issues`,
+and every stage that files an Issue under **Scope Control** defer to it. Do not restate it
+differently anywhere else — if you find a second definition in `.claude/`, that is a bug to
+fix, not a variant to follow.
+
+`user-request` marks an Issue **whose content came from the user's own statement of what they
+want.** It answers one question, later, when nobody remembers the session: *did I ask for this,
+or did Claude come up with it?*
+
+Add it when the user described the change — a feature they want, a bug they hit, a paste of an
+error they saw, a requirement list they wrote out. It does not matter which skill created the
+Issue, or whether the user said "起票して" explicitly.
+
+Do **not** add it when Claude authored the content, even though the user set the work in
+motion:
+
+| Situation | Label |
+| --- | --- |
+| "この機能を実装してほしい" / "―が壊れている、調べて起票して" | `user-request` |
+| A pasted error message or log the user hit | `user-request` |
+| `discover-issues` findings — including when the user ran the sweep | none |
+| "改善点を上げられる限り上げて起票して" — the user asked, Claude found | none |
+| Claude proposed a finding mid-work and the user said "起票して" | none |
+| **Scope Control** discoveries during implementation / review / QA | none |
+
+The line is **who authored the substance**, not who typed first. A sweep the user requested
+still produces Claude's findings; an error message the user pasted is still the user's report.
+
+An Issue with no `user-request` label means "Claude's own, or provenance unknown" — it is not
+an assertion that the user did not ask. Backfilling provenance for old Issues is best-effort
+(see below), so absence proves nothing.
+
+## Applying it
+
+Only ever with `add_labels`, never by writing the whole label set:
+
+```bash
+glab api "projects/:id/issues/<iid>" --method PUT -f "add_labels=user-request"
+```
+
+Writing `labels=` would silently drop `epic`, `bug`, and the `status::` / `priority::` labels
+the workflow depends on (see **How to change status**).
+
+To list them:
+
+```bash
+glab api "projects/:id/issues?per_page=100&state=all&labels=user-request" --paginate
+```
+
+## The 2026-09-09 backfill
+
+167 existing Issues were labelled by reconstructing provenance from the Claude Code
+transcripts in `~/.claude/projects/-home-seiji-*lets-blog-server/`: every `gh`/`glab issue
+create` call was matched to the last real user prompt before it, and to the response's
+`attributionSkill`. Issues created under `work-next`, `implement-issue`, `review-issue`,
+`qa-issue`, `git-workflow`, `merge-request` or `discover-issues` were classified as Claude's;
+free-text user prompts as the user's.
+
+**417 of 682 Issues could not be attributed at all** — transcripts only go back to 2026-08-10,
+and the project migrated from GitHub Issues to GitLab, which broke the number mapping. Those
+were deliberately left unlabelled rather than guessed at. Do not treat the backfill as
+complete, and do not re-run a guess over the unattributed remainder.
+
+## Selection order
+
+**A `user-request` Issue is selected before any Issue without it.** Provenance is the first
+sort key, ahead of priority (decided by the user, 2026-09-09). **A `bug` Issue comes next**,
+also ahead of priority (decided by the user, 2026-09-10). `ready-issue` Select-Next Mode and
+`work-next` Step 3 defer to this; it is repeated in neither.
+
+1. **Provenance** — `user-request` first; every other Issue after it.
+2. **Kind** — `bug` first; every other Issue after it.
+3. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.
+4. **Is blocking count — largest first**, from `dependencies/blocking`.
+5. **Issue number — oldest first.**
+
+The keys apply strictly in order, so a `user-request` `P2` **is** selected ahead of an
+unlabelled `P0`, and among Issues with the same provenance a `bug` `P2` **is** selected ahead of
+a non-bug `P0`. That is the intended effect: the user's own list is the queue, work Claude
+proposed to itself waits behind it, and within each of those a defect is fixed before new work
+is added.
+
+The cost is real and must not be papered over. Three things follow from it:
+
+- An unlabelled `P0` — a production defect, a broken build, a security hole `discover-issues`
+  found — can sit behind a large `user-request` backlog. **Do not silently reorder to fix
+  that.** Report it and let the user decide.
+- A trivial `bug` `P2` is selected ahead of an urgent non-bug `P0` of the same provenance. The
+  same applies: report it, do not silently reorder. Read the `bug` label as it stands — never
+  add or remove it to steer the order; a defect filed without the label simply ranks with the
+  non-bugs until someone labels it.
+- **Absence is not evidence.** 417 of 682 Issues could not be attributed (see below), so an
+  unlabelled Issue may well be one the user asked for. Ranking it last is a consequence of
+  missing data, not a judgment that the user did not ask. Never argue from the absence of the
+  label, and never add it to an old Issue to promote it — if the user wants one prioritized,
+  they will say so, and labelling it then is the right response.
+
+Naming an Issue explicitly always overrides the order. "#123 を実装して" selects #123, whatever
+its provenance. So does `queue-priority.txt` in the unattended runner.
+
+---
+
+# Scope Control
+
+Do not change unrelated files.
+
+Do not perform opportunistic refactoring unless:
+
+- It is required to complete the issue, or
+- The user explicitly requests it.
+
+If a problem outside the issue is discovered:
+
+Do not silently fix it.
+
+Do not wait for the user's judgment on whether it is worth filing.
+
+First, search for an existing Issue covering the same problem. Run `glab issue list --search "<term>"` (add `--all` to include closed ones) for the affected file path(s) and class/symbol name(s), and for the observable symptom. Search each identifier separately — a single combined query misses Issues that use different wording.
+
+- If an open Issue already covers the same problem, do **not** create a new one. Add a comment to that Issue with the new evidence (where it was re-encountered, which stage found it, any detail its body lacks) and report its number instead.
+- If a matching Issue exists but the new finding is genuinely broader or narrower in scope, say so explicitly in the comment, and only then decide whether a separate Issue is warranted.
+- Only when no existing Issue covers it, create a new one.
+
+Create the new GitLab Issue in `Inbox`, using the `project-planner` Issue template (Title, Background, Problem, Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies). This applies at every stage of the workflow (planning, implementation, review, QA) — whichever stage discovers the problem files it immediately.
+
+The Issue's `Priority` field (P0/P1/P2) must be set before the Issue is considered filed. Never leave priority unset on a newly discovered Issue, even though older Issues in the project may have it unset.
+
+## At most five Acceptance Criteria
+
+This is the single definition. `plan-issue`, `discover-issues` and the `project-planner` agent
+defer to it; do not restate it differently anywhere else.
+
+**An Issue carries at most five Acceptance Criteria.** More than five means the Issue is too
+big — **split it into another Issue**, do not fit it into five.
+
+Fitting is the failure mode this forbids: coarsening the wording, or folding several checks
+into one bullet, hides requirements without making the Issue smaller. If the work genuinely
+needs more than five observable conditions, it is more than one Issue.
+
+Split only where each part can be implemented, reviewed, QA'd and merged **without waiting for
+its siblings**. If no such seam exists, do not split — reduce the scope instead and record what
+was left out under **Out of Scope**, naming the follow-up Issue. A sequence-dependent split is
+worse than a large Issue: it produces the "the predecessor's work is not in the code yet"
+stall, which accounted for 6 of the 17 `NOT READY` verdicts in the 2026-09-08 Backlog sweep.
+
+**Why the cap is five.** The measured fixed cost of an Issue — Review + QA + Merge Request +
+merge — is 15–25 minutes (#938: 18 of 68 min; #941: 21 of 99; #940: 20 of 129), so splitting
+raises total wall-clock time; it does not lower it. The cap does not buy speed. It bounds
+**what one rollback destroys.** #940 carried 17 scenarios; three of them failed QA, the Issue
+was rolled back twice, and CLAUDE.md's escalation abandoned all four commits — including the
+14 scenarios that worked.
+
+Then report:
+
+- What was discovered
+- Why it matters
+- Whether it blocks the current issue
+- The new Issue number created for it, **or** the existing Issue number the finding was added to
+
+---
+
+# Completion Definition
+
+Work is not Done merely because code has been written.
+
+An issue may be considered complete only when:
+
+- Acceptance criteria are satisfied
+- Relevant tests pass
+- Required validation has completed
+- Review has no blocking issues
+- QA confirms the expected behavior
+- A Merge Request was opened and squash-merged into `develop`
+
+Passing QA opens a Merge Request; it does not mark the issue Done. `complete-issue` then merges it with `glab mr merge --squash --remove-source-branch`, moves the Issue to `Done`, and deletes the working branch locally and remotely.
+
+Squash is this repository's merge method for Issue Merge Requests. A Merge Request that cannot be
+merged cleanly is never forced through — not with `--admin`, not with a different merge method,
+not by bypassing a branch protection rule. A **merge conflict** is resolved on the working
+branch and re-verified (see **Merge Conflicts**); a draft or blocked merge state that survives
+that is a blocker to report.
+
+---
+
+# Merge Conflicts
+
+This is the single definition of how a conflict with `develop` is handled. `merge-request`,
+`complete-issue`, `git-workflow`, and `work-next` defer to it.
+
+A conflict between the working branch and `develop` **is resolved, not reported as a blocker.**
+
+Resolve it on the working branch:
+
+```bash
+git fetch origin
+git merge origin/develop     # resolve the conflicted files, then commit
+```
+
+then re-validate and push. This applies whenever the conflict shows up — while `merge-request`
+is preparing the Merge Request, or after it is open and GitLab reports the branch as
+having conflicts (`has_conflicts: true`).
+
+What remains forbidden is getting the merge through *without* resolving it:
+
+- Any merge method other than `--squash` — including **omitting the flag**. GitLab merges with a
+  merge commit when no method is given, so `glab mr merge` without `--squash` is itself a
+  violation, not a neutral default. (GitHub's PR merge command asked interactively; GitLab does
+  not. The guard requires `--squash` rather than merely rejecting `--rebase`.)
+- Marking a draft ready for review to unblock a merge
+- Bypassing a protected-branch rule
+
+GitLab has **no `--admin` equivalent** — there is no per-merge administrator override. The
+protection that GitHub's administrator-override merge used to defeat lives in GitLab's protected-branch
+settings, and is enforced there rather than by this hook.
+
+`complete-issue` still merges only a clean, mergeable Merge Request. When it finds a conflict,
+the fix is to resolve it on the working branch, push, re-verify, and merge — never to force it.
+
+## After resolving a conflict
+
+Re-run the full relevant validation (tests, lint, type check). If anything fails:
+
+1. **Fix the production code first.** A conflict resolution most often drops or duplicates a
+   change — that is a production defect, not a test defect.
+2. Change a test only when the test case itself is demonstrably inappropriate, per
+   **Test-First Implementation** → Never skip a test. `@Disabled`, `test.skip`, and deleting
+   the test are never the resolution.
+3. The conflict-resolution commit itself may touch test and production files together — it is
+   the mechanical reconciliation of two existing histories, not new authoring. Everything you
+   write **after** it goes back to alternating test and production phases in separate commits.
+
+---
+
+# Dependency Resolution
+
+This is the single definition of "dependencies are resolved". `work-next`, `implement-issue`,
+`ready-issue`, `triage-backlog`, `plan-issue`, and the `project-planner` agent all defer to it.
+Do not restate it differently
+anywhere else — if you find a second definition in `.claude/`, that is a bug to fix, not a
+variant to follow.
+
+Before producing any Ready/Backlog verdict, run:
+
+```bash
+scripts/issue-dependency-status.sh <issue-number>
+```
+
+It prints the live state of every dependency the Issue records, plus any readiness verdict
+already posted on the Issue. Never derive a verdict from the Issue body's prose alone, and
+never carry a dependency's status over from an earlier comment — re-read it live.
+
+## What counts as a blocker
+
+1. **No link and no board status blocks, by itself.** What decides readiness is whether *this*
+   Issue's acceptance criteria can be implemented and verified against the codebase as it
+   stands right now.
+2. A parent or tracking Issue that is still open does **not** block when its children are done
+   and the substance is in the code. Conversely, children being closed does not make an Issue
+   ready when the substance is not actually there. Look at the code, not the board.
+3. Every verdict must state which of these grounds it used, and cite the live evidence
+   (the script's output, and the file paths inspected).
+
+### Why there is no status-based blocker (changed 2026-09-03, #1024)
+
+The rule that an open `blocked_by` link is the one status-based blocker **is withdrawn**:
+GitLab CE has no directional dependency link (`blocks` / `is_blocked_by` are Premium, and
+`relates_to` states no direction), so the mechanism it named does not exist here. Keeping a rule
+that points at a missing mechanism invites a verdict to claim a formal ground it never checked.
+The full reasoning: `docs/WORKFLOW_RULE_RATIONALE.md` → status ベースのブロッカー.
+
+What replaces it is not "nothing". It is the same inspection the old rule demanded, now applying
+to every dependency without exception: **look at the code.** A verdict that asserts
+"dependencies do not block" without **naming the concrete files, endpoints, or config it
+inspected** is not a verdict; treat it as unverified and do the inspection. The script prints the
+inputs — it does not inspect the codebase for you.
+
+## When a verdict contradicts a recent one
+
+Governs whenever you are about to post a verdict opposite to a recent one, and decides *whether*
+you may flip the status. **Reversing a verdict** below is the procedure you run first — only ever
+a step inside this decision. The rules above make a verdict's *form* uniform (cited code, not
+board status) but do not mechanize how to weigh competing readings of that code: two assessors
+can cite real evidence and both be legitimate. After running it, apply exactly one of:
+
+- **The earlier ground is factually falsified** — the code it cited does not say what it was
+  claimed to say (e.g. a `fallback-uri` cited as covering a path that it demonstrably does not
+  match). A correction, not a disagreement: flip the status and name the falsified ground.
+- **Both readings are tenable on the same facts** — you weigh the same code differently rather
+  than showing the earlier reading false. Do **not** flip the status. Post both readings and what
+  would settle them, leave the status, and escalate to the user (a genuine blocker — see
+  **Autonomous Task Execution**). Ping-ponging well-evidenced opposite verdicts is worse than one
+  open question (#751).
+- **Inspection is inconclusive** — default to `Backlog`. Ready authorizes starting without
+  further clarification; without establishing the substance, you lack that authorization.
+
+If you cannot tell which of the first two you are in, you are in the second. Silently picking a
+side is what this prevents.
+
+## Reversing a verdict
+
+Required by the section above; its outcome feeds that choice. Never post a contradicting
+verdict without running it.
+
+1. Read the existing readiness comments (the script lists them).
+2. Re-check each ground the previous verdict cited, live.
+3. Say in the new comment which specific ground no longer holds, and why.
+
+If every ground still holds, the disagreement is about the *definition* above, not the facts —
+apply the definition rather than posting a contradicting verdict.
+
+## Recording dependencies
+
+Record dependencies as resolvable identifiers: `#<number>` in the body, optionally with a
+`relates_to` link for navigation. (A `relates_to` link is navigation only — it states no
+direction, so it is never itself a blocker; see **What counts as a blocker**.) Epic shorthand (`A4`, `B6`, `C14`) is not resolvable — it forces every run to
+re-translate labels into Issue numbers, and that translation is where verdicts diverge.
+When an Issue records dependencies only as shorthand, resolve them to numbers and update the
+body before judging readiness. If they cannot be resolved, say the dependencies are
+*unidentifiable* — do not assert they are *unresolved*.
+
+---
+
+# Enforcement
+
+The rules above are not only written down; the ones that can be checked mechanically are
+**enforced**. A violation is refused, not reported.
+
+## Claude Code hooks — `.claude/settings.json`
+
+`.claude/hooks/guard.py` runs as a `PreToolUse` hook and denies the tool call outright.
+
+| Guard | Fires on | Blocks |
+| --- | --- | --- |
+| Read-only stage tracking | `Skill` | Records that `discover-issues` / `triage-backlog` / `ready-issue` started; cleared by any other skill or by the user's next prompt |
+| Repository writes | `Write` / `Edit` / `NotebookEdit` | Any write inside the repository while a read-only stage is active |
+| Mutating shell | `Bash` | `sed -i`, `rm` / `mv` / `cp` / `tee` / `patch`, state-changing `git`, dependency installs, and output redirection — while a read-only stage is active |
+| Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/` and `*.md` are exempt, so the rules themselves can be written down) |
+| Phase separation | `Bash` (`git commit`) | A commit whose staged paths mix test code and production code |
+| Hook bypass | `Bash` | `git commit` / `git push` with `--no-verify` — the git hook is not optional |
+| Merge method | `Bash` (`glab mr merge`) | `--rebase`, and **any invocation without `--squash`** |
+| Coverage | `Bash` (`glab mr create`) | Opening a Merge Request while changed-code C1/C2 coverage is under 90% |
+
+### SILENCERS has a single source
+
+`.claude/hooks/silencers.py` defines the `SILENCERS` pattern table once; both `guard.py`'s Test
+silencing check and `scripts/git-hooks/pre-commit`'s import it rather than each keeping their own
+copy. This is the same precedent `.claude/hooks/paths.py` already set for path classification —
+one module, imported by both hooks, so the two never see a different set of patterns.
+
+Before #1055, the two hooks each restated `SILENCERS` independently, and the copies had already
+drifted: `pre-commit` was missing the `@(skip|fixme)` tag pattern that `guard.py` had. This
+repository's acceptance tests are Gherkin (`apps/web/e2e/features/**/*.feature`), and `@skip` /
+`@fixme` is exactly how a Gherkin scenario gets silenced — so the missing pattern meant a
+`.feature` file silenced with `@skip` committed cleanly through `pre-commit`, undetected. Do not
+restate `SILENCERS` in either hook again; import it from `silencers.py`.
+
+### Where squash is enforced
+
+In two places, deliberately — the GitLab project (`squash_option: always`, `merge_method: ff`)
+and the `guard.py` hook (`--squash` required on `glab mr merge`). Neither alone is enough: the
+project setting is one API call away from being changed back and teaches the caller nothing,
+while the hook cannot see a web-UI merge or shell indirection.
+
+**`merge_method: ff` is the half that makes the history linear**, and the half that is easy to
+miss — with `merge_method: merge`, GitLab creates the squashed commit *and then a merge commit
+on top of it*. What that did to !1020 (#1030), and why `ff` does not disturb the ordinary flow:
+`docs/WORKFLOW_RULE_RATIONALE.md` → squash.
+
+These squash / `ff` rules govern Issue Merge Requests into `develop`. The release merge into
+`main` is a direct push by `scripts/release-verify-tag.py` (#1274), not an Issue MR, and is not
+a violation of this rule — a later stage must not misread a merge commit on `main` as one.
+The same script's direct push of the release commit R and the next-dev-version commit V to
+`develop` (#1305), performed only after R has passed the full verification the release merge
+requires, is the same documented exception — not a violation of the squash/MR rule either.
+
+## Git hook — `scripts/git-hooks/pre-commit`
+
+Bound by `bash scripts/setup-git-hooks.sh`, which sets `core.hooksPath` to
+`scripts/git-hooks`. It is idempotent, and it is step 1 of the clone procedure in `README.md`.
+Once bound, it enforces the same invariants for **any** committer, agent or human:
+
+1. **Phase separation** — no commit mixes test and production paths.
+2. **No test silencing** — nothing that disables a test is added to a test or production file.
+3. **Test-first** — a commit containing production code is refused while the branch has no test
+   change at all. Write the failing Gherkin scenario first.
+4. **`apps/web` coverage floor** (#1040) — any commit touching `apps/web/**` runs
+   `cd apps/web && npm run test:coverage` and is refused if it exits non-zero. This is the
+   automatic detection path the Coverage section above requires: the repository-wide
+   `coverageThreshold` floor in `apps/web/jest.config.ts` is checked on every relevant commit,
+   not only when a developer happens to run the command by hand. It is skipped when
+   `apps/web/package.json` does not exist (e.g. a throwaway fixture repo used to unit-test this
+   hook itself), and it is a separate mechanism from `scripts/check-changed-coverage.py`, which
+   gates only the C1/C2 coverage of the lines this branch changed. It resolves `apps/web` from
+   the worktree the commit is actually made in (`git rev-parse --show-toplevel`, not the hook
+   script's own physical location), so it also checks the right directory from a linked
+   `git worktree` — a QA-found regression (#1040, #1319) when it derived the path from
+   `__file__` instead.
+
+**Never assert that the binding is in place — check it.** `core.hooksPath` is git
+configuration, not repository content: it is in no clone, no checkout and no diff. This
+section used to say "already set in this checkout", and that claim was false for every commit
+from #976 until #1039 — the hook had never run once. The only symptom of an unbound hook is
+that **nothing happens**, and `guard.py` still firing on agent commits supplies a false
+confidence that the enforcement is working.
+
+```bash
+bash scripts/setup-git-hooks.sh --check   # non-zero when unbound
+```
+
+`scripts/test_git_hooks_binding.py` makes the same check in the Python unit test suite, so
+drift fails a run that is already part of the routine.
+
+## Coverage check — `scripts/check-changed-coverage.py`
+
+Computes branch coverage (C1/C2) of the production files this branch changed, from JaCoCo's
+`BRANCH` counter and jest's branch map, and exits non-zero below 90%. Run it directly, or let
+the Merge Request guard run it:
+
+```bash
+./gradlew :services:<svc>:test jacocoTestReport
+cd apps/web && npm run test:coverage
+python3 scripts/check-changed-coverage.py
+```
+
+It gates only the trees a coverage runner actually walks — `services/**/src`,
+`packages/**/src`, `apps/*/src` (`MEASURABLE_PATTERNS` in the script). Within those, a missing
+coverage report for a changed file fails the check; it never passes silently.
+
+Production code outside those trees is **reported as unmeasurable and skipped**, not failed:
+`apps/*/webviews/` plain `.js`, `infra/e2e-stubs/**` (Node processes that only ever run under
+docker-compose), `next.config.ts`. No jest or JaCoCo run reaches them, so no report can exist,
+and demanding one made opening a Merge Request impossible for Issues that legitimately touched only
+those files (#942, #935). They are verified by the acceptance-test layer instead — the same
+convention `docs/COVERAGE_TARGETS.md` already applies to `extension.ts` and the Panel
+constructors. This is a **coverage** exemption only: `paths.py` still classifies these files as
+production, so phase separation and test-first still apply to them in full.
+
+Its own unit tests: `python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'`.
+
+## What the guards are, and are not
+
+The guards stop **mistakes**, not **circumvention**. They inspect the command a tool is about
+to run, and a shell can always defeat inspection — `bash -c '...'`, `eval`, a variable that
+expands to the forbidden word. Making them airtight is not achievable and is not the goal.
+
+This distinction is load-bearing: the guards were once assumed to be stronger than they are.
+They now parse the command (splitting on separators, stripping env assignments and wrappers like
+`timeout` / `env` / `nice` / `sudo`, respecting quotes) rather than matching a regex anchored to
+the start of it. Which ordinary command used to slip past, and what that cost:
+`docs/WORKFLOW_RULE_RATIONALE.md` → ガード.
+
+Defence against deliberate circumvention lives elsewhere and must stay there:
+
+- **GitLab protected-branch settings** — who may merge and push, enforced server-side
+- **`scripts/git-hooks/pre-commit`** — runs for any committer, agent or human
+
+### Process substitution is not indirect execution (#1035)
+
+`bash -c '...'` and `eval` above are the deliberate-circumvention non-goal: a caller has to
+choose to hand the guard an opaque string. **Process substitution (`>(...)` / `<(...)`) is not
+that** — `diff <(sort a) <(sort b)` is an everyday investigation command, not a way to defeat
+inspection, and it can be written unintentionally by anyone who reaches for it out of habit. The
+guard treats it accordingly: `split_commands()` parses the content of a process substitution as
+its own independent command and runs it through the same destructive-command check as anything
+else, rather than letting it hide inside the outer command's argument list.
+
+**What is handled**: one level of process substitution. **What is not**: nesting
+(`diff <(cat <(x)) y` is parsed as a single opaque block, not decomposed further) — the same
+"completeness is not claimed" boundary as everywhere else in this section.
+
+A heredoc's body is a related but opposite problem: it is not indirect execution at all, just
+text that used to be misread as shell syntax. `split_commands()` now skips the body between a
+`<<WORD` / `<<-WORD` introducer and its terminator line before parsing, so `;` and `>` inside
+the body are no longer mistaken for a command separator or a real file write. A heredoc's own
+redirect (`cat <<EOF > out.txt`) is unaffected — that token appears before the body starts and
+is still caught.
+
+### Redirections, and what a read-only stage refuses
+
+A read-only stage refuses **every** output redirection whose target is not `/dev/null` (or
+`/dev/stderr` / `/dev/stdout`) — **including a write into the scratchpad**. The check looks at
+the redirection, not at where it points. Compose what you need from pipes and stdout instead.
+
+Two operators look alike and are treated oppositely, because they mean opposite things:
+
+| Operator | Target is | In a read-only stage |
+| --- | --- | --- |
+| `>` `>>` `>\|` `&>` | a file name | refused unless `/dev/null` |
+| `>&` | a file descriptor (`2>&1`, `1>&2`, `2>&-`) | allowed — it writes no file |
+
+Getting this wrong cost twice (#1034) — see `docs/WORKFLOW_RULE_RATIONALE.md` → ガード.
+
+To see how a guard reads a command:
+
+```bash
+python3 .claude/hooks/guard.py explain 'timeout 60 git push --no-verify'
+```
+
+Use it before concluding that a hook "is not running". That conclusion was drawn once and was
+wrong: the hook was running, and the judgement was missing the command (#1029).
+
+## When a guard blocks something
+
+The guard is the rule speaking, not an obstacle to route around. Do not disable a hook, do not
+reach for `--no-verify`, and do not move a file to dodge a path pattern. If a guard is
+genuinely wrong, say so and file an Issue against it — the fix belongs in the guard, as its own
+change.
+
+---
+
+# Learning Loop
+
+When a failure, repeated review issue, or process problem is discovered:
+
+1. Determine whether it is a one-time mistake or a recurring pattern.
+2. If recurring, propose a rule or documentation improvement.
+3. Do not silently modify project rules without explaining the reason.
+
+The goal is to improve the system so the same category of mistake becomes less likely.

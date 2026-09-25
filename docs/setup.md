@@ -7,21 +7,45 @@ Docker Compose管理下のコンテナとして起動するため、`docker comp
 
 ## クイックスタート
 
+前提ソフトが何も入っていない Ubuntu/Debian 系の機械であれば、`setup.sh` を1回実行すれば
+`https://localhost` にアクセスできる状態まで到達する(前提ソフト導入・`.env` 生成・
+TLS証明書生成・全サービス起動・healthy確認を一括で行う。詳細は
+[README.md の「アプリケーションの起動(Docker)」](../README.md#アプリケーションの起動docker)
+を参照)。
+
 ```bash
-git clone <このリポジトリのURL>
+git clone -b develop <このリポジトリのURL>
+cd lets_blog_server
+./setup.sh
+```
+
+`.env` が既に存在する場合は上書きしない。既定は `develop` ブランチでの実行のみを許可する
+(`--branch <name>` / `--main` で上書き可能)。
+
+### `setup.sh` が行っている手順を個別に実行する場合
+
+前提ソフトが既に導入済みの環境や、Ubuntu/Debian 以外の環境では、以下を手動でなぞる。
+
+```bash
+git clone -b develop <このリポジトリのURL>
 cd lets_blog_server
 
 # 1. 環境変数を設定
 cp .env.example .env
 vi .env   # パスワード・APIキー・暗号化キー・NEXTAUTH_SECRET等を変更
+bash scripts/check-env.sh   # .env が .env.example の全項目を満たしているか確認
 
 # 2. リバースプロキシ用の自己署名証明書を生成
 bash scripts/generate-certs.sh
 
-# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/mysql/phpmyadmin/comfyui/plantuml)
-docker compose up -d
+# 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/log-writer/mysql/rabbitmq/
+#    phpmyadmin/comfyui/plantuml/drawio/wordpress/Penpotスイート。計19コンテナ)
+docker compose up -d --build
 
-# 4. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
+# 4. 全サービスがhealthyになるまで待機
+bash scripts/wait-for-stack-healthy.sh --all
+
+# 5. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
 ```
 
 ## システム要件
@@ -39,7 +63,6 @@ docker compose up -d
 | 項目 | 説明 | 変更要否 |
 |---|---|---|
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | MySQLのパスワード | 必須変更 |
-| `SERVER_API_KEY` | Web管理画面・VSCode拡張が使う固定APIキー(`X-API-Key`ヘッダ) | 必須変更 |
 | `APP_ENCRYPTION_KEY` | CMS認証情報暗号化キー(Base64, 32バイト)。生成例: `openssl rand -base64 32` | 必須変更 |
 | `COMFYUI_IMAGE` | ComfyUIイメージ(GPU種別に応じて変更。既定はNVIDIA CUDA13系) | 環境に応じて変更 |
 | `LLM_API_KEY` | 下書き/校正/要約・タグ提案・記事プランニングで使う外部LLMサービス(既定: OpenAI)のAPIキー | 必須変更 |
@@ -48,6 +71,52 @@ docker compose up -d
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` | 外部メールサービス(SendGrid/Resend/AWS SES等)のSMTP接続情報 | 必須変更 |
 | `NEXTAUTH_SECRET` | Web管理画面(Auth.js)のセッション署名鍵。生成例: `openssl rand -hex 32` | 必須変更 |
+| `LBS_*_DB_PASSWORD` | サービス別スキーマ用のMySQLユーザーのパスワード(ADR-0004)。`LBS_BACKUP_DB_PASSWORD` はplatform-serviceのバックアップ機能が使う `lbs_backup` ユーザー用 | 必須変更 |
+
+### `.env` が `.env.example` に追随しているか確認する
+
+`.env` は初回に `cp` で作るきりなので、その後 `.env.example` に項目が増えても追随しない。
+追随漏れは静かに壊れる — `docker compose` は警告を出すが起動自体は成功し、
+`infra/mysql/init/01-create-service-schemas.sh` は `LBS_*_DB_PASSWORD` が空だと該当ユーザーの
+作成を**スキップする**(#756 ではこれで `lbs_backup` が作られず、バックアップ機能が動かなかった)。
+
+```bash
+bash scripts/check-env.sh
+```
+
+`.env.example` にあって `.env` に無いキー、および `.env` で空になっているキーを報告する。
+不足があれば終了コード1で落ちる。`git pull` で `.env.example` が更新されたら実行すること。
+
+### 重複キーの報告について（#959）
+
+同じキーが2回以上定義されていると、このスクリプトは**終了コード1で落ちる**。
+
+`docker compose` の `env_file` も shell の `source` も**後の定義が勝つ**。したがって
+キーが2箇所にあると、コメント付きの正しい定義を書き換えても後の行に上書きされて無視される。
+しかも警告は一切出ない。#959 では `.env.example` の `PENPOT_SECRET_KEY` がこれで、
+「512-bit base64 で生成せよ」という指示を持たないほうが有効になっていた。
+
+**既存の `.env` を持つ環境では、これまで通っていた検査が急に落ちることがある。**
+`.env.example` を古い時点でコピーした `.env` には、同じ重複がそのまま入っている
+可能性が高いためである。これは意図した挙動で、直し方は次のとおり。
+
+1. 報告されたキーを `.env` から探す（`grep -n '^KEY=' .env`）
+2. **どちらの値が現に効いているかを確認する** — 効いているのは後の行のほう
+3. 残したい値を1行にまとめ、もう一方を削除する
+
+値が同じなら片方を消すだけでよい。値が違う場合は、後の行が現在の挙動なので、
+それを変えるつもりが無ければ後の行の値を残すこと。
+
+`LBS_*_DB_PASSWORD` を後から足した場合は、MySQLのユーザー作成をやり直す必要がある。
+`docker-entrypoint-initdb.d` はデータボリュームが空のときしか走らないため、
+既存ボリュームでは手動で再実行する(このスクリプトは冪等)。
+
+```bash
+docker compose up -d mysql
+docker compose exec mysql bash /docker-entrypoint-initdb.d/01-create-service-schemas.sh
+```
+
+詳細は [SERVICE_SCHEMA_MIGRATION.md](SERVICE_SCHEMA_MIGRATION.md) を参照。
 
 ## 2. TLS証明書の生成
 
@@ -67,20 +136,80 @@ bash scripts/generate-certs.sh
 docker compose up -d
 ```
 
-起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `mysql` / `phpmyadmin` / `comfyui` / `plantuml`。
+起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `log-writer` / `mysql` /
+`rabbitmq` / `phpmyadmin` / `comfyui` / `plantuml` / `drawio` / `wordpress` /
+`penpot-*`(デザイン生成スイート、6コンテナ)/ `docker-socket-proxy`。
+アーキテクチャ・ポート割当・全サービスの起動時メモリ実測値は
+[docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) を参照。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
+
+サービスによってはヘルスチェックが設定されており(`api` / `log-writer` / `mysql` / `rabbitmq` /
+`penpot-postgres` / `penpot-valkey`)、依存先が healthy になるまで起動を待つため、初回起動や
+複数コンテナの一括再作成時は数十秒〜数分かかることがある。`docker compose ps` の `STATUS`
+列が `Up` ではなく `Up (healthy)` になっているかを確認する。
 
 `web` サービスはソースディレクトリ(`./web`)をコンテナにバインドマウントしているため、
 コード変更は再ビルドなしでホットリロードされる。`package.json` の依存関係を変更した場合は
 `docker compose up -d --build web` でイメージを再ビルドする。
 
 ```bash
-docker compose ps           # 起動状況確認
+docker compose ps           # 起動状況確認(healthyかどうかも表示される)
 docker compose logs -f api  # 個別サービスのログ確認
 docker compose logs -f web  # Web管理画面のログ確認
 ```
+
+### 個別サービスの再起動・再ビルド
+
+コード変更後、全サービスを再作成する必要はない。変更したサービスだけを対象にする。
+
+```bash
+# 環境変数変更など、再ビルド不要な場合
+docker compose restart api
+
+# コード変更を反映する場合(イメージの再ビルドが必要。例: content-service)
+docker compose build content
+docker compose up -d content
+```
+
+バックエンドの各サービスは `services/<サービス名>` のGradleビルド成果物を
+イメージに焼き込む構成のため、ソース変更後は必ず `docker compose build` からやり直す
+(コンテナ再起動だけでは反映されない)。
+
+### サービス間の疎通確認
+
+現状は `reverse-proxy`(nginx)が唯一の外部窓口。個別サービスの単体疎通確認にはコンテナ内から
+直接アクセスする。
+
+```bash
+# reverse-proxy経由(通常のアクセス経路。初回セットアップ導線は未認証で叩ける)
+curl -k https://localhost/api/auth/setup-status
+
+# 個別サービスの疎通確認(コンテナ内から直接。curlは#556で追加済み)
+docker exec lbs-content curl -sf http://localhost:8080/actuator/health
+docker exec lbs-log-writer curl -sf http://localhost:8080/actuator/health
+```
+
+gateway は下流のバックエンドサービス9個(identity / project / content / media / ai /
+analytics / publishing / platform / log-writer)の状態を自身の `/actuator/health` に
+集約するため(`services/gateway/.../DownstreamHealthConfig`、#560・#743)、
+次のコマンドでまとめて確認できる。
+
+```bash
+docker exec lbs-gateway curl -s http://localhost:8080/actuator/health
+```
+
+`-f` を付けないのは、いずれかが DOWN のとき gateway が 503 を返すため。
+`-f` があると curl が本文を出さずに終了してしまい、**どのサービスが DOWN なのかが分からない**。
+gateway は `show-details: always` なので、本文にサービスごとの状態が入っている。
+
+mysql / rabbitmq / keycloak / web などは集約の対象外なので、個別に確認する。
+
+なお、いずれか1つでも DOWN だと gateway 自身のヘルスも DOWN になり、
+`docker ps` で `lbs-gateway (unhealthy)` と表示される。一部のサービスだけ起動している
+開発中はこれが正常なので、gateway の unhealthy 表示だけを見て異常と判断しないこと
+(gateway の healthy を起動条件にしているコンテナは無いため、起動順序には影響しない)。
 
 ### アクセスURL一覧
 
@@ -89,8 +218,11 @@ docker compose logs -f web  # Web管理画面のログ確認
 | Web管理画面 | https://localhost/ | サイト管理・投稿履歴・AIジョブ・ユーザー管理等(Next.js) |
 | 仲介APIサーバー | https://localhost/api/ | REST API(VSCode拡張・Web管理画面が使用) |
 | phpMyAdmin | https://localhost/phpmyadmin/ | MySQLデータベース管理 |
-| ComfyUI | https://localhost/comfyui/ | 画像生成ワークフローUI |
-| PlantUML | https://localhost/plantuml/ | 図のプレビュー・検証用 |
+| draw.io | https://localhost/drawio/ | ダイアグラム編集UI(VSCode拡張のwebviewが読み込む。#979) |
+
+ComfyUI と PlantUML はブラウザからは開けない(#979 で reverse-proxy の `/comfyui/` /
+`/plantuml/` 中継を削除した)。いずれも media-service が `lbs-net` 経由で呼ぶ内部専用サービスで、
+稼働状況はダッシュボードの「接続サービス状態」パネルで確認する。
 
 ### ブラウザの自己署名証明書警告について
 
@@ -121,26 +253,47 @@ docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
 
 | 環境変数 | 値 | 説明 |
 |---|---|---|
-| `LETS_BLOG_API_URL` | `http://api:8080` | lbs-net内部でapiコンテナへ直接到達するため自己署名証明書を経由しない |
-| `LETS_BLOG_API_KEY` | `${SERVER_API_KEY}` | `.env` の `SERVER_API_KEY` と同じ値 |
+| `LETS_BLOG_GATEWAY_URL` | `http://gateway:8080` | サーバーサイドAPI呼び出しの唯一の宛先(issue #584)。lbs-net内部でgatewayコンテナへ直接到達するため自己署名証明書を経由しない |
 | `NEXTAUTH_SECRET` | `${NEXTAUTH_SECRET}` | `.env` の値 |
 | `NEXTAUTH_URL` | `https://localhost` | ブラウザから見える公開URL(認証コールバック等の生成に使用) |
 
 Web管理画面自身のサーバーサイドAPI呼び出しがコンテナ間の平文HTTP通信になるため、
 Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERTS`)は不要。
 
+`docker-compose.yml` の `web` サービスは `./apps/web:/app` をバインドマウントするため、
+イメージビルド時に作られた `/app/node_modules` はマウントで覆い隠される。クローン直後など
+ホストに `apps/web/node_modules` が無い場合、`apps/web/docker-entrypoint.sh` が起動時に
+それを検知してコンテナ内(`node:22-alpine`、musl)で `npm ci` を実行し、生成された
+`node_modules` の所有者をバインドマウント元(ホストの実行ユーザー)へ揃える。ホストの
+Node(`npm install` 済みの場合)とコンテナのNodeでネイティブバイナリ(`@next/swc`等)の
+ABIが異なりうるため、インストールは常にコンテナ内で行う(#1050)。
+
+`docker-entrypoint.sh` は `npm ci`/`chown` のために一旦rootで動くが、最後に
+`su-exec`でバインドマウント元(=ホストの実行ユーザー)の uid/gid へ権限を落としてから
+`next dev` を実行する(#1042)。これにより、コンテナが稼働し続ける間に `next dev` が
+作り続ける `apps/web/.next` や `apps/web/next-env.d.ts` もホストユーザー所有のまま
+保たれ、`docker compose up -d` 後にホストから `cd apps/web && npm run build` が
+そのまま実行できる。`.next` を匿名/named volumeにせずバインドマウント内に置く方針
+(上記コメント参照、ルートディスク圧迫を避けるため)は変えていない。
+
+#1042 以前に起動したことがあり、`apps/web/.next` や `apps/web/next-env.d.ts` が
+既にroot所有で残っている場合は、ホストの `sudo rm -rf apps/web/.next` で削除するか
+(次回起動時にホストユーザー所有で作り直される)、`docker run --rm -v
+"$(pwd)/apps/web:/app" alpine chown -R "$(id -u):$(id -g)" /app/.next
+/app/next-env.d.ts` のようにコンテナ経由でsudo無しに所有者を付け替える。
+
 ### (代替)ホスト上で `npm run dev` を直接起動する場合
 
 より高速なホットリロードを求める場合など、コンテナを使わずホスト上で直接起動することもできる。
 この場合は `docker-compose.yml` の `web` サービスを停止し(`docker compose stop web`)、
-リバースプロキシがホスト側の3000番へ到達できるよう `nginx/conf.d/default.conf` の
+リバースプロキシがホスト側の3000番へ到達できるよう `infra/nginx/conf.d/default.conf` の
 `location /` の `proxy_pass` 先を `host.docker.internal:3000` に戻す必要がある(Linuxでは
 `reverse-proxy` サービスに `extra_hosts: ["host.docker.internal:host-gateway"]` の追加が必要)。
 
 ```bash
-cd web
+cd apps/web
 cp .env.local.example .env.local
-vi .env.local   # LETS_BLOG_API_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
+vi .env.local   # LETS_BLOG_GATEWAY_URL=https://localhost, NODE_EXTRA_CA_CERTS=../certs/localhost.crt 等
 npm install
 npm run dev
 ```
@@ -192,9 +345,15 @@ Chromiumがそのまま参照するため、Linuxのような追加ツールは�
 テーマ/プラグイン設定)で動作確認したい場合、プロジェクトの「マスタ環境」(テストまたは本番)から
 ローカル環境へデータを同期できる(issue #325)。
 
-**前提条件**: 同期元(マスタ環境)・同期先(ローカル)の両方が、このアプリで自動構築(managed)した
-WordPress環境である必要がある。SSH接続/REST接続で外部のWordPressホスティングを紐付けている
-プロジェクトでは、この方法によるDB・メディアの一括同期は現時点では未対応(将来の拡張予定)。
+**前提条件**:
+
+- 同期先(ローカル)は、このアプリで自動構築(managed)したWordPress環境である必要がある
+  (`ProjectEnvironmentSyncService#resolveManagedSite`)。本番環境は同期先に指定できない。
+- 同期元(マスタ環境)は、managed環境に加えて、SSH接続で外部のWordPressホスティングを
+  紐付けているサイトも指定できる(issue #511、`ProjectEnvironmentSyncService#syncFromSshManagedSite`)。
+  ただし同期元がSSH管理サイトの場合、同期できる対象はDB・メディア・テーマに限られ、
+  プラグインは同期できない(`SSH_SOURCE_SUPPORTED_TARGETS`)。
+- REST接続で紐付けているプロジェクトを同期元にする経路は、現時点では未対応(将来の拡張予定)。
 
 **手順**:
 
@@ -216,6 +375,29 @@ WordPress環境である必要がある。SSH接続/REST接続で外部のWordPr
 - メディア(`wp-content/uploads`)・テーマ・プラグインは、同期先の既存ファイルをバックアップした上で
   マスタ環境の内容で置き換えられる。
 
+**テーブルプレフィックスが同期元・同期先で異なる場合**(issue #1075):
+
+managedサイトのテーブルプレフィックスは`/provision`で作った直後は`wp_`だが、SSH管理サイトからの
+`/db-import`(#511)を経由した環境は、取り込み元に合わせてプレフィックスが書き換わっているため、
+同期元・同期先でプレフィックスが食い違うことがある。DB同期はテーブル名(識別子)だけでなく、
+WordPressのロール定義(`option_name = '{プレフィックス}user_roles'`)もこのキー1件に限り
+同期先のプレフィックスへ付け替えるため、通常の操作で復旧する(手動での対処は不要)。
+
+**再同期しないサイトが既に壊れている場合の手動復旧手順**(#1075修正の適用前に同期していた場合):
+
+同期先のロール定義が失われ、全ユーザーが`wp-admin`を開けなくなっている(全ケーパビリティを失う)
+症状が出ている場合は、同じ同期元・同期先の組み合わせで環境同期(DB)をもう一度実行するだけで
+復旧する。何らかの理由で再同期できない場合は、`phpMyAdmin`(`/phpmyadmin/`)または
+`docker exec`経由のwp-cliで、同期先の実際のテーブルプレフィックス(`wp config get table_prefix`)を
+確認した上で、次のSQLを同期先のDBに対して直接実行する(`{prefix}`は同期先の実際のプレフィックスに、
+`{正しいロール定義}`は同期元(または同種の正常なサイト)の`{prefix}user_roles`の値に読み替える)。
+
+```sql
+DELETE FROM `{prefix}options` WHERE option_name = '{prefix}user_roles';
+INSERT INTO `{prefix}options` (option_name, option_value, autoload)
+  VALUES ('{prefix}user_roles', '{正しいロール定義}', 'yes');
+```
+
 ## トラブルシューティング
 
 **ポート80/443が使用中で `docker compose up -d` が失敗する**
@@ -229,7 +411,7 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 
 **Web管理画面からのAPI呼び出しが `DEPTH_ZERO_SELF_SIGNED_CERT` で失敗する**
 コンテナ化された `web` サービスでは内部通信が平文HTTP(`http://api:8080`)のため通常発生しない。
-ホスト上で `npm run dev` を直接起動する代替方式を使っている場合のみ、`web/.env.local` の
+ホスト上で `npm run dev` を直接起動する代替方式を使っている場合のみ、`apps/web/.env.local` の
 `NODE_EXTRA_CA_CERTS` が正しいパス(`../certs/localhost.crt`)を指しているか確認し、
 `npm run dev` を再起動する(環境変数の変更はプロセス再起動が必要)。
 
@@ -242,13 +424,15 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 (admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs api`で
 詳細なエラー内容(レート制限・認証エラー等)を確認する。
 
-**個別ポート(8080/8081/8188/8085等)に直接アクセスできない**
-Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化)。
-デバッグ目的で一時的に直接アクセスしたい場合は、該当サービスの `docker-compose.yml` に
-一時的に `ports:` を追加する(恒久的な変更はしないこと)。
+**各サービスの個別ポート(内部8080等)に直接アクセスできない**
+Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化。内部ポートは#556で
+全サービス8080に統一済み)。デバッグ目的で一時的に直接アクセスしたい場合は、
+`docker exec <コンテナ名> curl ...` でコンテナ内から確認するか、該当サービスの
+`docker-compose.yml` に一時的に `ports:` を追加する(恒久的な変更はしないこと)。
 
 ## 関連ドキュメント
 
-- [spec/phase6/00-overview.md](../spec/phase6/00-overview.md) — リバースプロキシ導入の全体設計
-- [spec/phase6/01-reverse-proxy.md](../spec/phase6/01-reverse-proxy.md) — nginx設定の詳細
+- [infra/nginx/conf.d/default.conf](../infra/nginx/conf.d/default.conf) — リバースプロキシのルーティング設定
+  (どのパスをどのサービスへ振り分けるか、その判断理由がコメントに書かれている)
+- [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) — コンテナ構成・ポート割当・起動順序
 - [.env.example](../.env.example) — 環境変数の全項目

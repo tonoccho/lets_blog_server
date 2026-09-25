@@ -1,0 +1,40 @@
+{
+  "common": {
+    "appTitle": "Let's Blog Server",
+    "appName": "Let's Blog Server Admin Dashboard"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "sites": "Sites",
+    "posts": "Post History",
+    "aiJobs": "AI Jobs",
+    "imageGallery": "Generated Image Gallery",
+    "system": "System",
+    "security": "Security Settings",
+    "users": "Users",
+    "auditLogs": "Audit Logs",
+    "roleManagement": "Role Management",
+    "customTags": "Custom Tags",
+    "dataBackup": "Data Backup",
+    "systemSettings": "System Settings",
+    "admin": "Admin"
+  },
+  "header": {
+    "admin": "Admin",
+    "openAdminMenu": "Open admin menu",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "navigation": "Navigation",
+    "logout": "Logout",
+    "downloadVscodeExtension": "Download VSCode extension (.vsix)",
+    "downloadVscodeExtensionPending": "Building VSCode extension…"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "registeredSites": "Registered Sites",
+    "posts": "Posts",
+    "aiJobs": "AI Jobs",
+    "description": "Manage site registration, post history, and AI job status"
+  }
+}

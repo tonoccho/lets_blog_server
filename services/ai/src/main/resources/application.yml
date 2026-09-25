@@ -1,0 +1,126 @@
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.ai: DEBUG
+  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # issue #589: health に加えて info / metrics も公開する。
+        # 認証ゲート(ADR-0008)の PUBLIC_PATHS に /actuator/** が入っているため、
+        # 秘匿情報を含みうるエンドポイント(env / configprops / heapdump 等)は公開しない。
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)と同じ理由: 明示的なproducesを持たないエンドポイントが
+  # OpenAPI上`*/*`として記録されると、orvalが生成するTypeScriptクライアントの型付けが崩れる。
+  # 既定の応答Content-Typeを明示することでこれを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-ai
+  datasource:
+    # issue #1095: mysqlコンテナが再作成されると、その時点で確立済みだった接続はFIN/RSTを
+    # 受け取らずサイレントに応答不能になる。connectTimeout/socketTimeoutが無いと、その接続
+    # 上のクエリ(や検証クエリ)は無期限にブロックし、HikariCPのプールが「active のまま返却
+    # されない」状態で枯渇し、再起動するまで自力回復しない。有限のsocketTimeoutを設定する
+    # ことで、死んだ接続上の読み取りが有限時間で失敗してHikariCPに破棄させ、以降の借用は
+    # (mysql自体は復旧しているので)新しい物理接続で成功するようにする。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_ai?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_ai}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_ai}
+    hikari:
+      # issue #1095: socketTimeout=30000により死んだ接続はおよそ30秒で破棄される。
+      # HikariCPの connection-timeout(プールから借用できるまで待つ上限)の既定値も30000msで
+      # 両者がほぼ同時に満了すると、プール枯渇中でもヘルスチェックがsocketTimeout側の自力回復に
+      # 間に合ってしまい、枯渇状態を検知し損ねることがある。10000msに縮めて、枯渇時はどの呼び出し
+      # (ヘルスチェックを含む)も自力回復を待たずに早く失敗し、確実にDOWNを観測できるようにする。
+      connection-timeout: 10000
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  # generation_jobs/article_plan_sessions/project_ai_settingsのスキーマ所有権をai-serviceへ
+  # 移管した(#574)。専用スキーマ(lbs_ai、ADR-0004)なので、legacy-api側のV1〜とは無関係の
+  # 独立したマイグレーション履歴としてV1から開始する。既存データの移行は
+  # scripts/migrate-ai-tables-to-lbs-ai.sqlを参照(V1適用後に実行する運用)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路と同じ欠陥をspring.rabbitmqを持つ全サービスで
+    # 塞ぐ。本サービス自身はEventMessageListenerでletsblog.eventsを消費するだけで、HTTPリクエスト
+    # スレッドから同期的にconvertAndSendを呼ぶコード(AuditLogService相当)は持たない
+    # (RabbitMqConnectionTimeoutTestのJavadoc参照)ため直接の504リスクは無いが、同じ
+    # spring.rabbitmqブロックを持つ他8サービスと足並みを揃え、将来同期publish経路が
+    # 足された際に同じ欠陥を持ち込まないようにする。本サービスの内部クライアント
+    # (ProjectBridgeClient/IdentityBridgeClient/PublishingServiceClient/PlatformServiceClient、
+    # いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
+    # letsblog.eventsコンシューマー(EventMessageListener)のリトライ→DLQポリシー(issue #580)。
+    # content-serviceと同じ設定(docs/EVENT_DRIVEN_ARCHITECTURE.md参照)。
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000
+          multiplier: 2.0
+          max-interval: 10000
+        default-requeue-rejected: false
+
+app:
+  # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher、lbs-common)。
+  # 全サービス共通のAES-256-GCM鍵(legacy-api/media-serviceと同じ値を使う)。
+  encryption-key: ${APP_ENCRYPTION_KEY:}
+  # 呼び出し元のBearerトークンをそのまま転送して他サービスの内部ブリッジへ問い合わせる
+  # (log-writer(#572)/media-service(#573)と同じ方針。issue #574)。
+  # issue #583でlegacy-apiを解体したため、向き先は以下の2つに分かれた。
+  #   - プロジェクトメンバー判定(IdentityBridgeClient) → identity-service(project_users の所有者)
+  #   - GitHubアクセス解決(ProjectBridgeClient) → project-service(GitHubトークンの所有者)
+  project-service-uri: ${PROJECT_SERVICE_URI:http://project:8080}
+  # マスター環境サイトの既存カテゴリ/タグ取得(PublishingServiceClient)の呼び出し先。issue #574では
+  # legacy-apiのAiBridgeControllerが所有していたが、CmsAdapterFactory/cms/*の所有権がpublishing-service
+  # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5)。
+  publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # システム設定由来の実効LLM接続設定とBrave Search APIキーの取得先(issue #583)。
+  # 以前はlegacy-apiのAiBridgeController経由だったが、その実装はplatform-serviceへの
+  # 単純な中継だったため直接呼ぶよう切り替えた。
+  platform-service-uri: ${PLATFORM_SERVICE_URI:http://platform:8080}
+  # Brave Search APIのベースURL(APIキーとは異なりシステム設定でDB上書きされる対象ではないため、
+  # legacy-apiのAppSettingService DEFINITIONSにも含まれていない固定値。env varのみで変更可能)。
+  brave-search-base-url: ${BRAVE_SEARCH_BASE_URL:https://api.search.brave.com}
+  # GitHub REST APIのベースURL。受け入れテストではスタブへ向ける(issue #928)。
+  # 実GitHubのままだと、記事プランの検証(#935)がテストのたびに本物のIssueを作ってしまう。
+  github-api-base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+  # StaleGenerationJobSweepService(issue #1083要件4)。この時間以上runningのまま更新されない
+  # ジョブをfailedとして解消する(media-service側の終端通知が最終的に届かなかった場合の保険)。
+  generation-job:
+    stale-running-timeout-minutes: ${GENERATION_JOB_STALE_TIMEOUT_MINUTES:15}
+    stale-sweep-interval-ms: ${GENERATION_JOB_STALE_SWEEP_INTERVAL_MS:300000}
+
+# KeycloakのJWT検証。identity-service/log-writer/media-serviceのSecurityConfig/JwtDecoderConfigと
+# 同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}

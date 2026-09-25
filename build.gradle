@@ -1,0 +1,57 @@
+// ルートビルド。各サブプロジェクト(packages/*, services/*)はこのビルドの一部として扱われる。
+// checkstyle / jacoco / dependencyCheck は、各サブプロジェクトが該当プラグインを
+// 適用している場合にのみ、ここで定義した共通設定を適用する(プラグインの適用有無自体は
+// 各サブプロジェクトの build.gradle が決める)。
+
+subprojects {
+    group = 'com.letsblog'
+    version = '0.4.0'
+
+    repositories {
+        mavenCentral()
+    }
+
+    plugins.withId('java') {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(21)
+            }
+        }
+    }
+
+    plugins.withId('checkstyle') {
+        checkstyle {
+            configFile = rootProject.file('config/checkstyle.xml')
+            ignoreFailures = false
+            showViolations = true
+        }
+
+        tasks.named('checkstyleMain') {
+            reports {
+                xml.required = true
+                html.required = true
+            }
+        }
+
+        tasks.register('lint') {
+            dependsOn tasks.named('checkstyleMain')
+            doLast {
+                println "✓ Lint check passed"
+            }
+        }
+    }
+
+    plugins.withId('jacoco') {
+        jacoco {
+            toolVersion = '0.8.11'
+        }
+    }
+
+    plugins.withId('org.owasp.dependencycheck') {
+        dependencyCheck {
+            format = 'HTML'
+            suppressionFile = rootProject.file('config/dependency-check-suppression.xml').path
+            failBuildOnCVSS = 7.0
+        }
+    }
+}

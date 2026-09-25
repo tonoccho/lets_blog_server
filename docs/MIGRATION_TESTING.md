@@ -1,223 +1,106 @@
 # Database Migration Testing Guide
 
-## Overview
+## 前提: サービスごとに独立したマイグレーション
 
-This document describes the database migration testing strategy for Let's Blog. All Flyway database migrations are automatically tested to ensure:
+[ADR-0004](adr/0004-schema-per-service.md)(#570)により、DB スキーマはサービスごとに分かれている。
+**Flyway マイグレーションもサービスごとに独立**しており、サービス間に適用順序の依存は無い。
 
-- ✅ Migrations execute successfully
-- ✅ Migrations are idempotent (can run multiple times safely)
-- ✅ Database schema is properly validated after migrations
-- ✅ Essential tables and columns exist
-- ✅ Proper constraints and primary keys are configured
+| サービス | スキーマ | マイグレーション |
+|---|---|---|
+| identity | `lbs_identity` | `services/identity/src/main/resources/db/migration/` |
+| project | `lbs_project` | `services/project/src/main/resources/db/migration/` |
+| content | `lbs_content` | `services/content/src/main/resources/db/migration/` |
+| media | `lbs_media` | `services/media/src/main/resources/db/migration/` |
+| ai | `lbs_ai` | `services/ai/src/main/resources/db/migration/` |
+| analytics | `lbs_analytics` | `services/analytics/src/main/resources/db/migration/` |
+| publishing | `lbs_publishing` | `services/publishing/src/main/resources/db/migration/` |
+| platform | `lbs_platform` | `services/platform/src/main/resources/db/migration/` |
+| log-writer | `lbs_log` | `services/log-writer/src/main/resources/db/migration/` |
 
-## Migration Files Location
+分割前の単一サービス `legacy-api` とその `lets_blog` スキーマは、#583 / #785 で削除済み。
+既存データの移行手順は [docs/SERVICE_SCHEMA_MIGRATION.md](SERVICE_SCHEMA_MIGRATION.md) を参照。
 
-All Flyway migrations are located in:
-```
-api/src/main/resources/db/migration/
-```
+## 何が検証されているか
 
-Migrations follow the Flyway naming convention:
-- `V{version}__{description}.sql`
-- Example: `V1__init_schema.sql`, `V2__add_users.sql`
+### 1. スキーマとエンティティの整合(コンテキスト起動そのもの)
 
-## Migration Testing
+各サービスの `src/test/resources/application-test.yml` は
+`spring.flyway.enabled: true` + `spring.jpa.hibernate.ddl-auto: validate` になっている。
 
-### Test Classes
+つまり `@SpringBootTest` が起動する時点で、**マイグレーションが作ったスキーマと JPA
+エンティティ定義の一致**が検証される。食い違えば `SchemaManagementException`
+(`missing table` / `missing column`)で context load が落ちる。
 
-The following test classes are provided in `api/src/test/java/com/letsblog/api/migration/`:
+これは #886(identity-service が Flyway 依存の追加漏れで「missing table [role_permissions]」を出して
+起動できなかった)と同じ失敗モードを、テストで先に捕まえるための仕掛けである。
 
-1. **MigrationIdempotencyTest**
-   - Tests that migrations can be applied successfully
-   - Verifies that running migrations multiple times doesn't cause conflicts
-   - Validates migration history tracking
+### 2. 冪等性・履歴・チェックサム(`MigrationContractTest`)
 
-2. **MigrationSchemaValidationTest**
-   - Verifies essential tables exist after migrations
-   - Checks for required columns in critical tables
-   - Validates primary keys and constraints
-   - Ensures no orphaned foreign key constraints
+各サービスに `MigrationContractTest` があり、共通実装
+`packages/lbs-common/src/testFixtures/java/com/letsblog/common/testfixtures/MigrationContract.java`
+(#914)を呼ぶ。
 
-### Running Migration Tests Locally
+| 検証 | 内容 |
+|---|---|
+| `verifyIdempotent` | 2回目の `migrate()` が**成功するだけでなく実行件数0**であること |
+| `verifyAllMigrationsApplied` | 全マイグレーションが `SUCCESS` で、version/description/installedOn が履歴に残っていること |
+| `verifyValidates` | 適用済みマイグレーションのチェックサムがファイルと一致すること |
 
-#### Prerequisites
+冪等性を「失敗しない」ではなく「**0件である**」で見ているのは、再適用で余計な行を足したり
+DDL を二重に流したりしても「失敗しない」だけなら通ってしまうため。
 
-- MySQL 8.0 or later running on `localhost:3306`
-- JDK 21 or later
+## 実行方法
 
-#### Setup Test Database
-
-```bash
-mysql -u root -p -e "CREATE DATABASE lets_blog_test;"
-mysql -u root -p -e "CREATE USER 'test_user'@'localhost' IDENTIFIED BY 'test_pass';"
-mysql -u root -p -e "GRANT ALL PRIVILEGES ON lets_blog_test.* TO 'test_user'@'localhost';"
-mysql -u root -p -e "FLUSH PRIVILEGES;"
-```
-
-#### Run Tests
+テストは実 MySQL に接続する(ADR-0006: Testcontainers は使わない)。前提の整え方は
+[docs/TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) の「テスト用MySQLの前提」を参照。
 
 ```bash
-cd api
-./gradlew test --tests "com.letsblog.api.migration.*"
+# 前提: 開発スタックの MySQL を 127.0.0.1:3306 へ公開しておく
+docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
+bash scripts/check-test-db.sh
+
+# 1サービスのマイグレーション契約だけ
+./gradlew :services:content:test --tests "*MigrationContractTest*"
+
+# 全サービス
+./gradlew test
 ```
 
-Or run specific test class:
+CI は無いため、`./gradlew test` をローカルで実行したときに一緒に走る
+(専用の実行経路は持たない)。
 
-```bash
-cd api
-./gradlew test --tests "com.letsblog.api.migration.MigrationIdempotencyTest"
-```
+## 新しいマイグレーションを追加する
 
-## CI/CD Integration
+1. 対象サービスの `src/main/resources/db/migration/` に `V<n>__<description>.sql` を作る
+   (バージョン番号はそのサービス内で連番。他サービスとは独立)
+2. エンティティ側も合わせて変更する
+3. `./gradlew :services:<name>:test` を実行する
+   - スキーマとエンティティが食い違っていれば context load が落ちる
+   - 冪等でなければ `MigrationContractTest` が落ちる
 
-The GitHub Actions workflow `.github/workflows/migration-test.yml` automatically:
+### やってはいけないこと
 
-1. Creates a MySQL test database in a service container
-2. Runs all migration tests on each commit that modifies:
-   - Migration files
-   - Gradle configuration
-   - Migration test workflow itself
+- **適用済みのマイグレーションファイルを編集する。** チェックサムが変わり、本番は
+  `FlywayValidateException` で起動できなくなる。必ず新しいバージョンを足す
+  (`verifyValidates` がテストで先に落とす)
+- **他サービスのスキーマを参照する。** ADR-0004 が禁じている。各サービスのDBユーザーは
+  自分のスキーマにしか権限を持たないため、そもそも実行時に失敗する
+- **クロススキーマの FOREIGN KEY を張る。** 同上。ID だけを保持し、削除時の連動は
+  アプリケーション側(ドメインイベント)の責務とする
 
-3. Uploads test results as artifacts for review
+## トラブルシューティング
 
-### Triggering Migration Tests
+| 症状 | 原因 | 対処 |
+|---|---|---|
+| `Unknown database 'lbs_*_test'` | テストスキーマが未作成 | `docker compose exec mysql bash /docker-entrypoint-initdb.d/02-create-test-schemas.sh` |
+| `Communications link failure` | ホストから MySQL へ到達できない(#762) | `docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql` |
+| `missing table` / `missing column` | マイグレーションとエンティティの食い違い | どちらが正しいかを決め、マイグレーションを追加するかエンティティを直す |
+| `FlywayValidateException` | 適用済みファイルを編集した | 編集を戻し、新しいバージョンとして追加する |
+| 2回目の `migrate()` が0件でない | バージョン番号の重複、または冪等でないDDL | 番号を振り直すか、`IF NOT EXISTS` 等で冪等にする |
 
-Migration tests run automatically when:
+## 参考
 
-- Pushing to `main` or `develop` branches with migration file changes
-- Creating/updating a PR with migration file changes
-- Manually editing the migration test workflow
-
-## Idempotency Testing
-
-Idempotency means migrations can be applied multiple times without causing errors or data loss.
-
-### Why It Matters
-
-- Allows safe retry operations during deployment failures
-- Supports zero-downtime deployments
-- Prevents accidental re-application of migrations
-
-### How It Works
-
-The `MigrationIdempotencyTest` class verifies:
-
-1. First migration run completes successfully
-2. Second migration run completes successfully
-3. Second run executes 0 migrations (they're already applied)
-4. Migration state remains consistent
-
-## Flyway Configuration
-
-Flyway is configured in `api/src/main/resources/application.yml`:
-
-```yaml
-spring:
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
-    placeholder-replacement: false
-```
-
-### Key Settings
-
-- **enabled**: Flyway migrations run automatically on application startup
-- **locations**: Directory containing migration files
-- **placeholder-replacement**: Disabled to prevent conflicts with Thymeleaf syntax in email templates
-
-## Migration Best Practices
-
-### Do's ✅
-
-- Keep migrations focused on a single change
-- Use descriptive names: `V{N}__{description}.sql`
-- Test migrations locally before pushing
-- Include both forward and backward-compatible changes when possible
-- Add indexes for foreign keys
-- Add NOT NULL constraints with default values
-
-### Don'ts ❌
-
-- Don't modify existing migration files (create new ones instead)
-- Don't use transactions in migration files (Flyway handles this)
-- Don't drop tables without careful consideration
-- Don't change column types without a migration path
-- Don't remove migrations from version control
-
-## Adding New Migrations
-
-### Process
-
-1. Create a new SQL file in `api/src/main/resources/db/migration/`
-2. Follow naming: `V{NextNumber}__{Description}.sql`
-3. Write idempotent SQL
-4. Run tests locally: `./gradlew test --tests "com.letsblog.api.migration.*"`
-5. Commit and push
-
-### Example Migration
-
-```sql
--- V34__add_new_feature_table.sql
-CREATE TABLE IF NOT EXISTS new_feature (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY unique_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE INDEX idx_created_at ON new_feature(created_at);
-```
-
-## Troubleshooting
-
-### Migration Fails Locally
-
-1. Check MySQL is running on `localhost:3306`
-2. Verify test database exists: `SHOW DATABASES;`
-3. Check test user permissions: `SHOW GRANTS FOR 'test_user'@'localhost';`
-4. Drop and recreate test database: `DROP DATABASE lets_blog_test;`
-
-### Migration Fails in CI/CD
-
-1. Check GitHub Actions logs in the workflow run
-2. Review test artifact results
-3. Ensure migration file syntax is correct
-4. Verify migration doesn't conflict with existing migrations
-
-### Previous Migrations Corrupted
-
-If existing migrations are corrupted:
-
-1. **Never** modify existing migration files
-2. Create a new migration to fix the issue
-3. Update schema as needed in the new migration
-
-Example:
-```sql
--- V35__fix_corrupted_data.sql
-UPDATE affected_table SET column = corrected_value WHERE condition;
-```
-
-## Rollback Considerations
-
-**Note:** Flyway does not natively support rollbacks in the open-source version. Instead:
-
-1. Create a new forward-only migration to fix issues
-2. Use compensating transactions for data corrections
-3. Carefully plan schema changes to be reversible
-
-## Related Files
-
-- `.github/workflows/migration-test.yml` - CI/CD workflow
-- `api/src/main/resources/application.yml` - Flyway configuration
-- `api/src/test/resources/application-test.yml` - Test configuration
-- `api/src/main/resources/db/migration/` - Migration files
-
-## Questions or Issues?
-
-If you encounter issues with migrations or have questions about the testing process:
-
-1. Check this document for common solutions
-2. Review existing migration files for patterns
-3. Consult the [Flyway Documentation](https://flywaydb.org/documentation)
-4. Open a GitHub issue if you find a problem
+- [ADR-0004: schema-per-service](adr/0004-schema-per-service.md)
+- [ADR-0006: サービス別のテスト戦略](adr/0006-per-service-test-strategy.md)
+- [docs/SERVICE_SCHEMA_MIGRATION.md](SERVICE_SCHEMA_MIGRATION.md) — スキーマ分離とデータ移行
+- [docs/TEST_DOCUMENTATION.md](TEST_DOCUMENTATION.md) — テスト全般

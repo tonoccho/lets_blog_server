@@ -1,0 +1,158 @@
+server:
+  port: 8080
+  tomcat:
+    # issue #1061: Tomcatは上限超過でリクエストを打ち切ったあと、未読のリクエストボディを
+    # 読み捨ててから応答を返す。読み捨てる量の上限が max-swallow-size(既定2MB)で、これを
+    # 超える残りがあると応答を返さずにコネクションを閉じるため、クライアントには413ではなく
+    # 接続リセットが見える。プラグイン/テーマzipも記事の画像も数MB〜数百MBになるため、既定の
+    # ままでは「サイズが原因だと分かる応答を返す」という目的が実サイズでは達成できない。
+    # 値は下の max-request-size と同じにする(nginx / Server Action がそもそも通す最大量と
+    # 同じなので、既に受け入れている負荷を超える新しい負荷にはならない)。
+    max-swallow-size: 512MB
+
+logging:
+  level:
+    root: INFO
+    com.letsblog.publishing: DEBUG
+  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # issue #589: health に加えて info / metrics も公開する。
+        # 認証ゲート(ADR-0008)の PUBLIC_PATHS に /actuator/** が入っているため、
+        # 秘匿情報を含みうるエンドポイント(env / configprops / heapdump 等)は公開しない。
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  # log-writer(#572)/media-service(#573)/ai-service(#574)/content-service(#576)/project-service(#577)と
+  # 同じ理由: 明示的なproducesを持たないエンドポイントがOpenAPI上`*/*`として記録されると、orvalが生成する
+  # TypeScriptクライアントの型付けが崩れる。既定の応答Content-Typeを明示することでこれを避ける。
+  default-produces-media-type: application/json
+
+spring:
+  application:
+    name: lets-blog-publishing
+  servlet:
+    multipart:
+      # issue #1061: 未設定だとSpring Bootの既定(1ファイル1MB / リクエスト全体10MB)が効き、
+      # 1MB超の画像を含む記事公開(POST /api/posts/publish)も、プラグイン/テーマzipの
+      # アップロード(POST /api/projects/{id}/bulk-management/upload)も失敗していた。
+      #
+      # 値の根拠は「送り側の経路が通す最大量へ受け側を合わせる」(nginx側を下げるのではない)。
+      # 経路ごとに通る最大量は次のとおりで、経路によって異なる:
+      #   - ブラウザ → nginx の location /(infra/nginx/conf.d/default.conf:271、500M)
+      #     → web の Server Action(apps/web/next.config.ts の bodySizeLimit /
+      #       proxyClientMaxBodySize がいずれも 500mb)
+      #     → gateway(docker-compose.yml の LETS_BLOG_GATEWAY_URL=http://gateway:8080。
+      #       lbs-net 内の直通なので nginx は通らない)→ publishing
+      #     これが bulk-management/upload の経路で、500M まで届く。
+      #   - VSCode拡張 → nginx の server ブロック(同ファイル:42、100M。location /api/ は
+      #     独自の client_max_body_size を持たないのでこれが効く)→ gateway → publishing
+      #     これが posts/publish の経路で、100M で頭打ちになる。
+      # Springの上限はアプリ単位でしか持てずエンドポイント別にできないため、経路の最大値である
+      # 500M に合わせる。max-request-size は 500MB のファイル1つ + フォーム項目が収まるよう
+      # 512MB とする(こちらが先に効いて500MBのファイルが弾かれるのを避けるため)。
+      max-file-size: 500MB
+      max-request-size: 512MB
+      # 0 は「閾値なし = 常にディスクへ退避する」(Spring Bootの既定値と同じ)。上限を500MBまで
+      # 引き上げた以上、multipartのパース時点でヒープに載せない意図をここで明示しておく。
+      file-size-threshold: 0B
+  datasource:
+    # issue #1095: mysqlコンテナ再作成後も再起動なしで自力回復できるよう、ai-serviceの
+    # application.ymlと同じ理由でconnectTimeout/socketTimeoutを設定する。
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/lbs_publishing?useSSL=false&serverTimezone=UTC&connectTimeout=10000&socketTimeout=30000}
+    username: ${SPRING_DATASOURCE_USERNAME:lbs_publishing}
+    password: ${SPRING_DATASOURCE_PASSWORD:lbs_publishing}
+    hikari:
+      # issue #1095: ai-serviceのapplication.ymlと同じ理由で、プール枯渇時にヘルスチェックを
+      # 含む全呼び出しがsocketTimeoutの自力回復を待たず早く失敗するようconnection-timeoutを縮める。
+      connection-timeout: 10000
+  # 現時点では自身が所有するドメインテーブルは無い(posts/sites/user_site_authors等はいずれも他
+  # サービス所有。issue #707)が、専用スキーマ(lbs_publishing、ADR-0004)・Flyway基盤自体は
+  # 他サービスと同じ構成で用意しておく。bulk_operation_logsは#572で「将来のpublishing-serviceに
+  # 属する」と事前決定されていたが、issue #708の実装時点で永続化コードパス自体が既に存在しない
+  # ことを確認したため、物理テーブルはlegacy-api側でFlyway migrationにより削除し、本スキーマへの
+  # 再作成は行わない判断とした(BulkOperationLog.javaのJavadoc参照)。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # issue #1390: project-service(#1388)で確定した経路の横展開。RabbitMQ停止直後、JVMの
+    # 名前解決キャッシュ(既定30秒)が古いIPを生かしている間に接続を試みると、未設定時の既定
+    # (RabbitMQ Javaクライアント既定の60秒)いっぱいCachingConnectionFactoryの接続確立ロックを
+    # 握ったまま止まり、gatewayの応答時間と競合して504になる。AuditLogService/
+    # DomainEventPublisherがrabbitTemplate.convertAndSendをHTTPリクエストスレッド上で同期的に
+    # 呼び、失敗はAmqpExceptionとしてcatchするだけの設計なので、接続確立自体をgatewayの応答時間
+    # より十分短く諦めさせればよい。本サービスの内部クライアント(ProjectServiceClient/
+    # ContentServiceClient/IdentityBridgeClient等、いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))
+    # と同じ3秒の慣例に合わせる。
+    connection-timeout: 3s
+
+app:
+  # サイト本体・CMS認証情報(project-serviceが所有、#575設計判断2)の内部ブリッジ呼び出し先
+  # (ProjectServiceClient)。
+  project-service-uri: ${PROJECT_SERVICE_URI:http://localhost:8080}
+  # Markdownレンダリング・postsテーブルの読み書き(content-serviceが所有、#575設計判断1)の
+  # 内部ブリッジ呼び出し先(ContentServiceClient)。
+  content-service-uri: ${CONTENT_SERVICE_URI:http://localhost:8080}
+  # 著者マッピング(user_site_authors、#575設計判断4)とプロジェクトメンバー判定(project_users)の
+  # 内部ブリッジ呼び出し先(IdentityBridgeClient)。issue #583でこれらの所有権がlegacy-apiから
+  # identity-serviceへ移ったため、legacy-api-uri は不要になった。
+  # project_image_settings(投稿画像リサイズのプロジェクト別デフォルト)は #583 で
+  # media-service が所有するようになったため、下の media-service-uri 経由で解決する
+  # (MediaSettingsBridgeClient)。
+  identity-service-uri: ${IDENTITY_SERVICE_URI:http://localhost:8080}
+  # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)が実際の
+  # レンダリングを委譲する呼び出し先(media-serviceが所有、issue #573)。
+  media-service-uri: ${MEDIA_SERVICE_URI:http://localhost:8080}
+  # 記事投稿時に画像をリサイズする長編の目標px(media-serviceへ問い合わせられない
+  # projectId=null のときのフォールバック値)。media-serviceのapp.default-article-image-long-edge-px
+  # と同じ既定値(1300)。
+  default-article-image-long-edge-px: ${DEFAULT_ARTICLE_IMAGE_LONG_EDGE_PX:1300}
+  # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(infra/wordpress/provision-agent)の
+  # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。legacy-apiのapp.wordpress-
+  # provision-base-url/app.wordpress-provision-tokenと同じ既定値。
+  wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
+  wordpress-provision-token: ${WP_PROVISION_TOKEN:}
+  # issue #1123: provision-agentが固着して応答を返さなくなっても、WordPressBulkManagementClient
+  # (RestClient)が無期限に待ってHikariCPのコネクションプールを道連れに枯渇させないための
+  # 接続/リードタイムアウト(WordPressBulkManagementClient.buildClientが両方に同じ値を使う。
+  # platform-serviceのConnectedServiceStatusServiceと同じ手法)。カテゴリ/タグ/プラグイン/
+  # テーマの一覧取得(listing)は比較テーブル表示に使われる軽量な呼び出しなので短く、
+  # 一括適用/zipアップロード(apply)は長時間処理になりうるため別値にできるようにする(要件1)。
+  wordpress-provision-listing-timeout-seconds: ${WORDPRESS_PROVISION_LISTING_TIMEOUT_SECONDS:5}
+  wordpress-provision-apply-timeout-seconds: ${WORDPRESS_PROVISION_APPLY_TIMEOUT_SECONDS:120}
+  # 一括管理(プラグイン/テーマのzipアップロード)のロールフォワード用永続ボリューム
+  # (BulkUploadStorageService)。legacy-apiのapp.bulk-upload-storage-pathと同じ既定値(issue #708)。
+  bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}
+
+# KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-service/
+# project-serviceのSecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は
+# 使わずJWKS取得先と期待issuerを個別に指定して組み立てている。
+keycloak:
+  jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
+  issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # サービス間のClient Credentials認証(#567)。issue #1207で、テーマ骨格取得ブリッジ
+  # (ContentServiceClientのfetch-and-splice/fetch-real-post、利用者単位の認可を行わないPlaywright
+  # 専用呼び出し)が呼び出し元ユーザーのBearerトークン転送(forwardedBearer)から本サービス自身の
+  # トークンへ切り替わったため追加した(ServiceTokenClientConfig参照。media-service/identity-service
+  # と同じ設定キー)。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}

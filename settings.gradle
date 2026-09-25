@@ -1,0 +1,13 @@
+rootProject.name = 'lets-blog-server'
+
+include 'packages:lbs-common'
+include 'services:log-writer'
+include 'services:gateway'
+include 'services:identity'
+include 'services:media'
+include 'services:ai'
+include 'services:content'
+include 'services:analytics'
+include 'services:project'
+include 'services:platform'
+include 'services:publishing'

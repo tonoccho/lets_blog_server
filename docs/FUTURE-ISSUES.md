@@ -1,5 +1,8 @@
 # 今後のタスク・GitHub Issues
 
+> **前提**: このリポジトリに CI は無い（2026-09-03、GitLab CE 移行時の決定。#1027）。
+> 以下で CI に触れる項目は、CI を持つ判断に変わった場合の案である。
+
 このドキュメントは、Let's Blog Server の今後の実装タスクを優先度別に整理したものです。
 
 ---
@@ -132,7 +135,7 @@
 
 ---
 
-### 8. GitHub Actions CI/CD パイプライン
+### 8. CI/CD パイプライン
 
 **期間:** 12時間
 
@@ -171,7 +174,7 @@
 - Penpot ファイル変更を GitHub にコミット
 - Design System ドキュメント自動更新
 - コンポーネント情報を JSON にエクスポート
-- GitHub Actions で design-tokens.json を自動生成
+- CI で design-tokens.json を自動生成
 
 実装:
 - [ ] Webhook 設定
@@ -220,14 +223,14 @@
 
 機能:
 - Penpot から Design Tokens JSON を自動抽出
-- GitHub Actions で自動生成
+- CI で自動生成
 - 色・タイポ・スペーシング等を自動更新
 - PR 自動作成（マージ前に確認）
 
 実装:
 - [ ] Penpot API 連携
 - [ ] JSON 生成スクリプト
-- [ ] GitHub Actions ワークフロー
+- [ ] CI ワークフロー
 - [ ] PR コメント自動生成
 
 ---
@@ -366,7 +369,7 @@
 ### Phase 3（1-2ヶ月）
 - [ ] Jest ユニットテスト (#6)
 - [ ] Storybook セットアップ (#7)
-- [ ] GitHub Actions CI/CD (#8)
+- [ ] CI/CD パイプライン (#8)
 - [ ] Docker 本番構成 (#9)
 
 ### Phase 4（3ヶ月+）

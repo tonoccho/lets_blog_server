@@ -1,0 +1,167 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import {
+  updateUserProfile,
+  updateMyPreferences,
+  uploadAvatar,
+  type CustomLink,
+  type SocialLinks,
+  type UserProfile,
+} from "@/lib/apiClient";
+import { getViewerProfile, requireSession } from "@/lib/session";
+
+export interface UpdateProfileState {
+  error?: string;
+  success?: boolean;
+}
+
+const SOCIAL_LINK_KEYS: (keyof SocialLinks)[] = [
+  "facebook",
+  "youtube",
+  "whatsapp",
+  "tiktok",
+  "instagram",
+  "wechat",
+  "x",
+  "threads",
+  "github",
+  "pinterest",
+  "meetup",
+  "line",
+  "linkedin",
+  "hatena",
+];
+
+export async function updateUserProfileAction(
+  userId: number,
+  _prevState: UpdateProfileState,
+  formData: FormData
+): Promise<UpdateProfileState> {
+  const session = await requireSession();
+
+  // session.user.idはKeycloakのsub(UUID)であり、ローカルの数値ユーザーIDではない(issue #784)。
+  // 自分自身かの判定には、identity-serviceが自ユーザーとして返すローカルidを使う。
+  const viewer = await getViewerProfile();
+  const isSelf = viewer?.id === userId;
+  if (!isSelf && session.user.role !== "admin") {
+    return { error: "この操作を行う権限がありません。" };
+  }
+
+  const field = (name: string) => {
+    const value = String(formData.get(name) ?? "").trim();
+    return value === "" ? null : value;
+  };
+
+  const customLinksJson = String(formData.get("customLinks") ?? "[]");
+  let customLinks: CustomLink[];
+  try {
+    customLinks = JSON.parse(customLinksJson);
+  } catch {
+    return { error: "カスタムリンクの解析に失敗しました。" };
+  }
+
+  const socialLinks = Object.fromEntries(
+    SOCIAL_LINK_KEYS.map((key) => [key, field(`socialLinks.${key}`)])
+  ) as unknown as SocialLinks;
+
+  try {
+    await updateUserProfile(
+      userId,
+      {
+        firstName: field("firstName"),
+        lastName: field("lastName"),
+        displayName: field("displayName"),
+        nickname: field("nickname"),
+        websiteUrl: field("websiteUrl"),
+        bio: field("bio"),
+        locale: field("locale"),
+        avatarUrl: field("avatarUrl"),
+        department: field("department"),
+        position: field("position"),
+        socialLinks,
+        customLinks,
+      }
+    );
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/users/${userId}/edit`);
+  return { success: true };
+}
+
+export interface UploadAvatarState {
+  error?: string;
+  success?: boolean;
+}
+
+/**
+ * プロフィール編集画面でクライアント側(Canvas)切り抜き済みの正方形画像をアップロードする
+ * (issue #1241)。認可判定は{@link updateUserProfileAction}と同じ(本人またはadmin)。
+ */
+export async function uploadAvatarAction(
+  userId: number,
+  _prevState: UploadAvatarState,
+  formData: FormData
+): Promise<UploadAvatarState> {
+  const session = await requireSession();
+
+  const viewer = await getViewerProfile();
+  const isSelf = viewer?.id === userId;
+  if (!isSelf && session.user.role !== "admin") {
+    return { error: "この操作を行う権限がありません。" };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "画像ファイルを選択してください。" };
+  }
+
+  try {
+    await uploadAvatar(userId, file);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/users/${userId}/edit`);
+  return { success: true };
+}
+
+export interface UpdatePreferencesState {
+  error?: string;
+  success?: boolean;
+}
+
+/**
+ * 個人設定(言語・タイムゾーン)。システム画面から移動(issue #185)。本人の設定のみ変更する。
+ *
+ * issue #1259: タイムゾーンは任意の上書き。空文字(「ブラウザに従う(未設定)」の選択)は
+ * エラーにせず、identity-service側へnullとして送る(言語は未選択を許さない)。
+ */
+export async function updatePreferencesAction(
+  _prevState: UpdatePreferencesState,
+  formData: FormData
+): Promise<UpdatePreferencesState> {
+  await requireSession();
+
+  const locale = String(formData.get("locale") ?? "").trim();
+  const timezoneInput = String(formData.get("timezone") ?? "").trim();
+  const timezone = timezoneInput === "" ? null : timezoneInput;
+
+  if (!locale) {
+    return { error: "言語を選択してください。" };
+  }
+
+  // 自ユーザーの解決はidentity-service側が検証済みJWTのsubから行う(issue #784)。
+  // 以前はNumber(session.user.id)=NaNをパスへ埋め込んでおり、保存が常に失敗していた。
+  let updated: UserProfile;
+  try {
+    updated = await updateMyPreferences({ locale, timezone });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/users/${updated.id}/edit`);
+  return { success: true };
+}

@@ -1,52 +1,333 @@
+# サービス定義のテンプレート化(#556)。共通のrestart/networks、Spring Bootサービス共通の
+# actuatorヘルスチェック、RabbitMQ接続情報を各サービス定義から参照する。
+# 新しいサービス(gateway/Keycloak/各ドメインサービス等)を追加する際もこれらを再利用する。
+# ポート割当は内部8080に統一し(docs/DOCKER_COMPOSE_ARCHITECTURE.md参照)、外部公開は
+# reverse-proxy(nginx)経由のみとする。
+x-common-service: &common-service
+  # restartを個別に上書きする場合は、ダッシュボードのコンテナ状態判定
+  # (services/platform/.../ContainerStatusService、issue #725)に影響する点に注意。
+  # 判定は「終了コード0 かつ 再起動ポリシーno」を『正常に完了したワンショットジョブ』と見なす。
+  # 常駐サービスでこのアンカーを付け忘れるとポリシーがDocker既定のnoになり、正常停止が
+  # 「正常」と表示されて停止に気付けなくなる。
+  restart: unless-stopped
+  networks:
+    - lbs-net
+
+x-actuator-healthcheck: &actuator-healthcheck
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: ${RABBITMQ_USER}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+
 services:
   reverse-proxy:
     image: nginx:alpine
     container_name: lbs-reverse-proxy
-    restart: unless-stopped
+    <<: *common-service
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
-    networks:
-      - lbs-net
+    # E2E(#588)は https://localhost(=このreverse-proxy)へ直接アクセスするため、
+    # 「スタック全体がhealthy」を機械的に判定できるようヘルスチェックを持たせる。
+    # nginx:alpineにcurlは無いためbusybox wgetを使い、自己署名証明書のHTTPSではなく
+    # 80番のヘルス用location(infra/nginx/conf.d/default.confの/nginx-health)を叩く。
+    #
+    # issue #1038: /nginx-health だけでは足りない。ホストの80/443を他プロセスが占有していると
+    # Dockerはネットワーク接続時のポート公開に失敗し、コンテナは**どのネットワークにも
+    # 所属しないまま running になる**(実測: NetworkSettings.Networks が {}、コンテナ内は
+    # loopback のみ、web:3000 も gateway:8080 も `bad address`)。ところが /nginx-health は
+    # 自分のnetns内の127.0.0.1を叩くだけなので、この状態でも 200 を返し healthy と
+    # 報告され続ける。何も中継できないのに「正常」と見える、最も質の悪い壊れ方だった。
+    #
+    # そこで上流への到達性を条件に加える。busybox nc の -z はTCP接続だけを見るため、
+    # web(Next.js)のコンパイル中でも、gatewayが5xxを返していても落ちない。孤立時のみ
+    # 名前解決に失敗して落ちる。web と gateway の**どちらか**が届けばよいことにして、
+    # 片方の再起動でreverse-proxyがunhealthyへ倒れる無用な連鎖を避ける。
+    #
+    # start_period は上流のTCP待ち受け開始を待てる長さにする(webの`next dev`は
+    # 初回コンパイル前に3000番をlistenするので、ここで待つのはコンパイルではなく起動)。
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://127.0.0.1:80/nginx-health
+          && { nc -z -w 3 web 3000 || nc -z -w 3 gateway 8080; }
+          || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   web:
     build:
-      context: ./web
+      context: ./apps/web
       dockerfile: Dockerfile
     container_name: lbs-web
-    restart: unless-stopped
+    <<: *common-service
     environment:
-      # コンテナ間通信のためlbs-net内部でapiへ直接到達させる(自己署名証明書を経由しないため
+      # Web(BFF)からバックエンドへの全リクエストはgateway経由に一本化する(issue #584)。
+      # ルーティング/JWT検証/レート制限/相関IDはgatewayが担う。issue #583でlegacy-apiを削除し、
+      # gatewayのフォールバック(未割り当てパスの暗黙転送)も廃止したため、ルート表に無いパスは
+      # gatewayが404を返す(services/gateway/src/main/resources/application.yml)。
+      # コンテナ間通信のためlbs-net内部で直接到達させる(自己署名証明書を経由しないため
       # NODE_EXTRA_CA_CERTSは不要)
-      LETS_BLOG_API_URL: http://api:8080
+      LETS_BLOG_GATEWAY_URL: http://gateway:8080
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       # ブラウザから見える公開URL(認証コールバック等の生成に使用)
       NEXTAUTH_URL: https://localhost
+      # Keycloakのletsblog-webクライアント(confidential client)のシークレット(#564)。
+      # apps/web/src/lib/auth.tsがトークン交換・リフレッシュ・ログアウトのサーバー間通信で使う。
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET}
     # node_modules/.nextは匿名ボリュームにせず./web配下のbind mountに含める
     # (匿名ボリュームは/var/lib/docker配下、すなわちルートディスクに置かれるため、
     # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)
     volumes:
-      - ./web:/app
+      - ./apps/web:/app
+    # マウント先(/app)を working_dir にしない(#1000)。
+    #
+    # イメージのWORKDIRは/appだが、そこは上のバインドマウントの中である。ヘルスチェックは
+    # docker execと同じ経路で走り、cwdはコンテナのWorkingDirになる。runc 1.4.0はexecのcwdが
+    # バインドマウント経由でマウント名前空間のルート外を指す場合、プロセスの起動そのものを
+    # 拒否する(current working directory is outside of container mount namespace root)。
+    # 拒否されるのはプロセスが動き出す前なので、test:の中にcdを書いても回避できない。
+    # e2eスタブ6本が恒常的にunhealthyになったのと同じ構図で、webも同じ組み合わせを持つ。
+    #
+    # next devはプロジェクトディレクトリをcwdから決めるため、起動時にだけ/appへ入る。
+    # commandはDockerfileのCMD(npm run dev)と同じものを、cd経由で起動する。
+    working_dir: /
+    command: ["sh", "-c", "cd /app && exec npm run dev"]
+    # webの呼び先はgatewayに一本化した(issue #584)ため、起動順の依存もgatewayへ付け替える
+    # (gateway自身がapi/identity/各ドメインサービスのhealthyを待つ)。
     depends_on:
-      - api
+      - gateway
+    # E2E(#588)がテスト開始前に「全サービスhealthy」を待てるようにするためのヘルスチェック。
+    # 認証不要でNext.jsのサーバー処理まで到達する/api/auth/csrf(NextAuth)を叩く。
+    # 開発モード(next dev)は初回リクエスト時にコンパイルが走るため、start_period/retriesは
+    # 他サービス(actuator)より緩めに設定する。node:22-alpineにcurlは無いためbusybox wgetを使う。
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/auth/csrf || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+
+  media:
+    build:
+      context: .
+      dockerfile: services/media/Dockerfile
+    container_name: lbs-media
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_media?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_media
+      SPRING_DATASOURCE_PASSWORD: ${LBS_MEDIA_DB_PASSWORD}
+      # media は platform-service の /api/internal/platform/image-generation-config を
+      # 自分自身のサービストークンで呼ぶ(#583 で画像生成一式が移り、#742 で JWT 必須になった)。
+      # この宣言が無いと application.yml の既定値(空文字)が使われ、Keycloak が
+      # unauthorized_client で拒否し、画像生成に関わる公開APIが全滅する(#998)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      COMFYUI_BASE_URL: http://comfyui:8188
+      COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
+      COMFYUI_MODELS_PATH: /comfyui-models
+      PLANTUML_BASE_URL: http://plantuml:8080
+      PENPOT_BASE_URL: http://penpot-frontend:8080
+      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
+      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
+      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
+      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
+      # メディアガベージコレクションのCMSブリッジ(CmsMediaBridgeController)の呼び出し先。
+      # #573 stage3ではlegacy-apiが所有していたが、issue #709でpublishing-serviceへ移管された
+      # (Epic #551 C6-3)。起動時の依存関係(depends_on)には含めない(publishingがmediaのhealthyを
+      # 待つ構成にはしていないため、循環させないよう実行時呼び出し先としてのみ設定する)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
+      # プロジェクトの存在確認(画像設定の読み書き・解決、issue #583)。project_image_settings と
+      # 画像生成一式が media-service へ移ったのに伴い、projects の所有者へ問い合わせる。
+      PROJECT_SERVICE_URI: http://project:8080
+      # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、ai-serviceが所有)の
+      # 進捗反映先。#573 stage2ではlegacy-apiが所有していたため上のLEGACY_API_URIを共用していたが、
+      # issue #574でgeneration_jobsの所有権がai-serviceへ移ったため、GenerationJobClientの向き先を
+      # ここへ切り替えた(同じくdepends_onには含めない。理由は上のコメントと同じ)。
+      AI_SERVICE_URI: http://ai:8080
+      <<: *rabbitmq-env
+      # メディアガベージコレクションのrequireAdmin/自分自身のuserId解決のため、呼び出し元の
+      # Bearerトークンをそのままidentity-serviceへ転送して問い合わせる(#573 stage3)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+    volumes:
+      - generated_images:/app/data/generated-images
+      - comfyui_models:/comfyui-models
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+
+  # LLM呼び出し(下書き/校正/要約/タグ提案/セクション生成/Ask AI)・記事プラン(壁打ち)・
+  # generation_jobs(LLM/ComfyUIジョブ履歴)の所有権をai-serviceへ移管(#574)。スキーマ・Flyway
+  # マイグレーションは専用のlbs_aiスキーマ(ADR-0004)で本サービスが所有する。
+  ai:
+    build:
+      context: .
+      dockerfile: services/ai/Dockerfile
+    container_name: lbs-ai
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_ai?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_ai
+      SPRING_DATASOURCE_PASSWORD: ${LBS_AI_DB_PASSWORD}
+      # project_ai_settings.brave_search_api_key_encryptedの暗号化/復号(CredentialCipher)。
+      # 全サービス共通の鍵(legacy-api/media-serviceと同じ値)。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # GitHubアクセス解決(ProjectBridgeClient)の呼び出し先。issue #583 で legacy-api の
+      # AiBridgeController から、GitHubトークンの所有者である project-service へ移した。
+      # プロジェクトメンバー判定は下の IDENTITY_SERVICE_URI(project_users の所有者)へ向く。
+      PROJECT_SERVICE_URI: http://project:8080
+      # マスター環境サイトの既存カテゴリ/タグ取得(PublishingServiceClient)の呼び出し先。issue #574では
+      # legacy-apiのAiBridgeControllerが所有していたが、CmsAdapterFactory/cms/*の所有権がpublishing-service
+      # へ移った(issue #707)ため、issue #711でこの3エンドポイントのみ切り替えた(Epic #551 C6-5。
+      # 起動時の依存関係(depends_on)には含めない。理由は上のLEGACY_API_URIと同じ)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
+      # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
+      # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer(#572)/media-service(#573)と同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # システム設定由来の実効LLM接続設定とBrave Search APIキーの取得先(issue #583)。
+      # 以前はlegacy-apiのAiBridgeController経由だったが、その実装はplatform-serviceへの
+      # 単純な中継だったため直接呼ぶよう切り替えた。
+      PLATFORM_SERVICE_URI: http://platform:8080
+      <<: *rabbitmq-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・ブログカード/Amazonタグの
+  # コンテンツキャッシュの所有権をcontent-serviceへ移管(#576)。スキーマ・Flywayマイグレーションは
+  # 専用のlbs_contentスキーマ(ADR-0004)で本サービスが所有する。[blogcard]/[amazon]タグの
+  # スクレイピング・記事プレビューのテーマ骨格取得用のヘッドレスブラウザ(Playwright)は本サービスが持つ。
+  content:
+    build:
+      context: .
+      dockerfile: services/content/Dockerfile
+    container_name: lbs-content
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_content?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_content
+      SPRING_DATASOURCE_PASSWORD: ${LBS_CONTENT_DB_PASSWORD}
+      <<: *rabbitmq-env
+      # projects/sites/tag_design_settings への内部ブリッジ(ProjectBridgeClient)の呼び出し先。
+      # issue #583 まではこれらを legacy-api の ContentBridgeController 経由で取得していたが、
+      # その実装は project-service への素通しだったため、中継を外して直接向けた。
+      # project_users のメンバー判定と roles は下の IDENTITY_SERVICE_URI へ向く。
+      PROJECT_SERVICE_URI: http://project:8080
+      # 埋め込みタグ(PlantUML/Recharts)展開・カスタムタグAI生成のPenpotデザインファイル作成の
+      # 呼び出し先(issueの注記どおり、実際のダイアグラム描画はmedia-serviceへ委譲する)。
+      MEDIA_SERVICE_URI: http://media:8080
+      # カスタムタグのAI生成(CustomTagGenerationService)の呼び出し先。
+      AI_SERVICE_URI: http://ai:8080
+      # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
+      # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer/media-service/ai-serviceと同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+
+  # Google Analytics/AdSense連携(OAuth資格情報の保管、GA4 Data API/AdSense Management APIの
+  # レポート取得)の所有権をanalytics-serviceへ移管(#578)。OAuthの資格情報を扱うため、他ドメインから
+  # 分離して保管する。スキーマ・Flywayマイグレーションは専用のlbs_analyticsスキーマ(ADR-0004)で
+  # 本サービスが所有する。
+  analytics:
+    build:
+      context: .
+      dockerfile: services/analytics/Dockerfile
+    container_name: lbs-analytics
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_analytics?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_analytics
+      SPRING_DATASOURCE_PASSWORD: ${LBS_ANALYTICS_DB_PASSWORD}
+      # analytics_credentialsの各暗号化カラム(GAサービスアカウントJSON/AdSenseリフレッシュトークン/
+      # AdSense OAuthクライアントシークレット)の暗号化/復号(CredentialCipher)。全サービス共通の鍵
+      # (legacy-api/ai-serviceと同じ値)。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # レポート取得可否判定(本番サイトが紐付いているか、ProjectBridgeClient)の呼び出し先。
+      # issue #583 で legacy-api の AnalyticsBridgeController から projects/sites の所有者である
+      # project-service へ移した。プロジェクトメンバー判定は下の IDENTITY_SERVICE_URI へ向く。
+      PROJECT_SERVICE_URI: http://project:8080
+      # AdminAuthorizationServiceのrequireProjectMemberOrAdmin・自分自身のuserId解決のため、
+      # 呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer(#572)/media-service(#573)/ai-service(#574)と同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      <<: *rabbitmq-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # プロジェクト/サイトに紐付かないアプリ全体のグローバル設定(system_settings: Brave Search APIキー・
+  # 実効LLM接続設定/メール送信/Google OAuthクライアント/Webフロント公開URL/アップロードレート制限)の
+  # 所有権をplatform-serviceへ移管(issue #693、C10-1)。緊急パスワードリセット
+  # (AdminPasswordResetRunner)もここへ移設した。スキーマ・Flywayマイグレーションは専用の
+  # lbs_platformスキーマ(ADR-0004)で本サービスが所有する。全サービスMySQLスキーマ+Keycloak
+  # PostgreSQLを対象としたバックアップ/リストア機能(BackupService/BackupController)をlegacy-apiから
+  # 移設・拡張した(issue #694、C10-2)。コンテナ状態/接続サービス状態のSSE中継(#695、C10-3)・
+  # VSCode拡張のオンデマンドビルド配布(VscodeExtensionBuildService/VscodeExtensionController、
+  # issue #696、C10-4)もlegacy-apiから移設した(gatewayのplatformルート、
+  # /api/system/**・/api/backup/**参照。/api/system/vscode-extensionは/api/system/**に含まれる)。
+  platform:
+    build:
+      context: .
+      dockerfile: services/platform/Dockerfile
+    container_name: lbs-platform
+    <<: [*common-service, *actuator-healthcheck]
+    # 他サービスとの通信はlbs-net(x-common-serviceの既定)を維持しつつ、docker-socket-proxyへの
+    # 到達性のためだけにdocker-socket-proxy-netへも参加する(issue #701。下のdocker-socket-proxy
+    # サービス定義・networks:セクションのコメント参照)。
     networks:
       - lbs-net
-
-  api:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
-    container_name: lbs-api
-    restart: unless-stopped
+      - docker-socket-proxy-net
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_platform
+      SPRING_DATASOURCE_PASSWORD: ${LBS_PLATFORM_DB_PASSWORD}
+      # system_settings.setting_value_encryptedの暗号化/復号(CredentialCipher)。全サービス共通の鍵
+      # (legacy-api/ai-service/analytics-serviceと同じ値)。
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # AppSettingServiceのDB未設定時フォールバック値。legacy-apiのapiコンテナが持っていた同名の
+      # 環境変数と同じ(issue #693でSystemSettingService/AppSettingServiceの所有権がここへ移った)。
       MAIL_HOST: ${MAIL_HOST}
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME}
@@ -58,77 +339,328 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_AVAILABLE_MODELS: ${LLM_AVAILABLE_MODELS:-gpt-4o-mini,gpt-4o,gpt-4.1-mini}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
+      # issue #1086: 既定プロバイダはローカルのOllama(外部LLMのAPIキーが無くてもAI執筆支援が動く)。
+      # DB(system_settings)に llm_provider があればそちらが優先される。
+      LLM_PROVIDER: ${LLM_PROVIDER:-OLLAMA}
+      LLM_CLAUDE_API_KEY: ${LLM_CLAUDE_API_KEY}
+      LLM_CLAUDE_MODEL: ${LLM_CLAUDE_MODEL:-claude-3-5-haiku-20241022}
+      # OLLAMA専用の接続設定(issue #1086)。LlmClientが {baseUrl}/chat/completions へPOSTするため
+      # OpenAI互換の /v1 まで含める(http://ollama:11434 だけでは404になる)。
+      LLM_OLLAMA_BASE_URL: ${LLM_OLLAMA_BASE_URL:-http://ollama:11434/v1}
+      LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct}
       COMFYUI_BASE_URL: http://comfyui:8188
-      COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
-      COMFYUI_MODELS_PATH: /comfyui-models
+      IMAGE_LLM_API_KEY: ${IMAGE_LLM_API_KEY}
+      IMAGE_LLM_BASE_URL: ${IMAGE_LLM_BASE_URL:-https://api.openai.com/v1}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
+      UPLOAD_RATE_LIMIT_REQUESTS: ${UPLOAD_RATE_LIMIT_REQUESTS:-10}
+      # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
+      # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ。
       PLANTUML_BASE_URL: http://plantuml:8080
       PENPOT_BASE_URL: http://penpot-frontend:8080
-      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
-      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
-      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
-      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      # issue #589: ダッシュボードに Let's Blog 自身の9サービスの状態を出すため、gateway の
+      # 集約ヘルスを読む。各サービスを個別に叩かず1箇所(gateway)の判定を展開する。
+      GATEWAY_URI: http://gateway:8080
+      # issue #589: RabbitMQ のキュー滞留・DLQ 滞留の判定に Management HTTP API を使う。
+      # AMQP の接続だけでは各キューの滞留数を取れない。
+      RABBITMQ_MANAGEMENT_URI: http://rabbitmq:15672
+      # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
+      # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
+      # 本サービスのみに限定する(Epic #551の方針。下のdocker-socket-proxy定義・depends_on参照)。
+      DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
+      # ダッシュボードに他プロジェクトのコンテナを載せないための絞り込みに使う(issue #803)。
+      # composeが既定で使うプロジェクト名(ディレクトリ名)と一致させること。
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-lets_blog_server}
+      # AdminAuthorizationServiceのrequireAdmin・自分自身のuserId解決のため、呼び出し元のBearer
+      # トークンをそのままidentity-serviceへ転送して問い合わせる(log-writer/content-service/
+      # project-serviceと同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # AdminPasswordResetRunner(緊急パスワードリセット)がKeycloak Admin REST APIを呼び出すための
+      # letsblog-servicesクライアントのシークレット(legacy-api/identity-serviceと同じ値、issue #681由来)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # BackupService(issue #694)が生成画像ファイルをバックアップ/リストアする際の保存先。
+      # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ(バックアップ機能の移設に伴い、
+      # 実体を書き込むmedia-serviceと共有するgenerated_images volumeをこちらへ付け替えた)。
+      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
+      # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ+Keycloak PostgreSQLを横断して
+      # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
+      # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(infra/mysql/init/
+      # 01-create-service-schemas.shが作成・スキーマ限定の権限を付与する)を使う。
+      # 旧スキーマ(分割前の lets_blog)は #785 でバックアップのうえ DROP したため、
+      # この一覧から外した。対象はサービス別スキーマ9つ(ADR-0004)のみ。
       BACKUP_MYSQL_HOST: mysql
       BACKUP_MYSQL_PORT: "3306"
-      BACKUP_MYSQL_DATABASE: ${MYSQL_DATABASE}
-      BACKUP_MYSQL_USER: ${MYSQL_USER}
-      BACKUP_MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
-      GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
+      BACKUP_MYSQL_USER: lbs_backup
+      BACKUP_MYSQL_PASSWORD: ${LBS_BACKUP_DB_PASSWORD}
+      BACKUP_MYSQL_SCHEMAS: lbs_identity,lbs_project,lbs_content,lbs_media,lbs_ai,lbs_publishing,lbs_analytics,lbs_platform,lbs_log
+      # KeycloakのPostgreSQL(keycloak-postgres)は元々そのDB専用のkeycloakユーザーしか存在しないため、
+      # 新たな横断的な認証情報を追加せず、その既存ユーザーの認証情報をそのまま流用する
+      # (下のkeycloak-postgresサービス定義参照)。
+      BACKUP_POSTGRES_HOST: keycloak-postgres
+      BACKUP_POSTGRES_PORT: "5432"
+      BACKUP_POSTGRES_USER: keycloak
+      BACKUP_POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      BACKUP_POSTGRES_DATABASE: keycloak
+      # VscodeExtensionBuildService(issue #696、C10-4でlegacy-apiから移設)がシステム画面向けに
+      # VSCode拡張機能の.vsixをオンデマンドビルドする際のソース/作業ディレクトリ。legacy-apiのapi
+      # コンテナが持っていた同名の環境変数と同じ。
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
-      DOCKER_SOCKET_PROXY_BASE_URL: http://docker-socket-proxy:2375
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USER: ${RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      <<: *rabbitmq-env
     volumes:
-      - bulk_upload_files:/app/data/bulk-uploads
       - generated_images:/app/data/generated-images
-      - comfyui_models:/comfyui-models
       # システム画面からのVSCode拡張機能ダウンロード用。オンデマンドビルドの作業ディレクトリは
-      # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする。
-      - ./extension:/app/extension-src:ro
+      # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする
+      # (issue #696、C10-4でapiコンテナから移設)。
+      - ./apps/extension:/app/extension-src:ro
     depends_on:
       mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      keycloak-postgres:
+        condition: service_healthy
+      identity:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
       docker-socket-proxy:
         condition: service_started
-    networks:
-      - lbs-net
 
-  # ログメッセージキューイング(issue #466)のコンシューマー。apiサーバーがRabbitMQへ発行した
-  # エラーログ/操作ログ/監査ログのメッセージを受信し、apiと共有するDB(既存のFlywayマイグレーション
-  # 済みスキーマ)へ書き込む。スキーマの所有権・マイグレーションはapiサーバー側のFlywayのみが持つ。
+  # 名前をつけて保存・管理するSSH鍵ペア(Ed25519)、[toc]/[blogcard]/[amazon]組み込みタグの
+  # デザインカスタマイズ(プロジェクト単位)をlegacy-apiから抽出した(#577 stage 1)。より大きな
+  # Project/Site(CMS/WordPress自動プロビジョニング)ドメインは #577 stage2 で移設済み。
+  project:
+    build:
+      context: .
+      dockerfile: services/project/Dockerfile
+    container_name: lbs-project
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_project?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_project
+      SPRING_DATASOURCE_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
+      <<: *rabbitmq-env
+      # project_users(メンバー判定・所属プロジェクトID)と利用者個人のGitHubトークンへの
+      # 内部ブリッジ(IdentityBridgeClient)の呼び出し先は、下の IDENTITY_SERVICE_URI。
+      # issue #583 で project_users の所有権が legacy-api から identity-service へ移ったため、
+      # LEGACY_API_URI は不要になった。
+      # CMSプロビジョニングブリッジ(CmsProvisioningBridgeClient、サイト登録・接続確認・wp-cli
+      # インストール・環境同期のSSH/wp-cli操作)の呼び出し先。issue #577 stage2ではlegacy-apiが
+      # 所有していたが、issue #710でpublishing-serviceへ移管した(Epic #551 C6-4。起動時の
+      # 依存関係(depends_on)には含めない、理由は上のLEGACY_API_URIと同じ)。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
+      # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
+      AI_SERVICE_URI: http://ai:8080
+      # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の
+      # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
+      # (log-writer/media-service/ai-service/content-serviceと同じ暫定策)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # ssh_key_pairs.private_key_encrypted / sites.credentials_encryptedの暗号化/復号
+      # (CredentialCipher、lbs-common)。全サービス共通のAES-256-GCM鍵。
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(issue #577 stage2)。
+      # apiと同じ値(同一エージェントを共有する)。wordpressにヘルスチェックが無いため、apiと同様
+      # 起動時の依存関係(depends_on)には含めず、実行時呼び出し先としてのみ設定する。
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # cms/*パッケージ(CmsAdapter/WordPressAdapter/エージェント・SSH操作)・PostPublishService/
+  # PostDeleteService・PostControllerの公開・削除エンドポイントをlegacy-apiから抽出(issue #707、
+  # Epic #551 C6-1)。サイト本体・CMS認証情報(project-service)・投稿(posts)テーブル(content-service)・
+  # 著者マッピング(user_site_authors、issue #583でidentity-service)はいずれも自身で持たず、
+  # 内部ブリッジ経由で読み書きする
+  # (#575設計判断1・2・4)。スキーマ・Flywayマイグレーションは専用のlbs_publishingスキーマ
+  # (ADR-0004)で本サービスが所有する(本Issue時点では所有ドメインテーブルは無い)。
+  publishing:
+    build:
+      context: .
+      dockerfile: services/publishing/Dockerfile
+    container_name: lbs-publishing
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_publishing?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_publishing
+      SPRING_DATASOURCE_PASSWORD: ${LBS_PUBLISHING_DB_PASSWORD}
+      <<: *rabbitmq-env
+      # サイト本体・CMS認証情報の内部ブリッジ呼び出し先(ProjectServiceClient、#575設計判断2)。
+      PROJECT_SERVICE_URI: http://project:8080
+      # Markdownレンダリング・postsテーブルの読み書きの内部ブリッジ呼び出し先(ContentServiceClient、
+      # #575設計判断1)。記事プレビューのテーマ骨格取得(Playwrightを持つのはcontent-service)も
+      # 同じクライアント経由で呼ぶ(issue #712でArticlePreviewServiceを移設したのに伴う)。
+      CONTENT_SERVICE_URI: http://content:8080
+      # 著者マッピング(user_site_authors、#575設計判断4)とプロジェクトメンバー判定
+      # (project_users、issue #712)の内部ブリッジ呼び出し先(IdentityBridgeClient)。
+      # issue #583 でこれらの所有権が identity-service へ移った。あわせて identity-service が
+      # 著者プロビジョニング(PublishingServiceClient)をこのコンテナへ依頼する双方向ブリッジになる
+      # (起動時の依存関係(depends_on)には含めない。循環しない実行時呼び出し先としてのみ設定する)。
+      # CurrentActorService の自分自身の userId 解決も同じ宛先。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # サービス間のClient Credentials認証(#567)。issue #1207で、テーマ骨格取得ブリッジ
+      # (ContentServiceClientのfetch-and-splice/fetch-real-post)がforwardedBearerから
+      # 本サービス自身のトークンへ切り替わったため追加した。他の値(token-uri等)はコンテナ間の
+      # 既定URLで足りるためservices/publishing/src/main/resources/application.ymlの既定値に
+      # 委ねる(media/identity-serviceと同じ方針)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # 投稿画像リサイズのプロジェクト別デフォルト(project_image_settings、MediaSettingsBridgeClient)は
+      # issue #583 で media-service が所有するようになったため、下の MEDIA_SERVICE_URI 経由で解決する。
+      # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の
+      # レンダリング呼び出し先。
+      MEDIA_SERVICE_URI: http://media:8080
+      # 常駐wordpressコンテナ内の内部限定プロビジョニングエージェント(infra/wordpress/provision-agent)の
+      # `/wp-cli/*`エンドポイント呼び出し先(WordPressAgentOperations)。apiと同じ値。
+      WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
+      WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      # 一括管理(プラグイン/テーマのzipアップロード)のロールフォワード用永続ボリューム
+      # (BulkUploadStorageService)。一括管理機能一式のpublishing-serviceへの移設(issue #708)に伴い、
+      # apiコンテナから移した(bulk_upload_filesボリュームは同じものを引き続き使う)。
+      BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
+    volumes:
+      - bulk_upload_files:/app/data/bulk-uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ログの所有権をlog-writerへ完全移管(#572)。RabbitMQ経由でエラーログ/操作ログ/監査ログの
+  # メッセージを受信して書き込むのに加え、読み取りAPI(監査ログ・操作ログ・フロントエンドエラー
+  # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
+  # (ADR-0004)で本サービスが所有する。
   log-writer:
     build:
-      context: ./log-writer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/log-writer/Dockerfile
     container_name: lbs-log-writer
-    restart: unless-stopped
+    <<: [*common-service, *actuator-healthcheck]
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: "5672"
-      RABBITMQ_USER: ${RABBITMQ_USER}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      <<: *rabbitmq-env
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_log?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_log
+      SPRING_DATASOURCE_PASSWORD: ${LBS_LOG_DB_PASSWORD}
+      # 読み取りAPIのadmin判定・自分自身のuserId解決のため、呼び出し元のBearerトークンを
+      # そのままidentity-serviceの/api/identity/meへ転送して問い合わせる(#572の暫定策。
+      # lbs_logスキーマはusersテーブルへアクセスできない=ADR-0004のクロススキーマ禁止のため。
+      # C12(#581)でサービス間同期呼び出しの標準クライアントが定まったらそちらへ寄せる)。
+      IDENTITY_SERVICE_URI: http://identity:8080
+      # 統合操作ログ(/api/operation-logs/unified)のAIジョブソース。#825でlegacy-apiから
+      # ai-serviceへ向け直した(GenerationJobControllerがai-serviceへ移設済みのため)。
+      AI_SERVICE_URI: http://ai:8080
     depends_on:
       mysql:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    networks:
-      - lbs-net
+
+  # 単一入口(#560)。/api/**のルーティング・JWT検証・レート制限・相関ID付与を担う。
+  # issue #583 で legacy-api を削除し、全ルートが実サービスを指すようになった。
+  # 未割り当てパスのフォールバック(以前は legacy-api へ暗黙転送していた)も廃止し、
+  # マッチしないパスは gateway 自身が404を返す
+  # (services/gateway/src/main/resources/application.yml参照)。
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: lbs-gateway
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      LOG_SERVICE_URI: http://log-writer:8080
+      # 画像生成・ダイアグラム・PlantUML/Recharts/Penpotレンダリングのルーティング先(#573)。
+      MEDIA_SERVICE_URI: http://media:8080
+      # LLM呼び出し・記事プラン(壁打ち)・generation_jobsのルーティング先(#574)。
+      AI_SERVICE_URI: http://ai:8080
+      # 記事本文(posts)・カスタムタグ・記事プレビュー・コンテンツキャッシュのルーティング先(#576)。
+      CONTENT_SERVICE_URI: http://content:8080
+      # プロジェクトダッシュボードのGA/AdSenseレポート取得のルーティング先(#578)。
+      ANALYTICS_SERVICE_URI: http://analytics:8080
+      # Project/Site本体、SSH鍵ペア管理、組み込みタグのデザインカスタマイズ、
+      # プロジェクト単位のGitHubトークン(issue #583で分割した api-keys のうち1本)の
+      # ルーティング先(services/gateway/src/main/resources/application.yml参照)。
+      PROJECT_SERVICE_URI: http://project:8080
+      # システム全体のグローバル設定(system-settings、issue #693)・バックアップ(issue #694)・
+      # ダッシュボードのコンテナ状態/接続サービス状態(issue #695、C10-3、dashboard-status/
+      # dashboard-status-streamルート)・VSCode拡張のオンデマンドビルド配布(issue #696、C10-4、
+      # /api/system/vscode-extension、下のplatformルートの/api/system/**に含まれる)の
+      # ルーティング先。
+      PLATFORM_SERVICE_URI: http://platform:8080
+      # 投稿の公開(POST /api/posts/publish)・削除(DELETE /api/posts/*/*)のルーティング先
+      # (issue #707、posts-publish-legacy/posts-delete-legacyルート)。一括管理・taxonomy解決
+      # (issue #708、project-bulk-management-legacy/project-asset-images-legacy/publishingルート)、
+      # 記事プレビューのテーマCSS取得/骨格差し替え/プレビュー用投稿削除(issue #712、
+      # project-preview-legacyルート。/renderのみcontent-serviceのまま)もここへ向ける。
+      PUBLISHING_SERVICE_URI: http://publishing:8080
+    depends_on:
+      identity:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      log-writer:
+        condition: service_healthy
+      platform:
+        condition: service_healthy
+      media:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      content:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+      project:
+        condition: service_healthy
+      publishing:
+        condition: service_healthy
+
+  identity:
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+    container_name: lbs-identity
+    <<: [*common-service, *actuator-healthcheck]
+    environment:
+      # issue #786: 専用スキーマlbs_identityへ切り替えた(ADR-0004)。#561の受入基準にあった
+      # 「lbs_identityをFlywayで管理する」が未達のまま、分割前のlets_blogを参照し続けていた。
+      # 切り替え前にscripts/migrate-identity-tables-to-lbs-identity.sqlでデータを移すこと
+      # (手順はdocs/SERVICE_SCHEMA_MIGRATION.md)。
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_identity?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: lbs_identity
+      SPRING_DATASOURCE_PASSWORD: ${LBS_IDENTITY_DB_PASSWORD}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      # Keycloakユーザー同期(#562)。letsblog-servicesクライアントのシークレット
+      # (infra/keycloak/realm-export.jsonで定義済み)。他の値(token-uri等)はコンテナ間の既定URLで
+      # 足りるためservices/identity/src/main/resources/application.ymlの既定値に委ねる。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # issue #1241: アバター画像(512x512 JPEG、メタ情報削除済み)の保存先。
+      # media-serviceのGENERATED_IMAGES_STORAGE_PATHと同じ考え方の、identity-service専用ボリューム。
+      AVATAR_STORAGE_PATH: /app/data/avatars
+      <<: *rabbitmq-env
+    volumes:
+      - avatar_images:/app/data/avatars
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: lbs-rabbitmq
-    restart: unless-stopped
+    <<: *common-service
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
@@ -139,72 +671,168 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - lbs-net
 
   # apiコンテナからダッシュボードのコンテナ稼働状況(issue #280)取得のためだけにDocker Engine APIを
   # 読み取り専用で中継する。apiコンテナ自体にはdocker.sockを渡さない(コンテナ作成/実行系のPOST操作は
   # 一切許可しない=侵害時にDockerホストを乗っ取られるリスクを避ける)。
+  # issue #695(C10-3)でアプリコードの呼び出し元をplatform-serviceのみに一本化したが、lbs-net上の
+  # 全コンテナが同一フラットネットワークにいたため、環境変数を持たない他コンテナからでも
+  # http://docker-socket-proxy:2375 へ到達できてしまっていた(ネットワークレベルの制限は未達成、
+  # issue #701)。ここでは共通の lbs-net には参加させず、専用の内部ネットワーク
+  # docker-socket-proxy-net(下のplatformサービス定義・networks:セクション参照)にのみ参加させることで、
+  # Epic #551の方針どおり到達可能なコンテナをplatform-serviceだけに限定する。
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
     container_name: lbs-docker-socket-proxy
     restart: unless-stopped
+    networks:
+      - docker-socket-proxy-net
     environment:
       CONTAINERS: 1
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - lbs-net
 
   mysql:
     image: mysql:8.0
     container_name: lbs-mysql
-    restart: unless-stopped
+    <<: *common-service
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      # MYSQL_DATABASE(分割前の lets_blog スキーマ)は #785 で撤去した。#583 で legacy-api を
+      # 削除して参照元が無くなり、スキーマ自体も DROP 済み。残すと空ボリュームからの初回起動時に
+      # 使われないスキーマが再作成されてしまう。
+      #
+      # MYSQL_USER / MYSQL_PASSWORD(lbs_app)は残す。下の wordpress(WORDPRESS_DB_USER)が
+      # このユーザーで接続する(phpmyadmin は #978 以降このユーザーを渡されず、運用者が
+      # ログイン画面で入力する)。マネージドWordPressのサイト別DBは
+      # プロビジョニングエージェントが root で都度作成し、このユーザーへ個別に権限を付与するため、
+      # MYSQL_DATABASE が無くても機能する。
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      # サービス別スキーマ分離(#570)。infra/mysql/init/01-create-service-schemas.sh が
+      # 初回起動時にこれらの値でスキーマ/ユーザーを作成する。
+      LBS_IDENTITY_DB_PASSWORD: ${LBS_IDENTITY_DB_PASSWORD}
+      LBS_PROJECT_DB_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
+      LBS_CONTENT_DB_PASSWORD: ${LBS_CONTENT_DB_PASSWORD}
+      LBS_MEDIA_DB_PASSWORD: ${LBS_MEDIA_DB_PASSWORD}
+      LBS_AI_DB_PASSWORD: ${LBS_AI_DB_PASSWORD}
+      LBS_PUBLISHING_DB_PASSWORD: ${LBS_PUBLISHING_DB_PASSWORD}
+      LBS_ANALYTICS_DB_PASSWORD: ${LBS_ANALYTICS_DB_PASSWORD}
+      LBS_PLATFORM_DB_PASSWORD: ${LBS_PLATFORM_DB_PASSWORD}
+      LBS_LOG_DB_PASSWORD: ${LBS_LOG_DB_PASSWORD}
+      # 全サービスMySQLスキーマを横断してバックアップ/リストアするための専用ユーザー(issue #694、
+      # C10-2)。01-create-service-schemas.shが作成し、上記の各スキーマ限定の権限のみを付与する
+      # (MySQL rootクレデンシャルは使わず、#570のスキーマ分離の意図を損なわない範囲に留める)。
+      LBS_BACKUP_DB_PASSWORD: ${LBS_BACKUP_DB_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - lbs-net
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: lbs-phpmyadmin
-    restart: unless-stopped
+    <<: *common-service
     environment:
       PMA_HOST: mysql
-      PMA_USER: ${MYSQL_USER}
-      PMA_PASSWORD: ${MYSQL_PASSWORD}
+      # PMA_USER / PMA_PASSWORD は**渡さない**(#978)。公式イメージは PMA_USER が
+      # 設定されていると auth_type を config に切り替え、ログイン画面を出さずに
+      # MySQL へ接続済みのセッションを与える(/etc/phpmyadmin/config.inc.php)。
+      # reverse-proxy は /phpmyadmin/ を無認証で中継するため、この組み合わせでは
+      # URL に到達できる者が誰でも全DBを読み書きできてしまう。
+      # 渡さなければ既定の auth_type: cookie に戻り、phpMyAdmin 自身のログインを経由する。
+      # 運用者は .env の MYSQL_USER / MYSQL_PASSWORD を入力してログインする。
       # サブパス(/phpmyadmin/)配下でのリンク生成・リダイレクトを正しく行うために必須
       PMA_ABSOLUTE_URI: https://localhost/phpmyadmin/
     depends_on:
       - mysql
-    networks:
-      - lbs-net
+
+  # 認証基盤(ADR-0002, #559)。realm定義はGit管理された ./infra/keycloak/realm-export.json から
+  # 起動時にimportする(--import-realm)。GUIでの手作業設定はしない。
+  keycloak-postgres:
+    image: postgres:15
+    container_name: lbs-keycloak-postgres
+    <<: *common-service
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    volumes:
+      - keycloak_postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+
+  keycloak:
+    image: "quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.7.2}"
+    container_name: lbs-keycloak
+    <<: *common-service
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      # 初回起動時のみ有効。一度adminユーザーが作成された後は無視される
+      # (パスワードローテーションはKeycloak管理コンソール側で行う)。
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      # reverse-proxy配下の /auth/ サブパスで配信するため
+      KC_HTTP_RELATIVE_PATH: /auth
+      # 固定のissuer/公開URLを明示する(#560)。KC_HOSTNAME_STRICT=false +
+      # X-Forwarded-*ヘッダ頼みの動的検出だと、gatewayがコンテナ間通信で
+      # 直接keycloak:8080を叩いた際に issuer が http://keycloak/auth/... になり、
+      # ブラウザ経由で発行されたトークンの iss (https://localhost/auth/...) と
+      # 一致せずJWT検証が失敗する。ローカル開発のホスト名は固定(localhost)のため、
+      # 固定URLで両経路の issuer を一致させる。
+      KC_HOSTNAME: https://localhost/auth
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    # イメージにcurl/wgetが無いため、bashの/dev/tcpでヘルスチェックエンドポイント
+    # (KC_HEALTH_ENABLEDが公開する管理ポート9000の/health/ready)を直接叩く。
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          echo -e 'GET /auth/health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          cat <&3 | grep -q '"status": "UP"'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   penpot-frontend:
     image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-frontend
-    restart: unless-stopped
+    <<: *common-service
     ports:
       - "9001:8080"
     volumes:
       - penpot_assets:/opt/data/assets
+      # issue #1093: PENPOT_PUBLIC_URI は http://localhost:9001 のまま据え置き、
+      # https://localhost/penpot/ (reverse-proxy経由)からの /api 呼び出しにだけ
+      # CORSヘッダーを足す。penpot-frontend公式の拡張ポイント
+      # (/etc/nginx/overrides/{http,server}.d/*.conf)へ読み取り専用でマウントする。
+      - ./infra/penpot/nginx-overrides/http.d/lbs-cors.conf:/etc/nginx/overrides/http.d/lbs-cors.conf:ro
+      - ./infra/penpot/nginx-overrides/server.d/lbs-cors-api.conf:/etc/nginx/overrides/server.d/lbs-cors-api.conf:ro
     depends_on:
       - penpot-backend
       - penpot-exporter
       - penpot-mcp
-    networks:
-      - lbs-net
     environment:
       PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
       PENPOT_PUBLIC_URI: http://localhost:9001
@@ -214,7 +842,7 @@ services:
   penpot-backend:
     image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-backend
-    restart: unless-stopped
+    <<: *common-service
     volumes:
       - penpot_assets:/opt/data/assets
     depends_on:
@@ -222,8 +850,6 @@ services:
         condition: service_healthy
       penpot-valkey:
         condition: service_healthy
-    networks:
-      - lbs-net
     environment:
       PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
       PENPOT_PUBLIC_URI: http://localhost:9001
@@ -250,19 +876,15 @@ services:
   penpot-mcp:
     image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-mcp
-    restart: unless-stopped
-    networks:
-      - lbs-net
+    <<: *common-service
 
   penpot-exporter:
     image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-exporter
-    restart: unless-stopped
+    <<: *common-service
     depends_on:
       penpot-valkey:
         condition: service_healthy
-    networks:
-      - lbs-net
     environment:
       PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
       PENPOT_PUBLIC_URI: http://localhost:9001
@@ -272,7 +894,7 @@ services:
   penpot-postgres:
     image: "postgres:15"
     container_name: lbs-penpot-postgres
-    restart: unless-stopped
+    <<: *common-service
     stop_signal: SIGINT
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U penpot"]
@@ -282,8 +904,6 @@ services:
       start_period: 2s
     volumes:
       - penpot_postgres:/var/lib/postgresql/data
-    networks:
-      - lbs-net
     environment:
       - POSTGRES_INITDB_ARGS=--data-checksums
       - POSTGRES_DB=penpot
@@ -293,33 +913,115 @@ services:
   penpot-valkey:
     image: valkey/valkey:8.1
     container_name: lbs-penpot-valkey
-    restart: unless-stopped
+    <<: *common-service
     healthcheck:
       test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
       interval: 1s
       timeout: 3s
       retries: 5
       start_period: 3s
-    networks:
-      - lbs-net
     environment:
       - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
 
   penpot-mailcatch:
     image: sj26/mailcatcher:latest
     container_name: lbs-penpot-mailcatch
-    restart: unless-stopped
+    <<: *common-service
     expose:
       - '1025'
     ports:
       - "1080:1080"
+
+  # ローカルLLM(issue #1086)。#376で一度削除したが、外部LLMのAPIキー無しでAI執筆支援を
+  # 動かすために復活させた。reverse-proxy経由の外部公開はせず、到達元はlbs-net内部のみ。
+  # モデルの取得はollama-model-init(下)が起動時に済ませる(手動のollama pullは不要)。
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    container_name: lbs-ollama
+    <<: *common-service
+    # GPUはオプトイン(issue #1086 / R2)。
+    #
+    # comfyui のような無条件の deploy.resources.reservations.devices は使わない。
+    # NVIDIAランタイムを持たないホストでは `could not select device driver "nvidia"` で
+    # 起動に失敗し、サービス無指定の `docker compose up -d` がそこで中断してしまう
+    # (docs/ACCEPTANCE_TESTING.md「GPUを持たないホスト」)。実測(#1086)では
+    # `count: 0` にしてもデバイスドライバの選択は行われるため回避できず、`gpus:` は
+    # 空値を受け付けない(services.x.gpus value must be 'all')。runtime だけが
+    # 「未指定ならDockerの既定ランタイム」に倒せる。
+    #
+    # GPUを持つホストは .env に GPU_RUNTIME=nvidia を書く。コマンドライン引数は要らないので
+    # `docker compose up -d` のままGPUが使われる。#1066 は同じ1行を comfyui へ適用できる。
+    runtime: ${GPU_RUNTIME:-}
+    environment:
+      # runtime=nvidia のときにnvidia-container-runtimeが参照する(runc既定では無視される)。
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # issue #1086 / R6: 単一GPUをlbs-comfyuiと共有する。ComfyUIは生成後にVRAMを解放するが
+      # (ComfyUiClient#clearMemory)、Ollamaは既定でモデルを常駐させ続ける。常駐時間を短くし、
+      # 同時ロードを1モデルに制限してVRAMの取り合いを避ける。ComfyUI側でOOMが出る場合は
+      # OLLAMA_KEEP_ALIVE=30s まで下げる(docs/DOCKER_COMPOSE_ARCHITECTURE.md)。
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Ollamaの既定コンテキスト長は小さく、超過分は黙って切り捨てられる。下書き/校正の
+      # プロンプト長に耐える値を明示する。伸ばすほどKVキャッシュがVRAMを食うため、
+      # 7BクラスとComfyUIの共存を前提に8192とする(#1086)。
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      # イメージにcurl/wgetは無い。ollama CLIが自分のAPIを叩くのでそれを使う。
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # 既定モデルの初回取得(issue #1086 / R3)。取得済みなら即座に終了する冪等なワンショット。
+  # x-common-service は使わない。restart: unless-stopped が付くと ContainerStatusService
+  # (#725)が「正常に完了したワンショットジョブ」と見なせず、ダッシュボードが常時赤くなる。
+  # 判定条件は「終了コード0 かつ 再起動ポリシー no」。
+  ollama-model-init:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    container_name: lbs-ollama-model-init
+    restart: "no"
     networks:
       - lbs-net
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "モデル ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct} を取得します(初回は数分かかります)"
+        ollama pull "$${LLM_OLLAMA_MODEL}"
+        ollama list
 
+  # GPUはオプトイン(issue #1066)。
+  #
+  # ollama(#1086)は `runtime: ${GPU_RUNTIME:-}` の1行でGPUをオプトイン化したが、
+  # comfyui はその1行だけでは同じようにいかない。ollamaはGPUが無くてもCPUで正常に
+  # 動作するのに対し、comfyui の既定イメージ(cu130-slim)はCUDA前提のビルドで、
+  # README.md の「ハードウェア要件」もCPU動作には別イメージタグへの変更を要求している
+  # (本Issueの Out of Scope はComfyUIをCPUで動かすこと自体を除外している)。
+  # `runtime:` の未指定をDocker既定ランタイムに倒すだけでは、GPUの無いホストで
+  # CUDA前提イメージの起動がクラッシュし、`restart: unless-stopped` により再起動を
+  # 繰り返す(`docker ps -a` には残らないが `state=running` に安定しないため、
+  # `wait-for-stack-healthy.sh --all` がタイムアウトする恐れが残る)。
+  #
+  # そこで `profiles: ["gpu"]` を付け、既定の `docker compose up -d`(サービス無指定)
+  # ではコンテナ自体を作らないようにする。GPUを持つホストは `.env` に
+  # `COMPOSE_PROFILES=gpu` を書く(または `docker compose --profile gpu up -d`)。
+  # コンテナが作られなければ `docker compose ps --all` にも現れないため、
+  # `wait-for-stack-healthy.sh --all`(scripts/verify-clean-volume-boot.shが使う)の
+  # 待機対象からも自動的に外れる(スクリプト側の変更は不要)。
   comfyui:
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
-    restart: unless-stopped
+    profiles: ["gpu"]
+    <<: *common-service
     volumes:
       - comfyui_models:/root/ComfyUI/models
       - comfyui_output:/root/ComfyUI/output
@@ -330,26 +1032,20 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    networks:
-      - lbs-net
 
   plantuml:
     image: plantuml/plantuml-server:jetty
     container_name: lbs-plantuml
-    restart: unless-stopped
-    networks:
-      - lbs-net
+    <<: *common-service
 
   drawio:
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
-    restart: unless-stopped
-    networks:
-      - lbs-net
+    <<: *common-service
 
   # mcp-penpot:
   #   build:
-  #     context: ./mcp-server
+  #     context: ./apps/mcp-server
   #     dockerfile: Dockerfile
   #   container_name: lbs-mcp-penpot
   #   restart: unless-stopped
@@ -369,10 +1065,10 @@ services:
 
   wordpress:
     build:
-      context: ./wordpress
+      context: ./infra/wordpress
       dockerfile: Dockerfile
     container_name: lbs-wordpress
-    restart: unless-stopped
+    <<: *common-service
     environment:
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -384,20 +1080,30 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-    networks:
-      - lbs-net
 
 networks:
   lbs-net:
     driver: bridge
+  # docker-socket-proxyへの到達性をplatform-serviceのみに限定するための専用ネットワーク(issue #701、
+  # Epic #551の方針)。docker-socket-proxyはこのネットワークにのみ参加し(lbs-netには参加しない)、
+  # platformはlbs-netに加えてこちらにも参加することで両ネットワークへ到達できる。internal: trueに
+  # より、このネットワーク単体では外部(インターネット)への出口も持たない。
+  docker-socket-proxy-net:
+    driver: bridge
+    internal: true
 
 volumes:
   mysql_data:
   rabbitmq_data:
+  keycloak_postgres:
   penpot_postgres:
   penpot_assets:
   comfyui_models:
   comfyui_output:
+  # Ollamaのモデル置き場(issue #1086)。docker data-rootは/home配下にあり容量に余裕がある。
+  ollama_models:
   wordpress_sites:
   bulk_upload_files:
   generated_images:
+  # issue #1241: アバター画像の専用ボリューム(identity-service)。
+  avatar_images:

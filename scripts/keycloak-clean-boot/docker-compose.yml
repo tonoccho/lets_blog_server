@@ -1,0 +1,70 @@
+# issue #1278: 空の keycloak_postgres から `--import-realm` で起動した Keycloak が
+# クラッシュループせず healthy になり、realm `letsblog` を持つことを検証するための
+# 専用 compose 定義。単独では使わない(scripts/verify-clean-realm-import.sh から
+# `docker compose -p <一時プロジェクト名> -f <このファイル>` で呼び出す)。
+#
+# `docker-compose.yml` の keycloak / keycloak-postgres を土台にしているが、以下を
+# 意図的に変えている:
+#
+#   - container_name を持たない。`docker-compose.yml` は
+#     container_name: lbs-keycloak / lbs-keycloak-postgres を固定しているため、
+#     そのまま別プロジェクト名(-p)で起動すると稼働中の共有スタックと名前が衝突する。
+#   - ports を公開しない。ホストポートは共有スタックと衝突しうるため、
+#     healthy 判定・realm 存在確認はいずれもコンテナ内部から行う
+#     (scripts/verify-clean-realm-import.sh 参照)。
+#   - 認証情報はこの一時プロジェクト専用の使い捨て値を直書きする。共有スタックの
+#     `.env`(KEYCLOAK_DB_PASSWORD 等)には一切依存しない。
+#
+# 共有スタック(lbs-*)のコンテナ・ボリュームには一切触れない。
+
+services:
+  keycloak-postgres:
+    image: postgres:15
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: verify-only-not-a-secret
+
+  keycloak:
+    image: "quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.7.2}"
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: verify-only-not-a-secret
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: verify-only-not-a-secret
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # 検証はコンテナ内部からのみアクセスするため、reverse-proxy越しの固定URLは不要。
+      # `docker-compose.yml`本体はhttps://localhost/authを固定しているが(#560)、
+      # ここではhostname-strictを外して素のQuarkus起動要件だけを満たす。
+      KC_HOSTNAME_STRICT: "false"
+    volumes:
+      - ../../infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    # docker-compose.yml のkeycloakサービスと同じ判定方法(イメージにcurl/wgetが無いため
+    # bashの/dev/tcpで管理ポート9000の/health/readyを直接叩く)。
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          echo -e 'GET /auth/health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          cat <&3 | grep -q '"status": "UP"'
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s

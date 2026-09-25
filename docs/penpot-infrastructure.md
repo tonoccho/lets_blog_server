@@ -1,5 +1,13 @@
 # Penpot インフラストラクチャ設計書
 
+> **この文書の位置づけ**: Penpot 導入時の**設計記録**である。導入の判断と構成の意図を残すもので、
+> 現行の稼働構成そのものではない。ただし §3.1 のサブパス構成図だけは「どの経路が外部に開いて
+> いるか」を伝えるため、`infra/nginx/conf.d/default.conf` の実態と一致させて維持する
+> （`scripts/test_docs_reverse_proxy_diagram.py` が機械的に検査する。#1010）。
+>
+> 他の節に出てくる構成（コンテナ名・ファイル名・Ollama 連携など）は当時の設計であり、
+> 現行と食い違いうる。実態は `docker-compose.yml` と `infra/nginx/conf.d/default.conf` を見ること。
+
 ## 概要
 
 Let's Blog Server に Penpot（オープンソースデザインツール）を Docker コンテナとしてセットアップ。Ollama との MCP 連携により、AI 支援デザイン機能を実現。
@@ -107,16 +115,33 @@ penpot_postgres:
 ```
 https://localhost/
 ├─ /             ← Web UI (Next.js, reverse-proxy → web:3000)
-├─ /api          ← Let's Blog API (reverse-proxy → api:8080)
-├─ /penpot       ← Penpot (NEW) (reverse-proxy → penpot:80)
+├─ /api          ← Let's Blog API (reverse-proxy → gateway:8080)
+├─ /auth         ← Keycloak (reverse-proxy → keycloak:8080)
+├─ /penpot       ← Penpot (reverse-proxy → penpot:80)
+├─ /drawio       ← draw.io (reverse-proxy → drawio:8080)
 ├─ /phpmyadmin   ← PhpMyAdmin (reverse-proxy → phpmyadmin)
-├─ /ollama       ← Ollama UI (reverse-proxy → ollama:11434)
-└─ /comfyui      ← ComfyUI (reverse-proxy → comfyui:8188)
+└─ /sites        ← 管理対象 WordPress サイト (reverse-proxy → 各サイトのコンテナ)
 ```
+
+この図は要約であり、内部向けの `location`（`/nginx-health` など）は載せていない。
+網羅的な一覧は `infra/nginx/conf.d/default.conf` を参照。
+
+**外部に開いていない経路**（過去に図へ載っていたもの）:
+
+| 経路 | 現状 |
+| --- | --- |
+| `/ollama` | **存在しない。** `lbs-ollama` コンテナごと廃止済み |
+| `/comfyui` | **#979 で `location` を削除した。** ブラウザからは到達しない。ComfyUI へはサービス間通信でのみ到達する |
+
+`/api` の中継先は `gateway` である。`api` という名前のサービスは `docker-compose.yml` に存在しない。
+
+> `/penpot` の中継先 `penpot:80` は、`docker-compose.yml` のサービス名が `penpot-frontend` で
+> あるため名前解決できず、常に 502 になる（#1012）。ここは nginx 側の不具合であり、
+> 図は nginx の記述をそのまま反映している。
 
 ### 3.2 nginx ルーティング設定
 
-ファイル: `nginx/conf.d/penpot.conf` (新規作成)
+ファイル: `infra/nginx/conf.d/penpot.conf` (新規作成)
 
 ```nginx
 location /penpot {

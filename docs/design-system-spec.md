@@ -78,11 +78,11 @@
 
 ### 3.1 現在の Tailwind CSS 設定
 
-**ファイル:** `web/tailwind.config.ts`
+**ファイル:** `apps/web/tailwind.config.ts`
 
 現在の設定を確認：
 ```bash
-grep -A 20 "colors:" web/tailwind.config.ts
+grep -A 20 "colors:" apps/web/tailwind.config.ts
 ```
 
 **確認項目:**
@@ -95,7 +95,7 @@ grep -A 20 "colors:" web/tailwind.config.ts
 
 **ファイル構成:**
 ```
-web/src/components/
+apps/web/src/components/
 ├── auth/
 │   ├── LoginForm.tsx
 │   ├── SignupForm.tsx

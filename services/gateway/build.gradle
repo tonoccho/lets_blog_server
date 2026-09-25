@@ -1,0 +1,59 @@
+// api-gateway(#560)。Spring Cloud Gatewayはこの環境のSpring Boot 4.1系と非互換のため
+// (spring-cloud 2024.0.0系のオートコンフィグがBoot 3.x時代の
+// org.springframework.boot.autoconfigure.web.ServerProperties等、Boot 4.1では
+// 再編されクラスパスから無くなったクラスを前提にしており、起動時にNoClassDefFoundErrorになる。
+// 実機検証で確認済み)、Spring Cloudには依存せず、素のWebFlux + WebClientで
+// ルーティング/JWT検証/レート制限/相関IDを実装している。
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+}
+
+dependencies {
+    implementation project(':packages:lbs-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.github.resilience4j:resilience4j-ratelimiter:2.4.0'
+    // RateLimitWebFilterが、Spring Securityのフィルタチェーンより前段でJWTのsubを
+    // 取り出す(署名検証はしない)ために使う(#749)。oauth2-resource-serverの推移的依存でも
+    // クラスパスには載るが、直接importするため明示的に宣言する(バージョンはSpring Bootの
+    // 依存管理に任せる)。
+    implementation 'com.nimbusds:nimbus-jose-jwt'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy jacocoTestReport
+
+    // DownstreamHealthConfigContractTest と RouteControllerContractTest は、実行時に
+    // リポジトリのソースツリー(settings.gradle のサービス一覧、各サービスのコントローラー)を
+    // 走査する。これらを Gradle の入力として宣言しておかないと、サービスを新設しても
+    // gateway の test タスクが UP-TO-DATE で飛ばされ、契約テストが実行されない(issue #743)。
+    // CI は毎回 fresh checkout なので結局実行されるが、それではローカルで気付けず、
+    // 「次にサービスを増やしたときに落ちて気付ける」という契約テストの目的を果たさない。
+    inputs.file("$rootDir/settings.gradle").withPropertyName('settingsGradle')
+    inputs.files(fileTree("$rootDir/services") {
+        include '*/src/main/java/**/*Controller.java'
+    }).withPropertyName('downstreamControllers').withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
