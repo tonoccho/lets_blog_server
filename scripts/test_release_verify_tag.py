@@ -1599,5 +1599,71 @@ class BackendGradleStepEnablesDockerGatedTests(unittest.TestCase):
         self.assertIn("lint", step["argv"])
 
 
+class ProvisionAgentPhpTestsStep(unittest.TestCase):
+    """issue #1418: provision-agent の PHP テストをリリース検証で走らせる。
+
+    `infra/wordpress/provision-agent/__tests__/test-process-runner.php` は
+    managed WordPress への全操作を担う provision-agent の唯一の自動テストだが、
+    手順表にも `scripts/git-hooks/pre-commit` にも無く、CI も無いため
+    **どこからも自動実行されていなかった**。#1417 で足したテストも同じ状態だった。
+    """
+
+    def step(self):
+        return next(
+            (s for s in rvt.DEFAULT_STEPS if s["name"] == "provision-agent-php-test"), None
+        )
+
+    def test_step_exists(self):
+        self.assertIsNotNone(
+            self.step(),
+            "provision-agent のPHPテストがリリース検証で実行されない",
+        )
+
+    def test_runs_the_php_harness_through_the_wordpress_image(self):
+        """ホストに `php` が無いので、イメージの php で実行する。"""
+        argv = self.step()["argv"]
+        self.assertIn("docker", argv)
+        self.assertIn("lets_blog_server-wordpress:latest", argv)
+        self.assertTrue(
+            any(a.endswith("/provision-agent/__tests__/test-process-runner.php") for a in argv),
+            argv,
+        )
+
+    def test_mounts_the_whole_infra_wordpress_directory(self):
+        """`provision-agent` だけをマウントすると `start.sh` が見えず誤って落ちる。
+
+        テストは `__DIR__ . '/../../start.sh'` を読む。イメージ内の `start.sh` は
+        `/usr/local/bin/start.sh` にあり `/var/www/start.sh` には無いので、
+        イメージ内のコピーをそのまま実行する形も採れない。チェックアウトの
+        `infra/wordpress` ごとマウントする必要がある。
+        """
+        argv = self.step()["argv"]
+        mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+        self.assertTrue(
+            any(m.startswith("%CHECKOUT%/infra/wordpress:") for m in mounts),
+            "チェックアウトの infra/wordpress 全体をマウントすること: %s" % mounts,
+        )
+
+    def test_wrapped_in_timeout(self):
+        """ハーネスのdocstringが「必ずシェルのtimeoutで包む」ことを求めている。
+
+        デッドロックの回帰時にリリース検証自身が無限に固まらないようにするため。
+        """
+        self.assertEqual("timeout", self.step()["argv"][0])
+
+    def test_runs_after_the_image_is_built(self):
+        """イメージはゼロ構築(`web-test-at-clean` の ACCEPTANCE_RESET)が作る。
+
+        `docker compose up -d --build` がチェックアウトのソースから
+        `lets_blog_server-wordpress:latest` をビルドするので、それより後に置く。
+        """
+        names = [s["name"] for s in rvt.DEFAULT_STEPS]
+        self.assertLess(
+            names.index("web-test-at-clean"),
+            names.index("provision-agent-php-test"),
+            "イメージが未ビルドの状態で実行すると偽陽性になる",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

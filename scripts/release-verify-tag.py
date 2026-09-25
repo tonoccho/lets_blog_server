@@ -551,6 +551,51 @@ DEFAULT_STEPS = [
         "counts_source": "apps/extension/e2e-jest-report.json",
     },
     {
+        # issue #1418: provision-agent(managed WordPress への全操作の実行主体)の
+        # PHPテスト。手順表にもpre-commitにも無く、CIも無いため、これまで
+        # **どこからも自動実行されていなかった**。#1417 で足した判定のテストも同じ状態だった。
+        #
+        # ## 実行の仕方に3つの制約がある
+        #
+        # 1. ホストに `php` が無い。`lets_blog_server-wordpress` イメージの中にある。
+        #    イメージ名が固定なのは、この手順より前の `web-test-at-clean` が
+        #    `ACCEPTANCE_RESET=1` のゼロ構築(`docker compose up -d --build`)で
+        #    共有プロジェクト名 `lets_blog_server` の下にチェックアウトのソースから
+        #    ビルドするためである。**この手順を web-test-at-clean より前へ動かすと、
+        #    イメージ未ビルドで偽陽性になる。**
+        #
+        # 2. マウントは `infra/wordpress` **全体**でなければならない。テストは
+        #    `__DIR__ . '/../../start.sh'` を読む。`provision-agent` だけを
+        #    マウントすると `start.sh` が見えず AC4 のテストが誤って落ちる。
+        #    イメージ内の `start.sh` は `/usr/local/bin/start.sh` にあって
+        #    `/var/www/start.sh` には無いので、イメージ内のコピーをそのまま実行する
+        #    形も採れない(だからチェックアウトをマウントする)。
+        #
+        # 3. `timeout` で包む。ハーネス自身のdocstringが
+        #    「デッドロック回帰時にこのテスト自身が無限に固まらないよう、必ずシェルの
+        #    timeoutで包んで実行すること」と求めている。
+        #
+        # 件数は終了コードで判定する(`counts_parser` なし)。このハーネスは
+        # PASS/FAIL を自前で出力する簡易実装で、JUnit XML も jest JSON も出さないが、
+        # 失敗があれば非0で終了する。`backend-check-test-db` 等と同じ扱い。
+        "name": "provision-agent-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-process-runner.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         "name": "backend-expose-mysql",
         "argv": [
             "docker",
