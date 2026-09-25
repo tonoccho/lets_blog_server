@@ -409,6 +409,14 @@ When(
   }
 );
 
+When('batch sizeの入力を全消去する', async ({ page }) => {
+  await panelNumberInput(page, 'batch size(最大16)').fill('');
+});
+
+Then('batch sizeの入力は空欄のままで「0」にならない', async ({ page }) => {
+  await expect(panelNumberInput(page, 'batch size(最大16)')).toHaveValue('');
+});
+
 Then(/^生成結果に画像が「(\d+)」枚並ぶ$/, async ({ page }, expected: string) => {
   const grid = page.getByTestId('generated-image-grid');
   await expect(grid).toBeVisible({ timeout: 180_000 });

@@ -490,6 +490,100 @@ describe('ProjectAssetGenerationPanel batch size / batch count (issue #1103)', (
   })
 })
 
+describe('ProjectAssetGenerationPanel 数値入力を空にしたとき (issue #1115)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue({ ...OPTIONS, loras: ['my-lora'] })
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
+    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images: [] })
+  })
+
+  const FIELDS: Array<[string, string]> = [
+    ['steps', 'steps'],
+    ['cfg scale', 'cfg scale'],
+    ['width', 'width'],
+    ['height', 'height'],
+    ['batch size(最大16)', 'batch size(最大16)'],
+    ['batch count(最大16)', 'batch count(最大16)'],
+  ]
+
+  it.each(FIELDS)('%s を全消去しても0に書き換わらず空欄のままである', async (label) => {
+    await openPanel()
+    const input = screen.getByLabelText(label) as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
+    expect(input.value).toBe('')
+  })
+
+  it('LoRA weight を全消去しても0に書き換わらず空欄のままである', async () => {
+    await openPanel()
+    fireEvent.change(screen.getByLabelText('LoRA'), { target: { value: 'my-lora' } })
+    const input = screen.getByLabelText('LoRA weight') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
+    expect(input.value).toBe('')
+  })
+
+  it('空欄のまま生成すると各項目の既定値で要求を送る', async () => {
+    await openPanel()
+    fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'cat' } })
+    for (const [label] of FIELDS) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value: '' } })
+    }
+    fireEvent.click(screen.getByText('生成'))
+    await waitFor(() => {
+      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          steps: 20,
+          cfgScale: 7,
+          width: 1920,
+          height: 1080,
+          batchSize: 4,
+          batchCount: 1,
+        })
+      )
+    })
+  })
+
+  it('width/heightが空欄のとき、プロジェクトの既定サイズがあればそれで送る', async () => {
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue({
+      ...OPTIONS,
+      defaultWidth: 640,
+      defaultHeight: 480,
+    })
+    await openPanel()
+    fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'cat' } })
+    fireEvent.change(screen.getByLabelText('width'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('height'), { target: { value: '' } })
+    fireEvent.click(screen.getByText('生成'))
+    await waitFor(() => {
+      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ width: 640, height: 480 })
+      )
+    })
+  })
+
+  it('LoRA weight が空欄のまま生成すると既定値1で送る', async () => {
+    await openPanel()
+    fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'cat' } })
+    fireEvent.change(screen.getByLabelText('LoRA'), { target: { value: 'my-lora' } })
+    fireEvent.change(screen.getByLabelText('LoRA weight'), { target: { value: '' } })
+    fireEvent.click(screen.getByText('生成'))
+    await waitFor(() => {
+      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ loraName: 'my-lora', loraWeight: 1 })
+      )
+    })
+  })
+
+  it('空欄のbatch sizeでも合計枚数の目安は既定値で計算する', async () => {
+    await openPanel()
+    fireEvent.change(screen.getByLabelText('batch size(最大16)'), { target: { value: '' } })
+    expect(screen.getByText(/この設定で合計4枚/)).toBeInTheDocument()
+  })
+})
+
 describe('ProjectAssetGenerationPanel クリップボードのbatchCount (issue #1103)', () => {
   beforeEach(() => {
     jest.clearAllMocks()

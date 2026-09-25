@@ -36,6 +36,22 @@ const PANEL_CLASS =
 const SUBSECTION_CLASS =
   "space-y-3 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 p-3";
 
+/** 数値入力を空にしたとき、生成要求に送る値(各useStateの初期値と同じ)。 */
+const DEFAULTS = {
+  steps: 20,
+  cfgScale: 7.0,
+  width: 1920,
+  height: 1080,
+  batchSize: 4,
+  batchCount: 1,
+  loraWeight: 1.0,
+};
+
+/** 空文字列は空欄のまま保持する。Number("") は0になり、入力欄が勝手に「0」へ書き換わるため(#1115)。 */
+function toNumberOrEmpty(value: string): number | "" {
+  return value === "" ? "" : Number(value);
+}
+
 /**
  * プロジェクト管理画面でComfyUI画像を生成し(automatic1111相当のパラメータ)、
  * 選択した1枚をlocal/test/production全環境へアセットとしてアップロードするパネル。
@@ -52,19 +68,19 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
 
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
-  const [steps, setSteps] = useState(20);
-  const [cfgScale, setCfgScale] = useState(7.0);
+  const [steps, setSteps] = useState<number | "">(20);
+  const [cfgScale, setCfgScale] = useState<number | "">(7.0);
   const [seed, setSeed] = useState("");
   const [samplerName, setSamplerName] = useState("");
   const [scheduler, setScheduler] = useState("");
-  const [width, setWidth] = useState(1920);
-  const [height, setHeight] = useState(1080);
-  const [batchSize, setBatchSize] = useState(4);
+  const [width, setWidth] = useState<number | "">(1920);
+  const [height, setHeight] = useState<number | "">(1080);
+  const [batchSize, setBatchSize] = useState<number | "">(4);
   // リピート回数。1回の要求のうちにサーバー側で繰り返され、リピートごとにseedが変わる(issue #1103)。
-  const [batchCount, setBatchCount] = useState(1);
+  const [batchCount, setBatchCount] = useState<number | "">(1);
   const [checkpoint, setCheckpoint] = useState("");
   const [loraName, setLoraName] = useState("");
-  const [loraWeight, setLoraWeight] = useState(1.0);
+  const [loraWeight, setLoraWeight] = useState<number | "">(1.0);
 
   const [generating, setGenerating] = useState(false);
   // 生成中に表示する「要求した」総枚数。生成中に入力を変えても要求時の枚数を出し続ける。
@@ -108,31 +124,34 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     }
   }
 
+  const effectiveBatchSize = batchSize === "" ? DEFAULTS.batchSize : batchSize;
+  const effectiveBatchCount = batchCount === "" ? DEFAULTS.batchCount : batchCount;
+
   async function handleGenerate() {
     if (!prompt.trim()) {
       setMessage({ type: "error", text: "promptを入力してください。" });
       return;
     }
     setGenerating(true);
-    setRequestedTotal(batchSize * batchCount);
+    setRequestedTotal(effectiveBatchSize * effectiveBatchCount);
     setMessage(null);
     setImages(null);
     setSelectedId(null);
     const result = await generateProjectImagesAction(projectId, {
       prompt,
       negativePrompt: negativePrompt || undefined,
-      steps,
-      cfgScale,
+      steps: steps === "" ? DEFAULTS.steps : steps,
+      cfgScale: cfgScale === "" ? DEFAULTS.cfgScale : cfgScale,
       samplerName: samplerName || undefined,
       scheduler: scheduler || undefined,
       seed: seed.trim() ? Number(seed) : null,
-      width,
-      height,
-      batchSize,
-      batchCount,
+      width: width === "" ? (options?.defaultWidth || DEFAULTS.width) : width,
+      height: height === "" ? (options?.defaultHeight || DEFAULTS.height) : height,
+      batchSize: effectiveBatchSize,
+      batchCount: effectiveBatchCount,
       checkpoint: checkpoint || undefined,
       loraName: loraName || undefined,
-      loraWeight: loraName ? loraWeight : undefined,
+      loraWeight: loraName ? (loraWeight === "" ? DEFAULTS.loraWeight : loraWeight) : undefined,
     });
     setGenerating(false);
     if (result.error) {
@@ -444,7 +463,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 value={steps}
                 min={1}
                 max={150}
-                onChange={(e) => setSteps(Number(e.target.value))}
+                onChange={(e) => setSteps(toNumberOrEmpty(e.target.value))}
               />
             </div>
             <div>
@@ -455,7 +474,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 step={0.1}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={cfgScale}
-                onChange={(e) => setCfgScale(Number(e.target.value))}
+                onChange={(e) => setCfgScale(toNumberOrEmpty(e.target.value))}
               />
             </div>
             <div>
@@ -510,7 +529,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 step={8}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={width}
-                onChange={(e) => setWidth(Number(e.target.value))}
+                onChange={(e) => setWidth(toNumberOrEmpty(e.target.value))}
               />
             </div>
             <div>
@@ -521,7 +540,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 step={8}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={height}
-                onChange={(e) => setHeight(Number(e.target.value))}
+                onChange={(e) => setHeight(toNumberOrEmpty(e.target.value))}
               />
             </div>
             <div>
@@ -535,7 +554,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 max={16}
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={batchSize}
-                onChange={(e) => setBatchSize(Number(e.target.value))}
+                onChange={(e) => setBatchSize(toNumberOrEmpty(e.target.value))}
               />
             </div>
             <div>
@@ -550,7 +569,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 aria-describedby="asset-batch-count-help"
                 className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                 value={batchCount}
-                onChange={(e) => setBatchCount(Number(e.target.value))}
+                onChange={(e) => setBatchCount(toNumberOrEmpty(e.target.value))}
               />
               <p id="asset-batch-count-help" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                 batch size枚の生成を繰り返す回数です。リピートのたびにseedが変わるので、同じ設定のまま違う絵柄の候補を増やせます。
@@ -558,7 +577,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             </div>
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            この設定で合計{batchSize * batchCount}枚(batch size {batchSize} × batch count {batchCount})を生成します。
+            この設定で合計{effectiveBatchSize * effectiveBatchCount}枚(batch size {effectiveBatchSize} × batch count {effectiveBatchCount})を生成します。
             合計枚数に上限はありませんが、枚数に比例して時間がかかり、最大の256枚では非常に長時間かかります。
           </p>
           <div>
@@ -604,7 +623,7 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                   max={2}
                   className="mt-1 w-full rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
                   value={loraWeight}
-                  onChange={(e) => setLoraWeight(Number(e.target.value))}
+                  onChange={(e) => setLoraWeight(toNumberOrEmpty(e.target.value))}
                 />
               </div>
             )}
