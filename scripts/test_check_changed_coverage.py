@@ -591,6 +591,45 @@ class TypeOnlyModuleDetection(unittest.TestCase):
         dirs = ccc.typescript_resolve_dirs(REPO_ROOT)
         self.assertIn(os.path.join(REPO_ROOT, "apps", "extension"), dirs)
 
+    # --- アプリ境界(#1117): 各ファイルは自分のアプリの typescript で変換される ---
+
+    def fake_typescript(self, app, emit):
+        """`apps/<app>/node_modules/typescript` に、常に `emit` を返す偽物を置く。"""
+        d = os.path.join(self.tmp, "apps", app, "node_modules", "typescript")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "package.json"), "w", encoding="utf-8") as f:
+            f.write('{"name":"typescript","version":"0.0.0","main":"index.js"}')
+        with open(os.path.join(d, "index.js"), "w", encoding="utf-8") as f:
+            f.write(
+                "module.exports = { ScriptTarget: {ES2020: 1}, ModuleKind: {ESNext: 1}, "
+                "JsxEmit: {React: 1}, transpileModule: () => ({ outputText: %s, diagnostics: [] }) };"
+                % json.dumps(emit)
+            )
+
+    def test_each_file_uses_its_own_apps_typescript(self):
+        self.fake_typescript("aaa", "export {};")  # 型のみと判定する版
+        self.fake_typescript("bbb", "const x = 1;")  # 実行時コードありと判定する版
+        a = self.write("apps/aaa/src/t.ts", "export type A = number;\n")
+        b = self.write("apps/bbb/src/t.ts", "export type A = number;\n")
+        self.assertEqual(self.detect([a, b]), {a})
+        self.assertEqual(self.detect([b, a]), {a})
+
+    def test_app_without_resolvable_typescript_is_not_type_only(self):
+        self.fake_typescript("aaa", "export {};")
+        a = self.write("apps/aaa/src/t.ts", "export type A = number;\n")
+        c = self.write("apps/ccc/src/t.ts", "export type A = number;\n")
+        self.assertEqual(self.detect([a, c]), {a})
+        self.assertEqual(self.detect([c, a]), {a})
+
+    def test_batch_still_starts_node_once(self):
+        self.fake_typescript("aaa", "export {};")
+        self.fake_typescript("bbb", "export {};")
+        a = self.write("apps/aaa/src/t.ts", "export type A = number;\n")
+        b = self.write("apps/bbb/src/t.ts", "export type A = number;\n")
+        with mock.patch.object(ccc.subprocess, "run", wraps=ccc.subprocess.run) as run:
+            self.assertEqual(self.detect([a, b]), {a, b})
+        self.assertEqual(run.call_count, 1)
+
     def test_no_candidates_does_not_invoke_node(self):
         """計測可能な .ts が無いときは判定を起動しない(ゲートの常用経路を遅くしない)。"""
         with mock.patch.object(ccc.subprocess, "run", side_effect=AssertionError("node を起動した")):

@@ -194,29 +194,48 @@ try {
   process.exit(2);
 }
 const root = input.root;
-const dirs = [];
-for (const f of input.files) dirs.push(path.dirname(path.resolve(root, f)));
-for (const d of input.resolveDirs || []) dirs.push(d);
-let ts = null;
-for (const d of dirs) {
-  try {
-    ts = require(require.resolve('typescript', { paths: [d] }));
-    break;
-  } catch (e) {
-    /* 次の候補を試す */
+// ファイルごとに、そのファイルが属するアプリ(apps/<name>/)の typescript で変換する。
+// アプリごとに解決してキャッシュするので、node の起動は1回のまま。アプリ配下のファイルは
+// 自アプリで解決できなければ型のみとみなさない(他アプリの版へ流用しない)。
+// アプリに属さないファイルだけが、従来どおり resolveDirs を順に試す。
+const tsCache = new Map();
+function loadTs(dirs) {
+  for (const d of dirs) {
+    try {
+      return require(require.resolve('typescript', { paths: [d] }));
+    } catch (e) {
+      /* 次の候補を試す */
+    }
   }
+  return null;
 }
-if (!ts) process.exit(3);
-const compilerOptions = {
-  target: ts.ScriptTarget.ES2020,
-  module: ts.ModuleKind.ESNext,
-  jsx: ts.JsxEmit.React,
-  removeComments: true,
-  isolatedModules: true,
-};
+function tsFor(f) {
+  const m = /^apps\/([^/]+)\//.exec(f.split(path.sep).join('/'));
+  const key = m ? m[1] : '';
+  if (!tsCache.has(key)) {
+    tsCache.set(
+      key,
+      m
+        ? loadTs([path.resolve(root, 'apps', key)])
+        : loadTs([root].concat(input.resolveDirs || []))
+    );
+  }
+  return tsCache.get(key);
+}
+function optionsFor(ts) {
+  return {
+    target: ts.ScriptTarget.ES2020,
+    module: ts.ModuleKind.ESNext,
+    jsx: ts.JsxEmit.React,
+    removeComments: true,
+    isolatedModules: true,
+  };
+}
 const DECLARATION = /\.d\.(ts|mts|cts)$/;
 const typeOnly = [];
 for (const f of input.files) {
+  const ts = tsFor(f);
+  if (!ts) continue; // typescript を解決できないアプリのファイルは型のみとみなさない
   let source;
   try {
     source = fs.readFileSync(path.resolve(root, f), 'utf8');
@@ -231,7 +250,7 @@ for (const f of input.files) {
   let result;
   try {
     result = ts.transpileModule(source, {
-      compilerOptions,
+      compilerOptions: optionsFor(ts),
       fileName,
       reportDiagnostics: isDeclaration,
     });
