@@ -22,7 +22,7 @@ app.use((req, res, next) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'penpot-design-mcp-server', version: '0.4.0' });
+  res.json({ status: 'ok', service: 'penpot-design-mcp-server', version: '0.4.1' });
 });
 
 // MCP Tool Endpoints

@@ -1274,8 +1274,21 @@ if ($path === '/wp-cli/post-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // ゴミ箱にある時点で「もう削除済み」と見なして404を返し、実削除は行わない。
     // この経路からゴミ箱の恒久削除はできなくなるが、それはWordPress管理画面の役目であり、
     // 本APIの`DELETE`は「ゴミ箱へ送る」までを責務とする(下の`--force`なしの選択と一貫する)。
-    [$statusCode, $statusOut, ] = runWp(['post', 'get', $postId, '--field=post_status', "--path=$sitePath", '--allow-root']);
+    // issue #1417: 404にしてよいのは「対象が無い」と断定できる失敗だけである。
+    // `wp post get` が非0で終わる理由は「投稿が無い」以外にもある(wp-cli自体の異常、
+    // DB接続の一時的な失敗、メモリ不足、パーミッション異常)。それらを一律404にすると、
+    // 呼び出し側は**確定的な答え**として受け取り、実際にはまだ存在する記事を
+    // 「もう消えている」ものとして扱ってしまう。#529 が `postExists` について既に
+    // 否定した形で、SSH側は #1411 で「断定できない失敗は502のまま + ログ」に揃えた。
+    [$statusCode, $statusOut, $statusErr] = runWp(['post', 'get', $postId, '--field=post_status', "--path=$sitePath", '--allow-root']);
     if ($statusCode !== 0) {
+        if (!wpPostNotFound($statusOut, $statusErr)) {
+            // 断定できない失敗。無言で500にすると、404にならない理由が誰にも分からない。
+            error_log("post-delete: 投稿の存在確認が対象なしと断定できない理由で失敗しました"
+                . " (slug=$slug postId=$postId exit=$statusCode): " . combinedOutput($statusOut, $statusErr));
+            respond(500, ['error' => '投稿の存在確認に失敗しました',
+                'detail' => combinedOutput($statusOut, $statusErr)]);
+        }
         respond(404, ['error' => "投稿 '$postId' が見つかりません"]);
     }
     if (trim($statusOut) === 'trash') {
@@ -1530,8 +1543,15 @@ if ($path === '/wp-cli/media-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // issue #1070 AC3: メディア(添付ファイル)もwp_postsベースの`wp post delete`のため、
     // post-deleteと同じく削除前に存在確認し、対象なしを404で区別する。
-    [$existsCode, , ] = runWp(['post', 'get', $mediaId, '--field=ID', "--path=$sitePath", '--allow-root']);
+    // issue #1417: post-delete と同じく、404は「対象が無い」と断定できるときだけにする。
+    [$existsCode, $existsOut, $existsErr] = runWp(['post', 'get', $mediaId, '--field=ID', "--path=$sitePath", '--allow-root']);
     if ($existsCode !== 0) {
+        if (!wpPostNotFound($existsOut, $existsErr)) {
+            error_log("media-delete: メディアの存在確認が対象なしと断定できない理由で失敗しました"
+                . " (slug=$slug mediaId=$mediaId exit=$existsCode): " . combinedOutput($existsOut, $existsErr));
+            respond(500, ['error' => 'メディアの存在確認に失敗しました',
+                'detail' => combinedOutput($existsOut, $existsErr)]);
+        }
         respond(404, ['error' => "メディア '$mediaId' が見つかりません"]);
     }
 

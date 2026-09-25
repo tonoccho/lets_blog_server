@@ -231,6 +231,84 @@ check(
 );
 
 echo "\n";
+/*
+ * issue #1417: `wp post get` の失敗が「対象が無い」と断定できるかを判定する。
+ *
+ * #1070 / #1326 で入れた削除前の存在確認は、終了コードが0以外なら**理由を問わず404**を
+ * 返していた。`wp post get` が非0で終わる理由は「投稿が無い」だけではなく、wp-cli自体の
+ * 異常、DB接続の一時的な失敗、PHPのメモリ不足、パーミッション異常などでも非0になる。
+ * それらが全て「対象なし(404)」に化けると、呼び出し側は**確定的な答え**として受け取り、
+ * 実際にはまだ存在する記事を「もう消えている」ものとして扱ってしまう。
+ *
+ * #529 が `postExists` について既に否定した形であり、SSH側は #1411 で
+ * 「断定できない失敗は502のまま + warn」に揃えた。agent側もここで揃える。
+ *
+ * 判定文言は Java 側の `WordPressSshOperations.POST_NOT_FOUND_PATTERN` と合わせる。
+ */
+check(
+    'wpPostNotFound: wp-cliの「見つからない」メッセージを対象なしと判定する',
+    wpPostNotFound('', 'Error: Could not find the post with ID 99.')
+);
+check(
+    'wpPostNotFound: Invalid post IDも対象なしと判定する',
+    wpPostNotFound('', 'Error: Invalid post ID.')
+);
+check(
+    'wpPostNotFound: 日本語ロケールの文言も対象なしと判定する',
+    wpPostNotFound('', 'エラー: 無効な投稿 ID です。')
+);
+check(
+    'wpPostNotFound: stdout側に出ていても拾う',
+    wpPostNotFound('Could not find the post with ID 7.', '')
+);
+check(
+    'wpPostNotFound: 大文字小文字を区別しない',
+    wpPostNotFound('', 'error: could not find the post with id 7.')
+);
+check(
+    'wpPostNotFound: DB接続失敗は対象なしと断定しない',
+    !wpPostNotFound('', "Error: Error establishing a database connection.")
+);
+check(
+    'wpPostNotFound: メモリ不足は対象なしと断定しない',
+    !wpPostNotFound('', 'PHP Fatal error: Allowed memory size of 134217728 bytes exhausted')
+);
+check(
+    'wpPostNotFound: パーミッション異常は対象なしと断定しない',
+    !wpPostNotFound('', "sh: 1: /usr/local/bin/wp: Permission denied")
+);
+check(
+    'wpPostNotFound: 空の出力は対象なしと断定しない',
+    !wpPostNotFound('', '')
+);
+/*
+ * issue #1417 のレビュー指摘: Java側と**literally 等価**であること。
+ *
+ * 当初のPHP側は `無効な投稿\s*ID` までで、Java側の
+ * `POST_NOT_FOUND_PATTERN`(`…|無効な投稿\s*ID\s*です`)が要求する `です` を
+ * 要求していなかった。同じ文字列に対して agent が404、SSHが502という食い違いが
+ * 起こりうる状態で、「文言を揃えてある」という私の記述は literally 誤りだった。
+ *
+ * レビュアーは wp-cli 2.12.0 の phar を展開し、`wp post get` が失敗時に出す文言は
+ * ハードコードの `Could not find the post with ID %d.` ただ1つで、`無効な投稿` は
+ * phar 内に存在しないことまで確認した。つまりこの分岐は現時点では発火しない。
+ * それでも揃えるのは、#487 が `wp post update` 経由(WordPressコアの翻訳文字列)で
+ * この日本語文言を実際に観測しているためで、将来 `wp post get` の実装が
+ * コア側の文言を通すようになったときに両者が食い違わないようにする。
+ */
+check(
+    'wpPostNotFound: Java側と揃えて「です」を要求する(単独の「無効な投稿ID」は断定しない)',
+    !wpPostNotFound('', 'エラー: 無効な投稿IDのため処理を中断しました')
+);
+check(
+    'wpPostNotFound: 「無効な投稿IDです」は対象なしと判定する',
+    wpPostNotFound('', 'エラー: 無効な投稿IDです。')
+);
+check(
+    'wpPostNotFound: 「無効な投稿 ID です」(空白あり)も判定する',
+    wpPostNotFound('', 'エラー: 無効な投稿 ID です。')
+);
+
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";
     foreach ($failures as $f) {
