@@ -262,3 +262,29 @@ function runWpWithStdin(array $args, string $stdin, ?int $timeoutSeconds = null)
         array_merge(['php', '-d', 'memory_limit=512M', '/usr/local/bin/wp'], $args)));
     return runProcessWithIO($command, $stdin, $timeoutSeconds);
 }
+
+/**
+ * `wp post get` の失敗が「対象が無い」と断定できるものかを判定する(issue #1417)。
+ *
+ * <p>終了コードが0以外になる理由は「投稿が無い」だけではない。wp-cli自体の異常、
+ * DB接続の一時的な失敗、PHPのメモリ不足、パーミッション異常などでも非0になる。
+ * それらを一律「対象なし(404)」にすると、呼び出し側は**確定的な答え**として受け取り、
+ * 実際にはまだ存在する記事を「もう消えている」ものとして扱ってしまう。
+ *
+ * <p>#529 が `postExists` について既に否定した形であり、SSH側
+ * ({@code WordPressSshOperations#isPostNotFoundError})は #1411 で
+ * 「断定できない失敗は502のまま + ログ」に揃えた。判定文言もそちらの
+ * `POST_NOT_FOUND_PATTERN` と合わせてある。
+ *
+ * @param string $stdout wp-cliの標準出力
+ * @param string $stderr wp-cliの標準エラー出力
+ * @return bool 「対象が無い」と断定できるならtrue
+ */
+function wpPostNotFound(string $stdout, string $stderr): bool
+{
+    $haystack = $stderr . "\n" . $stdout;
+    // Java側の `WordPressSshOperations.POST_NOT_FOUND_PATTERN` と**literally 同じ**にする。
+    // 末尾の `です` は Java 側が要求しており、片方だけ緩いと同じ文字列に対して
+    // agent が404・SSHが502という食い違いが起こる(issue #1417 のレビュー指摘)。
+    return preg_match('/Invalid post ID|Could not find the post|無効な投稿\s*ID\s*です/iu', $haystack) === 1;
+}
