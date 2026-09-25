@@ -100,12 +100,13 @@ const STATUS_GUIDANCE: Record<number, { cause: string; remedy: string }> = {
  * ほとんどだが、gatewayは応答にサービス名を載せない。そこでリクエストパスからgatewayの
  * ルート表を逆引きし、コンテナ名(`docker logs lbs-<id>`で辿れる)を添えて提示する。
  */
-function describeResponsibleService(url: string): string {
+function describeResponsibleService(url: string, reached = false): string {
   const service = downstreamServiceFor(url);
-  return (
-    `担当サービス: ${service.label} (コンテナ: lbs-${service.id}、パス: ${pathOf(url)})。` +
-    ` 対応: 「docker logs lbs-${service.id}」でそのサービスのログを確認してください。`
-  );
+  const identity = `担当サービス: ${service.label} (コンテナ: lbs-${service.id}、パス: ${pathOf(url)})。`;
+  // 応答が返っている場合、コンテナは起動しており到達もできている。ログ確認は補助に留める。
+  return reached
+    ? `${identity} 補足: 必要に応じて「docker logs lbs-${service.id}」でそのサービスのログも確認できます。`
+    : `${identity} 対応: 「docker logs lbs-${service.id}」でそのサービスのログを確認してください。`;
 }
 
 /** 相関IDが取れている場合に、ログ横断検索の手掛かりとして添える一文。 */
@@ -125,20 +126,29 @@ export function describeError(error: unknown): string {
     const guidance = STATUS_GUIDANCE[error.status];
     const detail = error.responseBody.trim();
     const parts = [`APIエラー (${error.status})`];
-    if (guidance) {
+    // 502で応答本文がある場合、gatewayは担当サービスへ到達済みで、担当サービスが上流(外部サービス)の
+    // 失敗を報告している(issue #1082)。「到達できなかった」と断定せず、原因を持つ応答本文を先頭に置く。
+    const upstreamFailure = error.status === 502 && detail !== '';
+    if (upstreamFailure) {
+      parts.push(
+        `サーバーからの応答: ${truncate(detail, 500)}`,
+        'gatewayは担当サービスへ到達できましたが、担当サービスの上流(外部サービス)が失敗しました。',
+        '対応: 上記の応答内容に沿って、上流サービスの状態や設定を確認してください。'
+      );
+    } else if (guidance) {
       parts.push(guidance.cause, `対応: ${guidance.remedy}`);
     }
     // 5xxは下流サービス側の障害(gatewayは応答をそのまま中継する)。どのサービスを見ればよいかを
     // 示さないと利用者はサービス分割後の構成から当たりを付けられないため、ここで明示する。
     // 4xxは利用者の操作・入力に起因することが大半で、サービス名を出すとむしろ誤誘導になるため付けない。
     if (error.status >= 500) {
-      parts.push(describeResponsibleService(error.url));
+      parts.push(describeResponsibleService(error.url, upstreamFailure));
       const correlation = describeCorrelationId(error.correlationId);
       if (correlation) {
         parts.push(correlation);
       }
     }
-    if (detail) {
+    if (detail && !upstreamFailure) {
       parts.push(`サーバーからの応答: ${truncate(detail, 500)}`);
     }
     return parts.join(' ');

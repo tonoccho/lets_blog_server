@@ -46,6 +46,45 @@ describe('describeError: 下流サービス障害の切り分け(issue #585)', (
     expect(message).toContain('lbs-publishing');
   });
 
+  describe('502: 応答本文の有無で到達不能の断定を出し分ける(issue #1082)', () => {
+    const url = 'https://localhost/api/ai/image';
+    const body = '{"error":"ComfyUIへのジョブ投入に失敗しました: ckpt_name not in []"}';
+
+    it('応答本文を伴う502では「到達できませんでした」と断定しない', () => {
+      const message = describeError(new ApiError('APIエラー (502)', 502, body, url, 'corr-1'));
+      expect(message).not.toContain('到達できませんでした');
+      expect(message).not.toContain('コンテナが起動しているか');
+      expect(message).toContain('上流');
+    });
+
+    it('応答本文を伴う502では、サーバー応答をステータス直後(担当サービスの案内より前)に置く', () => {
+      const message = describeError(new ApiError('APIエラー (502)', 502, body, url, 'corr-1'));
+      expect(message.startsWith(`APIエラー (502) サーバーからの応答: ${body}`)).toBe(true);
+      expect(message.indexOf('サーバーからの応答')).toBeLessThan(message.indexOf('担当サービス'));
+    });
+
+    it('応答本文を伴う502でも相関IDと担当サービス名は維持する', () => {
+      const message = describeError(new ApiError('APIエラー (502)', 502, body, url, 'corr-1'));
+      expect(message).toContain('相関ID: corr-1');
+      expect(message).toContain('画像・ダイアグラムサービス');
+    });
+
+    it('空白のみの本文は本文なしとして扱い、従来の到達不能の説明を出す', () => {
+      const message = describeError(new ApiError('APIエラー (502)', 502, '  \n', url));
+      expect(message).toContain('gatewayが担当サービスへ到達できませんでした');
+      expect(message).toContain('担当サービスのコンテナが起動しているか確認してください');
+    });
+
+    it('応答本文なしの502は従来どおり到達不能とコンテナ確認を案内する', () => {
+      const message = describeError(new ApiError('APIエラー (502)', 502, '', url, 'corr-2'));
+      expect(message).toContain('gatewayが担当サービスへ到達できませんでした');
+      expect(message).toContain('担当サービスのコンテナが起動しているか確認してください');
+      expect(message).toContain('docker logs lbs-media');
+      expect(message).toContain('相関ID: corr-2');
+      expect(message).not.toContain('サーバーからの応答');
+    });
+  });
+
   it('4xxは利用者の操作起因が大半のため、担当サービス名は付けない', () => {
     const message = describeError(
       new ApiError('APIエラー (404)', 404, 'not found', 'https://localhost/api/projects/3')

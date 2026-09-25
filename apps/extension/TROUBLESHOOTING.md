@@ -39,6 +39,11 @@ gateway までは到達したものの、転送先の下流サービスがエラ
 | メッセージに相関ID(`X-Correlation-Id`)が含まれる場合、`docker compose logs \| grep <相関ID>` で gateway と下流サービスをまたいだ経路を追う |
 | `docker compose ps` で該当コンテナが healthy かを確認する |
 
+`APIエラー (502)` で先頭に「サーバーからの応答: …」が付く場合は、gateway は担当サービスへ到達済みで、
+担当サービスの上流(ComfyUI などの外部サービス)が失敗しています。コンテナの起動確認より先に、
+応答内容(例: ComfyUIのチェックポイント未配置)に沿って上流の状態を確認してください(issue #1082)。
+応答本文が無い502のときだけ、担当サービスへ到達できなかったものとしてコンテナの起動を確認します。
+
 どのパスがどのサービスへ振り分けられるかは `services/gateway/src/main/resources/application.yml` の
 ルート表が決めます(拡張側の対応表は `src/downstreamServices.ts`)。
 
