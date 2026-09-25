@@ -3,7 +3,6 @@ package com.letsblog.platform.controller;
 import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.service.AppSettingService;
 import com.letsblog.platform.service.SystemSettingService;
-import java.util.Arrays;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -72,7 +71,7 @@ public class InternalPlatformSettingsController {
                 appSettingService.baseUrlFor(resolved),
                 appSettingService.apiKeyFor(resolved),
                 appSettingService.defaultModelFor(resolved),
-                parseAvailableModels(appSettingService.getLlmAvailableModels()),
+                appSettingService.availableModelsFor(resolved),
                 appSettingService.requestTimeoutSeconds());
     }
 
@@ -89,15 +88,5 @@ public class InternalPlatformSettingsController {
                 appSettingService.comfyUiBaseUrl(),
                 appSettingService.chatGptApiKey(),
                 appSettingService.chatGptBaseUrl());
-    }
-
-    private List<String> parseAvailableModels(String csv) {
-        if (csv == null || csv.isBlank()) {
-            return List.of();
-        }
-        return Arrays.stream(csv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .toList();
     }
 }

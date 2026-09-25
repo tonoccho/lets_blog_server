@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +45,8 @@ public class AppSettingService {
     static final String LLM_CLAUDE_MODEL = "llm_claude_model";
     static final String LLM_OLLAMA_BASE_URL = "llm_ollama_base_url";
     static final String LLM_OLLAMA_MODEL = "llm_ollama_model";
+    static final String LLM_OLLAMA_AVAILABLE_MODELS = "llm_ollama_available_models";
+    static final String LLM_CLAUDE_AVAILABLE_MODELS = "llm_claude_available_models";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
     static final String IMAGE_LLM_API_KEY = "image_llm_api_key";
     static final String IMAGE_LLM_BASE_URL = "image_llm_base_url";
@@ -89,6 +92,10 @@ public class AppSettingService {
             new Definition(LLM_OLLAMA_MODEL, "Ollama 既定モデル(OLLAMA用)", false),
             new Definition(LLM_CLAUDE_API_KEY, "Claude APIキー", true),
             new Definition(LLM_CLAUDE_MODEL, "Claude 既定モデル", false),
+            new Definition(LLM_OLLAMA_AVAILABLE_MODELS,
+                    "Ollama 選択可能モデル(カンマ区切り、OLLAMA用。未設定なら既定モデルのみ)", false),
+            new Definition(LLM_CLAUDE_AVAILABLE_MODELS,
+                    "Claude 選択可能モデル(カンマ区切り、CLAUDE用。未設定なら既定モデルのみ)", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
             new Definition(IMAGE_LLM_API_KEY, "画像生成 APIキー(ChatGPT用)", true),
             new Definition(IMAGE_LLM_BASE_URL, "画像生成 ベースURL(ChatGPT用)", false),
@@ -145,6 +152,8 @@ public class AppSettingService {
         defaults.put(LLM_CLAUDE_MODEL, llmClaudeModelEnvDefault);
         defaults.put(LLM_OLLAMA_BASE_URL, llmOllamaBaseUrlEnvDefault);
         defaults.put(LLM_OLLAMA_MODEL, llmOllamaModelEnvDefault);
+        defaults.put(LLM_OLLAMA_AVAILABLE_MODELS, "");
+        defaults.put(LLM_CLAUDE_AVAILABLE_MODELS, "");
         defaults.put(COMFYUI_BASE_URL, comfyUiBaseUrlEnvDefault);
         defaults.put(IMAGE_LLM_API_KEY, imageLlmApiKeyEnvDefault);
         defaults.put(IMAGE_LLM_BASE_URL, imageLlmBaseUrlEnvDefault);
@@ -492,6 +501,35 @@ public class AppSettingService {
             case OLLAMA -> "";
             case OPENAI -> getLlmApiKey();
         };
+    }
+
+    /**
+     * プロジェクトのモデル選択に並べる、providerで実際に使えるモデル名の一覧(issue #1088)。
+     * OPENAIは従来どおり{@code llm_available_models}。OLLAMA/CLAUDEは専用キーを持ち、未設定ならそのproviderの
+     * 既定モデルのみを返す(他providerのモデル名が混ざって404になるのを防ぐ)。
+     */
+    @Transactional(readOnly = true)
+    public List<String> availableModelsFor(AiProvider provider) {
+        return switch (provider) {
+            case OPENAI -> parseModelList(getLlmAvailableModels());
+            case OLLAMA -> modelListOrDefault(resolve(LLM_OLLAMA_AVAILABLE_MODELS), getLlmOllamaModel());
+            case CLAUDE -> modelListOrDefault(resolve(LLM_CLAUDE_AVAILABLE_MODELS), getLlmClaudeModel());
+        };
+    }
+
+    private static List<String> modelListOrDefault(String csv, String defaultModel) {
+        List<String> models = parseModelList(csv);
+        return models.isEmpty() ? parseModelList(defaultModel) : models;
+    }
+
+    private static List<String> parseModelList(String csv) {
+        if (csv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .toList();
     }
 
     public String defaultModelFor(AiProvider provider) {

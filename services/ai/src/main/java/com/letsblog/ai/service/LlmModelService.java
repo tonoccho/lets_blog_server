@@ -34,7 +34,8 @@ public class LlmModelService {
     }
 
     public LlmModelListResponse listModelsForProject(Long projectId) {
-        return new LlmModelListResponse(llmConfigProvider.availableModels(), getSelectedModel(projectId));
+        return new LlmModelListResponse(
+                llmConfigProvider.availableModelsFor(getSelectedProvider(projectId)), getSelectedModel(projectId));
     }
 
     /**

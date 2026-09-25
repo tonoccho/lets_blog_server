@@ -326,5 +326,10 @@ class LlmClientTest {
         public List<String> availableModels() {
             return List.of(model);
         }
+
+        @Override
+        public List<String> availableModelsFor(AiProvider requested) {
+            return List.of(model);
+        }
     }
 }

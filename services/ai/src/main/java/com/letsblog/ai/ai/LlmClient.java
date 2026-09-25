@@ -94,6 +94,11 @@ public class LlmClient {
             public java.util.List<String> availableModels() {
                 return java.util.List.of(model);
             }
+
+            @Override
+            public java.util.List<String> availableModelsFor(AiProvider provider) {
+                return java.util.List.of(model);
+            }
         };
     }
 

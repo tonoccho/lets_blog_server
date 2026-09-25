@@ -31,4 +31,7 @@ public interface LlmConfigProvider {
 
     /** プロジェクト画面のモデル選択ドロップダウンに表示する、選択可能なモデル名の一覧。 */
     List<String> availableModels();
+
+    /** 指定providerで実際に使える、選択可能なモデル名の一覧(issue #1088)。 */
+    List<String> availableModelsFor(AiProvider provider);
 }

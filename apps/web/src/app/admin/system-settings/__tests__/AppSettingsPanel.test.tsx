@@ -43,6 +43,8 @@ function allSettings(): AppSetting[] {
       value: 'qwen2.5:7b-instruct',
       source: 'DATABASE',
     }),
+    setting({ key: 'llm_ollama_available_models', label: 'Ollama 選択可能モデル', value: 'qwen2.5:7b-instruct' }),
+    setting({ key: 'llm_claude_available_models', label: 'Claude 選択可能モデル', value: 'claude-3-5-haiku-20241022' }),
     setting({ key: 'llm_claude_api_key', label: 'Claude APIキー', secret: true, configured: false, value: null }),
     setting({ key: 'llm_claude_model', label: 'Claude 既定モデル', value: 'claude-3-5-haiku-20241022' }),
     setting({ key: 'comfyui_base_url', label: 'ComfyUI ベースURL', value: 'http://comfyui:8188' }),
@@ -87,6 +89,17 @@ describe('AppSettingsPanel', () => {
     const llmSection = field('llm_provider')!.closest('section')
     expect(llmSection).toContainElement(baseUrl)
     expect(llmSection).toContainElement(model)
+  })
+
+  it('provider別の選択可能モデルのキーを外部LLMサービス連携グループに描画する(issue #1088)', () => {
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    const llmSection = field('llm_provider')!.closest('section')
+    for (const name of ['llm_ollama_available_models', 'llm_claude_available_models']) {
+      const input = field(name)
+      expect(input).not.toBeNull()
+      expect(llmSection).toContainElement(input)
+    }
   })
 
   it('管理画面パスの設定項目を専用グループに描画し、説明文で用途を案内する(issue #1079)', () => {

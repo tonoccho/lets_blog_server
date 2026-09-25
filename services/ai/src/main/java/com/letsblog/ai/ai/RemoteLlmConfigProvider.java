@@ -81,6 +81,11 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
         return resolveDefault().availableModels();
     }
 
+    @Override
+    public List<String> availableModelsFor(AiProvider provider) {
+        return resolveFor(provider).availableModels();
+    }
+
     private PlatformServiceClient.LlmConfig resolveFor(AiProvider provider) {
         return resolve(provider == null ? null : provider.name());
     }

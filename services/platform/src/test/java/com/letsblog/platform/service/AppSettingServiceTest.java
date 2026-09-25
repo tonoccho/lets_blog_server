@@ -786,4 +786,94 @@ class AppSettingServiceTest {
 
         verify(repository, never()).save(any());
     }
+
+    // ---- provider別の選択可能モデル一覧(issue #1088) ----
+
+    @Test
+    void availableModelsFor_OPENAIはllm_available_modelsを返す() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        assertEquals(java.util.List.of("gpt-4o-mini", "gpt-4o"), service.availableModelsFor(AiProvider.OPENAI));
+    }
+
+    @Test
+    void availableModelsFor_OLLAMAはOpenAIのモデル名を含まない() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        java.util.List<String> models = service.availableModelsFor(AiProvider.OLLAMA);
+
+        assertEquals(java.util.List.of("qwen2.5:7b-instruct"), models);
+    }
+
+    @Test
+    void availableModelsFor_OLLAMAはllm_ollama_available_modelsのDB値を優先する() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        when(repository.findById("llm_ollama_available_models")).thenReturn(Optional.of(new SystemSetting(
+                "llm_ollama_available_models", credentialCipher.encrypt("qwen3:8b, ,llama3.1:8b"))));
+
+        assertEquals(java.util.List.of("qwen3:8b", "llama3.1:8b"), service.availableModelsFor(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void availableModelsFor_CLAUDEはClaudeのモデル名を返す() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        assertEquals(java.util.List.of("claude-3-5-haiku-20241022"), service.availableModelsFor(AiProvider.CLAUDE));
+    }
+
+    @Test
+    void availableModelsFor_CLAUDEはllm_claude_available_modelsのDB値を優先する() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        when(repository.findById("llm_claude_available_models")).thenReturn(Optional.of(new SystemSetting(
+                "llm_claude_available_models", credentialCipher.encrypt("claude-a,claude-b"))));
+
+        assertEquals(java.util.List.of("claude-a", "claude-b"), service.availableModelsFor(AiProvider.CLAUDE));
+    }
+
+    @Test
+    void availableModelsFor_OPENAIの一覧が空なら空を返す() {
+        AppSettingService service = new AppSettingService(
+                repository, credentialCipher, adminAuthorizationService,
+                "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "", "120",
+                "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
+                "http://ollama:11434/v1", "qwen2.5:7b-instruct",
+                "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
+                "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
+                "http://localhost:3000", "10", "wp-admin");
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        assertEquals(java.util.List.of(), service.availableModelsFor(AiProvider.OPENAI));
+    }
+
+    @Test
+    void availableModelsFor_OLLAMAの既定モデルも空なら空を返す() {
+        AppSettingService service = new AppSettingService(
+                repository, credentialCipher, adminAuthorizationService,
+                "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o", "120",
+                "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
+                "http://ollama:11434/v1", "",
+                "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
+                "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
+                "http://localhost:3000", "10", "wp-admin");
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        assertEquals(java.util.List.of(), service.availableModelsFor(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void getAllSettings_provider別の候補モデルキーを一覧に含む() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        java.util.List<String> keys = service.getAllSettings().stream()
+                .map(AppSettingService.SettingStatus::key).toList();
+
+        assertTrue(keys.contains("llm_ollama_available_models"), "実際のキー一覧: " + keys);
+        assertTrue(keys.contains("llm_claude_available_models"), "実際のキー一覧: " + keys);
+    }
 }

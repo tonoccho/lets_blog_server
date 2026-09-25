@@ -49,14 +49,48 @@ class LlmModelServiceTest {
     }
 
     @Test
-    void listModelsForProject_LlmConfigProviderの一覧を返す() {
+    void listModelsForProject_プロジェクトのproviderに対応する一覧を返す() {
         when(projectAiSettingsService.getLlmModel(1L)).thenReturn("gpt-4o");
-        when(llmConfigProvider.availableModels()).thenReturn(List.of("gpt-4o-mini", "gpt-4o"));
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("OPENAI");
+        when(llmConfigProvider.availableModelsFor(AiProvider.OPENAI)).thenReturn(List.of("gpt-4o-mini", "gpt-4o"));
 
         LlmModelListResponse response = service().listModelsForProject(1L);
 
         assertEquals(List.of("gpt-4o-mini", "gpt-4o"), response.availableModels());
         assertEquals("gpt-4o", response.selected());
+    }
+
+    @Test
+    void listModelsForProject_OLLAMA上書きならOllamaの一覧を返しOpenAIのモデル名を含まない() {
+        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("OLLAMA");
+        when(llmConfigProvider.defaultModel()).thenReturn("qwen2.5:7b-instruct");
+        when(llmConfigProvider.availableModelsFor(AiProvider.OLLAMA)).thenReturn(List.of("qwen2.5:7b-instruct"));
+
+        LlmModelListResponse response = service().listModelsForProject(1L);
+
+        assertEquals(List.of("qwen2.5:7b-instruct"), response.availableModels());
+    }
+
+    @Test
+    void listModelsForProject_CLAUDE上書きならClaudeの一覧を返す() {
+        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("CLAUDE");
+        when(llmConfigProvider.defaultModel()).thenReturn("claude-3-5-haiku-20241022");
+        when(llmConfigProvider.availableModelsFor(AiProvider.CLAUDE)).thenReturn(List.of("claude-3-5-haiku-20241022"));
+
+        assertEquals(List.of("claude-3-5-haiku-20241022"), service().listModelsForProject(1L).availableModels());
+    }
+
+    @Test
+    void listModelsForProject_上書きなしならシステム既定providerの一覧を返す() {
+        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn(null);
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(llmConfigProvider.defaultModel()).thenReturn("qwen2.5:7b-instruct");
+        when(llmConfigProvider.availableModelsFor(AiProvider.OLLAMA)).thenReturn(List.of("qwen2.5:7b-instruct"));
+
+        assertEquals(List.of("qwen2.5:7b-instruct"), service().listModelsForProject(1L).availableModels());
     }
 
     @Test
