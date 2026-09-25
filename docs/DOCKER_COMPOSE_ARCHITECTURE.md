@@ -160,11 +160,19 @@ docker logs -f lbs-ollama-model-init
 docker exec lbs-ollama ollama list
 ```
 
-`docker compose up -d` は既に正常終了しているワンショットを再実行しない。モデルを消して
-しまった場合や、`LLM_OLLAMA_MODEL` を変えた場合は明示的に作り直す。
+`docker compose up -d` は、正常終了済み(`exited` / `ExitCode=0` / `restart: "no"`)の
+`ollama-model-init` を**毎回再実行する**(#1094 で実測: 実行前後で `FinishedAt` が
+`2026-09-25T10:17:08Z` → `2026-09-25T22:14:11Z` に更新され、`Starting` / `Started` が出力された)。
+`ollama pull` は冪等で、取得済みのモデルには即座に `success` を返し、モデルは変わらない。
+ただし `up -d` のたびに `ollama pull` が走るため、**起動のたびにレジストリへのネットワーク
+アクセスが発生する**。オフライン環境や細い回線ではこの点に注意する。
+
+そのため、モデルを消してしまった場合も、`LLM_OLLAMA_MODEL` を変えた場合も、追加の操作は
+要らない。`.env` を変えて `docker compose up -d` するだけで再取得される。
+`--force-recreate ollama-model-init` は不要である。
 
 ```bash
-docker compose up -d --force-recreate ollama-model-init
+docker compose up -d
 ```
 
 取得の完了前に AI 機能を叩くと、ai-service が Ollama の 404 を
