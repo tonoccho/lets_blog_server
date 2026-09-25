@@ -1,5 +1,6 @@
 package com.letsblog.publishing.cms.ssh;
 
+import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import com.letsblog.publishing.cms.AuthCookie;
 import com.letsblog.publishing.cms.AuthorProvisioningRequest;
 import com.letsblog.publishing.cms.WpCliInstallResult;
@@ -777,9 +778,52 @@ public class WordPressSshOperations {
      * `wp post delete`を`--force`なしで実行する(ゴミ箱対応の投稿タイプはWordPressコアの
      * `wp_delete_post()`既定挙動でゴミ箱へ移動される。REST API版(forceパラメータなし)と
      * 同じ挙動になる想定)。
+     *
+     * <p><b>issue #1411: 削除前に`post_status`を見る。</b>agent transportの
+     * `/wp-cli/post-delete`は#1070で存在確認を、#1326でゴミ箱判定を入れたが、
+     * どちらもSSH transportには適用されていなかった。SSH管理サイトは実運用の顧客サイトであり、
+     * 未対応のままだと次の2つが残る:
+     *
+     * <ul>
+     *   <li>存在しないIDの削除が一律502({@link SshOperationException})になり、
+     *       呼び出し側の入力ミスとインフラ障害が区別できない(#1070相当)</li>
+     *   <li>`--force`なしの1回目でゴミ箱へ移動した投稿へ削除要求が再送されると、
+     *       WordPressコアは既に`trash`の投稿への`wp_delete_post()`を恒久削除として扱うため、
+     *       **記事が復旧不能に失われる**(#1326相当)。タイムアウト後のリトライで起こりうる</li>
+     * </ul>
+     *
+     * <p><b>一時的な失敗を404に化けさせない(issue #529)。</b>{@link #postExists}が
+     * 同じ理由で安全側へ倒しているのと同じ判断である。`wp post get`の失敗のうち
+     * 「投稿が無い」と断定できるのは{@link #isPostNotFoundError}が真のときだけで、
+     * SSHやwp-cliの一時的な不調まで404にすると、呼び出し側は「消すものが無い」という
+     * 確定的な答えを受け取ってそれ以上追わなくなる。断定できない失敗は502のままにする。
+     *
+     * <p>この経路からゴミ箱の恒久削除はできなくなるが、それはWordPress管理画面の役目であり、
+     * 本APIの削除は「ゴミ箱へ送る」までを責務とする(`--force`を付けない既存の選択と一貫する)。
      */
     public void deletePost(WordPressCredentials creds, String postId) {
-        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + postId));
+        SshCommandResult status = exec(creds,
+                wpCli(creds, "post get " + ShellQuote.single(postId) + " --field=post_status"));
+        if (!status.ok()) {
+            if (isPostNotFoundError(status)) {
+                throw new PostNotFoundException("投稿 '" + postId + "' が見つかりません");
+            }
+            // 断定できない失敗はここで止める。`postExists`が同じ分岐でwarnを出しているのと
+            // 同じ理由で、ここも記録する(issue #1411のレビュー指摘)。`isPostNotFoundError`は
+            // wp-cliのエラー文言の正規表現なので、ロケールやバージョンで文言が変われば
+            // 「本当は存在しない」ケースがこの分岐へ落ちる。そのとき無言だと、404にならない
+            // 理由が誰にも分からない。
+            log.warn("投稿の存在確認が実在しないと断定できない理由で失敗したため、削除を中止します: "
+                    + "postId={}, exitStatus={}, detail={}",
+                    postId, status.exitStatus(), firstLine(status.stderr(), status.stdout()));
+            throw new SshOperationException("WordPress投稿の存在確認に失敗しました: "
+                    + firstLine(status.stderr(), status.stdout()));
+        }
+        if ("trash".equals(status.stdout().trim())) {
+            throw new PostNotFoundException("投稿 '" + postId + "' は既に削除済み(ゴミ箱)です");
+        }
+
+        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + ShellQuote.single(postId)));
         if (!result.ok()) {
             throw new SshOperationException("WordPress投稿の削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
@@ -956,7 +1000,25 @@ public class WordPressSshOperations {
      * `--force`を付けてゴミ箱を経由せず物理削除する(アップロード済みファイルも合わせて削除される)。
      */
     public void deleteMedia(WordPressCredentials creds, String mediaId) {
-        SshCommandResult result = exec(creds, wpCli(creds, "post delete " + mediaId + " --force"));
+        // issue #1411: agent側の`/wp-cli/media-delete`(#1070)と同じく、削除前に存在を確かめて
+        // 対象なしを404で区別する。`--force`付きなので#1326のゴミ箱問題は起こらない
+        // (添付ファイルはそもそもゴミ箱を持たない)が、存在しないIDが502になる点は同じだった。
+        // #529と同じ理由で、実在しないと断定できない失敗は404にせず502のままにする。
+        SshCommandResult exists = exec(creds,
+                wpCli(creds, "post get " + ShellQuote.single(mediaId) + " --field=ID"));
+        if (!exists.ok()) {
+            if (isPostNotFoundError(exists)) {
+                throw new PostNotFoundException("メディア '" + mediaId + "' が見つかりません");
+            }
+            log.warn("メディアの存在確認が実在しないと断定できない理由で失敗したため、削除を中止します: "
+                    + "mediaId={}, exitStatus={}, detail={}",
+                    mediaId, exists.exitStatus(), firstLine(exists.stderr(), exists.stdout()));
+            throw new SshOperationException("メディアの存在確認に失敗しました: "
+                    + firstLine(exists.stderr(), exists.stdout()));
+        }
+
+        SshCommandResult result = exec(creds,
+                wpCli(creds, "post delete " + ShellQuote.single(mediaId) + " --force"));
         if (!result.ok()) {
             throw new SshOperationException("メディアの削除に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));

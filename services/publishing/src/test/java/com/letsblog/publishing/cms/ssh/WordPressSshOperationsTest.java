@@ -14,6 +14,7 @@ import com.letsblog.publishing.domain.BulkOperationType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -31,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.notNull;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -570,17 +572,27 @@ class WordPressSshOperationsTest {
                 () -> operations.createOrUpdatePost(creds(), postContent(), null));
     }
 
+    /**
+     * issue #1411 で存在確認が1回増えたため、`post delete` は2本目のコマンドになった。
+     * 検証内容(`--force`/`--yes` を付けない)は変えていない。IDは同Issueで
+     * ShellQuote を通すようにしたので `'99'` を見る。
+     */
     @Test
     void deletePost_forceなしでpost_deleteを実行する() {
-        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(ok("publish\n"));
+        when(executor.exec(any(SshConnectionParams.class), contains("post delete"), isNull()))
+                .thenReturn(ok(""));
 
         operations.deletePost(creds(), "99");
 
+        // 1本目は存在確認、2本目が削除(issue #1411)。検証対象は2本目。
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("post delete 99"));
-        assertEquals(false, commandCaptor.getValue().contains("--force"));
-        assertEquals(false, commandCaptor.getValue().contains("--yes"));
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        String deleteCommand = commandCaptor.getAllValues().get(1);
+        assertEquals(true, deleteCommand.contains("post delete '99'"));
+        assertEquals(false, deleteCommand.contains("--force"));
+        assertEquals(false, deleteCommand.contains("--yes"));
     }
 
     @Test
@@ -590,17 +602,103 @@ class WordPressSshOperationsTest {
         assertThrows(SshOperationException.class, () -> operations.deletePost(creds(), "99"));
     }
 
+    /** issue #1411 で存在確認が増えた分の追従。検証内容は変えていない。 */
     @Test
     void deleteMedia_forceありpost_deleteを実行する() {
-        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(ok("123\n"));
+        when(executor.exec(any(SshConnectionParams.class), contains("post delete"), isNull()))
+                .thenReturn(ok(""));
 
         operations.deleteMedia(creds(), "123");
 
+        // 1本目は存在確認、2本目が削除(issue #1411)。検証対象は2本目。
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("post delete 123"));
-        assertEquals(true, commandCaptor.getValue().contains("--force"));
-        assertEquals(false, commandCaptor.getValue().contains("--yes"));
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        String deleteCommand = commandCaptor.getAllValues().get(1);
+        assertEquals(true, deleteCommand.contains("post delete '123'"));
+        assertEquals(true, deleteCommand.contains("--force"));
+        assertEquals(false, deleteCommand.contains("--yes"));
+    }
+
+    /**
+     * issue #1411: SSH transport の削除を agent transport(#1070 / #1326 適用後)に揃える。
+     *
+     * <p>agent側の {@code /wp-cli/post-delete} は削除前に
+     * {@code wp post get --field=post_status} で存在を確かめ、対象なしと
+     * **ゴミ箱(trash)** をどちらも404で返す。SSH側にはその確認が一切無く、
+     *
+     * <ul>
+     *   <li>存在しないIDの削除が一律502({@link SshOperationException})になり、
+     *       呼び出し側の入力ミスとインフラ障害が区別できない(#1070相当)</li>
+     *   <li>`--force`なしの1回目でゴミ箱へ移動した投稿に削除要求が再送されると、
+     *       WordPressコアが恒久削除として扱うため**記事が復旧不能に失われる**(#1326相当)</li>
+     * </ul>
+     *
+     * が残っていた。SSH管理サイトは実運用の顧客サイトである。
+     */
+    @Test
+    void deletePost_存在しないIDは502ではなく404として区別する() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(fail("Error: Could not find the post with ID 99."));
+
+        assertThrows(PostNotFoundException.class, () -> operations.deletePost(creds(), "99"));
+
+        verify(executor, never()).exec(any(SshConnectionParams.class), contains("post delete"), isNull());
+    }
+
+    @Test
+    void deletePost_ゴミ箱の投稿への再削除は404にし恒久削除しない() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(ok("trash\n"));
+
+        assertThrows(PostNotFoundException.class, () -> operations.deletePost(creds(), "99"));
+
+        // `wp post delete` を一度も実行しないことが、記事がゴミ箱に残る根拠である。
+        verify(executor, never()).exec(any(SshConnectionParams.class), contains("post delete"), isNull());
+    }
+
+    /**
+     * issue #529 の教訓を削除経路にも効かせる。同ファイルの {@code postExists} は
+     * 「実在しないと断定できない失敗」を実在扱い(安全側)にしている。削除でも同じで、
+     * 一時的なSSH/wp-cliの不調を404(=対象なし)に化けさせてはならない。
+     * 404は「消すものが無い」という確定的な答えであり、呼び出し側はそれ以上追わない。
+     */
+    @Test
+    void deletePost_実在しないと断定できない失敗は404ではなく502のままにする() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(fail("ssh: connect to host example.com port 22: Connection timed out"));
+
+        assertThrows(SshOperationException.class, () -> operations.deletePost(creds(), "99"));
+
+        verify(executor, never()).exec(any(SshConnectionParams.class), contains("post delete"), isNull());
+    }
+
+    @Test
+    void deletePost_存在確認のIDはシェルクォートを通す() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(ok("publish\n"));
+        when(executor.exec(any(SshConnectionParams.class), contains("post delete"), isNull()))
+                .thenReturn(ok(""));
+
+        operations.deletePost(creds(), "99");
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        for (String command : commandCaptor.getAllValues()) {
+            assertEquals(true, command.contains("'99'"),
+                    "動的な値はShellQuoteを通すこと(ShellQuoteのjavadoc、issue #1416): " + command);
+        }
+    }
+
+    @Test
+    void deleteMedia_存在しないIDは502ではなく404として区別する() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(fail("Error: Could not find the post with ID 123."));
+
+        assertThrows(PostNotFoundException.class, () -> operations.deleteMedia(creds(), "123"));
+
+        verify(executor, never()).exec(any(SshConnectionParams.class), contains("post delete"), isNull());
     }
 
     @Test
