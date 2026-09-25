@@ -70,7 +70,7 @@ export function ArticlePlanChat({
           }}
           placeholder="質問や企画案を入力..."
           disabled={isLoading}
-          className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm disabled:bg-neutral-100"
+          className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm disabled:bg-neutral-100 dark:disabled:bg-neutral-800"
         />
         <button
           onClick={handleSendMessage}
