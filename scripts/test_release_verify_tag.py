@@ -1599,5 +1599,119 @@ class BackendGradleStepEnablesDockerGatedTests(unittest.TestCase):
         self.assertIn("lint", step["argv"])
 
 
+class ProvisionAgentPhpTestsStep(unittest.TestCase):
+    """issue #1418: provision-agent の PHP テストをリリース検証で走らせる。
+
+    `infra/wordpress/provision-agent/__tests__/test-process-runner.php` は
+    managed WordPress への全操作を担う provision-agent の唯一の自動テストだが、
+    手順表にも `scripts/git-hooks/pre-commit` にも無く、CI も無いため
+    **どこからも自動実行されていなかった**。#1417 で足したテストも同じ状態だった。
+    """
+
+    def step(self):
+        return next(
+            (s for s in rvt.DEFAULT_STEPS if s["name"] == "provision-agent-php-test"), None
+        )
+
+    def test_step_exists(self):
+        self.assertIsNotNone(
+            self.step(),
+            "provision-agent のPHPテストがリリース検証で実行されない",
+        )
+
+    def test_runs_the_php_harness_through_the_wordpress_image(self):
+        """ホストに `php` が無いので、イメージの php で実行する。"""
+        argv = self.step()["argv"]
+        self.assertIn("docker", argv)
+        self.assertIn("lets_blog_server-wordpress:latest", argv)
+        self.assertTrue(
+            any(a.endswith("/provision-agent/__tests__/test-process-runner.php") for a in argv),
+            argv,
+        )
+
+    def test_mounts_the_whole_infra_wordpress_directory(self):
+        """`provision-agent` だけをマウントすると `start.sh` が見えず誤って落ちる。
+
+        テストは `__DIR__ . '/../../start.sh'` を読む。イメージ内の `start.sh` は
+        `/usr/local/bin/start.sh` にあり `/var/www/start.sh` には無いので、
+        イメージ内のコピーをそのまま実行する形も採れない。チェックアウトの
+        `infra/wordpress` ごとマウントする必要がある。
+        """
+        argv = self.step()["argv"]
+        mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+        self.assertTrue(
+            any(m.startswith("%CHECKOUT%/infra/wordpress:") for m in mounts),
+            "チェックアウトの infra/wordpress 全体をマウントすること: %s" % mounts,
+        )
+
+    def test_wrapped_in_timeout(self):
+        """ハーネスのdocstringが「必ずシェルのtimeoutで包む」ことを求めている。
+
+        デッドロックの回帰時にリリース検証自身が無限に固まらないようにするため。
+        """
+        self.assertEqual("timeout", self.step()["argv"][0])
+
+    def test_runs_after_the_image_is_built(self):
+        """イメージはゼロ構築(`web-test-at-clean` の ACCEPTANCE_RESET)が作る。
+
+        `docker compose up -d --build` がチェックアウトのソースから
+        `lets_blog_server-wordpress:latest` をビルドするので、それより後に置く。
+        """
+        names = [s["name"] for s in rvt.DEFAULT_STEPS]
+        self.assertLess(
+            names.index("web-test-at-clean"),
+            names.index("provision-agent-php-test"),
+            "イメージが未ビルドの状態で実行すると偽陽性になる",
+        )
+
+
+class E2eUnitTestsStep(unittest.TestCase):
+    """issue #1421: `apps/web/e2e/` の単体テストをリリース検証で走らせる。
+
+    `apps/web/jest.config.ts` は `e2e/` を既定の実行から除外している(Playwright用の
+    ファイルを拾わないため)。除外自体は妥当だが、**別経路でも実行していなかった**ので、
+    12スイート58件が一度も自動実行されていなかった。#1391 / #1403 の
+    `helpers-login-retry.test.ts` や #1360 / #1381 / #1385 の `retryClick.test.ts` も含む。
+    """
+
+    def step(self):
+        return next((s for s in rvt.DEFAULT_STEPS if s["name"] == "web-test-e2e-unit"), None)
+
+    def test_step_exists(self):
+        self.assertIsNotNone(
+            self.step(), "apps/web/e2e/ の単体テストがリリース検証で実行されない"
+        )
+
+    def test_counts_are_parsed_so_skips_are_detected(self):
+        """ゼロ許容は skipped も見る。終了コードだけの判定では skip を検出できない。"""
+        step = self.step()
+        self.assertEqual("jest", step["counts_parser"])
+        self.assertIn("--json", step["argv"])
+        self.assertTrue(
+            any(a.startswith("--outputFile=") for a in step["argv"]), step["argv"]
+        )
+        self.assertTrue(
+            any(a.endswith(step["counts_source"]) for a in step["argv"]),
+            "counts_source と --outputFile の指す先が食い違っている",
+        )
+
+    def test_targets_the_e2e_directory(self):
+        argv = self.step()["argv"]
+        self.assertTrue(
+            any("e2e" in a and a.startswith("--testMatch=") for a in argv), argv
+        )
+
+    def test_does_not_change_the_default_web_test_step(self):
+        """既定の `npm run test --prefix apps/web` の対象は変えない(Requirement 2)。"""
+        web_test = next(s for s in rvt.DEFAULT_STEPS if s["name"] == "web-test")
+        self.assertNotIn("--testMatch", " ".join(web_test["argv"]))
+
+    def test_report_file_does_not_collide_with_web_test(self):
+        """`web-test` と同じ出力ファイルを使うと、片方の集計がもう片方を上書きする。"""
+        e2e = self.step()
+        web_test = next(s for s in rvt.DEFAULT_STEPS if s["name"] == "web-test")
+        self.assertNotEqual(e2e["counts_source"], web_test["counts_source"])
+
+
 if __name__ == "__main__":
     unittest.main()

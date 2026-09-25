@@ -26,6 +26,7 @@ import {
   floodGateway,
   gatewayApiGlobalLimit,
   gatewayUploadEndpointLimit,
+  nextProbeClientIp,
   probeThroughGateway,
   sendThroughGateway,
   waitForContainerLog,
@@ -438,27 +439,22 @@ function overLimitRequestCount(): number {
 }
 
 /**
- * シナリオごとに別のクライアントとして扱われるよう、呼び出しのたびに別のIPを使う。
+ * 合成クライアントIPの採番は `nextProbeClientIp`(`../support/gateway`)へ一本化した(issue #1420)。
  *
- * 乱数一択ではなく、プロセスごとに開始位置をずらした連番にする(issue #1132)。
- * `fullyParallel: true`(playwright.config.ts)のため、同一ファイル内のシナリオでも
- * 別のワーカー(別のNode.jsプロセス、したがって別のモジュール状態)で並行に走りうる。
- * `API_RATE_LIMIT_REQUESTS` を引き上げた受け入れテスト環境では
- * {@link overLimitRequestCount} により1回のfloodが長くなる(105件→設定値+5件)ため、
- * 複数プロセスのfloodが同じ60秒ウィンドウで重なる時間が伸び、250通りからの単純な乱択では
- * 「別のクライアントのはずが実は同じキーだった」という取り違えを引く確率がその分だけ
- * 上がる(実測: この変更前に1回観測した)。`process.pid` を初期値にすることで、
- * プロセスをまたいだ1回目の呼び出しどうしが同じ値になる事態を避けつつ、
- * 同一プロセス内での呼び出しどうしは連番により確実に重複しない。
+ * ここには以前 `process.pid % 250` を起点にする独自の連番があった(#1132)。しかしそれは
+ * ワーカー間の衝突を防げていない —— 実測では **Playwrightのワーカーのpidは6しか離れておらず**、
+ * 6回呼べば隣のワーカーの開始位置に到達する。pid差がちょうど250の倍数なら1回目から衝突する
+ * (#1420 の note_9566)。
+ *
+ * `nextProbeClientIp` は #995 で**まったく同じ失敗**(異なるWorkerが同じIPを選び、
+ * 無関係なシナリオが429で落ちる。#943のQAで2回観測)を解決するために作られたもので、
+ * 状態ファイルとロックでプロセスをまたいで連番を直列化する。ワーカー数の上限が無く、
+ * `process.ppid` で1回の `playwright test` 実行にスコープされるため実行間でも分離される。
+ * **同じ問題に2つの仕組みを置かない。**
  */
-let clientIpSequence = process.pid % 250;
-function uniqueClientIp(): string {
-  clientIpSequence = (clientIpSequence % 250) + 1;
-  return `203.0.113.${clientIpSequence}`;
-}
 
 function floodUntilLimited(ctx: Record<string, unknown>): number[] {
-  const clientIp = uniqueClientIp();
+  const clientIp = nextProbeClientIp();
   ctx.rateLimitClientIp = clientIp;
   const statuses = floodGateway(RATE_LIMITED_PATH, clientIp, overLimitRequestCount());
   ctx.rateLimitStatuses = statuses;
@@ -490,9 +486,11 @@ Then('上限を超えた要求は429で拒否され、再試行までの時間�
 });
 
 When('別のクライアントが同じエンドポイントへ要求する', async ({ ctx }) => {
-  let otherIp = uniqueClientIp();
+  // #1420 以降、`nextProbeClientIp` はプロセスをまたいでも同じ値を返さないので
+  // このループは回らない。採番の不変条件が崩れたときの保険として残す。
+  let otherIp = nextProbeClientIp();
   while (otherIp === ctx.rateLimitClientIp) {
-    otherIp = uniqueClientIp();
+    otherIp = nextProbeClientIp();
   }
   ctx.otherClientResponse = sendThroughGateway({ path: RATE_LIMITED_PATH, clientIp: otherIp });
 });

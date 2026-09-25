@@ -1545,9 +1545,20 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 7. **ゼロ許容**: 全手順の終了コードが0であり、かつ failed / skipped / did not run / flaky が
    すべて0であるときだけ成功とする。既知の失敗(#1140、#1262 など)も例外にしない。
    終了コードだけでは隠れる skip を防ぐため、`web-test`(jest `--json`)・
-   `web-test-at-clean`(Playwright の `json` レポーター)・`extension-test-at`
-   (jest `--json`)・`backend-gradle-test-lint`(全11モジュールの JUnit XML を集計)の
-   4手順は、実際の出力ファイルから passed/failed/skipped/flaky を抽出して判定する。
+   `web-test-e2e-unit`(jest `--json`、issue #1421)・`web-test-at-clean`(Playwright の
+   `json` レポーター)・`extension-test-at`(jest `--json`)・`backend-gradle-test-lint`
+   (全11モジュールの JUnit XML を集計)の5手順は、実際の出力ファイルから
+   passed/failed/skipped/flaky を抽出して判定する。
+
+   `web-test-e2e-unit` は `apps/web/e2e/` の単体テスト(#1421)。`apps/web/jest.config.ts` が
+   対象除外オプションで `e2e/` を既定の実行から外している(既定の testMatch が rootDir 全体に
+   及び、Playwright用のファイルまで拾ってしまうため)ので、`web-test` とは別手順として
+   `--testMatch` を上書きして実行する。除外を入れたまま別経路でも実行していなかったため、
+   12スイート58件が一度も自動実行されていなかった。
+
+   なお `provision-agent-php-test`(#1418)はこの5手順に含まれない。PHPの簡易ハーネスは
+   PASS/FAIL を自前で出力するだけで JUnit XML も jest JSON も出さず、**skip の概念を
+   持たない**ため、終了コードだけで判定している。
 8. 成功したら、`origin/main` を再取得してもう一度マージ+木の同一性確認を R に対して
    行い(検証中に main が進んでいてもそのときの先頭に対して行う)、同名タグの不存在と
    `origin/develop` が依然として P のままであることを再確認する(#1305: 検証中に develop が
