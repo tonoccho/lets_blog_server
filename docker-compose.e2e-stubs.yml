@@ -137,6 +137,20 @@ services:
     ports:
       - "127.0.0.1:18087:8080"
 
+  # ---- ollama は AT では起動しない(issue #1090)----
+  #
+  # AT の LLM は llm-stub が担う(#928: GPU にも外部SaaS にも依存しない)。ollama と
+  # ollama-model-init を残すと、テストに使わない約4.7GBのモデル取得とVRAM確保が走る。
+  # profiles を上書きファイル側にだけ置くので、docker-compose.yml 単独の起動は変わらず、
+  # AT の `docker compose up -d` に引数も要らない。
+  # deploy.replicas: 0 はコンテナを作らず `docker compose start ollama` が使えないため採らない。
+  # 明示起動は `docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d ollama`
+  # (profile が自動で有効になる)。いったん作られたコンテナは `start` / `stop` でも操作できる。
+  ollama:
+    profiles: ["ollama"]
+  ollama-model-init:
+    profiles: ["ollama"]
+
   # ---- 各サービスの向き先をスタブへ ----
 
   # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
@@ -162,8 +176,8 @@ services:
     environment:
       LLM_BASE_URL: http://llm-stub:8080
       LLM_API_KEY: e2e-stub-key
-      # issue #1086: 既定プロバイダの環境変数既定値は OLLAMA になった。受け入れテスト環境には
-      # ollama コンテナを持ち込まない(GPU依存とスタブ方針を崩さないため)ので、AT では
+      # issue #1086: 既定プロバイダの環境変数既定値は OLLAMA になった。受け入れテスト環境では
+      # ollama コンテナを既定で起動しない(#1090。GPU依存とスタブ方針を崩さないため)ので、AT では
       # OPENAI に固定してスタブへ向ける。scripts/e2e-clear-llm-db-overrides.sh が DB 上書きを
       # 消すため、ここで固定しないと環境変数既定の OLLAMA がそのまま効く。
       LLM_PROVIDER: OPENAI

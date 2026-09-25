@@ -461,6 +461,21 @@ docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
 **スタブ化しないもの**: PlantUML / draw.io / Penpot / WordPress。
 いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
 
+### ollama は AT スタックでは起動しない(#1090)
+
+AT の LLM は `llm-stub` が受けるので、`docker-compose.e2e-stubs.yml` が `ollama` と
+`ollama-model-init` に `profiles: ["ollama"]` を付け、`up -d` の対象から外している
+(約4.7GBのモデル取得もVRAM確保も起きない)。`docker-compose.yml` 単独では従来どおり起動する。
+`deploy.replicas: 0` は採らなかった: コンテナが作られず `docker compose start ollama` が使えないため。
+明示的に起動するには、profile が自動で有効になる `up -d ollama` を使う:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d ollama
+```
+
+作られた後のコンテナは `docker compose start|stop ollama` でも操作できる。
+検証: `scripts/test_ollama_at_disabled.py`。
+
 ### ComfyUI だけは実機とスタブを併用する
 
 ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 の方針決定)。
