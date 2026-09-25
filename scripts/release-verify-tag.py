@@ -469,6 +469,36 @@ DEFAULT_STEPS = [
         "counts_parser": "jest",
         "counts_source": "apps/web/jest-report.json",
     },
+    {
+        # issue #1421: `apps/web/e2e/` の単体テスト。`apps/web/jest.config.ts` は
+        # 対象除外オプションで `e2e/` を既定の実行から外している(既定の testMatch が
+        # rootDir 全体に及び、Playwright用のファイルまで拾ってしまうため)。
+        # **除外自体は妥当**で、問題は「除外したまま、別経路でも実行していなかった」点だった。
+        # 12スイート58件が一度も自動実行されておらず、その中には #1391 / #1403 の
+        # ログイン撮り直し、#1360 / #1381 / #1385 のハイドレーション競合、#1295 の
+        # アカウント単位ロックといった、**受け入れテストの土台**が含まれていた。
+        #
+        # ここでは `--testMatch` と対象除外オプションを上書きして e2e だけを対象にする。
+        # 上の `web-test` の argv は触らないので、既定の `npm run test` の対象は変わらない。
+        #
+        # 件数は `web-test` と同じく jest の `--json` 出力から読む。終了コードだけの判定では
+        # **skipped を検出できず**、要件4のゼロ許容(failed/skipped/did not run/flaky が全て0)の
+        # 網に穴が開くため。出力ファイル名は `web-test` と分ける(同じにすると集計が上書きされる)。
+        "name": "web-test-e2e-unit",
+        "argv": [
+            "npx",
+            "jest",
+            "--config",
+            "jest.config.ts",
+            "--testPathIgnorePatterns=/node_modules/|/\\.next/",
+            "--testMatch=**/e2e/**/*.test.ts",
+            "--json",
+            "--outputFile=%CHECKOUT%/apps/web/jest-e2e-unit-report.json",
+        ],
+        "cwd": "apps/web",
+        "counts_parser": "jest",
+        "counts_source": "apps/web/jest-e2e-unit-report.json",
+    },
     {"name": "web-lint", "argv": ["npm", "run", "lint", "--prefix", "apps/web"], "cwd": ""},
     {"name": "web-build", "argv": ["npm", "run", "build", "--prefix", "apps/web"], "cwd": ""},
     {
