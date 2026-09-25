@@ -33,6 +33,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -231,8 +232,8 @@ class WordPressSshOperationsTest {
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getAllValues().get(0).contains("term list category"));
-        assertEquals(true, commandCaptor.getAllValues().get(1).contains("term create category"));
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("term list 'category'"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("term create 'category'"));
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("--porcelain"));
     }
 
@@ -246,7 +247,7 @@ class WordPressSshOperationsTest {
         assertEquals(List.of("7"), ids);
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("term list post_tag"));
+        assertEquals(true, commandCaptor.getValue().contains("term list 'post_tag'"));
     }
 
     @Test
@@ -285,7 +286,7 @@ class WordPressSshOperationsTest {
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
         assertEquals(true, commandCaptor.getAllValues().get(0).contains("user list --search="));
-        assertEquals(true, commandCaptor.getAllValues().get(1).contains("user update 11"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("user update '11'"));
     }
 
     @Test
@@ -302,7 +303,7 @@ class WordPressSshOperationsTest {
         verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("user create"));
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("--porcelain"));
-        assertEquals(true, commandCaptor.getAllValues().get(2).contains("user update 23"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("user update '23'"));
     }
 
     @Test
@@ -399,7 +400,7 @@ class WordPressSshOperationsTest {
 
         ArgumentCaptor<String> readonlyCommandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), readonlyCommandCaptor.capture(), isNull());
-        assertEquals(true, readonlyCommandCaptor.getAllValues().get(0).contains("post meta update 99 _thumbnail_id '55'"));
+        assertEquals(true, readonlyCommandCaptor.getAllValues().get(0).contains("post meta update '99' _thumbnail_id '55'"));
     }
 
     @Test
@@ -439,7 +440,7 @@ class WordPressSshOperationsTest {
         assertEquals("42", result.id());
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
-        assertEquals(true, commandCaptor.getValue().contains("post update 42 -"));
+        assertEquals(true, commandCaptor.getValue().contains("post update '42' -"));
     }
 
     @Test
@@ -495,7 +496,7 @@ class WordPressSshOperationsTest {
         assertEquals("42", result.id());
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), notNull());
-        assertEquals(true, commandCaptor.getValue().contains("post update 42 -"));
+        assertEquals(true, commandCaptor.getValue().contains("post update '42' -"));
     }
 
     @Test
@@ -708,6 +709,97 @@ class WordPressSshOperationsTest {
         assertThrows(SshOperationException.class, () -> operations.deleteMedia(creds(), "123"));
     }
 
+    /**
+     * issue #1416: 動的な値は必ず {@code ShellQuote} を通す。
+     *
+     * <p>{@link ShellQuote} の javadoc がこのファイル群の規約を定めている:
+     * 「SSHのexecはリモートシェルが解釈する1本の文字列を送るだけなので、コマンド文字列へ
+     * 埋め込む動的な値は**必ずこれを通す(コマンドインジェクション対策)**」。
+     * 45箇所で守られている一方、いくつかの箇所が素通しになっていた。
+     *
+     * <p>{@code wpPostId} は {@code DELETE /api/posts/{site}/{wpPostId}} の
+     * {@code @PathVariable String} で、経路上どこでも数値検証されずに
+     * {@code WordPressSshOperations} まで届く。**SSH管理サイトは実運用の顧客サーバーである。**
+     *
+     * <p>ここではメタ文字を含むIDを渡し、組み立てられたコマンド文字列の中で
+     * **メタ文字がクォートの外に出ていない**ことを確かめる。実際にリモートで実行はしない
+     * (コマンド文字列がどうなるかが、リモートシェルが何を解釈するかを決める)。
+     */
+    private static final String METACHARACTER_ID = "1; touch /tmp/pwned";
+
+    private static void assertNoUnquotedMetacharacters(String command) {
+        // ShellQuote.single は値全体を ' で囲む。メタ文字がその中にあれば、
+        // 直前に必ず ' が来る形(= "'1; touch /tmp/pwned'")になる。
+        assertEquals(true, command.contains("'" + METACHARACTER_ID + "'"),
+                "動的な値がShellQuoteを通っていない(ShellQuoteのjavadoc、issue #1416): " + command);
+    }
+
+    @Test
+    void deletePost_メタ文字を含むIDでもクォートの外に出さない() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(ok("publish\n"));
+        when(executor.exec(any(SshConnectionParams.class), contains("post delete"), isNull()))
+                .thenReturn(ok(""));
+
+        operations.deletePost(creds(), METACHARACTER_ID);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        captor.getAllValues().forEach(WordPressSshOperationsTest::assertNoUnquotedMetacharacters);
+    }
+
+    @Test
+    void deleteMedia_メタ文字を含むIDでもクォートの外に出さない() {
+        when(executor.exec(any(SshConnectionParams.class), contains("post get"), isNull()))
+                .thenReturn(ok("1\n"));
+        when(executor.exec(any(SshConnectionParams.class), contains("post delete"), isNull()))
+                .thenReturn(ok(""));
+
+        operations.deleteMedia(creds(), METACHARACTER_ID);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        captor.getAllValues().forEach(WordPressSshOperationsTest::assertNoUnquotedMetacharacters);
+    }
+
+    @Test
+    void postExists_メタ文字を含むIDでもクォートの外に出さない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("1\n"));
+
+        operations.postExists(creds(), METACHARACTER_ID);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        assertNoUnquotedMetacharacters(captor.getValue());
+    }
+
+    /**
+     * 更新経路。`existingPostId` は公開APIの `wpPostId` リクエストパラメータ由来で、
+     * `post update <id>` に素通しで埋め込まれていた。
+     */
+    @Test
+    void createOrUpdatePost_メタ文字を含む既存IDでもクォートの外に出さない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("1\n"));
+        when(executor.exec(any(SshConnectionParams.class), any(), notNull()))
+                .thenReturn(ok("1\n"));
+
+        try {
+            operations.createOrUpdatePost(creds(), postContent(), METACHARACTER_ID);
+        } catch (RuntimeException ignored) {
+            // 後続のJSON解析まで通す必要は無い。組み立てたコマンド文字列だけを見る。
+        }
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor, atLeastOnce()).exec(any(SshConnectionParams.class), captor.capture(), any());
+        String update = captor.getAllValues().stream()
+                .filter(c -> c.contains("post update"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "post update コマンドが組み立てられていない: " + captor.getAllValues()));
+        assertNoUnquotedMetacharacters(update);
+    }
+
     @Test
     void generateAuthCookie_wp_evalの結果からCookieを組み立てる() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
@@ -795,7 +887,7 @@ class WordPressSshOperationsTest {
         verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
         assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("media import"));
-        assertEquals(true, commandCaptor.getAllValues().get(2).contains("post get 55"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("post get '55'"));
 
         verify(executor).removeFile(any(SshConnectionParams.class), eq(remotePath));
     }
@@ -878,7 +970,7 @@ class WordPressSshOperationsTest {
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("theme install"));
+        assertEquals(true, commandCaptor.getValue().contains("'theme' install"));
         assertEquals(true, commandCaptor.getValue().contains("--force"));
         assertEquals(true, commandCaptor.getValue().contains(remotePath));
 
@@ -893,7 +985,7 @@ class WordPressSshOperationsTest {
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("plugin install"));
+        assertEquals(true, commandCaptor.getValue().contains("'plugin' install"));
     }
 
     @Test
@@ -946,7 +1038,7 @@ class WordPressSshOperationsTest {
         assertEquals("active", infos.get(0).status());
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("plugin list --fields=name,status --format=json"));
+        assertEquals(true, commandCaptor.getValue().contains("'plugin' list --fields=name,status --format=json"));
     }
 
     @Test
@@ -968,7 +1060,7 @@ class WordPressSshOperationsTest {
         assertEquals("SUCCESS", result.status());
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getAllValues().get(1).contains("plugin install 'akismet'"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("'plugin' install 'akismet'"));
     }
 
     @Test
@@ -1038,7 +1130,7 @@ class WordPressSshOperationsTest {
         assertEquals("news", infos.get(1).parentSlug());
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getValue().contains("term list category"));
+        assertEquals(true, commandCaptor.getValue().contains("term list 'category'"));
     }
 
     @Test
@@ -1054,8 +1146,8 @@ class WordPressSshOperationsTest {
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
         String createCommand = commandCaptor.getAllValues().get(1);
-        assertEquals(true, createCommand.contains("term create category"));
-        assertEquals(true, createCommand.contains("--parent=1"));
+        assertEquals(true, createCommand.contains("term create 'category'"));
+        assertEquals(true, createCommand.contains("--parent='1'"));
     }
 
     @Test
@@ -1082,7 +1174,7 @@ class WordPressSshOperationsTest {
         assertEquals("SUCCESS", result.status());
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
         verify(executor, times(2)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
-        assertEquals(true, commandCaptor.getAllValues().get(1).contains("term update post_tag 1"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("term update 'post_tag' '1'"));
     }
 
     @Test

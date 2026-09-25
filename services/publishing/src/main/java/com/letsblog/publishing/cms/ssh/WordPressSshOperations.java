@@ -146,7 +146,7 @@ public class WordPressSshOperations {
 
     private String findOrCreateTerm(WordPressCredentials creds, String taxonomy, String name) {
         SshCommandResult searchResult = exec(creds, wpCli(creds,
-                "term list " + taxonomy + " --search=" + ShellQuote.single(name)
+                "term list " + ShellQuote.single(taxonomy) + " --search=" + ShellQuote.single(name)
                         + " --fields=name,term_id --format=json"));
         if (!searchResult.ok()) {
             throw new SshOperationException("カテゴリ/タグ '" + name + "' の検索に失敗しました: "
@@ -159,7 +159,7 @@ public class WordPressSshOperations {
         }
 
         SshCommandResult createResult = exec(creds, wpCli(creds,
-                "term create " + taxonomy + " " + ShellQuote.single(name) + " --porcelain"));
+                "term create " + ShellQuote.single(taxonomy) + " " + ShellQuote.single(name) + " --porcelain"));
         if (!createResult.ok()) {
             throw new SshOperationException("カテゴリ/タグ '" + name + "' の作成に失敗しました: "
                     + firstLine(createResult.stderr(), createResult.stdout()));
@@ -258,7 +258,7 @@ public class WordPressSshOperations {
     }
 
     private String pluginThemeListCommand(String type) {
-        return type + " list --fields=name,status --format=json";
+        return ShellQuote.single(type) + " list --fields=name,status --format=json";
     }
 
     private List<PluginThemeInfo> parsePluginThemeList(SshCommandResult result, String label) {
@@ -315,7 +315,7 @@ public class WordPressSshOperations {
             return SshApplyResult.failed(e);
         }
         try {
-            return runWpCli(creds, wpType + " install " + ShellQuote.single(remotePath) + " --force",
+            return runWpCli(creds, ShellQuote.single(wpType) + " install " + ShellQuote.single(remotePath) + " --force",
                     (wpType.equals("plugin") ? "プラグイン" : "テーマ") + "のインストール");
         } catch (SshOperationException e) {
             return SshApplyResult.failed(e);
@@ -329,7 +329,7 @@ public class WordPressSshOperations {
         if (installed.stream().anyMatch(info -> info.name().equals(slug))) {
             return SshApplyResult.skipped();
         }
-        return runWpCli(creds, type + " install " + ShellQuote.single(slug),
+        return runWpCli(creds, ShellQuote.single(type) + " install " + ShellQuote.single(slug),
                 (type.equals("plugin") ? "プラグイン" : "テーマ") + "のインストール");
     }
 
@@ -360,7 +360,8 @@ public class WordPressSshOperations {
     }
 
     private String termListCommand(String taxonomy) {
-        return "term list " + taxonomy + " --fields=term_id,name,slug,parent,description --format=json";
+        return "term list " + ShellQuote.single(taxonomy)
+                + " --fields=term_id,name,slug,parent,description --format=json";
     }
 
     private List<CategoryInfo> parseTerms(SshCommandResult result, String label) {
@@ -482,7 +483,7 @@ public class WordPressSshOperations {
         if (findBySlug(terms, slug) != null) {
             return SshApplyResult.skipped();
         }
-        StringBuilder command = new StringBuilder("term create ").append(taxonomy).append(" ")
+        StringBuilder command = new StringBuilder("term create ").append(ShellQuote.single(taxonomy)).append(" ")
                 .append(ShellQuote.single(value)).append(" --slug=").append(ShellQuote.single(slug))
                 .append(" --porcelain");
         if (description != null && !description.isBlank()) {
@@ -493,7 +494,7 @@ public class WordPressSshOperations {
             if (parent == null) {
                 throw new SshOperationException("親カテゴリ(slug: " + parentSlug + ")が見つかりません");
             }
-            command.append(" --parent=").append(parent.termId());
+            command.append(" --parent=").append(ShellQuote.single(parent.termId()));
         }
         SshCommandResult result = exec(creds, wpCli(creds, command.toString()));
         if (!result.ok()) {
@@ -510,7 +511,8 @@ public class WordPressSshOperations {
         if (target == null) {
             throw new SshOperationException("対象(slug: " + targetSlug + ")が見つかりません");
         }
-        StringBuilder command = new StringBuilder("term update ").append(taxonomy).append(" ").append(target.termId())
+        StringBuilder command = new StringBuilder("term update ").append(ShellQuote.single(taxonomy)).append(" ")
+                .append(ShellQuote.single(target.termId()))
                 .append(" --name=").append(ShellQuote.single(value))
                 .append(" --slug=").append(ShellQuote.single(slug));
         if (description != null && !description.isBlank()) {
@@ -524,7 +526,7 @@ public class WordPressSshOperations {
             if (parent.termId().equals(target.termId())) {
                 throw new SshOperationException("親カテゴリに自分自身は指定できません");
             }
-            command.append(" --parent=").append(parent.termId());
+            command.append(" --parent=").append(ShellQuote.single(parent.termId()));
         }
         SshCommandResult result = exec(creds, wpCli(creds, command.toString()));
         if (!result.ok()) {
@@ -540,7 +542,7 @@ public class WordPressSshOperations {
             // 既に存在しない = 目的達成済みとみなす(provision-agentの/bulk-managementと同じ方針)
             return SshApplyResult.skipped();
         }
-        SshCommandResult result = exec(creds, wpCli(creds, "term delete " + taxonomy + " " + target.termId()));
+        SshCommandResult result = exec(creds, wpCli(creds, "term delete " + ShellQuote.single(taxonomy) + " " + ShellQuote.single(target.termId())));
         if (!result.ok()) {
             throw new SshOperationException("削除に失敗しました: " + firstLine(result.stderr(), result.stdout()));
         }
@@ -591,7 +593,7 @@ public class WordPressSshOperations {
     }
 
     private String updateAuthor(WordPressCredentials creds, String userId, AuthorProvisioningRequest request) {
-        StringBuilder command = new StringBuilder("user update ").append(userId);
+        StringBuilder command = new StringBuilder("user update ").append(ShellQuote.single(userId));
         appendFieldIfPresent(command, "user_email", request.email());
         appendFieldIfPresent(command, "display_name", request.displayName());
         appendFieldIfPresent(command, "first_name", request.firstName());
@@ -652,7 +654,7 @@ public class WordPressSshOperations {
 
         String subcommand = targetPostId == null
                 ? "post create - " + fields + " --porcelain"
-                : "post update " + targetPostId + " - " + fields + " --porcelain";
+                : "post update " + ShellQuote.single(targetPostId) + " - " + fields + " --porcelain";
 
         SshCommandResult result = exec(creds, wpCli(creds, subcommand), stdin);
         if (!result.ok()) {
@@ -709,7 +711,7 @@ public class WordPressSshOperations {
      */
     private void setFeaturedMedia(WordPressCredentials creds, String postId, String mediaId) {
         SshCommandResult result = exec(creds, wpCli(creds,
-                "post meta update " + postId + " _thumbnail_id " + ShellQuote.single(mediaId)));
+                "post meta update " + ShellQuote.single(postId) + " _thumbnail_id " + ShellQuote.single(mediaId)));
         if (!result.ok()) {
             throw new SshOperationException("アイキャッチ(featured media)の設定に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
@@ -753,7 +755,7 @@ public class WordPressSshOperations {
 
     private PostResult fetchPostResult(WordPressCredentials creds, String postId) {
         SshCommandResult result = exec(creds, wpCli(creds,
-                "post get " + postId + " --fields=guid,post_status --format=json"));
+                "post get " + ShellQuote.single(postId) + " --fields=guid,post_status --format=json"));
         if (!result.ok()) {
             throw new SshOperationException("作成/更新した投稿の情報取得に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
@@ -914,7 +916,7 @@ public class WordPressSshOperations {
     /** `wp post update <id> --post_status=` はIDベースで投稿種別を問わず動作する。 */
     public void updatePostStatus(WordPressCredentials creds, String postId, String status) {
         SshCommandResult result = exec(creds, wpCli(creds,
-                "post update " + postId + " --post_status=" + ShellQuote.single(status)));
+                "post update " + ShellQuote.single(postId) + " --post_status=" + ShellQuote.single(status)));
         if (!result.ok()) {
             throw new SshOperationException("投稿/ページのステータス変更に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
@@ -1046,7 +1048,7 @@ public class WordPressSshOperations {
             String mediaId = importResult.stdout().strip();
 
             SshCommandResult getResult = exec(creds, wpCli(creds,
-                    "post get " + mediaId + " --fields=guid --format=json"));
+                    "post get " + ShellQuote.single(mediaId) + " --fields=guid --format=json"));
             if (!getResult.ok()) {
                 throw new SshOperationException("アップロードしたメディアの情報取得に失敗しました: "
                         + firstLine(getResult.stderr(), getResult.stdout()));
@@ -1141,7 +1143,7 @@ public class WordPressSshOperations {
         }
         String remotePath = "/tmp/letsblog-" + dirName + "-" + UUID.randomUUID() + ".tar.gz";
         SshCommandResult tarResult = exec(creds, "tar -czf " + ShellQuote.single(remotePath)
-                + " -C " + ShellQuote.single(contentPath) + " " + dirName);
+                + " -C " + ShellQuote.single(contentPath) + " " + ShellQuote.single(dirName));
         if (!tarResult.ok()) {
             throw new SshOperationException(label + "のエクスポートに失敗しました: "
                     + firstLine(tarResult.stderr(), tarResult.stdout()));
