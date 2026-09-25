@@ -167,6 +167,14 @@ python3 -m unittest discover -s .claude/hooks -t .claude/hooks -p 'test_*.py'
 python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'
 ```
 
+JVM サービスのコードや Dockerfile を変えたら、Merge Request を開く前に実行イメージ(JRE)の
+起動スモークテストを回す。JDK にしか無い API への依存は単体テストで検出できない(#1101)。
+所要時間と詳細は [docs/JRE_IMAGE_SMOKE_TEST.md](docs/JRE_IMAGE_SMOKE_TEST.md)。
+
+```bash
+python3 scripts/smoke_jre_image.py --changed    # 変更したサービスだけ
+```
+
 受け入れテスト(`npm run test:at`)は、初回だけ Playwright のブラウザの導入が要る。
 **2段あり、下の段は root 権限が要るので自動実行しない**(#1045)。
 
