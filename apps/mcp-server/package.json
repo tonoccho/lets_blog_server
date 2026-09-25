@@ -1,6 +1,6 @@
 {
   "name": "penpot-design-mcp-server",
-  "version": "0.4.1",
+  "version": "0.4.2-DEVELOP",
   "description": "MCP server for AI-assisted design in Penpot using Ollama",
   "license": "MIT",
   "main": "src/server.js",
