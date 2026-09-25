@@ -3,18 +3,22 @@ package com.letsblog.gateway.config;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.netty.http.client.PrematureCloseException;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -35,6 +39,8 @@ import java.util.Set;
  * {@code retrieve()}はこの自動解放を行わないため、代わりにこちらを使う。
  */
 public class ProxyHandler {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ProxyHandler.class);
 
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
@@ -97,7 +103,33 @@ public class ProxyHandler {
         return response
                 .timeout(timeout)
                 .onErrorResume(java.util.concurrent.TimeoutException.class,
-                        e -> ServerResponse.status(HttpStatus.GATEWAY_TIMEOUT).build());
+                        e -> ServerResponse.status(HttpStatus.GATEWAY_TIMEOUT).build())
+                .onErrorResume(WebClientRequestException.class, e -> unreachable(route, e));
+    }
+
+    /**
+     * 下流へ到達できなかった場合の応答(issue #1096)。gateway自身の内部エラー(500)ではなく、
+     * 「下流が利用できない」ことを表す503を返す。
+     *
+     * <p>{@link PrematureCloseException}(接続確立後・応答受信前に下流が切断)も502ではなく503とする。
+     * 拡張は「本文付きの502」を「下流は応答したが、その上流(外部サービス)が失敗した」と解釈する
+     * (issue #1082)ため、502だと利用者を誤った原因へ誘導する。いずれの場合もgateway自身は
+     * リクエストを再送しない。
+     */
+    private Mono<ServerResponse> unreachable(RouteProperties.Route route, WebClientRequestException e) {
+        log.warn("downstream unreachable: service={} cause={}", route.getId(), String.valueOf(e.getCause()));
+        boolean closedAfterConnect = e.getCause() instanceof PrematureCloseException;
+        HttpStatus status = HttpStatus.SERVICE_UNAVAILABLE;
+        String message = closedAfterConnect
+                ? "サービス " + route.getId() + " は応答を返す前に接続を切断しました。再起動中の可能性があります。"
+                : "サービス " + route.getId() + " へ接続できませんでした。起動中または停止中の可能性があります。";
+        return ServerResponse.status(status)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "status", status.value(),
+                        "error", status.getReasonPhrase(),
+                        "service", String.valueOf(route.getId()),
+                        "message", message));
     }
 
     /**

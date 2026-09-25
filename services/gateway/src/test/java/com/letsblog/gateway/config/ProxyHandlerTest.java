@@ -149,4 +149,73 @@ class ProxyHandlerTest {
                 })
                 .verifyComplete();
     }
+
+    private String bodyOf(org.springframework.web.reactive.function.server.ServerResponse response) {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/sites").build());
+        response.writeTo(exchange, new org.springframework.web.reactive.function.server.ServerResponse.Context() {
+            @Override
+            public List<org.springframework.http.codec.HttpMessageWriter<?>> messageWriters() {
+                return org.springframework.http.codec.ServerCodecConfigurer.create().getWriters();
+            }
+
+            @Override
+            public List<org.springframework.web.reactive.result.view.ViewResolver> viewResolvers() {
+                return List.of();
+            }
+        }).block();
+        return exchange.getResponse().getBodyAsString().block();
+    }
+
+    private static org.springframework.web.reactive.function.client.WebClientRequestException connectFailure() {
+        return new org.springframework.web.reactive.function.client.WebClientRequestException(
+                new java.net.ConnectException("Connection refused: downstream/172.20.0.16:8080"),
+                org.springframework.http.HttpMethod.GET, java.net.URI.create("http://downstream:8080/api/sites"),
+                new HttpHeaders());
+    }
+
+    @Test
+    @DisplayName("下流へ接続できない(接続拒否等)場合、500ではなく503を返し、本文で到達不能なサービスを示す(issue #1096)")
+    void returns503WhenDownstreamIsUnreachable() {
+        ProxyHandler handler = handlerWithDownstream(request -> Mono.error(connectFailure()));
+
+        StepVerifier.create(handler.handle(requestWithHeaders(new HttpHeaders())))
+                .assertNext(response -> {
+                    assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.statusCode());
+                    String body = bodyOf(response);
+                    org.junit.jupiter.api.Assertions.assertTrue(body.contains("test-catch-all"), body);
+                    org.junit.jupiter.api.Assertions.assertTrue(body.contains("503"), body);
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    @DisplayName("接続確立後・応答受信前に下流が落ちた場合も503を返す(502だと拡張が外部サービス障害と誤読する)。再送はしない(issue #1096)")
+    void returns503WhenDownstreamClosesBeforeResponseAndDoesNotResend() {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        ProxyHandler handler = handlerWithDownstream(request -> {
+            calls.incrementAndGet();
+            return Mono.error(new org.springframework.web.reactive.function.client.WebClientRequestException(
+                    reactor.netty.http.client.PrematureCloseException.TEST_EXCEPTION,
+                    org.springframework.http.HttpMethod.POST, java.net.URI.create("http://downstream:8080/x"),
+                    new HttpHeaders()));
+        });
+
+        StepVerifier.create(handler.handle(requestWithHeaders(new HttpHeaders())))
+                .assertNext(response -> {
+                    assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.statusCode());
+                    org.junit.jupiter.api.Assertions.assertTrue(bodyOf(response).contains("test-catch-all"));
+                })
+                .verifyComplete();
+        assertEquals(1, calls.get());
+    }
+
+    @Test
+    @DisplayName("TimeoutExceptionは従来どおり504のまま(issue #1096 回帰)")
+    void timeoutStillMapsTo504() {
+        ProxyHandler handler = handlerWithDownstream(request -> Mono.error(new java.util.concurrent.TimeoutException()));
+
+        StepVerifier.create(handler.handle(requestWithHeaders(new HttpHeaders())))
+                .assertNext(response -> assertEquals(HttpStatus.GATEWAY_TIMEOUT, response.statusCode()))
+                .verifyComplete();
+    }
 }
