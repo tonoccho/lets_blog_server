@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -158,6 +159,14 @@ public class ComfyUiClient implements ImageGenerationProvider {
                     "ComfyUIの画像生成にはseedの実値が必要です(呼び出し側で解決してください)", null);
         }
         String baseUrl = configProvider.comfyUiBaseUrl();
+        try {
+            return submitAndCollect(baseUrl, params);
+        } catch (ResourceAccessException e) {
+            throw unreachable(baseUrl, e);
+        }
+    }
+
+    private List<ComfyUiImage> submitAndCollect(String baseUrl, ComfyUiGenerationParams params) {
         String clientId = UUID.randomUUID().toString();
         ObjectNode workflow = buildWorkflow(params);
 
@@ -234,9 +243,10 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIに現在配置されているチェックポイント一覧を取得する(GET /object_info/CheckpointLoaderSimple)。
      */
     public List<String> listCheckpoints() {
+        String baseUrl = configProvider.comfyUiBaseUrl();
         try {
             JsonNode response = client.get()
-                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/CheckpointLoaderSimple")
+                    .uri(baseUrl + "/object_info/CheckpointLoaderSimple")
                     .retrieve().body(JsonNode.class);
             List<String> checkpoints = new ArrayList<>();
             if (response == null) {
@@ -248,6 +258,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
                 checkpoints.add(name.asText());
             }
             return checkpoints;
+        } catch (ResourceAccessException e) {
+            throw unreachable(baseUrl, e);
         } catch (RestClientResponseException e) {
             throw new AiServiceException("ComfyUIチェックポイント一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
@@ -257,9 +269,10 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIが対応しているサンプラー名の一覧を取得する(GET /object_info/KSampler)。
      */
     public List<String> listSamplers() {
+        String baseUrl = configProvider.comfyUiBaseUrl();
         try {
             JsonNode response = client.get()
-                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/KSampler")
+                    .uri(baseUrl + "/object_info/KSampler")
                     .retrieve().body(JsonNode.class);
             List<String> samplers = new ArrayList<>();
             if (response == null) {
@@ -271,6 +284,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
                 samplers.add(name.asText());
             }
             return samplers;
+        } catch (ResourceAccessException e) {
+            throw unreachable(baseUrl, e);
         } catch (RestClientResponseException e) {
             throw new AiServiceException("ComfyUIサンプラー一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
@@ -280,9 +295,10 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIが対応しているスケジューラー名の一覧を取得する(GET /object_info/KSampler)。
      */
     public List<String> listSchedulers() {
+        String baseUrl = configProvider.comfyUiBaseUrl();
         try {
             JsonNode response = client.get()
-                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/KSampler")
+                    .uri(baseUrl + "/object_info/KSampler")
                     .retrieve().body(JsonNode.class);
             List<String> schedulers = new ArrayList<>();
             if (response == null) {
@@ -294,6 +310,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
                 schedulers.add(name.asText());
             }
             return schedulers;
+        } catch (ResourceAccessException e) {
+            throw unreachable(baseUrl, e);
         } catch (RestClientResponseException e) {
             throw new AiServiceException("ComfyUIスケジューラー一覧の取得に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
@@ -301,12 +319,13 @@ public class ComfyUiClient implements ImageGenerationProvider {
 
     /**
      * ComfyUIに配置されているLoRAモデルの一覧を取得する(GET /object_info/LoraLoader)。
-     * LoraLoaderノードが未実装のComfyUI環境では例外を投げず空リストを返す。
+     * LoraLoaderノードが未実装のComfyUI環境(HTTPエラー)では空リストを返す。到達できない場合は空リストへ丸めず{@link AiServiceException}(#1126)。
      */
     public List<String> listLoras() {
+        String baseUrl = configProvider.comfyUiBaseUrl();
         try {
             JsonNode response = client.get()
-                    .uri(configProvider.comfyUiBaseUrl() + "/object_info/LoraLoader")
+                    .uri(baseUrl + "/object_info/LoraLoader")
                     .retrieve().body(JsonNode.class);
             List<String> loras = new ArrayList<>();
             if (response == null) {
@@ -318,9 +337,22 @@ public class ComfyUiClient implements ImageGenerationProvider {
                 loras.add(name.asText());
             }
             return loras;
+        } catch (ResourceAccessException e) {
+            throw unreachable(baseUrl, e);
         } catch (RestClientResponseException e) {
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * 接続失敗(名前解決不可・接続拒否・タイムアウト)を、到達したうえでのHTTPエラー
+     * ({@link RestClientResponseException})と区別して{@link AiServiceException}(502)にする(issue #1126)。
+     * これを通らない{@code ResourceAccessException}は本文の空な409になり、理由も接続先も読めなかった。
+     */
+    private AiServiceException unreachable(String baseUrl, ResourceAccessException e) {
+        String message = "ComfyUIへ到達できません(接続先: " + baseUrl + "): " + e.getMessage();
+        log.warn(message, e);
+        return new AiServiceException(message, e);
     }
 
     private ObjectNode buildWorkflow(ComfyUiGenerationParams params) {
