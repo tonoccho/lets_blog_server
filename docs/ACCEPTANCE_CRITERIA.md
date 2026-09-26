@@ -168,10 +168,10 @@ API: publishing `BulkManagementController`(23エンドポイント)
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
 | AC-BULK-001 | カテゴリの環境間比較 | どの環境に何が無いか分かる | `GET /bulk-management/categories/comparison` が環境ごとの差分を返す | `apps/web/e2e/features/bulk/category-comparison.feature`(マスターにのみ存在=対象環境に不足 / 両環境に存在し内容が異なる=差異あり / 対象環境にのみ存在=余剰。#1177) | 検証済 |
-| AC-BULK-002 | タグの環境間比較 | 同上(タグ) | `GET /bulk-management/tags/comparison` が差分を返す | — | 未着手 |
-| AC-BULK-003 | 記事の環境間比較 | 同上(記事) | `GET /bulk-management/posts/comparison` が差分を返す | — | 未着手 |
-| AC-BULK-004 | プラグインの環境間比較 | 環境間の構成差を把握できる | `GET /bulk-management/plugins/comparison` が差分を返す | — | 未着手 |
-| AC-BULK-005 | テーマの環境間比較 | 同上(テーマ) | `GET /bulk-management/themes/comparison` が差分を返す | — | 未着手 |
+| AC-BULK-002 | タグの環境間比較 | 同上(タグ) | `GET /bulk-management/tags/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › タグの比較が、不足・差異・余剰を示す(タグ: マスターにのみ存在=対象環境に不足 / 両環境で説明文が異なる=差異 / 対象環境にのみ存在=余剰。#1178) | 検証済(`@slow`) |
+| AC-BULK-003 | 記事の環境間比較 | 同上(記事) | `GET /bulk-management/posts/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › 投稿の比較が、環境間の差分を示す(投稿: マスターにのみ存在=対象環境に存在しない / 両環境に存在し公開状態が異なる。#1178) | 検証済(`@slow`) |
+| AC-BULK-004 | プラグインの環境間比較 | 環境間の構成差を把握できる | `GET /bulk-management/plugins/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › プラグインの比較が、環境間の構成差を示す(プラグイン: マスターにのみ有効=対象環境に未インストール / 有効状態が異なる。#1178) | 検証済(`@slow`) |
+| AC-BULK-005 | テーマの環境間比較 | 同上(テーマ) | `GET /bulk-management/themes/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › テーマの比較が、環境間の構成差を示す(テーマ: マスターにのみ存在・対象環境にのみ存在=それぞれ他方が未インストール。#1178) | 検証済(`@slow`) |
 | AC-BULK-006 | カテゴリの同期 | 環境を手作業で揃えなくてよい | `sync` / `sync-all` / `edit-sync` 後、比較の差分が解消する | — | 未着手 |
 | AC-BULK-007 | タグの同期 | 同上(タグ) | 同上 | — | 未着手 |
 | AC-BULK-008 | プラグイン/テーマの調整 | 環境の構成を揃えられる | `plugins/reconcile` `themes/reconcile` 後、比較の差分が解消する | — | 未着手(`@slow`) |
