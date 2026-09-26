@@ -1,5 +1,6 @@
 package com.letsblog.identity.config;
 
+import com.letsblog.identity.client.PublishingServiceException;
 import com.letsblog.identity.keycloak.KeycloakUserSyncException;
 import com.letsblog.identity.service.AvatarNotFoundException;
 import com.letsblog.identity.service.EmailAlreadyExistsException;
@@ -104,6 +105,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(KeycloakUserSyncException.class)
     public ResponseEntity<ErrorResponse> handleKeycloakUserSync(KeycloakUserSyncException e) {
         log.error("Keycloak Admin APIとの同期に失敗しました", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * サイト側の著者登録(publishing-service呼び出し)の失敗(#1136)。実WordPressでない/到達不能な
+     * サイトが紐づいていると、無条件の500ではなく原因の分かる502(Bad Gateway)で返す。
+     */
+    @ExceptionHandler(PublishingServiceException.class)
+    public ResponseEntity<ErrorResponse> handlePublishingService(PublishingServiceException e) {
+        log.error("publishing-serviceの著者登録呼び出しに失敗しました", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
