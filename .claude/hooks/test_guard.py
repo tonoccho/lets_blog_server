@@ -628,6 +628,38 @@ class ExplainSubcommand(unittest.TestCase):
         self.assertIn("timeout", out, "剥がしたラッパーが示されていない")
         self.assertIn("deny", out.lower(), "判定結果が示されていない")
 
+    def _explain(self, command):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", command],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout
+
+    def test_explain_denies_an_illegal_status_transition(self):
+        """#1183: `cmd_bash` が拒否する遷移を、explain も DENY と表示すること。"""
+        out = self._explain(
+            'timeout 60 glab api "projects/:id/issues/1" --method PUT '
+            '-f "remove_labels=status::Ready" -f "add_labels=status::Done"'
+        )
+        self.assertIn("判定: DENY", out)
+        self.assertNotIn("判定: allow", out)
+
+    def test_explain_denies_a_wholesale_label_overwrite(self):
+        out = self._explain('glab api "projects/:id/issues/1" --method PUT -f "labels=bug"')
+        self.assertIn("判定: DENY", out)
+
+    def test_explain_keeps_denying_merge_flags_and_no_verify(self):
+        self.assertIn("判定: DENY [マージ方式]", self._explain("glab mr merge 5"))
+        self.assertIn("判定: DENY [--no-verify 禁止]", self._explain("git push --no-verify"))
+
+    def test_explain_states_which_checks_it_cannot_run(self):
+        """セッション状態・作業ツリーに依存するガードは、その旨を表示すること。"""
+        out = self._explain("ls")
+        self.assertIn("判定: allow", out)
+        for name in ("check_read_only", "check_commit_phase", "check_pr_coverage"):
+            self.assertIn(name, out)
+
 
 class StatusLabelIntegrity(unittest.TestCase):
     """CLAUDE.md → How to change status: ステータスは常にちょうど1つ(#1023)。

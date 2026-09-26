@@ -874,6 +874,7 @@ def cmd_explain(command):
 
     for label, check in (
         ("マージ方式", check_merge_flags),
+        ("ステータスラベル", check_status_label_integrity),
         ("--no-verify 禁止", check_no_verify),
     ):
         try:
@@ -881,6 +882,13 @@ def cmd_explain(command):
         except Denied as denied:
             print("判定: DENY [%s] %s" % (label, denied.reason))
             return 0
+
+    # `cmd_bash` が呼ぶ残りのガードは payload(セッション状態・作業ツリー・計測結果)に
+    # 依存し、コマンド文字列だけでは判定できない。判定に含まれていないことを明示する(#1183)。
+    print("注記: 次のガードは payload に依存するため explain では判定していない:")
+    print("      check_read_only(読み取り専用ステージの状態)")
+    print("      check_commit_phase(ステージ済みファイル)")
+    print("      check_pr_coverage(カバレッジ計測結果)")
 
     if invokes(command, "glab", ("mr", "create")):
         print("判定: glab mr create を検出。カバレッジ検査が走る(結果は計測次第)")
