@@ -88,7 +88,17 @@ The hook refuses exactly two things, both decidable from the command text alone 
 - adding a `status::` without removing one in the same call, or removing without adding.
 
 Creating an Issue (`glab issue create --label status::Inbox,...`) is not a transition and is not
-refused. Run the script when you suspect drift and after any web-UI editing:
+refused.
+
+**The one exception to every new Issue starting in `Inbox`**: `/report-bug`
+(`.claude/skills/report-bug/SKILL.md`) creates its Issue directly in `status::Backlog`, skipping `Inbox`,
+because report-bug already investigates the codebase and fills in the Acceptance Criteria before
+filing — the same judgment `triage-backlog` would otherwise make. This is still Issue creation,
+not a `status::` transition, so the Legal Transitions table below is unaffected. `plan-issue`
+Step 5's "the project workflow explicitly allows the planner to skip a stage" refers to this
+definition; no other skill has this allowance.
+
+Run the script when you suspect drift and after any web-UI editing:
 
 ```bash
 scripts/check-issue-labels.sh
@@ -239,7 +249,7 @@ Resulting assignments:
 - `haiku` — `git-workflow`, `triage-backlog`, `ready-issue`
 - `sonnet` — `merge-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`,
   `implement-issue`; the `reviewer`, `qa` and `implementer` agents
-- `opus` — `plan-issue`, `discover-issues`
+- `opus` — `plan-issue`, `discover-issues`, `report-bug`
 
 Two deliberate exceptions:
 
@@ -294,10 +304,10 @@ Otherwise, do not halt the workflow short of a merged Merge Request and a `Done`
 
 # Read-Only Stages
 
-This is the single definition of "read-only"; `discover-issues`, `triage-backlog`, `ready-issue`
+This is the single definition of "read-only"; `discover-issues`, `triage-backlog`, `ready-issue`, `report-bug`
 and every agent they spawn defer to it. A second definition in `.claude/` is a bug to fix.
 
-These three stages never change the repository. They read the codebase and the Issue tracker,
+These four stages never change the repository. They read the codebase and the Issue tracker,
 form a judgment, and record that judgment in GitLab. That is their entire output.
 
 ## What must not change
@@ -328,6 +338,7 @@ Only GitLab Issue state, and only the mutations listed for that stage:
 | `discover-issues` | Create new Issues in `Inbox` with `Priority` set; comment on an existing Issue when the finding is already covered by it |
 | `triage-backlog` | Move `Inbox → Backlog`; set `Priority` on each Issue it moves |
 | `ready-issue` | Move `Backlog → Ready`; post the Readiness Report as a comment; rewrite Epic shorthand in the Issue body to `#<number>` (required by **Dependency Resolution** → Recording dependencies) |
+| `report-bug` | Create exactly one Issue directly in `status::Backlog` with `user-request`, `bug`, `priority::P0`, `hotfix` — see **How to change status** for the Inbox-skip exception this row grants |
 
 Anything else is out of bounds — including closing an Issue, which stays the user's call.
 
@@ -517,12 +528,15 @@ Two independent layers enforce this — the same split `status::` uniqueness use
 | Layer | Enforces |
 | --- | --- |
 | `guard.py` → the hotfix-immutability check | Denies Claude adding or removing `hotfix` on an **existing** Issue: `glab api ... --method PUT` (`add_labels=`/`remove_labels=`) and `glab issue update` (`-l`/`--label`, `-u`/`--unlabel`). |
+| `guard.py` → the hotfix-creation gate | Denies `glab issue create --label ...,hotfix,...` unless the read-only stage marker is `report-bug` (#1434). This is the create-time counterpart of the row above — an independent check, not an extension of it. |
 | `scripts/check-issue-labels.sh` | Detects, after the fact, more than 3 open Issues carrying `hotfix` — however they got there, including a web-UI edit. |
 
 `guard.py` never counts open `hotfix` Issues itself — that needs an API call, and it stays
 network-free by design (CLAUDE.md → Enforcement). The 3-Issue cap is `check-issue-labels.sh`'s
-job alone. `glab issue create --label hotfix,...` is neither denied nor specially handled here
-(Out of Scope for #1433; `/report-bug` and its create-time handling are #1434).
+job alone; `/report-bug` (`.claude/skills/report-bug/SKILL.md`) counts it live via the API before
+filing, and stops without creating an Issue when 3 are already open. `glab issue create --label
+hotfix,...` from any other caller — a different skill, or a manual invocation with no read-only
+stage marker set — is denied by `guard.py`'s hotfix-creation gate (#1434).
 
 See **Selection order** below for how `hotfix` affects which Issue is picked next.
 

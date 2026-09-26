@@ -953,22 +953,264 @@ class HotfixLabelImmutability(unittest.TestCase):
             )
         )
 
-    def test_issue_create_with_hotfix_is_not_denied(self):
-        """新規作成は対象外(Out of Scope、#1434 で扱う。現状維持)。"""
-        self.assertIsNone(
-            run_hook(
-                "bash",
-                bash_payload(
-                    "glab issue create --title x --label hotfix,priority::P0 --yes"
-                ),
-            )
+    def test_issue_create_with_hotfix_without_marker_is_now_denied(self):
+        """#1434: 作成時の `hotfix` は `report-bug` 実行中だけ許可される。
+
+        このテストは元々「新規作成は対象外(Out of Scope、#1434 で扱う。現状維持)」を
+        検証していた。#1434 はまさにその隙間を埋める Issue であり、Requirement 5 は
+        read-only stage マーカーが `report-bug` でない限り作成時の `hotfix` を拒否する
+        ことを求めている。マーカーを何も立てていないこの呼び出しは、その「report-bug
+        以外」に該当するので、期待する結果が allow から deny に変わる
+        (`HotfixCreationGate` に、マーカーありの allow / 他スキルでの deny を追加した)。
+        """
+        reason = run_hook(
+            "bash",
+            bash_payload(
+                "glab issue create --title x --label hotfix,priority::P0 --yes"
+            ),
         )
+        self.assertIsNotNone(reason, "マーカー無しでの hotfix 付き起票が拒否されていない")
+        self.assertIn("hotfix", reason)
 
     def test_wrapped_hotfix_violation_is_still_denied(self):
         """#1029 の教訓。前置詞で外れないこと。"""
         self.assertIsNotNone(
             run_hook(
                 "bash", bash_payload("timeout 60 glab issue update 42 --label hotfix")
+            )
+        )
+
+
+# --------------------------------------------------------------------------- #1434
+
+
+def _stage_root(skill, session="report-bug-test-session"):
+    """`.claude/hooks/guard.py` の `cmd_stage` が書くマーカーファイルを、一時ディレクトリに
+    直接作る(`ReadOnlyStageFalsePositives._in_stage` と同じ方式)。root と session id を返す。
+    """
+    root = tempfile.mkdtemp()
+    state = os.path.join(root, ".claude", ".state")
+    os.makedirs(state)
+    with open(os.path.join(state, "readonly-%s" % session), "w", encoding="utf-8") as f:
+        f.write(skill)
+    return root, session
+
+
+def _run_in_root(mode, tool_input, root, session):
+    """`root` を `CLAUDE_PROJECT_DIR` にせず `cwd` として渡し、guard.py を起動する。
+
+    `CLAUDE_PROJECT_DIR` が実際のセッション環境で設定されていると、そちらが
+    `payload["cwd"]` より優先されてしまい、一時ディレクトリに立てたマーカーが
+    見えなくなる(`project_dir()` の優先順位)。既存の `_in_stage` と同じ回避策。
+    """
+    env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+    try:
+        return run_hook(mode, {"tool_input": tool_input, "session_id": session, "cwd": root})
+    finally:
+        if env_backup is not None:
+            os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+
+class ReportBugReadOnlyStage(unittest.TestCase):
+    """Requirement 3 / AC2: `report-bug` は read-only stage である(#1434)。
+
+    #1433 までの `READ_ONLY_SKILLS` は `discover-issues` / `triage-backlog` / `ready-issue`
+    の3つだけだった。`report-bug` が加わっていない限り、`Skill` フックの `cmd_stage` は
+    マーカーを書かず、`Write`/`Edit` も、リポジトリ内へ書き込む `Bash` も止められない。
+
+    **`_stage_root()` のようにマーカーファイルを直接書いてはいけない**。`read_stage()` は
+    マーカーの中身が何であれ「読み取り専用ステージ中」として扱うため、直接書く方式では
+    `report-bug` が `READ_ONLY_SKILLS` に入っているかどうかに関係なく常に拒否側になり、
+    Requirement 3 が実際に満たされているかを検査したことにならない(検査したいのは
+    「`cmd_stage` が `report-bug` のときにマーカーを書くかどうか」自体)。実際の呼び出し
+    経路(`Skill` フック → `stage`、続けて `Write`/`Bash` フック)をそのままサブプロセスの
+    連鎖として駆動する。スタブは使わない。
+    """
+
+    def _enter_stage(self, skill, root, session="report-bug-real-session"):
+        """実際の `stage` サブコマンドを起動し、`cmd_stage` にマーカーの要否を判断させる。"""
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            proc = subprocess.run(
+                [sys.executable, HOOK, "stage"],
+                input=json.dumps(
+                    {"tool_input": {"skill": skill}, "session_id": session, "cwd": root}
+                ),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        return session
+
+    def _new_root(self):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, ".claude"))
+        return root
+
+    def test_report_bug_stage_marker_is_written(self):
+        """`cmd_stage` が `report-bug` のマーカーを実際に書くこと。"""
+        root = self._new_root()
+        session = self._enter_stage("report-bug", root)
+        marker = os.path.join(root, ".claude", ".state", "readonly-%s" % session)
+        self.assertTrue(os.path.exists(marker), "report-bug のマーカーが書かれていない")
+        with open(marker, encoding="utf-8") as f:
+            self.assertEqual("report-bug", f.read().strip())
+
+    def test_report_bug_stage_denies_writes_inside_the_repo(self):
+        root = self._new_root()
+        session = self._enter_stage("report-bug", root)
+        target = os.path.join(root, "docs", "note.md")
+        reason = _run_in_root("write", {"file_path": target, "content": "x"}, root, session)
+        self.assertIsNotNone(reason, "report-bug 実行中の Write が拒否されていない")
+        self.assertIn("report-bug", reason)
+
+    def test_report_bug_stage_denies_edit_style_writes(self):
+        """`Edit` も `file_path` を使うので同じ経路で拒否されること。"""
+        root = self._new_root()
+        session = self._enter_stage("report-bug", root)
+        target = os.path.join(root, "src", "app.py")
+        reason = _run_in_root(
+            "write", {"file_path": target, "old_string": "a", "new_string": "b"}, root, session
+        )
+        self.assertIsNotNone(reason, "report-bug 実行中の Edit が拒否されていない")
+
+    def test_report_bug_stage_denies_mutating_bash(self):
+        root = self._new_root()
+        session = self._enter_stage("report-bug", root)
+        reason = _run_in_root("bash", {"command": "rm -rf build"}, root, session)
+        self.assertIsNotNone(reason, "report-bug 実行中の破壊的コマンドが拒否されていない")
+
+    def test_report_bug_stage_allows_investigation_bash(self):
+        root = self._new_root()
+        session = self._enter_stage("report-bug", root)
+        reason = _run_in_root("bash", {"command": "git log --oneline -5"}, root, session)
+        self.assertIsNone(reason, "report-bug 実行中の調査コマンドが拒否された")
+
+    def test_other_skill_does_not_trigger_the_read_only_stage(self):
+        """比較対照: read-only ではないスキルのマーカーは Write を拒否しない。"""
+        root = self._new_root()
+        session = self._enter_stage("implement-issue", root)
+        target = os.path.join(root, "docs", "note.md")
+        reason = _run_in_root("write", {"file_path": target, "content": "x"}, root, session)
+        self.assertIsNone(reason, "read-only ではないスキルなのに Write が拒否された")
+
+
+class HotfixCreationGate(unittest.TestCase):
+    """Requirement 5 / AC3: 作成時の `hotfix` は `report-bug` の実行中だけ許可される(#1434)。
+
+    `check_hotfix_label_immutability` は既存 Issue への付け外しだけを扱い、
+    `check_status_label_integrity` は `glab issue create` を遷移ではないとして素通り
+    させている(#1433 の Out of Scope)。ここで検証するのは、その隙間を埋める
+    **独立した新規チェック**であり、既存の2つのチェックには影響しないこと。
+    """
+
+    def test_create_with_hotfix_is_denied_without_any_marker(self):
+        reason = run_hook(
+            "bash", bash_payload('glab issue create --label hotfix --title x')
+        )
+        self.assertIsNotNone(reason, "マーカー無しでの hotfix 付き起票が許可された")
+        self.assertIn("hotfix", reason)
+
+    def test_create_with_hotfix_is_denied_when_marker_is_another_read_only_skill(self):
+        root, session = _stage_root("ready-issue")
+        reason = _run_in_root(
+            "bash", {"command": "glab issue create --label hotfix --title x"}, root, session
+        )
+        self.assertIsNotNone(reason, "ready-issue のマーカーで hotfix 付き起票が許可された")
+
+    def test_create_with_hotfix_is_denied_when_marker_is_discover_issues(self):
+        root, session = _stage_root("discover-issues")
+        reason = _run_in_root(
+            "bash", {"command": "glab issue create --label hotfix --title x"}, root, session
+        )
+        self.assertIsNotNone(reason, "discover-issues のマーカーで hotfix 付き起票が許可された")
+
+    def test_create_with_hotfix_is_allowed_when_marker_is_report_bug(self):
+        root, session = _stage_root("report-bug")
+        reason = _run_in_root(
+            "bash", {"command": "glab issue create --label hotfix --title x"}, root, session
+        )
+        self.assertIsNone(reason, "report-bug のマーカーがあるのに hotfix 付き起票が拒否された")
+
+    def test_create_with_full_label_set_is_allowed_when_marker_is_report_bug(self):
+        """Requirement 4 の5ラベル(user-request,bug,priority::P0,hotfix,status::Backlog)。"""
+        root, session = _stage_root("report-bug")
+        reason = _run_in_root(
+            "bash",
+            {
+                "command": (
+                    "glab issue create --title x "
+                    "--label user-request,bug,priority::P0,hotfix,status::Backlog"
+                ),
+            },
+            root,
+            session,
+        )
+        self.assertIsNone(reason)
+
+    def test_create_without_hotfix_is_allowed_regardless_of_marker(self):
+        """AC3: `hotfix` を含まない起票は従来どおり許可される。"""
+        self.assertIsNone(
+            run_hook(
+                "bash", bash_payload("glab issue create --label bug,priority::P0 --title x")
+            )
+        )
+        root, session = _stage_root("ready-issue")
+        reason = _run_in_root(
+            "bash", {"command": "glab issue create --label bug,priority::P0 --title x"}, root, session
+        )
+        self.assertIsNone(reason)
+
+    def test_create_short_flag_attached_hotfix_is_denied_without_marker(self):
+        """`-lhotfix`(直結形)も見逃さないこと。既存の `_issue_update_label_args` を再利用する。"""
+        reason = run_hook(
+            "bash", bash_payload("glab issue create -lhotfix --title x")
+        )
+        self.assertIsNotNone(reason, "-lhotfix での起票が拒否されていない")
+
+    def test_create_short_flag_attached_hotfix_is_allowed_with_report_bug_marker(self):
+        root, session = _stage_root("report-bug")
+        reason = _run_in_root(
+            "bash", {"command": "glab issue create -lbug,hotfix --title x"}, root, session
+        )
+        self.assertIsNone(reason)
+
+    def test_create_hotfix_substring_label_is_not_mistaken(self):
+        """`hotfix` は完全一致で判定する。部分一致で誤検知しないこと。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab issue create --label not-a-hotfix-label --title x"),
+            )
+        )
+
+    def test_wrapped_creation_violation_is_still_denied(self):
+        """#1029 の教訓。前置詞で外れないこと。"""
+        reason = run_hook(
+            "bash", bash_payload("timeout 60 glab issue create --label hotfix --title x")
+        )
+        self.assertIsNotNone(reason)
+
+    def test_hotfix_immutability_check_is_unaffected(self):
+        """既存 Issue への付け外し検査(#1433)と衝突しないこと。"""
+        reason = run_hook(
+            "bash",
+            bash_payload(
+                'glab api projects/:id/issues/42 --method PUT -f add_labels=hotfix'
+            ),
+        )
+        self.assertIsNotNone(reason, "既存 Issue への hotfix 付与が許可された(#1433 への回帰)")
+
+    def test_status_transition_creation_is_unaffected(self):
+        """作成時の `status::` ラベルは従来どおり素通りする(#1023 の Out of Scope)。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab issue create --label status::Backlog --title x"),
             )
         )
 

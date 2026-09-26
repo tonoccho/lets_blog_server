@@ -3,8 +3,8 @@
 
 強制する対象は3つ。いずれも CLAUDE.md 側が唯一の定義であり、ここはその執行機構:
 
-1. **Read-Only Stages** — `discover-issues` / `triage-backlog` / `ready-issue` の実行中は、
-   リポジトリ内のいかなるファイルも書き換えさせない。
+1. **Read-Only Stages** — `discover-issues` / `triage-backlog` / `ready-issue` / `report-bug`
+   の実行中は、リポジトリ内のいかなるファイルも書き換えさせない。
 2. **Test-First Implementation** — テストコードとプロダクションコードを同一コミットに
    混在させない。テストを skip/ignore/削除して緑にすることを許さない。
 3. **Completion Definition** — squash 以外のマージ方式を許さない。
@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import classify, is_production, is_test, strip_worktree  # noqa: E402
 from silencers import SILENCERS  # noqa: E402
 
-READ_ONLY_SKILLS = {"discover-issues", "triage-backlog", "ready-issue"}
+READ_ONLY_SKILLS = {"discover-issues", "triage-backlog", "ready-issue", "report-bug"}
 
 # 読み取り専用ステージ中に禁止するコマンド。**コマンド名で判定する**(#986)。
 # 旧実装は生の文字列に `\b(rm|mv|cp|tee|patch|truncate)\b` をかけていたため、
@@ -852,6 +852,41 @@ def check_hotfix_label_immutability(command):
             )
 
 
+def check_hotfix_creation(payload, command):
+    """CLAUDE.md → Issue Provenance → hotfix: 作成時の付与は `report-bug` の実行中だけ(#1434)。
+
+    `check_status_label_integrity` は `glab issue create` を遷移ではないとして素通りさせ
+    (681-682行のコメント)、`check_hotfix_label_immutability` も「作成は対象外(遷移ではなく
+    新規作成。#1434 で扱う)」と明記して現状を維持している。ここはその隙間を埋める。
+    #1433 の Readiness Report が指摘したとおり、`check_status_label_integrity` を拡張せず
+    **独立した関数**として追加する — あちらは `status::` 専用のロジック(一意性・遷移表)と
+    密結合しており、この判定は無関係な壊れ方を見ている。
+
+    判定には read-only stage マーカー(`read_stage`)をそのまま使う。ネットワーク呼び出しは
+    無い。マーカーは `cmd_stage`(`Skill` フックの PreToolUse)が `READ_ONLY_SKILLS` に
+    含まれるスキル名だけを書き込むので、`report-bug` がこの集合に入っていないと、
+    `report-bug` 自身の起票呼び出しもここで拒否されてしまう(#1434 Readiness Report の
+    実装順序の注意)。`READ_ONLY_SKILLS` への `report-bug` の追加がこの関数より先に
+    必要な理由はそこにある。
+
+    ラベル値の抽出は `_issue_update_label_args` を再利用する。`glab issue create` の
+    `--label`/`-l` は `glab issue update` と同じ pflag の記法(空白区切り、`--label=`、
+    `-l` の値直結形、`-l=` のカンマ併記)を受け付けるため、専用の解析を新たに書かない。
+    """
+    for args in invokes(command, "glab", ("issue", "create")):
+        added, _ = _issue_update_label_args(args)
+        if "hotfix" not in added:
+            continue
+        if read_stage(payload) != "report-bug":
+            emit_deny(
+                "`glab issue create` に `hotfix` を含めての起票は `/report-bug` の実行中"
+                "だけ許可されます(CLAUDE.md → Issue Provenance → hotfix)。"
+                "`/report-bug` はここに至る前に open な `hotfix` の件数を数え、上限(3件)で"
+                "止まります。他のスキルや手動呼び出しから `hotfix` 付きで起票することは"
+                "できません。"
+            )
+
+
 def check_no_verify(command):
     for sub in ("commit", "push"):
         for args in invokes(command, "git", (sub,)):
@@ -952,6 +987,7 @@ def cmd_bash(payload):
     check_merge_flags(command)
     check_status_label_integrity(command)
     check_hotfix_label_immutability(command)
+    check_hotfix_creation(payload, command)
     check_no_verify(command)
     check_commit_phase(payload, command)
     check_pr_coverage(payload, command)
@@ -1011,6 +1047,7 @@ def cmd_explain(command):
     print("      check_read_only(読み取り専用ステージの状態)")
     print("      check_commit_phase(ステージ済みファイル)")
     print("      check_pr_coverage(カバレッジ計測結果)")
+    print("      check_hotfix_creation(read-only stage マーカーが report-bug かどうか)")
 
     if invokes(command, "glab", ("mr", "create")):
         print("判定: glab mr create を検出。カバレッジ検査が走る(結果は計測次第)")

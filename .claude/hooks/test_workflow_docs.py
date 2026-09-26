@@ -490,3 +490,263 @@ class SkillNames(unittest.TestCase):
             [], offenders, "旧スキル名への参照が残っている:\n" + "\n".join(offenders)
         )
 
+
+# --------------------------------------------------------------------------- #1434
+
+
+class ReportBugSkillExists(unittest.TestCase):
+    """Requirement 1 / AC1: `.claude/skills/report-bug/SKILL.md` の frontmatter(#1434)。"""
+
+    PATH = ".claude/skills/report-bug/SKILL.md"
+
+    def _frontmatter(self):
+        text = read(self.PATH)
+        parts = text.split("---", 2)
+        self.assertEqual(3, len(parts), "%s の frontmatter が見つからない" % self.PATH)
+        return parts[1]
+
+    def test_skill_file_exists(self):
+        self.assertIn(self.PATH, claude_docs())
+
+    def test_frontmatter_declares_opus(self):
+        """CLAUDE.md → Model Selection → Authoring Issues → opus(Requirement 1)。"""
+        self.assertRegex(self._frontmatter(), r"(?m)^model:\s*opus\s*$")
+
+    def test_frontmatter_name_matches_directory(self):
+        """`SkillNames.test_frontmatter_name_matches_the_directory` と同じ検査を、
+        このファイルが存在しない間も明示的な失敗として出すための重複。"""
+        self.assertRegex(self._frontmatter(), r"(?m)^name:\s*report-bug\s*$")
+
+
+class ReportBugDoesNotRestateTheIssueTemplate(unittest.TestCase):
+    """Requirement 2: 本文は Issue の節構成を書き直さず、`plan-issue` / `project-planner` を
+    参照する(#1434)。`.claude/` 内の二重定義はこのプロジェクトではバグ扱い(CLAUDE.md)。
+
+    `SelectionOrderSingleSource.KEY_LIST_MARKERS` と同じ考え方: Issue テンプレートの
+    見出しをそのまま書き直した箇条書きが3つ以上一致すれば「書き直し」とみなす。
+    """
+
+    PATH = ".claude/skills/report-bug/SKILL.md"
+
+    ISSUE_TEMPLATE_HEADING_MARKERS = [
+        re.compile(r"^#{1,3}\s+Background\s*$", re.MULTILINE),
+        re.compile(r"^#{1,3}\s+Problem\s*$", re.MULTILINE),
+        re.compile(r"^#{1,3}\s+Requirements\s*$", re.MULTILINE),
+        re.compile(r"^#{1,3}\s+Acceptance Criteria\s*$", re.MULTILINE),
+        re.compile(r"^#{1,3}\s+Out of Scope\s*$", re.MULTILINE),
+        re.compile(r"^#{1,3}\s+Implementation Notes\s*$", re.MULTILINE),
+    ]
+
+    def test_does_not_restate_the_issue_template_headings(self):
+        text = read(self.PATH)
+        matched = sum(1 for m in self.ISSUE_TEMPLATE_HEADING_MARKERS if m.search(text))
+        self.assertLess(
+            matched, 3, "report-bug が Issue の節構成をそのまま書き直している(%d 個一致)" % matched
+        )
+
+    def test_references_plan_issue(self):
+        self.assertIn("plan-issue", read(self.PATH))
+
+    def test_references_project_planner(self):
+        self.assertIn("project-planner", read(self.PATH))
+
+    def test_references_the_five_acceptance_criteria_cap(self):
+        self.assertRegex(read(self.PATH), r"At most five Acceptance Criteria")
+
+
+class ReportBugSkillContent(unittest.TestCase):
+    """Requirement 2 / AC4: 固定ラベル一式・`status::Backlog`・上限チェック手順(#1434)。"""
+
+    PATH = ".claude/skills/report-bug/SKILL.md"
+
+    def test_specifies_the_fixed_label_set(self):
+        text = read(self.PATH)
+        for label in ("user-request", "bug", "priority::P0", "hotfix", "status::Backlog"):
+            with self.subTest(label=label):
+                self.assertIn(label, text, "%s がラベル一式に含まれていない" % label)
+
+    def test_uses_glab_issue_create_with_label_flag(self):
+        self.assertRegex(read(self.PATH), r"glab issue create.*--label", )
+
+    def test_has_a_hotfix_cap_check_before_filing(self):
+        """AC4: 起票前に open な hotfix の件数を数える手順。"""
+        text = read(self.PATH)
+        self.assertIn("hotfix", text)
+        self.assertRegex(text, r"3")
+        self.assertRegex(text, r"(state=opened|open な)")
+
+    def test_stops_without_creating_when_the_cap_is_full(self):
+        """AC4: 上限3件のとき、起票せず止まる。"""
+        text = read(self.PATH)
+        self.assertRegex(text, r"(Stop|止まり|止まる)")
+
+    def test_shows_the_existing_three_and_offers_two_choices(self):
+        """AC4: 既存3件を示し、二択を提示する。"""
+        text = read(self.PATH)
+        self.assertRegex(text, r"(existing 3|既存3件|既存の3件)")
+        # 二択: web UI で外す/hotfix 無しで起票する、の2通り
+        self.assertRegex(text, r"(?s)1\..{0,400}2\.")
+
+    def test_never_removes_an_existing_hotfix_itself(self):
+        """Requirement 6: Claude が既存の hotfix を外すことはしない。"""
+        text = read(self.PATH)
+        self.assertRegex(text, r"(Never remove|外すことはしない|Claude.*外さない)")
+
+    def test_reports_issue_number_labels_and_readiness_signal(self):
+        """Requirement 7: 起票後、Issue 番号・ラベル・readiness signal を報告する。"""
+        text = read(self.PATH)
+        self.assertIn("Readiness Signal", text)
+        self.assertRegex(text, r"(Ready candidate|Needs clarification)")
+
+    def test_does_not_decide_ready_itself(self):
+        """Requirement 7: Backlog → Ready の判定はしない。"""
+        text = read(self.PATH)
+        self.assertIn("ready-issue", text)
+
+
+class ReadOnlyStagesIncludeReportBug(unittest.TestCase):
+    """Requirement 3 / AC2: `CLAUDE.md` → Read-Only Stages に `report-bug` を追加する(#1434)。"""
+
+    def _section(self):
+        text = read(".claude/CLAUDE.md")
+        after = text.split("# Read-Only Stages", 1)
+        self.assertEqual(2, len(after), "CLAUDE.md に # Read-Only Stages が無い")
+        return after[1].split("\n# ", 1)[0]
+
+    def test_definition_sentence_lists_report_bug(self):
+        section = self._section()
+        self.assertRegex(
+            section,
+            r"`discover-issues`,?\s*`triage-backlog`,?\s*`ready-issue`.{0,40}`report-bug`"
+            r"|`report-bug`.{0,120}`discover-issues`",
+        )
+
+    def test_permitted_mutations_table_has_a_report_bug_row(self):
+        section = self._section()
+        self.assertRegex(section, r"\|\s*`report-bug`\s*\|")
+        # そのすぐ後(表の同じ行)に、許可される内容が書かれていること
+        row_match = re.search(r"\|\s*`report-bug`\s*\|([^\n]*)\|", section)
+        self.assertIsNotNone(row_match, "report-bug の行が見つからない")
+        row = row_match.group(1)
+        for token in ("user-request", "bug", "priority::P0", "hotfix", "status::Backlog"):
+            with self.subTest(token=token):
+                self.assertIn(token, row)
+
+    def test_guard_py_read_only_skills_include_report_bug(self):
+        text = read(".claude/hooks/guard.py")
+        match = re.search(r"READ_ONLY_SKILLS\s*=\s*\{([^}]*)\}", text)
+        self.assertIsNotNone(match, "guard.py に READ_ONLY_SKILLS が見つからない")
+        self.assertIn('"report-bug"', match.group(1))
+
+
+class ModelSelectionIncludesReportBug(unittest.TestCase):
+    """Requirement 8: `CLAUDE.md` → Model Selection の opus 一覧に `report-bug`(#1434)。"""
+
+    def test_opus_assignment_line_includes_report_bug(self):
+        text = read(".claude/CLAUDE.md")
+        section = text.split("## What each stage declares", 1)[1].split("\n---", 1)[0]
+        match = re.search(r"`opus`\s*—\s*([^\n]*)", section)
+        self.assertIsNotNone(match, "opus の割り当て行が見つからない")
+        self.assertIn("report-bug", match.group(1))
+
+
+class BacklogCreationExceptionIsDefinedOnce(unittest.TestCase):
+    """Requirement 4 / AC5: `/report-bug` の Backlog 直接起票の例外は1か所だけ(#1434)。
+
+    `plan-issue` Step 5 の「the project workflow explicitly allows the planner to skip a
+    stage」が指す先。表の1行(Read-Only Stages)とは別に、Inbox 始まりの既定に対する
+    例外だと明示的に述べる文が、CLAUDE.md 中にちょうど1つだけ存在することを固定する。
+    """
+
+    SENTINEL = "creates its Issue directly in `status::Backlog`, skipping `Inbox`"
+
+    def test_sentinel_sentence_appears_exactly_once(self):
+        text = read(".claude/CLAUDE.md")
+        self.assertEqual(
+            1, text.count(self.SENTINEL),
+            "Backlog 直接起票の例外が0か所、または複数か所に書かれている",
+        )
+
+    def test_exception_mentions_report_bug_and_plan_issue_step_5(self):
+        text = read(".claude/CLAUDE.md")
+        idx = text.find(self.SENTINEL)
+        self.assertNotEqual(-1, idx)
+        surrounding = text[max(0, idx - 200): idx + 600]
+        self.assertIn("report-bug", surrounding)
+        self.assertIn("plan-issue", surrounding)
+        self.assertIn("Step 5", surrounding)
+
+
+class LegalTransitionsAreUnchanged(unittest.TestCase):
+    """AC5: Legal Transitions の表と `LEGAL_STATUS_TRANSITIONS` は変わっていない(#1434)。
+
+    作成は遷移ではないので、#1434 はこの表にも `guard.py` のデータにも触れない。
+    ここは「触れていないこと」自体を固定する回帰ガードであり、新しい振る舞いを
+    要求するものではない(常に真であるべき既存の不変条件)。
+    """
+
+    EXPECTED_TABLE = """| Kind | Transition | Driven by |
+| --- | --- | --- |
+| Forward | `Inbox → Backlog` | `triage-backlog` |
+| Forward | `Backlog → Ready` | `ready-issue` |
+| Forward | `Ready → In Progress` | `work-next` Step 6 |
+| Forward | `In Progress → Review` | `work-next` Step 7 |
+| Forward | `Review → QA` | `review-issue` APPROVED |
+| Forward | `QA → Done` | `complete-issue`, after confirming the merge |
+| Rollback | `Review → In Progress` | `review-issue` CHANGES REQUIRED |
+| Rollback | `QA → In Progress` | `qa-issue` FAIL |
+| Rollback | `Ready → Backlog` | `work-next` Step 4 |
+| Rollback | `Review → Backlog` | `review-issue` REQUIREMENT CLARIFICATION |
+| Rollback | `In Progress → Ready` | re-assessment after two rollbacks in one cycle (see **Implementation runs on Sonnet**) |"""
+
+    EXPECTED_GUARD_SET = """LEGAL_STATUS_TRANSITIONS = {
+    # 前進
+    ("Inbox", "Backlog"),
+    ("Backlog", "Ready"),
+    ("Ready", "In Progress"),
+    ("In Progress", "Review"),
+    ("Review", "QA"),
+    ("QA", "Done"),
+    # 差し戻し
+    ("Review", "In Progress"),
+    ("QA", "In Progress"),
+    ("Ready", "Backlog"),
+    ("Review", "Backlog"),
+    ("In Progress", "Ready"),
+}"""
+
+    def test_claude_md_table_is_byte_identical(self):
+        self.assertIn(self.EXPECTED_TABLE, read(".claude/CLAUDE.md"))
+
+    def test_guard_py_set_is_byte_identical(self):
+        self.assertIn(self.EXPECTED_GUARD_SET, read(".claude/hooks/guard.py"))
+
+    def test_no_new_transition_mentions_report_bug(self):
+        text = read(".claude/CLAUDE.md")
+        after = text.split("### Legal Transitions", 1)[1].split("\n### ", 1)[0]
+        self.assertNotIn("report-bug", after)
+
+
+class HotfixSectionDocumentsCreateTimeHandling(unittest.TestCase):
+    """Requirement 5: hotfix セクションが、作成時の扱いを最新の状態で説明している(#1434)。
+
+    #1433 の文言「`glab issue create --label hotfix,...` is neither denied nor specially
+    handled here」は、#1434 が実装した時点で事実と食い違う(#1434 はまさにその「作成時の
+    扱い」を追加する)。齟齬を残さないこと自体を検査する。
+    """
+
+    def _hotfix_section(self):
+        text = read(".claude/CLAUDE.md")
+        after = text.split("## hotfix", 1)
+        self.assertEqual(2, len(after), "CLAUDE.md に ## hotfix が無い")
+        return after[1].split("\n## ", 1)[0]
+
+    def test_no_longer_claims_creation_is_unhandled(self):
+        section = self._hotfix_section()
+        self.assertNotIn("is neither denied nor specially handled here", section)
+
+    def test_describes_the_report_bug_only_create_time_gate(self):
+        section = self._hotfix_section()
+        self.assertIn("report-bug", section)
+        self.assertIn("guard.py", section)
+
