@@ -969,6 +969,39 @@ def check_hotfix_creation(payload, command):
             )
 
 
+def check_issue_creation_requires_status(command):
+    """CLAUDE.md → How to change status: 作成にも `status::` がちょうど1つ必要(#1444)。
+
+    `check_status_label_integrity` は `glab issue create` を遷移ではないとして素通り
+    させている(759-760行) — それ自体は正しい。作成は遷移ではなく、最初のステータスは
+    そこから来る。しかし「作成に `status::` が含まれているか」を確認する仕組みが
+    予防層のどこにも無く、#1441 は `status::` を1つも持たずに起票され、約10時間
+    ボードのどの列にも現れなかった。
+
+    `check_hotfix_creation`(#1434)の Readiness Report が確立した方針どおり、
+    `check_status_label_integrity` を拡張せず**独立した新規関数**として追加する —
+    あちらは `status::` 専用の遷移表と密結合しており、ここで見ている壊れ方
+    (作成時の欠落・重複)とは無関係。
+
+    ラベル値の抽出は `_issue_update_label_args`(#1433)を再利用する。`glab issue create`
+    の `--label`/`-l` は `glab issue update` と同じ pflag の記法(空白区切り、`--label=`、
+    `-l` の値直結形、カンマ併記、複数回指定)を受け付けるため、専用の解析を新たに書かない。
+    """
+    for args in invokes(command, "glab", ("issue", "create")):
+        added, _ = _issue_update_label_args(args)
+        statuses = [label for label in added if label.startswith("status::")]
+        if not statuses:
+            emit_deny(
+                "`status::` ラベルを持たない Issue は作成できません(CLAUDE.md → How to "
+                "change status)。`--label` に `status::Inbox` 等を含めてください。"
+            )
+        if len(statuses) > 1:
+            emit_deny(
+                "`status::` ラベルが複数指定されています(%s)(CLAUDE.md → How to change "
+                "status)。ちょうど1つにしてください。" % ", ".join(statuses)
+            )
+
+
 def check_no_verify(command):
     for sub in ("commit", "push"):
         for args in invokes(command, "git", (sub,)):
@@ -1071,6 +1104,7 @@ def cmd_bash(payload):
     check_status_label_integrity(command)
     check_hotfix_label_immutability(command)
     check_hotfix_creation(payload, command)
+    check_issue_creation_requires_status(command)
     check_no_verify(command)
     check_commit_phase(payload, command)
     check_pr_coverage(payload, command)
@@ -1116,6 +1150,7 @@ def cmd_explain(command):
         ("マージ方式", check_merge_flags),
         ("ステータスラベル", check_status_label_integrity),
         ("hotfixラベル", check_hotfix_label_immutability),
+        ("Issue作成のstatus::必須", check_issue_creation_requires_status),
         ("--no-verify 禁止", check_no_verify),
     ):
         try:

@@ -1186,7 +1186,10 @@ class HotfixCreationGate(unittest.TestCase):
     def test_create_with_hotfix_is_allowed_when_marker_is_report_bug(self):
         root, session = _stage_root("report-bug")
         reason = _run_in_root(
-            "bash", {"command": "glab issue create --label hotfix --title x"}, root, session
+            "bash",
+            {"command": "glab issue create --label hotfix,status::Backlog --title x"},
+            root,
+            session,
         )
         self.assertIsNone(reason, "report-bug のマーカーがあるのに hotfix 付き起票が拒否された")
 
@@ -1210,12 +1213,18 @@ class HotfixCreationGate(unittest.TestCase):
         """AC3: `hotfix` を含まない起票は従来どおり許可される。"""
         self.assertIsNone(
             run_hook(
-                "bash", bash_payload("glab issue create --label bug,priority::P0 --title x")
+                "bash",
+                bash_payload(
+                    "glab issue create --label bug,priority::P0,status::Inbox --title x"
+                ),
             )
         )
         root, session = _stage_root("ready-issue")
         reason = _run_in_root(
-            "bash", {"command": "glab issue create --label bug,priority::P0 --title x"}, root, session
+            "bash",
+            {"command": "glab issue create --label bug,priority::P0,status::Inbox --title x"},
+            root,
+            session,
         )
         self.assertIsNone(reason)
 
@@ -1229,7 +1238,10 @@ class HotfixCreationGate(unittest.TestCase):
     def test_create_short_flag_attached_hotfix_is_allowed_with_report_bug_marker(self):
         root, session = _stage_root("report-bug")
         reason = _run_in_root(
-            "bash", {"command": "glab issue create -lbug,hotfix --title x"}, root, session
+            "bash",
+            {"command": "glab issue create -lbug,hotfix,status::Backlog --title x"},
+            root,
+            session,
         )
         self.assertIsNone(reason)
 
@@ -1238,7 +1250,9 @@ class HotfixCreationGate(unittest.TestCase):
         self.assertIsNone(
             run_hook(
                 "bash",
-                bash_payload("glab issue create --label not-a-hotfix-label --title x"),
+                bash_payload(
+                    "glab issue create --label not-a-hotfix-label,status::Inbox --title x"
+                ),
             )
         )
 
@@ -1265,6 +1279,126 @@ class HotfixCreationGate(unittest.TestCase):
             run_hook(
                 "bash",
                 bash_payload("glab issue create --label status::Backlog --title x"),
+            )
+        )
+
+
+# --------------------------------------------------------------------------- #1444
+
+
+class IssueCreationRequiresStatus(unittest.TestCase):
+    """CLAUDE.md → How to change status: `status::` の無い Issue はどの列にも現れない
+    (「ゼロは危険な方」)。予防層(guard.py)にはこれを止める仕組みが無かった(#1444)。
+
+    #1441 はこの経路(`status::` 無しの `glab issue create`)で起票され、約10時間
+    ボードのどの列にも現れなかった。ここで検証するのは、その隙間を埋める
+    **独立した新規チェック**であり、`check_status_label_integrity`(#1023、遷移専用)にも
+    `check_hotfix_creation`(#1434、hotfix 専用)にも影響しないこと。
+    """
+
+    def test_create_without_status_label_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("glab issue create --title x --label priority::P2")
+        )
+        self.assertIsNotNone(reason, "status:: 無しの起票が許可された(#1441 の再発)")
+        self.assertIn("status::", reason)
+
+    def test_create_with_status_label_is_allowed(self):
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload(
+                    "glab issue create --title x --label status::Inbox,priority::P2"
+                ),
+            )
+        )
+
+    def test_create_with_short_flag_attached_status_is_allowed(self):
+        """`-lstatus::Inbox`(値直結)。既存の `_issue_update_label_args` をそのまま再利用する。"""
+        self.assertIsNone(
+            run_hook(
+                "bash", bash_payload("glab issue create --title x -lstatus::Inbox")
+            )
+        )
+
+    def test_create_with_equals_joined_status_is_allowed(self):
+        """`--label=status::Inbox`(`=` 結合)。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab issue create --title x --label=status::Inbox"),
+            )
+        )
+
+    def test_create_with_repeated_label_flag_is_allowed(self):
+        """`--label` の複数回指定。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload(
+                    "glab issue create --title x --label status::Inbox "
+                    "--label priority::P2"
+                ),
+            )
+        )
+
+    def test_create_with_two_status_labels_is_denied(self):
+        """Requirement 3: `status::` を2つ含む作成も拒否する。"""
+        reason = run_hook(
+            "bash",
+            bash_payload(
+                "glab issue create --title x --label status::Inbox,status::Backlog"
+            ),
+        )
+        self.assertIsNotNone(reason, "status:: を2つ含む起票が許可された")
+        self.assertIn("status::", reason)
+
+    def test_create_without_label_flag_at_all_is_denied(self):
+        """`--label` 自体が無い起票も status:: 0個として拒否する。"""
+        reason = run_hook("bash", bash_payload("glab issue create --title x"))
+        self.assertIsNotNone(reason, "--label 自体が無い起票が許可された")
+
+    def test_wrapped_creation_without_status_is_still_denied(self):
+        """#1029 の教訓。前置詞で外れないこと。"""
+        reason = run_hook(
+            "bash",
+            bash_payload("timeout 60 glab issue create --title x --label priority::P2"),
+        )
+        self.assertIsNotNone(reason)
+
+    def test_hotfix_creation_gate_is_unaffected(self):
+        """既存の hotfix 作成ゲート(#1434)と衝突しないこと。マーカー無しは hotfix 側で拒否。"""
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue create --title x --label hotfix,status::Backlog"),
+        )
+        self.assertIsNotNone(reason, "マーカー無しの hotfix 付き起票が許可された(#1434 への回帰)")
+        self.assertIn("hotfix", reason)
+
+    def test_hotfix_creation_with_status_and_marker_is_allowed(self):
+        """report-bug マーカー付きなら、hotfix + status:: の組み合わせも従来どおり許可される。"""
+        root, session = _stage_root("report-bug")
+        reason = _run_in_root(
+            "bash",
+            {
+                "command": (
+                    "glab issue create --title x --label hotfix,status::Backlog"
+                ),
+            },
+            root,
+            session,
+        )
+        self.assertIsNone(reason)
+
+    def test_status_label_integrity_transition_check_is_unaffected(self):
+        """既存 Issue への正当な status:: 遷移(#1023)は従来どおり許可される。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload(
+                    'glab api projects/:id/issues/42 --method PUT '
+                    '-f "remove_labels=status::Ready" -f "add_labels=status::In Progress"'
+                ),
             )
         )
 
@@ -1399,7 +1533,8 @@ class GlobalFlagBeforeSubcommand(unittest.TestCase):
             "bash",
             {
                 "command": (
-                    "glab --repo owner/repo issue create --title x --label hotfix"
+                    "glab --repo owner/repo issue create --title x "
+                    "--label hotfix,status::Backlog"
                 ),
             },
             root,
