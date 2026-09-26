@@ -1340,8 +1340,17 @@ if ($path === '/wp-cli/post-list' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "サイト '$slug' が見つかりません"]);
     }
 
-    [$code, $out, $err] = runWp(['post', 'list', "--post_type=$postType",
-        '--fields=ID,post_title,post_name,post_status', '--format=json', "--path=$sitePath", '--allow-root']);
+    $listArgs = ['post', 'list', "--post_type=$postType"];
+    // postName(WordPressの保存形へ正規化済みのスラッグ)が指定された場合は、そのスラッグの投稿だけに
+    // 絞る。投稿時の既存投稿の同定用(issue #1431)で、ステータスは公開済み・下書き・非公開・予約・
+    // レビュー待ちを明示し、ゴミ箱は含めない(wp-cliの既定値には依存しない)。
+    $postName = (string) ($input['postName'] ?? '');
+    if ($postName !== '') {
+        $listArgs[] = "--name=$postName";
+        $listArgs[] = '--post_status=publish,draft,private,future,pending';
+    }
+    [$code, $out, $err] = runWp(array_merge($listArgs, [
+        '--fields=ID,post_title,post_name,post_status', '--format=json', "--path=$sitePath", '--allow-root']));
     if ($code !== 0) {
         respond(500, ['error' => '投稿/ページ一覧の取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }

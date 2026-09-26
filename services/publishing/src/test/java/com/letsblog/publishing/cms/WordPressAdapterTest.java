@@ -388,4 +388,34 @@ class WordPressAdapterTest {
 
         assertThrows(IllegalStateException.class, () -> adapter.installWpCli(creds));
     }
+
+    // ---- issue #1431: スラッグでの既存投稿照会 ----
+
+    @Test
+    void findPostIdsBySlug_SSHはWordPressの保存形へ正規化したスラッグで委譲する() {
+        when(sshOperations.findPostIdsBySlug(any(), org.mockito.ArgumentMatchers.eq("%e6%97%a5%e6%9c%ac-abc")))
+                .thenReturn(List.of("42"));
+
+        assertEquals(List.of("42"), adapter.findPostIdsBySlug(sshCredentials(), "日本 ABC"));
+    }
+
+    @Test
+    void findPostIdsBySlug_managedはagentへ委譲する() {
+        when(agentOperations.findPostIdsBySlug(any(), org.mockito.ArgumentMatchers.eq("my-slug")))
+                .thenReturn(List.of("7"));
+
+        assertEquals(List.of("7"), adapter.findPostIdsBySlug(agentCredentials(), "my-slug"));
+        verify(sshOperations, never()).findPostIdsBySlug(any(), any());
+    }
+
+    @Test
+    void findPostIdsBySlug_正規化後に空になるスラッグは照会せず空を返す() {
+        assertEquals(List.of(), adapter.findPostIdsBySlug(sshCredentials(), "!!!"));
+        verify(sshOperations, never()).findPostIdsBySlug(any(), any());
+    }
+
+    @Test
+    void findPostIdsBySlug_未対応トランスポートは例外を投げる() {
+        assertThrows(RuntimeException.class, () -> adapter.findPostIdsBySlug(unsupportedCredentials(), "my-slug"));
+    }
 }

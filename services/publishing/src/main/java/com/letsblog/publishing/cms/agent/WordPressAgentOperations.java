@@ -280,6 +280,29 @@ public class WordPressAgentOperations {
         }
     }
 
+    /**
+     * 指定スラッグ(WordPressの保存形へ正規化済み)の投稿(post_type=post)のIDを返す(issue #1431)。
+     * provision-agentの`post-list`が`postName`指定時にゴミ箱以外の全ステータスを対象に絞り込む。
+     * 失敗時は例外を投げる(呼び出し側が新規作成へ進んで重複を作らないため)。
+     */
+    public List<String> findPostIdsBySlug(WordPressCredentials creds, String slug) {
+        try {
+            JsonNode body = post("/wp-cli/post-list",
+                    Map.of("slug", creds.wpSlug(), "postType", "post", "postName", slug));
+            List<String> ids = new ArrayList<>();
+            body.path("posts").forEach(item -> {
+                if (slug.equalsIgnoreCase(item.path("slug").asText())) {
+                    ids.add(item.path("id").asText());
+                }
+            });
+            return ids;
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("スラッグによる既存投稿の照会に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     public void updatePostStatus(WordPressCredentials creds, String postId, String status) {
         try {
             post("/wp-cli/post-status-update", Map.of("slug", creds.wpSlug(), "postId", postId, "status", status));

@@ -180,7 +180,7 @@ async function adoptExistingManagedSite(
 
 interface PublishOptions {
   title: string;
-  slug: string;
+  slug?: string;
   markdown: string;
   wpPostId?: string;
   image?: { name: string; mimeType: string; buffer: Buffer };
@@ -205,7 +205,9 @@ async function publish(
   const form = new FormData();
   form.append('site', siteKey);
   form.append('title', options.title);
-  form.append('slug', options.slug);
+  if (options.slug !== undefined) {
+    form.append('slug', options.slug);
+  }
   form.append('status', 'publish');
   form.append('markdown', options.markdown);
   if (options.wpPostId) {
@@ -422,17 +424,136 @@ Then('WordPress側の記事は投稿IDとスラッグを変えずに本文だけ
   ).toBe(true);
 });
 
-Then('そのスラッグの記事はWordPress側に1件だけ存在する', async ({ ctx }) => {
-  const slug = ctx.publishSiteSlug as string;
-  const postSlug = ctx.republishSlug as string;
+// ------------------------------------------------------- issue #1431: WordPress側のスラッグ照会
 
-  const output = wpCli(slug, `post list --post_type=post --name=${postSlug} --format=json`);
-  const posts = JSON.parse(output || '[]') as { ID: number | string }[];
+const STATUS_LABELS: Record<string, { postStatus: string; extraArgs: string }> = {
+  公開済み: { postStatus: 'publish', extraArgs: '' },
+  下書き: { postStatus: 'draft', extraArgs: '' },
+  非公開: { postStatus: 'private', extraArgs: '' },
+  予約: { postStatus: 'future', extraArgs: ` --post_date=${shellQuote('2099-01-01 00:00:00')}` },
+};
+
+/** wp-cliで一覧を引き、ゴミ箱以外の指定スラッグの投稿IDを返す。 */
+function postIdsBySlug(siteSlug: string, postSlug: string): string[] {
+  const output = wpCli(
+    siteSlug,
+    `post list --post_type=post --post_status=publish,draft,private,future,pending --name=${shellQuote(postSlug)} --field=ID`
+  );
+  return output === '' ? [] : output.split('\n').map((line) => line.trim());
+}
+
+Given(
+  'ローカルDBに記録の無い「{word}」の記事がWordPress側に直接作られている',
+  async ({ ctx }, statusLabel: string) => {
+    const spec = STATUS_LABELS[statusLabel];
+    expect(spec, `未対応の状態です: ${statusLabel}`).toBeTruthy();
+    const unique = uniqueSuffix();
+    const slug = `e2e-1431-existing-${unique}`;
+    const siteSlug = ctx.publishSiteSlug as string;
+    const postId = wpCli(
+      siteSlug,
+      `post create --post_type=post --post_status=${spec.postStatus}${spec.extraArgs}`
+        + ` --post_title=${shellQuote(`E2E-1431-Original-${unique}`)}`
+        + ` --post_name=${shellQuote(slug)} --post_content=${shellQuote('original body')} --porcelain`
+    );
+    (ctx.publishCleanupPostIds as string[]).push(postId);
+    ctx.lookupSlug = slug;
+    ctx.lookupExistingPostId = postId;
+    ctx.lookupUnique = unique;
+  }
+);
+
+When('投稿IDを付けずに同じスラッグで記事を公開する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const unique = ctx.lookupUnique as string;
+  const title = `E2E-1431-Updated-${unique}`;
+  const marker = `issue-1431-updated-marker-${unique}`;
+  const result = await publish(request, token, ctx.publishSiteKey as string, {
+    title,
+    slug: ctx.lookupSlug as string,
+    markdown: `# ${title}\n\n${marker}\n`,
+  });
+  (ctx.publishCleanupPostIds as string[]).push(result.wpPostId);
+  ctx.lookupResultPostId = result.wpPostId;
+  ctx.lookupUpdatedTitle = title;
+  ctx.lookupUpdatedMarker = marker;
+});
+
+Then('公開の結果は既存記事の投稿IDと一致し、そのタイトルと本文が送信した内容に更新されている', async ({ ctx }) => {
+  const siteSlug = ctx.publishSiteSlug as string;
+  const existingId = ctx.lookupExistingPostId as string;
   expect(
-    posts,
-    `スラッグ '${postSlug}' の投稿がWordPress側に1件だけ存在しません(重複投稿の疑いがあります): ${output}`
-  ).toHaveLength(1);
-  expect(String(posts[0].ID)).toBe(ctx.republishFirstPostId as string);
+    ctx.lookupResultPostId,
+    '公開結果の投稿IDが既存記事と異なります(新規作成された疑いがあります)'
+  ).toBe(existingId);
+  expect(postField(siteSlug, existingId, 'post_title')).toBe(ctx.lookupUpdatedTitle as string);
+  const content = postField(siteSlug, existingId, 'post_content');
+  expect(
+    content?.includes(ctx.lookupUpdatedMarker as string),
+    `既存記事の本文が更新後のマーカーを含みません: ${content}`
+  ).toBe(true);
+});
+
+Then('そのスラッグの記事はWordPress側に1件だけ存在する', async ({ ctx }) => {
+  const siteSlug = ctx.publishSiteSlug as string;
+  const postSlug = (ctx.republishSlug ?? ctx.lookupSlug) as string;
+  const expectedId = (ctx.republishFirstPostId ?? ctx.lookupExistingPostId) as string;
+  const ids = postIdsBySlug(siteSlug, postSlug);
+  expect(ids, `スラッグ '${postSlug}' の投稿がWordPress側に1件だけ存在しません: ${ids.join(',')}`).toEqual([
+    expectedId,
+  ]);
+});
+
+When('未使用のスラッグで投稿IDを付けずに記事を公開する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const unique = uniqueSuffix();
+  const slug = `e2e-1431-fresh-${unique}`;
+  const title = `E2E-1431-Fresh-${unique}`;
+  const result = await publish(request, token, ctx.publishSiteKey as string, {
+    title,
+    slug,
+    markdown: `# ${title}\n\nissue #1431 fresh post\n`,
+  });
+  (ctx.publishCleanupPostIds as string[]).push(result.wpPostId);
+  ctx.lookupSlug = slug;
+  ctx.lookupResultPostId = result.wpPostId;
+});
+
+Then('WordPress側にその記事が新規に作成されている', async ({ ctx }) => {
+  const siteSlug = ctx.publishSiteSlug as string;
+  const ids = postIdsBySlug(siteSlug, ctx.lookupSlug as string);
+  expect(ids, '指定スラッグの記事がWordPress側にちょうど1件作成されていません').toEqual([
+    ctx.lookupResultPostId as string,
+  ]);
+});
+
+Then('スラッグ照会APIがその記事の投稿IDを返す', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const lookup = await request.get(`/api/posts/${ctx.publishSiteKey as string}/by-slug/${ctx.lookupSlug as string}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(lookup.ok(), `スラッグ照会に失敗しました (status=${lookup.status()})`).toBe(true);
+  expect(((await lookup.json()) as { wpPostId: string }).wpPostId).toBe(ctx.lookupResultPostId as string);
+});
+
+When('スラッグを指定せずに記事を公開する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const unique = uniqueSuffix();
+  const title = `E2E-1431-NoSlug-${unique}`;
+  const result = await publish(request, token, ctx.publishSiteKey as string, {
+    title,
+    markdown: `# ${title}\n\nissue #1431 no slug\n`,
+  });
+  (ctx.publishCleanupPostIds as string[]).push(result.wpPostId);
+  ctx.noSlugPostId = result.wpPostId;
+});
+
+Then('WordPress側にスラッグ指定なしの記事が新規に作成されている', async ({ ctx }) => {
+  const siteSlug = ctx.publishSiteSlug as string;
+  const postId = ctx.noSlugPostId as string;
+  expect(postField(siteSlug, postId, 'post_status'), `投稿(id=${postId})がWordPress側に見つかりません`).toBe(
+    'publish'
+  );
 });
 
 // ------------------------------------------------------- 後片付け

@@ -63,6 +63,23 @@ public class WordPressAdapter implements CmsAdapter {
     }
 
     @Override
+    public List<String> findPostIdsBySlug(CmsCredentials credentials, String slug) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        // WordPressが保存するpost_nameの形へそろえてから照会する(非ASCIIは小文字のパーセントエンコード)。
+        String normalized = WordPressSlug.sanitizeTitle(slug);
+        if (normalized.isEmpty()) {
+            return List.of();
+        }
+        if (creds.isSsh()) {
+            return sshOperations.findPostIdsBySlug(creds, normalized);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.findPostIdsBySlug(creds, normalized);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
     public boolean mediaExists(CmsCredentials credentials, String mediaId) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (creds.isSsh()) {

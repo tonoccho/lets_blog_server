@@ -336,4 +336,47 @@ class WordPressAgentOperationsTest {
 
         assertThrows(AgentOperationException.class, () -> operations.getLatestPost(creds()));
     }
+
+    // ---- issue #1431: スラッグでの既存投稿照会 ----
+
+    @Test
+    void findPostIdsBySlug_スラッグで絞った一覧を照会し一致する投稿IDを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-list"))
+                .andExpect(content().json("{\"slug\":\"main\",\"postType\":\"post\",\"postName\":\"my-slug\"}"))
+                .andRespond(withSuccess(
+                        "{\"posts\":[{\"id\":\"42\",\"title\":\"t\",\"slug\":\"my-slug\",\"status\":\"draft\"},"
+                                + "{\"id\":\"43\",\"title\":\"t\",\"slug\":\"my-slug-2\",\"status\":\"publish\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(java.util.List.of("42"), operations.findPostIdsBySlug(creds(), "my-slug"));
+        server.verify();
+    }
+
+    @Test
+    void findPostIdsBySlug_該当が無ければ空を返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-list"))
+                .andRespond(withSuccess("{\"posts\":[]}", MediaType.APPLICATION_JSON));
+
+        assertEquals(java.util.List.of(), operations.findPostIdsBySlug(creds(), "my-slug"));
+    }
+
+    @Test
+    void findPostIdsBySlug_エージェントがエラーを返したら例外にして新規作成へ進ませない() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-list"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"boom\"}"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(AgentOperationException.class,
+                () -> operations.findPostIdsBySlug(creds(), "my-slug"));
+    }
+
+    @Test
+    void findPostIdsBySlug_エージェントへ接続できなければ例外にする() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/post-list"))
+                .andRespond(request -> { throw new java.io.IOException("connection refused"); });
+
+        org.junit.jupiter.api.Assertions.assertThrows(AgentOperationException.class,
+                () -> operations.findPostIdsBySlug(creds(), "my-slug"));
+    }
 }

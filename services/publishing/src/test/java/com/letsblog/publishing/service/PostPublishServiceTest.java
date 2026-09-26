@@ -1031,4 +1031,104 @@ class PostPublishServiceTest {
         verify(domainEventPublisher, never())
                 .publishPostPublished(any(), any(), anyString(), anyString(), anyString());
     }
+
+    // ---- issue #1431: WordPress側のスラッグ照会 ----
+
+    private PostPublishCommand commandWithWpPostId(String slug, String wpPostId) {
+        return new PostPublishCommand(
+                "main", "My Article", slug, "draft", List.of(), List.of(), wpPostId, "本文", List.of(), null,
+                null, null);
+    }
+
+    @Test
+    void publish_wpPostIdが無くWordPressに同じスラッグの投稿が1件あればその投稿を更新しpostsへupsertする() {
+        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of("55"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        PostPublishResponse response = service.publish(commandWithWpPostId("my-article", null));
+
+        assertEquals("55", response.wpPostId());
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+        verify(contentServiceClient).upsertPost(
+                eq(1L), eq("55"), eq("my-article"), eq("draft"), any(), any(), any());
+    }
+
+    @Test
+    void publish_wpPostIdが空文字でも未指定と同じく照会する() {
+        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of("55"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        service.publish(commandWithWpPostId("my-article", " "));
+
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+    }
+
+    @Test
+    void publish_WordPressに同じスラッグの投稿が無ければ新規作成する() {
+        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of());
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        PostPublishResponse response = service.publish(commandWithWpPostId("my-article", null));
+
+        assertEquals("101", response.wpPostId());
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void publish_slug未指定なら照会せず新規作成する() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(commandWithWpPostId(null, null));
+
+        verify(cmsAdapter, never()).findPostIdsBySlug(any(), any());
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void publish_slugが空白なら照会せず新規作成する() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(commandWithWpPostId("  ", null));
+
+        verify(cmsAdapter, never()).findPostIdsBySlug(any(), any());
+    }
+
+    @Test
+    void publish_wpPostIdが指定されていれば照会しない() {
+        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+
+        service.publish(commandWithWpPostId("my-article", "55"));
+
+        verify(cmsAdapter, never()).findPostIdsBySlug(any(), any());
+        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+    }
+
+    @Test
+    void publish_同じスラッグの投稿が複数あれば候補IDを示して中止し作成も更新もしない() {
+        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of("55", "56"));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.publish(commandWithWpPostId("my-article", null)));
+
+        assertTrue(thrown.getMessage().contains("55"));
+        assertTrue(thrown.getMessage().contains("56"));
+        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+        verify(contentServiceClient, never()).upsertPost(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_照会に失敗したら新規作成へ進まず中止する() {
+        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article"))
+                .thenThrow(new RuntimeException("ssh timeout"));
+
+        assertThrows(RuntimeException.class, () -> service.publish(commandWithWpPostId("my-article", null)));
+
+        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+    }
 }

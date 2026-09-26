@@ -8,6 +8,7 @@ import com.letsblog.publishing.client.ContentServiceClient;
 import com.letsblog.publishing.client.IdentityBridgeClient;
 import com.letsblog.publishing.client.MediaSettingsBridgeClient;
 import com.letsblog.publishing.client.ProjectServiceClient;
+import com.letsblog.publishing.cms.AmbiguousPostSlugException;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsApiException;
@@ -109,12 +110,14 @@ public class PostPublishService {
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionが未捕捉のまま伝播し、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340、ContentServiceClient
         // が content-service側の400応答をこの例外へ変換して再送出する)。
+        // wpPostId未指定でもCMS側に同じスラッグの記事があれば、それを更新対象にする(issue #1431)。
+        String targetWpPostId = resolveTargetWpPostId(cmsAdapter, credentials, command);
         String markdown = contentServiceClient.renderPreImage(
                 command.markdown(), projectId, isProductionSite(site, projectId));
         // 前回投稿時にアップロード済みの画像/ダイアグラムを再利用するキャッシュは、そのwpPostIdに紐づけて
         // 記憶している。wpPostId自体がCMS側で削除される等して実在しなくなっている場合、一緒にアップロードした
         // 画像も削除されている可能性が高く、キャッシュされたURLが既にリンク切れであることがある(issue #493)。
-        String wpPostIdForImageCache = command.wpPostId();
+        String wpPostIdForImageCache = targetWpPostId;
         if (wpPostIdForImageCache != null && !cmsAdapter.postExists(credentials, wpPostIdForImageCache)) {
             log.info("wpPostId={} はCMS側に存在しないため、前回アップロード画像の再利用キャッシュは使用しません",
                     wpPostIdForImageCache);
@@ -159,8 +162,8 @@ public class PostPublishService {
                 publishScheduledAt
         );
 
-        log.info("WordPress投稿リクエスト送信: wpPostId={}, featuredMediaId={}", command.wpPostId(), content.featuredMediaId());
-        PostResult result = cmsAdapter.createOrUpdatePost(credentials, content, command.wpPostId());
+        log.info("WordPress投稿リクエスト送信: wpPostId={}, featuredMediaId={}", targetWpPostId, content.featuredMediaId());
+        PostResult result = cmsAdapter.createOrUpdatePost(credentials, content, targetWpPostId);
         log.info("WordPress投稿完了: postId={}, status={}", result.id(), result.status());
 
         upsertPostRecord(site.id(), result, command.slug(), imageResult.uploadedImages(),
@@ -168,6 +171,32 @@ public class PostPublishService {
         domainEventPublisher.publishPostPublished(site.id(), projectId, result.id(), result.link(), result.status());
 
         return new PostPublishResponse(result.id(), result.link(), result.status());
+    }
+
+    /**
+     * 更新対象のwpPostIdを決める。wpPostIdが指定されていればそのまま使う(#493/#529の挙動を変えない)。
+     * 未指定でslugがあれば、ローカルDBではなくCMS側のスラッグを照会し、1件ならその投稿を更新対象とする。
+     * 複数件は候補IDを示して中止し、照会の失敗は例外のまま伝播させる(いずれも新規作成へ進まない)。
+     */
+    private String resolveTargetWpPostId(CmsAdapter cmsAdapter, CmsCredentials credentials,
+                                         PostPublishCommand command) {
+        String wpPostId = command.wpPostId();
+        if (wpPostId != null && !wpPostId.isBlank()) {
+            return wpPostId;
+        }
+        String slug = command.slug();
+        if (slug == null || slug.isBlank()) {
+            return wpPostId;
+        }
+        List<String> found = cmsAdapter.findPostIdsBySlug(credentials, slug);
+        if (found.isEmpty()) {
+            return wpPostId;
+        }
+        if (found.size() > 1) {
+            throw new AmbiguousPostSlugException(slug, found);
+        }
+        log.info("スラッグ '{}' の既存投稿をCMS側で確認したため更新します: wpPostId={}", slug, found.get(0));
+        return found.get(0);
     }
 
     /** サイト+既存wpPostIdに紐づくPost行から、前回投稿時にアップロード済みの画像情報を読み込む。 */

@@ -913,6 +913,28 @@ public class WordPressSshOperations {
                 .toList();
     }
 
+    /**
+     * 指定スラッグ(WordPressの保存形へ正規化済み)の投稿(post_type=post)のIDを返す(issue #1431)。
+     * ステータスは公開済み・下書き・非公開・予約・レビュー待ちに明示し、ゴミ箱は含めない
+     * (wp-cliの既定値には依存しない)。`--name`での絞り込みに加え、`post_name`の完全一致で確認する。
+     * 失敗時は例外を投げる(呼び出し側が新規作成へ進んで重複を作らないため)。
+     */
+    public List<String> findPostIdsBySlug(WordPressCredentials creds, String slug) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post list --post_type=" + ShellQuote.single("post")
+                        + " --post_status=publish,draft,private,future,pending"
+                        + " --name=" + ShellQuote.single(slug)
+                        + " --fields=ID,post_name --format=json"));
+        if (!result.ok()) {
+            throw new SshOperationException("スラッグによる既存投稿の照会に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        return parseJsonArray(result.stdout()).stream()
+                .filter(item -> slug.equalsIgnoreCase(item.path("post_name").asText()))
+                .map(item -> item.path("ID").asText())
+                .toList();
+    }
+
     /** `wp post update <id> --post_status=` はIDベースで投稿種別を問わず動作する。 */
     public void updatePostStatus(WordPressCredentials creds, String postId, String status) {
         SshCommandResult result = exec(creds, wpCli(creds,

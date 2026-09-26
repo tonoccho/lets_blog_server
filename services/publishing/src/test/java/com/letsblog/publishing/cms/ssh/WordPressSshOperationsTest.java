@@ -1401,4 +1401,66 @@ class WordPressSshOperationsTest {
         assertThrows(SshOperationException.class, () -> operations.exportThemes(creds()));
         verify(executor, never()).getFile(any(), any());
     }
+
+    // ---- issue #1431: スラッグでの既存投稿照会 ----
+
+    @Test
+    void findPostIdsBySlug_ゴミ箱以外の全ステータスをスラッグで絞って照会する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"ID\":42,\"post_name\":\"my-slug\"}]"));
+
+        List<String> ids = operations.findPostIdsBySlug(creds(), "my-slug");
+
+        assertEquals(List.of("42"), ids);
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        String command = captor.getValue();
+        assertEquals(true, command.contains("post list"));
+        assertEquals(true, command.contains("--post_type='post'"));
+        assertEquals(true, command.contains("--post_status=publish,draft,private,future,pending"));
+        assertEquals(true, command.contains("--name='my-slug'"));
+        assertEquals(false, command.contains("trash"));
+    }
+
+    @Test
+    void findPostIdsBySlug_一致しないpost_nameの行は候補から除く() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"ID\":42,\"post_name\":\"my-slug\"},{\"ID\":43,\"post_name\":\"my-slug-2\"}]"));
+
+        assertEquals(List.of("42"), operations.findPostIdsBySlug(creds(), "my-slug"));
+    }
+
+    @Test
+    void findPostIdsBySlug_post_nameの大文字小文字は区別せず比較する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"ID\":7,\"post_name\":\"%E6%97%A5%E6%9C%AC\"}]"));
+
+        assertEquals(List.of("7"), operations.findPostIdsBySlug(creds(), "%e6%97%a5%e6%9c%ac"));
+    }
+
+    @Test
+    void findPostIdsBySlug_該当が無ければ空を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        assertEquals(List.of(), operations.findPostIdsBySlug(creds(), "my-slug"));
+    }
+
+    @Test
+    void findPostIdsBySlug_wp_cliが失敗したら例外にして新規作成へ進ませない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: db connection"));
+
+        assertThrows(SshOperationException.class, () -> operations.findPostIdsBySlug(creds(), "my-slug"));
+    }
+
+    @Test
+    void findPostIdsBySlug_メタ文字を含むスラッグでもクォートの外に出さない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        operations.findPostIdsBySlug(creds(), METACHARACTER_ID);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        assertNoUnquotedMetacharacters(captor.getValue());
+    }
 }
