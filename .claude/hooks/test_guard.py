@@ -1214,3 +1214,74 @@ class HotfixCreationGate(unittest.TestCase):
             )
         )
 
+
+
+class WriteEditSilencerDenial(unittest.TestCase):
+    """#1219: `cmd_write` の `SILENCERS` 拒否と、その免除パスを検査する。
+
+    黙殺パターンを Write/Edit で追加しようとすると deny される経路には、これまで
+    単体テストが無かった。ここが壊れても pre-commit 側(`FeatureSkipTagIsRejected`)は
+    別経路なので、guard.py 側の空振りは誰にも検出されない。
+    """
+
+    # 黙殺パターンそのものをこのファイルに書くと pre-commit の SILENCERS に自分自身が
+    # 引っかかるので、実行時に組み立てる。
+    TEST_SKIP = "test" + ".skip('x', () => {});\n"
+    IT_SKIP = "it" + ".skip('x', () => {});"
+    SKIP_TAG = "@" + "skip\nシナリオ: x\n"
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.session = "silencer-test-session"
+
+    def _write(self, rel_path, content, key="content"):
+        target = os.path.join(self.root, rel_path)
+        return _run_in_root("write", {"file_path": target, key: content}, self.root, self.session)
+
+    def test_write_with_test_skip_in_test_file_is_denied(self):
+        reason = self._write("apps/web/src/foo.test.ts", self.TEST_SKIP)
+        self.assertIsNotNone(reason)
+        self.assertIn("Never skip a test", reason)
+
+    def test_edit_with_test_skip_is_denied(self):
+        reason = self._write(
+            "apps/web/src/foo.test.ts", self.IT_SKIP, key="new_string"
+        )
+        self.assertIsNotNone(reason)
+
+    def test_gherkin_skip_tag_is_denied(self):
+        reason = self._write("apps/web/e2e/features/a.feature", self.SKIP_TAG)
+        self.assertIsNotNone(reason)
+
+    def test_denial_applies_to_production_files_too(self):
+        reason = self._write("apps/web/src/app.ts", self.TEST_SKIP)
+        self.assertIsNotNone(reason)
+
+    def test_exempt_paths_are_allowed(self):
+        for rel in (
+            ".claude/hooks/example.py",
+            "docs/GUIDE.txt",
+            "scripts/helper.sh",
+            "apps/web/README.md",
+        ):
+            with self.subTest(path=rel):
+                self.assertIsNone(self._write(rel, self.TEST_SKIP))
+
+    def test_ordinary_change_is_allowed(self):
+        self.assertIsNone(
+            self._write("apps/web/src/foo.test.ts", "it('works', () => { expect(1).toBe(1); });\n")
+        )
+
+    def test_empty_payload_is_allowed(self):
+        self.assertIsNone(self._write("apps/web/src/foo.test.ts", ""))
+
+    def test_path_outside_repository_is_allowed(self):
+        outside = os.path.join(tempfile.mkdtemp(), "foo.test.ts")
+        self.assertIsNone(
+            _run_in_root(
+                "write",
+                {"file_path": outside, "content": self.TEST_SKIP},
+                self.root,
+                self.session,
+            )
+        )
