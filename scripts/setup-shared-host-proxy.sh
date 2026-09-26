@@ -59,7 +59,9 @@ GITLAB_VHOST_SRC="$REPO_ROOT/infra/shared-host/$GITLAB_VHOST_NAME"
 
 INFRA_DIR="${INFRA_DIR:-/home/seiji/src/infra}"
 PROXY_CONTAINER="${PROXY_CONTAINER:-infra-proxy}"
-LBS_NETWORK="${LBS_NETWORK:-${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}_lbs-net}"
+# shellcheck source=lib/compose-project.sh
+source "$REPO_ROOT/scripts/lib/compose-project.sh"
+LBS_NETWORK="${LBS_NETWORK:-$(resolve_compose_project "$REPO_ROOT")_lbs-net}"
 DOCKER_BIN="${DOCKER_BIN:-docker}"
 GITLAB_HEALTH_URL="${GITLAB_HEALTH_URL-https://server.tonoccho.local/gitlab/}"
 LBS_BASE_URL="${LBS_BASE_URL-https://localhost}"

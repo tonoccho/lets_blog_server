@@ -213,6 +213,10 @@ class SetupShTestCase(unittest.TestCase):
             "scripts/wait-for-stack-healthy.sh",
         ):
             shutil.copy(os.path.join(REPO_ROOT, rel), os.path.join(self.repo, rel))
+        # wait-for-stack-healthy.sh が source する共有ライブラリ(#1201)
+        shutil.copytree(
+            os.path.join(REPO_ROOT, "scripts", "lib"), os.path.join(self.repo, "scripts", "lib")
+        )
         shutil.copy(SETUP_SCRIPT, os.path.join(self.repo, "setup.sh"))
         st = os.stat(os.path.join(self.repo, "setup.sh"))
         os.chmod(os.path.join(self.repo, "setup.sh"), st.st_mode | stat.S_IEXEC)

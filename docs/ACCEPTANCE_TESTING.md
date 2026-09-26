@@ -1468,6 +1468,17 @@ Node自身がこのファイルのfdを開いたまま保持し、`flock` コマ
 どちらも症状が「何も起きない」ため、`scripts/check-worktree-match.py` が両方の入口で
 呼ばれる。
 
+### worktree から healthy 待ち・共有ホストプロキシ点検を実行する(#1201)
+
+`scripts/wait-for-stack-healthy.sh` と `scripts/setup-shared-host-proxy.sh` は、compose
+プロジェクト名(と `<プロジェクト>_lbs-net`)の既定値を `scripts/lib/compose-project.sh` の
+`resolve_compose_project` で導出する。リンクされた git worktree から実行すると、worktree の
+ディレクトリ名ではなく**メイン作業ツリーのディレクトリ名**(= 共有スタックの名前)になるため、
+呼び出し側が `COMPOSE_PROJECT_NAME` を export する必要はない。優先順位は
+`COMPOSE_PROJECT_NAME` → メイン作業ツリー名(worktree のみ)→ `basename $REPO_ROOT`
+(メイン作業ツリー・git 管理外)。`git clone` で作った別 clone は worktree ではないため
+対象外(#1297)。
+
 ### 判定方法
 
 「共有スタックをどの作業ツリーが作ったか」の権威は `docker compose ls --format json` の

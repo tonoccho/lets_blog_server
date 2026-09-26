@@ -54,8 +54,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # 全サービスを「存在しない」と報告して600秒待ってから落ちていた。
 #
 # COMPOSE_PROJECT_NAME が設定されていればそれを使い、無ければ compose 自身の既定と同じく
-# リポジトリのディレクトリ名を使う。compose ファイルもリポジトリ基準の絶対パスで渡す。
-COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
+# リポジトリのディレクトリ名を使う。git worktree からはメイン作業ツリーのディレクトリ名
+# (共有スタックの名前)を使う(#1201。導出は scripts/lib/compose-project.sh の1箇所)。
+# compose ファイルもリポジトリ基準の絶対パスで渡す。
+# shellcheck source=lib/compose-project.sh
+source "$SCRIPT_DIR/lib/compose-project.sh"
+COMPOSE_PROJECT="$(resolve_compose_project "$REPO_ROOT")"
 COMPOSE_ARGS=(-p "$COMPOSE_PROJECT" -f "$REPO_ROOT/docker-compose.yml")
 
 # E2E実行に必要なサービス(docker-compose.yml)。gatewayは各ドメインサービスのhealthyを
