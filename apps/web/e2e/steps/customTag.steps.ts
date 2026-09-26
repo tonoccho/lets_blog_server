@@ -782,6 +782,79 @@ Then(
   }
 );
 
+// ---- テンプレートをプロジェクトで使う(issue #1131) ----
+
+When('テンプレートギャラリーでそのテンプレートを新しいタグ名でプロジェクトで使う', async ({ ctx, page }) => {
+  await openTemplateDetail(page, `?projectId=${ctx.tagProjectId}`, ctx.tagTemplateName as string);
+
+  const tagName = `e2e1131t${uniqueSuffix()}`;
+  ctx.tagName = tagName;
+  await page.getByLabel('適用先プロジェクト').selectOption(String(ctx.tagProjectId));
+  await page.getByPlaceholder('タグ名(例: note)').fill(tagName);
+  await page.getByRole('button', { name: 'プロジェクトで使う' }).click();
+  await expect(page.getByText(`[${tagName}] を`)).toBeVisible({ timeout: 30_000 });
+});
+
+Then(
+  'そのプロジェクトのカスタムタグ一覧に、そのタグがテンプレートのHTMLとCSSで現れる',
+  async ({ ctx, request }) => {
+    const tags = await listProjectTags(request, ctx.tagProjectId as number);
+    const applied = tags.find((tag) => tag.tagName === ctx.tagName);
+    expect(applied, `タグ「${ctx.tagName}」がプロジェクトのカスタムタグ一覧にありません`).toBeDefined();
+    expect(applied!.htmlTemplate, 'テンプレートのHTMLが引き継がれていません').toBe(ctx.tagTemplateHtml);
+    expect(applied!.cssContent, 'テンプレートのCSSが引き継がれていません').toBe(SHARED_CSS);
+  }
+);
+
+Then('そのプロジェクトの統合CSSにテンプレートのCSSが含まれる', async ({ ctx, request }) => {
+  const css = await fetchProjectCssBundle(request, ctx.tagProjectId as number);
+  expect(css).toContain(SHARED_CSS_CLASS);
+});
+
+Then(
+  'そのタグを本文で使った記事を描画すると、テンプレートのHTMLで展開される',
+  async ({ ctx, request }) => {
+    const response = await request.post(`/api/projects/${ctx.tagProjectId}/preview/render`, {
+      headers: await authHeaders(request),
+      data: { markdown: `[${ctx.tagName}]\ne2e1131 の記事本文\n[/${ctx.tagName}]` },
+    });
+    expect(
+      response.ok(),
+      `記事の描画に失敗しました (status=${response.status()}): ${await response.text()}`
+    ).toBe(true);
+    const { html } = (await response.json()) as { html: string };
+    expect(html, 'テンプレートのHTMLで展開されていません').toContain(
+      `<div class="${SHARED_CSS_CLASS}">`
+    );
+    expect(html).toContain('e2e1131 の記事本文');
+    expect(html, 'タグがショートコードのまま残っています').not.toContain(`[${ctx.tagName}]`);
+  }
+);
+
+When('そのテンプレートを既存のタグと同じ名前でプロジェクトに適用するよう要求する', async ({ ctx, request }) => {
+  const response = await request.post(`/api/custom-tag-templates/${ctx.tagTemplateId}/apply`, {
+    headers: await authHeaders(request),
+    data: { projectId: ctx.tagProjectId, tagName: ctx.tagName },
+  });
+  ctx.tagApplyStatus = response.status();
+  ctx.tagApplyBody = await response.text();
+});
+
+Then(
+  /^適用は「(\d+)」で拒否され、理由に既に登録されていることが示される$/,
+  async ({ ctx }, status: string) => {
+    expect(ctx.tagApplyStatus, `応答本文: ${ctx.tagApplyBody}`).toBe(Number(status));
+    expect(ctx.tagApplyBody).toContain('既に登録されています');
+  }
+);
+
+Then('既存のタグは元の内容のまま残っている', async ({ ctx, request }) => {
+  const tags = await listProjectTags(request, ctx.tagProjectId as number);
+  const existing = tags.filter((tag) => tag.tagName === ctx.tagName);
+  expect(existing, '同名のタグが2件になっています').toHaveLength(1);
+  expect(existing[0].id).toBe(ctx.tagId);
+});
+
 When('他の利用者としてそのテンプレートの削除を要求する', async ({ ctx, request }) => {
   const response = await request.delete(`/api/custom-tag-templates/${ctx.tagTemplateId}`, {
     headers: { Authorization: `Bearer ${await otherUserToken(request)}` },

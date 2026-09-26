@@ -896,6 +896,7 @@ platform-service所有(issue #694)。未認証401はplatform-serviceの`Security
 | POST /api/custom-tag-templates/{id}/publish | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.publish()`内 |
 | POST /api/custom-tag-templates/{id}/unpublish | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.unpublish()`内 |
 | POST /api/custom-tag-templates/{id}/clone | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.clone()`内 |
+| POST /api/custom-tag-templates/{id}/apply | requireProjectMemberOrAdmin(対象プロジェクト。テンプレートが未公開かつプロジェクト所属ならそのプロジェクトも、service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.apply()`内。issue #1131で追加。テンプレートの HTML/CSS から対象プロジェクトの `custom_tags` 行を作る(`clone` はテンプレート間の複製で別物)。同名タグは409(上書きしない) |
 | DELETE /api/custom-tag-templates/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagTemplateService.delete()`内 |
 
 ## DashboardController (5エンドポイント、ベースパス `/api/dashboard`)

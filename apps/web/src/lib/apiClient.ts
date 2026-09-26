@@ -1026,6 +1026,12 @@ export interface CloneCustomTagTemplateInput {
   projectId?: number | null;
 }
 
+/** テンプレートをプロジェクトの custom_tags 行として適用する要求(issue #1131)。 */
+export interface ApplyCustomTagTemplateInput {
+  projectId: number;
+  tagName: string;
+}
+
 export function listCustomTagTemplates(projectId?: number, options?: { category?: string; search?: string; showAll?: boolean }): Promise<CustomTagTemplate[]> {
   const params = new URLSearchParams();
   if (projectId != null) params.set('projectId', String(projectId));
@@ -1070,6 +1076,18 @@ export function unpublishCustomTagTemplate(id: number): Promise<CustomTagTemplat
 
 export function cloneCustomTagTemplate(id: number, input: CloneCustomTagTemplateInput): Promise<CustomTagTemplate> {
   return apiFetch<CustomTagTemplate>(`/api/custom-tag-templates/${id}/clone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * テンプレートをプロジェクトのカスタムタグ(custom_tags 行)として適用する。記事で [tagname] として
+ * 使える。cloneCustomTagTemplate(テンプレート間の複製)とは別の操作。同名タグがあれば 409。
+ */
+export function applyCustomTagTemplate(id: number, input: ApplyCustomTagTemplateInput): Promise<CustomTag> {
+  return apiFetch<CustomTag>(`/api/custom-tag-templates/${id}/apply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),

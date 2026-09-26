@@ -2,12 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  applyCustomTagTemplate,
   cloneCustomTagTemplate,
   createCustomTagTemplate,
   deleteCustomTagTemplate,
   publishCustomTagTemplate,
   unpublishCustomTagTemplate,
   updateCustomTagTemplate,
+  type ApplyCustomTagTemplateInput,
+  type CustomTag,
   type CustomTagTemplate,
   type CustomTagTemplateInput,
   type CloneCustomTagTemplateInput,
@@ -85,6 +88,22 @@ export async function cloneCustomTagTemplateAction(
   try {
     const result = await cloneCustomTagTemplate(id, input);
     revalidatePath("/custom-tag-templates");
+    return { data: result };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** テンプレートをプロジェクトのカスタムタグとして適用する(issue #1131)。 */
+export async function applyCustomTagTemplateAction(
+  id: number,
+  input: ApplyCustomTagTemplateInput
+): Promise<{ data?: CustomTag; error?: string }> {
+  await requireAdminSession();
+
+  try {
+    const result = await applyCustomTagTemplate(id, input);
+    revalidatePath(`/projects/${input.projectId}/custom-tags`);
     return { data: result };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

@@ -1,6 +1,12 @@
 package com.letsblog.content.service;
 
+import com.letsblog.content.domain.CustomTag;
+import com.letsblog.content.domain.CustomTagFormat;
 import com.letsblog.content.domain.CustomTagTemplate;
+import com.letsblog.content.dto.ApplyCustomTagTemplateRequest;
+import com.letsblog.content.dto.CustomTagResponse;
+import com.letsblog.content.dto.ValidationResult;
+import com.letsblog.content.repository.CustomTagRepository;
 import com.letsblog.content.dto.CloneCustomTagTemplateRequest;
 import com.letsblog.content.dto.CustomTagTemplateRequest;
 import com.letsblog.content.dto.CustomTagTemplateResponse;
@@ -19,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,6 +41,10 @@ class CustomTagTemplateServiceTest {
     @Mock
     private CustomTagTemplateRepository customTagTemplateRepository;
     @Mock
+    private CustomTagRepository customTagRepository;
+    @Mock
+    private CustomTagValidationService customTagValidationService;
+    @Mock
     private CurrentActorService currentActorService;
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
@@ -42,7 +53,9 @@ class CustomTagTemplateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new CustomTagTemplateService(customTagTemplateRepository, currentActorService, adminAuthorizationService);
+        service = new CustomTagTemplateService(
+                customTagTemplateRepository, customTagRepository, customTagValidationService,
+                currentActorService, adminAuthorizationService);
     }
 
     private CustomTagTemplateRequest buildRequest() {
@@ -396,5 +409,107 @@ class CustomTagTemplateServiceTest {
         List<CustomTagTemplateResponse> result = service.getMyTemplates();
 
         assertEquals(1, result.size());
+    }
+
+    // ---- issue #1131: テンプレートをプロジェクトの custom_tags 行として適用する(apply) ----
+
+    private CustomTagTemplate applicableTemplate(boolean published, Long templateProjectId) {
+        CustomTagTemplate template = buildTemplate(1L);
+        template.setHtmlTemplate("<div class=\"note\">{{content}}</div>");
+        template.setCssContent(".note{color:red;}");
+        template.setDescription("注意書き");
+        template.setProjectId(templateProjectId);
+        template.setIsPublished(published);
+        return template;
+    }
+
+    @Test
+    void apply_テンプレートのHTML_CSSから対象プロジェクトのcustom_tags行を作る() {
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(true, null)));
+        when(customTagValidationService.validate(any(), any())).thenReturn(ValidationResult.valid());
+        when(customTagRepository.findByTagNameAndProjectId("note", 5L)).thenReturn(Optional.empty());
+        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
+            CustomTag saved = invocation.getArgument(0);
+            saved.setId(10L);
+            return saved;
+        });
+
+        CustomTagResponse response = service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note"));
+
+        assertEquals(10L, response.id());
+        assertEquals("note", response.tagName());
+        assertEquals(5L, response.projectId());
+        assertEquals("<div class=\"note\">{{content}}</div>", response.htmlTemplate());
+        assertEquals(".note{color:red;}", response.cssContent());
+        assertEquals("注意書き", response.description());
+        assertEquals(CustomTagFormat.BLOCK, response.tagFormat());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+    }
+
+    @Test
+    void apply_同名タグが既にあれば上書きせずIllegalArgumentException() {
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(true, null)));
+        when(customTagValidationService.validate(any(), any())).thenReturn(ValidationResult.valid());
+        when(customTagRepository.findByTagNameAndProjectId("note", 5L)).thenReturn(Optional.of(new CustomTag()));
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
+
+        assertTrue(e.getMessage().contains("note"));
+        assertTrue(e.getMessage().contains("既に登録されています"));
+        verify(customTagRepository, never()).save(any(CustomTag.class));
+    }
+
+    @Test
+    void apply_存在しないテンプレートはCustomTagTemplateNotFoundException() {
+        when(customTagTemplateRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(CustomTagTemplateNotFoundException.class,
+                () -> service.apply(99L, new ApplyCustomTagTemplateRequest(5L, "note")));
+        verify(customTagRepository, never()).save(any(CustomTag.class));
+    }
+
+    @Test
+    void apply_対象プロジェクトのメンバーでなければForbiddenで何も作らない() {
+        doThrow(new ForbiddenException("no")).when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
+        verify(customTagRepository, never()).save(any(CustomTag.class));
+    }
+
+    @Test
+    void apply_他プロジェクトの未公開テンプレートはそのプロジェクトのメンバーでなければ適用できない() {
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(false, 8L)));
+        doNothing().when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        doThrow(new ForbiddenException("no")).when(adminAuthorizationService).requireProjectMemberOrAdmin(8L);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
+        verify(customTagRepository, never()).save(any(CustomTag.class));
+    }
+
+    @Test
+    void apply_未公開でもグローバルテンプレートならテンプレート側のメンバー判定は行わない() {
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(false, null)));
+        when(customTagValidationService.validate(any(), any())).thenReturn(ValidationResult.valid());
+        when(customTagRepository.findByTagNameAndProjectId("note", 5L)).thenReturn(Optional.empty());
+        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note"));
+
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(8L);
+    }
+
+    @Test
+    void apply_HTMLがセキュリティ検証に通らなければInvalidCustomTagContentExceptionで何も作らない() {
+        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(true, null)));
+        when(customTagValidationService.validate(any(), any())).thenReturn(
+                ValidationResult.invalid(List.of(com.letsblog.content.dto.ValidationError.of("E", "bad", "ERROR")), List.of()));
+
+        assertThrows(InvalidCustomTagContentException.class,
+                () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
+        verify(customTagRepository, never()).save(any(CustomTag.class));
     }
 }

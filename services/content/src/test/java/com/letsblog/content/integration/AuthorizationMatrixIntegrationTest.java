@@ -101,6 +101,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/custom-tag-templates/1/publish"),
                 new Endpoint("POST", "/api/custom-tag-templates/1/unpublish"),
                 new Endpoint("POST", "/api/custom-tag-templates/1/clone"),
+                new Endpoint("POST", "/api/custom-tag-templates/1/apply"),
                 new Endpoint("DELETE", "/api/custom-tag-templates/1"),
 
                 // -- PostController --

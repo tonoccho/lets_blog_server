@@ -1,6 +1,8 @@
 package com.letsblog.content.controller;
 
+import com.letsblog.content.dto.ApplyCustomTagTemplateRequest;
 import com.letsblog.content.dto.CloneCustomTagTemplateRequest;
+import com.letsblog.content.dto.CustomTagResponse;
 import com.letsblog.content.dto.CustomTagTemplateRequest;
 import com.letsblog.content.dto.CustomTagTemplateResponse;
 import com.letsblog.content.service.CustomTagTemplateService;
@@ -73,9 +75,21 @@ public class CustomTagTemplateController {
         return ResponseEntity.ok(customTagTemplateService.unpublish(id));
     }
 
+    /**
+     * テンプレート間の複製。{@code custom_tags} の行は作らない(記事で使うタグは {@link #apply} で作る)。
+     */
     @PostMapping("/{id}/clone")
     public ResponseEntity<CustomTagTemplateResponse> clone(@PathVariable Long id, @Valid @RequestBody CloneCustomTagTemplateRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(customTagTemplateService.clone(id, request));
+    }
+
+    /**
+     * テンプレートをプロジェクトの {@code custom_tags} 行として適用する(issue #1131)。
+     * 同名タグが既にあれば 409。{@link #clone} はテンプレート間の複製で、意味が異なる。
+     */
+    @PostMapping("/{id}/apply")
+    public ResponseEntity<CustomTagResponse> apply(@PathVariable Long id, @Valid @RequestBody ApplyCustomTagTemplateRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(customTagTemplateService.apply(id, request));
     }
 
     @DeleteMapping("/{id}")

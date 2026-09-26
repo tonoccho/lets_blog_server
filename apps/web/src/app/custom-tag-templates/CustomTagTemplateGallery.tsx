@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { CustomTagTemplate, Project } from "@/lib/apiClient";
 import {
+  applyCustomTagTemplateAction,
   cloneCustomTagTemplateAction,
   publishCustomTagTemplateAction,
   unpublishCustomTagTemplateAction,
@@ -77,15 +78,41 @@ function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
 interface TemplateDetailProps {
   template: CustomTagTemplate;
   projects: Project[];
+  currentProjectId: number | null;
   onClose: () => void;
   onClone: (template: CustomTagTemplate, clonedName: string) => void;
   onPublishChange: () => void;
 }
 
-function TemplateDetailPanel({ template, projects, onClose, onClone, onPublishChange }: TemplateDetailProps) {
+function TemplateDetailPanel({ template, projects, currentProjectId, onClose, onClone, onPublishChange }: TemplateDetailProps) {
   const [cloneName, setCloneName] = useState("");
   const [togglingPublish, setTogglingPublish] = useState(false);
   const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
+  const [applyProjectId, setApplyProjectId] = useState(String(currentProjectId ?? template.projectId ?? ""));
+  const [applyTagName, setApplyTagName] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [applyMessage, setApplyMessage] = useState<string | null>(null);
+
+  // 複製(テンプレート間)とは別に、記事で [tagname] として使える custom_tags 行を対象プロジェクトに作る(issue #1131)。
+  const handleApply = async () => {
+    const tagName = applyTagName.trim();
+    const projectId = Number(applyProjectId);
+    setApplying(true);
+    setApplyMessage(null);
+    try {
+      const { error } = await applyCustomTagTemplateAction(template.id, { projectId, tagName });
+      if (error) {
+        alert(`プロジェクトでの利用に失敗しました: ${error}`);
+      } else {
+        setApplyMessage(`[${tagName}] を${projectNameById.get(projectId) ?? `Project #${projectId}`}のカスタムタグとして作成しました`);
+        setApplyTagName("");
+      }
+    } catch (err) {
+      alert(`プロジェクトでの利用に失敗しました: ${err}`);
+    } finally {
+      setApplying(false);
+    }
+  };
 
   const handleClone = async () => {
     if (!cloneName.trim()) {
@@ -179,6 +206,41 @@ function TemplateDetailPanel({ template, projects, onClose, onClone, onPublishCh
         </div>
 
         <TemplateEditor initialHtml={template.htmlTemplate} initialCss={template.cssContent || ""} />
+
+        <div className="space-y-2">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">適用先プロジェクト</span>
+            <select
+              value={applyProjectId}
+              onChange={(e) => setApplyProjectId(e.target.value)}
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+            >
+              <option value="">選択してください</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <input
+            type="text"
+            value={applyTagName}
+            onChange={(e) => setApplyTagName(e.target.value)}
+            placeholder="タグ名(例: note)"
+            pattern="[a-zA-Z][a-zA-Z0-9_\-]*"
+            className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={handleApply}
+            disabled={applying || !applyProjectId || !applyTagName.trim()}
+            className="w-full rounded bg-green-600 px-4 py-2 text-sm text-white disabled:bg-neutral-300"
+          >
+            プロジェクトで使う
+          </button>
+          {applyMessage && <p className="text-sm text-green-700 dark:text-green-400">{applyMessage}</p>}
+        </div>
 
         <div className="space-y-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -395,6 +457,7 @@ export function CustomTagTemplateGallery({
         <TemplateDetailPanel
           template={selectedTemplate}
           projects={projects}
+          currentProjectId={currentProjectId}
           onClose={() => setSelectedTemplate(null)}
           onClone={() => {
             setSelectedTemplate(null);

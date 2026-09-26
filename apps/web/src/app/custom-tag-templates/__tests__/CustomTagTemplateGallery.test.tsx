@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CustomTagTemplate, Project } from "@/lib/apiClient";
 import { CustomTagTemplateGallery } from "../CustomTagTemplateGallery";
 import {
+  applyCustomTagTemplateAction,
   cloneCustomTagTemplateAction,
   publishCustomTagTemplateAction,
   unpublishCustomTagTemplateAction,
@@ -16,6 +17,7 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("../actions", () => ({
+  applyCustomTagTemplateAction: jest.fn(),
   cloneCustomTagTemplateAction: jest.fn(),
   publishCustomTagTemplateAction: jest.fn(),
   unpublishCustomTagTemplateAction: jest.fn(),
@@ -23,6 +25,7 @@ jest.mock("../actions", () => ({
 
 const publishMock = publishCustomTagTemplateAction as jest.MockedFunction<typeof publishCustomTagTemplateAction>;
 const unpublishMock = unpublishCustomTagTemplateAction as jest.MockedFunction<typeof unpublishCustomTagTemplateAction>;
+const applyMock = applyCustomTagTemplateAction as jest.MockedFunction<typeof applyCustomTagTemplateAction>;
 const cloneMock = cloneCustomTagTemplateAction as jest.MockedFunction<typeof cloneCustomTagTemplateAction>;
 
 function template(overrides: Partial<CustomTagTemplate>): CustomTagTemplate {
@@ -191,5 +194,96 @@ describe("CustomTagTemplateGallery 自分のテンプレートの絞り込み", 
     renderGallery({ templates: [] });
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } });
     expect(push).toHaveBeenCalledWith("/custom-tag-templates");
+  });
+});
+
+describe("CustomTagTemplateGallery プロジェクトで使う(issue #1131)", () => {
+  const project = (id: number, name: string): Project =>
+    ({ id, name, slug: `p${id}` }) as unknown as Project;
+  const twoProjects = [project(3, "プロジェクトA"), project(4, "プロジェクトB")];
+
+  function openDetail(props: { currentProjectId?: number | null; templates?: CustomTagTemplate[] } = {}) {
+    render(
+      <CustomTagTemplateGallery
+        templates={props.templates ?? [template({ id: 21 })]}
+        projects={twoProjects}
+        currentProjectId={props.currentProjectId ?? null}
+        showAll={false}
+        mine={false}
+      />
+    );
+    fireEvent.click(screen.getByRole("heading", { name: "未公開テンプレート", level: 3 }));
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(window, "alert").mockImplementation(() => {});
+  });
+
+  it("複製を作成ボタンは残したまま、プロジェクトで使うボタンが出る。タグ名かプロジェクトが空の間は押せない", () => {
+    openDetail();
+    expect(screen.getByRole("button", { name: "複製を作成" })).toBeInTheDocument();
+    const apply = screen.getByRole("button", { name: "プロジェクトで使う" });
+    expect(apply).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("タグ名(例: note)"), { target: { value: "note" } });
+    expect(apply).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("適用先プロジェクト"), { target: { value: "4" } });
+    expect(apply).toBeEnabled();
+  });
+
+  it("表示中のプロジェクトを適用先の初期値にする", () => {
+    openDetail({ currentProjectId: 3 });
+    expect(screen.getByLabelText("適用先プロジェクト")).toHaveValue("3");
+  });
+
+  it("プロジェクトの無いスコープでは、テンプレート自身のプロジェクトを初期値にする", () => {
+    openDetail({ templates: [template({ id: 22, projectId: 4 })] });
+    expect(screen.getByLabelText("適用先プロジェクト")).toHaveValue("4");
+  });
+
+  it("適用するとタグ作成アクションを呼び、成功メッセージを出す(詳細は閉じない)", async () => {
+    applyMock.mockResolvedValue({ data: { id: 1, tagName: "note" } as never });
+    openDetail({ currentProjectId: 3 });
+    fireEvent.change(screen.getByPlaceholderText("タグ名(例: note)"), { target: { value: " note " } });
+    fireEvent.click(screen.getByRole("button", { name: "プロジェクトで使う" }));
+
+    await waitFor(() => expect(applyMock).toHaveBeenCalledWith(21, { projectId: 3, tagName: "note" }));
+    expect(await screen.findByText(/\[note\] をプロジェクトAのカスタムタグとして作成しました/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "プロジェクトで使う" })).toBeInTheDocument();
+  });
+
+  it("同名タグがある(409)などの失敗は理由を通知し、成功メッセージは出さない", async () => {
+    applyMock.mockResolvedValue({ error: "タグ名 'note' は既に登録されています" });
+    openDetail({ currentProjectId: 3 });
+    fireEvent.change(screen.getByPlaceholderText("タグ名(例: note)"), { target: { value: "note" } });
+    fireEvent.click(screen.getByRole("button", { name: "プロジェクトで使う" }));
+
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith("プロジェクトでの利用に失敗しました: タグ名 'note' は既に登録されています")
+    );
+    expect(screen.queryByText(/作成しました/)).not.toBeInTheDocument();
+  });
+
+  it("アクションが例外を投げても理由を通知する", async () => {
+    applyMock.mockRejectedValue(new Error("network"));
+    openDetail({ currentProjectId: 3 });
+    fireEvent.change(screen.getByPlaceholderText("タグ名(例: note)"), { target: { value: "note" } });
+    fireEvent.click(screen.getByRole("button", { name: "プロジェクトで使う" }));
+
+    await waitFor(() =>
+      expect(window.alert).toHaveBeenCalledWith("プロジェクトでの利用に失敗しました: Error: network")
+    );
+  });
+
+  it("テンプレートのプロジェクトが一覧に無い場合は、Project #id 表記の成功メッセージを出す", async () => {
+    applyMock.mockResolvedValue({ data: { id: 1, tagName: "note" } as never });
+    openDetail({ templates: [template({ id: 23, projectId: 99 })] });
+    fireEvent.change(screen.getByPlaceholderText("タグ名(例: note)"), { target: { value: "note" } });
+    fireEvent.click(screen.getByRole("button", { name: "プロジェクトで使う" }));
+
+    expect(await screen.findByText(/\[note\] をProject #99のカスタムタグとして作成しました/)).toBeInTheDocument();
+    expect(applyMock).toHaveBeenCalledWith(23, { projectId: 99, tagName: "note" });
   });
 });
