@@ -167,7 +167,7 @@ API: publishing `BulkManagementController`(23エンドポイント)
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-BULK-001 | カテゴリの環境間比較 | どの環境に何が無いか分かる | `GET /bulk-management/categories/comparison` が環境ごとの差分を返す | — | 未着手 |
+| AC-BULK-001 | カテゴリの環境間比較 | どの環境に何が無いか分かる | `GET /bulk-management/categories/comparison` が環境ごとの差分を返す | `apps/web/e2e/features/bulk/category-comparison.feature`(マスターにのみ存在=対象環境に不足 / 両環境に存在し内容が異なる=差異あり / 対象環境にのみ存在=余剰。#1177) | 検証済 |
 | AC-BULK-002 | タグの環境間比較 | 同上(タグ) | `GET /bulk-management/tags/comparison` が差分を返す | — | 未着手 |
 | AC-BULK-003 | 記事の環境間比較 | 同上(記事) | `GET /bulk-management/posts/comparison` が差分を返す | — | 未着手 |
 | AC-BULK-004 | プラグインの環境間比較 | 環境間の構成差を把握できる | `GET /bulk-management/plugins/comparison` が差分を返す | — | 未着手 |
