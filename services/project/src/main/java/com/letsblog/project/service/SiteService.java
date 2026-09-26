@@ -242,7 +242,12 @@ public class SiteService {
         Site site = siteRepository.findById(id)
                 .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
 
-        if (StringUtils.hasText(request.name())) {
+        // nameがnullなら名前は変更しない(credentialsのみのpatch)。非nullで空白のみは無言で無視せず拒否する。
+        // 変更前(credentialsの更新より前)に検証し、拒否時は何も変更しない。
+        if (request.name() != null && !StringUtils.hasText(request.name())) {
+            throw new InvalidSiteNameException("サイト名は空にできません");
+        }
+        if (request.name() != null) {
             site.setName(request.name());
         }
 

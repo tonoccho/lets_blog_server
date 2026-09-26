@@ -1,6 +1,7 @@
 package com.letsblog.project.controller;
 
 import com.letsblog.project.cms.CmsType;
+import com.letsblog.project.config.GlobalExceptionHandler;
 import com.letsblog.project.crypto.SshKeyGenerationService;
 import com.letsblog.project.dto.SiteConnectionCheckResult;
 import com.letsblog.project.dto.SiteRegisterRequest;
@@ -11,7 +12,15 @@ import com.letsblog.project.service.ProvisioningService;
 import com.letsblog.project.service.ProjectService;
 import com.letsblog.project.service.SiteService;
 import com.letsblog.project.service.WordPressSiteProvisioningService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.project.domain.Site;
+import com.letsblog.project.repository.SiteRepository;
+import java.util.Base64;
 import java.util.List;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.Optional;
 import java.util.Set;
 import java.time.LocalDateTime;
@@ -24,6 +33,13 @@ import org.springframework.http.ResponseEntity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -176,5 +192,46 @@ class SiteControllerTest {
         when(siteService.list(null, null)).thenReturn(List.of(buildResponse()));
 
         assertEquals(1, controller().list(null, null).size());
+    }
+
+    /** issue #1196: 実SiteService + GlobalExceptionHandler越しに、空のnameがHTTP 400で拒否されることを確認する。 */
+    private MockMvc mockMvcWithRealService(SiteRepository siteRepository) {
+        SiteService realService = new SiteService(siteRepository,
+                new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32])), new ObjectMapper(),
+                null, null, null, null);
+        SiteController real = new SiteController(realService, adminAuthorizationService,
+                wordPressSiteProvisioningService, sshKeyGenerationService, projectService);
+        return MockMvcBuilders.standaloneSetup(real).setControllerAdvice(new GlobalExceptionHandler()).build();
+    }
+
+    @Test
+    void update_空文字のnameは400で原因メッセージを返す() throws Exception {
+        SiteRepository siteRepository = mock(SiteRepository.class);
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+
+        mockMvcWithRealService(siteRepository)
+                .perform(put("/api/sites/1").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("サイト名は空にできません")));
+    }
+
+    @Test
+    void update_有効なnameなら200で更新される() throws Exception {
+        SiteRepository siteRepository = mock(SiteRepository.class);
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        site.setCmsType(CmsType.WORDPRESS);
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvcWithRealService(siteRepository)
+                .perform(put("/api/sites/1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"新しい名前\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("新しい名前"));
     }
 }

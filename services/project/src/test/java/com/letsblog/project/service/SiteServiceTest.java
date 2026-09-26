@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -185,6 +186,62 @@ class SiteServiceTest {
         SiteUpdateRequest request = new SiteUpdateRequest("name", Map.of("baseUrl", "https://x.example.com"));
 
         assertThrows(IllegalArgumentException.class, () -> service().update(1L, request));
+    }
+
+    @Test
+    void update_空文字のnameは400相当の例外で拒否し何も変更しない() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+
+        RuntimeException e = assertThrows(RuntimeException.class,
+                () -> service().update(1L, new SiteUpdateRequest("", null)));
+
+        assertEquals("サイト名は空にできません", e.getMessage());
+        assertEquals("InvalidSiteNameException", e.getClass().getSimpleName());
+        assertEquals("元の名前", site.getName());
+        verify(siteRepository, never()).save(any());
+    }
+
+    @Test
+    void update_空白のみのnameも拒否する() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+
+        RuntimeException e = assertThrows(RuntimeException.class,
+                () -> service().update(1L, new SiteUpdateRequest("   ", null)));
+
+        assertEquals("InvalidSiteNameException", e.getClass().getSimpleName());
+        verify(siteRepository, never()).save(any());
+    }
+
+    @Test
+    void update_nameがnullなら名前は変更せずcredentialsだけの更新を許す() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service().update(1L, new SiteUpdateRequest(null, null));
+
+        assertEquals("元の名前", site.getName());
+    }
+
+    @Test
+    void update_有効なnameなら名前を更新する() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service().update(1L, new SiteUpdateRequest("新しい名前", null));
+
+        assertEquals("新しい名前", site.getName());
     }
 
     @Test

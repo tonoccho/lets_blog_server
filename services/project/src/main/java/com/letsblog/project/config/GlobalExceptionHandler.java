@@ -5,6 +5,7 @@ import com.letsblog.project.service.AiServiceGenerationException;
 import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.IdentityServiceUnavailableException;
 import com.letsblog.project.service.InvalidCustomTagContentException;
+import com.letsblog.project.service.InvalidSiteNameException;
 import com.letsblog.project.service.ProjectNotFoundException;
 import com.letsblog.project.service.ProvisioningException;
 import com.letsblog.project.service.SiteAlreadyProvisionedException;
@@ -73,6 +74,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidCustomTagContentException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCustomTagContent(InvalidCustomTagContentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidSiteNameException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidSiteName(InvalidSiteNameException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
