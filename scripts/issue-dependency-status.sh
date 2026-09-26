@@ -169,7 +169,19 @@ else
     # (`tr -d '。'` は E3/80/82 の各バイトを消すので「なし」のE3まで壊す)。
     # 空白除去とlower化はASCIIバイトしか触らないので安全。句読点は正規表現側で吸収する。
     DEP_COMPACT="$(echo "$DEP_SECTION" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-    if [ -z "$DEP_NUMBERS" ] && [[ "$DEP_COMPACT" =~ ^(なし|無し|特になし|none|n/a|na|-)[。.]?$ ]]; then
+    # 箇条書きの「- なし」や、「なし。単独でデリバリ可能。」のように説明文が続く形も
+    # 依存ゼロと読む(#1139)。ただし A4 / B6 のような Epic 略記が1つでも書かれていれば
+    # 依存ゼロとは読まない(検出を弱めない)。
+    DEP_FIRST="$(echo "$DEP_SECTION" | grep -v '^[[:space:]]*$' | head -n1 \
+        | sed -E 's/^[[:space:]]*([-*+][[:space:]]*)?//' | tr '[:upper:]' '[:lower:]')"
+    DEP_DECLARES_NONE=0
+    if [[ "$DEP_COMPACT" =~ ^(なし|無し|特になし|none|n/a|na|-)[。.]?$ ]]; then
+        DEP_DECLARES_NONE=1
+    elif [[ "$DEP_FIRST" =~ ^(なし|無し|特になし|none|n/a) ]] \
+        && ! echo "$DEP_SECTION" | grep -qE '(^|[^A-Za-z0-9])[A-Za-z]{1,2}[0-9]+([^A-Za-z0-9]|$)'; then
+        DEP_DECLARES_NONE=1
+    fi
+    if [ -z "$DEP_NUMBERS" ] && [ "$DEP_DECLARES_NONE" = 1 ]; then
         echo "(依存なしと明記されている)"
         echo "  | $(echo "$DEP_SECTION" | tr -d '\n' | sed 's/^[[:space:]]*//')"
         echo "  → 依存ゼロ。これは「依存が識別できない」状態とは別物であり、"

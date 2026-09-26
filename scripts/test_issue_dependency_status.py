@@ -155,6 +155,32 @@ class BodyDependencies(ScriptHarness):
         self.assertNotIn("警告", none_out, "依存ゼロに『識別できない』警告が出ている")
         self.assertIn("警告", shorthand_out, "Epic 略記に警告が出ていない")
 
+    def test_declared_none_in_bullet_or_with_explanation_is_not_shorthand(self):
+        """箇条書きの「- なし」や、「なし」に説明文が続く形も依存ゼロである(#1139)。"""
+        bodies = {
+            111: "## 依存\n\n- なし\n",
+            112: "## Dependencies\n\nなし。単独でデリバリ可能。\n",
+            113: "## 依存\n\n- なし(どの AT Issue とも独立に実施できる)\n",
+        }
+        for number, body in bodies.items():
+            with self.subTest(number=number):
+                self.fixture(f"issue-{number}", issue(number, "対象", description=body))
+                self.empty_links_and_notes()
+                out = self.run_script(number).stdout
+                self.assertIn("依存なしと明記", out)
+                self.assertNotIn("警告", out)
+
+    def test_epic_shorthand_with_a_none_word_still_warns(self):
+        """「なし」を含んでいても Epic 略記が書かれていれば警告する(検出を弱めない)。"""
+        self.fixture(
+            "issue-114",
+            issue(114, "対象", description="## 依存\n\n- なし\n- A4 の完了後\n"),
+        )
+        self.empty_links_and_notes()
+        out = self.run_script(114).stdout
+        self.assertIn("警告", out)
+        self.assertNotIn("依存なしと明記", out)
+
     def test_reports_a_missing_dependency_section(self):
         self.fixture("issue-103", issue(103, "対象", description="## Goal\n\nやる\n"))
         self.empty_links_and_notes()
