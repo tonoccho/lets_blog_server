@@ -1215,6 +1215,186 @@ class HotfixCreationGate(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------- #1435
+
+
+class GlobalFlagBeforeSubcommand(unittest.TestCase):
+    """`invokes()` は、値を取るグローバル永続フラグ(`--repo` など)がサブコマンドより前に
+    置かれても、対象のサブコマンド呼び出しを検出しなければならない(#1435)。
+
+    `glab`(cobra/pflag)は永続フラグをサブコマンドの前後どちらに置いても受け付けるが、
+    旧実装は `positional = [a for a in rest if not a.startswith("-")]` という素朴な
+    フィルタで判定していたため、`--repo owner/repo` のように値が独立したトークンに
+    なるフラグが前置されると、値がサブコマンドの位置にずれ込んで一致しなくなっていた
+    (`=` 結合形と短縮形の直結は1トークンで `-` 始まりなので、元から影響を受けない)。
+
+    ここで確かめるのは、この抜け穴を継承した4つの利用者すべて
+    (`check_merge_flags` / `check_hotfix_label_immutability` / `check_hotfix_creation` /
+    `check_pr_coverage`)であり、あわせて Readiness Report が名指しした設計上の
+    落とし穴(ブール型フラグの直後を消費しない、`=`/短縮直結を壊さない)への回帰を防ぐ。
+    """
+
+    # --- AC1/AC2: check_merge_flags ---
+
+    def test_repo_prefixed_merge_without_squash_is_denied(self):
+        """AC1: `--repo owner/repo` を前置しても squash 必須検査が発火すること。"""
+        reason = run_hook(
+            "bash", bash_payload("glab --repo owner/repo mr merge")
+        )
+        self.assertIsNotNone(reason, "--repo 前置の glab mr merge が拒否されていない")
+        self.assertIn("squash", reason)
+
+    def test_repo_prefixed_merge_with_squash_is_allowed(self):
+        """AC2: `--repo owner/repo`(空白区切り)+ `--squash` は引き続き許可されること。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab --repo owner/repo mr merge --squash"),
+            )
+        )
+
+    def test_repo_equals_prefixed_merge_with_squash_is_allowed(self):
+        """AC2: `--repo=owner/repo`(`=` 結合形)+ `--squash` は引き続き許可されること。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab --repo=owner/repo mr merge --squash"),
+            )
+        )
+
+    def test_repo_equals_prefixed_merge_without_squash_is_still_denied(self):
+        """回帰: `=` 結合形は元々正しく動いていた分岐。壊れていないこと。"""
+        reason = run_hook(
+            "bash", bash_payload("glab --repo=owner/repo mr merge")
+        )
+        self.assertIsNotNone(reason, "--repo= 前置の glab mr merge が拒否されていない")
+
+    # 値は #1441(`_has_flag` が短縮形の直結値に含まれる文字を無関係な短縮フラグの結合と
+    # 誤認する既知の別バグ)を踏まないよう、小文字 `r` を含まない repo 名を使う
+    # (`owner/repo` は `r` を含み、`_has_flag(..., "--rebase", "r")` を誤って満たす)。
+
+    def test_short_repo_flag_attached_merge_without_squash_is_still_denied(self):
+        """回帰: `-Racme/blog`(短縮形の直結)は元々正しく動いていた分岐。壊れていないこと。"""
+        reason = run_hook(
+            "bash", bash_payload("glab -Racme/blog mr merge")
+        )
+        self.assertIsNotNone(reason, "-Racme/blog 前置の glab mr merge が拒否されていない")
+
+    def test_short_repo_flag_attached_merge_with_squash_is_allowed(self):
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab -Racme/blog mr merge --squash"))
+        )
+
+    def test_boolean_flag_before_subcommand_does_not_swallow_it(self):
+        """落とし穴1: `--help` はブール型。次のトークン `mr` を値として消費しないこと。
+
+        消費すると `mr merge` が見えなくなり、逆に検出漏れになる(過検知に倒すべき
+        という `invokes()` 自身の方針、#1029 に反する)。ここでは保守的に「サブコマンド
+        は見えたまま」であることを、squash 必須検査が発火することで確かめる。
+        """
+        reason = run_hook("bash", bash_payload("glab --help mr merge"))
+        self.assertIsNotNone(
+            reason, "--help の次のトークンが誤って消費され、mr merge を見失っている"
+        )
+
+    def test_wrapped_repo_prefixed_merge_without_squash_is_denied(self):
+        """回帰: `timeout` などの前置ラッパーとの併用でも見逃さないこと(#1029)。"""
+        reason = run_hook(
+            "bash", bash_payload("timeout 60 glab --repo owner/repo mr merge")
+        )
+        self.assertIsNotNone(reason, "ラッパー併用の --repo 前置 mr merge が拒否されていない")
+
+    # --- AC3: check_hotfix_label_immutability ---
+
+    def test_repo_prefixed_issue_update_hotfix_label_is_denied(self):
+        """AC3: `--repo owner/repo` を前置しても既存 Issue の hotfix 付け外しが拒否されること。"""
+        reason = run_hook(
+            "bash",
+            bash_payload("glab --repo owner/repo issue update 42 --label hotfix"),
+        )
+        self.assertIsNotNone(reason, "--repo 前置の issue update --label hotfix が拒否されていない")
+        self.assertIn("hotfix", reason)
+
+    def test_repo_prefixed_issue_update_non_hotfix_label_is_allowed(self):
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab --repo owner/repo issue update 42 --label bug"),
+            )
+        )
+
+    # --- AC4: check_hotfix_creation ---
+
+    def test_repo_prefixed_issue_create_hotfix_without_marker_is_denied(self):
+        """AC4: `--repo owner/repo` を前置しても、マーカー無しの hotfix 付き起票が拒否されること。"""
+        reason = run_hook(
+            "bash",
+            bash_payload(
+                "glab --repo owner/repo issue create --title x --label hotfix"
+            ),
+        )
+        self.assertIsNotNone(
+            reason, "--repo 前置かつマーカー無しの hotfix 付き起票が拒否されていない"
+        )
+        self.assertIn("hotfix", reason)
+
+    def test_repo_prefixed_issue_create_hotfix_is_allowed_with_report_bug_marker(self):
+        """`report-bug` マーカーがあれば、`--repo` 前置でも従来どおり許可されること。"""
+        root, session = _stage_root("report-bug")
+        reason = _run_in_root(
+            "bash",
+            {
+                "command": (
+                    "glab --repo owner/repo issue create --title x --label hotfix"
+                ),
+            },
+            root,
+            session,
+        )
+        self.assertIsNone(reason)
+
+    # --- AC5: check_pr_coverage(Coverage Gate) ---
+
+    def _coverage_project(self, exit_code):
+        root = tempfile.mkdtemp()
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write(
+                "import sys\n"
+                "print('coverage report placeholder')\n"
+                "sys.exit(%d)\n" % exit_code
+            )
+        return root
+
+    def _run_coverage(self, command, exit_code):
+        root = self._coverage_project(exit_code)
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook("bash", bash_payload(command, cwd=root))
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    def test_repo_prefixed_mr_create_triggers_coverage_gate(self):
+        """AC5: `--repo owner/repo` を前置しても Coverage Gate が発火すること。
+
+        素の `glab mr create` と同じ扱いになることを、カバレッジ不足(終了コード1)で
+        拒否されることによって確かめる(`CoverageGate` と同じ検証方法)。
+        """
+        reason = self._run_coverage(
+            "glab --repo owner/repo mr create --title x", 1
+        )
+        self.assertIsNotNone(
+            reason, "--repo 前置の glab mr create で Coverage Gate が発火していない"
+        )
+        self.assertIn("C1/C2", reason)
+
+    def test_repo_prefixed_mr_create_is_allowed_when_coverage_passes(self):
+        self.assertIsNone(
+            self._run_coverage("glab --repo owner/repo mr create --title x", 0)
+        )
+
 
 class WriteEditSilencerDenial(unittest.TestCase):
     """#1219: `cmd_write` の `SILENCERS` 拒否と、その免除パスを検査する。

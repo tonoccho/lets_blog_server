@@ -524,6 +524,29 @@ def simple_commands(command):
     return out
 
 
+# サブコマンド一致判定(invokes())の前に読み飛ばす、値を取るグローバルな永続フラグ。
+# `glab`(cobra/pflag)は永続フラグをサブコマンドの前後どちらに置いても受け付けるため、
+# `glab --repo owner/repo mr merge` のように値が独立したトークンになる形では、値が
+# サブコマンドの位置にずれ込んで一致しなくなる(#1435)。
+#
+# `=` 結合形(`--repo=owner/repo`)と短縮形の直結(`-Rowner/repo`)は1トークンで `-`
+# から始まるため、素朴な `not a.startswith("-")` フィルタで元から正しく除外されている。
+# ここで読み飛ばす必要があるのは「フラグ本体と値が別トークン」の場合だけ。
+#
+# ブール型フラグ(`-h`/`--help` など)は含めない。含めると `glab --help mr merge` の
+# `mr` を値として消費してしまい、本物のサブコマンドを取りこぼす(見逃しは #1029 の
+# 教訓に反する)。`strip_wrappers()` の `value_flags` と同じ「値を取ると分かっている
+# フラグの明示的な集合」方式であり、推測(「`-` 始まりの次は常に値」など)はしない。
+#
+# `git` 呼び出し元(`check_no_verify` / `check_commit_phase`)とは値を取るフラグの
+# 集合が異なる(`git` は `-C` / `--git-dir` / `-c` など)ため、program ごとのテーブルに
+# しておく。`git` の集合を実際に埋めるのは #1440 の仕事(このテーブルにキーを足すだけ
+# で済む形にしてある)。
+GLOBAL_VALUE_FLAGS = {
+    "glab": {"-R", "--repo", "--jq", "-F", "--output", "-p", "--page", "-P", "--per-page"},
+}
+
+
 def invokes(command, program, subcommands=()):
     """`program`(必要なら続く部分コマンド)を実行する箇所の残り引数を列挙する。
 
@@ -537,13 +560,24 @@ def invokes(command, program, subcommands=()):
             pattern += r"\s+" + r"\s+".join(re.escape(s) for s in subcommands) + r"\b"
         return [command.split()] if re.search(pattern, command) else []
 
+    value_flags = GLOBAL_VALUE_FLAGS.get(program, set())
     found = []
     for argv, _ in parsed:
         if not argv or os.path.basename(argv[0]) != program:
             continue
         rest = argv[1:]
         if subcommands:
-            positional = [a for a in rest if not a.startswith("-")]
+            positional = []
+            skip_next = False
+            for a in rest:
+                if skip_next:
+                    skip_next = False
+                    continue
+                if a in value_flags:
+                    skip_next = True
+                    continue
+                if not a.startswith("-"):
+                    positional.append(a)
             if positional[: len(subcommands)] != list(subcommands):
                 continue
         found.append(rest)
