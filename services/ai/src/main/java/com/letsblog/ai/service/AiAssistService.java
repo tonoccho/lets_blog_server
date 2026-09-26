@@ -3,6 +3,7 @@ package com.letsblog.ai.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.AiProvider;
+import com.letsblog.ai.ai.BraveSearchResult;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.domain.ReviewStepKey;
@@ -21,6 +22,7 @@ import com.letsblog.ai.dto.PlanChatMessage;
 import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.dto.ProofreadIssue;
 import com.letsblog.ai.dto.ReviewStepSuggestion;
+import com.letsblog.ai.dto.SourceReference;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +34,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -153,8 +156,9 @@ public class AiAssistService {
      * ステップごとに1観点だけを問い、応答も{originalText, message}のみ(typeやsuggestionは持たない)。
      * 識別子(id)は本文中の出現位置を含めないためLLMには出させず、サーバ側で
      * {@link #computeSuggestionId}が算出する。5ステップのうちプロンプト未実装のステップ
-     * (FACT_CHECK/READER_PERSPECTIVE/STYLE)はこのMapに含めない
-     * (#1214/#1221が担当。{@link #generateReviewStepSuggestions}が未実装ステップを例外にする)。
+     * (READER_PERSPECTIVE/STYLE)はこのMapに含めない。FACT_CHECKは検索を伴い形が違うため
+     * {@link #generateFactCheckSuggestions}が別に扱う(issue #1214)。
+     * (#1221が担当。{@link #generateReviewStepSuggestions}が未実装ステップを例外にする)。
      */
     private static final Map<ReviewStepKey, String> REVIEW_STEP_PROMPT_TEMPLATES = buildReviewStepPromptTemplates();
 
@@ -188,6 +192,51 @@ public class AiAssistService {
                 """);
         return templates;
     }
+
+    /**
+     * issue #1214: 校閲(FACT_CHECK)の1段目。本文から事実主張を抽出し、Web検索に使うクエリを返させる。
+     * 抽出と判定を分けるのは、検索クエリを本文全体から機械的に作ると事実主張の裏取りに使えないため
+     * (実装レポート参照。LLM呼び出しは抽出・判定の2回)。本文は必ず末尾に置く(E2Eスタブが
+     * {@code 本文:}以降を本文として読む)。
+     */
+    private static final String FACT_CHECK_EXTRACTION_PROMPT_TEMPLATE = """
+            あなたはブログ記事の校閲者です。以下のブログ記事本文から、事実確認の対象となる主張を抽出してください。
+            対象は数値・固有名詞・日付・製品仕様など、Web検索で裏取りできる客観的な事実の主張です。
+            意見・感想・比喩は含めないでください。重要なものから最大%d件までにしてください。
+
+            出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。対象が無ければ空配列 [] を返してください。
+            claimには本文中の主張の該当箇所を、一字一句変えずにそのまま引用してください。
+            queryにはその主張の裏取りに使うWeb検索クエリを入れてください。
+
+            [{"claim": "本文中の主張の該当箇所", "query": "Web検索クエリ"}]
+
+            本文:
+            %s
+            """;
+
+    /**
+     * issue #1214: 校閲の2段目。Web検索結果と本文を突き合わせ、裏付けが取れない/矛盾する主張だけを
+     * 指摘させる。出典は検索結果の番号で答えさせ、サーバ側でタイトルとURLへ引き直す(URLをLLMに
+     * 書かせない=幻覚の防止)。本文は必ず末尾に置く。
+     */
+    private static final String FACT_CHECK_JUDGE_PROMPT_TEMPLATE = """
+            あなたはブログ記事の校閲者です。以下のWeb検索結果と照らして事実確認を行い、ブログ記事本文の中で
+            検索結果と矛盾する、または裏付けが取れない事実の主張だけを指摘してください。
+            検索結果から裏付けが取れている主張、検索結果から判断できない主張は指摘しないでください。
+
+            出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。指摘が無ければ空配列 [] を返してください。
+            originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+            sourcesには判断の根拠にした検索結果の番号(1始まり)を配列で入れてください。根拠にした検索結果が無い指摘は出力しないでください。
+
+            [{"originalText": "本文中の該当箇所", "message": "指摘内容", "sources": [1]}]
+
+            %s
+            本文:
+            %s
+            """;
+
+    /** 校閲が1回の呼び出しで裏取りする主張の上限。検索回数(=レイテンシ)を抑える。 */
+    private static final int FACT_CHECK_MAX_CLAIMS = 3;
 
     /** issue #526: エディタ右クリックメニュー「Ask AI」からの質問に、Web検索結果を踏まえて回答する。 */
     private static final String ASK_PROMPT_TEMPLATE = """
@@ -536,6 +585,9 @@ public class AiAssistService {
      */
     public AiReviewStepSuggestionsResponse generateReviewStepSuggestions(
             Long projectId, ReviewStepKey stepKey, String text) {
+        if (stepKey == ReviewStepKey.FACT_CHECK) {
+            return generateFactCheckSuggestions(projectId, text);
+        }
         String template = REVIEW_STEP_PROMPT_TEMPLATES.get(stepKey);
         if (template == null) {
             throw new IllegalArgumentException(
@@ -555,6 +607,133 @@ public class AiAssistService {
         } catch (RuntimeException e) {
             failJob(job, e);
             throw e;
+        }
+    }
+
+    /**
+     * issue #1214: 校閲(FACT_CHECK)。①LLMで事実主張と検索クエリを抽出 → ②主張ごとに
+     * {@link WebSearchService#searchSafely}で裏取り → ③検索結果を根拠にLLMが指摘を判定、の順に進む。
+     * 指摘の形・識別子・originalText実在チェックは他のステップと同じ({@link #parseReviewStepSuggestions}の
+     * 規則を{@link #parseFactCheckSuggestions}が踏襲する)。
+     *
+     * <p>検索が使えない(APIキー未設定・検索失敗、{@code WebSearchOutcome#succeeded}=false)とき、または
+     * 検索結果が1件も得られなかったときは、裏取りできていないのに「問題なし」と返さないよう、
+     * 判定を行わず{@code skipped=true}と理由を返す(HTTPエラーにもしない)。
+     * 主張が抽出されなかった場合は、検索を要する事実主張が無いということなので、
+     * 指摘0件・{@code skipped=false}で返す。
+     */
+    private AiReviewStepSuggestionsResponse generateFactCheckSuggestions(Long projectId, String text) {
+        ReviewStepKey stepKey = ReviewStepKey.FACT_CHECK;
+        GenerationJob job = startJob("llm_review_step_fact_check", Map.of(
+                "projectId", String.valueOf(projectId), "stepKey", stepKey.name(), "text", text));
+        try {
+            String model = reviewStepModelService.resolveModel(projectId, stepKey);
+            AiProvider provider = reviewStepModelService.resolveProvider(projectId, stepKey);
+
+            String extractionRaw = llmClient.generate(
+                    FACT_CHECK_EXTRACTION_PROMPT_TEMPLATE.formatted(FACT_CHECK_MAX_CLAIMS, text), model, provider);
+            List<String> queries = parseFactCheckQueries(extractionRaw);
+            if (queries.isEmpty()) {
+                completeJob(job, Map.of("result", extractionRaw, "skipped", "false"));
+                return new AiReviewStepSuggestionsResponse(List.of(), false, null);
+            }
+
+            List<BraveSearchResult> results = new ArrayList<>();
+            for (String query : queries) {
+                WebSearchOutcome outcome = webSearchService.searchSafely(query, projectId);
+                if (!outcome.succeeded()) {
+                    return skipFactCheck(job, "Web検索を利用できなかったため校閲をスキップしました: "
+                            + (outcome.errorMessage() == null || outcome.errorMessage().isBlank()
+                                    ? "理由不明" : outcome.errorMessage()));
+                }
+                results.addAll(outcome.results());
+            }
+            WebSearchOutcome combined = WebSearchOutcome.success(results);
+            if (results.isEmpty()) {
+                return skipFactCheck(job, "関連する検索結果が見つからず裏取りできなかったため校閲をスキップしました");
+            }
+
+            String raw = llmClient.generate(FACT_CHECK_JUDGE_PROMPT_TEMPLATE.formatted(
+                    WebSearchService.formatForPrompt(combined), text), model, provider);
+            List<ReviewStepSuggestion> suggestions =
+                    parseFactCheckSuggestions(raw, text, WebSearchService.toSources(combined));
+            completeJob(job, Map.of("result", raw, "skipped", "false"));
+            return new AiReviewStepSuggestionsResponse(suggestions, false, null);
+        } catch (RuntimeException e) {
+            failJob(job, e);
+            throw e;
+        }
+    }
+
+    /** スキップはジョブの失敗ではなく完了として、スキップした事実と理由を履歴に残す。 */
+    private AiReviewStepSuggestionsResponse skipFactCheck(GenerationJob job, String reason) {
+        completeJob(job, Map.of("skipped", "true", "skipReason", reason));
+        return new AiReviewStepSuggestionsResponse(List.of(), true, reason);
+    }
+
+    /** 抽出結果から検索クエリを取り出す。主張(claim)が空の要素は無視し、queryが無ければ主張で検索する。 */
+    private List<String> parseFactCheckQueries(String raw) {
+        try {
+            JsonNode node = objectMapper.readTree(extractJsonArray(raw));
+            if (!node.isArray()) {
+                return List.of();
+            }
+            LinkedHashSet<String> queries = new LinkedHashSet<>();
+            for (JsonNode item : node) {
+                String claim = item.path("claim").asText("").trim();
+                if (claim.isEmpty()) {
+                    continue;
+                }
+                String query = item.path("query").asText("").trim();
+                queries.add(query.isEmpty() ? claim : query);
+                if (queries.size() >= FACT_CHECK_MAX_CLAIMS) {
+                    break;
+                }
+            }
+            return List.copyOf(queries);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * {@link #parseReviewStepSuggestions}と同じ防御(本文に実在しない引用の除外)に加え、出典番号を
+     * {@code SourceReference}へ引き直す。有効な出典が1件も無い指摘は、根拠を示せないため除外する。
+     */
+    private List<ReviewStepSuggestion> parseFactCheckSuggestions(
+            String raw, String sourceText, List<SourceReference> sources) {
+        try {
+            JsonNode node = objectMapper.readTree(extractJsonArray(raw));
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<ReviewStepSuggestion> suggestions = new ArrayList<>();
+            for (JsonNode item : node) {
+                String originalText = item.path("originalText").asText(null);
+                if (originalText == null || originalText.isEmpty() || !sourceText.contains(originalText)) {
+                    continue;
+                }
+                List<SourceReference> cited = new ArrayList<>();
+                JsonNode indexes = item.path("sources");
+                if (indexes.isArray()) {
+                    for (JsonNode index : indexes) {
+                        int i = index.asInt(0);
+                        if (i >= 1 && i <= sources.size() && !cited.contains(sources.get(i - 1))) {
+                            cited.add(sources.get(i - 1));
+                        }
+                    }
+                }
+                if (cited.isEmpty()) {
+                    continue;
+                }
+                String message = item.path("message").asText(null);
+                suggestions.add(new ReviewStepSuggestion(
+                        computeSuggestionId(ReviewStepKey.FACT_CHECK, originalText, message),
+                        ReviewStepKey.FACT_CHECK.name(), originalText, message, List.copyOf(cited)));
+            }
+            return suggestions;
+        } catch (Exception e) {
+            return List.of();
         }
     }
 

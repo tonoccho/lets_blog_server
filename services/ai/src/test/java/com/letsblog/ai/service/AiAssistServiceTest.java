@@ -19,6 +19,8 @@ import com.letsblog.ai.dto.AiSectionResponse;
 import com.letsblog.ai.dto.AiTagsRequest;
 import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.dto.PlanChatMessage;
+import com.letsblog.ai.dto.ReviewStepSuggestion;
+import com.letsblog.ai.dto.SourceReference;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -716,5 +718,310 @@ class AiAssistServiceTest {
         assertEquals(1, response.suggestions().size());
         assertNull(response.suggestions().get(0).message());
         assertNotEquals("", response.suggestions().get(0).id());
+    }
+
+    // ---- issue #1214: 校閲(FACT_CHECK)ステップ。抽出 → Web検索 → 判定の2回のLLM呼び出し ----
+
+    private static final String FACT_TEXT = "東京タワーの高さは333メートルです。開業は1958年です。";
+
+    private static final String FACT_EXTRACTION =
+            "[{\"claim\": \"東京タワーの高さは333メートル\", \"query\": \"東京タワー 高さ\"}]";
+
+    private static BraveSearchResult searchResult(int n) {
+        return new BraveSearchResult("出典" + n, "説明" + n, "https://example.test/" + n);
+    }
+
+    @Test
+    void factCheck_検索結果を根拠にした指摘が出典つきで返りスキップではない() {
+        when(webSearchService.searchSafely("東京タワー 高さ", 1L)).thenReturn(
+                WebSearchOutcome.success(List.of(searchResult(1), searchResult(2))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                FACT_EXTRACTION,
+                "[{\"originalText\": \"東京タワーの高さは333メートル\", \"message\": \"333mではなく332.6mです\","
+                        + " \"sources\": [2]}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(1, response.suggestions().size());
+        ReviewStepSuggestion suggestion = response.suggestions().get(0);
+        assertEquals("FACT_CHECK", suggestion.stepKey());
+        assertEquals("東京タワーの高さは333メートル", suggestion.originalText());
+        assertEquals(List.of(new SourceReference("出典2", "https://example.test/2")), suggestion.sources());
+        assertEquals(Boolean.FALSE, response.skipped());
+        assertNull(response.skipReason());
+    }
+
+    @Test
+    void factCheck_プロジェクトのモデルで抽出と判定の2回を呼びジョブをfact_checkとして記録する() {
+        when(reviewStepModelService.resolveModel(1L, ReviewStepKey.FACT_CHECK)).thenReturn("model-f");
+        when(reviewStepModelService.resolveProvider(1L, ReviewStepKey.FACT_CHECK)).thenReturn(AiProvider.CLAUDE);
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(llmClient.generate(anyString(), eq("model-f"), eq(AiProvider.CLAUDE))).thenReturn(FACT_EXTRACTION, "[]");
+
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(2))
+                .generate(anyString(), eq("model-f"), eq(AiProvider.CLAUDE));
+        ArgumentCaptor<GenerationJob> captor = ArgumentCaptor.forClass(GenerationJob.class);
+        org.mockito.Mockito.verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        GenerationJob last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertEquals("llm_review_step_fact_check", last.getType());
+        assertEquals("done", last.getStatus());
+    }
+
+    @Test
+    void factCheck_APIキー未設定でWeb検索が使えないときはスキップと理由を返し判定へ進まない() {
+        String reason = "Brave Search APIキーが設定されていません";
+        when(webSearchService.searchSafely(anyString(), eq(1L))).thenReturn(WebSearchOutcome.failure(reason));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION);
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(Boolean.TRUE, response.skipped());
+        assertTrue(response.skipReason().contains(reason));
+        assertEquals(List.of(), response.suggestions());
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString(), any(), any());
+    }
+
+    @Test
+    void factCheck_Web検索が失敗した場合は検索失敗の理由つきでスキップする() {
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.failure("Brave Search呼び出しに失敗しました: 500"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION);
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(Boolean.TRUE, response.skipped());
+        assertTrue(response.skipReason().contains("500"));
+    }
+
+    @Test
+    void factCheck_失敗理由が無い検索失敗でも理由文字列は空にならない() {
+        when(webSearchService.searchSafely(anyString(), eq(1L))).thenReturn(WebSearchOutcome.failure(null));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION);
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(Boolean.TRUE, response.skipped());
+        assertTrue(!response.skipReason().isBlank());
+    }
+
+    @Test
+    void factCheck_検索が途中で失敗したら以降の検索を行わずスキップする() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"claim\": \"東京タワーの高さは333メートル\", \"query\": \"q1\"},"
+                        + " {\"claim\": \"開業は1958年\", \"query\": \"q2\"}]");
+        when(webSearchService.searchSafely("q1", 1L)).thenReturn(WebSearchOutcome.failure("失敗"));
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(Boolean.TRUE, response.skipped());
+        org.mockito.Mockito.verify(webSearchService, org.mockito.Mockito.never()).searchSafely(eq("q2"), any());
+    }
+
+    @Test
+    void factCheck_検索が失敗したジョブは完了として記録されスキップ情報を残す() {
+        when(webSearchService.searchSafely(anyString(), eq(1L))).thenReturn(WebSearchOutcome.failure("理由X"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION);
+
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        ArgumentCaptor<GenerationJob> captor = ArgumentCaptor.forClass(GenerationJob.class);
+        org.mockito.Mockito.verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        GenerationJob last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertEquals("done", last.getStatus());
+        assertTrue(last.getResultPayload().contains("理由X"));
+    }
+
+    @Test
+    void factCheck_抽出された主張が無ければ検索も判定もせず指摘0件でスキップではない() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("[]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+        assertEquals(Boolean.FALSE, response.skipped());
+        org.mockito.Mockito.verifyNoInteractions(webSearchService);
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString(), any(), any());
+    }
+
+    @Test
+    void factCheck_抽出結果がJSONでなければ指摘0件でスキップではない() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+        assertEquals(Boolean.FALSE, response.skipped());
+    }
+
+    @Test
+    void factCheck_抽出結果が配列でなければ指摘0件でスキップではない() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("{}");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+        assertEquals(Boolean.FALSE, response.skipped());
+    }
+
+    @Test
+    void factCheck_queryが無い主張は主張文で検索し空の主張は無視する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"claim\": \"開業は1958年\"}, {\"query\": \"主張なし\"}, {\"claim\": \"\"}]", "[]");
+        when(webSearchService.searchSafely("開業は1958年", 1L))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        org.mockito.Mockito.verify(webSearchService).searchSafely("開業は1958年", 1L);
+        org.mockito.Mockito.verify(webSearchService, org.mockito.Mockito.times(1)).searchSafely(anyString(), any());
+    }
+
+    @Test
+    void factCheck_検索する主張は最大3件までに抑える() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"claim\": \"a\", \"query\": \"q1\"}, {\"claim\": \"b\", \"query\": \"q2\"},"
+                        + " {\"claim\": \"c\", \"query\": \"q3\"}, {\"claim\": \"d\", \"query\": \"q4\"}]",
+                "[]");
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        org.mockito.Mockito.verify(webSearchService, org.mockito.Mockito.times(3)).searchSafely(anyString(), eq(1L));
+    }
+
+    @Test
+    void factCheck_出典を持たない指摘と範囲外の出典番号だけの指摘は除外する() {
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                FACT_EXTRACTION,
+                "[{\"originalText\": \"東京タワーの高さは333メートル\", \"message\": \"出典なし\"},"
+                        + " {\"originalText\": \"開業は1958年\", \"message\": \"範囲外\", \"sources\": [0, 9]},"
+                        + " {\"originalText\": \"東京タワー\", \"message\": \"型違い\", \"sources\": \"1\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+        assertEquals(Boolean.FALSE, response.skipped());
+    }
+
+    @Test
+    void factCheck_本文に実在しない引用の指摘は出典があっても除外する() {
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                FACT_EXTRACTION,
+                "[{\"originalText\": \"本文に無い\", \"message\": \"m\", \"sources\": [1]},"
+                        + " {\"message\": \"originalTextなし\", \"sources\": [1]}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void factCheck_判定結果が不正なら指摘0件でスキップではない() {
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION, "壊れた応答");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+        assertEquals(Boolean.FALSE, response.skipped());
+    }
+
+    @Test
+    void factCheck_判定結果が配列でなければ指摘0件でスキップではない() {
+        when(webSearchService.searchSafely(anyString(), eq(1L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION, "{}");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(), response.suggestions());
+    }
+
+    @Test
+    void factCheck_複数の主張の検索結果は通し番号で判定へ渡され出典番号で引ける() {
+        when(webSearchService.searchSafely("q1", 1L))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(webSearchService.searchSafely("q2", 1L))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(2))));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"claim\": \"a\", \"query\": \"q1\"}, {\"claim\": \"b\", \"query\": \"q2\"}]",
+                "[{\"originalText\": \"開業は1958年\", \"message\": \"m\", \"sources\": [2, 1]}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(List.of(new SourceReference("出典2", "https://example.test/2"),
+                new SourceReference("出典1", "https://example.test/1")), response.suggestions().get(0).sources());
+    }
+
+    @Test
+    void factCheck_LLM呼び出しが例外を投げたらジョブを失敗にして再送出する() {
+        when(llmClient.generate(anyString(), any(), any())).thenThrow(new RuntimeException("LLM呼び出し失敗"));
+
+        assertThrows(RuntimeException.class,
+                () -> service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT));
+    }
+
+    @Test
+    void 既存ステップの応答にはスキップ情報も出典も付かない() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"本文\", \"message\": \"指摘\"}]");
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文");
+
+        assertNull(response.skipped());
+        assertNull(response.skipReason());
+        assertNull(response.suggestions().get(0).sources());
+        org.mockito.Mockito.verifyNoInteractions(webSearchService);
+    }
+
+    @Test
+    void 応答のJSONは既存ステップではスキップ情報と出典のキーを含まずFACT_CHECKでは含む() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        String legacy = mapper.writeValueAsString(new AiReviewStepSuggestionsResponse(
+                List.of(new ReviewStepSuggestion("i", "JAPANESE", "o", "m"))));
+        assertTrue(!legacy.contains("skipped") && !legacy.contains("skipReason") && !legacy.contains("sources"));
+
+        String factCheck = mapper.writeValueAsString(new AiReviewStepSuggestionsResponse(
+                List.of(new ReviewStepSuggestion("i", "FACT_CHECK", "o", "m",
+                        List.of(new SourceReference("t", "u")))), false, null));
+        assertTrue(factCheck.contains("\"skipped\":false") && factCheck.contains("\"sources\""));
+        assertTrue(!factCheck.contains("skipReason"));
+    }
+
+    @Test
+    void factCheck_検索は成功したが結果が1件も無ければ裏取りできないためスキップし判定へ進まない() {
+        when(webSearchService.searchSafely(anyString(), eq(1L))).thenReturn(WebSearchOutcome.success(List.of()));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(FACT_EXTRACTION);
+
+        AiReviewStepSuggestionsResponse response =
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        assertEquals(Boolean.TRUE, response.skipped());
+        assertTrue(response.skipReason().contains("検索結果が見つからず"));
+        assertEquals(List.of(), response.suggestions());
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString(), any(), any());
     }
 }

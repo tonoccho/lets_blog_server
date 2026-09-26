@@ -217,6 +217,41 @@ function reviewStepJsonCompletion(prompt, message) {
   return JSON.stringify([{ originalText: quote, message }]);
 }
 
+// ------------------------------------ 校閲(FACT_CHECK)ステップ(issue #1214)
+
+/**
+ * ai-service の AiAssistService#FACT_CHECK_EXTRACTION_PROMPT_TEMPLATE(1段目: 事実主張の抽出)と
+ * FACT_CHECK_JUDGE_PROMPT_TEMPLATE(2段目: 検索結果を踏まえた判定)の、それぞれだけが持つ指示文言を
+ * マーカーにする。どちらのプロンプトも「本文:」を末尾に置くため、{@link promptBodyText}で本文を読める。
+ * 校閲のプロンプトは「校正」「タグ」等の一般判定の語を含みうるので、{@link jsonFormatCompletionFor}
+ * (一般判定より先に通す)で処理する。
+ */
+const FACT_CHECK_EXTRACTION_MARKER = '事実確認の対象となる主張を抽出';
+const FACT_CHECK_JUDGE_MARKER = 'Web検索結果と照らして事実確認';
+const FACT_CHECK_MESSAGE = 'E2Eスタブが検出した校閲の指摘です(検索結果から裏付けが取れません)。';
+
+/**
+ * 抽出: 本文の**最後の**文断片を主張・検索クエリとして返す({@link reviewStepQuote}と同じ理由で
+ * 末尾から取る)。スタブのBrave Searchは検索クエリを結果のタイトルへ埋め込むので、
+ * シナリオは「出典が検索結果由来か」を確認できる。
+ */
+function factCheckExtractionCompletion(prompt) {
+  const quote = reviewStepQuote(promptBodyText(prompt));
+  if (!quote) {
+    return JSON.stringify([]);
+  }
+  return JSON.stringify([{ claim: quote, query: quote }]);
+}
+
+/** 判定: 抽出と同じ引用を、検索結果の1番目を根拠に指摘として返す。 */
+function factCheckJudgeCompletion(prompt) {
+  const quote = reviewStepQuote(promptBodyText(prompt));
+  if (!quote) {
+    return JSON.stringify([]);
+  }
+  return JSON.stringify([{ originalText: quote, message: FACT_CHECK_MESSAGE, sources: [1] }]);
+}
+
 /**
  * JSON形式を要求するプロンプトへの応答。判別できなければ null を返し、呼び元へ委ねる。
  *
@@ -229,6 +264,8 @@ function jsonFormatCompletionFor(prompt) {
   if (prompt.includes(TAGS_JSON_MARKER)) return TAGS_JSON_COMPLETION;
   if (prompt.includes(IMAGE_TAGS_JSON_MARKER)) return IMAGE_TAGS_JSON_COMPLETION;
   if (prompt.includes(PROOFREAD_JSON_MARKER)) return proofreadJsonCompletion(prompt);
+  if (prompt.includes(FACT_CHECK_EXTRACTION_MARKER)) return factCheckExtractionCompletion(prompt);
+  if (prompt.includes(FACT_CHECK_JUDGE_MARKER)) return factCheckJudgeCompletion(prompt);
   if (prompt.includes(JAPANESE_STEP_MARKER)) return reviewStepJsonCompletion(prompt, JAPANESE_STEP_MESSAGE);
   if (prompt.includes(PROOFREADING_STEP_MARKER)) {
     return reviewStepJsonCompletion(prompt, PROOFREADING_STEP_MESSAGE);

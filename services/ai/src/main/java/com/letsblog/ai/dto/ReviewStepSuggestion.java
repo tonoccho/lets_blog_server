@@ -1,5 +1,9 @@
 package com.letsblog.ai.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.util.List;
+
 /**
  * レビューステップ単位で検出した1件の指摘(issue #1213)。
  *
@@ -10,6 +14,16 @@ package com.letsblog.ai.dto;
  *
  * <p>{@code originalText}は本文中に実在する引用そのもの(位置特定用、
  * {@link com.letsblog.ai.service.AiAssistService}の既存の防御と同じくLLMの幻覚を除外する)。
+ *
+ * <p>{@code sources}は校閲(FACT_CHECK、issue #1214)が判断の根拠にしたWeb検索の出典(タイトルとURL)。
+ * 校閲以外のステップではnullで、JSONにもキーが現れない(既存の応答の形を変えないため)。
  */
-public record ReviewStepSuggestion(String id, String stepKey, String originalText, String message) {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record ReviewStepSuggestion(
+        String id, String stepKey, String originalText, String message, List<SourceReference> sources) {
+
+    /** 出典を持たないステップ用。 */
+    public ReviewStepSuggestion(String id, String stepKey, String originalText, String message) {
+        this(id, stepKey, originalText, message, null);
+    }
 }

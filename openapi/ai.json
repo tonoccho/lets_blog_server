@@ -1776,6 +1776,12 @@
             "items": {
               "$ref": "#/components/schemas/ReviewStepSuggestion"
             }
+          },
+          "skipped": {
+            "type": "boolean"
+          },
+          "skipReason": {
+            "type": "string"
           }
         }
       },
@@ -1792,6 +1798,23 @@
             "type": "string"
           },
           "message": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceReference"
+            }
+          }
+        }
+      },
+      "SourceReference": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "url": {
             "type": "string"
           }
         }
@@ -1974,17 +1997,6 @@
             }
           },
           "searchNote": {
-            "type": "string"
-          }
-        }
-      },
-      "SourceReference": {
-        "type": "object",
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "url": {
             "type": "string"
           }
         }

@@ -133,15 +133,23 @@ export interface AiReviewStepSuggestionsRequest {
   text: string;
 }
 
+export interface SourceReference {
+  title?: string;
+  url?: string;
+}
+
 export interface ReviewStepSuggestion {
   id?: string;
   stepKey?: string;
   originalText?: string;
   message?: string;
+  sources?: SourceReference[];
 }
 
 export interface AiReviewStepSuggestionsResponse {
   suggestions?: ReviewStepSuggestion[];
+  skipped?: boolean;
+  skipReason?: string;
 }
 
 export interface AiImagePromptRequest {
@@ -201,11 +209,6 @@ export interface AiSectionRequest {
   history?: PlanChatMessage[];
   message?: string;
   provider?: string;
-}
-
-export interface SourceReference {
-  title?: string;
-  url?: string;
 }
 
 export interface AiSectionResponse {
