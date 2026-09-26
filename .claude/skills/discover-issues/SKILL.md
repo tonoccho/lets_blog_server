@@ -8,11 +8,14 @@ model: opus
 
 You are running a repository-wide audit to surface work that nobody has explicitly requested yet.
 
-This is one of the three entry points into the Issue registration workflow:
+This is one of the four entry points into the Issue registration workflow:
 
 1. Full-repository review (this skill)
 2. A specific feature request → `plan-issue`
-3. A specific bug report → `plan-issue`
+3. A specific bug report, filed the ordinary way starting in `Inbox` → `plan-issue`
+4. An urgent bug the user just hit themselves, filed straight into `status::Backlog` →
+   `/report-bug` (see `CLAUDE.md` → **Issue Provenance** → **hotfix**, and
+   `.claude/skills/report-bug/SKILL.md` for what that entry point does and its limits)
 
 This is a **read-only stage**. It never writes to the repository — no production code, no
 tests, no configuration, no documentation. Its only output is GitLab Issues. See

@@ -750,3 +750,99 @@ class HotfixSectionDocumentsCreateTimeHandling(unittest.TestCase):
         self.assertIn("report-bug", section)
         self.assertIn("guard.py", section)
 
+
+# --------------------------------------------------------------------------- #1438
+
+
+class DiscoverIssuesEntryPointsAreCurrent(unittest.TestCase):
+    """Requirement 1/2/3, AC1/AC2: discover-issues の入口一覧が `/report-bug` を含み、
+    件数の表記が一覧の項目数と一致していること。定義そのものは書き直さず、
+    `CLAUDE.md` / `report-bug/SKILL.md` への参照に留めていること(#1438)。
+    """
+
+    PATH = ".claude/skills/discover-issues/SKILL.md"
+
+    NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+
+    # `report-bug` の固定ラベル一式・上限の定義を、discover-issues が自分で書き直した
+    # 兆候。2つ以上一致すれば「参照」ではなく「書き直し」とみなす
+    # (`ReportBugDoesNotRestateTheIssueTemplate` と同じ考え方)。
+    RESTATEMENT_MARKERS = [
+        re.compile(r"user-request"),
+        re.compile(r"priority::P0"),
+        re.compile(r"上限3件|at most 3|cap of 3|no more than 3"),
+    ]
+
+    def _entry_points_section(self):
+        text = read(self.PATH)
+        after = text.split(
+            "entry points into the Issue registration workflow:\n\n", 1
+        )
+        self.assertEqual(2, len(after), "%s に入口一覧の導入文が見つからない" % self.PATH)
+        section = after[1].split("\n\n", 1)[0]
+        return section
+
+    def _stated_number_word(self):
+        text = read(self.PATH)
+        match = re.search(
+            r"one of the (\w+) entry points into the Issue registration workflow", text
+        )
+        self.assertIsNotNone(match, "入口一覧の導入文が見つからない")
+        return match.group(1)
+
+    def _item_count(self):
+        section = self._entry_points_section()
+        return len(re.findall(r"^\s*\d+\.\s+", section, re.MULTILINE))
+
+    def test_lists_report_bug_as_an_entry_point(self):
+        section = self._entry_points_section()
+        self.assertRegex(section, r"`?/report-bug`?")
+
+    def test_item_count_is_at_least_four_now_that_report_bug_exists(self):
+        self.assertGreaterEqual(
+            self._item_count(), 4, "report-bug 追加後は入口が4つ以上のはず"
+        )
+
+    def test_stated_number_word_matches_the_item_count(self):
+        count = self._item_count()
+        expected_word = self.NUMBER_WORDS.get(count)
+        self.assertIsNotNone(
+            expected_word, "項目数 %d に対応する数詞が定義されていない" % count
+        )
+        self.assertEqual(
+            expected_word,
+            self._stated_number_word(),
+            "件数の表記が一覧の項目数(%d)と一致しない" % count,
+        )
+
+    def test_distinguishes_regular_bug_reports_from_urgent_ones(self):
+        """Requirement 2: 通常のバグ報告(plan-issue)と緊急バグ(report-bug)の使い分け。"""
+        section = self._entry_points_section()
+        self.assertIn("plan-issue", section)
+        self.assertRegex(section, r"/report-bug")
+
+    def test_does_not_restate_the_report_bug_definition(self):
+        """Requirement 3: report-bug の意味・ラベル・上限を書き直さない。"""
+        text = read(self.PATH)
+        matched = sum(1 for m in self.RESTATEMENT_MARKERS if m.search(text))
+        self.assertLess(
+            matched, 2,
+            "discover-issues が report-bug の定義を書き直している(%d 個一致)" % matched,
+        )
+
+    def test_references_report_bug_definition_source(self):
+        """Requirement 3: 一覧の `/report-bug` の項目そのものが `CLAUDE.md` または
+        `report-bug/SKILL.md` への参照になっている(ファイルのどこか他の場所に
+        `CLAUDE.md` という語があるだけでは満たされない)。"""
+        section = self._entry_points_section()
+        self.assertRegex(section, r"(report-bug/SKILL\.md|CLAUDE\.md)")
+
+
+class NoStaleEntryPointEnumerations(unittest.TestCase):
+    """AC3: `.claude/` 内に、入口を古い件数・古い内容で列挙している箇所が
+    他に残っていないこと(#1438)。"""
+
+    def test_no_document_mentions_three_entry_points(self):
+        offenders = [path for path in claude_docs() if "three entry points" in read(path)]
+        self.assertEqual([], offenders, "古い件数表記が残っている: %s" % offenders)
+
