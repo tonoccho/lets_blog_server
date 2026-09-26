@@ -1,11 +1,9 @@
 package com.letsblog.media.client;
 
 import com.letsblog.media.ai.AiServiceException;
-import com.letsblog.common.client.ServiceAuthHeaders;
 import com.letsblog.common.client.SyncCallProfile;
 import com.letsblog.common.client.SyncServiceClient;
 import com.letsblog.common.client.SyncServiceException;
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,21 +22,22 @@ import org.springframework.web.client.RestClient;
  * (LLM用プロファイル、リトライ無し、明確なエラー)。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
  *
  * <p>projectIdを渡すとai-service側でそのプロジェクトの選択中モデル/プロバイダーを解決して使う
- * (未指定時はシステム既定)。認証は呼び出し元ユーザーのBearerトークンをそのまま転送する。
+ * (未指定時はシステム既定)。認証は{@link OutboundAuthHeaders}(リクエスト中はユーザーのBearer、
+ * 非同期ジョブ(#1405)などリクエストの無いスレッドではサービス自身のトークン)。
  */
 @Component
 public class AiGenerationClient {
 
     private final SyncServiceClient client;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders authHeaders;
 
     public AiGenerationClient(
             RestClient.Builder builder, @Value("${app.ai-service-uri}") String aiServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders authHeaders) {
         this.client = SyncServiceClient.builder(builder, "ai-service", aiServiceUri)
                 .profile(SyncCallProfile.LLM)
                 .build();
-        this.request = request;
+        this.authHeaders = authHeaders;
     }
 
     public String generate(Long projectId, String prompt, String providerOverride) {
@@ -49,7 +48,7 @@ public class AiGenerationClient {
             body.put("providerOverride", providerOverride);
             GenerateResponse response = client.post(
                     "/api/internal/ai/generate", new Object[0], body, GenerateResponse.class,
-                    ServiceAuthHeaders.forwardedBearer(request));
+                    authHeaders.current());
             if (response == null) {
                 throw new AiServiceException("ai-serviceから空の応答を受け取りました", null);
             }

@@ -1,7 +1,6 @@
 package com.letsblog.media.client;
 
 import com.letsblog.media.service.ProjectNotFoundException;
-import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,7 +19,8 @@ import org.springframework.web.client.RestClientResponseException;
  * プロジェクト本体の所有権はproject-service(#577 stage2)にある。
  * 画像設定の読み書き・解決は「そのプロジェクトが実在すること」を前提にするため、その確認だけを行う。
  *
- * <p>認証は他サービスの内部ブリッジクライアントと同じく、呼び出し元のBearerトークンを転送する。
+ * <p>認証は{@link OutboundAuthHeaders}: リクエスト中は呼び出し元のBearerを転送し、
+ * 非同期ジョブ(#1405)などリクエストの無いスレッドではサービス自身のトークンを使う。
  */
 @Component
 public class ProjectServiceClient {
@@ -29,17 +29,17 @@ public class ProjectServiceClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final RestClient restClient;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders authHeaders;
 
     public ProjectServiceClient(
             RestClient.Builder builder,
             @Value("${app.project-service-uri}") String projectServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders authHeaders) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.baseUrl(projectServiceUri).requestFactory(requestFactory).build();
-        this.request = request;
+        this.authHeaders = authHeaders;
     }
 
     private record ProjectBridge(Long id, String name, String slug) {
@@ -56,7 +56,7 @@ public class ProjectServiceClient {
         try {
             restClient.get()
                     .uri("/api/internal/project/projects/{projectId}", projectId)
-                    .headers(this::setAuthorization)
+                    .headers(headers -> authHeaders.current().accept(headers))
                     .retrieve()
                     .body(ProjectBridge.class);
         } catch (RestClientResponseException e) {
@@ -68,13 +68,6 @@ public class ProjectServiceClient {
         } catch (RestClientException e) {
             throw new IllegalStateException(
                     "project-serviceのプロジェクト照会呼び出しに失敗しました: " + e.getMessage(), e);
-        }
-    }
-
-    private void setAuthorization(HttpHeaders headers) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
         }
     }
 

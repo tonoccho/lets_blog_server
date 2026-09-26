@@ -1363,3 +1363,118 @@ Then('パネル内の全てのラベルが対応する入力と結びついて�
   expect(result.total).toBeGreaterThanOrEqual(10);
   expect(result.unbound).toEqual([]);
 });
+
+/**
+ * 画像生成のジョブとしての非同期受理(issue #1405)のステップ定義。
+ *
+ * `POST /api/ai/image/jobs` は upload-endpoint 枠に入らない(api-global)ため、
+ * 同期APIのステップと違い枠(10/時)を消費しない。
+ */
+
+interface ImageJobState {
+  acceptStatus: number;
+  acceptBody: string;
+  jobId: number | null;
+  jobStatus: string | null;
+  final: { status: string; resultPayload: string | null } | null;
+}
+
+function jobState(ctx: Record<string, unknown>): ImageJobState {
+  const value = ctx.imageJob as ImageJobState | undefined;
+  expect(value, '画像生成のジョブがまだ要求されていません').toBeDefined();
+  return value as ImageJobState;
+}
+
+When(
+  /^そのプロジェクトで「([^」]+)」の画像生成をジョブとして要求する$/,
+  async ({ ctx, request }, prompt: string) => {
+    const token = await adminToken(request);
+    const response = await request.post('/api/ai/image/jobs', {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { prompt, projectId: ctx.mediaProjectId },
+      timeout: 30_000,
+    });
+    const text = await response.text();
+    let parsed: { id?: number; status?: string } = {};
+    try {
+      parsed = JSON.parse(text) as { id?: number; status?: string };
+    } catch {
+      // 本文がJSONでなければ後続の検証がステータスと本文を出して失敗する。
+    }
+    ctx.imageJob = {
+      acceptStatus: response.status(),
+      acceptBody: text,
+      jobId: parsed.id ?? null,
+      jobStatus: parsed.status ?? null,
+      final: null,
+    } satisfies ImageJobState;
+  }
+);
+
+Then(
+  /^画像生成のジョブIDが「(\w+)」の状態で即座に返る$/,
+  async ({ ctx }, status: string) => {
+    const job = jobState(ctx);
+    expect(job.acceptStatus, `応答本文: ${job.acceptBody}`).toBe(202);
+    expect(job.jobId, `ジョブIDが返っていません: ${job.acceptBody}`).not.toBeNull();
+    expect(job.jobStatus).toBe(status);
+  }
+);
+
+When('画像生成のジョブが終わるまで待つ', async ({ ctx, request }) => {
+  const job = jobState(ctx);
+  expect(job.jobId, `ジョブIDが返っていません: ${job.acceptBody}`).not.toBeNull();
+  const token = await adminToken(request);
+  const deadline = Date.now() + 120_000;
+  let last = { status: 'running', resultPayload: null as string | null };
+  while (Date.now() < deadline) {
+    const response = await request.get(`/api/generation-jobs/${job.jobId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(
+      response.ok(),
+      `ジョブの取得に失敗しました (status=${response.status()}): ${await response.text()}`
+    ).toBe(true);
+    last = (await response.json()) as { status: string; resultPayload: string | null };
+    if (last.status !== 'running') {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  job.final = last;
+});
+
+Then(
+  /^そのジョブは「done」で終わり、結果に生成画像のIDが「(\d+)」件示される$/,
+  async ({ ctx }, count: string) => {
+    const final = jobState(ctx).final;
+    expect(final, 'ジョブの終了を待っていません').not.toBeNull();
+    expect(final?.status, `結果: ${final?.resultPayload}`).toBe('done');
+    const result = JSON.parse(final?.resultPayload ?? '{}') as { imageIds?: number[] };
+    expect(result.imageIds).toHaveLength(Number(count));
+    expect(final?.resultPayload).not.toContain('dataBase64');
+    ctx.mediaGeneratedIds = result.imageIds ?? [];
+  }
+);
+
+Then('結果が示す画像はすべて生成画像の一覧に現れる', async ({ ctx, request }) => {
+  const ids = await listGeneratedImageIds(request);
+  const shown = (ctx.mediaGeneratedIds as number[] | undefined) ?? [];
+  expect(shown.length).toBeGreaterThan(0);
+  for (const id of shown) {
+    expect(ids, `生成画像 ${id} が一覧に現れていません`).toContain(id);
+  }
+});
+
+Then(
+  /^そのジョブは「failed」で終わり、理由に失敗した画像生成AIと状態コード「(\d+)」が示される$/,
+  async ({ ctx }, status: string) => {
+    const final = jobState(ctx).final;
+    expect(final, 'ジョブの終了を待っていません').not.toBeNull();
+    expect(final?.status, `結果: ${final?.resultPayload}`).toBe('failed');
+    const result = JSON.parse(final?.resultPayload ?? '{}') as { error?: string; errorType?: string };
+    expect(result.error).toContain('ChatGPT');
+    expect(result.error).toContain(String(status));
+    expect(result.errorType).toBeTruthy();
+  }
+);

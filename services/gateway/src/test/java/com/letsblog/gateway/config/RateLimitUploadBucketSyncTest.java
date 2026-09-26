@@ -60,6 +60,9 @@ class RateLimitUploadBucketSyncTest {
             "/api/ai/image",
             "/api/projects/1/asset-images/2/upload",
             "/api/projects/1/bulk-management/upload",
+            // #1405: 非同期の受理口。受理は軽量でGPU占有は専用Executorが直列化するため、
+            // upload-endpointの共有枠には入れずapi-global(クライアント単位)に置く。
+            "/api/ai/image/jobs",
             // #999で新たにapi-globalへ解放した画像関連メタデータ/設定
             "/api/ai/image-options",
             "/api/projects/1/image-settings",

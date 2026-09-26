@@ -360,6 +360,15 @@ app:
         paths:
           - /api/ai/image
         response-timeout: 3400s
+      # issue #1405: 画像生成を非同期ジョブとして受理する口。/api/ai/** はai-service向けなので
+      # 明示ルートが要る(先勝ちのため汎用のaiルートより前に置く)。受理はジョブを1件作って
+      # 即座に返すだけなので、生成本体用の長いresponse-timeoutは与えず既定値を使う。
+      # レート制限は upload-endpoint 枠に入れず api-global に置く
+      # (RateLimitWebFilter#UPLOAD_BUCKET_EXACT_PATHS のJavadoc参照)。
+      - id: ai-image-jobs
+        uri: ${MEDIA_SERVICE_URI:http://media:8080}
+        paths:
+          - /api/ai/image/jobs
       # LLM呼び出しはLLM_REQUEST_TIMEOUT_SECONDS(既定120秒)まで掛かりうり、記事プランの壁打ちは
       # Web検索+LLM呼び出しでさらに長くなりうるため、既定の60秒(default-response-timeout)より
       # 長いタイムアウトを設定する(issue #574の受入基準)。AiGenerationClient/GenerationJobClientの

@@ -108,6 +108,7 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- ImageGenerationController(issue #583でlegacy-apiから移設) --
                 new Endpoint("POST", "/api/ai/image"),
+                new Endpoint("POST", "/api/ai/image/jobs"),
                 new Endpoint("GET", "/api/ai/image-options"),
 
                 // -- ProjectImageModelController(issue #583でlegacy-apiから移設) --

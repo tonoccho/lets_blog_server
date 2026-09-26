@@ -349,10 +349,10 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ({@link RestClientResponseException})と区別して{@link AiServiceException}(502)にする(issue #1126)。
      * これを通らない{@code ResourceAccessException}は本文の空な409になり、理由も接続先も読めなかった。
      */
-    private AiServiceException unreachable(String baseUrl, ResourceAccessException e) {
+    private ComfyUiUnreachableException unreachable(String baseUrl, ResourceAccessException e) {
         String message = "ComfyUIへ到達できません(接続先: " + baseUrl + "): " + e.getMessage();
         log.warn(message, e);
-        return new AiServiceException(message, e);
+        return new ComfyUiUnreachableException(message, e);
     }
 
     private ObjectNode buildWorkflow(ComfyUiGenerationParams params) {

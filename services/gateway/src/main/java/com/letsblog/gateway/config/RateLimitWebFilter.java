@@ -149,6 +149,16 @@ public class RateLimitWebFilter implements WebFilter {
      * 隔離されているべき)ため、api-global(クライアント単位に分割されたバケット。
      * クラスJavadoc参照)に委ねる。</p>
      *
+     * <p><b>{@code POST /api/ai/image/jobs}(issue #1405、画像生成を非同期ジョブとして受理する口)
+     * も意図的にここへ含めない。</b>同期の{@code /api/ai/image}は1リクエストが生成の完了まで
+     * GPUを占有するため共有枠で総量を絞っている。一方こちらは受理がジョブ1件の作成で終わり、
+     * GPUの占有は専用Executor(media-serviceの{@code imageGenerationExecutor}、並列度1・待ち行列10件で
+     * 満杯なら受理側がジョブをfailedにする)が直列化して有限に抑える。ここを共有枠に入れると、
+     * プロセス全体で1時間に10回という枠を非同期の受理が消費し、同じ1時間に走る他ユーザーの
+     * 生成・アップロードを巻き添えで429にする(#999、上のavatarと同じ実害パターン)ため、
+     * クライアント単位のapi-globalに委ねる。同期経路と非同期経路の枠が別になる点は
+     * 受け入れた上での判断である。</p>
+     *
      * <p>{@code apps/web/e2e/support/endpoints.ts#isUploadBucketPath}に全く同じ定義を
      * 持つ(二重管理)。両者が食い違っていないことは
      * {@code RateLimitUploadBucketSyncTest}が検証している(#999 受入基準4)。

@@ -115,4 +115,10 @@ class ComfyUiClientUnreachableTest {
         assertEquals(1, warns.size());
         assertTrue(warns.get(0).getFormattedMessage().contains(REFUSED_URL), warns.get(0).getFormattedMessage());
     }
+
+    @Test
+    void 不到達は型で判別できるComfyUiUnreachableExceptionになる() {
+        assertThrows(ComfyUiUnreachableException.class, () -> clientFor(REFUSED_URL).listCheckpoints());
+        assertThrows(ComfyUiUnreachableException.class, () -> clientFor(REFUSED_URL).generateImage(params()));
+    }
 }

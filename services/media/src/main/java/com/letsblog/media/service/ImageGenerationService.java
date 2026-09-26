@@ -140,9 +140,7 @@ public class ImageGenerationService {
      */
     public AiImageBatchResponse generateImage(AiImageRequest imageRequest) {
         ImageProvider provider = imageModelService.getSelectedProvider(imageRequest.projectId());
-        ImageGenerationProvider generator = provider == ImageProvider.CHATGPT ? chatGptImageClient : comfyUiClient;
         int batchSize = imageRequest.batchSize() != null ? imageRequest.batchSize() : 1;
-        int batchCount = imageRequest.batchCount() != null ? imageRequest.batchCount() : 1;
         // ジョブを作る前に判定する。プロバイダが受け付けない枚数は生成が1枚も始まらないので、
         // 履歴に「失敗したジョブ」を残す意味が無い(受入基準「生成は開始されない」)。
         requireBatchSizeWithinProviderLimit(provider, batchSize);
@@ -150,77 +148,130 @@ public class ImageGenerationService {
                 provider == ImageProvider.CHATGPT ? "chatgpt_image" : "comfyui_image",
                 Map.of("prompt", imageRequest.prompt()));
         try {
-            // 禁止コンテンツの検査とタグ提案はプロンプト単位なので、リピートの外で1回だけ行う。
-            // プロンプトはリピート間で変わらない(変わるのはseedだけ)。
-            // 既定値の解決はDB往復を伴うので、リピート間で変わらないものは1回だけ引く
-            // (issue #1102 レビュー指摘。batchCount=16のとき品質プロンプトを18回引いていた)。
-            String prompt = resolvePrompt(imageRequest);
-            // issue #1085: ブロックフラグはこのあとnegative promptの安全側抑制語連結にも使うため、
-            // resolveParamsの中で再度引き直さず、ここで1回だけ解決して使い回す
-            // (issue #1102 レビュー指摘と同じ「リピート間で変わらない値は1回だけ引く」方針)。
-            boolean blockSexual = defaultsResolver.resolveBlockSexualContent(imageRequest.projectId());
-            boolean blockViolent = defaultsResolver.resolveBlockViolentContent(imageRequest.projectId());
-            boolean blockDiscriminatory = defaultsResolver.resolveBlockDiscriminatoryContent(imageRequest.projectId());
-            prohibitedContentFilterService.check(prompt, blockSexual, blockViolent, blockDiscriminatory);
-            String tagsJson = suggestImageTagsJson(prompt);
-            ComfyUiGenerationParams baseParams = resolveParams(
-                    imageRequest, prompt, provider, blockSexual, blockViolent, blockDiscriminatory);
-            List<AiImageResponse> responses = new ArrayList<>();
-            RuntimeException firstFailure = null;
-            int consecutiveFailures = 0;
-            int attemptedRepeats = 0;
-            int succeededRepeats = 0;
-            for (int repeat = 0; repeat < batchCount; repeat++) {
-                ComfyUiGenerationParams params = withRepeatSeed(baseParams, imageRequest, provider, repeat);
-                attemptedRepeats++;
-                try {
-                    responses.addAll(generateRepeat(generator, params, imageRequest, provider, tagsJson));
-                    succeededRepeats++;
-                    consecutiveFailures = 0;
-                } catch (RuntimeException e) {
-                    // 途中のリピートが落ちても、それまでに成功した画像は捨てない(issue #1102)。
-                    // 200枚生成したあとの1回の失敗で全部を失うほうが損失が大きい。
-                    consecutiveFailures++;
-                    if (firstFailure == null) {
-                        firstFailure = e;
-                    } else {
-                        // 2件目以降の失敗を捨てない。投げるのは最初の失敗なので、
-                        // 後続の失敗をそれに添えてログ・スタックトレースに残す。
-                        addSuppressedIfDistinct(firstFailure, e);
-                    }
-                    log.warn("画像生成のリピート{}/{}に失敗しました(成功分は返します): {}",
-                            repeat + 1, batchCount, e.getMessage());
-                    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                        // 認証エラー・設定不備・チェックポイント不在のような決定的な原因は、
-                        // 何度繰り返しても同じように失敗する。/prompt投入後に落ちる経路では
-                        // 1リピートごとにフルのポーリング予算を使い切るため、打ち切らないと
-                        // 一つの設定ミスがリクエストを何十分も掴んだあげく、1回目で既に
-                        // 判明していたエラーを返すことになる(issue #1102 レビュー指摘)。
-                        log.warn("画像生成が{}回続けて失敗したため、残り{}リピートを打ち切ります",
-                                consecutiveFailures, batchCount - attemptedRepeats);
-                        break;
-                    }
-                }
-            }
-            if (responses.isEmpty() && firstFailure != null) {
-                // 1枚も作れなかった場合は「成功した部分」が無いので、従来どおり失敗として返す。
-                // プロバイダが例外を投げずに0枚を返した場合(firstFailureがnull)は失敗ではないので、
-                // #1102以前と同じく空の結果をそのまま返す。
-                throw firstFailure;
-            }
-            // 打ち切って一度も試さなかったリピートも「成功しなかった」ので失敗として数える。
-            // こうすると 成功リピート数 + 失敗リピート数 が常に要求したリピート回数に一致し、
-            // 「256枚頼んで16枚しか無い」理由を数えるだけで追える。実際に何回試したのかは
-            // attemptedRepeats に残す。
-            int failedRepeats = batchCount - succeededRepeats;
+            BatchOutcome outcome = runBatch(provider, imageRequest, true, (done, total) -> { });
             completeJob(jobId, jobResult(
-                    responses.size(), succeededRepeats, failedRepeats,
-                    attemptedRepeats, attemptedRepeats < batchCount));
-            return new AiImageBatchResponse(responses, failedRepeats);
+                    outcome.images().size(), outcome.succeededRepeats(), outcome.failedRepeats(),
+                    outcome.attemptedRepeats(), outcome.aborted()));
+            return new AiImageBatchResponse(outcome.images(), outcome.failedRepeats());
         } catch (RuntimeException e) {
             failJob(jobId, e);
             throw e;
         }
+    }
+
+    /**
+     * 非同期ジョブ(issue #1405)が受理前に呼ぶ検証。プロバイダが受け付けない枚数を、
+     * ジョブを作る前に{@link UnsupportedBatchSizeException}(400)で断る。
+     *
+     * @return 生成に使われるプロバイダ
+     */
+    public ImageProvider requireAcceptable(AiImageRequest imageRequest) {
+        ImageProvider provider = imageModelService.getSelectedProvider(imageRequest.projectId());
+        requireBatchSizeWithinProviderLimit(
+                provider, imageRequest.batchSize() != null ? imageRequest.batchSize() : 1);
+        return provider;
+    }
+
+    /**
+     * ジョブ管理を含まない生成本体(issue #1405)。非同期ジョブランナーが、受理時に作られた
+     * ジョブの中で呼ぶ。{@link #generateImage}と違い自前ではジョブを作らず、
+     * {@code includeImageData}がfalseなら画像のBase64を保持しない(#1112: 生成画像は
+     * {@code generated_images}に永続化済みで、ジョブへはIDだけを残せばよい)。
+     */
+    public BatchOutcome generateBatch(
+            AiImageRequest imageRequest, boolean includeImageData, RepeatProgressListener listener) {
+        return runBatch(
+                imageModelService.getSelectedProvider(imageRequest.projectId()), imageRequest, includeImageData,
+                listener);
+    }
+
+    /** リピートが1つ終わる(成功・失敗を問わない)たびに呼ばれる。 */
+    @FunctionalInterface
+    public interface RepeatProgressListener {
+        void repeatFinished(int completedRepeats, int totalRepeats);
+    }
+
+    /** {@link #generateBatch}の結果。 */
+    public record BatchOutcome(
+            List<AiImageResponse> images, int succeededRepeats, int failedRepeats, int attemptedRepeats,
+            boolean aborted) {
+    }
+
+    private BatchOutcome runBatch(
+            ImageProvider provider, AiImageRequest imageRequest, boolean includeImageData,
+            RepeatProgressListener listener) {
+        ImageGenerationProvider generator = provider == ImageProvider.CHATGPT ? chatGptImageClient : comfyUiClient;
+        int batchCount = imageRequest.batchCount() != null ? imageRequest.batchCount() : 1;
+        // 禁止コンテンツの検査とタグ提案はプロンプト単位なので、リピートの外で1回だけ行う。
+        // プロンプトはリピート間で変わらない(変わるのはseedだけ)。
+        // 既定値の解決はDB往復を伴うので、リピート間で変わらないものは1回だけ引く
+        // (issue #1102 レビュー指摘。batchCount=16のとき品質プロンプトを18回引いていた)。
+        String prompt = resolvePrompt(imageRequest);
+        // issue #1085: ブロックフラグはこのあとnegative promptの安全側抑制語連結にも使うため、
+        // resolveParamsの中で再度引き直さず、ここで1回だけ解決して使い回す
+        // (issue #1102 レビュー指摘と同じ「リピート間で変わらない値は1回だけ引く」方針)。
+        boolean blockSexual = defaultsResolver.resolveBlockSexualContent(imageRequest.projectId());
+        boolean blockViolent = defaultsResolver.resolveBlockViolentContent(imageRequest.projectId());
+        boolean blockDiscriminatory = defaultsResolver.resolveBlockDiscriminatoryContent(imageRequest.projectId());
+        prohibitedContentFilterService.check(prompt, blockSexual, blockViolent, blockDiscriminatory);
+        String tagsJson = suggestImageTagsJson(prompt);
+        ComfyUiGenerationParams baseParams = resolveParams(
+                imageRequest, prompt, provider, blockSexual, blockViolent, blockDiscriminatory);
+        List<AiImageResponse> responses = new ArrayList<>();
+        RuntimeException firstFailure = null;
+        int consecutiveFailures = 0;
+        int attemptedRepeats = 0;
+        int succeededRepeats = 0;
+        for (int repeat = 0; repeat < batchCount; repeat++) {
+            ComfyUiGenerationParams params = withRepeatSeed(baseParams, imageRequest, provider, repeat);
+            attemptedRepeats++;
+            try {
+                responses.addAll(generateRepeat(
+                        generator, params, imageRequest, provider, tagsJson, includeImageData));
+                succeededRepeats++;
+                consecutiveFailures = 0;
+            } catch (RuntimeException e) {
+                // 途中のリピートが落ちても、それまでに成功した画像は捨てない(issue #1102)。
+                // 200枚生成したあとの1回の失敗で全部を失うほうが損失が大きい。
+                consecutiveFailures++;
+                if (firstFailure == null) {
+                    firstFailure = e;
+                } else {
+                    // 2件目以降の失敗を捨てない。投げるのは最初の失敗なので、
+                    // 後続の失敗をそれに添えてログ・スタックトレースに残す。
+                    addSuppressedIfDistinct(firstFailure, e);
+                }
+                log.warn("画像生成のリピート{}/{}に失敗しました(成功分は返します): {}",
+                        repeat + 1, batchCount, e.getMessage());
+                listener.repeatFinished(attemptedRepeats, batchCount);
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                    // 認証エラー・設定不備・チェックポイント不在のような決定的な原因は、
+                    // 何度繰り返しても同じように失敗する。/prompt投入後に落ちる経路では
+                    // 1リピートごとにフルのポーリング予算を使い切るため、打ち切らないと
+                    // 一つの設定ミスがリクエストを何十分も掴んだあげく、1回目で既に
+                    // 判明していたエラーを返すことになる(issue #1102 レビュー指摘)。
+                    log.warn("画像生成が{}回続けて失敗したため、残り{}リピートを打ち切ります",
+                            consecutiveFailures, batchCount - attemptedRepeats);
+                    break;
+                }
+                continue;
+            }
+            // 通知の失敗をリピートの失敗として数えないよう、tryの外で呼ぶ。
+            listener.repeatFinished(attemptedRepeats, batchCount);
+        }
+        if (responses.isEmpty() && firstFailure != null) {
+            // 1枚も作れなかった場合は「成功した部分」が無いので、従来どおり失敗として返す。
+            // プロバイダが例外を投げずに0枚を返した場合(firstFailureがnull)は失敗ではないので、
+            // #1102以前と同じく空の結果をそのまま返す。
+            throw firstFailure;
+        }
+        // 打ち切って一度も試さなかったリピートも「成功しなかった」ので失敗として数える。
+        // こうすると 成功リピート数 + 失敗リピート数 が常に要求したリピート回数に一致し、
+        // 「256枚頼んで16枚しか無い」理由を数えるだけで追える。実際に何回試したのかは
+        // attemptedRepeats に残す。
+        int failedRepeats = batchCount - succeededRepeats;
+        return new BatchOutcome(
+                responses, succeededRepeats, failedRepeats, attemptedRepeats, attemptedRepeats < batchCount);
     }
 
     /** 1リピート分を生成し、保存してレスポンスへ組み立てる。 */
@@ -229,7 +280,8 @@ public class ImageGenerationService {
             ComfyUiGenerationParams params,
             AiImageRequest imageRequest,
             ImageProvider provider,
-            String tagsJson) {
+            String tagsJson,
+            boolean includeImageData) {
         List<ComfyUiImage> images = generator.generateImage(params);
         List<AiImageResponse> responses = new ArrayList<>();
         // issue #1101: バッチ内の位置(0起点)を1枚ずつ振り、seedとともに行とレスポンスへ残す。
@@ -244,7 +296,7 @@ public class ImageGenerationService {
                     params.width(), params.height(), params.batchSize(), batchIndex, params.checkpoint(),
                     params.loraName(), params.loraWeight(), image.mimeType(), provider.name(), tagsJson,
                     image.data())).getId();
-            String base64 = Base64.getEncoder().encodeToString(image.data());
+            String base64 = includeImageData ? Base64.getEncoder().encodeToString(image.data()) : null;
             responses.add(new AiImageResponse(
                     savedId, image.fileName(), base64, image.mimeType(), params.seed(), batchIndex));
             batchIndex++;

@@ -2,6 +2,7 @@ package com.letsblog.media.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
@@ -13,6 +14,7 @@ import java.util.concurrent.Executor;
  * 同時ダウンロード数の上限を設けるために明示的なBeanを用意する。
  */
 @Configuration
+@EnableScheduling
 public class AsyncJobConfig {
 
     @Bean(name = "modelInstallExecutor")
@@ -38,6 +40,22 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("media-gc-");
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 画像生成ジョブ(issue #1405)。ComfyUIもホストGPUも1台なので並列度は1(直列)にする。
+     * 溢れた要求は待ち行列(10件)で受け、それも満杯なら受理側がジョブをfailedにして返す。
+     * 同期API({@code POST /api/ai/image})はこのExecutorを使わない。
+     */
+    @Bean(name = "imageGenerationExecutor")
+    public Executor imageGenerationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("image-generation-");
         executor.initialize();
         return executor;
     }
