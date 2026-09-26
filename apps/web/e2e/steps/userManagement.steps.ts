@@ -134,6 +134,57 @@ Then('一覧のそのメンバーの表示名が更新されている', async ({
   expect(profile.displayName).toBe(expectedDisplayName);
 });
 
+// --------------------------------------------------------------- 編集(親シナリオ2、メールアドレス。issue #1192)
+
+/** 指定メールのKeycloakユーザーの username を返す(存在しなければ null)。 */
+function keycloakUsernameByEmail(email: string): string | null {
+  kcadmLogin();
+  const usersJson = kcadm(['get', 'users', '-r', KEYCLOAK_REALM, '-q', `email=${email}`, '--fields', 'username']);
+  const users = JSON.parse(usersJson) as { username: string }[];
+  return users.length > 0 ? users[0].username : null;
+}
+
+When('管理者がそのメンバーのメールアドレスを編集する', async ({ request, ctx }) => {
+  const userId = ctx.userManagementUserId as number;
+  const newEmail = `e2e-1192-renamed-${uniqueSuffix()}@example.com`;
+  const headers = await adminHeaders(request);
+  const response = await request.put(`/api/users/${userId}`, { headers, data: { email: newEmail } });
+  expect(
+    response.ok(),
+    `メールアドレス更新に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  ctx.userManagementNewEmail = newEmail;
+});
+
+Then('一覧のそのメンバーのメールアドレスが更新されている', async ({ request, ctx }) => {
+  const userId = ctx.userManagementUserId as number;
+  const users = await fetchUserList(request);
+  expect(users.find((user) => user.id === userId)?.email).toBe(ctx.userManagementNewEmail);
+});
+
+Then('Keycloakのそのメンバーのメールアドレスとユーザー名も更新されている', async ({ ctx }) => {
+  const newEmail = ctx.userManagementNewEmail as string;
+  expect(keycloakUsernameByEmail(newEmail), `Keycloakに ${newEmail} が見つからない、またはusernameが追随していません`)
+    .toBe(newEmail);
+});
+
+When('管理者がそのメンバーのメールアドレスを既存ユーザーのものへ編集しようとする', async ({ request, ctx }) => {
+  const userId = ctx.userManagementUserId as number;
+  const headers = await adminHeaders(request);
+  const response = await request.put(`/api/users/${userId}`, { headers, data: { email: E2E_ADMIN_EMAIL } });
+  ctx.userManagementDuplicateStatus = response.status();
+});
+
+Then('メールアドレスの変更が重複として拒否される', async ({ ctx }) => {
+  expect(ctx.userManagementDuplicateStatus).toBe(409);
+});
+
+Then('一覧のそのメンバーのメールアドレスは変更されていない', async ({ request, ctx }) => {
+  const userId = ctx.userManagementUserId as number;
+  const users = await fetchUserList(request);
+  expect(users.find((user) => user.id === userId)?.email).toBe(ctx.userManagementEmail);
+});
+
 // --------------------------------------------------------------- 削除(親シナリオ5)
 
 When('管理者がそのメンバーを削除する', async ({ request, ctx }) => {

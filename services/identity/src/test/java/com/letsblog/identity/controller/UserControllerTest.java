@@ -1,5 +1,7 @@
 package com.letsblog.identity.controller;
 
+import com.letsblog.identity.dto.UserProfileResponse;
+import com.letsblog.identity.dto.UserProfileUpdateRequest;
 import com.letsblog.identity.dto.UserResponse;
 import com.letsblog.identity.service.AdminAuthorizationService;
 import com.letsblog.identity.service.ForbiddenException;
@@ -114,5 +116,60 @@ class UserControllerTest {
 
         verify(roleService, never()).assignRoleToUser(any(), any());
         verify(userService, never()).reconcileKeycloakAdminRole(any());
+    }
+
+    private UserProfileUpdateRequest profileRequest(String email) {
+        return new UserProfileUpdateRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, email);
+    }
+
+    @Test
+    void updateProfile_メールアドレス変更はadmin限定_issue1192() {
+        UserController controller = controller();
+        UserProfileUpdateRequest request = profileRequest("new@example.com");
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.updateProfile(1L, request));
+
+        verify(userService, never()).updateUserProfile(any(), any());
+    }
+
+    @Test
+    void updateProfile_adminはメールアドレスを変更できる_issue1192() {
+        UserController controller = controller();
+        UserProfileUpdateRequest request = profileRequest("new@example.com");
+        UserProfileResponse expected = org.mockito.Mockito.mock(UserProfileResponse.class);
+        when(userService.updateUserProfile(1L, request)).thenReturn(expected);
+
+        assertEquals(expected, controller.updateProfile(1L, request));
+
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void updateProfile_メールアドレス無指定なら本人も従来どおり更新できる_issue1192() {
+        UserController controller = controller();
+        UserProfileUpdateRequest request = profileRequest(null);
+        UserProfileResponse expected = org.mockito.Mockito.mock(UserProfileResponse.class);
+        when(userService.updateUserProfile(1L, request)).thenReturn(expected);
+
+        assertEquals(expected, controller.updateProfile(1L, request));
+
+        verify(adminAuthorizationService).requireSelfOrAdmin(1L);
+        verify(adminAuthorizationService, never()).requireAdmin();
+    }
+
+    @Test
+    void updateProfile_空白のメールアドレスは変更なしとして本人も更新できる_issue1192() {
+        UserController controller = controller();
+        UserProfileUpdateRequest request = profileRequest("  ");
+        UserProfileResponse expected = org.mockito.Mockito.mock(UserProfileResponse.class);
+        when(userService.updateUserProfile(1L, request)).thenReturn(expected);
+
+        assertEquals(expected, controller.updateProfile(1L, request));
+
+        verify(adminAuthorizationService).requireSelfOrAdmin(1L);
+        verify(adminAuthorizationService, never()).requireAdmin();
     }
 }

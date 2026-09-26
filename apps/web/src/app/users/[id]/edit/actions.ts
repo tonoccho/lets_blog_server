@@ -81,6 +81,8 @@ export async function updateUserProfileAction(
         position: field("position"),
         socialLinks,
         customLinks,
+        // メールアドレスの変更はadmin限定(identity-service側でも強制される)。#1192
+        email: session.user.role === "admin" ? field("email") : null,
       }
     );
   } catch (err) {
@@ -88,6 +90,7 @@ export async function updateUserProfileAction(
   }
 
   revalidatePath(`/users/${userId}/edit`);
+  revalidatePath("/users");
   return { success: true };
 }
 

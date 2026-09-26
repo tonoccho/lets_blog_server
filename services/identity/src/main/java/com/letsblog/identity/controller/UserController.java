@@ -196,12 +196,19 @@ public class UserController {
     @Operation(summary = "ユーザープロフィール更新", description = "指定されたユーザーのプロフィール情報を更新します")
     @ApiResponse(responseCode = "200", description = "プロフィールが更新されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
+    @ApiResponse(responseCode = "403", description = "メールアドレスの変更はadmin限定")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
+    @ApiResponse(responseCode = "409", description = "メールアドレスが既に使われています")
     @PutMapping("/{id}")
     public UserProfileResponse updateProfile(
             @Parameter(description = "ユーザーID") @PathVariable Long id,
             @RequestBody UserProfileUpdateRequest request) {
-        adminAuthorizationService.requireSelfOrAdmin(id);
+        if (request.email() != null && !request.email().isBlank()) {
+            // #1192: メールアドレスの変更はadmin限定(本人でも不可)。
+            adminAuthorizationService.requireAdmin();
+        } else {
+            adminAuthorizationService.requireSelfOrAdmin(id);
+        }
         return userService.updateUserProfile(id, request);
     }
 

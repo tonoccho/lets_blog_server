@@ -124,6 +124,14 @@ public class KeycloakAdminClient {
         putUser(keycloakSub, body, "プロフィール更新");
     }
 
+    /** メールアドレスとusernameをKeycloak側にも反映する(#1192。createUserがusername=emailで作る方針を踏襲)。 */
+    public void updateEmail(String keycloakSub, String email) {
+        ObjectNode body = JsonNodeFactory.instance.objectNode();
+        body.put("username", email);
+        body.put("email", email);
+        putUser(keycloakSub, body, "メールアドレス更新");
+    }
+
     /** Keycloak側のユーザーの有効/無効を切り替える(#562の「無効化」)。 */
     public void setEnabled(String keycloakSub, boolean enabled) {
         ObjectNode body = JsonNodeFactory.instance.objectNode().put("enabled", enabled);

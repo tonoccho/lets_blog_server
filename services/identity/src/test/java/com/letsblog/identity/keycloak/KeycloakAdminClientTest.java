@@ -153,6 +153,31 @@ class KeycloakAdminClientTest {
     }
 
     @Test
+    void updateEmail_emailとusernameの両方を更新する_issue1192() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-email"))
+                .andExpect(method(PUT))
+                .andExpect(header("Authorization", "Bearer test-access-token"))
+                .andExpect(content().string(containsString("\"email\":\"new@example.com\"")))
+                .andExpect(content().string(containsString("\"username\":\"new@example.com\"")))
+                .andRespond(withSuccess());
+
+        client.updateEmail("sub-email", "new@example.com");
+
+        server.verify();
+    }
+
+    @Test
+    void updateEmail_失敗レスポンスは例外になる_issue1192() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-email-2"))
+                .andExpect(method(PUT))
+                .andRespond(withStatus(HttpStatus.CONFLICT));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.updateEmail("sub-email-2", "dup@example.com"));
+    }
+
+    @Test
     void sendPasswordResetEmail_execute_actions_emailを呼ぶ() {
         expectTokenRequest();
         server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-3/execute-actions-email"))

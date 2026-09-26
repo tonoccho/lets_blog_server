@@ -63,7 +63,7 @@ export default async function UserProfileEditPage({
     {
       id: "profile",
       label: "プロフィール",
-      content: <UserProfileForm profile={profile} />,
+      content: <UserProfileForm profile={profile} canEditEmail={session.user.role === "admin"} />,
     },
   ];
 

@@ -657,6 +657,8 @@ export interface UserProfileInput {
   position: string | null;
   socialLinks: SocialLinks | null;
   customLinks: CustomLink[] | null;
+  /** 変更後のメールアドレス(admin限定。null/未指定は変更なし)。 */
+  email?: string | null;
 }
 
 export function getUserProfile(id: number): Promise<UserProfile> {

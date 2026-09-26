@@ -420,12 +420,92 @@ class UserServiceTest {
                 "太郎", "山田", "山田太郎", "taro",
                 "https://example.com", "自己紹介", "ja_JP",
                 "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
-                null, null);
+                null, null, null);
 
         UserProfileResponse response = service.updateUserProfile(1L, request);
 
         assertEquals("太郎", response.firstName());
         assertEquals("山田太郎", response.displayName());
+        assertEquals("user@example.com", response.email());
+        verify(userRepository, never()).existsByEmail(any());
+        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+    }
+
+    private UserProfileUpdateRequest emailRequest(String email) {
+        return new UserProfileUpdateRequest(
+                null, null, null, null, null, null, null, null, null, null, null, null, email);
+    }
+
+    @Test
+    void updateUserProfile_メールアドレスをDBに反映する_issue1192() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserProfileResponse response = service.updateUserProfile(1L, emailRequest("  new@example.com "));
+
+        assertEquals("new@example.com", response.email());
+        assertEquals("new@example.com", user.getEmail());
+        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+    }
+
+    @Test
+    void updateUserProfile_Keycloak登録済みならemailとusernameを追随させる_issue1192() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-1");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateUserProfile(1L, emailRequest("new@example.com"));
+
+        verify(keycloakAdminClient).updateEmail("kc-sub-1", "new@example.com");
+    }
+
+    @Test
+    void updateUserProfile_使用済みメールアドレスは拒否しDBもKeycloakも変更しない_issue1192() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-1");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.existsByEmail("taken@example.com")).thenReturn(true);
+
+        assertThrows(EmailAlreadyExistsException.class,
+                () -> service.updateUserProfile(1L, emailRequest("taken@example.com")));
+
+        assertEquals("user@example.com", user.getEmail());
+        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void updateUserProfile_現在と同じメールアドレスは重複チェックもKeycloak更新もしない_issue1192() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-1");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateUserProfile(1L, emailRequest("user@example.com"));
+
+        verify(userRepository, never()).existsByEmail(any());
+        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+    }
+
+    @Test
+    void updateUserProfile_空白のメールアドレスは変更なしとして扱う_issue1192() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateUserProfile(1L, emailRequest("   "));
+
+        assertEquals("user@example.com", user.getEmail());
+        verify(userRepository, never()).existsByEmail(any());
     }
 
     @Test

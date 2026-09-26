@@ -49,7 +49,14 @@ function SocialLinkField({
   );
 }
 
-export function UserProfileForm({ profile }: { profile: UserProfile }) {
+export function UserProfileForm({
+  profile,
+  canEditEmail = false,
+}: {
+  profile: UserProfile;
+  /** メールアドレスを編集できるか(管理者のみ。#1192) */
+  canEditEmail?: boolean;
+}) {
   const action = (prevState: UpdateProfileState, formData: FormData) =>
     updateUserProfileAction(profile.id, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -62,13 +69,25 @@ export function UserProfileForm({ profile }: { profile: UserProfile }) {
     <form action={formAction} className="space-y-4 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-neutral-600 dark:text-neutral-400">メールアドレス</span>
-        <input
-          type="email"
-          value={profile.email ?? ""}
-          disabled
-          className="rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-500 dark:text-neutral-400"
-        />
-        <span className="text-xs text-neutral-400">(変更は設定から行えます)</span>
+        {canEditEmail ? (
+          <input
+            name="email"
+            type="email"
+            defaultValue={profile.email ?? ""}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        ) : (
+          <>
+            <input
+              type="email"
+              value={profile.email ?? ""}
+              disabled
+              readOnly
+              className="rounded border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-500 dark:text-neutral-400"
+            />
+            <span className="text-xs text-neutral-400">(メールアドレスの変更は管理者のみ可能です)</span>
+          </>
+        )}
       </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

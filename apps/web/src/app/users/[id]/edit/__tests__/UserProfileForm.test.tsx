@@ -58,3 +58,36 @@ describe("UserProfileForm のアバター欄", () => {
     expect(input.value).toBe("https://example.com/avatar.png");
   });
 });
+
+/** issue #1192: 管理者はメールアドレスを編集できる。管理者以外には変更経路を出さない。 */
+describe("UserProfileForm のメールアドレス欄", () => {
+  it("canEditEmailなら編集可能でname=emailを持ち、リンク切れの文言は出ない", () => {
+    render(<UserProfileForm profile={baseProfile()} canEditEmail />);
+
+    const input = screen.getByLabelText("メールアドレス") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    expect(input.name).toBe("email");
+    expect(input.defaultValue).toBe("user@example.com");
+    expect(screen.queryByText("(変更は設定から行えます)")).toBeNull();
+  });
+
+  it("canEditEmailでなければ表示専用で、管理者のみ変更できる旨を示す", () => {
+    render(<UserProfileForm profile={baseProfile()} />);
+
+    const input = screen.getByDisplayValue("user@example.com") as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    expect(screen.queryByText("(変更は設定から行えます)")).toBeNull();
+    expect(screen.getByText("(メールアドレスの変更は管理者のみ可能です)")).toBeInTheDocument();
+  });
+});
+
+describe("UserProfileForm のメールアドレス欄(メール未設定)", () => {
+  it.each([true, false])("emailがnullでも空欄で描画される(canEditEmail=%s)", (canEditEmail) => {
+    const { container } = render(
+      <UserProfileForm profile={baseProfile({ email: null as unknown as string })} canEditEmail={canEditEmail} />
+    );
+
+    const input = container.querySelector('input[type="email"]') as HTMLInputElement;
+    expect(input.value).toBe("");
+  });
+});

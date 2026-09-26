@@ -372,6 +372,13 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
 
+        // #1192: メールアドレスの変更(null/空白は変更なし)。重複はDB・Keycloakへ触れる前に拒否する。
+        String newEmail = request.email() == null ? null : request.email().trim();
+        boolean emailChanged = newEmail != null && !newEmail.isEmpty() && !newEmail.equals(user.getEmail());
+        if (emailChanged && userRepository.existsByEmail(newEmail)) {
+            throw new EmailAlreadyExistsException("メールアドレス '" + newEmail + "' は既に登録されています");
+        }
+
         user.setFirstName(request.firstName());
         user.setLastName(request.lastName());
         user.setDisplayName(request.displayName());
@@ -389,6 +396,12 @@ public class UserService {
         // 未移行ユーザー(現時点では既存ユーザー全員)はKeycloak側に対応するアカウントが無いためスキップする。
         if (user.getKeycloakSub() != null) {
             keycloakAdminClient.updateProfile(user.getKeycloakSub(), request.firstName(), request.lastName());
+            if (emailChanged) {
+                keycloakAdminClient.updateEmail(user.getKeycloakSub(), newEmail);
+            }
+        }
+        if (emailChanged) {
+            user.setEmail(newEmail);
         }
 
         return UserProfileResponse.from(userRepository.save(user));

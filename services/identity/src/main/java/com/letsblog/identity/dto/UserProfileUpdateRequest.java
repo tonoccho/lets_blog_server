@@ -5,6 +5,10 @@ import com.letsblog.identity.domain.SocialLinks;
 
 import java.util.List;
 
+/**
+ * @param email 変更後のメールアドレス(#1192)。null/空白は「変更しない」。変更はadmin限定
+ *              ({@code UserController#updateProfile}が認可する)
+ */
 public record UserProfileUpdateRequest(
         String firstName,
         String lastName,
@@ -17,6 +21,7 @@ public record UserProfileUpdateRequest(
         String department,
         String position,
         SocialLinks socialLinks,
-        List<CustomLink> customLinks
+        List<CustomLink> customLinks,
+        String email
 ) {
 }
