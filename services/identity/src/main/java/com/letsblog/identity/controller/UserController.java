@@ -113,7 +113,7 @@ public class UserController {
     @Operation(summary = "ユーザーを削除", description = "指定されたユーザーを削除します(admin限定。自分自身は削除不可)")
     @ApiResponse(responseCode = "204", description = "ユーザーが削除されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
-    @ApiResponse(responseCode = "403", description = "admin権限が無い、または自分自身を削除しようとした")
+    @ApiResponse(responseCode = "403", description = "admin権限が無い、自分自身を削除しようとした、または最後の管理者を削除しようとした")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@Parameter(description = "ユーザーID") @PathVariable Long id) {
@@ -133,7 +133,7 @@ public class UserController {
     @Operation(summary = "ユーザーを無効化", description = "指定されたユーザーを無効化します(admin限定。自分自身は無効化不可。Keycloak登録済みの場合はKeycloak側も無効化)")
     @ApiResponse(responseCode = "200", description = "ユーザーが無効化されました")
     @ApiResponse(responseCode = "401", description = "認証ヘッダが無効")
-    @ApiResponse(responseCode = "403", description = "admin権限が無い、または自分自身を無効化しようとした")
+    @ApiResponse(responseCode = "403", description = "admin権限が無い、自分自身を無効化しようとした、または最後の管理者を無効化しようとした")
     @ApiResponse(responseCode = "404", description = "ユーザーが見つかりません")
     @ApiResponse(responseCode = "502", description = "Keycloak Admin APIの呼び出しに失敗しました")
     @PostMapping("/{id}/deactivate")

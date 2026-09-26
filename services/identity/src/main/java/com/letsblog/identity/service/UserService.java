@@ -430,6 +430,7 @@ public class UserService {
     public void delete(Long id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+        requireNotLastEnabledAdmin(user, "最後の管理者は削除できません");
 
         // #562: Keycloak側にも対応するアカウントがあれば削除する。ローカル削除後もKeycloak側に
         // 有効なアカウントが残る(=誰も管理していないログイン手段が残る)状態を避けるため、
@@ -441,6 +442,33 @@ public class UserService {
     }
 
     /**
+     * 対象が「最後に残った有効なadmin」なら拒否する(#1162。#798の「数えない」判断を覆す)。
+     *
+     * <p><b>検査時-使用時(TOCTOU)の穴の塞ぎ方</b>: 呼び出し元({@link #delete}/{@link #deactivate})の
+     * {@code @Transactional}の中で、有効なadmin全行を{@code SELECT ... FOR UPDATE}で取得する
+     * ({@link UserRepository#lockEnabledAdmins()})。ロックはトランザクション終了(変更のコミット)まで
+     * 保持されるので、adminが互いを同時に消す/無効化するとき、後発は先発のコミットを待ち、
+     * コミット後の最新状態(有効なadminが1人)で数え直して拒否される。数えた後・変更前に
+     * 他のトランザクションが割り込む隙間が無い。ロック→判定→変更(と、その間のKeycloak呼び出し)を
+     * 1トランザクションに収めるため、Keycloak呼び出しはこの検査の後に置く(拒否時に外部を触らない)。
+     *
+     * <p>ロック済みの集合に対象が含まれるかで判定する(呼び出し前に読んだ{@code user}は
+     * 他トランザクションの変更を反映していないかもしれないため、その値は信用しない)。
+     * 対象がadmin以外なら有効なadminの数に影響しないので、ロックも取らない。
+     */
+    private void requireNotLastEnabledAdmin(User target, String message) {
+        if (!"admin".equals(target.getRole())) {
+            return;
+        }
+        List<User> enabledAdmins = userRepository.lockEnabledAdmins();
+        boolean targetIsEnabledAdmin = enabledAdmins.stream()
+                .anyMatch(admin -> admin.getId().equals(target.getId()));
+        if (targetIsEnabledAdmin && enabledAdmins.size() <= 1) {
+            throw new ForbiddenException(message);
+        }
+    }
+
+    /**
      * ユーザーを無効化する(#562の受入基準: 作成・更新・無効化)。ローカルのenabledをfalseにし、
      * Keycloak側に登録済みであればKeycloak側も無効化する。ハード削除ではないため、
      * ロール・プロフィール等の情報は保持される。
@@ -449,6 +477,7 @@ public class UserService {
     public UserResponse deactivate(Long id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new UserNotFoundException("id " + id + " のユーザーは登録されていません"));
+        requireNotLastEnabledAdmin(user, "最後の管理者は無効化できません");
 
         if (user.getKeycloakSub() != null) {
             keycloakAdminClient.setEnabled(user.getKeycloakSub(), false);

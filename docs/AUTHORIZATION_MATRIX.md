@@ -67,8 +67,8 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 | `GET /api/users` | `requireAdmin()` | #653 で追加 |
 | `POST /api/users` | `requireAdmin()` | **#796 で追加**。`UserCreateRequest` が `role` を受け取るため、認可が無いと `role=admin` のアカウントを誰でも作れた(権限昇格) |
 | `PATCH /api/users/{id}` | `requireAdmin()` + `requireNotSelfDemotion(id, role)` | **#796 で追加、#798 で自己降格ガードを追加**。扱うのは `role` / `password` で管理者が管理する項目。本人に許すと自分の `role` を admin へ書き換えられる。逆に admin が自分を `role="user"` へ降格すると admin 限定エンドポイントが全て閉じて復旧できなくなるため、**自分自身を admin 以外へ変更すること**も禁止した(パスワードのみの更新と admin→admin は通る) |
-| `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id, ...)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ) |
-| `POST /api/users/{id}/deactivate` | `requireAdminAndNotSelf(id, ...)` | **#798 で自己ガードを追加**。#796 は自己「削除」だけを禁止し「無効化」を放置していた。admin が自分を無効化するとログインできなくなり、他に admin がいなければ `reactivate` も `requireAdmin()` を要求するため誰も復旧できない |
+| `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id, ...)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ)。**#1162 で「最後の有効な admin」の削除も拒否**(403) |
+| `POST /api/users/{id}/deactivate` | `requireAdminAndNotSelf(id, ...)` | **#798 で自己ガードを追加**。#796 は自己「削除」だけを禁止し「無効化」を放置していた。admin が自分を無効化するとログインできなくなり、他に admin がいなければ `reactivate` も `requireAdmin()` を要求するため誰も復旧できない。**#1162 で「最後の有効な admin」の無効化も拒否**(403) |
 | `POST /api/users/{id}/reactivate` | `requireAdmin()` | 自己ガードは付けていない。#798 の時点では「無効化しても発行済みトークンが失効しないため厳密には自己 reactivate が可能」だったが、それは無効化全般のギャップ(下記)であり `reactivate` 固有ではないとして #816 に委ねた。**#816 で無効化ユーザーが操作者として解決されなくなったため、自己 reactivate は実際に不可能になった**(`requireAdmin()` の手前で 403)|
 | `POST・DELETE /api/users/{userId}/roles/{roleName}` | 特権ロールは `requireAdmin()`、それ以外は `requirePermission(ROLE_MANAGE)` | **#798 で変更**。下記参照 |
 | `POST /api/users/migrate-to-keycloak`・`/reconcile-keycloak` | `requireAdmin()` | 従来どおり |
@@ -104,9 +104,26 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 `findByRoleName(roleName)` を同じ入力文字列で呼ぶため、両者の解決結果は必ず一致する。
 全角・Unicode 正規化・末尾空白といった照合順序の差異は、この構造の下では分岐点になりえない。
 
-**「最後の admin か」は数えない**。admin が2人いれば互いに削除・無効化でき、それは正当な運用である。
-数える設計にすると「他の admin が同時に自分を消す」レースで両者とも通る検査時-使用時の穴が生まれる。
-防いでいるのは「自分で自分を締め出す」ことだけに限定している。
+**「最後の有効な admin」の削除・無効化は拒否する(#1162)**。admin が2人以上いれば互いに削除・無効化でき、
+それは正当な運用である。`DELETE /api/users/{id}` と `POST /api/users/{id}/deactivate` は、対象が
+「有効(`enabled=true`)な `role=admin` の最後の1人」であれば 403(`最後の管理者は削除できません` /
+`最後の管理者は無効化できません`)で拒否する。
+
+**これは #798 の判断(「最後の admin か」は数えない)を覆す変更である。** #798 が数えなかった理由は、
+数える設計にすると「他の admin が同時に自分を消す」レースで両者とも通る検査時-使用時(TOCTOU)の穴が
+生まれる、というものだった。#1162 で利用者が「最後の admin の保護を実装する」と決定した(2026-09-08)ため、
+その穴を実装で塞いだうえで数えるようにした。#798 の懸念そのものは撤回されておらず、塞ぎ方が要点である。
+
+**TOCTOU の塞ぎ方**: `UserService#delete` / `#deactivate`(`@Transactional`)の中で、有効な admin の
+全行を `SELECT ... FOR UPDATE`(`UserRepository#lockEnabledAdmins`、`ORDER BY id`)で取得して悲観ロックし、
+ロック済みの集合の件数と対象の所属で判定してから、同じトランザクション内で変更する。ロックは変更のコミットまで
+保持されるので、admin が互いを同時に消す/無効化するとき、後発は先発のコミットを待ち、コミット後の状態
+(有効な admin が1人)で数え直して拒否される。数えてから変更するまでの間に割り込む余地が無い。
+Keycloak 呼び出しはこの検査より後に置く(拒否時に外部を触らない)。検証は実 MySQL に対する
+`LastAdminGuardIntegrationTest`(2人の admin が互いを同時に削除/無効化する競合を繰り返し、必ず1人残ること)。
+
+自己削除・自己無効化の禁止(`requireAdminAndNotSelf`)は従来どおり残る。範囲外: `PATCH` による他 admin の
+`role` 降格で有効な admin が 0 になる経路は本判定の対象外(#1162 は削除と無効化のみ)。
 
 ##### 無効化されたユーザーの発行済みトークン(#816 で一部解消)
 

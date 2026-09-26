@@ -108,6 +108,7 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | AC-USR-014 | 本人設定(タイムゾーン/ロケール)の保存 | 自分の表示設定を保てる。タイムゾーンは任意の上書きで、未設定なら閲覧者のブラウザのタイムゾーンに従う(#1259) | `PATCH /api/identity/me/preferences` で保存した内容が、再ログイン後も `GET /api/identity/me` に反映される(#784 の退行検知)。タイムゾーンに `null` を送ると未設定(ブラウザのタイムゾーンに従う)に戻せる(#1259) | `features/identity/user-management.feature` › 利用者が自分のタイムゾーン/ロケールを保存でき、再ログイン後も保持される / `features/identity/timezone-override.feature` (#1259) | 検証済 |
 | AC-USR-015 | ユーザー操作の認可 | 権限の無い利用者にアカウントを改変されない | 一般ユーザーは `POST/PATCH/DELETE /api/users` を実行できず(403)、実行後も一覧・対象の状態が変化していない(#796 の退行検知) | `features/identity/user-authorization.feature` › 一般ユーザーは新しいメンバーを登録できず、ユーザー一覧は変化しない / 一般ユーザーは他人のロールも削除も操作できず、対象の状態は変化しない | 検証済 |
 | AC-USR-016 | 自己権限昇格・自己締め出しの防止 | 権限を持つ利用者でも自分を特別扱いできない | ROLE_MANAGE保有者(非admin)は自分自身へ特権ロールを付与できず(403)、管理者は自分自身を無効化できず(403)、いずれも実行後に権限・アカウント状態が変化していない(#798 の退行検知) | `features/identity/self-guard.feature` › ROLE_MANAGE保有者は自分自身に特権ロールを付与できず、権限は変化しない / 管理者は自分自身を無効化できず、アカウント状態は変化しない | 検証済 |
+| AC-USR-017 | 最後の管理者の保護 | 有効な管理者が0人にならない | 有効な管理者が2人以上いるときは互いに削除・無効化できる。最後の1人の削除・無効化は拒否され(403)、2つの削除/無効化要求が同時に来ても最後の1人は残る(#798 の「数えない」判断を覆し、悲観ロックで TOCTOU を塞ぐ #1162)。「唯一の管理者が対象」の状態と同時実行はWeb/APIから決定的に作れないため、その2点は実MySQLの統合テストで固定する | `features/identity/last-admin-guard.feature` › 管理者が2人いるとき、一方は他方を削除できる / 管理者が2人いるとき、一方は他方を無効化できる(回帰)。拒否と同時実行: `services/identity/src/test/java/com/letsblog/identity/integration/LastAdminGuardIntegrationTest.java` | 検証済 |
 
 ### 2.3 プロジェクト・環境・サイト — `PRJ` / `SITE`
 
