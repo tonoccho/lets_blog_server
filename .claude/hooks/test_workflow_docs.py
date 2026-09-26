@@ -522,8 +522,12 @@ class ReportBugDoesNotRestateTheIssueTemplate(unittest.TestCase):
     """Requirement 2: 本文は Issue の節構成を書き直さず、`plan-issue` / `project-planner` を
     参照する(#1434)。`.claude/` 内の二重定義はこのプロジェクトではバグ扱い(CLAUDE.md)。
 
-    `SelectionOrderSingleSource.KEY_LIST_MARKERS` と同じ考え方: Issue テンプレートの
-    見出しをそのまま書き直した箇条書きが3つ以上一致すれば「書き直し」とみなす。
+    #1447 より前は「3つ以上一致すれば書き直しとみなす」だったが、それでは節見出しを
+    1つか2つだけ書き写した部分的な書き直しを取りこぼす。マーカー自体が「行頭で
+    `#` に続いて見出し語だけが単独で並ぶ」形にしか一致しない(`Step 2` の地の文にある
+    "Title, Background, Problem, ..." のような列挙は一致しない)ので、検査範囲を
+    さらに節に絞り込む必要はない。ここで直すのは閾値だけで、**1件でも一致したら
+    失敗**にする。
     """
 
     PATH = ".claude/skills/report-bug/SKILL.md"
@@ -540,8 +544,8 @@ class ReportBugDoesNotRestateTheIssueTemplate(unittest.TestCase):
     def test_does_not_restate_the_issue_template_headings(self):
         text = read(self.PATH)
         matched = sum(1 for m in self.ISSUE_TEMPLATE_HEADING_MARKERS if m.search(text))
-        self.assertLess(
-            matched, 3, "report-bug が Issue の節構成をそのまま書き直している(%d 個一致)" % matched
+        self.assertEqual(
+            0, matched, "report-bug が Issue の節構成をそのまま書き直している(%d 個一致)" % matched
         )
 
     def test_references_plan_issue(self):
@@ -765,8 +769,13 @@ class DiscoverIssuesEntryPointsAreCurrent(unittest.TestCase):
     NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 
     # `report-bug` の固定ラベル一式・上限の定義を、discover-issues が自分で書き直した
-    # 兆候。2つ以上一致すれば「参照」ではなく「書き直し」とみなす
-    # (`ReportBugDoesNotRestateTheIssueTemplate` と同じ考え方)。
+    # 兆候。#1447 より前は「ファイル全体を対象に2つ以上一致すれば書き直しとみなす」
+    # 閾値だったが、これだと105行目付近の無関係な既存の一文("Never apply
+    # `user-request`...")が偶然2件目の一致を稼ぐ場合にしか部分的な書き写しを
+    # 検出できず、その一文が言い換えられると素通りする(#1447 で実証)。
+    # マーカーは裸の語なので、入口一覧の**節の中だけ**を対象にする
+    # (`_entry_points_section()` の外に出れば、地の文の「参照」に触れても
+    # 誤検出しない)。1つでも一致すれば書き直しとみなす。
     RESTATEMENT_MARKERS = [
         re.compile(r"user-request"),
         re.compile(r"priority::P0"),
@@ -822,12 +831,18 @@ class DiscoverIssuesEntryPointsAreCurrent(unittest.TestCase):
         self.assertRegex(section, r"/report-bug")
 
     def test_does_not_restate_the_report_bug_definition(self):
-        """Requirement 3: report-bug の意味・ラベル・上限を書き直さない。"""
-        text = read(self.PATH)
-        matched = sum(1 for m in self.RESTATEMENT_MARKERS if m.search(text))
-        self.assertLess(
-            matched, 2,
-            "discover-issues が report-bug の定義を書き直している(%d 個一致)" % matched,
+        """Requirement 3: report-bug の意味・ラベル・上限を書き直さない(#1447)。
+
+        検査対象は入口一覧の**節だけ**(`_entry_points_section()`)。ファイル全体を
+        見ると、節の外にある無関係な既存の一文がたまたま目印を拾ってしまい、
+        その一文の言い換え次第で判定が変わってしまう(#1447 の Problem)。
+        """
+        section = self._entry_points_section()
+        matched = sum(1 for m in self.RESTATEMENT_MARKERS if m.search(section))
+        self.assertEqual(
+            0, matched,
+            "discover-issues が入口一覧の中で report-bug の定義を書き直している"
+            "(%d 個一致)" % matched,
         )
 
     def test_references_report_bug_definition_source(self):
