@@ -37,21 +37,18 @@ Review, QA, Done) is out of scope here.
 
 # Step 3: Select the next Issue
 
-If multiple Ready Issues exist, rank them by `CLAUDE.md` → **Issue Provenance** → Selection
-order — never merely by search-result order:
+If multiple Ready Issues exist, rank them by `CLAUDE.md` → **Issue Provenance** → **Selection
+order** — the single definition of the key order (`hotfix` first, then `user-request`, `bug`,
+priority, blocking count, Issue number). Do not restate the key list here; read it live from
+`CLAUDE.md` each time, since it is the one place it is defined. Never rank merely by
+search-result order.
 
-1. **Provenance — `user-request` first.** Every other Issue ranks after it.
-2. **Kind — `bug` first.** Every other Issue ranks after it.
-3. **Priority — highest first.** `P0` > `P1` > `P2` > unset.
-4. **Is blocking count — largest first**, then dependency readiness.
-5. **Issue number — oldest first.**
+Read the labels; never infer `hotfix`, provenance, or bug-ness from an Issue's wording, and
+never add or remove `hotfix` to steer the selection (CLAUDE.md → Issue Provenance → hotfix:
+Claude reads it, never writes it).
 
-The keys apply strictly in order, so a `user-request` `P2` is selected ahead of an unlabelled
-`P0`, and a `bug` `P2` ahead of a non-bug `P0` of the same provenance. Read the labels; never
-infer provenance or bug-ness from an Issue's wording.
-
-Before proceeding, report the Issue number, title, priority, **whether it is `user-request`**,
-**whether it is `bug`**, and why it was selected.
+Before proceeding, report the Issue number, title, priority, **whether it is `hotfix`**,
+**whether it is `user-request`**, **whether it is `bug`**, and why it was selected.
 
 ---
 

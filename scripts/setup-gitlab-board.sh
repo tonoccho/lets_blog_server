@@ -40,6 +40,13 @@ PRIORITY_LABELS=(
   "priority::P2|#666666|後回し可"
 )
 
+# hotfix ラベル。選択順の第0キー(CLAUDE.md → Issue Provenance → hotfix)。
+# 付与・削除はユーザーのみが行い、Claude は読むだけ。open な Issue で最大3件
+# (上限超過の検出は scripts/check-issue-labels.sh、付け外し自体の拒否は guard.py)。
+HOTFIX_LABEL=(
+  "hotfix|#d9534f|緊急バグ。選択順の第0キー。付与・削除はユーザーのみ(Claudeは読むだけ)。openなIssueで最大3件"
+)
+
 api() { glab api "$@"; }
 
 echo "=== 認証確認 ==="
@@ -90,6 +97,10 @@ for spec in "${STATUS_LABELS[@]}"; do ensure_label "$spec"; done
 echo
 echo "=== 優先度ラベルの作成 ==="
 for spec in "${PRIORITY_LABELS[@]}"; do ensure_label "$spec"; done
+
+echo
+echo "=== hotfix ラベルの作成 ==="
+for spec in "${HOTFIX_LABEL[@]}"; do ensure_label "$spec"; done
 
 echo
 echo "=== ボードの作成 ==="

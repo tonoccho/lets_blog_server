@@ -732,6 +732,126 @@ def check_status_label_integrity(command):
             )
 
 
+def _short_flag_attached_value(arg, short):
+    """pflag の短縮形の値直結形から値を取り出す。該当しなければ None。
+
+    pflag は値を取るフラグの短縮形について、`-l hotfix`(空白区切り)だけでなく
+    `-lhotfix`(直結)と `-l=hotfix`(`=` 付き直結、`=` は剥がされる)も同じ値として
+    受け付ける。実機の glab(1.116.0)で確認済み: `-lhotfix`/`-uhotfix`/`-l=hotfix`/
+    `-u=hotfix` はいずれもパースエラーにならずネットワーク呼び出しに到達する
+    (対照として無効な短縮形 `-zhotfix` は `Unknown shorthand flag` になる)。
+    `check_merge_flags` の `_has_flag` はブール短縮フラグの結合(`-sd`)用で、値を
+    取るフラグのこの直結形は別物なので使い回さない。
+    """
+    prefix = "-" + short
+    if arg.startswith("--") or not arg.startswith(prefix) or len(arg) <= len(prefix):
+        return None
+    value = arg[len(prefix):]
+    if value.startswith("="):
+        value = value[1:]
+    return value
+
+
+def _issue_update_label_args(args):
+    """`glab issue update` の `-l/--label` / `-u/--unlabel` から、カンマ区切りのラベル名を集める。
+
+    `_label_fields` は `-f key=value` 形式(`add_labels=`/`remove_labels=`)専用で、
+    `--label`/`--unlabel` はラベル名そのものをカンマ区切りで渡す別形式なので使い回せない
+    (#1433 の Readiness Report)。返り値は (追加されたラベル名のリスト, 削除されたラベル名のリスト)。
+    """
+    added = []
+    removed = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        target = None
+        value = None
+        if arg in ("-l", "--label"):
+            target = added
+            if i + 1 < len(args):
+                value = args[i + 1]
+                i += 1
+        elif arg.startswith("--label="):
+            target = added
+            value = arg[len("--label="):]
+        elif arg in ("-u", "--unlabel"):
+            target = removed
+            if i + 1 < len(args):
+                value = args[i + 1]
+                i += 1
+        elif arg.startswith("--unlabel="):
+            target = removed
+            value = arg[len("--unlabel="):]
+        else:
+            attached = _short_flag_attached_value(arg, "l")
+            if attached is not None:
+                target = added
+                value = attached
+            else:
+                attached = _short_flag_attached_value(arg, "u")
+                if attached is not None:
+                    target = removed
+                    value = attached
+        i += 1
+        if value is None:
+            continue
+        target.extend(part.strip() for part in value.split(",") if part.strip())
+    return added, removed
+
+
+def check_hotfix_label_immutability(command):
+    """CLAUDE.md → Issue Provenance → hotfix: 付与・削除はユーザーのみ(#1433)。
+
+    `hotfix` は選択順の第0キーで、`bug` と同じく Claude は読むだけの前提に立っている。
+    GitLab CE のラベルにこれを守らせる仕組みは無い(スコープ付きラベルは Premium)ので、
+    既存 Issue への `hotfix` の付け外しは Claude の呼び出しの時点で一律に拒否する。
+
+    `check_status_label_integrity` を拡張せず**独立した関数**にしているのは、あちらが
+    `status::` 専用のロジック(一意性・遷移表)と密結合しているためで、両者は無関係な
+    壊れ方を検査している。#1389 が同じ既存関数を触る計画があることとも独立に保てる。
+
+    上限3件の判定はここではしない。現在の件数を知るには API 問い合わせが要り、
+    guard.py はネットワークを使わない方針(CLAUDE.md → Enforcement)。上限超過の
+    事後検出は `scripts/check-issue-labels.sh` の役目。
+
+    `glab issue create` は対象外(遷移ではなく新規作成。#1434 で扱う。現状維持)。
+    """
+
+    def has_hotfix(value):
+        return any(part.strip() == "hotfix" for part in value.split(","))
+
+    # `glab api projects/:id/issues/<n> --method PUT` の add_labels=/remove_labels=
+    for args in invokes(command, "glab", ()):
+        if "--method" not in args and "-X" not in args:
+            continue
+        if not any(re.search(r"issues/\d+", a) for a in args):
+            continue
+        method = ""
+        for i, a in enumerate(args):
+            if a in ("--method", "-X") and i + 1 < len(args):
+                method = args[i + 1].upper()
+        if method != "PUT":
+            continue
+
+        fields = _label_fields(args)
+        added = fields.get("add_labels", "")
+        removed = fields.get("remove_labels", "")
+        if has_hotfix(added) or has_hotfix(removed):
+            emit_deny(
+                "`hotfix` の付与・削除は禁止です。既存 Issue の `hotfix` はユーザーのみが"
+                "操作します。Claude は読むだけです(CLAUDE.md → Issue Provenance → hotfix)。"
+            )
+
+    # `glab issue update <n> --label/--unlabel`
+    for args in invokes(command, "glab", ("issue", "update")):
+        added, removed = _issue_update_label_args(args)
+        if "hotfix" in added or "hotfix" in removed:
+            emit_deny(
+                "`hotfix` の付与・削除は禁止です。既存 Issue の `hotfix` はユーザーのみが"
+                "操作します。Claude は読むだけです(CLAUDE.md → Issue Provenance → hotfix)。"
+            )
+
+
 def check_no_verify(command):
     for sub in ("commit", "push"):
         for args in invokes(command, "git", (sub,)):
@@ -831,6 +951,7 @@ def cmd_bash(payload):
     check_read_only(payload, command)
     check_merge_flags(command)
     check_status_label_integrity(command)
+    check_hotfix_label_immutability(command)
     check_no_verify(command)
     check_commit_phase(payload, command)
     check_pr_coverage(payload, command)
@@ -875,6 +996,7 @@ def cmd_explain(command):
     for label, check in (
         ("マージ方式", check_merge_flags),
         ("ステータスラベル", check_status_label_integrity),
+        ("hotfixラベル", check_hotfix_label_immutability),
         ("--no-verify 禁止", check_no_verify),
     ):
         try:

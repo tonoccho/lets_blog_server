@@ -122,6 +122,22 @@ if [ -n "$CLOSED_CANDIDATES" ]; then
     CLOSED_REPORT="${CLOSED_REPORT%$'\n'}"
 fi
 
+# issue #1433: CLAUDE.md → Issue Provenance → hotfix。open な Issue で最大3件。
+# guard.py は既存 Issue への hotfix の付与・削除そのものを拒否するが、件数の上限は
+# 判定しない(現在の件数を知るには API 問い合わせが要り、guard.py はネットワークを
+# 使わない方針)。ここが上限超過の事後検出を担う。closed な hotfix は数えない —
+# `complete-issue` が Done に付け替えても hotfix ラベル自体を外す必要が無いようにする。
+HOTFIX_CAP=3
+HOTFIX_ISSUES="$(echo "$ISSUES" | jq -r '
+  .[]
+  | select(.labels | index("hotfix") != null)
+  | "\(.iid)\t\(.title[0:56])"
+')"
+HOTFIX_COUNT=0
+if [ -n "$HOTFIX_ISSUES" ]; then
+    HOTFIX_COUNT="$(echo "$HOTFIX_ISSUES" | grep -c . || true)"
+fi
+
 echo "検査対象: open な Issue ${TOTAL} 件、closed な Issue ${CLOSED_TOTAL} 件"
 
 VIOLATIONS=0
@@ -163,6 +179,17 @@ if [ -n "$CLOSED_REPORT" ]; then
         echo "          経ていなければ、何が省略されたかを調査すること。"
     done <<< "$CLOSED_REPORT"
     VIOLATIONS=$(( VIOLATIONS + $(echo "$CLOSED_REPORT" | grep -c . || true) ))
+fi
+
+if [ "$HOTFIX_COUNT" -gt "$HOTFIX_CAP" ]; then
+    echo
+    echo "=== 違反(hotfix の上限超過, CLAUDE.md → Issue Provenance)==="
+    echo "open な hotfix Issue が ${HOTFIX_COUNT} 件(上限 ${HOTFIX_CAP})。付与・削除はユーザーのみ:"
+    while IFS=$'\t' read -r iid title; do
+        [ -z "$iid" ] && continue
+        echo "  #${iid} ${title}"
+    done <<< "$HOTFIX_ISSUES"
+    VIOLATIONS=$(( VIOLATIONS + 1 ))
 fi
 
 if [ "$VIOLATIONS" -eq 0 ]; then

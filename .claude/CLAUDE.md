@@ -497,13 +497,49 @@ Old Issues were labelled best-effort from transcripts; 417 of 682 could not be a
 deliberately left unlabelled. Do not treat it as complete and do not re-run a guess over the remainder.
 Rationale: `docs/WORKFLOW_RULE_RATIONALE.md` → 利用者由来ラベルのバックフィル.
 
+## hotfix
+
+`hotfix` marks an Issue as an urgent bug the user hit themselves while using the product — an
+override that jumps straight to the front of the queue, ahead of even `user-request`. It exists
+so a fresh, high-urgency report never has to wait behind the ordinary backlog (decided by the
+user, 2026-09-26).
+
+**Only the user adds or removes it.** Exactly like `bug`, Claude reads the label and never adds
+or removes it, including to move an Issue up the queue or to strip it after `complete-issue`
+closes the Issue.
+
+**At most 3 open Issues may carry it at once.** A closed `hotfix` Issue is not counted, so
+`complete-issue` never needs to touch the label just to stay under the cap.
+
+Two independent layers enforce this — the same split `status::` uniqueness uses (see **How
+"exactly one" is enforced**), because neither one alone can see everything:
+
+| Layer | Enforces |
+| --- | --- |
+| `guard.py` → the hotfix-immutability check | Denies Claude adding or removing `hotfix` on an **existing** Issue: `glab api ... --method PUT` (`add_labels=`/`remove_labels=`) and `glab issue update` (`-l`/`--label`, `-u`/`--unlabel`). |
+| `scripts/check-issue-labels.sh` | Detects, after the fact, more than 3 open Issues carrying `hotfix` — however they got there, including a web-UI edit. |
+
+`guard.py` never counts open `hotfix` Issues itself — that needs an API call, and it stays
+network-free by design (CLAUDE.md → Enforcement). The 3-Issue cap is `check-issue-labels.sh`'s
+job alone. `glab issue create --label hotfix,...` is neither denied nor specially handled here
+(Out of Scope for #1433; `/report-bug` and its create-time handling are #1434).
+
+See **Selection order** below for how `hotfix` affects which Issue is picked next.
+
 ## Selection order
 
-**A `user-request` Issue is selected before any Issue without it.** Provenance is the first
-sort key, ahead of priority (decided by the user, 2026-09-09). **A `bug` Issue comes next**,
-also ahead of priority (decided by the user, 2026-09-10). `ready-issue` Select-Next Mode and
-`work-next` Step 3 defer to this; it is repeated in neither.
+**An open `hotfix` Issue is selected before anything else, including `user-request`.** Among
+multiple `hotfix` Issues, the **newest Issue number wins** — the opposite tiebreak from every
+key below, because the whole point of `hotfix` is to jump the queue with the freshest report
+(decided by the user, 2026-09-26; see **hotfix** above for what enforces the label itself).
+Below `hotfix`, **a `user-request` Issue is selected before any Issue without it.** Provenance
+is the next sort key, ahead of priority (decided by the user, 2026-09-09). **A `bug` Issue comes
+next**, also ahead of priority (decided by the user, 2026-09-10). `ready-issue` Select-Next Mode
+and `work-next` Step 3 defer to this; it is repeated in neither.
 
+0. **`hotfix` — open Issues carrying it first, newest Issue number first.** This key alone
+   decides among `hotfix` Issues: two of them are never further ordered by provenance, kind,
+   priority, or blocking count.
 1. **Provenance** — `user-request` first; every other Issue after it.
 2. **Kind** — `bug` first; every other Issue after it.
 3. **Priority — highest first.** `P0` > `P1` > `P2` > unset. Unset always ranks last.

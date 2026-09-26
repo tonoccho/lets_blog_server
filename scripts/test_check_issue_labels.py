@@ -304,5 +304,51 @@ class Pagination(Harness):
         self.assertIn("#2", r.stdout + r.stderr)
 
 
+class HotfixCap(Harness):
+    """CLAUDE.md → Issue Provenance → hotfix: open な Issue で最大3件(#1433)。
+
+    guard.py は既存 Issue への hotfix の付与・削除を拒否するが、上限3件の判定は
+    しない(件数を知るには API 問い合わせが要り、guard.py はネットワークを使わない
+    方針)。ここが事後検出を担う。closed な hotfix は数えない(`complete-issue` が
+    Done に付け替えても、hotfix ラベル自体を外す必要が無いようにするため)。
+    """
+
+    def _hotfix_issue(self, iid):
+        return issue(iid, ["status::Ready", "priority::P1", "hotfix"])
+
+    def test_three_open_hotfix_issues_pass(self):
+        r = self.run_with([self._hotfix_issue(i) for i in (1, 2, 3)])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_four_open_hotfix_issues_fail(self):
+        r = self.run_with([self._hotfix_issue(i) for i in (1, 2, 3, 4)])
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_violation_lists_every_hotfix_issue_number(self):
+        r = self.run_with([self._hotfix_issue(i) for i in (11, 12, 13, 14)])
+        out = r.stdout + r.stderr
+        for iid in (11, 12, 13, 14):
+            with self.subTest(iid=iid):
+                self.assertIn("#%d" % iid, out)
+
+    def test_closed_hotfix_issues_are_not_counted(self):
+        """open は3件だけなら、closed に何件 hotfix があっても違反にならない。"""
+        r = self.run_with(
+            [self._hotfix_issue(i) for i in (1, 2, 3)],
+            closed_issues=[
+                closed_issue(90 + i, ["status::Done", "priority::P1", "hotfix"])
+                for i in range(5)
+            ],
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_non_hotfix_issues_do_not_count_toward_the_cap(self):
+        r = self.run_with(
+            [self._hotfix_issue(i) for i in (1, 2, 3)]
+            + [issue(4, ["status::Ready", "priority::P1"])]
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

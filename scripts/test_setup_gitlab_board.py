@@ -87,11 +87,12 @@ class Harness(unittest.TestCase):
         )
 
     def existing_everything(self):
-        """ラベル10種・ボード・列7つが全て揃った状態。"""
+        """ラベル11種(hotfix 込み)・ボード・列7つが全て揃った状態。"""
         names = [
             "status::Inbox", "status::Backlog", "status::Ready", "status::In Progress",
             "status::Review", "status::QA", "status::Done",
             "priority::P0", "priority::P1", "priority::P2",
+            "hotfix",
         ]
         self.write("labels", [{"id": i, "name": n} for i, n in enumerate(names, 1)])
         self.write("boards", [{"id": 1, "name": "Development"}])
@@ -145,6 +146,44 @@ class Idempotency(Harness):
         self.run_script()
         writes = "\n".join(self.writes())
         self.assertIn("priority::P0", writes)
+        self.assertNotIn("status::Inbox", writes, "既存ラベルまで作り直している")
+
+
+class HotfixLabel(Harness):
+    """CLAUDE.md → Issue Provenance → hotfix: ラベルを冪等に作成する(#1433)。
+
+    `hotfix` は 2026-09-26 に手で作成済みだが、再現手順(このスクリプト)からも
+    作れることを固定する。既存なら `ensure_label()` の「既存ならスキップ」に乗る。
+    """
+
+    def test_creates_hotfix_label_when_missing(self):
+        self.write("labels", [])
+        self.write("boards", [{"id": 1, "name": "Development"}])
+        self.write("board", {"id": 1, "name": "Development", "lists": []})
+        self.write("lists", [])
+        r = self.run_script()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("hotfix", "\n".join(self.writes()), "hotfix ラベルが作成されていない")
+
+    def test_skips_hotfix_label_when_already_present(self):
+        self.existing_everything()
+        r = self.run_script()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn(
+            "hotfix", "\n".join(self.writes()), "既存の hotfix ラベルを作り直している"
+        )
+
+    def test_only_hotfix_label_is_recreated_when_missing(self):
+        """hotfix だけが無い状態では、hotfix だけを作り直し、他の既存ラベルは触らない。"""
+        self.existing_everything()
+        with open(os.path.join(self.tmp, "labels")) as f:
+            labels = json.load(f)
+        labels = [l for l in labels if l["name"] != "hotfix"]
+        self.write("labels", labels)
+        r = self.run_script()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        writes = "\n".join(self.writes())
+        self.assertIn("hotfix", writes)
         self.assertNotIn("status::Inbox", writes, "既存ラベルまで作り直している")
 
 

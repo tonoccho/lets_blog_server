@@ -816,3 +816,159 @@ class StatusTransitionValidity(unittest.TestCase):
         reason = run_hook("bash", bash_payload(command))
         self.assertIsNotNone(reason, "前置詞付きの Ready→Done が素通りした")
 
+
+class HotfixLabelImmutability(unittest.TestCase):
+    """CLAUDE.md → Issue Provenance → hotfix: 付与・削除はユーザーのみ(#1433)。
+
+    `hotfix` は選択順の第0キーで、`bug` と同じく Claude は読むだけである。GitLab CE の
+    ラベルにこれを守らせる仕組みは無いので、既存 Issue への `hotfix` の付け外しは
+    `check_status_label_integrity` とは**独立した**この検査で一律に拒否する
+    (`status::` の遷移とは無関係な壊れ方なので、既存関数を拡張せず新規関数にする)。
+
+    上限3件の判定はここではしない。ネットワークが要るため、事後検出は
+    `scripts/check-issue-labels.sh` の役目(CLAUDE.md → Enforcement)。
+    """
+
+    PUT = "glab api projects/:id/issues/42 --method PUT "
+
+    # --- `glab api ... --method PUT` の add_labels=/remove_labels= ---
+
+    def test_adding_hotfix_via_api_put_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.PUT + "-f add_labels=hotfix"))
+        self.assertIsNotNone(reason, "hotfix の付与が拒否されていない")
+        self.assertIn("hotfix", reason)
+
+    def test_removing_hotfix_via_api_put_is_denied(self):
+        reason = run_hook("bash", bash_payload(self.PUT + "-f remove_labels=hotfix"))
+        self.assertIsNotNone(reason, "hotfix の削除が拒否されていない")
+
+    def test_adding_hotfix_combined_with_another_label_is_denied(self):
+        """カンマ区切りの他ラベルに紛れていても検出すること。"""
+        reason = run_hook(
+            "bash", bash_payload(self.PUT + "-f add_labels=priority::P0,hotfix")
+        )
+        self.assertIsNotNone(reason, "他ラベルと同時の hotfix 付与が素通りした")
+
+    def test_non_hotfix_label_change_via_api_put_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload(self.PUT + "-f add_labels=bug")))
+
+    def test_label_containing_hotfix_as_a_substring_is_not_mistaken(self):
+        """`hotfix` はラベル名の完全一致で判定する。部分一致で誤検知しないこと。"""
+        self.assertIsNone(
+            run_hook("bash", bash_payload(self.PUT + "-f add_labels=not-a-hotfix-label"))
+        )
+
+    def test_status_transition_without_hotfix_is_unaffected(self):
+        """既存の status:: 遷移検査と衝突しないこと。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload(
+                    self.PUT
+                    + '-f "remove_labels=status::Ready" -f "add_labels=status::In Progress"'
+                ),
+            )
+        )
+
+    # --- `glab issue update` の --label/--unlabel ---
+
+    def test_issue_update_label_hotfix_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("glab issue update 42 --label hotfix")
+        )
+        self.assertIsNotNone(reason, "glab issue update --label hotfix が拒否されていない")
+        self.assertIn("hotfix", reason)
+
+    def test_issue_update_unlabel_hotfix_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("glab issue update 42 --unlabel hotfix")
+        )
+        self.assertIsNotNone(reason, "glab issue update --unlabel hotfix が拒否されていない")
+
+    def test_issue_update_short_flags_hotfix_is_denied(self):
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab issue update 42 -l hotfix"))
+        )
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab issue update 42 -u hotfix"))
+        )
+
+    def test_issue_update_hotfix_combined_with_other_labels_is_denied(self):
+        self.assertIsNotNone(
+            run_hook(
+                "bash", bash_payload("glab issue update 42 --label bug,hotfix")
+            )
+        )
+
+    def test_issue_update_non_hotfix_label_is_allowed(self):
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab issue update 42 --label bug"))
+        )
+
+    # --- pflag の短縮形は値を直結できる(`-lhotfix`)。実機 glab(1.116.0)で
+    # 確認済み: `-lhotfix`/`-uhotfix`/`-l=hotfix`/`-u=hotfix` はいずれもパースエラーに
+    # ならずネットワーク呼び出しに到達する(対照として `-zhotfix` は
+    # `Unknown shorthand flag` になる)。この直結形を見逃すと AC3 の核心である
+    # 「Claude は既存 Issue の hotfix に触れない」が破れる。
+
+    def test_issue_update_short_flag_value_attached_hotfix_is_denied(self):
+        """`-lhotfix` / `-uhotfix`(空白なしの直結形)を見逃さないこと。"""
+        reason = run_hook("bash", bash_payload("glab issue update 42 -lhotfix"))
+        self.assertIsNotNone(reason, "-lhotfix が拒否されていない")
+        self.assertIn("hotfix", reason)
+        reason = run_hook("bash", bash_payload("glab issue update 42 -uhotfix"))
+        self.assertIsNotNone(reason, "-uhotfix が拒否されていない")
+
+    def test_issue_update_short_flag_equals_hotfix_is_denied(self):
+        """`-l=hotfix` / `-u=hotfix`(pflag が `=` を剥がす直結形)も見逃さないこと。"""
+        reason = run_hook("bash", bash_payload("glab issue update 42 -l=hotfix"))
+        self.assertIsNotNone(reason, "-l=hotfix が拒否されていない")
+        reason = run_hook("bash", bash_payload("glab issue update 42 -u=hotfix"))
+        self.assertIsNotNone(reason, "-u=hotfix が拒否されていない")
+
+    def test_issue_update_short_flag_attached_hotfix_combined_with_other_label_is_denied(
+        self,
+    ):
+        """直結形でも、他ラベルと並記されたカンマ区切りの中の hotfix を見逃さないこと。"""
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab issue update 42 -lbug,hotfix"))
+        )
+
+    def test_issue_update_short_flag_attached_non_hotfix_label_is_allowed(self):
+        """直結形で hotfix を含まないラベルは許可されること(`-lbug`)。"""
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab issue update 42 -lbug"))
+        )
+
+    def test_issue_update_short_flag_attached_substring_is_not_mistaken(self):
+        """直結形でも `hotfix` は完全一致で判定する。部分一致で誤検知しないこと。"""
+        self.assertIsNone(
+            run_hook(
+                "bash", bash_payload("glab issue update 42 -lhotfix-foo")
+            )
+        )
+        self.assertIsNone(
+            run_hook(
+                "bash", bash_payload("glab issue update 42 -lnot-a-hotfix-label")
+            )
+        )
+
+    def test_issue_create_with_hotfix_is_not_denied(self):
+        """新規作成は対象外(Out of Scope、#1434 で扱う。現状維持)。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload(
+                    "glab issue create --title x --label hotfix,priority::P0 --yes"
+                ),
+            )
+        )
+
+    def test_wrapped_hotfix_violation_is_still_denied(self):
+        """#1029 の教訓。前置詞で外れないこと。"""
+        self.assertIsNotNone(
+            run_hook(
+                "bash", bash_payload("timeout 60 glab issue update 42 --label hotfix")
+            )
+        )
+

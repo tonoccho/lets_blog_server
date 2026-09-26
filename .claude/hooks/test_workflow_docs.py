@@ -141,6 +141,100 @@ class StatusLabels(unittest.TestCase):
                 self.assertIn("status::", read(path), "%s が status:: ラベルに触れていない" % path)
 
 
+class SelectionOrderSingleSource(unittest.TestCase):
+    """CLAUDE.md → Issue Provenance → Selection order が単一の定義であること(#1433)。
+
+    hotfix を選択順の第0キーとして追加したとき、`work-next` / `ready-issue` /
+    `triage-backlog` の SKILL.md が独自にキー一覧を書き直したままでは、CLAUDE.md を
+    いくら直しても各段の実際の振る舞いには効かない(#1433 の Problem そのもの)。
+    書き直しではなく CLAUDE.md への参照になっていることを機械的に固定する。
+    """
+
+    SKILLS = [
+        ".claude/skills/work-next/SKILL.md",
+        ".claude/skills/ready-issue/SKILL.md",
+        ".claude/skills/triage-backlog/SKILL.md",
+    ]
+
+    # 選択順のキー一覧を丸ごと書き直した箇条書きの特徴的な形("1. **Provenance" のような、
+    # 番号付きリストの先頭に太字でキー名が来る行)。3つ以上一致すれば「書き直し」とみなす。
+    KEY_LIST_MARKERS = [
+        re.compile(r"^\s*\d+\.\s+\*\*Provenance", re.MULTILINE),
+        re.compile(r"^\s*\d+\.\s+\*\*Kind", re.MULTILINE),
+        re.compile(r"^\s*\d+\.\s+\*\*Priority", re.MULTILINE),
+        re.compile(r"^\s*\d+\.\s+\*\*Is blocking count", re.MULTILINE),
+        re.compile(r"^\s*\d+\.\s+\*\*Issue number", re.MULTILINE),
+    ]
+
+    # frontmatter description でキーの連鎖を矢印で書き直す形("user-request → bug → Priority")。
+    CHAIN_MARKER = re.compile(r"user-request.{0,10}(→|->).{0,10}bug.{0,10}(→|->).{0,10}[Pp]riority")
+
+    def _selection_order_section(self):
+        text = read(".claude/CLAUDE.md")
+        after = text.split("## Selection order", 1)
+        self.assertEqual(2, len(after), "CLAUDE.md に ## Selection order が無い")
+        section = after[1].split("\n---", 1)[0]
+        return section
+
+    def test_claude_md_defines_hotfix_as_key_zero(self):
+        section = self._selection_order_section()
+        self.assertIn("hotfix", section)
+        self.assertRegex(
+            section, r"0\.\s+\*\*`hotfix`", "hotfix が選択順の第0キーとして書かれていない"
+        )
+
+    def test_claude_md_hotfix_key_is_newest_first(self):
+        """hotfix 同士は Issue 番号の新しい順(他のキーとは逆のタイブレーク)。"""
+        section = self._selection_order_section()
+        self.assertRegex(section, r"(newest|descending)", "hotfix の降順ルールが書かれていない")
+
+    def test_skills_do_not_restate_the_key_list(self):
+        for path in self.SKILLS:
+            text = read(path)
+            with self.subTest(path=path):
+                matched = sum(1 for m in self.KEY_LIST_MARKERS if m.search(text))
+                self.assertLess(
+                    matched, 3,
+                    "%s が選択順のキー一覧を書き直している(%d 個のキーが一致)" % (path, matched),
+                )
+
+    def test_ready_issue_frontmatter_does_not_restate_the_chain(self):
+        text = read(".claude/skills/ready-issue/SKILL.md")
+        frontmatter = text.split("---", 2)[1]
+        self.assertNotRegex(
+            frontmatter, self.CHAIN_MARKER, "frontmatter description が選択順を書き直している"
+        )
+
+    # 見出しがそのまま1行に収まらず折り返されることがあるため("Selection\norder")、
+    # 空白1文字だけでなく改行も挟めるようにする。
+    SELECTION_ORDER_REFERENCE = re.compile(r"Selection\s+order")
+
+    def test_skills_reference_claude_md_selection_order(self):
+        for path in self.SKILLS:
+            with self.subTest(path=path):
+                self.assertRegex(
+                    read(path), self.SELECTION_ORDER_REFERENCE,
+                    "%s が CLAUDE.md → Selection order を参照していない" % path,
+                )
+
+    def test_triage_backlog_no_longer_claims_priority_selects_first(self):
+        """`ready-issue selects by Priority first` は #1433 の Problem が指摘する誤り。
+
+        現在の Selection order では Priority は第3キー(hotfix, user-request, bug の後)。
+        """
+        text = read(".claude/skills/triage-backlog/SKILL.md")
+        self.assertNotIn("selects by Priority first", text)
+
+    def test_work_next_and_triage_backlog_report_hotfix(self):
+        """Requirement 4: 各スキルが報告する選定理由に hotfix か否かを含める。"""
+        for path in (
+            ".claude/skills/work-next/SKILL.md",
+            ".claude/skills/triage-backlog/SKILL.md",
+        ):
+            with self.subTest(path=path):
+                self.assertIn("hotfix", read(path), "%s が選定理由に hotfix を含めていない" % path)
+
+
 if __name__ == "__main__":
     unittest.main()
 

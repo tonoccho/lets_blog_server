@@ -132,7 +132,7 @@ glab api "projects/:id/issues/<iid>" --method PUT \
   -f "remove_labels=status::Inbox" -f "add_labels=status::Backlog,priority::P1"
 ```
 
-Set the `Priority` field on every moved Issue. Never leave priority unset — `ready-issue` selects by Priority first, so an unset priority sinks the Issue to the bottom of the selection order.
+Set the `Priority` field on every moved Issue. Never leave priority unset — `ready-issue` factors Priority into its selection (CLAUDE.md → Issue Provenance → Selection order; Priority is one key among several, not the first — `hotfix`, provenance and kind are read before it), and an unset priority still sinks the Issue toward the bottom within its own provenance/kind group.
 
 Do not move `Keep in Inbox` or `Recommend Closing` Issues.
 
@@ -144,12 +144,15 @@ Process every Inbox Issue in this run without pausing between items; report the 
 
 ## Step 5: Report
 
-Return one consolidated table, ordered by priority (highest first):
+Return one consolidated table, ordered by priority (highest first). Note whether each moved
+Issue carries `hotfix` — it does not change anything `triage-backlog` itself does (Priority is
+still set the same way), but it is the first thing `ready-issue` and `work-next` will look at
+next (CLAUDE.md → Issue Provenance → Selection order):
 
 ## Triage Result
 
-| Issue | Title | Priority | Outcome | Reason |
-|---|---|---|---|---|
+| Issue | Title | Priority | Hotfix | Outcome | Reason |
+|---|---|---|---|---|---|
 
 ## Moved to Backlog
 
