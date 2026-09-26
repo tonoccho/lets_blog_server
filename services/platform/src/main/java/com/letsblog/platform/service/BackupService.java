@@ -69,18 +69,24 @@ public class BackupService {
     private final String encryptionKey;
     private final AdminAuthorizationService adminAuthorizationService;
     private final ObjectMapper objectMapper;
+    private final AuditLogService auditLogService;
+    private final CurrentActorService currentActorService;
 
     public BackupService(
             BackupProperties backupProperties,
             @Value("${app.generated-images-storage-path}") String generatedImagesStoragePath,
             @Value("${app.encryption-key}") String encryptionKey,
             AdminAuthorizationService adminAuthorizationService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AuditLogService auditLogService,
+            CurrentActorService currentActorService) {
         this.backupProperties = backupProperties;
         this.generatedImagesDir = Path.of(generatedImagesStoragePath);
         this.encryptionKey = encryptionKey;
         this.adminAuthorizationService = adminAuthorizationService;
         this.objectMapper = objectMapper;
+        this.auditLogService = auditLogService;
+        this.currentActorService = currentActorService;
     }
 
     public record BackupMetadata(
@@ -92,7 +98,10 @@ public class BackupService {
             String mysqldumpVersion) {
     }
 
-    @AuditLog(action = AuditLogAction.DB_BACKUP_DOWNLOADED, resourceType = "DATABASE")
+    /**
+     * バックアップZIPを作成する。監査ログは{@code @AuditLog}(戻り値をそのまま記録する)ではなく、
+     * 本体を含まない要約(対象スキーマ/サイズ/作成日時)を明示的に記録する(issue #1246)。
+     */
     public byte[] createBackup() {
         adminAuthorizationService.requireAdmin();
 
@@ -117,7 +126,31 @@ public class BackupService {
 
         log.info("バックアップアーカイブを作成しました (mysqlSchemas={}, postgresDatabase={}, size={} bytes)",
                 mysqlSchemas, postgresDatabase, zipBytes.size());
-        return zipBytes.toByteArray();
+        byte[] archive = zipBytes.toByteArray();
+        recordBackupDownloadAudit(mysqlSchemas, postgresDatabase, archive.length, metadata.createdAt());
+        return archive;
+    }
+
+    private void recordBackupDownloadAudit(
+            List<String> mysqlSchemas, String postgresDatabase, int sizeBytes, String createdAt) {
+        try {
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("mysqlSchemas", mysqlSchemas);
+            summary.put("postgresDatabase", postgresDatabase);
+            summary.put("sizeBytes", sizeBytes);
+            summary.put("createdAt", createdAt);
+            auditLogService.log(
+                    currentActorService.getCurrentActorId(),
+                    currentActorService.getCurrentActorKeycloakSub(),
+                    AuditLogAction.DB_BACKUP_DOWNLOADED,
+                    "DATABASE",
+                    null,
+                    objectMapper.writeValueAsString(summary),
+                    currentActorService.getRemoteIp(),
+                    currentActorService.getUserAgent());
+        } catch (Exception e) {
+            log.warn("バックアップダウンロードの監査ログ記録に失敗しました", e);
+        }
     }
 
     @AuditLog(action = AuditLogAction.DB_RESTORED, resourceType = "DATABASE")

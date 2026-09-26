@@ -26,6 +26,9 @@ import java.time.LocalDateTime;
 @Slf4j
 public class LogMessageListener {
 
+    /** audit_logs.changes(TEXT)の最大バイト数。 */
+    private static final int CHANGES_MAX_BYTES = 65_535;
+
     private final FrontendErrorLogRepository frontendErrorLogRepository;
     private final OperationLogRepository operationLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -82,12 +85,36 @@ public class LogMessageListener {
         entity.setAction(message.action());
         entity.setResourceType(message.resourceType());
         entity.setResourceId(message.resourceId());
-        entity.setChanges(message.changes());
+        entity.setChanges(truncateToColumnLimit(message.changes()));
         entity.setRemoteIp(message.remoteIp());
         entity.setUserAgent(message.userAgent());
         entity.setCreatedAt(parse(message.createdAt()));
         auditLogRepository.save(entity);
         log.debug("Audit log written: action={}, userId={}", message.action(), message.userId());
+    }
+
+    /**
+     * audit_logs.changes(TEXT)の上限を超える値でINSERTが「Data too long」で失敗し毒メッセージになるのを防ぐ
+     * (issue #1246)。UTF-8で上限バイト内に収まる最長のprefixへ切り詰める(文字の途中では切らない)。
+     */
+    private static String truncateToColumnLimit(String changes) {
+        if (changes == null || changes.length() * 3L <= CHANGES_MAX_BYTES) {
+            return changes;
+        }
+        int bytes = 0;
+        int index = 0;
+        while (index < changes.length()) {
+            int codePoint = changes.codePointAt(index);
+            int charCount = Character.charCount(codePoint);
+            int codePointBytes = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+            if (bytes + codePointBytes > CHANGES_MAX_BYTES) {
+                log.warn("Audit log changes exceeded {} bytes and was truncated", CHANGES_MAX_BYTES);
+                return changes.substring(0, index);
+            }
+            bytes += codePointBytes;
+            index += charCount;
+        }
+        return changes;
     }
 
     private LocalDateTime parse(String value) {

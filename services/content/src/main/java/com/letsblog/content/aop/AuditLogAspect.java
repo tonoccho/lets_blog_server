@@ -11,6 +11,8 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /**
  * @AuditLog を付与したメソッドの正常終了を監査ログとして記録する。legacy-apiのAuditLogAspectと同じ実装
@@ -20,6 +22,10 @@ import java.lang.reflect.Method;
 @Component
 @Slf4j
 public class AuditLogAspect {
+
+    /** audit_logs.changes(TEXT)の上限65,535バイトに対し、余裕を持たせた上限(issue #1246)。 */
+    private static final int MAX_CHANGES_BYTES = 60_000;
+    private static final int PREVIEW_CHARS = 1_000;
 
     private final AuditLogService auditLogService;
     private final CurrentActorService currentActorService;
@@ -96,10 +102,34 @@ public class AuditLogAspect {
         if (result == null) {
             return null;
         }
+        if (result instanceof byte[] bytes) {
+            // バイナリ(バックアップZIP等)は中身を記録せず、種別とサイズだけを残す(issue #1246)
+            return "{\"type\":\"binary\",\"size\":" + bytes.length + "}";
+        }
+        String json;
         try {
-            return objectMapper.writeValueAsString(result);
+            json = objectMapper.writeValueAsString(result);
         } catch (Exception e) {
-            return String.valueOf(result);
+            json = String.valueOf(result);
+        }
+        return limitSize(json);
+    }
+
+    /** audit_logs.changes(TEXT、最大65,535バイト)へ収まらない長さなら、有効なJSONの要約へ置き換える。 */
+    private String limitSize(String json) {
+        int size = json.getBytes(StandardCharsets.UTF_8).length;
+        if (size <= MAX_CHANGES_BYTES) {
+            return json;
+        }
+        int end = PREVIEW_CHARS;
+        if (Character.isHighSurrogate(json.charAt(end - 1))) {
+            end--;
+        }
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "truncated", true, "originalSize", size, "preview", json.substring(0, end)));
+        } catch (Exception e) {
+            return "{\"truncated\":true,\"originalSize\":" + size + "}";
         }
     }
 }

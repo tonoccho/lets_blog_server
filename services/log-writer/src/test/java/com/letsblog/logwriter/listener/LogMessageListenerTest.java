@@ -18,6 +18,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -93,5 +96,62 @@ class LogMessageListenerTest {
         assertEquals("USER", saved.getResourceType());
         assertEquals(2L, saved.getResourceId());
         assertEquals(now, saved.getCreatedAt());
+    }
+
+    @Test
+    void onAuditLog_上限を超えるchangesはUTF8で65535バイト以内に切り詰めて保存する() {
+        String big = "a" + "あ".repeat(30_000);
+        AuditLogMessage message = new AuditLogMessage(
+                1L, "keycloak-sub-1", "DB_BACKUP_DOWNLOADED", "DATABASE", null, big, "127.0.0.1", "agent",
+                LocalDateTime.now().toString());
+
+        listener().onAuditLog(message);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        String saved = captor.getValue().getChanges();
+        int bytes = saved.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        assertTrue(bytes <= 65_535, "bytes=" + bytes);
+        assertTrue(bytes > 65_535 - 3, "must keep as much as fits, bytes=" + bytes);
+        assertTrue(big.startsWith(saved));
+        assertFalse(saved.contains("\uFFFD"));
+    }
+
+    @Test
+    void onAuditLog_ちょうど上限のchangesはそのまま保存する() {
+        String exact = "x".repeat(65_535);
+        AuditLogMessage message = new AuditLogMessage(
+                1L, "s", "USER_CREATED", "USER", 2L, exact, null, null, LocalDateTime.now().toString());
+
+        listener().onAuditLog(message);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertEquals(exact, captor.getValue().getChanges());
+    }
+
+    @Test
+    void onAuditLog_changesがnullでも保存できる() {
+        AuditLogMessage message = new AuditLogMessage(
+                1L, "s", "USER_CREATED", "USER", 2L, null, null, null, LocalDateTime.now().toString());
+
+        listener().onAuditLog(message);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertNull(captor.getValue().getChanges());
+    }
+
+    @Test
+    void onAuditLog_サロゲートペアの途中で切らない() {
+        String big = "x".repeat(65_533) + "\uD83D\uDE00\uD83D\uDE00";
+        AuditLogMessage message = new AuditLogMessage(
+                1L, "s", "USER_CREATED", "USER", 2L, big, null, null, LocalDateTime.now().toString());
+
+        listener().onAuditLog(message);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertEquals("x".repeat(65_533), captor.getValue().getChanges());
     }
 }

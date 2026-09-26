@@ -71,6 +71,12 @@ class BackupServiceTest {
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
+    @Mock
+    private AuditLogService auditLogService;
+
+    @Mock
+    private CurrentActorService currentActorService;
+
     private BackupService service;
 
     @TempDir
@@ -79,7 +85,7 @@ class BackupServiceTest {
     @BeforeEach
     void setUp() {
         service = new BackupService(buildDefaultProperties(), generatedImagesDir.toString(), ENCRYPTION_KEY,
-                adminAuthorizationService, new ObjectMapper());
+                adminAuthorizationService, new ObjectMapper(), auditLogService, currentActorService);
     }
 
     private BackupProperties buildDefaultProperties() {
@@ -670,6 +676,66 @@ class BackupServiceTest {
                     "an InterruptedException during waitFor should surface as a BackupException");
             assertTrue(interruptedWhenCaught.get(),
                     "the thread's interrupt status must be restored before the exception propagates");
+        }
+    }
+
+    @Nested
+    @DisplayName("createBackup audit log summary (issue #1246)")
+    class CreateBackupAuditTests {
+
+        @Test
+        @DisplayName("AC1/AC5: DB_BACKUP_DOWNLOADEDを1件だけ記録し、changesはZIP内容を含まない要約(スキーマ/サイズ/作成日時)")
+        void recordsSummaryWithoutArchiveContent() throws Exception {
+            BackupService spied = spy(service);
+            doReturn("v").when(spied).queryClientVersion(anyString());
+            byte[] dump = new byte[200_000];
+            java.util.Arrays.fill(dump, (byte) 'Z');
+            doReturn(dump).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+            org.mockito.Mockito.when(currentActorService.getCurrentActorId()).thenReturn(9L);
+            org.mockito.Mockito.when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("sub-9");
+            org.mockito.Mockito.when(currentActorService.getRemoteIp()).thenReturn("10.0.0.1");
+            org.mockito.Mockito.when(currentActorService.getUserAgent()).thenReturn("ua");
+
+            byte[] archive = spied.createBackup();
+
+            org.mockito.ArgumentCaptor<String> changes = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(auditLogService, org.mockito.Mockito.times(1)).log(eq(9L), eq("sub-9"),
+                    eq(com.letsblog.platform.domain.AuditLogAction.DB_BACKUP_DOWNLOADED), eq("DATABASE"),
+                    eq((Long) null), changes.capture(), eq("10.0.0.1"), eq("ua"));
+            com.fasterxml.jackson.databind.JsonNode node = new ObjectMapper().readTree(changes.getValue());
+            assertEquals(MYSQL_SCHEMAS.size(), node.get("mysqlSchemas").size());
+            assertEquals("lbs_identity", node.get("mysqlSchemas").get(0).asText());
+            assertEquals(POSTGRES_DATABASE, node.get("postgresDatabase").asText());
+            assertEquals(archive.length, node.get("sizeBytes").asLong());
+            assertThat(node.get("createdAt").asText(), notNullValue());
+            assertTrue(changes.getValue().length() < 1_000, "summary must be small");
+            assertFalse(changes.getValue().contains("Z".repeat(50)));
+            assertFalse(changes.getValue().contains("UEsD"));
+        }
+
+        @Test
+        @DisplayName("監査ログの記録に失敗してもバックアップは返す")
+        void auditFailureDoesNotBreakBackup() {
+            BackupService spied = spy(service);
+            doReturn("v").when(spied).queryClientVersion(anyString());
+            doReturn(new byte[]{1}).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+            org.mockito.Mockito.when(currentActorService.getCurrentActorId())
+                    .thenThrow(new IllegalStateException("no actor"));
+
+            byte[] archive = spied.createBackup();
+
+            assertThat(archive.length, greaterThan(0));
+            verify(auditLogService, never()).log(any(), any(), any(), anyString(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("管理者でなければバックアップも監査ログも作らない")
+        void nonAdminRecordsNothing() {
+            doThrow(new ForbiddenException("no")).when(adminAuthorizationService).requireAdmin();
+
+            assertThrows(ForbiddenException.class, () -> service.createBackup());
+
+            verify(auditLogService, never()).log(any(), any(), any(), anyString(), any(), any(), any(), any());
         }
     }
 

@@ -1,5 +1,5 @@
 import type { APIRequestContext } from '@playwright/test';
-import { Then, When } from './fixtures';
+import { Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -111,4 +111,71 @@ Then('一般ユーザーとしてバックアップのダウンロードを要�
     headers: { Authorization: `Bearer ${await userToken(request)}` },
   });
   expect(response.status(), `応答本文: ${await response.text()}`).toBe(403);
+});
+
+// ---- 監査ログ(issue #1246): バックアップ本体を changes に入れない ----
+
+interface BackupAuditEntry {
+  id: number;
+  action: string;
+  changes: string | null;
+}
+
+async function listBackupAuditLogs(
+  request: APIRequestContext, token: string
+): Promise<BackupAuditEntry[]> {
+  const response = await request.get(
+    '/api/audit-logs?page=0&size=200&sort=createdAt,desc&action=DB_BACKUP_DOWNLOADED',
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  expect(response.ok(), `監査ログの取得に失敗しました (status=${response.status()})`).toBe(true);
+  const page = (await response.json()) as { content: BackupAuditEntry[] };
+  return page.content.filter((entry) => entry.action === 'DB_BACKUP_DOWNLOADED');
+}
+
+Given('バックアップ監査検証用に現時点の監査ログを控えておく', async ({ ctx, request }) => {
+  const logs = await listBackupAuditLogs(request, await adminToken(request));
+  ctx.backupKnownAuditIds = new Set(logs.map((entry) => entry.id));
+});
+
+Then(
+  'バックアップのダウンロードの監査ログが1件だけ記録されるまで待つ',
+  async ({ ctx, request, $testInfo }) => {
+    $testInfo.setTimeout($testInfo.timeout + 60_000);
+    const token = await adminToken(request);
+    const known = ctx.backupKnownAuditIds as Set<number>;
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      const fresh = (await listBackupAuditLogs(request, token)).filter((entry) => !known.has(entry.id));
+      if (fresh.length > 0) {
+        expect(fresh.length, 'バックアップ1回に対する監査ログが複数件記録されました').toBe(1);
+        ctx.backupAuditEntry = fresh[0];
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error('DB_BACKUP_DOWNLOADED の監査ログが60秒以内に現れませんでした(本体が大きすぎて保存に失敗した可能性)');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+  }
+);
+
+Then('その監査ログの内容はアーカイブ本体を含まず、対象スキーマとサイズだけを要約している', async ({ ctx }) => {
+  const entry = ctx.backupAuditEntry as BackupAuditEntry;
+  const changes = entry.changes ?? '';
+  const archive = ctx.backupBytes as Buffer;
+  expect(changes.length, `changes が大きすぎます(${changes.length}文字)`).toBeLessThan(2_000);
+  expect(changes, 'changes に ZIP の base64 (PK ヘッダ) が含まれています').not.toContain('UEsD');
+  const summary = JSON.parse(changes) as {
+    mysqlSchemas: string[];
+    postgresDatabase: string;
+    sizeBytes: number;
+    createdAt: string;
+  };
+  for (const schema of BACKUP_MYSQL_SCHEMAS) {
+    expect(summary.mysqlSchemas, `対象スキーマ ${schema} が要約にありません`).toContain(schema);
+  }
+  expect(summary.postgresDatabase).toBeTruthy();
+  expect(summary.sizeBytes).toBe(archive.length);
+  expect(Number.isNaN(Date.parse(summary.createdAt)), 'createdAt を解釈できません').toBe(false);
 });
