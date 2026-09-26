@@ -285,10 +285,8 @@ VSCode 拡張だけにあるため、この節の受け入れ基準に対応す�
 API: content `CustomTagController`, `CustomTagTemplateController`, `ProjectCustomTagController`, `ProjectContentSettingsController`, `ContentCacheController` / project `TagDesignSettingController`, `GlobalTagDesignSettingController`
 
 受け入れシナリオは `apps/web/e2e/features/custom-tag/` の6ファイル(#938 / AT-12)。
-状態欄について2点:
+状態欄について:
 
-- **`@api` と書いてある行は、画面がそもそも存在しない**(AC-TAG-009 / 011 / 013)。
-  API も Server Action も実装済みで、それを呼ぶコンポーネントだけが無い。#1128 で扱う。
 - **`実装中` の行はシナリオが書かれているが、この開発ホストでは実行できていない。**
   Playwright のブラウザが OS の共有ライブラリを欠いていて起動しないため(#1045)。
   ブラウザを起動できる環境で `npm run test:at` を通した時点で `検証済` へ変える。
@@ -303,11 +301,11 @@ API: content `CustomTagController`, `CustomTagTemplateController`, `ProjectCusto
 | AC-TAG-006 | タグ検証API | 貼る前に安全か確かめられる | `POST /api/custom-tags/validate` が `isValid` と理由を返す | `e2e/features/custom-tag/generation.feature` › 危険なHTMLを含むカスタムタグは検証で拒否される、`e2e/features/custom-tag/performance.feature` › カスタムタグの検証APIが所定の時間内に応答する | 検証済 |
 | AC-TAG-007 | CSSバンドルの取得 | 公開先でタグの見た目が再現される | `GET /api/projects/{id}/custom-tags/css-bundle` がタグ定義に対応するCSSを返し、画面から取得できる | `e2e/features/custom-tag/preview-and-css.feature` › プロジェクトの統合CSSに、そのプロジェクトのタグのCSSが含まれる || 検証済(#1283で実測、2026-09-15) |
 | AC-TAG-008 | テンプレートギャラリー (`/custom-tag-templates`) | 他人の作ったタグを再利用できる | ギャラリーから詳細を開き、複製が自分のプロジェクトへ独立して作られる | `e2e/features/custom-tag/templates.feature` › テンプレートを複製すると、自分のプロジェクトに独立した複製が作られる || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行。`templates.feature` は #1283 の対象外 — #1131) |
-| AC-TAG-009 | テンプレートの公開・非公開 | 共有範囲を選べる | `publish` / `unpublish` の結果が他利用者から見える一覧に反映される | `e2e/features/custom-tag/templates.feature` › タグをテンプレートとして公開すると、他の利用者からも見えるようになる / 公開をやめると、他の利用者から見えなくなる | 検証済(`@api`。切り替える画面が無い。#1128) |
+| AC-TAG-009 | テンプレートの公開・非公開 | 共有範囲を選べる | `publish` / `unpublish` の結果が他利用者から見える一覧に反映される | `e2e/features/custom-tag/templates.feature` › タグをテンプレートとして公開すると、他の利用者からも見えるようになる / 公開をやめると、他の利用者から見えなくなる | 検証済(#1128で実測、2026-09-26。ギャラリーの詳細パネルで切り替え、結果は一般利用者の一覧APIで確認) |
 | AC-TAG-010 | テンプレート削除の認可 | 他人のテンプレートを消されない | 非adminユーザーはテンプレートを削除できない | `e2e/features/custom-tag/templates.feature` › 非adminは他人のテンプレートを削除できない | 検証済 |
-| AC-TAG-011 | 自分のテンプレート一覧 | 自作を管理できる | `GET /api/custom-tag-templates/my-templates` が自分の作成分だけを返す | `e2e/features/custom-tag/templates.feature` › 自分のテンプレート一覧には、自分が作ったものだけが出る | 検証済(`@api`。表示する画面が無い。#1128) |
+| AC-TAG-011 | 自分のテンプレート一覧 | 自作を管理できる | ギャラリーの「自分が作ったものだけ」で `GET /api/custom-tag-templates/my-templates` の作成分だけが一覧に出る | `e2e/features/custom-tag/templates.feature` › ギャラリーで自分が作ったものだけに絞り込むと、自分のテンプレートだけが一覧に出る / 他の利用者の自分のテンプレート一覧には、自分が作ったものは出ない(`@api`。一般利用者はギャラリーを開けない) | 検証済(#1128で実測、2026-09-26) |
 | AC-TAG-012 | プロジェクト別タグとプレビュー | プロジェクトごとの見た目を確認できる | 保存前のHTML/CSSでも、実際の投稿と同じ描画結果をプレビューで確認できる | `e2e/features/custom-tag/preview-and-css.feature` › タグのプレビューで、保存前に描画結果を確認できる || 検証済(#1283で実測、2026-09-15) |
-| AC-TAG-013 | CSSセレクタ接頭辞の設定 | 公開先の既存CSSと衝突しない | `PUT /api/projects/{projectId}/css-selector-prefix` の設定が統合CSSのセレクタへ反映され、他プロジェクトと衝突しない | `e2e/features/custom-tag/preview-and-css.feature` › CSSセレクタ接頭辞を変えると、統合CSSのセレクタが接頭辞付きになり他プロジェクトと衝突しない | 検証済(`@api`。変更する画面が無い。#1128) |
+| AC-TAG-013 | CSSセレクタ接頭辞の設定 | 公開先の既存CSSと衝突しない | `PUT /api/projects/{projectId}/css-selector-prefix` の設定が統合CSSのセレクタへ反映され、他プロジェクトと衝突しない(タグ画面の「CSSセレクタ接頭辞」フォームから保存) | `e2e/features/custom-tag/preview-and-css.feature` › CSSセレクタ接頭辞を変えると、統合CSSのセレクタが接頭辞付きになり他プロジェクトと衝突しない | 検証済(#1128で実測、2026-09-26) |
 | AC-TAG-014 | タグデザイン設定(プロジェクト/全体) | タグの見た目を一括で決められる | `/projects/{id}/tag-design-settings` と `/api/tag-design-settings` の保存・生成結果が公開先の見た目に反映される(#861 の再発検知) | — | 未着手 |
 | AC-TAG-015 | コンテンツキャッシュ | 外部URLの情報をカード表示できる | `GET /api/content-cache` が取得結果を返してキャッシュし、内部アドレスへの取得は拒否される(#902 SSRF の再発検知) | `e2e/features/custom-tag/content-cache.feature` › 外部URLのコンテンツを取得してキャッシュできる / 内部アドレスのコンテンツ取得はSSRF対策で拒否される | 検証済 |
 

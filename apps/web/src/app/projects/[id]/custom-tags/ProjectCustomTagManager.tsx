@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef, useState, useTransition } from "reac
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
 import { SAMPLE_CONTENT, TemplateEditor, buildPreviewSrcDoc, fetchPreview } from "@/app/custom-tags/CustomTagManager";
+import { CssSelectorPrefixForm } from "./CssSelectorPrefixForm";
 import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
 
 const initialState: CustomTagFormState = {};
@@ -94,6 +95,8 @@ export function ProjectCustomTagManager({
       <p className="max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
         このプロジェクト専用のカスタムタグです。グローバルタグや他プロジェクトのタグは表示されません。
       </p>
+
+      <CssSelectorPrefixForm projectId={projectId} projectSlug={projectSlug} cssSelectorPrefix={cssSelectorPrefix} />
 
       <CustomTagGenerationForm
         projects={[currentProject]}

@@ -1,5 +1,5 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { After, Given, Step, Then, When } from './fixtures';
+import { After, Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -15,8 +15,7 @@ import {
  *
  * 画面から確かめるものとAPIから確かめるものが混在する。分け方の理由は各 `.feature` の
  * 冒頭に書いてある(要約: 画面のふるまいが受け入れ基準なら画面から、サーバーの判断が
- * 受け入れ基準ならAPIから。加えて **接頭辞の変更・テンプレートの公開/非公開・
- * 自分のテンプレート一覧には、そもそも画面が存在しない**)。
+ * 受け入れ基準ならAPIから)。
  *
  * フィクスチャ(プロジェクト・タグ・テンプレート)は全て `After({ tags: '@custom-tag' })`
  * が片付ける。`custom_tags` / `custom_tag_templates` は content-service のスキーマにあり、
@@ -560,26 +559,23 @@ Then('統合CSSにそのタグのCSSが含まれる', async ({ ctx }) => {
 });
 
 When(
-  /^そのプロジェクトのCSSセレクタ接頭辞を「([^」]+)」に変更する$/,
-  async ({ ctx, request }, prefix: string) => {
-    const response = await request.put(`/api/projects/${ctx.tagProjectId}/css-selector-prefix`, {
-      headers: await authHeaders(request),
-      data: { cssSelectorPrefix: prefix },
-    });
-    expect(
-      response.ok(),
-      `CSSセレクタ接頭辞の保存に失敗しました (status=${response.status()}): ${await response.text()}`
-    ).toBe(true);
-    expect((await response.json()) as { cssSelectorPrefix: string }).toEqual({
-      cssSelectorPrefix: prefix,
+  /^そのプロジェクトのタグ画面でCSSセレクタ接頭辞を「([^」]+)」に変更する$/,
+  async ({ ctx, page }, prefix: string) => {
+    await openTagsTab(page, ctx.tagProjectId as number, 'カスタムタグ管理');
+    const input = page.getByLabel('CSSセレクタ接頭辞');
+    await expect(input).toBeVisible({ timeout: 30_000 });
+    await input.fill(prefix);
+    await page.getByRole('button', { name: '接頭辞を保存' }).click();
+    await expect(page.getByText('CSSセレクタ接頭辞を保存しました。')).toBeVisible({
+      timeout: 30_000,
     });
   }
 );
 
 Then(
-  /^そのプロジェクトの統合CSSでは、タグのセレクタが「([^」]+)」で始まる$/,
-  async ({ ctx, request }, prefix: string) => {
-    const bundle = await fetchProjectCssBundle(request, ctx.tagProjectId as number);
+  /^画面の統合CSSでは、タグのセレクタが「([^」]+)」で始まる$/,
+  async ({ ctx }, prefix: string) => {
+    const bundle = ctx.tagCssBundleShown as string;
     expect(bundle, '統合CSSのセレクタに接頭辞が付いていません').toContain(
       `${prefix} .${SHARED_CSS_CLASS}`
     );
@@ -628,14 +624,49 @@ Then('他の利用者のテンプレート一覧に、そのテンプレート�
   expect(templates.map((template) => template.id)).not.toContain(ctx.tagTemplateId);
 });
 
-Step('そのテンプレートを公開する', async ({ ctx, request }) => {
-  const response = await request.post(`/api/custom-tag-templates/${ctx.tagTemplateId}/publish`, {
+Given('自分が作った公開済みのカスタムタグテンプレートがある', async ({ ctx, request }) => {
+  const template = await createTemplate(request, ctx, null);
+  const published = await request.post(`/api/custom-tag-templates/${template.id}/publish`, {
     headers: await authHeaders(request),
   });
   expect(
-    response.ok(),
-    `テンプレートの公開に失敗しました (status=${response.status()}): ${await response.text()}`
+    published.ok(),
+    `テンプレートの公開に失敗しました (status=${published.status()}): ${await published.text()}`
   ).toBe(true);
+  ctx.tagTemplateId = template.id;
+  ctx.tagTemplateName = template.templateName;
+  ctx.tagTemplateHtml = template.htmlTemplate;
+});
+
+/**
+ * ギャラリーを開き、テンプレートのカードから詳細パネルを開く。
+ * ギャラリーは `"use client"` で、ハイドレーション前のクリックは取りこぼされる(#1312)ため、
+ * 詳細パネルの出現までクリックを再試行する。
+ */
+async function openTemplateDetail(page: Page, query: string, templateName: string): Promise<void> {
+  await page.goto(`/custom-tag-templates${query}`, { waitUntil: 'commit' });
+  await expect(page.getByRole('heading', { name: 'カスタムタグテンプレート' })).toBeVisible({
+    timeout: 30_000,
+  });
+  const cardHeading = page.getByRole('heading', { name: templateName, level: 3 });
+  await expect(cardHeading).toBeVisible({ timeout: 30_000 });
+  const closeButton = page.getByRole('button', { name: '閉じる' });
+  await expect(async () => {
+    await cardHeading.click();
+    await expect(closeButton).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
+When('テンプレートギャラリーでそのテンプレートを公開する', async ({ ctx, page }) => {
+  await openTemplateDetail(page, '?showAll=true', ctx.tagTemplateName as string);
+  await page.getByRole('button', { name: '公開する' }).click();
+  await expect(page.getByRole('button', { name: '閉じる' })).toHaveCount(0, { timeout: 30_000 });
+});
+
+When('テンプレートギャラリーでそのテンプレートを非公開に戻す', async ({ ctx, page }) => {
+  await openTemplateDetail(page, '', ctx.tagTemplateName as string);
+  await page.getByRole('button', { name: '非公開に戻す' }).click();
+  await expect(page.getByRole('button', { name: '閉じる' })).toHaveCount(0, { timeout: 30_000 });
 });
 
 Then('他の利用者のテンプレート一覧にそのテンプレートが現れる', async ({ ctx, request }) => {
@@ -643,19 +674,51 @@ Then('他の利用者のテンプレート一覧にそのテンプレートが�
   expect(templates.map((template) => template.id)).toContain(ctx.tagTemplateId);
 });
 
-When('そのテンプレートを非公開に戻す', async ({ ctx, request }) => {
-  const response = await request.post(`/api/custom-tag-templates/${ctx.tagTemplateId}/unpublish`, {
-    headers: await authHeaders(request),
-  });
-  expect(
-    response.ok(),
-    `テンプレートの非公開化に失敗しました (status=${response.status()}): ${await response.text()}`
-  ).toBe(true);
-});
-
 Then('他の利用者のテンプレート一覧にそのテンプレートは現れない', async ({ ctx, request }) => {
   const templates = await listTemplates(request, await otherUserToken(request));
   expect(templates.map((template) => template.id)).not.toContain(ctx.tagTemplateId);
+});
+
+Then('ギャラリーの既定表示にそのテンプレートが現れる', async ({ ctx, page }) => {
+  await page.goto('/custom-tag-templates', { waitUntil: 'commit' });
+  await expect(
+    page.getByRole('heading', { name: ctx.tagTemplateName as string, level: 3 })
+  ).toBeVisible({ timeout: 30_000 });
+});
+
+Then('ギャラリーの既定表示にそのテンプレートは現れない', async ({ ctx, page }) => {
+  await page.goto('/custom-tag-templates', { waitUntil: 'commit' });
+  await expect(page.getByRole('heading', { name: 'カスタムタグテンプレート' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(
+    page.getByRole('heading', { name: ctx.tagTemplateName as string, level: 3 })
+  ).toHaveCount(0);
+});
+
+When('テンプレートギャラリーで自分が作ったものだけに絞り込む', async ({ page }) => {
+  await page.goto('/custom-tag-templates', { waitUntil: 'commit' });
+  const checkbox = page.getByRole('checkbox', { name: '自分が作ったものだけ' });
+  await expect(checkbox).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    await checkbox.check();
+    await expect(page).toHaveURL(/mine=true/, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+Then('ギャラリーにそのテンプレートが表示される', async ({ ctx, page }) => {
+  await expect(
+    page.getByRole('heading', { name: ctx.tagTemplateName as string, level: 3 })
+  ).toBeVisible({ timeout: 30_000 });
+});
+
+Then('ギャラリーに表示されるテンプレートは、自分のテンプレート一覧と同じである', async ({ page, request }) => {
+  const mine = await listTemplates(request, await adminToken(request), '/my-templates');
+  const expected = mine.map((template) => template.templateName).sort();
+  await expect(async () => {
+    const shown = (await page.getByRole('heading', { level: 3 }).allInnerTexts()).sort();
+    expect(shown).toEqual(expected);
+  }).toPass({ timeout: 30_000 });
 });
 
 When('テンプレートギャラリーでそのテンプレートを複製する', async ({ ctx, page }) => {
@@ -736,15 +799,6 @@ Then('そのテンプレートは残っている', async ({ ctx, request }) => {
     headers: await authHeaders(request),
   });
   expect(response.status(), 'テンプレートが削除されています').toBe(200);
-});
-
-When('自分のテンプレート一覧を取得する', async ({ ctx, request }) => {
-  ctx.tagMyTemplates = await listTemplates(request, await adminToken(request), '/my-templates');
-});
-
-Then('一覧にそのテンプレートが含まれる', async ({ ctx }) => {
-  const templates = ctx.tagMyTemplates as TemplateFixture[];
-  expect(templates.map((template) => template.id)).toContain(ctx.tagTemplateId);
 });
 
 When('他の利用者が自分のテンプレート一覧を取得する', async ({ ctx, request }) => {

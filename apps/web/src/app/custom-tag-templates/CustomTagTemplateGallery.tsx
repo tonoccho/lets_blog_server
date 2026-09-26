@@ -3,7 +3,11 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { CustomTagTemplate, Project } from "@/lib/apiClient";
-import { cloneCustomTagTemplateAction } from "./actions";
+import {
+  cloneCustomTagTemplateAction,
+  publishCustomTagTemplateAction,
+  unpublishCustomTagTemplateAction,
+} from "./actions";
 
 interface TemplateEditorProps {
   initialHtml: string;
@@ -75,10 +79,12 @@ interface TemplateDetailProps {
   projects: Project[];
   onClose: () => void;
   onClone: (template: CustomTagTemplate, clonedName: string) => void;
+  onPublishChange: () => void;
 }
 
-function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateDetailProps) {
+function TemplateDetailPanel({ template, projects, onClose, onClone, onPublishChange }: TemplateDetailProps) {
   const [cloneName, setCloneName] = useState("");
+  const [togglingPublish, setTogglingPublish] = useState(false);
   const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
 
   const handleClone = async () => {
@@ -104,6 +110,25 @@ function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateD
       }
     } catch (err) {
       alert(`複製に失敗しました: ${err}`);
+    }
+  };
+
+  // ギャラリー自体が requireAdminSession() で保護されているため、この操作は admin だけが到達する。
+  const handleTogglePublish = async () => {
+    setTogglingPublish(true);
+    try {
+      const { error } = template.isPublished
+        ? await unpublishCustomTagTemplateAction(template.id)
+        : await publishCustomTagTemplateAction(template.id);
+      if (error) {
+        alert(`公開状態の変更に失敗しました: ${error}`);
+      } else {
+        onPublishChange();
+      }
+    } catch (err) {
+      alert(`公開状態の変更に失敗しました: ${err}`);
+    } finally {
+      setTogglingPublish(false);
     }
   };
 
@@ -143,6 +168,14 @@ function TemplateDetailPanel({ template, projects, onClose, onClone }: TemplateD
             <span className="text-sm text-neutral-600 dark:text-neutral-400">公開状態</span>
             <p className="text-sm">{template.isPublished ? "公開" : "非公開"}</p>
           </div>
+          <button
+            type="button"
+            onClick={handleTogglePublish}
+            disabled={togglingPublish}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:bg-neutral-100 dark:disabled:bg-neutral-800 disabled:text-neutral-400"
+          >
+            {template.isPublished ? "非公開に戻す" : "公開する"}
+          </button>
         </div>
 
         <TemplateEditor initialHtml={template.htmlTemplate} initialCss={template.cssContent || ""} />
@@ -185,6 +218,7 @@ export function CustomTagTemplateGallery({
   currentCategory,
   currentSearch,
   showAll,
+  mine,
 }: {
   templates: CustomTagTemplate[];
   projects: Project[];
@@ -192,6 +226,7 @@ export function CustomTagTemplateGallery({
   currentCategory?: string;
   currentSearch?: string;
   showAll: boolean;
+  mine: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -200,6 +235,7 @@ export function CustomTagTemplateGallery({
   const [searchValue, setSearchValue] = useState(currentSearch || "");
   const [categoryValue, setCategoryValue] = useState(currentCategory || "");
   const [showAllValue, setShowAllValue] = useState(showAll);
+  const [mineValue, setMineValue] = useState(mine);
 
   useEffect(() => {
     const uniqueCategories = Array.from(new Set(templates.map((t) => t.category).filter(Boolean) as string[]));
@@ -207,22 +243,23 @@ export function CustomTagTemplateGallery({
     setCategories(uniqueCategories.sort());
   }, [templates]);
 
-  const updateSearchParams = (newSearch?: string, newCategory?: string, newShowAll?: boolean) => {
+  const updateSearchParams = (newSearch?: string, newCategory?: string, newShowAll?: boolean, newMine?: boolean) => {
     const params = new URLSearchParams();
     if (currentProjectId) params.set("projectId", String(currentProjectId));
     if (newSearch) params.set("search", newSearch);
     if (newCategory) params.set("category", newCategory);
     if (newShowAll) params.set("showAll", "true");
+    if (newMine) params.set("mine", "true");
     router.push(`/custom-tag-templates?${params.toString()}`);
   };
 
   const handleSearch = () => {
-    updateSearchParams(searchValue, categoryValue, showAllValue);
+    updateSearchParams(searchValue, categoryValue, showAllValue, mineValue);
   };
 
   const handleCategoryChange = (category: string) => {
     setCategoryValue(category);
-    updateSearchParams(searchValue, category, showAllValue);
+    updateSearchParams(searchValue, category, showAllValue, mineValue);
   };
 
   return (
@@ -254,10 +291,21 @@ export function CustomTagTemplateGallery({
                 checked={showAllValue}
                 onChange={(e) => {
                   setShowAllValue(e.target.checked);
-                  updateSearchParams(searchValue, categoryValue, e.target.checked);
+                  updateSearchParams(searchValue, categoryValue, e.target.checked, mineValue);
                 }}
               />
               <span className="text-neutral-600 dark:text-neutral-400">未公開を含める</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={mineValue}
+                onChange={(e) => {
+                  setMineValue(e.target.checked);
+                  updateSearchParams(searchValue, categoryValue, showAllValue, e.target.checked);
+                }}
+              />
+              <span className="text-neutral-600 dark:text-neutral-400">自分が作ったものだけ</span>
             </label>
           </div>
         </div>
@@ -349,6 +397,10 @@ export function CustomTagTemplateGallery({
           projects={projects}
           onClose={() => setSelectedTemplate(null)}
           onClone={() => {
+            setSelectedTemplate(null);
+            router.refresh();
+          }}
+          onPublishChange={() => {
             setSelectedTemplate(null);
             router.refresh();
           }}
