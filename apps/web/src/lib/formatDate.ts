@@ -120,6 +120,20 @@ export function formatOperationLogDateTime(iso: string, timeZone?: string | null
 }
 
 /**
+ * 日時を UTC の `Z` 付き ISO-8601(秒まで。例 `2026-09-11T09:10:35Z`)へ整形する(issue #1260)。
+ * 「コピー」で作る共有用トレースの日時に使い、共有先で時刻の基準が曖昧にならないようにする。
+ * オフセット無しの入力は UTC として解釈する(`normalizeToUtcIfOffsetMissing`)。
+ * パース不能な入力は例外を投げず、そのまま返す。
+ */
+export function formatUtcIso8601(iso: string): string {
+  const date = new Date(normalizeToUtcIfOffsetMissing(iso));
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  return date.toISOString().slice(0, 19) + "Z";
+}
+
+/**
  * 閲覧者TZの壁時計(`<input type="datetime-local">` の値。例 `2026-09-10T09:30`)を、
  * バックエンドが受ける UTC の日時文字列(オフセット指定子なし。例 `2026-09-10T00:30:00`)へ
  * 換算する(issue #1138)。

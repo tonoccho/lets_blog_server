@@ -3,6 +3,7 @@ import { listUnifiedOperationLogs, type UnifiedLogSourceType } from "@/lib/apiCl
 import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { localDateTimeToUtcIso } from "@/lib/formatDate";
 import { UnifiedLogRow } from "./UnifiedLogRow";
+import { OperationLogTimeZoneLabel } from "./OperationLogTimeZoneLabel";
 
 const PAGE_SIZE = 50;
 
@@ -62,6 +63,7 @@ export default async function OperationLogsPage({
           {isAdmin ? "監査ログ" : ""}
           を時系列で一覧表示します。操作の行は「コピー」でトレースを取得し、AIやサポート担当者に共有できます。
         </p>
+        <OperationLogTimeZoneLabel personalTimeZone={timezone} />
       </div>
 
       <form className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5" method="get">

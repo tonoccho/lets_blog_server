@@ -1,5 +1,5 @@
 import type { OperationLogEntry } from "@/lib/apiClient";
-import { formatOperationLogDateTime } from "@/lib/formatDate";
+import { formatUtcIso8601 } from "@/lib/formatDate";
 
 export interface OperationGroup {
   operationId: string;
@@ -33,18 +33,21 @@ export function groupOperationLogEntries(entries: OperationLogEntry[]): Operatio
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-/** AIやサポート担当者との共有を想定した、操作の完全なトレースをテキスト化する。 */
-export function describeOperationTraceText(group: OperationGroup, timezone: string | null): string {
+/**
+ * AIやサポート担当者との共有を想定した、操作の完全なトレースをテキスト化する。
+ * 日時は閲覧者のTZに依らずUTC(`Z`付きISO-8601)で出力する(issue #1260)。
+ */
+export function describeOperationTraceText(group: OperationGroup): string {
   const lines = [
     `操作ID: ${group.operationId}`,
-    `開始日時: ${formatOperationLogDateTime(group.startedAt, timezone)}`,
+    `開始日時: ${formatUtcIso8601(group.startedAt)}`,
     `呼び出し件数: ${group.entries.length}`,
     `結果: ${group.success ? "成功" : "エラーあり"}`,
     "",
     "呼び出し一覧:",
   ];
   group.entries.forEach((entry, index) => {
-    lines.push(`${index + 1}. [${formatOperationLogDateTime(entry.createdAt, timezone)}] ${entry.method} ${entry.path}`);
+    lines.push(`${index + 1}. [${formatUtcIso8601(entry.createdAt)}] ${entry.method} ${entry.path}`);
     lines.push(
       `   ステータス: ${entry.statusCode ?? "(応答なし)"} / ${entry.durationMs}ms / ${entry.success ? "成功" : "失敗"}`
     );

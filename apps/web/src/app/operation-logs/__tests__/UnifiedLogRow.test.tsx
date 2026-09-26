@@ -75,4 +75,32 @@ describe("UnifiedLogRow", () => {
     render(<UnifiedLogRow entry={entry({ sourceType: "AI_JOB", operationId: "op-1" })} timezone={null} />);
     expect(screen.queryByRole("button", { name: "コピー" })).not.toBeInTheDocument();
   });
+
+  describe("日時の表示タイムゾーン(issue #1260)", () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    function mockBrowserTimeZone(timeZone: string) {
+      jest
+        .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+        .mockReturnValue({ timeZone } as Intl.ResolvedDateTimeFormatOptions);
+    }
+
+    it("個人設定TZがあればブラウザTZに関係なくそれで表示する", () => {
+      mockBrowserTimeZone("Pacific/Auckland");
+      render(<UnifiedLogRow entry={entry({ createdAt: "2026-09-11T09:10:35" })} timezone="Asia/Tokyo" />);
+      expect(screen.getByText("2026/09/11 18:10:35")).toBeInTheDocument();
+    });
+
+    it("個人設定TZが未設定ならブラウザTZ(Pacific/Auckland)で表示する", () => {
+      mockBrowserTimeZone("Pacific/Auckland");
+      render(<UnifiedLogRow entry={entry({ createdAt: "2026-09-11T09:10:35" })} timezone={null} />);
+      expect(screen.getByText("2026/09/11 21:10:35")).toBeInTheDocument();
+    });
+
+    it("個人設定TZが未設定ならブラウザTZ(America/New_York)で表示する", () => {
+      mockBrowserTimeZone("America/New_York");
+      render(<UnifiedLogRow entry={entry({ createdAt: "2026-09-11T09:10:35" })} timezone={null} />);
+      expect(screen.getByText("2026/09/11 05:10:35")).toBeInTheDocument();
+    });
+  });
 });

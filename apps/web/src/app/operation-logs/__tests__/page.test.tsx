@@ -23,6 +23,8 @@ jest.mock('@/lib/apiClient', () => ({
 }));
 
 jest.mock('../UnifiedLogRow', () => ({ UnifiedLogRow: () => null }));
+import { OperationLogTimeZoneLabel } from '../OperationLogTimeZoneLabel';
+jest.mock('../OperationLogTimeZoneLabel', () => ({ OperationLogTimeZoneLabel: () => null }));
 
 import OperationLogsPage from '../page';
 
@@ -125,5 +127,21 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
     const tree = await render({});
     const options = collect(tree, (e) => e.type === 'option').map((e) => e.props.value);
     expect(options).not.toContain('AUDIT');
+  });
+
+  it('表示中のタイムゾーンの表記に個人設定TZを渡す(issue #1260)', async () => {
+    const tree = await render({});
+
+    const label = collect(tree, (e) => e.type === OperationLogTimeZoneLabel)[0];
+    expect(label?.props.personalTimeZone).toBe('Asia/Tokyo');
+  });
+
+  it('個人設定TZが未設定ならnullを渡す(ブラウザTZはクライアントで解決する)', async () => {
+    getViewerTimeZone.mockResolvedValue(null);
+
+    const tree = await render({});
+
+    const label = collect(tree, (e) => e.type === OperationLogTimeZoneLabel)[0];
+    expect(label?.props.personalTimeZone).toBeNull();
   });
 });

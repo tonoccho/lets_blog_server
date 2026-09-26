@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { formatOperationLogDateTime } from "@/lib/formatDate";
+import { formatOperationLogDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 import type { UnifiedLogEntry, UnifiedLogSourceType } from "@/lib/apiClient";
 import { copyOperationTraceAction } from "./actions";
+import { useViewerTimeZone } from "./useViewerTimeZone";
 
 const SOURCE_LABEL: Record<UnifiedLogSourceType, string> = {
   OPERATION: "操作",
@@ -29,6 +30,8 @@ function statusBadgeClass(status: string | null): string {
 
 export function UnifiedLogRow({ entry, timezone }: { entry: UnifiedLogEntry; timezone: string | null }) {
   const [copied, setCopied] = useState(false);
+  // 個人設定TZ、無ければブラウザTZ。ブラウザTZが未解決の間(SSR・ハイドレーション中)は仮表示(issue #1260)。
+  const displayTimeZone = useViewerTimeZone(timezone);
 
   async function handleCopy() {
     if (!entry.operationId) return;
@@ -42,7 +45,7 @@ export function UnifiedLogRow({ entry, timezone }: { entry: UnifiedLogEntry; tim
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 dark:border-neutral-800 px-4 py-3 last:border-0">
       <div className="flex flex-1 flex-wrap items-center gap-3 text-sm">
         <span className="w-36 shrink-0 text-neutral-600 dark:text-neutral-400">
-          {formatOperationLogDateTime(entry.createdAt, timezone)}
+          {displayTimeZone ? formatOperationLogDateTime(entry.createdAt, displayTimeZone) : TIMEZONE_PENDING_PLACEHOLDER}
         </span>
         <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${SOURCE_BADGE_CLASS[entry.sourceType]}`}>
           {SOURCE_LABEL[entry.sourceType]}

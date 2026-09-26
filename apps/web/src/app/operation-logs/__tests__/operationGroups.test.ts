@@ -72,7 +72,7 @@ describe('describeOperationTraceText', () => {
     ]
     const [group] = groupOperationLogEntries(entries)
 
-    const text = describeOperationTraceText(group, 'Asia/Tokyo')
+    const text = describeOperationTraceText(group)
 
     expect(text).toContain('操作ID: op-1')
     expect(text).toContain('呼び出し件数: 2')
@@ -80,5 +80,18 @@ describe('describeOperationTraceText', () => {
     expect(text).toContain('GET /api/sites')
     expect(text).toContain('POST /api/sites')
     expect(text).toContain('エラー: APIエラー (500): internal error')
+  })
+
+  it('日時はUTCのZ付きISO-8601で出力する(issue #1260)', () => {
+    const [group] = groupOperationLogEntries([
+      entry({ id: 1, operationId: 'op-1', createdAt: '2026-09-11T09:10:35' }),
+      entry({ id: 2, operationId: 'op-1', createdAt: '2026-09-11T09:10:36' }),
+    ])
+
+    const text = describeOperationTraceText(group)
+
+    expect(text).toContain('開始日時: 2026-09-11T09:10:35Z')
+    expect(text).toContain('1. [2026-09-11T09:10:35Z] GET /api/sites')
+    expect(text).toContain('2. [2026-09-11T09:10:36Z] GET /api/sites')
   })
 })

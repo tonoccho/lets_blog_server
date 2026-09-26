@@ -1,6 +1,7 @@
 import {
   formatDateTime,
   formatOperationLogDateTime,
+  formatUtcIso8601,
   formatDateYYYYMMDD,
   localDateTimeToUtcIso,
 } from '../formatDate'
@@ -219,5 +220,23 @@ describe('localDateTimeToUtcIso(issue #1138: 閲覧者TZの壁時計 -> バッ�
     expect(localDateTimeToUtcIso('', 'UTC')).toBeUndefined()
     expect(localDateTimeToUtcIso(undefined, 'UTC')).toBeUndefined()
     expect(localDateTimeToUtcIso('not-a-date', 'UTC')).toBeUndefined()
+  })
+})
+
+describe('formatUtcIso8601(issue #1260: コピー用のUTC日時)', () => {
+  it('オフセット無しの日時をUTCとして、Z付きISO-8601(秒まで)で返す', () => {
+    expect(formatUtcIso8601('2026-09-11T09:10:35')).toBe('2026-09-11T09:10:35Z')
+  })
+
+  it('ミリ秒を含む入力はミリ秒を落とす', () => {
+    expect(formatUtcIso8601('2026-09-11T09:10:35.123Z')).toBe('2026-09-11T09:10:35Z')
+  })
+
+  it('オフセット付き入力はUTCへ換算する', () => {
+    expect(formatUtcIso8601('2026-09-11T18:10:35+09:00')).toBe('2026-09-11T09:10:35Z')
+  })
+
+  it('パース不能な入力は例外を投げず、そのまま返す', () => {
+    expect(formatUtcIso8601('not-a-date')).toBe('not-a-date')
   })
 })

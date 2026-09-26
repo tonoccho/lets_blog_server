@@ -110,6 +110,8 @@ const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; hea
   // issue #1364(親issue #1261 分割C)。`users/page.tsx:30`・`projects/page.tsx:14`の見出し。
   ユーザー管理: { path: () => '/users', heading: 'ユーザー管理' },
   プロジェクト: { path: () => '/projects', heading: 'プロジェクト' },
+  // issue #1260。`operation-logs/page.tsx`の見出し。
+  操作ログ: { path: () => '/operation-logs', heading: '操作ログ' },
   // トップレベル`/posts`一覧(`posts/page.tsx:15`の見出しは`投稿履歴`だが、`TARGET_PAGES`の
   // キーが既存の`投稿履歴`(`/projects/{id}/posts`)と重複しないよう区別する)。
   投稿履歴一覧: { path: () => '/posts', heading: '投稿履歴' },
@@ -121,7 +123,7 @@ const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; hea
  * 専用の `BrowserContext` / `Page` を作り、その中でログインする。
  */
 When(
-  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|生成画像ギャラリー画面|サイト一覧|投稿履歴一覧|投稿履歴|ユーザー管理|プロジェクト)を開く$/,
+  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|生成画像ギャラリー画面|サイト一覧|投稿履歴一覧|投稿履歴|ユーザー管理|プロジェクト|操作ログ)を開く$/,
   async ({ ctx, page }, timezoneId: string, targetName: string) => {
     const target = TARGET_PAGES[targetName];
     const browser = page.context().browser();
@@ -869,5 +871,63 @@ After({ tags: '@panel-timezone' }, async ({ ctx, request }) => {
         timezone: (ctx.panelTzOriginalTimezone as string | null) ?? 'Asia/Tokyo',
       },
     });
+  }
+});
+
+// ------------------------------------------------------- issue #1260: 操作ログ画面
+
+/** `uiQuality.steps.ts`の「操作ログに記録される操作を1件実行しておく」が積む値を使う。 */
+Then(
+  /^操作ログの記録された操作の日時が「([^」]+)」への換算値と一致する$/,
+  async ({ ctx }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const iso = ctx.at18TimezoneEntryIso as string;
+    const marker = ctx.at18TimezoneMarker as string;
+    const expected = new Date(withUtcOffsetIfMissing(iso)).toLocaleString('ja-JP', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const titleCell = tzPage.getByText(marker, { exact: true });
+    await expect(titleCell).toBeVisible({ timeout: 15_000 });
+    await expect(titleCell.locator('xpath=..')).toContainText(expected);
+  }
+);
+
+Then(
+  /^操作ログ画面に表示中のタイムゾーンとして「([^」]+)」が表記される$/,
+  async ({ ctx }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    await expect(tzPage.getByTestId('operation-log-timezone')).toContainText(timeZone, {
+      timeout: 15_000,
+    });
+  }
+);
+
+When('操作ログの最初の操作の「コピー」を押す', async ({ ctx }) => {
+  const tzPage = ctx.panelTzPage as Page;
+  const tzContext = ctx.panelTzContext as BrowserContext;
+  await tzContext.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await tzPage.getByRole('button', { name: 'コピー' }).first().click();
+  await expect(tzPage.getByRole('button', { name: 'コピーしました' }).first()).toBeVisible({
+    timeout: 15_000,
+  });
+  ctx.operationLogCopiedText = await tzPage.evaluate(() => navigator.clipboard.readText());
+});
+
+Then('コピーされたトレース文字列の日時がすべてUTCのZ付きISO-8601形式である', async ({ ctx }) => {
+  const text = ctx.operationLogCopiedText as string;
+  const utc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+  const started = text.match(/^開始日時: (.+)$/m)?.[1] ?? '';
+  expect(started, `開始日時がUTC形式でない: ${text}`).toMatch(utc);
+  const calls = [...text.matchAll(/^\d+\. \[([^\]]+)\]/gm)].map((m) => m[1]);
+  expect(calls.length, `呼び出し一覧が空: ${text}`).toBeGreaterThan(0);
+  for (const value of calls) {
+    expect(value).toMatch(utc);
   }
 });

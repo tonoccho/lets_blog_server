@@ -1,7 +1,7 @@
 "use server";
 
 import { getOperationTrace } from "@/lib/apiClient";
-import { requireSession, getViewerTimeZone } from "@/lib/session";
+import { requireSession } from "@/lib/session";
 import { groupOperationLogEntries, describeOperationTraceText } from "./operationGroups";
 
 /**
@@ -10,12 +10,11 @@ import { groupOperationLogEntries, describeOperationTraceText } from "./operatio
  */
 export async function copyOperationTraceAction(operationId: string): Promise<string> {
   await requireSession();
-  const timezone = await getViewerTimeZone();
 
   const entries = await getOperationTrace(operationId);
   const [group] = groupOperationLogEntries(entries);
   if (!group) {
     return `操作ID: ${operationId}\n(記録が見つかりませんでした)`;
   }
-  return describeOperationTraceText(group, timezone);
+  return describeOperationTraceText(group);
 }
