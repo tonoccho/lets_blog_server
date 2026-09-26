@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -60,6 +62,7 @@ public class BackupService {
     private static final String MYSQL_ENTRY_SUFFIX = ".sql";
     private static final String POSTGRES_ENTRY_PREFIX = "postgres/";
     private static final String POSTGRES_ENTRY_SUFFIX = ".dump";
+    private static final Pattern POSTGRES_MAJOR_VERSION = Pattern.compile("PostgreSQL\\)\\s+(\\d+)");
 
     private final BackupProperties backupProperties;
     private final Path generatedImagesDir;
@@ -84,7 +87,9 @@ public class BackupService {
             String encryptionKeyHash,
             String createdAt,
             List<String> mysqlSchemas,
-            List<String> postgresDatabases) {
+            List<String> postgresDatabases,
+            String pgDumpVersion,
+            String mysqldumpVersion) {
     }
 
     @AuditLog(action = AuditLogAction.DB_BACKUP_DOWNLOADED, resourceType = "DATABASE")
@@ -94,7 +99,8 @@ public class BackupService {
         List<String> mysqlSchemas = backupProperties.getMysql().getSchemas();
         String postgresDatabase = backupProperties.getPostgres().getDatabase();
         BackupMetadata metadata = new BackupMetadata(
-                sha256Hex(encryptionKey), Instant.now().toString(), mysqlSchemas, List.of(postgresDatabase));
+                sha256Hex(encryptionKey), Instant.now().toString(), mysqlSchemas, List.of(postgresDatabase),
+                queryClientVersion("pg_dump"), queryClientVersion("mysqldump"));
 
         ByteArrayOutputStream zipBytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(zipBytes)) {
@@ -158,6 +164,10 @@ public class BackupService {
                             + "これを理解した上で続行する場合は、確認チェックを付けて再実行してください。");
         }
 
+        if (postgresDump != null) {
+            verifyPostgresClientCompatibility(metadata);
+        }
+
         // アーカイブ内のエントリ名をそのままスキーマ名としてmysqlコマンドへ渡さず、設定済みの既知スキーマ
         // (backupProperties.mysql.schemas)にのみ制限する(細工されたアーカイブによる想定外の
         // データベースへのアクセスを防ぐ、#570のスキーマ分離の意図を維持するための防御)。
@@ -179,6 +189,53 @@ public class BackupService {
 
         log.info("バックアップからのリストアが完了しました (mysqlSchemas={}, postgresRestored={}, images={})",
                 restoredSchemaCount, postgresDump != null, generatedImageFiles.size());
+    }
+
+    /**
+     * アーカイブを作ったpg_dumpのメジャーバージョンが現在のpg_restoreより新しい場合、復元を始める前に
+     * 拒否する(新しいpg_dumpのcustom形式は古いpg_restoreが読めない。issue #1204)。バージョンが
+     * 記録されていない(旧アーカイブ)か、解釈できない場合は判別不能として警告のみで続行する
+     * (復元可能性を優先し、ブロックしない)。
+     */
+    private void verifyPostgresClientCompatibility(BackupMetadata metadata) {
+        String archiveVersion = metadata == null ? null : metadata.pgDumpVersion();
+        if (archiveVersion == null) {
+            log.warn("アーカイブにpg_dumpのバージョンが記録されていないため、現在のpg_restoreで復元できるか判別できません"
+                    + "(この機能の導入前に作成されたアーカイブ)。復元を続行します");
+            return;
+        }
+        Integer archiveMajor = parsePostgresMajor(archiveVersion);
+        if (archiveMajor == null) {
+            log.warn("アーカイブのpg_dumpバージョン '{}' を解釈できず、復元できるか判別できません。復元を続行します",
+                    archiveVersion);
+            return;
+        }
+        String currentVersion = queryClientVersion("pg_restore");
+        Integer currentMajor = parsePostgresMajor(currentVersion);
+        if (currentMajor == null) {
+            log.warn("現在のpg_restoreバージョン '{}' を解釈できず、復元できるか判別できません。復元を続行します",
+                    currentVersion);
+            return;
+        }
+        if (archiveMajor > currentMajor) {
+            throw new BackupException("このバックアップは " + archiveVersion + " で作成されたため、"
+                    + "現在の " + currentVersion + " では読み込めません(バージョンの不一致)。"
+                    + "アーカイブを作成したバージョン以上のpg_restoreが必要です");
+        }
+    }
+
+    private static Integer parsePostgresMajor(String versionOutput) {
+        Matcher matcher = POSTGRES_MAJOR_VERSION.matcher(versionOutput);
+        return matcher.find() ? Integer.valueOf(matcher.group(1)) : null;
+    }
+
+    /**
+     * {@code <binary> --version}を実行し、トリムした出力を返す(例: "pg_dump (PostgreSQL) 15.4")。
+     * パッケージプライベート(テストで差し替えるため。issue #1204)。
+     */
+    String queryClientVersion(String binary) {
+        byte[] output = runProcess(List.of(binary, "--version"), "PGPASSWORD", "", null, binary + " --version");
+        return new String(output, StandardCharsets.UTF_8).strip();
     }
 
     private byte[] dumpMysqlSchema(String schema) {

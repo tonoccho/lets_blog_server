@@ -8,7 +8,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.mockito.Mock;
+import org.slf4j.LoggerFactory;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.ByteArrayInputStream;
@@ -39,7 +44,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -90,7 +102,7 @@ class BackupServiceTest {
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             zip.putNextEntry(new ZipEntry("metadata.json"));
             zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
-                    encryptionKeyHash, Instant.now().toString(), MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE))));
+                    encryptionKeyHash, Instant.now().toString(), MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE), null, null)));
             zip.closeEntry();
 
             for (String schema : MYSQL_SCHEMAS) {
@@ -111,7 +123,7 @@ class BackupServiceTest {
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             zip.putNextEntry(new ZipEntry("metadata.json"));
             zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
-                    sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE))));
+                    sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE), null, null)));
             zip.closeEntry();
 
             for (String schema : MYSQL_SCHEMAS) {
@@ -465,7 +477,7 @@ class BackupServiceTest {
                 zip.putNextEntry(new ZipEntry("metadata.json"));
                 zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
                         sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS,
-                        List.of(POSTGRES_DATABASE))));
+                        List.of(POSTGRES_DATABASE), null, null)));
                 zip.closeEntry();
 
                 // "mysql" is the MySQL system schema, not in MYSQL_SCHEMAS: must not be executed against.
@@ -555,7 +567,7 @@ class BackupServiceTest {
                 zip.putNextEntry(new ZipEntry("metadata.json"));
                 zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
                         sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS,
-                        List.of(POSTGRES_DATABASE))));
+                        List.of(POSTGRES_DATABASE), null, null)));
                 zip.closeEntry();
 
                 zip.putNextEntry(new ZipEntry("mysql/not-an-allowed-schema.sql"));
@@ -658,6 +670,232 @@ class BackupServiceTest {
                     "an InterruptedException during waitFor should surface as a BackupException");
             assertTrue(interruptedWhenCaught.get(),
                     "the thread's interrupt status must be restored before the exception propagates");
+        }
+    }
+
+    @Nested
+    @DisplayName("Client version metadata and restore compatibility check (issue #1204)")
+    class ClientVersionMetadataTests {
+
+        private BackupService spied;
+
+        @BeforeEach
+        void spyService() {
+            spied = spy(service);
+        }
+
+        private byte[] archiveWithMetadataJson(String metadataJson) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                if (metadataJson != null) {
+                    zip.putNextEntry(new ZipEntry("metadata.json"));
+                    zip.write(metadataJson.getBytes(StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+                zip.putNextEntry(new ZipEntry("mysql/lbs_identity.sql"));
+                zip.write("SELECT 1;".getBytes());
+                zip.closeEntry();
+                zip.putNextEntry(new ZipEntry("postgres/" + POSTGRES_DATABASE + ".dump"));
+                zip.write(new byte[]{1, 2, 3});
+                zip.closeEntry();
+            }
+            return out.toByteArray();
+        }
+
+        private byte[] archiveWithPgDumpVersion(String pgDumpVersion) throws IOException {
+            byte[] json = new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                    sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS,
+                    List.of(POSTGRES_DATABASE), pgDumpVersion, null));
+            return archiveWithMetadataJson(new String(json, StandardCharsets.UTF_8));
+        }
+
+        private ListAppender<ILoggingEvent> captureLogs() {
+            Logger logger = (Logger) LoggerFactory.getLogger(BackupService.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            return appender;
+        }
+
+        private void detach(ListAppender<ILoggingEvent> appender) {
+            ((Logger) LoggerFactory.getLogger(BackupService.class)).detachAppender(appender);
+        }
+
+        private void stubRestoreProcesses() {
+            doReturn(new byte[0]).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("createBackup records the pg_dump and mysqldump versions in metadata.json")
+        void createBackupRecordsClientVersions() throws Exception {
+            doReturn("pg_dump (PostgreSQL) 15.4").when(spied).queryClientVersion("pg_dump");
+            doReturn("mysqldump  Ver 8.0.36 for Linux on x86_64").when(spied).queryClientVersion("mysqldump");
+            doReturn(new byte[]{1}).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+
+            byte[] archive = spied.createBackup();
+
+            BackupService.BackupMetadata metadata = null;
+            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    if ("metadata.json".equals(entry.getName())) {
+                        metadata = new ObjectMapper().readValue(zip.readAllBytes(),
+                                BackupService.BackupMetadata.class);
+                    }
+                }
+            }
+            assertThat(metadata, notNullValue());
+            assertEquals("pg_dump (PostgreSQL) 15.4", metadata.pgDumpVersion());
+            assertEquals("mysqldump  Ver 8.0.36 for Linux on x86_64", metadata.mysqldumpVersion());
+        }
+
+        @Test
+        @DisplayName("queryClientVersion runs '<binary> --version' and returns the trimmed output")
+        void queryClientVersionTrimsOutput() {
+            doReturn("pg_dump (PostgreSQL) 15.4\n".getBytes(StandardCharsets.UTF_8)).when(spied)
+                    .runProcess(eq(List.of("pg_dump", "--version")), anyString(), anyString(), any(), anyString());
+
+            assertEquals("pg_dump (PostgreSQL) 15.4", spied.queryClientVersion("pg_dump"));
+        }
+
+        @Test
+        @DisplayName("metadata.json written before this change (no version fields) still deserializes, as null")
+        void legacyMetadataDeserializesWithNullVersions() throws Exception {
+            String legacy = "{\"encryptionKeyHash\":\"h\",\"createdAt\":\"t\","
+                    + "\"mysqlSchemas\":[\"a\"],\"postgresDatabases\":[\"b\"]}";
+
+            BackupService.BackupMetadata metadata =
+                    new ObjectMapper().readValue(legacy, BackupService.BackupMetadata.class);
+
+            assertEquals(null, metadata.pgDumpVersion());
+            assertEquals(null, metadata.mysqldumpVersion());
+        }
+
+        @Test
+        @DisplayName("restore rejects an archive made by a newer pg_dump than pg_restore, before starting any restore process")
+        void rejectsArchiveNewerThanPgRestore() throws Exception {
+            doReturn("pg_restore (PostgreSQL) 15.4").when(spied).queryClientVersion("pg_restore");
+            byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 18.0");
+
+            BackupException ex = assertThrows(BackupException.class,
+                    () -> spied.restoreBackup(new ByteArrayInputStream(archive), true, false));
+
+            assertThat(ex.getMessage(), containsString("pg_dump (PostgreSQL) 18.0"));
+            assertThat(ex.getMessage(), containsString("pg_restore (PostgreSQL) 15.4"));
+            verify(spied, never()).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("restore proceeds when the archive's pg_dump major equals pg_restore's")
+        void acceptsEqualMajor() throws Exception {
+            doReturn("pg_restore (PostgreSQL) 15.6").when(spied).queryClientVersion("pg_restore");
+            stubRestoreProcesses();
+            byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 15.4");
+
+            spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+
+            verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+        }
+
+        @Test
+        @DisplayName("restore proceeds when the archive was made by an older pg_dump")
+        void acceptsOlderMajor() throws Exception {
+            doReturn("pg_restore (PostgreSQL) 15.6").when(spied).queryClientVersion("pg_restore");
+            stubRestoreProcesses();
+            byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 13.2");
+
+            spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+
+            verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+        }
+
+        @Test
+        @DisplayName("legacy archive whose metadata has no version warns that the client version is unknown, and restores")
+        void legacyMetadataWarnsAndProceeds() throws Exception {
+            stubRestoreProcesses();
+            String legacy = "{\"encryptionKeyHash\":\"" + sha256Hex(ENCRYPTION_KEY) + "\",\"createdAt\":\"t\","
+                    + "\"mysqlSchemas\":[\"lbs_identity\"],\"postgresDatabases\":[\"keycloak\"]}";
+            byte[] archive = archiveWithMetadataJson(legacy);
+            ListAppender<ILoggingEvent> appender = captureLogs();
+            try {
+                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+            } finally {
+                detach(appender);
+            }
+
+            assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                    && e.getFormattedMessage().contains("判別できません")));
+            verify(spied, never()).queryClientVersion(anyString());
+            verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+        }
+
+        @Test
+        @DisplayName("archive without metadata.json warns that the client version is unknown, and restores")
+        void missingMetadataWarnsAndProceeds() throws Exception {
+            stubRestoreProcesses();
+            byte[] archive = archiveWithMetadataJson(null);
+            ListAppender<ILoggingEvent> appender = captureLogs();
+            try {
+                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+            } finally {
+                detach(appender);
+            }
+
+            assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                    && e.getFormattedMessage().contains("判別できません")));
+        }
+
+        @Test
+        @DisplayName("an unparsable recorded pg_dump version is treated as undeterminable: warn and restore")
+        void unparsableRecordedVersionWarnsAndProceeds() throws Exception {
+            stubRestoreProcesses();
+            byte[] archive = archiveWithPgDumpVersion("garbage");
+            ListAppender<ILoggingEvent> appender = captureLogs();
+            try {
+                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+            } finally {
+                detach(appender);
+            }
+            assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                    && e.getFormattedMessage().contains("判別できません")));
+            verify(spied, never()).queryClientVersion(anyString());
+        }
+
+        @Test
+        @DisplayName("an unparsable current pg_restore version is treated as undeterminable: warn and restore")
+        void unparsableCurrentVersionWarnsAndProceeds() throws Exception {
+            doReturn("garbage").when(spied).queryClientVersion("pg_restore");
+            stubRestoreProcesses();
+            byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 18.0");
+            ListAppender<ILoggingEvent> appender = captureLogs();
+            try {
+                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+            } finally {
+                detach(appender);
+            }
+            assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                    && e.getFormattedMessage().contains("判別できません")));
+        }
+
+        @Test
+        @DisplayName("an archive with a recorded version but no postgres dump does not query pg_restore")
+        void noPostgresDumpSkipsComparison() throws Exception {
+            stubRestoreProcesses();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("metadata.json"));
+                zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                        sha256Hex(ENCRYPTION_KEY), "t", MYSQL_SCHEMAS, List.of(POSTGRES_DATABASE),
+                        "pg_dump (PostgreSQL) 18.0", null)));
+                zip.closeEntry();
+                zip.putNextEntry(new ZipEntry("mysql/lbs_identity.sql"));
+                zip.write("SELECT 1;".getBytes());
+                zip.closeEntry();
+            }
+
+            spied.restoreBackup(new ByteArrayInputStream(out.toByteArray()), true, false);
+
+            verify(spied, never()).queryClientVersion(anyString());
         }
     }
 }
