@@ -219,9 +219,12 @@ cd apps/extension && npm audit --audit-level=moderate
 | ディスク | Dockerイメージに加え、ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 
-CPUのみでも動作するイメージタグ(`COMFYUI_IMAGE`をCPU向けタグに変更)にすれば起動は可能だが、
-AI機能(下書き/校正支援・画像生成)が実用的な速度で動作しないため、AI機能を利用する場合は
-上記GPU要件を満たすことを前提とする。
+GPUを持たないホストでも、ComfyUIをCPUで実行できる(issue #1395)。`.env` で
+`COMFYUI_IMAGE=yanwk/comfyui-boot:cpu` とし、`COMPOSE_PROFILES=cpu` を有効にすると、
+`docker compose up -d` のまま別サービス `comfyui-cpu`(`--cpu --force-fp32`、nvidia予約なし)が
+起動する。`COMFYUI_BASE_URL` は変更不要で、`comfyui`(GPU)とは同時に起動しない。
+ただしCPU実行は**実用的な速度に達しない**(画像生成は遅いが完了することが到達点)。
+AI機能を実用速度で使うにはGPU(上記要件)を推奨する。
 
 **`comfyui` はGPUオプトインのcompose profile(`gpu`)を持つ(issue #1066)。** GPUの無い
 ホストで `docker compose up -d`(サービス無指定)を実行しても、`comfyui` はコンテナ自体が

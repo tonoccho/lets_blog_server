@@ -1092,6 +1092,9 @@ services:
   comfyui:
     environment:
       TZ: UTC
+      # ComfyUIの起動引数(コンテナ内の起動スクリプトが `main.py ... ${CLI_ARGS}` と展開する。#1395)。
+      # 既定は空でGPU構成の挙動を変えない。
+      CLI_ARGS: ${COMFYUI_CLI_ARGS:-}
     logging: *default-logging
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
@@ -1107,6 +1110,37 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+  # CPU実行構成(issue #1395)。GPUの無いホスト向けに、`comfyui` とは別サービスとして併存させる。
+  #
+  # `deploy.resources.reservations.devices` は変数展開で条件付きにできず(#1066 の実測、
+  # docs/DOCKER_COMPOSE_ARCHITECTURE.md)、マージでも消せない(`!override` を伴う `-f` の追加が
+  # 要り、`docker compose up -d` だけでは切り替わらない)。別サービスにすればnvidia予約を
+  # 一切持たずに済み、切り替えは「どちらのprofileを有効にするか」だけになる。
+  #
+  # `.env` に `COMPOSE_PROFILES=cpu` を書き、`COMFYUI_IMAGE` をCPU向けタグ(yanwk/comfyui-boot:cpu)
+  # にする。`comfyui` と同じネットワークエイリアスを持つので `COMFYUI_BASE_URL`(http://comfyui:8188)
+  # は変えなくてよい。`comfyui`(gpu)とは同時に起動しない前提(エイリアスが重複する)。
+  # `comfyui-cpu` という固有名でも到達できるため、GPU構成を止めずにこちらだけを指名できる(#1401)。
+  # モデル・出力ボリュームは `comfyui` と共有する。CPU実行は実用速度に達しない(速度改善は対象外)。
+  comfyui-cpu:
+    environment:
+      TZ: UTC
+      # CPU実行には --cpu に加えて --force-fp32 が要る(CPUではfp16が使えない/不安定)。
+      CLI_ARGS: --cpu --force-fp32 ${COMFYUI_CLI_ARGS:-}
+    logging: *default-logging
+    image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cpu}
+    container_name: lbs-comfyui-cpu
+    profiles: ["cpu"]
+    <<: *common-service
+    networks:
+      lbs-net:
+        aliases:
+          - comfyui
+          - comfyui-cpu
+    volumes:
+      - comfyui_models:/root/ComfyUI/models
+      - comfyui_output:/root/ComfyUI/output
 
   plantuml:
     environment:

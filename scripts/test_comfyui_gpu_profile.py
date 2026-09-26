@@ -143,5 +143,99 @@ class ComfyuiOptInOnGpuHost(ComposeConfigHarness):
         self.assertEqual(["gpu"], devices[0]["capabilities"])
 
 
+CPU_IMAGE = "yanwk/comfyui-boot:cpu"
+
+
+class ComfyuiCpuProfile(ComposeConfigHarness):
+    """#1395: GPU非搭載ホストで CPU 実行する構成(別サービス `comfyui-cpu`)。
+
+    Web UI から到達できない基準のため、上の #1066 と同じく compose 契約テストで表現する。
+    """
+
+    def cpu_service(self, extra_env=None):
+        env = {"COMPOSE_PROFILES": "cpu", "COMFYUI_IMAGE": CPU_IMAGE}
+        env.update(extra_env or {})
+        return self.full_config(extra_env=env)["services"]["comfyui-cpu"]
+
+    def test_cpu_profile_starts_only_the_cpu_service(self):
+        services = self.config_services(extra_env={"COMPOSE_PROFILES": "cpu"})
+        self.assertIn("comfyui-cpu", services)
+        self.assertNotIn("comfyui", services)
+
+    def test_default_up_does_not_include_the_cpu_service(self):
+        self.assertNotIn("comfyui-cpu", self.config_services())
+
+    def test_cpu_service_has_no_nvidia_device_reservation(self):
+        svc = self.cpu_service()
+        reservations = svc.get("deploy", {}).get("resources", {}).get("reservations", {})
+        self.assertEqual([], reservations.get("devices", []))
+        self.assertNotIn("nvidia", str(svc.get("runtime", "")))
+        self.assertNotIn("gpus", svc)
+
+    def test_cpu_service_uses_cpu_image_and_cpu_flags(self):
+        svc = self.cpu_service()
+        self.assertEqual(CPU_IMAGE, svc["image"])
+        args = svc["environment"]["CLI_ARGS"].split()
+        self.assertIn("--cpu", args)
+        self.assertIn("--force-fp32", args)
+
+    def test_cpu_service_image_follows_comfyui_image_without_new_variable(self):
+        svc = self.cpu_service({"COMFYUI_IMAGE": "example/comfyui:custom"})
+        self.assertEqual("example/comfyui:custom", svc["image"])
+
+    def test_cpu_service_is_reachable_as_comfyui_and_by_its_own_name(self):
+        aliases = self.cpu_service()["networks"]["lbs-net"]["aliases"]
+        self.assertIn("comfyui", aliases)
+        self.assertIn("comfyui-cpu", aliases)
+
+    def test_cpu_service_shares_models_and_output_volumes(self):
+        volumes = {v["source"] for v in self.cpu_service()["volumes"]}
+        self.assertEqual({"comfyui_models", "comfyui_output"}, volumes)
+
+    def test_cpu_service_keeps_restart_policy(self):
+        self.assertEqual("unless-stopped", self.cpu_service()["restart"])
+
+
+class ComfyuiGpuUnchanged(ComposeConfigHarness):
+    """#1395: GPU 構成は従来どおり(#1066 の退行検知)。"""
+
+    def gpu_service(self):
+        return self.full_config(extra_env={"COMPOSE_PROFILES": "gpu"})["services"]["comfyui"]
+
+    def test_gpu_service_keeps_cuda_image_and_empty_cli_args(self):
+        svc = self.gpu_service()
+        self.assertEqual("yanwk/comfyui-boot:cu130-slim", svc["image"])
+        self.assertEqual("", svc["environment"]["CLI_ARGS"])
+
+    def test_gpu_profile_does_not_start_the_cpu_service(self):
+        services = self.config_services(extra_env={"COMPOSE_PROFILES": "gpu"})
+        self.assertNotIn("comfyui-cpu", services)
+
+    def test_consumers_still_point_at_comfyui_host(self):
+        config = self.full_config(extra_env={"COMPOSE_PROFILES": "cpu"})
+        for name in ("media", "platform"):
+            self.assertEqual(
+                "http://comfyui:8188", config["services"][name]["environment"]["COMFYUI_BASE_URL"]
+            )
+
+
+class ComfyuiCpuDocumentation(unittest.TestCase):
+    def read(self, name):
+        with open(os.path.join(REPO_ROOT, name), encoding="utf-8") as f:
+            return f.read()
+
+    def test_readme_documents_cpu_profile_and_slowness(self):
+        text = self.read("README.md")
+        self.assertIn("COMPOSE_PROFILES=cpu", text)
+        self.assertIn("comfyui-cpu", text)
+        self.assertIn("実用", text)
+
+    def test_env_example_documents_cpu_profile_and_no_longer_says_unusable(self):
+        text = self.read(".env.example")
+        self.assertIn("COMPOSE_PROFILES=cpu", text)
+        self.assertIn("comfyui-boot:cpu", text)
+        self.assertNotIn("CPUでは実用に耐えず", text)
+
+
 if __name__ == "__main__":
     unittest.main()

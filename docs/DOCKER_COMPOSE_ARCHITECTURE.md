@@ -295,3 +295,18 @@ docker inspect -f '{{.Name}} {{.LogPath}}' $(docker ps -aq)   # id とコンテ�
 JVM が9個に増えたぶん、1サービスあたりの実処理量に比べてベースラインの消費が大きい。
 メモリ制約環境では Penpot 7サービス(合計約4.3 GiB)を落とす縮退起動が最も効く
 (上記「Penpotスイート」の節を参照)。
+
+## comfyui のCPU実行構成(#1395)
+
+nvidia デバイス予約は変数展開でもマージでも消せない(上記 #1066 の実測、`docker-compose.shared-host.yml` の
+`!override` は追加の `-f` を要する)ため、CPU実行は `comfyui` とは**別サービス `comfyui-cpu`**
+(`profiles: ["cpu"]`)として定義している。切り替えは `.env` の `COMPOSE_PROFILES`(`gpu` / `cpu`)だけで、
+`docker compose up -d` に追加引数は要らない。
+
+- イメージは既存の `COMFYUI_IMAGE`(CPU実行時は `yanwk/comfyui-boot:cpu`)。新しいイメージ変数は無い。
+- 起動引数は環境変数 `CLI_ARGS`(コンテナ内 `/runner-scripts/entrypoint.sh` が展開)。`comfyui` は `COMFYUI_CLI_ARGS`(既定は空)、
+  `comfyui-cpu` は `--cpu --force-fp32` に `COMFYUI_CLI_ARGS` を足す。
+- `comfyui-cpu` はネットワークエイリアス `comfyui` を持つため、`COMFYUI_BASE_URL`(`http://comfyui:8188`)は不変。
+  固有名 `comfyui-cpu` でも到達でき、GPU構成を止めずにこちらだけを指名できる(#1401 の前提)。
+- モデル・出力ボリューム(`comfyui_models` / `comfyui_output`)は共有。両者は同時に起動しない前提。
+- 検証: `scripts/test_comfyui_gpu_profile.py`(compose契約テスト)。実機での生成は #1401。
