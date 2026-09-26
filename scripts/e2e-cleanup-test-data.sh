@@ -10,7 +10,10 @@
 #                   generated_image_sequences
 #   lbs_ai        : article_plan_sessions / project_ai_settings
 #   lbs_analytics : analytics_credentials
-#   lets_blog     : project_users / project_image_settings / user_site_authors
+#   lbs_identity  : project_users / user_site_authors / users
+#                   (users はE2Eが作成した検証用ユーザー。issue #1193)
+# 旧スキーマ lets_blog は #786 で lbs_identity へ移されて存在しない。参照すると mysql が
+# "Unknown database" で中断し、後続の削除まで届かないため対象に含めない(issue #1193)。
 # 各specはafterEach/afterAllでUI経由の後片付けを行うが、テストがフィクスチャ作成の
 # 途中で失敗した場合や、UIに削除機能が無いテーブル(生成画像のシーケンス等)には
 # 孤児行が残りうる。このスクリプトはそれらをまとめて掃除する。
@@ -19,7 +22,13 @@
 #   projects : slug が e2e-* / test-project-* 、または name が "E2E *"
 #   sites    : site_key が e2e*
 #   その他   : 上記projects/sitesのidに紐づく行、またはE2E固有のプレフィックスを持つ行
-# 実データ(手動で作成したプロジェクト・サイト)には一致しない。
+#   users    : email が e2e-*@example.com(lbs_identity.users と、Keycloakの同名ユーザー)
+# 実データ(手動で作成したプロジェクト・サイト・ユーザー)には一致しない。
+#
+# identityユーザーはローカルDBの行に加えてKeycloak側にも実体があるため、DB行と同じ命名規約に
+# 一致するKeycloakユーザーも kcadm で削除する(issue #1193)。Keycloakコンテナが無い、または
+# .env の KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD が未設定の場合は、Keycloak側の
+# 掃除だけを警告付きでスキップし、DB行の削除は続行する。
 #
 # ManagedWordPressサイト(sites.managed_wordpress = 1)については、DB行を消す前に
 # wordpressコンテナ内のプロビジョニングエージェント(POST /deprovision、ポート9000、
@@ -45,6 +54,11 @@ ENV_FILE="$REPO_ROOT/.env"
 
 MYSQL_CONTAINER="lbs-mysql"
 WORDPRESS_CONTAINER="lbs-wordpress"
+KEYCLOAK_CONTAINER="lbs-keycloak"
+KEYCLOAK_REALM="letsblog"
+# E2Eが作るidentityユーザーのメールアドレス(SQLのLIKEと、Keycloak側の正規表現で同じ規約を表す)。
+E2E_USER_EMAIL_LIKE="e2e-%@example.com"
+E2E_USER_EMAIL_REGEX='^e2e-.*@example\.com$'
 # プロビジョニングエージェントの待ち受け先(infra/wordpress/start.sh。コンテナ内からのみ叩く)。
 PROVISION_AGENT_URL="http://127.0.0.1:9000"
 APPLY=0
@@ -76,6 +90,10 @@ fi
 # 実体の解放(/deprovision)にのみ使う。未設定でもDB行の削除は行えるため、ここでは中断しない。
 WP_PROVISION_TOKEN="$(grep -m1 '^WP_PROVISION_TOKEN=' "$ENV_FILE" | cut -d= -f2- || true)"
 
+# Keycloakユーザーの掃除にのみ使う。未設定でもDB行の削除は行えるため、ここでは中断しない。
+KEYCLOAK_ADMIN_USERNAME="$(grep -m1 '^KEYCLOAK_ADMIN_USERNAME=' "$ENV_FILE" | cut -d= -f2- || true)"
+KEYCLOAK_ADMIN_PASSWORD="$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2- || true)"
+
 if ! docker inspect "$MYSQL_CONTAINER" >/dev/null 2>&1; then
   echo "エラー: コンテナ ${MYSQL_CONTAINER} が見つかりません" >&2
   exit 1
@@ -101,9 +119,9 @@ TARGETS=(
   "lbs_ai.article_plan_sessions|project_id IN (${PROJECT_IDS})"
   "lbs_ai.project_ai_settings|project_id IN (${PROJECT_IDS})"
   "lbs_analytics.analytics_credentials|project_id IN (${PROJECT_IDS})"
-  "lets_blog.project_users|project_id IN (${PROJECT_IDS})"
-  "lets_blog.project_image_settings|project_id IN (${PROJECT_IDS})"
-  "lets_blog.user_site_authors|site_id IN (${SITE_IDS})"
+  "lbs_identity.project_users|project_id IN (${PROJECT_IDS})"
+  "lbs_identity.user_site_authors|site_id IN (${SITE_IDS})"
+  "lbs_identity.users|email LIKE '${E2E_USER_EMAIL_LIKE}'"
   "lbs_project.tag_design_settings|project_id IN (${PROJECT_IDS})"
   "lbs_project.static_content|site_id IN (${SITE_IDS})"
   "lbs_project.projects|id IN (${PROJECT_IDS})"
@@ -217,6 +235,66 @@ deprovision_managed_sites() {
   fi
 }
 
+kcadm() { docker exec "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh "$@"; }
+
+# E2E命名規約に一致するKeycloakユーザーを掃除する(issue #1193)。実行できない場合は警告を出して
+# 戻る(DB行の削除は妨げない)。
+cleanup_keycloak_users() {
+  local mode="$1" # count | delete
+  local users_json targets id email matched=0 failed=0
+
+  if ! docker inspect "$KEYCLOAK_CONTAINER" >/dev/null 2>&1; then
+    echo "警告: コンテナ ${KEYCLOAK_CONTAINER} が見つからないため、Keycloakのユーザーは掃除しません" >&2
+    return 0
+  fi
+  if [ -z "${KEYCLOAK_ADMIN_USERNAME:-}" ] || [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
+    echo "警告: .env の KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD が未設定のため、Keycloakのユーザーは掃除しません" >&2
+    return 0
+  fi
+
+  # 一覧の既定上限(100件)で孤児を取りこぼさないよう、search で絞り込み max を引き上げる。
+  # 実際の対象判定は下の正規表現が行う(search は部分一致で、絞り込みにすぎない)。
+  if ! kcadm config credentials --server http://localhost:8080/auth --realm master \
+      --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1 \
+     || ! users_json="$(kcadm get users -r "$KEYCLOAK_REALM" -q search=e2e- -q max=10000 --fields id,username,email 2>/dev/null)"; then
+    echo "警告: Keycloakのユーザー一覧を取得できないため、Keycloakのユーザーは掃除しません" >&2
+    return 0
+  fi
+
+  targets="$(printf '%s' "$users_json" | E2E_REGEX="$E2E_USER_EMAIL_REGEX" python3 -c "
+import sys, json, os, re
+pattern = re.compile(os.environ['E2E_REGEX'])
+try:
+    users = json.load(sys.stdin)
+except Exception:
+    users = []
+for u in users:
+    email = u.get('email') or u.get('username') or ''
+    if pattern.match(email):
+        print(u['id'], email)
+")"
+
+  while read -r id email; do
+    [ -z "$id" ] && continue
+    matched=$((matched + 1))
+    if [ "$mode" = "count" ]; then
+      echo "  - ${email}"
+    elif kcadm delete "users/${id}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then
+      echo "  - ${email} を削除しました"
+    else
+      failed=$((failed + 1))
+      echo "  ! ${email} の削除に失敗しました (id: ${id})" >&2
+    fi
+  done <<< "$targets"
+
+  if [ "$matched" -eq 0 ]; then
+    echo "  (対象なし)"
+  fi
+  if [ "$failed" -gt 0 ]; then
+    echo "警告: ${failed}件のKeycloakユーザーを削除できませんでした(DB行の削除は続行します)" >&2
+  fi
+}
+
 if [ "$APPLY" -eq 1 ]; then
   echo "ManagedWordPressの実体を解放します"
   # 解放対象を確定できなかった場合はDB行を消さずに中断する。行を消すとwp_slug/wp_db_nameが
@@ -226,6 +304,8 @@ if [ "$APPLY" -eq 1 ]; then
     echo "       原因(mysqlへの接続等)を解消してから再実行してください。" >&2
     exit 1
   fi
+  echo "E2Eが作成したKeycloakユーザーを削除します"
+  cleanup_keycloak_users delete
   echo "E2Eテストデータを全スキーマから削除します"
   build_sql delete | run_sql
   echo "削除が完了しました。"
@@ -235,5 +315,7 @@ else
   # ドライランでは何も削除しないため、一覧取得に失敗しても(関数が警告を出した上で)
   # DB行の件数表示までは続ける。
   deprovision_managed_sites count || true
+  echo "削除対象のKeycloakユーザー:"
+  cleanup_keycloak_users count
   build_sql count | run_sql
 fi
