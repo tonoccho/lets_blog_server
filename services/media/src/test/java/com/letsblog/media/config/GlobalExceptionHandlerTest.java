@@ -36,4 +36,13 @@ class GlobalExceptionHandlerTest {
                 "性的コンテンツに該当する可能性のあるキーワードが含まれているため、画像生成をブロックしました。",
                 response.getBody().error());
     }
+
+    @Test
+    void 本文サイズ上限超過は413で理由を返す() {
+        ResponseEntity<ErrorResponse> response = handler.handleRequestBodyTooLarge(new RequestBodyTooLargeException(100));
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("リクエスト本文が上限(100バイト)を超えています。", response.getBody().error());
+    }
 }

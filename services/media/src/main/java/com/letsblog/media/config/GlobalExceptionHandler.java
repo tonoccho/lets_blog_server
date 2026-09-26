@@ -61,6 +61,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
+    /** issue #1135: /api/render/**の本文サイズ上限超過。直せるのは送り手なので413で上限つきの理由を返す。 */
+    @ExceptionHandler(RequestBodyTooLargeException.class)
+    public ResponseEntity<ErrorResponse> handleRequestBodyTooLarge(RequestBodyTooLargeException e) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorResponse.of(e.getMessage()));
+    }
+
     @ExceptionHandler(GeneratedImageNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleGeneratedImageNotFound(GeneratedImageNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));

@@ -236,6 +236,24 @@ later.
   traffic is roughly 1:1 with `api-internal` traffic. It was split out of `api-global` by issue
   #464 so that logging cannot starve the functional endpoints.
 
+#### 5. Internal render endpoints request-body limit (`/api/render/**`, issue #1135)
+- **Limit**: 10 MiB (10,485,760 bytes) of JSON body, per request. Not a rate limit.
+- **Environment Variable**: `RENDER_MAX_BODY_BYTES` (`app.render.max-body-bytes` in
+  `services/media`)
+- **Applies to**: `POST /api/render/plantuml`, `/api/render/recharts`,
+  `/api/render/penpot/design-file` (media-service; reachable only from content-service /
+  publishing-service inside `lbs-net`, not routed by the gateway, #830)
+- **Why a limit at all**: Spring's `@RequestBody` JSON read has no cap (the multipart
+  `max-file-size`/`max-request-size` of 20MB do not apply), so a huge `source`/`data` would consume
+  memory during deserialization, *before* PlantUML's own URI-length limit (which only applies when
+  forwarding) is reached. The endpoints are internal, so this is defence in depth against a
+  compromised or malfunctioning caller, not an external-attack control.
+- **Why 10 MiB**: real inputs are tens of KB (a 10,000-element PlantUML source is ~177 KB); 10 MiB
+  is ~50x that while staying below the 20MB upload cap.
+- **Enforcement**: `RenderBodySizeLimitFilter` rejects a declared `Content-Length` over the limit
+  with `413 {"error": "..."}` before reading; for chunked bodies it counts bytes while reading and
+  fails with the same 413 (`RequestBodyTooLargeException`, mapped in `GlobalExceptionHandler`).
+
 ### Response Codes
 
 - **200 OK**: Request processed successfully
