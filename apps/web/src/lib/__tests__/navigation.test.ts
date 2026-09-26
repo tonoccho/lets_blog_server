@@ -1,4 +1,6 @@
 import { NAV_ITEMS, ADMIN_NAV_ITEMS, type NavItem } from '../navigation'
+import messagesJa from '../../../messages/ja.json'
+import messagesEn from '../../../messages/en.json'
 
 describe('Navigation', () => {
   describe('NAV_ITEMS', () => {
@@ -9,10 +11,10 @@ describe('Navigation', () => {
     it('has required properties for each item', () => {
       NAV_ITEMS.forEach((item: NavItem) => {
         expect(item).toHaveProperty('href')
-        expect(item).toHaveProperty('label')
+        expect(item).toHaveProperty('labelKey')
         expect(item).toHaveProperty('icon')
         expect(typeof item.href).toBe('string')
-        expect(typeof item.label).toBe('string')
+        expect(typeof item.labelKey).toBe('string')
         expect(item.icon).toBeDefined()
       })
     })
@@ -20,13 +22,13 @@ describe('Navigation', () => {
     it('includes ダッシュボード item', () => {
       const dashboardItem = NAV_ITEMS.find((item) => item.href === '/')
       expect(dashboardItem).toBeDefined()
-      expect(dashboardItem?.label).toBe('ダッシュボード')
+      expect(dashboardItem?.labelKey).toBe('dashboard')
     })
 
     it('includes サイト item', () => {
       const sitesItem = NAV_ITEMS.find((item) => item.href === '/sites')
       expect(sitesItem).toBeDefined()
-      expect(sitesItem?.label).toBe('サイト')
+      expect(sitesItem?.labelKey).toBe('sites')
     })
 
     it('does not include admin-only items', () => {
@@ -55,12 +57,12 @@ describe('Navigation', () => {
     it('has required properties for each item', () => {
       ADMIN_NAV_ITEMS.forEach((item: NavItem) => {
         expect(item).toHaveProperty('href')
-        expect(item).toHaveProperty('label')
+        expect(item).toHaveProperty('labelKey')
         expect(item).toHaveProperty('icon')
         expect(item).toHaveProperty('adminOnly')
         expect(item).toHaveProperty('group')
         expect(typeof item.href).toBe('string')
-        expect(typeof item.label).toBe('string')
+        expect(typeof item.labelKey).toBe('string')
         expect(item.icon).toBeDefined()
       })
     })
@@ -79,6 +81,21 @@ describe('Navigation', () => {
       allItems.forEach((item) => {
         expect(item.href).toMatch(/^\//)
       })
+    })
+  })
+
+  describe('nav namespace of the message files', () => {
+    const itemKeys = [...NAV_ITEMS, ...ADMIN_NAV_ITEMS].map((item) => item.labelKey)
+
+    it.each([
+      ['ja', messagesJa],
+      ['en', messagesEn],
+    ])('has exactly the keys the navigation items use (%s)', (_locale, messages) => {
+      expect(Object.keys(messages.nav).sort()).toEqual([...itemKeys].sort())
+    })
+
+    it('uses a distinct key for every item', () => {
+      expect(new Set(itemKeys).size).toBe(itemKeys.length)
     })
   })
 })

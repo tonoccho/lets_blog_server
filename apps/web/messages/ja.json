@@ -7,18 +7,14 @@
     "dashboard": "ダッシュボード",
     "projects": "プロジェクト",
     "sites": "サイト",
-    "posts": "投稿履歴",
-    "aiJobs": "AIジョブ",
     "imageGallery": "生成画像ギャラリー",
-    "system": "システム",
-    "security": "セキュリティ設定",
+    "operationLogs": "操作ログ",
     "users": "ユーザー",
-    "auditLogs": "監査ログ",
     "roleManagement": "ロール管理",
-    "customTags": "カスタムタグ",
     "dataBackup": "データバックアップ",
     "systemSettings": "システム設定",
-    "admin": "管理"
+    "sshKeys": "SSH鍵管理",
+    "tagDesign": "グローバルタグデザイン"
   },
   "header": {
     "admin": "管理",

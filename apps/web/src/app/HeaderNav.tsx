@@ -9,6 +9,7 @@ import { ICON_MAP } from "@/lib/navigation";
 
 export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
   const { t } = useI18n();
+  const labelOf = (item: NavItem) => t("nav", item.labelKey);
   const [isOpen, setIsOpen] = useState(false);
   const [isAdminDropdownOpen, setIsAdminDropdownOpen] = useState(false);
   const adminDropdownRef = useRef<HTMLDivElement>(null);
@@ -67,11 +68,11 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
             <Link
               key={item.href}
               href={item.href}
-              title={item.label}
+              title={labelOf(item)}
               className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
             >
               <Icon className="h-4 w-4" aria-hidden="true" />
-              <span className="font-medium">{item.label}</span>
+              <span className="font-medium">{labelOf(item)}</span>
             </Link>
           );
         })}
@@ -107,7 +108,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                       className="flex items-center gap-2 whitespace-nowrap px-4 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 first:rounded-t-lg last:rounded-b-lg"
                     >
                       <Icon className="h-4 w-4" aria-hidden="true" />
-                      <span className="font-medium">{item.label}</span>
+                      <span className="font-medium">{labelOf(item)}</span>
                     </Link>
                   );
                 })}
@@ -145,7 +146,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                   className="flex items-center gap-2 rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                 >
                   <Icon className="h-4 w-4" aria-hidden="true" />
-                  <span className="font-medium">{item.label}</span>
+                  <span className="font-medium">{labelOf(item)}</span>
                 </Link>
               );
             })}
@@ -166,7 +167,7 @@ export function HeaderNav({ navItems }: { navItems: NavItem[] }) {
                       className="flex items-center gap-2 rounded-lg px-3 py-2 text-neutral-600 dark:text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-50 ml-2"
                     >
                       <Icon className="h-4 w-4" aria-hidden="true" />
-                      <span className="font-medium">{item.label}</span>
+                      <span className="font-medium">{labelOf(item)}</span>
                     </Link>
                   );
                 })}

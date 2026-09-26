@@ -16,7 +16,7 @@ import {
 
 export type NavItem = {
   href: string;
-  label: string;
+  labelKey: string; // messages の nav 名前空間のキー
   icon: string;
   adminOnly?: boolean;
   group?: "admin"; // ドロップダウングループの指定
@@ -38,19 +38,19 @@ export const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/", label: "ダッシュボード", icon: "Home" },
-  { href: "/projects", label: "プロジェクト", icon: "Folder" },
-  { href: "/sites", label: "サイト", icon: "Globe" },
-  { href: "/image-gallery", label: "生成画像ギャラリー", icon: "Images" },
-  { href: "/operation-logs", label: "操作ログ", icon: "History" },
+  { href: "/", labelKey: "dashboard", icon: "Home" },
+  { href: "/projects", labelKey: "projects", icon: "Folder" },
+  { href: "/sites", labelKey: "sites", icon: "Globe" },
+  { href: "/image-gallery", labelKey: "imageGallery", icon: "Images" },
+  { href: "/operation-logs", labelKey: "operationLogs", icon: "History" },
 ];
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [
-  { href: "/users", label: "ユーザー", icon: "Users", adminOnly: true, group: "admin" },
-  { href: "/admin/roles", label: "ロール管理", icon: "Shield", adminOnly: true, group: "admin" },
-  { href: "/admin/backup", label: "データバックアップ", icon: "DatabaseBackup", adminOnly: true, group: "admin" },
-  { href: "/admin/system-settings", label: "システム設定", icon: "Settings", adminOnly: true, group: "admin" },
-  { href: "/admin/ssh-keys", label: "SSH鍵管理", icon: "KeyRound", adminOnly: true, group: "admin" },
+  { href: "/users", labelKey: "users", icon: "Users", adminOnly: true, group: "admin" },
+  { href: "/admin/roles", labelKey: "roleManagement", icon: "Shield", adminOnly: true, group: "admin" },
+  { href: "/admin/backup", labelKey: "dataBackup", icon: "DatabaseBackup", adminOnly: true, group: "admin" },
+  { href: "/admin/system-settings", labelKey: "systemSettings", icon: "Settings", adminOnly: true, group: "admin" },
+  { href: "/admin/ssh-keys", labelKey: "sshKeys", icon: "KeyRound", adminOnly: true, group: "admin" },
   // プロジェクト未紐付けサイト向けのグローバル既定タグデザイン(issue #763)。
-  { href: "/admin/tag-design", label: "グローバルタグデザイン", icon: "Palette", adminOnly: true, group: "admin" },
+  { href: "/admin/tag-design", labelKey: "tagDesign", icon: "Palette", adminOnly: true, group: "admin" },
 ];

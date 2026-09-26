@@ -4,8 +4,8 @@ import { HeaderNav } from '../HeaderNav'
 import { I18nProvider } from '../I18nProvider'
 import type { NavItem } from '@/lib/navigation'
 
-function renderWithI18n(ui: React.ReactElement) {
-  return render(<I18nProvider>{ui}</I18nProvider>)
+function renderWithI18n(ui: React.ReactElement, initialLocale: 'ja' | 'en' = 'ja') {
+  return render(<I18nProvider initialLocale={initialLocale}>{ui}</I18nProvider>)
 }
 
 jest.mock('next/link', () => {
@@ -34,17 +34,17 @@ jest.mock('lucide-react', () => ({
 const mockNavItems: NavItem[] = [
   {
     href: '/dashboard',
-    label: 'Dashboard',
+    labelKey: 'dashboard',
     icon: 'Home',
   },
   {
     href: '/sites',
-    label: 'Sites',
+    labelKey: 'sites',
     icon: 'Globe',
   },
   {
     href: '/settings',
-    label: 'Settings',
+    labelKey: 'systemSettings',
     icon: 'Settings',
     group: 'admin',
   },
@@ -53,8 +53,8 @@ const mockNavItems: NavItem[] = [
 describe('HeaderNav', () => {
   it('renders navigation items', () => {
     renderWithI18n(<HeaderNav navItems={mockNavItems} />)
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
-    expect(screen.getByText('Sites')).toBeInTheDocument()
+    expect(screen.getByText('ダッシュボード')).toBeInTheDocument()
+    expect(screen.getByText('サイト')).toBeInTheDocument()
   })
 
   it('groups admin items in a dropdown', () => {
@@ -85,8 +85,8 @@ describe('HeaderNav', () => {
   it('renders correct number of regular nav items', () => {
     renderWithI18n(<HeaderNav navItems={mockNavItems} />)
     const regularItems = mockNavItems.filter((item) => item.group !== 'admin')
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
-    expect(screen.getByText('Sites')).toBeInTheDocument()
+    expect(screen.getByText('ダッシュボード')).toBeInTheDocument()
+    expect(screen.getByText('サイト')).toBeInTheDocument()
   })
 
   it('handles empty nav items', () => {
@@ -99,12 +99,21 @@ describe('HeaderNav', () => {
     const adminOnlyItems: NavItem[] = [
       {
         href: '/admin/users',
-        label: 'Users',
+        labelKey: 'users',
         icon: 'Users',
         group: 'admin',
       },
     ]
     renderWithI18n(<HeaderNav navItems={adminOnlyItems} />)
     expect(screen.getByText('管理')).toBeInTheDocument()
+  })
+
+  it('renders every label in English when the locale is en (desktop and mobile)', () => {
+    renderWithI18n(<HeaderNav navItems={mockNavItems} />, 'en')
+    fireEvent.click(screen.getByLabelText('Open menu'))
+    expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Sites').length).toBeGreaterThan(0)
+    expect(screen.queryByText('ダッシュボード')).not.toBeInTheDocument()
+    expect(screen.getAllByText('System Settings').length).toBeGreaterThan(0)
   })
 })

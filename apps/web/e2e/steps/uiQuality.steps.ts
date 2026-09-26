@@ -364,6 +364,26 @@ Then('ヘッダーのラベルが英語表示になる', async ({ page }) => {
   await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.header.admin);
 });
 
+Then('デスクトップ幅のナビゲーションの全項目が英語表示になる', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/', { waitUntil: 'load' });
+  await page.getByLabel(messagesEn.header.openAdminMenu).click();
+  const nav = page.locator('header');
+  for (const label of Object.values(messagesEn.nav)) {
+    await expect(nav.getByRole('link', { name: label, exact: true }).first()).toBeVisible();
+  }
+});
+
+Then('モバイル幅のナビゲーションの全項目が英語表示になる', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto('/', { waitUntil: 'load' });
+  await page.getByLabel(messagesEn.header.openMenu).click();
+  const drawer = page.getByRole('dialog', { name: messagesEn.header.navigation });
+  for (const label of Object.values(messagesEn.nav)) {
+    await expect(drawer.getByRole('link', { name: label, exact: true })).toBeVisible();
+  }
+});
+
 When('ページを再読み込みする', async ({ page }) => {
   await page.reload({ waitUntil: 'load' });
 });

@@ -7,18 +7,14 @@
     "dashboard": "Dashboard",
     "projects": "Projects",
     "sites": "Sites",
-    "posts": "Post History",
-    "aiJobs": "AI Jobs",
     "imageGallery": "Generated Image Gallery",
-    "system": "System",
-    "security": "Security Settings",
+    "operationLogs": "Operation Logs",
     "users": "Users",
-    "auditLogs": "Audit Logs",
     "roleManagement": "Role Management",
-    "customTags": "Custom Tags",
     "dataBackup": "Data Backup",
     "systemSettings": "System Settings",
-    "admin": "Admin"
+    "sshKeys": "SSH Key Management",
+    "tagDesign": "Global Tag Design"
   },
   "header": {
     "admin": "Admin",
