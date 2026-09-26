@@ -1012,28 +1012,61 @@ def check_no_verify(command):
                 )
 
 
+def _leading_global_git_flags(args):
+    """`args`(`git` の後続トークン列)のうち、最初の positional トークン(サブコマンド)
+
+    より前のグローバルフラグ列を返す(#1443)。`invokes()` がサブコマンド検出に使う
+    のと全く同じ規則(`GLOBAL_VALUE_FLAGS["git"]` にあるフラグは次のトークンも値として
+    読み飛ばす)で走査するので、`invokes()` が返す `args` の先頭が確実にこの境界に
+    一致する。
+    """
+    value_flags = GLOBAL_VALUE_FLAGS.get("git", set())
+    i = 0
+    skip_next = False
+    while i < len(args):
+        a = args[i]
+        if skip_next:
+            skip_next = False
+            i += 1
+            continue
+        if a in value_flags:
+            skip_next = True
+            i += 1
+            continue
+        if not a.startswith("-"):
+            break
+        i += 1
+    return args[:i]
+
+
 def check_commit_phase(payload, command):
     commits = invokes(command, "git", ("commit",))
     if not commits:
         return
     root = project_dir(payload)
-    staged = git(["diff", "--cached", "--name-only"], root)
-    if staged is None:
-        return
-    files = [p for p in staged.splitlines() if p.strip()]
     commit_value_shorts = SHORT_VALUE_FLAGS[("git", "commit")]
-    if any(_has_flag(args, "--all", "a", commit_value_shorts) for args in commits):
-        tracked = git(["diff", "--name-only"], root) or ""
-        files += [p for p in tracked.splitlines() if p.strip()]
-    tests, prod = classify(files)
-    if tests and prod:
-        emit_deny(
-            "テストコードとプロダクションコードが同じコミットに混在しています"
-            "(CLAUDE.md → Test-First Implementation → Never edit tests and production code "
-            "in the same phase)。\n\nテスト: %s\nプロダクション: %s\n\n"
-            "`git restore --staged <path>` で片側を外し、フェーズごとに分けてコミットしてください。"
-            % (", ".join(tests[:10]), ", ".join(prod[:10]))
-        )
+    for args in commits:
+        # `-C`/`--git-dir`/`--work-tree` は自前で値を解釈して root を組み立てず、
+        # 呼び出し側が書いたとおりの形で `git` 自身に渡す(#1443)。こうすることで
+        # 相対パスの解決(cwd 基準)・複数の `-C` の累積・`--git-dir` と
+        # `--work-tree` の優先順位を、すべて git 自身の実装に委ねられる。
+        prefix = _leading_global_git_flags(args)
+        staged = git(prefix + ["diff", "--cached", "--name-only"], root)
+        if staged is None:
+            continue
+        files = [p for p in staged.splitlines() if p.strip()]
+        if _has_flag(args, "--all", "a", commit_value_shorts):
+            tracked = git(prefix + ["diff", "--name-only"], root) or ""
+            files += [p for p in tracked.splitlines() if p.strip()]
+        tests, prod = classify(files)
+        if tests and prod:
+            emit_deny(
+                "テストコードとプロダクションコードが同じコミットに混在しています"
+                "(CLAUDE.md → Test-First Implementation → Never edit tests and production code "
+                "in the same phase)。\n\nテスト: %s\nプロダクション: %s\n\n"
+                "`git restore --staged <path>` で片側を外し、フェーズごとに分けてコミットしてください。"
+                % (", ".join(tests[:10]), ", ".join(prod[:10]))
+            )
 
 
 def coverage_worktree_root(payload):

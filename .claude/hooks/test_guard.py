@@ -1713,11 +1713,13 @@ class GitGlobalFlagBeforeSubcommand(unittest.TestCase):
 def _git_phase_project(*staged_rel_paths):
     """実際の git リポジトリを作り、渡したパスをステージ済みにして root を返す。
 
-    `check_commit_phase` は `root = project_dir(payload)`(ツール呼び出しの実際の cwd)から
-    `git diff --cached --name-only` を読む。`git -C <path>` 自身の対象がどこであるかは
-    ここでは無関係 — 検査対象はあくまで cwd 側のリポジトリであり、それがこのテストの
-    確認したいこと(`invokes()` が `-C` 越しでも `commit` を検出し、この検査自体が
-    起動すること)そのものである。
+    引数無しで呼ぶと、ステージ内容が空のクリーンなリポジトリを作る(#1443のクロス
+    リポジトリ検証で「一方はクリーン」を作るのに使う)。
+
+    `check_commit_phase` は本来 `root = project_dir(payload)`(ツール呼び出しの実際の
+    cwd)から `git diff --cached --name-only` を読むが、#1443 以降は `git -C <path>` /
+    `--git-dir` / `--work-tree` が指定されていればその対象を読む。どちらの root から
+    読むかはテストごとに変わるため、ここでは「実際のリポジトリを作る」ことだけを担う。
     """
     root = tempfile.mkdtemp()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -1728,7 +1730,8 @@ def _git_phase_project(*staged_rel_paths):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write("x")
-    subprocess.run(["git", "add"] + list(staged_rel_paths), cwd=root, check=True)
+    if staged_rel_paths:
+        subprocess.run(["git", "add"] + list(staged_rel_paths), cwd=root, check=True)
     return root
 
 
@@ -1742,13 +1745,21 @@ def _run_in_git_phase_project(command, root):
 
 
 class GitDashCPhaseSeparation(unittest.TestCase):
-    """AC3: `git -C <path> commit` でもフェーズ分離検査(`check_commit_phase`)が働くこと。"""
+    """AC3(#1440): `git -C <path> commit` でもフェーズ分離検査(`check_commit_phase`)が
+    働くこと(=検査自体が起動すること)。
+
+    #1440 の時点では `-C` の対象がどこであるかまでは反映していなかった(検査は常に
+    cwd 側を見ていた)。ここでは `-C` の対象を自分自身(同じリポジトリ)にして、
+    #1443 で対象解決が正しく行われるようになった後も自己参照の `-C` が壊れないことを
+    確かめる。cwd とは異なるリポジトリを対象にする場合の検証は
+    `GitDashCCrossRepoPhaseSeparation`(#1443)が担う。
+    """
 
     def test_dash_C_prefixed_mixed_commit_is_denied(self):
         root = _git_phase_project(
             "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
         )
-        reason = _run_in_git_phase_project("git -C /tmp commit -m x", root)
+        reason = _run_in_git_phase_project("git -C %s commit -m x" % root, root)
         self.assertIsNotNone(
             reason, "-C 前置の git commit がフェーズ分離検査をすり抜けている"
         )
@@ -1759,7 +1770,7 @@ class GitDashCPhaseSeparation(unittest.TestCase):
             "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
         )
         reason = _run_in_git_phase_project(
-            "git --git-dir /tmp/other/.git commit -m x", root
+            "git --git-dir %s commit -m x" % os.path.join(root, ".git"), root
         )
         self.assertIsNotNone(
             reason, "--git-dir 前置の git commit がフェーズ分離検査をすり抜けている"
@@ -1767,7 +1778,139 @@ class GitDashCPhaseSeparation(unittest.TestCase):
 
     def test_dash_C_prefixed_test_only_commit_is_allowed(self):
         root = _git_phase_project("apps/web/e2e/features/a.feature")
-        self.assertIsNone(_run_in_git_phase_project("git -C /tmp commit -m x", root))
+        self.assertIsNone(
+            _run_in_git_phase_project("git -C %s commit -m x" % root, root)
+        )
+
+
+class GitDashCCrossRepoPhaseSeparation(unittest.TestCase):
+    """#1443: `check_commit_phase` は `-C`/`--git-dir`/`--work-tree` が指す実際の対象
+
+    リポジトリのステージ内容を検査しなければならない — cwd 側(`project_dir(payload)`)
+    ではなく。cwd 側と対象側を別々の実リポジトリにして、判定が対象側の内容だけで
+    決まることを確認する。
+    """
+
+    # --- AC1 ---
+
+    def test_ac1_dash_c_target_mixed_cwd_clean_is_denied(self):
+        repo_a = _git_phase_project()  # cwd 側: クリーン
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git -C %s commit -m x" % repo_b, repo_a
+        )
+        self.assertIsNotNone(
+            reason,
+            "-C の対象(repoB)が混在ステージなのに、cwd(repoA)がクリーンだからと"
+            "見逃している",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_ac1_relative_dash_c_target_mixed_is_denied(self):
+        """相対パスの `-C` も cwd(repoA)基準で解決され、対象(repoB)を正しく指すこと。"""
+        parent = tempfile.mkdtemp()
+        repo_a = os.path.join(parent, "repoA")
+        os.makedirs(repo_a)
+        subprocess.run(["git", "init", "-q"], cwd=repo_a, check=True)
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        rel = os.path.relpath(repo_b, repo_a)
+        reason = _run_in_git_phase_project("git -C %s commit -m x" % rel, repo_a)
+        self.assertIsNotNone(
+            reason,
+            "相対パスの -C 対象(repoB)が混在ステージなのに見逃している(cwd 基準の"
+            "解決に問題がある可能性)",
+        )
+
+    # --- AC2 ---
+
+    def test_ac2_dash_c_target_clean_cwd_mixed_is_allowed(self):
+        repo_a = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        repo_b = _git_phase_project()  # -C の対象: クリーン
+        reason = _run_in_git_phase_project(
+            "git -C %s commit -m x" % repo_b, repo_a
+        )
+        self.assertIsNone(
+            reason,
+            "-C の対象(repoB)はクリーンなのに、無関係な cwd(repoA)の混在ステージで"
+            "誤って拒否している: %s" % reason,
+        )
+
+    # --- AC3: --git-dir / --work-tree の組み合わせでも同様 ---
+
+    def test_ac3_git_dir_work_tree_target_mixed_is_denied(self):
+        repo_a = _git_phase_project()
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --git-dir %s --work-tree %s commit -m x"
+            % (os.path.join(repo_b, ".git"), repo_b),
+            repo_a,
+        )
+        self.assertIsNotNone(
+            reason,
+            "--git-dir/--work-tree の対象(repoB)が混在ステージなのに見逃している",
+        )
+
+    def test_ac3_git_dir_work_tree_target_clean_is_allowed(self):
+        repo_a = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        repo_b = _git_phase_project()
+        reason = _run_in_git_phase_project(
+            "git --git-dir %s --work-tree %s commit -m x"
+            % (os.path.join(repo_b, ".git"), repo_b),
+            repo_a,
+        )
+        self.assertIsNone(
+            reason,
+            "--git-dir/--work-tree の対象(repoB)はクリーンなのに誤って拒否している: "
+            "%s" % reason,
+        )
+
+    def test_ac3_multiple_dash_c_accumulate_relative_to_previous(self):
+        """`-C` を複数指定した場合、git 自身の解釈どおり前の `-C` の結果に対して次を
+
+        解決すること(自前でパスを組み立てて累積を再実装していないことの確認)。
+        """
+        parent = tempfile.mkdtemp()
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        repo_a = _git_phase_project()
+        # 1つ目の -C は repoB の親ディレクトリへ、2つ目は repoB の basename への相対指定。
+        # 累積して解決されて初めて repoB を指す。
+        cmd = "git -C %s -C %s commit -m x" % (
+            os.path.dirname(repo_b),
+            os.path.basename(repo_b),
+        )
+        reason = _run_in_git_phase_project(cmd, repo_a)
+        self.assertIsNotNone(
+            reason,
+            "複数の -C の累積解決(前の -C の結果基準)が効いておらず、repoB の混在を"
+            "見逃している",
+        )
+
+    # --- AC4: `-C` 等の指定が無い通常の `git commit` の挙動に回帰が無いこと ---
+
+    def test_ac4_plain_commit_no_prefix_mixed_is_still_denied(self):
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project("git commit -m x", root)
+        self.assertIsNotNone(reason, "通常の git commit の混在検出に回帰がある")
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_ac4_plain_commit_no_prefix_test_only_is_allowed(self):
+        root = _git_phase_project("apps/web/e2e/features/a.feature")
+        reason = _run_in_git_phase_project("git commit -m x", root)
+        self.assertIsNone(reason, "通常の git commit の許可判定に回帰がある: %s" % reason)
 
 
 class ShortValueFlagAttachedValueMisdetection(unittest.TestCase):
