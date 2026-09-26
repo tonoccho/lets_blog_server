@@ -1019,7 +1019,8 @@ services:
     # 「未指定ならDockerの既定ランタイム」に倒せる。
     #
     # GPUを持つホストは .env に GPU_RUNTIME=nvidia を書く。コマンドライン引数は要らないので
-    # `docker compose up -d` のままGPUが使われる。#1066 は同じ1行を comfyui へ適用できる。
+    # `docker compose up -d` のままGPUが使われる。空にすると、VRAMに載らない大規模モデルを
+    # システムRAMで動かす意図的なCPU実行になる(#1396、docs/DOCKER_COMPOSE_ARCHITECTURE.md)。#1066 は同じ1行を comfyui へ適用できる。
     runtime: ${GPU_RUNTIME:-}
     environment:
       TZ: UTC

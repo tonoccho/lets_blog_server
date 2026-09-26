@@ -149,6 +149,54 @@ CPU動作には別イメージタグへの変更を要求している(#1066 の 
 からも自動的に外れる(スクリプト側の変更は不要だった)。「新しい仕組みを2つ作らない」の
 判断は、ollamaとcomfyuiのCPU動作可否という前提の違いにより成り立たなかった。
 
+## Ollama を CPU で動かす(大規模モデル)(#1396)
+
+`GPU_RUNTIME` は「GPU が無くても起動を失敗させない」ためだけでなく、**VRAM に載らない大規模
+モデルを、遅くてもシステム RAM で動かす**ための意図的な選択肢でもある。
+
+| 選択 | `.env` | 向く用途 |
+| --- | --- | --- |
+| 速度優先(既定) | `GPU_RUNTIME=nvidia` | 7B クラスを VRAM で速く動かす。ComfyUI と GPU を共有する |
+| 大規模モデル優先 | `GPU_RUNTIME=`(空) | VRAM(16GB 等)に載らないモデルを、システム RAM(この開発機は 125GiB)で動かす |
+
+どちらも `docker compose up -d` のままで、追加の `-f` や引数は要らない。`ollama` の compose 定義は
+1行(`runtime: ${GPU_RUNTIME:-}`)のままで、既定(`nvidia`)の挙動は変わらない。
+
+### 手順
+
+1. `.env` の `GPU_RUNTIME=` を空にし、`LLM_OLLAMA_MODEL` を大きなモデルへ変える(例: `qwen2.5:72b-instruct`)。
+2. `docker compose up -d`。`ollama` は runtime が変わるので作り直され、`ollama-model-init` が
+   新しいモデルを取得する。`ollama-model-init` は `up -d` のたびに再実行されるので、通常は
+   `--force-recreate ollama-model-init` は要らない。取得済みのまま作り直したいときだけ
+   `docker compose up -d --force-recreate ollama-model-init` を使う。
+3. 取得の進捗は `docker logs -f lbs-ollama-model-init`。
+4. 実行デバイスの確認: `docker exec lbs-ollama ollama ps` の `PROCESSOR` 列が `100% CPU` なら CPU 実行。
+
+### 所要時間とディスクの目安
+
+- 取得の**所要時間**は回線速度で決まる(目安: 100Mbps で 1GB あたり約 1.5 分)。既定の
+  `qwen2.5:7b-instruct` は約 4.7GB で数分、72B 級の 4bit 量子化は約 40GB 台で 1 時間前後を見込む。
+- **ディスク**はモデルサイズ分が `ollama_models` ボリュームに増える。モデルを切り替えても古い
+  モデルは消えないので、不要なら `docker exec lbs-ollama ollama rm <model>` で消す。
+- CPU 実行の**メモリ**はモデルサイズ + KV キャッシュがシステム RAM に載ること。
+
+### GPU 前提の既定値の読み替え
+
+`docker-compose.yml` の既定値は「単一 GPU を ComfyUI と共有する」前提で決めてある。CPU では制約が
+VRAM ではなくシステム RAM と帯域に変わる。
+
+| 変数 | GPU での意味(既定) | CPU で大規模モデルを動かすとき |
+| --- | --- | --- |
+| `OLLAMA_KEEP_ALIVE`(5m) | VRAM を ComfyUI に空けるため短くする | RAM は ComfyUI と取り合わないので長く(例: `30m`)して再ロードを避ける。大規模モデルは読み込み自体が遅い |
+| `OLLAMA_MAX_LOADED_MODELS`(1) | VRAM の取り合いを避ける | 大規模モデルは RAM を大きく占めるので 1 のままがよい |
+| `OLLAMA_CONTEXT_LENGTH`(8192) | 伸ばすほど KV キャッシュが VRAM を食う | RAM に余裕があれば伸ばせるが、伸ばすほど生成は遅くなる |
+
+### 応答遅延とタイムアウト
+
+CPU 実行の応答は GPU より桁違いに遅く(大規模モデルでは 1 秒あたり数トークン以下)、
+`LLM_REQUEST_TIMEOUT_SECONDS`(既定 120)では足りずに失敗しうる。`.env` で
+`LLM_REQUEST_TIMEOUT_SECONDS=600` など生成が終わる長さへ伸ばす。
+
 ## Ollama のモデル取得と VRAM(#1086)
 
 モデルの初回取得は `ollama-model-init` が行う。手動の `ollama pull` は要らない。
