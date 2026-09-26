@@ -46,8 +46,6 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `global-setup.ts` | 全サービスの healthy 待ち + 公開URL/Keycloak への疎通確認 | - |
 | `global-teardown.ts` | 全スキーマ横断のテストデータ削除(`E2E_DB_CLEANUP=1` のときのみ) | - |
 | `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
-| `site-registration.spec.ts` | サイト管理・疎通確認(ManagedWordPress フィクスチャ) | admin |
-| `post-creation.spec.ts` | プロジェクト作成ワークフロー | admin |
 | `security.spec.ts` | CSRF・SQL インジェクション対策・入力サニタイズ(XSS検出とテンプレート削除の認可は #938 で `features/custom-tag/` へ移行済み) | admin |
 
 ---
@@ -467,17 +465,17 @@ ManagedWordPress を `beforeAll` で構築する spec をそのまま並列実�
 | spec | フィクスチャ | 実行モード |
 | --- | --- | --- |
 | `main-scenario.spec.ts` | ManagedWordPress サイト1件(テスト内で構築・削除) | serial |
-| `site-registration.spec.ts` | ManagedWordPress サイト1件(`beforeAll` / `afterAll`) | serial |
-| `post-creation.spec.ts` | プロジェクト1件(`beforeEach` / `afterEach`) | 既定(並列可) |
 
-`post-creation.spec.ts` は ManagedWordPress を構築しないため直列化していない。ただし
-`/projects` の一覧は全ワーカー・全 spec で共有されるため、**一覧の「先頭行」を対象にする
+`site-registration.spec.ts` は `features/project/site-provisioning.feature`、`post-creation.spec.ts` は
+`features/project/project-management.feature` へ移行済みで、いずれも削除済み。
+
+直列化の対象でない spec でも、`/projects` の一覧は全ワーカー・全 spec で共有されるため、**一覧の「先頭行」を対象にする
 アサーションを書かないこと**(他のテストが並列に作成・削除している行を掴み、クリック直前に
 行が消えて不安定になる)。必ず自分のフィクスチャを名前で特定する。
 
 ManagedWordPress の削除は「コンテナ内のファイル削除 + 専用 DB の `DROP DATABASE`」を伴い、
 30 秒では終わらないことがある。後片付けの待ちは 60 秒を目安にする
-(`main-scenario.spec.ts` / `site-registration.spec.ts` はいずれも 60 秒)。
+(`main-scenario.spec.ts` は 60 秒。移行済みの `features/project/site-provisioning.feature` も同じ基準)。
 削除しきれなかった場合は `[E2E ORPHAN] site_key=...` をログへ出力するので、
 実行後に孤児が残ったかどうかはレポートの標準出力から判別できる。
 

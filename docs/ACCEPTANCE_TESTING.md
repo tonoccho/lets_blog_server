@@ -346,8 +346,8 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | `auth-flow.spec.ts` | AT-3 (#929) | **移行完了。spec は削除済み**(`features/auth/` の6ファイル) |
 | `accessibility.spec.ts` | AT-18 (#944) | **移行完了。spec は削除済み**(`features/ui-quality/accessibility.feature`。旧`Identify accessibility violations for review`は合否を決めない調査用テストだったため移行対象から除外) |
 | `main-scenario.spec.ts` | AT-6 (#932) | 未 |
-| `site-registration.spec.ts` | AT-5 (#931) | 未 |
-| `post-creation.spec.ts` | AT-6 (#932) | 未 |
+| `site-registration.spec.ts` | AT-5 (#931) | **移行完了。spec は削除済み**(プロビジョニングは #1167 で `features/project/site-provisioning.feature`、資格情報誤りの疎通確認は #1168 で `features/project/site-registration.feature`) |
+| `post-creation.spec.ts` | AT-6 (#932) | **移行完了。spec は削除済み**(#1165 で `features/project/project-management.feature`) |
 | `image-upload.spec.ts` | AT-10 (#936) | **移行完了。spec は削除済み**(`features/media/image-gallery.feature`) |
 | `custom-tag-generation.spec.ts` | AT-12 (#938) → AT-18 (#944) | **移行完了。spec は削除済み**。レスポンシブテスト1件(モバイル幅でのカスタムタグ生成フォーム操作)は AT-12 (#938) が移行先の判断を AT-18 (#944) へ委ねていた。AT-18 は横断的なレスポンシブ検証(`features/ui-quality/responsive.feature` › モバイル幅で主要な操作(ナビゲーション・フォーム送信)ができる、プロジェクト作成フォームで検証)を既に持っており、LLMバックエンド固有の生成フローの再検証はAT-18のスコープ外(個別機能の振る舞い)と判断し、個別移行はせず削除した |
 | `service-degradation.spec.ts` | AT-17 (#943) | **移行完了。spec は削除済み**(`features/cross-cutting/service-degradation.feature`) |
