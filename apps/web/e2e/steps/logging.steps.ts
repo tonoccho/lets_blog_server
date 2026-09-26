@@ -1,4 +1,5 @@
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
+import { parseApiDateTime } from '../support/apiDateTime';
 import { After, Given, Step, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -340,7 +341,7 @@ Then('その記録には操作者・日時・対象・結果が揃っている',
   // いつ: 解釈可能な日時であること。
   expect(entry.createdAt, '操作ログに日時がありません').toBeTruthy();
   expect(
-    Number.isNaN(Date.parse(entry.createdAt)),
+    Number.isNaN(parseApiDateTime(entry.createdAt)),
     `操作ログの日時を解釈できません: ${entry.createdAt}`
   ).toBe(false);
 
@@ -403,7 +404,7 @@ Then('そのoperationIdのトレースは、同じ操作のログだけを古い
       .toBe(keycloakSubOf(token));
   }
 
-  const times = trace.map((entry) => Date.parse(entry.createdAt));
+  const times = trace.map((entry) => parseApiDateTime(entry.createdAt));
   const ascending = [...times].sort((a, b) => a - b);
   expect(times, 'トレースが古い順に並んでいません').toEqual(ascending);
 });
@@ -441,7 +442,7 @@ Then('統合ビューにその操作の操作ログと監査ログの双方が�
 
 Then('統合ビューは新しい順に並んでいる', async ({ ctx }) => {
   const content = ctx.at15UnifiedContent as UnifiedLogEntry[];
-  const times = content.map((entry) => Date.parse(entry.createdAt));
+  const times = content.map((entry) => parseApiDateTime(entry.createdAt));
   const descending = [...times].sort((a, b) => b - a);
   expect(times, '統合ビューが新しい順に並んでいません').toEqual(descending);
 });
@@ -557,7 +558,7 @@ Then('監査ログの各件には操作者・日時・対象・操作種別が�
     expect(entry.actorKeycloakSub, `監査ログ ${entry.action} の操作者が実際の操作者と一致しません`)
       .toBe(sub);
     expect(
-      Number.isNaN(Date.parse(entry.createdAt)),
+      Number.isNaN(parseApiDateTime(entry.createdAt)),
       `監査ログ ${entry.action} の日時を解釈できません: ${entry.createdAt}`
     ).toBe(false);
     expect(entry.resourceType, `監査ログ ${entry.action} に対象種別がありません`).toBe('PROJECT_USER');
@@ -859,7 +860,7 @@ Then('その監査ログは日時の範囲で絞り込める', async ({ ctx, req
   // 扱っている(#1314)。`Date.parse` はゾーン無し文字列を**実行ホストのローカル
   // タイムゾーン**として解釈するため(ECMAScript仕様)、そのまま渡すとホストの
   // タイムゾーンがUTCでない場合に範囲がずれる。'Z' を明示的に付けてUTCとして解釈させる。
-  const at = Date.parse(`${entry.createdAt}Z`);
+  const at = parseApiDateTime(entry.createdAt);
   const iso = (millis: number) => new Date(millis).toISOString().replace('Z', '');
 
   const inRange = await listAuditLogs(

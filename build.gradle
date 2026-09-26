@@ -22,6 +22,15 @@ subprojects {
     // #1109: `docker compose up -d --force-recreate <svc>` は mysql もオーバレイ無しで作り直し、
     // 127.0.0.1:3306 の公開を黙って外す。DB依存テストが変更と無関係に大量に落ちるので、
     // 到達できないときは「環境要因」と明示して警告する。失敗にはしない(DB非依存の単体テストは動かす)。
+    // #1257: システム内部の時刻はすべてUTC。ホストのTZ(例: Pacific/Auckland)に関係なく、
+    // テストJVMはUTCで動かす。TZ は子プロセスへ、user.timezone はJVM既定ゾーンへ効く。
+    plugins.withId('java') {
+        tasks.withType(Test).configureEach {
+            environment 'TZ', 'UTC'
+            systemProperty 'user.timezone', 'UTC'
+        }
+    }
+
     plugins.withId('java') {
         tasks.withType(Test).configureEach {
             doFirst {

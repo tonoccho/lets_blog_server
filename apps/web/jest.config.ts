@@ -1,6 +1,10 @@
 import type { Config } from 'jest'
 import nextJest from 'next/jest.js'
 
+// システム内部の時刻はすべてUTC(#1257)。ホストTZ(例: Pacific/Auckland)に関係なく、単体テストは
+// UTCで動かす。jest のワーカーはこのプロセスの環境変数を引き継ぐので、設定の読込時に固定する。
+process.env.TZ = 'UTC'
+
 const createJestConfig = nextJest({
   dir: './',
 })

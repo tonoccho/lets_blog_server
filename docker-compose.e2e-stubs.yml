@@ -51,6 +51,7 @@ x-stub-base: &stub-base
   volumes:
     - ./infra/e2e-stubs:/app:ro
   environment:
+    TZ: UTC
     PORT: "8080"
   networks:
     - lbs-net

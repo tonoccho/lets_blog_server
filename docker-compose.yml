@@ -40,6 +40,8 @@ x-rabbitmq-env: &rabbitmq-env
 
 services:
   reverse-proxy:
+    environment:
+      TZ: UTC
     logging: *default-logging
     image: nginx:alpine
     container_name: lbs-reverse-proxy
@@ -90,6 +92,7 @@ services:
     container_name: lbs-web
     <<: *common-service
     environment:
+      TZ: UTC
       # Web(BFF)からバックエンドへの全リクエストはgateway経由に一本化する(issue #584)。
       # ルーティング/JWT検証/レート制限/相関IDはgatewayが担う。issue #583でlegacy-apiを削除し、
       # gatewayのフォールバック(未割り当てパスの暗黙転送)も廃止したため、ルート表に無いパスは
@@ -144,6 +147,7 @@ services:
     container_name: lbs-media
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_media?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_media
       SPRING_DATASOURCE_PASSWORD: ${LBS_MEDIA_DB_PASSWORD}
@@ -202,6 +206,7 @@ services:
     container_name: lbs-ai
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_ai?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_ai
       SPRING_DATASOURCE_PASSWORD: ${LBS_AI_DB_PASSWORD}
@@ -248,6 +253,7 @@ services:
     container_name: lbs-content
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_content?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_content
       SPRING_DATASOURCE_PASSWORD: ${LBS_CONTENT_DB_PASSWORD}
@@ -288,6 +294,7 @@ services:
     container_name: lbs-analytics
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_analytics?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_analytics
       SPRING_DATASOURCE_PASSWORD: ${LBS_ANALYTICS_DB_PASSWORD}
@@ -338,6 +345,7 @@ services:
       - lbs-net
       - docker-socket-proxy-net
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_platform
       SPRING_DATASOURCE_PASSWORD: ${LBS_PLATFORM_DB_PASSWORD}
@@ -456,6 +464,7 @@ services:
     container_name: lbs-project
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_project?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_project
       SPRING_DATASOURCE_PASSWORD: ${LBS_PROJECT_DB_PASSWORD}
@@ -508,6 +517,7 @@ services:
     container_name: lbs-publishing
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_publishing?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_publishing
       SPRING_DATASOURCE_PASSWORD: ${LBS_PUBLISHING_DB_PASSWORD}
@@ -568,6 +578,7 @@ services:
     container_name: lbs-log-writer
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       <<: *rabbitmq-env
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_log?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_log
@@ -599,6 +610,7 @@ services:
     container_name: lbs-gateway
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       LOG_SERVICE_URI: http://log-writer:8080
       # 画像生成・ダイアグラム・PlantUML/Recharts/Penpotレンダリングのルーティング先(#573)。
       MEDIA_SERVICE_URI: http://media:8080
@@ -654,6 +666,7 @@ services:
     container_name: lbs-identity
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      TZ: UTC
       # issue #786: 専用スキーマlbs_identityへ切り替えた(ADR-0004)。#561の受入基準にあった
       # 「lbs_identityをFlywayで管理する」が未達のまま、分割前のlets_blogを参照し続けていた。
       # 切り替え前にscripts/migrate-identity-tables-to-lbs-identity.sqlでデータを移すこと
@@ -686,6 +699,7 @@ services:
     container_name: lbs-rabbitmq
     <<: *common-service
     environment:
+      TZ: UTC
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     volumes:
@@ -713,6 +727,7 @@ services:
     networks:
       - docker-socket-proxy-net
     environment:
+      TZ: UTC
       CONTAINERS: 1
       POST: 0
     volumes:
@@ -723,7 +738,12 @@ services:
     image: mysql:8.0
     container_name: lbs-mysql
     <<: *common-service
+    # セッション/グローバルのタイムゾーンをコンテナOSの TZ に頼らず +00:00 に固定する(#1257)。
+    # DATETIME DEFAULT/ON UPDATE CURRENT_TIMESTAMP 列がUTCで書かれることを保証する。
+    # tz テーブル(mysql_tzinfo_to_sql)に依存しないオフセット表記にしている。
+    command: ["--default-time-zone=+00:00"]
     environment:
+      TZ: UTC
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       # MYSQL_DATABASE(分割前の lets_blog スキーマ)は #785 で撤去した。#583 で legacy-api を
       # 削除して参照元が無くなり、スキーマ自体も DROP 済み。残すと空ボリュームからの初回起動時に
@@ -766,6 +786,7 @@ services:
     container_name: lbs-phpmyadmin
     <<: *common-service
     environment:
+      TZ: UTC
       PMA_HOST: mysql
       # PMA_USER / PMA_PASSWORD は**渡さない**(#978)。公式イメージは PMA_USER が
       # 設定されていると auth_type を config に切り替え、ログイン画面を出さずに
@@ -795,6 +816,7 @@ services:
     volumes:
       - keycloak_postgres:/var/lib/postgresql/data
     environment:
+      TZ: UTC
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
       POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
@@ -806,6 +828,7 @@ services:
     <<: *common-service
     command: ["start", "--import-realm"]
     environment:
+      TZ: UTC
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
       KC_DB_USERNAME: keycloak
@@ -864,6 +887,7 @@ services:
       - penpot-exporter
       - penpot-mcp
     environment:
+      TZ: UTC
       PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
       PENPOT_PUBLIC_URI: http://localhost:9001
       PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
@@ -882,6 +906,7 @@ services:
       penpot-valkey:
         condition: service_healthy
     environment:
+      TZ: UTC
       PENPOT_FLAGS: disable-email-verification enable-smtp enable-prepl-server disable-secure-session-cookies enable-mcp
       PENPOT_PUBLIC_URI: http://localhost:9001
       PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
@@ -905,6 +930,8 @@ services:
       PENPOT_SMTP_SSL: "false"
 
   penpot-mcp:
+    environment:
+      TZ: UTC
     logging: *default-logging
     image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-mcp
@@ -919,6 +946,7 @@ services:
       penpot-valkey:
         condition: service_healthy
     environment:
+      TZ: UTC
       PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
       PENPOT_PUBLIC_URI: http://localhost:9001
       PENPOT_INTERNAL_URI: http://penpot-frontend:8080
@@ -939,6 +967,7 @@ services:
     volumes:
       - penpot_postgres:/var/lib/postgresql/data
     environment:
+      - TZ=UTC
       - POSTGRES_INITDB_ARGS=--data-checksums
       - POSTGRES_DB=penpot
       - POSTGRES_USER=penpot
@@ -956,9 +985,12 @@ services:
       retries: 5
       start_period: 3s
     environment:
+      - TZ=UTC
       - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
 
   penpot-mailcatch:
+    environment:
+      TZ: UTC
     logging: *default-logging
     image: sj26/mailcatcher:latest
     container_name: lbs-penpot-mailcatch
@@ -990,6 +1022,7 @@ services:
     # `docker compose up -d` のままGPUが使われる。#1066 は同じ1行を comfyui へ適用できる。
     runtime: ${GPU_RUNTIME:-}
     environment:
+      TZ: UTC
       # runtime=nvidia のときにnvidia-container-runtimeが参照する(runc既定では無視される)。
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
@@ -1028,6 +1061,7 @@ services:
       ollama:
         condition: service_healthy
     environment:
+      TZ: UTC
       OLLAMA_HOST: http://ollama:11434
       LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct}
     entrypoint: ["/bin/sh", "-c"]
@@ -1056,6 +1090,8 @@ services:
   # `wait-for-stack-healthy.sh --all`(scripts/verify-clean-volume-boot.shが使う)の
   # 待機対象からも自動的に外れる(スクリプト側の変更は不要)。
   comfyui:
+    environment:
+      TZ: UTC
     logging: *default-logging
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
@@ -1073,12 +1109,16 @@ services:
               capabilities: [gpu]
 
   plantuml:
+    environment:
+      TZ: UTC
     logging: *default-logging
     image: plantuml/plantuml-server:jetty
     container_name: lbs-plantuml
     <<: *common-service
 
   drawio:
+    environment:
+      TZ: UTC
     logging: *default-logging
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
@@ -1112,6 +1152,7 @@ services:
     container_name: lbs-wordpress
     <<: *common-service
     environment:
+      TZ: UTC
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       WORDPRESS_DB_HOST: mysql
