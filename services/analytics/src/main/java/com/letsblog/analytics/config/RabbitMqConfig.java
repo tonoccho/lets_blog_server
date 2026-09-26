@@ -2,6 +2,7 @@ package com.letsblog.analytics.config;
 
 import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
 import com.letsblog.common.messaging.EventExchanges;
+import org.aopalliance.aop.Advice;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
@@ -76,8 +77,24 @@ public class RabbitMqConfig {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         configurer.configure(factory, connectionFactory);
         factory.setMessageConverter(converter);
-        // メッセージヘッダの相関ID(issue #582)をMDCへ設定してからリスナーメソッドを呼び出す。
-        factory.setAdviceChain(new CorrelationIdListenerAdvice());
+        // configure()が設定したリトライ→DLQのadvice chain(issue #580)を丸ごと置き換えず、
+        // 相関ID(issue #582)のMDC設定を先頭に足す(消さずに共存させる、issue #1276)。
+        factory.setAdviceChain(prependCorrelationAdvice(factory.getAdviceChain()));
         return factory;
+    }
+
+    /**
+     * 既存のadvice chainの先頭に{@link CorrelationIdListenerAdvice}を追加する(issue #1276、
+     * content-serviceの{@code RabbitMqConfig#prependCorrelationAdvice}と同じ方針)。
+     * 相関IDのMDC設定を先に行ってからリトライの成否判定に入るようにする(順序が重要)。
+     */
+    Advice[] prependCorrelationAdvice(Advice[] existing) {
+        int existingLength = existing != null ? existing.length : 0;
+        Advice[] combined = new Advice[existingLength + 1];
+        combined[0] = new CorrelationIdListenerAdvice();
+        if (existingLength > 0) {
+            System.arraycopy(existing, 0, combined, 1, existingLength);
+        }
+        return combined;
     }
 }
