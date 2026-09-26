@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { deflateSync } from 'node:zlib';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import {
@@ -554,6 +555,152 @@ Then('WordPress側にスラッグ指定なしの記事が新規に作成され�
   expect(postField(siteSlug, postId, 'post_status'), `投稿(id=${postId})がWordPress側に見つかりません`).toBe(
     'publish'
   );
+});
+
+// ------------------------------------------------------- issue #1432: 内容ハッシュによるメディアの再利用
+
+/** CRC32(PNGチャンク用)。 */
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buf) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k++) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** 指定色の1x1(不透明RGB)PNGを作る。色が違えばバイト列(=sha256)が必ず変わる。 */
+function solidPng(r: number, g: number, b: number): Buffer {
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0);
+  ihdr.writeUInt32BE(1, 4);
+  ihdr[8] = 8; // ビット深度
+  ihdr[9] = 2; // RGB
+  const raw = Buffer.from([0, r, g, b]); // フィルタ0 + 1画素
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const DEDUPE_REFERENCE = 'assets/eyecatch.png';
+
+/** メディアライブラリ(ゴミ箱を含む)の添付ファイル件数。 */
+function mediaCount(siteSlug: string): number {
+  return Number(
+    wpCli(siteSlug, 'post list --post_type=attachment --post_status=inherit,private,trash --format=count')
+  );
+}
+
+async function publishWithImage(
+  request: APIRequestContext,
+  ctx: Record<string, unknown>,
+  png: Buffer,
+  asFeatured: boolean
+): Promise<string> {
+  const token = await adminToken(request);
+  const unique = uniqueSuffix();
+  const title = `E2E-1432-${unique}`;
+  const result = await publish(request, token, ctx.publishSiteKey as string, {
+    title,
+    slug: `e2e-1432-${unique}`,
+    markdown: `# ${title}\n\n![image](${DEDUPE_REFERENCE})\n`,
+    image: { name: 'eyecatch.png', mimeType: 'image/png', buffer: png },
+    imageReferences: [DEDUPE_REFERENCE],
+    ...(asFeatured ? { featuredImageFilename: DEDUPE_REFERENCE } : {}),
+  });
+  (ctx.publishCleanupPostIds as string[]).push(result.wpPostId);
+  return result.wpPostId;
+}
+
+Given('画像付きの記事を公開済みである', async ({ ctx, request }) => {
+  const color = [0, 0, 0].map(() => Math.floor(Math.random() * 256));
+  const png = solidPng(color[0], color[1], color[2]);
+  ctx.dedupeColor = color;
+  const siteSlug = ctx.publishSiteSlug as string;
+  const firstPostId = await publishWithImage(request, ctx, png, true);
+  const mediaId = wpCli(siteSlug, `post meta get ${firstPostId} _thumbnail_id`);
+  expect(mediaId, '前提の記事にアイキャッチが設定されていません').toBeTruthy();
+  ctx.dedupePng = png;
+  ctx.dedupeFirstMediaId = mediaId;
+  ctx.dedupeFirstMediaUrl = postField(siteSlug, mediaId, 'guid');
+});
+
+Given('その記事の画像メディアがゴミ箱に移されている', async ({ ctx }) => {
+  const siteSlug = ctx.publishSiteSlug as string;
+  // メディアのゴミ箱(MEDIA_TRASH)は既定で無効のため、`wp post delete`ではなくステータスを直接変える。
+  wpCli(siteSlug, `post update ${ctx.dedupeFirstMediaId as string} --post_status=trash`);
+});
+
+When('別の記事として同じ内容の画像を本文に入れて公開する', async ({ ctx, request }) => {
+  ctx.dedupeCountBefore = mediaCount(ctx.publishSiteSlug as string);
+  ctx.dedupeSecondPostId = await publishWithImage(request, ctx, ctx.dedupePng as Buffer, false);
+});
+
+When('別の記事として同じ内容の画像をアイキャッチに指定して公開する', async ({ ctx, request }) => {
+  ctx.dedupeCountBefore = mediaCount(ctx.publishSiteSlug as string);
+  ctx.dedupeSecondPostId = await publishWithImage(request, ctx, ctx.dedupePng as Buffer, true);
+});
+
+When('別の記事として同じ参照名で内容の異なる画像を本文に入れて公開する', async ({ ctx, request }) => {
+  ctx.dedupeCountBefore = mediaCount(ctx.publishSiteSlug as string);
+  const [r, g, b] = ctx.dedupeColor as number[];
+  // 元の画像と必ず異なる色にする(赤成分を反転させれば、元と同じ色にはならない)。
+  const different = solidPng(255 - r, g, b);
+  ctx.dedupeSecondPostId = await publishWithImage(request, ctx, different, false);
+});
+
+Then('WordPressのメディアライブラリの件数は増えていない', async ({ ctx }) => {
+  expect(mediaCount(ctx.publishSiteSlug as string)).toBe(ctx.dedupeCountBefore as number);
+});
+
+Then('WordPressのメディアライブラリの件数は1件増えている', async ({ ctx }) => {
+  expect(mediaCount(ctx.publishSiteSlug as string)).toBe((ctx.dedupeCountBefore as number) + 1);
+});
+
+Then('公開した記事の本文の画像URLは既存メディアのURLを指している', async ({ ctx }) => {
+  const content = postField(ctx.publishSiteSlug as string, ctx.dedupeSecondPostId as string, 'post_content');
+  expect(content?.includes(ctx.dedupeFirstMediaUrl as string), `本文が既存メディアのURLを含みません: ${content}`).toBe(
+    true
+  );
+});
+
+Then('公開した記事の本文の画像URLは新しいメディアのURLを指している', async ({ ctx }) => {
+  const content = postField(ctx.publishSiteSlug as string, ctx.dedupeSecondPostId as string, 'post_content');
+  expect(content, '本文が取得できません').toBeTruthy();
+  expect(
+    content?.includes(ctx.dedupeFirstMediaUrl as string),
+    `本文が既存(内容の異なる)メディアのURLを指しています: ${content}`
+  ).toBe(false);
+  expect(content).toMatch(/\/wp-content\/uploads\//);
+});
+
+Then('公開した記事のアイキャッチは既存メディアのIDである', async ({ ctx }) => {
+  const thumbnailId = wpCli(
+    ctx.publishSiteSlug as string,
+    `post meta get ${ctx.dedupeSecondPostId as string} _thumbnail_id`
+  );
+  expect(thumbnailId).toBe(ctx.dedupeFirstMediaId as string);
+});
+
+Then('公開した記事のアイキャッチはゴミ箱のメディアとは別の新しいメディアである', async ({ ctx }) => {
+  const siteSlug = ctx.publishSiteSlug as string;
+  const thumbnailId = wpCli(siteSlug, `post meta get ${ctx.dedupeSecondPostId as string} _thumbnail_id`);
+  expect(thumbnailId, 'アイキャッチが設定されていません').toBeTruthy();
+  expect(thumbnailId, 'ゴミ箱のメディアが再利用されました').not.toBe(ctx.dedupeFirstMediaId as string);
+  expect(postField(siteSlug, thumbnailId, 'post_status')).toBe('inherit');
 });
 
 // ------------------------------------------------------- 後片付け

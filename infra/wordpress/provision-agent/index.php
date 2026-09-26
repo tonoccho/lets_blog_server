@@ -37,6 +37,12 @@ function isValidDbName(string $value): bool
     return (bool) preg_match('/^[a-z0-9_-]+$/', $value);
 }
 
+/** 小文字16進64桁のsha256か(issue #1432)。 */
+function isValidSha256(string $value): bool
+{
+    return preg_match('/^[0-9a-f]{64}$/', $value) === 1;
+}
+
 /**
  * stdout/stderrをエラー表示用に1つの文字列へまとめる。porcelain出力の抽出には使わないこと
  * (wp-cliがstderrへPHP Warning等を出すことがあり、それが混ざるとID等の値が壊れるため)。
@@ -1571,6 +1577,47 @@ if ($path === '/wp-cli/media-delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['mediaId' => $mediaId]);
 }
 
+// アップロード時に記録した内容ハッシュ(post meta `_letsblog_sha256`)で既存メディアをまとめて照会する
+// (issue #1432)。ゴミ箱のメディアは対象外(post_statusはinherit/privateのみ)。ハッシュは16進64桁に
+// 検証したものだけをPHPリテラルへ埋め込む。SSH側(WordPressSshOperations#findMediaBySha256)と同じ照会。
+if ($path === '/wp-cli/media-find-by-hash' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $hashes = $input['hashes'] ?? null;
+
+    if (!isValidSlug($slug) || !is_array($hashes) || count($hashes) === 0) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $literals = [];
+    foreach ($hashes as $hash) {
+        if (!is_string($hash) || !isValidSha256($hash)) {
+            respond(400, ['error' => 'パラメータが不正です']);
+        }
+        $literals[] = "'" . $hash . "'";
+    }
+    $sitePath = resolveExistingSitePath($slug);
+    if ($sitePath === null) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $phpCode = '$h = [' . implode(',', $literals) . ']; '
+        . "\$ids = get_posts(['post_type' => 'attachment', 'post_status' => ['inherit','private'], "
+        . "'numberposts' => -1, 'fields' => 'ids', 'orderby' => 'ID', 'order' => 'ASC', "
+        . "'meta_query' => [['key' => '_letsblog_sha256', 'value' => \$h, 'compare' => 'IN']]]); "
+        . "echo json_encode(array_map(function(\$id) { return ['id' => (string) \$id, "
+        . "'guid' => get_post_field('guid', \$id), "
+        . "'sha256' => get_post_meta(\$id, '_letsblog_sha256', true)]; }, \$ids));";
+
+    [$code, $out, $err] = runWp(['eval', $phpCode, "--path=$sitePath", '--allow-root']);
+    if ($code !== 0) {
+        respond(500, ['error' => '内容ハッシュによるメディアの照会に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    $items = json_decode($out, true);
+    if (!is_array($items)) {
+        respond(500, ['error' => 'メディア照会結果を解析できませんでした', 'detail' => $out]);
+    }
+    respond(200, ['media' => $items]);
+}
+
 if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($_POST['slug'] ?? '');
     if (!isValidSlug($slug) || empty($_FILES['file'])) {
@@ -1603,6 +1650,18 @@ if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(500, ['error' => 'アップロードしたメディアの情報取得に失敗しました', 'detail' => combinedOutput($out, $err)]);
     }
     $media = json_decode($out, true) ?: [];
+    // アップロードしたバイト列のsha256をメディアのpost metaへ記録する(issue #1432)。以後の投稿で
+    // 同一内容の画像を media-find-by-hash で同定するための印。記録に失敗してもメディアは作成済みで
+    // 投稿は続行できる(次回その画像が再アップロードされるだけ)ため、ログに留めて成功として返す。
+    $sha256 = strtolower((string) ($_POST['sha256'] ?? ''));
+    if (isValidSha256($sha256)) {
+        [$metaCode, $metaOut, $metaErr] = runWp(['post', 'meta', 'update', $mediaId, '_letsblog_sha256', $sha256,
+            "--path=$sitePath", '--allow-root']);
+        if ($metaCode !== 0) {
+            error_log("media-upload: sha256の記録に失敗しました (slug=$slug mediaId=$mediaId): "
+                . combinedOutput($metaOut, $metaErr));
+        }
+    }
     runCommand(['chown', '-R', 'www-data:www-data', "$sitePath/wp-content/uploads"]);
     respond(200, ['mediaId' => $mediaId, 'guid' => $media['guid'] ?? '']);
 }

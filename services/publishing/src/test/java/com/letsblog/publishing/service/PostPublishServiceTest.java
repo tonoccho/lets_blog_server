@@ -1131,4 +1131,162 @@ class PostPublishServiceTest {
 
         verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
     }
+
+    // ---- issue #1432: WordPress側の内容ハッシュ(sha256)照会によるメディア再利用 ----
+
+    private PostPublishCommand imageCommand(String featured, List<byte[]> contents, List<String> refs) {
+        List<MultipartFile> images = new java.util.ArrayList<>();
+        for (int i = 0; i < contents.size(); i++) {
+            images.add(new MockMultipartFile("images", "img" + i + ".png", "image/png", contents.get(i)));
+        }
+        return new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", images, featured,
+                refs, null);
+    }
+
+    @Test
+    void publish_ローカルに記録が無くてもWordPress側に同一sha256のメディアがあれば再アップロードせず既存URLを使う() throws Exception {
+        String sha = sha256Hex(new byte[]{1});
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
+                .thenReturn(Map.of(sha, new MediaUploadResult("88", "https://example.com/wp-content/uploads/existing.png")));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
+                .thenReturn("![a](assets/eyecatch.png)");
+
+        service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        ArgumentCaptor<String> html = ArgumentCaptor.forClass(String.class);
+        verify(contentServiceClient).finalizeHtml(html.capture(), any());
+        assertTrue(html.getValue().contains("https://example.com/wp-content/uploads/existing.png"));
+    }
+
+    @Test
+    void publish_アイキャッチに指定した画像もWordPress側の既存メディアを再利用しfeaturedMediaIdになる() throws Exception {
+        String sha = sha256Hex(new byte[]{1});
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
+                .thenReturn(Map.of(sha, new MediaUploadResult("88", "https://example.com/wp-content/uploads/existing.png")));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(imageCommand("assets/eyecatch.png", List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        ArgumentCaptor<PostContent> content = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), content.capture(), any());
+        assertEquals("88", content.getValue().featuredMediaId());
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_WordPress側に同一sha256が無ければ新規アップロードする() {
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenReturn(Map.of());
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+    }
+
+    @Test
+    void publish_照会は画像の枚数によらず1回で全画像のsha256をまとめて渡す() throws Exception {
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenReturn(Map.of());
+        when(cmsAdapter.uploadMedia(any(), any(), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(imageCommand(null, List.of(new byte[]{1}, new byte[]{2}, new byte[]{3}),
+                List.of("a.png", "b.png", "c.png")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Collection<String>> hashes = ArgumentCaptor.forClass(java.util.Collection.class);
+        verify(cmsAdapter, org.mockito.Mockito.times(1)).findMediaBySha256(eq(credentials), hashes.capture());
+        assertEquals(java.util.Set.of(sha256Hex(new byte[]{1}), sha256Hex(new byte[]{2}), sha256Hex(new byte[]{3})),
+                new java.util.HashSet<>(hashes.getValue()));
+    }
+
+    @Test
+    void publish_ローカルのキャッシュで再利用できる画像だけなら照会しない() throws Exception {
+        String sha = sha256Hex(new byte[]{1});
+        String json = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha + "\","
+                + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
+        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", json)));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文",
+                List.of(new MockMultipartFile("images", "e.png", "image/png", new byte[]{1})), null,
+                List.of("assets/eyecatch.png"), null);
+
+        service.publish(command);
+
+        verify(cmsAdapter, never()).findMediaBySha256(any(), any());
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    @Test
+    void publish_WordPress側で再利用したメディアもuploadedImagesJsonに記録する() throws Exception {
+        String sha = sha256Hex(new byte[]{1});
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
+                .thenReturn(Map.of(sha, new MediaUploadResult("88", "https://example.com/wp-content/uploads/existing.png")));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
+        verify(contentServiceClient).upsertPost(eq(1L), eq("101"), any(), any(), json.capture(), any(), any());
+        assertTrue(json.getValue().contains("\"mediaId\":\"88\""));
+        assertTrue(json.getValue().contains(sha));
+    }
+
+    @Test
+    void publish_照会に失敗しても従来どおり新規アップロードして投稿を続行する() {
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenThrow(new RuntimeException("ssh timeout"));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        PostPublishResponse response =
+                service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        assertEquals("101", response.wpPostId());
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+    }
+
+    @Test
+    void publish_内容が異なる画像は同じ参照名でも既存メディアを再利用せず新規アップロードする() throws Exception {
+        // WordPress側にあるのは別内容(sha256が異なる)のメディアだけ。
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
+                .thenReturn(Map.of(sha256Hex(new byte[]{9}),
+                        new MediaUploadResult("88", "https://example.com/wp-content/uploads/other.png")));
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(imageCommand("assets/eyecatch.png", List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        ArgumentCaptor<PostContent> content = ArgumentCaptor.forClass(PostContent.class);
+        verify(cmsAdapter).createOrUpdatePost(any(), content.capture(), any());
+        assertEquals("22", content.getValue().featuredMediaId());
+    }
+
+    @Test
+    void publish_照会結果がnullでも新規アップロードして続行する() {
+        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenReturn(null);
+        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
+                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
+                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+
+        service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+
+        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+    }
 }

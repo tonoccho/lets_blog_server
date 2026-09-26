@@ -298,6 +298,9 @@ public class PostPublishService {
         String featuredMediaId = null;
         int articleImageLongEdgePx = mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(projectId);
 
+        // 先に全画像をリサイズ/変換してsha256を求める。WordPress側の内容ハッシュ照会を、画像の枚数によらず
+        // 1回で済ませるため(issue #1432)。
+        List<PreparedImage> prepared = new java.util.ArrayList<>();
         for (int i = 0; i < images.size(); i++) {
             MultipartFile image = images.get(i);
             // imageReferencesはMarkdown中に実際に書かれている参照文字列(例: "assets/eyecatch.png")。
@@ -315,37 +318,56 @@ public class PostPublishService {
                 // 前回投稿時と同じリサイズ/変換結果であれば再アップロードをスキップする再利用判定が働く。
                 ImageResizeService.ResizeResult resized = imageResizeService.resizeToLongEdge(
                         image.getBytes(), image.getContentType(), articleImageLongEdgePx, true);
-                byte[] bytes = resized.data();
-                String sha256 = sha256Hex(bytes);
-                UploadedImageInfo prior = priorUploads.get(reference);
-                UploadedImageInfo current;
-                boolean hashMatches = prior != null && prior.sha256().equals(sha256);
-                boolean reusePrior = hashMatches && cmsAdapter.mediaExists(credentials, prior.mediaId());
-                if (hashMatches && !reusePrior) {
-                    log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)ですが、CMS側のメディア(mediaId={})が"
-                            + "実在しないため再アップロードします", reference, prior.mediaId());
+                prepared.add(new PreparedImage(i, reference, resized, sha256Hex(resized.data())));
+            } catch (IOException e) {
+                throw new CmsApiException("画像 '" + reference + "' の読み込み/アップロードに失敗しました", e);
+            }
+        }
+
+        // WordPress側の既存メディア(sha256 -> メディア)。ローカルのキャッシュで再利用できない画像が
+        // 初めて出たときに、全画像分をまとめて1回だけ照会する。
+        Map<String, MediaUploadResult> remoteMedia = null;
+
+        for (PreparedImage item : prepared) {
+            String reference = item.reference();
+            ImageResizeService.ResizeResult resized = item.resized();
+            String sha256 = item.sha256();
+            UploadedImageInfo prior = priorUploads.get(reference);
+            UploadedImageInfo current;
+            boolean hashMatches = prior != null && prior.sha256().equals(sha256);
+            boolean reusePrior = hashMatches && cmsAdapter.mediaExists(credentials, prior.mediaId());
+            if (hashMatches && !reusePrior) {
+                log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)ですが、CMS側のメディア(mediaId={})が"
+                        + "実在しないため再アップロードします", reference, prior.mediaId());
+            }
+            if (reusePrior) {
+                current = prior;
+                log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)のため再利用します: mediaId={}, url={}",
+                        reference, current.mediaId(), current.url());
+            } else {
+                if (remoteMedia == null) {
+                    remoteMedia = lookupRemoteMedia(cmsAdapter, credentials, prepared);
                 }
-                if (reusePrior) {
-                    current = prior;
-                    log.info("画像 '{}' は前回投稿時と同一内容(sha256一致)のため再利用します: mediaId={}, url={}",
-                            reference, current.mediaId(), current.url());
+                MediaUploadResult existing = remoteMedia.get(sha256);
+                if (existing != null) {
+                    current = new UploadedImageInfo(sha256, existing.url(), existing.id());
+                    log.info("画像 '{}' はWordPress側に同一内容(sha256一致)のメディアがあるため再利用します: "
+                            + "mediaId={}, url={}", reference, current.mediaId(), current.url());
                 } else {
-                    String renamedFilename = renameImageFile(reference, finalSlug, i + 1, resized.mimeType());
+                    String renamedFilename = renameImageFile(reference, finalSlug, item.index() + 1, resized.mimeType());
                     MediaUploadResult uploaded = cmsAdapter.uploadMedia(
-                            credentials, renamedFilename, resized.mimeType(), bytes);
+                            credentials, renamedFilename, resized.mimeType(), resized.data());
                     current = new UploadedImageInfo(sha256, uploaded.url(), uploaded.id());
                     log.info("画像 '{}' を新規アップロードしました: mediaId={}, url={}",
                             reference, current.mediaId(), current.url());
                 }
-                referenceToUrl.put(reference, current.url());
-                updatedUploads.put(reference, current);
-                if (featuredImageFilename != null && featuredImageFilename.equals(reference)) {
-                    featuredMediaId = current.mediaId();
-                    log.info("画像 '{}' はfeaturedImageFilenameと一致したためfeaturedMediaId={}を設定します",
-                            reference, featuredMediaId);
-                }
-            } catch (IOException e) {
-                throw new CmsApiException("画像 '" + reference + "' の読み込み/アップロードに失敗しました", e);
+            }
+            referenceToUrl.put(reference, current.url());
+            updatedUploads.put(reference, current);
+            if (featuredImageFilename != null && featuredImageFilename.equals(reference)) {
+                featuredMediaId = current.mediaId();
+                log.info("画像 '{}' はfeaturedImageFilenameと一致したためfeaturedMediaId={}を設定します",
+                        reference, featuredMediaId);
             }
         }
 
@@ -356,6 +378,29 @@ public class PostPublishService {
         }
         log.info("アイキャッチ解決結果: featuredMediaId={}", featuredMediaId);
         return new ImageReplacementResult(rewritten, featuredMediaId, updatedUploads);
+    }
+
+    /** リサイズ/変換済みの画像とそのsha256(記事中の並び順indexを保持する。連番のファイル名に使う)。 */
+    private record PreparedImage(int index, String reference, ImageResizeService.ResizeResult resized,
+                                 String sha256) {
+    }
+
+    /**
+     * 全画像のsha256をまとめて1回WordPress側へ照会する(issue #1432)。照会に失敗した場合は空として扱い、
+     * 従来どおり新規アップロードして投稿を続行する(メディアの重複は記事の重複より実害が小さいため)。
+     */
+    private Map<String, MediaUploadResult> lookupRemoteMedia(
+            CmsAdapter cmsAdapter, CmsCredentials credentials, List<PreparedImage> prepared) {
+        Set<String> hashes = prepared.stream().map(PreparedImage::sha256)
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        try {
+            Map<String, MediaUploadResult> found = cmsAdapter.findMediaBySha256(credentials, hashes);
+            return found == null ? Map.of() : found;
+        } catch (RuntimeException e) {
+            log.warn("WordPress側の同一内容メディアの照会に失敗しました(新規アップロードして続行します): {}",
+                    e.getMessage());
+            return Map.of();
+        }
     }
 
     /**

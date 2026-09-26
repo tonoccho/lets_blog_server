@@ -10,6 +10,7 @@ import com.letsblog.publishing.cms.CmsMediaSummary;
 import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.MediaContentHash;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -1076,10 +1077,58 @@ public class WordPressSshOperations {
                         + firstLine(getResult.stderr(), getResult.stdout()));
             }
             JsonNode media = parseJsonObject(getResult.stdout());
+            recordContentHash(creds, mediaId, data);
             return new MediaUploadResult(mediaId, media.path("guid").asText());
         } finally {
             executor.removeFile(params, remotePath);
         }
+    }
+
+    /**
+     * アップロードしたバイト列のsha256をメディアのpost metaへ記録する(issue #1432)。以後の投稿で
+     * 同一内容の画像を{@link #findMediaBySha256}で同定するための印。記録に失敗してもメディア自体は
+     * 作成済みで投稿は続行できる(次回その画像が再アップロードされるだけ)ため、警告に留める。
+     */
+    private void recordContentHash(WordPressCredentials creds, String mediaId, byte[] data) {
+        SshCommandResult result = exec(creds, wpCli(creds,
+                "post meta update " + ShellQuote.single(mediaId) + " "
+                        + ShellQuote.single(MediaContentHash.META_KEY) + " "
+                        + ShellQuote.single(MediaContentHash.sha256Hex(data))));
+        if (!result.ok()) {
+            log.warn("メディア(id={})のsha256の記録に失敗しました(次回は再アップロードされます): {}",
+                    mediaId, firstLine(result.stderr(), result.stdout()));
+        }
+    }
+
+    /**
+     * 内容ハッシュ(sha256)を記録したメディアを1回のwp evalでまとめて照会する(issue #1432)。
+     * ゴミ箱(trash)のメディアは対象外(post_statusはinherit/privateのみ)。ハッシュは16進64桁に
+     * 検証済みのものだけをPHPリテラルへ埋め込む。同一ハッシュが複数あればIDの小さいものを採る。
+     */
+    public Map<String, MediaUploadResult> findMediaBySha256(WordPressCredentials creds,
+                                                           java.util.Collection<String> sha256s) {
+        List<String> valid = sha256s.stream().filter(MediaContentHash::isValid).distinct().toList();
+        if (valid.isEmpty()) {
+            return Map.of();
+        }
+        String literal = valid.stream().map(h -> "'" + h + "'").collect(java.util.stream.Collectors.joining(","));
+        String phpCode = "$h = [" + literal + "]; "
+                + "$ids = get_posts(['post_type' => 'attachment', 'post_status' => ['inherit','private'], "
+                + "'numberposts' => -1, 'fields' => 'ids', 'orderby' => 'ID', 'order' => 'ASC', "
+                + "'meta_query' => [['key' => '" + MediaContentHash.META_KEY + "', 'value' => $h, "
+                + "'compare' => 'IN']]]); "
+                + "echo json_encode(array_map(function($id) { return ['id' => (string) $id, "
+                + "'guid' => get_post_field('guid', $id), "
+                + "'sha256' => get_post_meta($id, '" + MediaContentHash.META_KEY + "', true)]; }, $ids));";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("内容ハッシュによるメディアの照会に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        Map<String, MediaUploadResult> found = new LinkedHashMap<>();
+        parseJsonArray(result.stdout()).forEach(item -> found.putIfAbsent(item.path("sha256").asText(),
+                new MediaUploadResult(item.path("id").asText(), item.path("guid").asText())));
+        return found;
     }
 
     /**

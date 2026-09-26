@@ -884,7 +884,7 @@ class WordPressSshOperationsTest {
         assertEquals(true, remotePath.contains("photo.png"));
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
         assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("media import"));
         assertEquals(true, commandCaptor.getAllValues().get(2).contains("post get '55'"));
@@ -902,7 +902,7 @@ class WordPressSshOperationsTest {
         operations.uploadMedia(creds(), "icon.svg", "image/svg+xml", new byte[]{1});
 
         ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
-        verify(executor, times(4)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        verify(executor, times(5)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
         assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("mkdir -p"));
         assertEquals(true, commandCaptor.getAllValues().get(1).contains("mu-plugins"));
@@ -1462,5 +1462,97 @@ class WordPressSshOperationsTest {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(executor).exec(any(SshConnectionParams.class), captor.capture(), isNull());
         assertNoUnquotedMetacharacters(captor.getValue());
+    }
+
+    // ---- issue #1432: 内容ハッシュによるメディア照会・記録 ----
+
+    private static final String SHA_A = "a".repeat(64);
+    private static final String SHA_B = "b".repeat(64);
+
+    @Test
+    void findMediaBySha256_1回のwp_evalで全ハッシュをまとめて照会しゴミ箱を除く() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("[{\"id\":\"5\",\"guid\":\"https://example.com/a.png\",\"sha256\":\"" + SHA_A + "\"}]"));
+
+        Map<String, MediaUploadResult> found =
+                operations.findMediaBySha256(creds(), new java.util.LinkedHashSet<>(List.of(SHA_A, SHA_B)));
+
+        assertEquals(1, found.size());
+        assertEquals("5", found.get(SHA_A).id());
+        assertEquals("https://example.com/a.png", found.get(SHA_A).url());
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(1)).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        String command = captor.getValue();
+        assertEquals(true, command.contains("eval"));
+        assertEquals(true, command.contains("_letsblog_sha256"));
+        assertEquals(true, command.contains(SHA_A));
+        assertEquals(true, command.contains(SHA_B));
+        assertEquals(true, command.contains("inherit"));
+        assertEquals(false, command.contains("trash"));
+    }
+
+    @Test
+    void findMediaBySha256_ハッシュが空ならwp_cliを呼ばず空を返す() {
+        assertEquals(Map.of(), operations.findMediaBySha256(creds(), java.util.Set.of()));
+        verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
+    }
+
+    @Test
+    void findMediaBySha256_該当が無ければ空を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        assertEquals(Map.of(), operations.findMediaBySha256(creds(), java.util.Set.of(SHA_A)));
+    }
+
+    @Test
+    void findMediaBySha256_wp_cliが失敗したら例外にする() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("Error: db"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.findMediaBySha256(creds(), java.util.Set.of(SHA_A)));
+    }
+
+    @Test
+    void findMediaBySha256_16進64桁でない値は照会に含めない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("[]"));
+
+        operations.findMediaBySha256(creds(), java.util.Set.of(SHA_A, "x'); system('id');//"));
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), captor.capture(), isNull());
+        assertEquals(false, captor.getValue().contains("system("));
+        assertEquals(true, captor.getValue().contains(SHA_A));
+    }
+
+    @Test
+    void uploadMedia_取り込んだメディアへアップロードしたバイト列のsha256をpost_metaとして記録する() throws Exception {
+        byte[] data = "image-bytes".getBytes(StandardCharsets.UTF_8);
+        String sha = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(data));
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/photo.png\"}"))
+                .thenReturn(ok("Success: Added custom field."));
+
+        operations.uploadMedia(creds(), "photo.png", "image/png", data);
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        String metaCommand = commandCaptor.getAllValues().get(3);
+        assertEquals(true, metaCommand.contains("post meta update '55' '_letsblog_sha256' '" + sha + "'"));
+    }
+
+    @Test
+    void uploadMedia_sha256の記録に失敗してもアップロード自体は成功として返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok(""))
+                .thenReturn(ok("55\n"))
+                .thenReturn(ok("{\"guid\":\"https://example.com/wp-content/uploads/photo.png\"}"))
+                .thenReturn(fail("meta failed"));
+
+        MediaUploadResult result = operations.uploadMedia(creds(), "photo.png", "image/png", new byte[]{1});
+
+        assertEquals("55", result.id());
     }
 }

@@ -1,6 +1,8 @@
 package com.letsblog.publishing.cms;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -52,6 +54,17 @@ public interface CmsAdapter {
      */
     default boolean mediaExists(CmsCredentials credentials, String mediaId) {
         return true;
+    }
+
+    /**
+     * アップロード時にWordPress側へ記録した内容ハッシュ(sha256)で、既存メディアをまとめて照会する
+     * (読み取り専用、issue #1432)。戻り値はsha256→メディア。ゴミ箱・削除済みのメディアは含めない。
+     * 呼び出し側は画像の枚数によらず1回の呼び出しで済ませられる。照会に失敗した場合は例外を投げる
+     * (呼び出し側は従来どおり新規アップロードで続行してよい)。対応しないCMSは既定で空を返す。
+     */
+    default Map<String, MediaUploadResult> findMediaBySha256(CmsCredentials credentials,
+                                                            Collection<String> sha256s) {
+        return Map.of();
     }
 
     /**

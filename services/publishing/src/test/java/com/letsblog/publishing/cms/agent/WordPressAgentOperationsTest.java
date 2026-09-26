@@ -379,4 +379,69 @@ class WordPressAgentOperationsTest {
         org.junit.jupiter.api.Assertions.assertThrows(AgentOperationException.class,
                 () -> operations.findPostIdsBySlug(creds(), "my-slug"));
     }
+
+    // ---- issue #1432: 内容ハッシュによるメディア照会・記録 ----
+
+    @Test
+    void findMediaBySha256_1回の呼び出しで全ハッシュを渡し一致したメディアを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-find-by-hash"))
+                .andExpect(content().json("{\"slug\":\"main\",\"hashes\":[\"aa\",\"bb\"]}"))
+                .andRespond(withSuccess(
+                        "{\"media\":[{\"id\":\"5\",\"guid\":\"http://wordpress/a.png\",\"sha256\":\"aa\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        java.util.Map<String, MediaUploadResult> found =
+                operations.findMediaBySha256(creds(), new java.util.LinkedHashSet<>(java.util.List.of("aa", "bb")));
+
+        assertEquals(1, found.size());
+        assertEquals("5", found.get("aa").id());
+        assertEquals("http://wordpress/a.png", found.get("aa").url());
+        server.verify();
+    }
+
+    @Test
+    void findMediaBySha256_ハッシュが空ならエージェントを呼ばず空を返す() {
+        assertEquals(java.util.Map.of(), operations.findMediaBySha256(creds(), java.util.Set.of()));
+        server.verify();
+    }
+
+    @Test
+    void findMediaBySha256_エージェントがエラーを返したら例外にする() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-find-by-hash"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"boom\"}"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(AgentOperationException.class,
+                () -> operations.findMediaBySha256(creds(), java.util.Set.of("aa")));
+    }
+
+    @Test
+    void findMediaBySha256_エージェントへ接続できなければ例外にする() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-find-by-hash"))
+                .andRespond(request -> { throw new java.io.IOException("connection refused"); });
+
+        org.junit.jupiter.api.Assertions.assertThrows(AgentOperationException.class,
+                () -> operations.findMediaBySha256(creds(), java.util.Set.of("aa")));
+    }
+
+    @Test
+    void uploadMedia_アップロードしたバイト列のsha256をフォームで送る() throws Exception {
+        byte[] data = new byte[]{1, 2, 3};
+        String sha = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(data));
+        server.expect(requestTo("http://wordpress:9000/wp-cli/media-upload"))
+                .andExpect(request -> {
+                    String body = ((org.springframework.mock.http.client.MockClientHttpRequest) request)
+                            .getBodyAsString();
+                    org.junit.jupiter.api.Assertions.assertTrue(body.contains("name=\"sha256\""), body);
+                    org.junit.jupiter.api.Assertions.assertTrue(body.contains(sha), body);
+                })
+                .andRespond(withSuccess("{\"mediaId\":\"77\",\"guid\":\"http://wordpress/img.png\"}",
+                        MediaType.APPLICATION_JSON));
+
+        operations.uploadMedia(creds(), "img.png", "image/png", data);
+
+        server.verify();
+    }
 }

@@ -9,6 +9,7 @@ import com.letsblog.publishing.cms.CmsMediaSummary;
 import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.MediaContentHash;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -382,6 +383,8 @@ public class WordPressAgentOperations {
     public MediaUploadResult uploadMedia(WordPressCredentials creds, String filename, String contentType, byte[] data) {
         MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
         form.add("slug", creds.wpSlug());
+        // アップロードしたバイト列のsha256(issue #1432)。エージェントがメディアのpost metaへ記録する。
+        form.add("sha256", MediaContentHash.sha256Hex(data));
         form.add("file", new ByteArrayResource(data) {
             @Override
             public String getFilename() {
@@ -400,6 +403,30 @@ public class WordPressAgentOperations {
             return new MediaUploadResult(body.path("mediaId").asText(), body.path("guid").asText());
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPressメディアのアップロードに失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 内容ハッシュ(sha256)を記録したメディアを、1回のエージェント呼び出しでまとめて照会する
+     * (issue #1432)。ゴミ箱のメディアはエージェント側で除外される。失敗時は例外を投げる。
+     */
+    public Map<String, MediaUploadResult> findMediaBySha256(WordPressCredentials creds,
+                                                           java.util.Collection<String> sha256s) {
+        List<String> hashes = sha256s.stream().distinct().toList();
+        if (hashes.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            // ハッシュの形式検証はエージェント側(index.php)が行う。
+            JsonNode body = post("/wp-cli/media-find-by-hash", Map.of("slug", creds.wpSlug(), "hashes", hashes));
+            Map<String, MediaUploadResult> found = new HashMap<>();
+            body.path("media").forEach(item -> found.putIfAbsent(item.path("sha256").asText(),
+                    new MediaUploadResult(item.path("id").asText(), item.path("guid").asText())));
+            return found;
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("内容ハッシュによるメディアの照会に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
         }

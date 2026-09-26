@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -417,5 +418,35 @@ class WordPressAdapterTest {
     @Test
     void findPostIdsBySlug_未対応トランスポートは例外を投げる() {
         assertThrows(RuntimeException.class, () -> adapter.findPostIdsBySlug(unsupportedCredentials(), "my-slug"));
+    }
+
+    // ---- issue #1432: 内容ハッシュによるメディア照会 ----
+
+    @Test
+    void findMediaBySha256_SSHはsshOperationsへ委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        java.util.Set<String> hashes = java.util.Set.of("aa");
+        Map<String, MediaUploadResult> expected = Map.of("aa", new MediaUploadResult("5", "u"));
+        when(sshOperations.findMediaBySha256(creds, hashes)).thenReturn(expected);
+
+        assertEquals(expected, adapter.findMediaBySha256(creds, hashes));
+        verify(agentOperations, never()).findMediaBySha256(any(), any());
+    }
+
+    @Test
+    void findMediaBySha256_managedはagentOperationsへ委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        java.util.Set<String> hashes = java.util.Set.of("aa");
+        Map<String, MediaUploadResult> expected = Map.of("aa", new MediaUploadResult("5", "u"));
+        when(agentOperations.findMediaBySha256(creds, hashes)).thenReturn(expected);
+
+        assertEquals(expected, adapter.findMediaBySha256(creds, hashes));
+        verify(sshOperations, never()).findMediaBySha256(any(), any());
+    }
+
+    @Test
+    void findMediaBySha256_未対応トランスポートは例外を投げる() {
+        assertThrows(RuntimeException.class,
+                () -> adapter.findMediaBySha256(unsupportedCredentials(), java.util.Set.of("aa")));
     }
 }

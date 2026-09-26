@@ -6,6 +6,7 @@ import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -89,6 +90,19 @@ public class WordPressAdapter implements CmsAdapter {
         }
         if (creds.isAgent()) {
             return agentOperations.postExists(creds, mediaId);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
+    public Map<String, MediaUploadResult> findMediaBySha256(CmsCredentials credentials,
+                                                           Collection<String> sha256s) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.findMediaBySha256(creds, sha256s);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.findMediaBySha256(creds, sha256s);
         }
         throw unsupportedTransport(creds);
     }
