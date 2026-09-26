@@ -3,6 +3,17 @@
 # 新しいサービス(gateway/Keycloak/各ドメインサービス等)を追加する際もこれらを再利用する。
 # ポート割当は内部8080に統一し(docs/DOCKER_COMPOSE_ARCHITECTURE.md参照)、外部公開は
 # reverse-proxy(nginx)経由のみとする。
+# 全サービスのjson-fileログにサイズ上限を付ける(#1247)。
+# Dockerの既定json-fileは無制限で、1サービスの暴走(2026-09-10のlog-writerは約352GB)が
+# ホストのディスクを埋める。各サービスは `logging: *default-logging` で参照する。
+# 新しいサービスを足すときも必ず付けること(scripts/test_compose_log_rotation.py が検査する)。
+# 1コンテナあたりの上限は max-size x max-file = 250MB。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 x-common-service: &common-service
   # restartを個別に上書きする場合は、ダッシュボードのコンテナ状態判定
   # (services/platform/.../ContainerStatusService、issue #725)に影響する点に注意。
@@ -29,6 +40,7 @@ x-rabbitmq-env: &rabbitmq-env
 
 services:
   reverse-proxy:
+    logging: *default-logging
     image: nginx:alpine
     container_name: lbs-reverse-proxy
     <<: *common-service
@@ -71,6 +83,7 @@ services:
       start_period: 60s
 
   web:
+    logging: *default-logging
     build:
       context: ./apps/web
       dockerfile: Dockerfile
@@ -124,6 +137,7 @@ services:
       start_period: 60s
 
   media:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/media/Dockerfile
@@ -181,6 +195,7 @@ services:
   # generation_jobs(LLM/ComfyUIジョブ履歴)の所有権をai-serviceへ移管(#574)。スキーマ・Flyway
   # マイグレーションは専用のlbs_aiスキーマ(ADR-0004)で本サービスが所有する。
   ai:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/ai/Dockerfile
@@ -226,6 +241,7 @@ services:
   # 専用のlbs_contentスキーマ(ADR-0004)で本サービスが所有する。[blogcard]/[amazon]タグの
   # スクレイピング・記事プレビューのテーマ骨格取得用のヘッドレスブラウザ(Playwright)は本サービスが持つ。
   content:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/content/Dockerfile
@@ -265,6 +281,7 @@ services:
   # 分離して保管する。スキーマ・Flywayマイグレーションは専用のlbs_analyticsスキーマ(ADR-0004)で
   # 本サービスが所有する。
   analytics:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/analytics/Dockerfile
@@ -308,6 +325,7 @@ services:
   # issue #696、C10-4)もlegacy-apiから移設した(gatewayのplatformルート、
   # /api/system/**・/api/backup/**参照。/api/system/vscode-extensionは/api/system/**に含まれる)。
   platform:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/platform/Dockerfile
@@ -431,6 +449,7 @@ services:
   # デザインカスタマイズ(プロジェクト単位)をlegacy-apiから抽出した(#577 stage 1)。より大きな
   # Project/Site(CMS/WordPress自動プロビジョニング)ドメインは #577 stage2 で移設済み。
   project:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/project/Dockerfile
@@ -482,6 +501,7 @@ services:
   # (#575設計判断1・2・4)。スキーマ・Flywayマイグレーションは専用のlbs_publishingスキーマ
   # (ADR-0004)で本サービスが所有する(本Issue時点では所有ドメインテーブルは無い)。
   publishing:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/publishing/Dockerfile
@@ -541,6 +561,7 @@ services:
   # ログ)もここへ移設した。スキーマ・Flywayマイグレーションは専用の lbs_log スキーマ
   # (ADR-0004)で本サービスが所有する。
   log-writer:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/log-writer/Dockerfile
@@ -571,6 +592,7 @@ services:
   # マッチしないパスは gateway 自身が404を返す
   # (services/gateway/src/main/resources/application.yml参照)。
   gateway:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
@@ -625,6 +647,7 @@ services:
         condition: service_healthy
 
   identity:
+    logging: *default-logging
     build:
       context: .
       dockerfile: services/identity/Dockerfile
@@ -658,6 +681,7 @@ services:
         condition: service_healthy
 
   rabbitmq:
+    logging: *default-logging
     image: rabbitmq:3-management-alpine
     container_name: lbs-rabbitmq
     <<: *common-service
@@ -682,6 +706,7 @@ services:
   # docker-socket-proxy-net(下のplatformサービス定義・networks:セクション参照)にのみ参加させることで、
   # Epic #551の方針どおり到達可能なコンテナをplatform-serviceだけに限定する。
   docker-socket-proxy:
+    logging: *default-logging
     image: tecnativa/docker-socket-proxy:latest
     container_name: lbs-docker-socket-proxy
     restart: unless-stopped
@@ -694,6 +719,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   mysql:
+    logging: *default-logging
     image: mysql:8.0
     container_name: lbs-mysql
     <<: *common-service
@@ -735,6 +761,7 @@ services:
       retries: 5
 
   phpmyadmin:
+    logging: *default-logging
     image: phpmyadmin/phpmyadmin
     container_name: lbs-phpmyadmin
     <<: *common-service
@@ -755,6 +782,7 @@ services:
   # 認証基盤(ADR-0002, #559)。realm定義はGit管理された ./infra/keycloak/realm-export.json から
   # 起動時にimportする(--import-realm)。GUIでの手作業設定はしない。
   keycloak-postgres:
+    logging: *default-logging
     image: postgres:15
     container_name: lbs-keycloak-postgres
     <<: *common-service
@@ -772,6 +800,7 @@ services:
       POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
 
   keycloak:
+    logging: *default-logging
     image: "quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.7.2}"
     container_name: lbs-keycloak
     <<: *common-service
@@ -816,6 +845,7 @@ services:
       start_period: 30s
 
   penpot-frontend:
+    logging: *default-logging
     image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-frontend
     <<: *common-service
@@ -840,6 +870,7 @@ services:
       PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: 367001600
 
   penpot-backend:
+    logging: *default-logging
     image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-backend
     <<: *common-service
@@ -874,11 +905,13 @@ services:
       PENPOT_SMTP_SSL: "false"
 
   penpot-mcp:
+    logging: *default-logging
     image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-mcp
     <<: *common-service
 
   penpot-exporter:
+    logging: *default-logging
     image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-exporter
     <<: *common-service
@@ -892,6 +925,7 @@ services:
       PENPOT_REDIS_URI: redis://penpot-valkey/0
 
   penpot-postgres:
+    logging: *default-logging
     image: "postgres:15"
     container_name: lbs-penpot-postgres
     <<: *common-service
@@ -911,6 +945,7 @@ services:
       - POSTGRES_PASSWORD=penpot
 
   penpot-valkey:
+    logging: *default-logging
     image: valkey/valkey:8.1
     container_name: lbs-penpot-valkey
     <<: *common-service
@@ -924,6 +959,7 @@ services:
       - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
 
   penpot-mailcatch:
+    logging: *default-logging
     image: sj26/mailcatcher:latest
     container_name: lbs-penpot-mailcatch
     <<: *common-service
@@ -936,6 +972,7 @@ services:
   # 動かすために復活させた。reverse-proxy経由の外部公開はせず、到達元はlbs-net内部のみ。
   # モデルの取得はollama-model-init(下)が起動時に済ませる(手動のollama pullは不要)。
   ollama:
+    logging: *default-logging
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: lbs-ollama
     <<: *common-service
@@ -981,6 +1018,7 @@ services:
   # (#725)が「正常に完了したワンショットジョブ」と見なせず、ダッシュボードが常時赤くなる。
   # 判定条件は「終了コード0 かつ 再起動ポリシー no」。
   ollama-model-init:
+    logging: *default-logging
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: lbs-ollama-model-init
     restart: "no"
@@ -1018,6 +1056,7 @@ services:
   # `wait-for-stack-healthy.sh --all`(scripts/verify-clean-volume-boot.shが使う)の
   # 待機対象からも自動的に外れる(スクリプト側の変更は不要)。
   comfyui:
+    logging: *default-logging
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
     profiles: ["gpu"]
@@ -1034,11 +1073,13 @@ services:
               capabilities: [gpu]
 
   plantuml:
+    logging: *default-logging
     image: plantuml/plantuml-server:jetty
     container_name: lbs-plantuml
     <<: *common-service
 
   drawio:
+    logging: *default-logging
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
     <<: *common-service
@@ -1064,6 +1105,7 @@ services:
   #     start_period: 10s
 
   wordpress:
+    logging: *default-logging
     build:
       context: ./infra/wordpress
       dockerfile: Dockerfile

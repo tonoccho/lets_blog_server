@@ -26,6 +26,12 @@
 x-stub-base: &stub-base
   image: node:22-alpine
   restart: unless-stopped
+  # 他のサービスと同じログ上限(#1247)。値の根拠は docker-compose.yml の x-logging を参照。
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
   # マウント先(/app)を working_dir にしない(#1000)。
   #
   # ヘルスチェックは docker exec と同じ経路で走り、その cwd はコンテナの WorkingDir に

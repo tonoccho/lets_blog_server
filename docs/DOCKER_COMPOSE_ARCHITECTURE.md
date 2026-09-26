@@ -205,6 +205,34 @@ VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後�
   `profiles: ["design-tools"]` を付与し、`docker compose --profile design-tools up -d`
   で明示的に含める形にするのが妥当(別Issueとして起票する)。
 
+## コンテナログのサイズ上限(#1247)
+
+Docker の既定 `json-file` ドライバはサイズ無制限でログを書く。2026-09-10 に `lbs-log-writer`
+1 コンテナの `*-json.log` が約 352GB(約 1.46MB/秒)に達し、ホストのルートファイルシステムが
+92% まで埋まった。1 サービスの暴走がホスト全体を止めないよう、全サービスに上限を付けている。
+
+- 設定値: `driver: json-file`、`max-size: 50m`、`max-file: 5`(1 コンテナあたり最大 250MB)。
+- `docker-compose.yml` は `x-logging`(アンカー `default-logging`)を各サービスが
+  `logging: *default-logging` で参照する。`x-common-service` を使わないサービスにも付ける。
+  `docker-compose.e2e-stubs.yml` は `x-stub-base` に同じ値を持つ。`host-tests` / `shared-host` は
+  本体で定義済みのサービスの上書きだけなので、本体の設定がそのまま効く。
+- 新しいサービスを足すときも付けること。`scripts/test_compose_log_rotation.py` が
+  `docker compose config` の出力で全サービスを検査する。
+- 設定は**コンテナの作成時**に決まる。反映には `docker compose up -d` でコンテナを作り直す。
+  `docker inspect -f '{{json .HostConfig.LogConfig}}' <container>` で確認できる。
+- `/etc/docker/daemon.json` の `log-opts`(デーモン既定)はリポジトリ外でホストごとに設定する。
+
+### ログ容量の確認方法
+
+`docker system df` はコンテナログを集計しない(Containers 欄は書き込み層のみ)ため、ログが
+ディスクを食っていても見えない。ログの実体は `/var/lib/docker/containers/<id>/<id>-json.log`。
+root でしか読めない環境では、読み取り専用でマウントしたコンテナ経由で測る:
+
+```bash
+docker run --rm -v /var/lib/docker/containers:/c:ro alpine sh -c 'du -sh /c/* | sort -h | tail'
+docker inspect -f '{{.Name}} {{.LogPath}}' $(docker ps -aq)   # id とコンテナ名の対応
+```
+
 ## リソース実測
 
 全29コンテナを `docker compose up -d` で起動した状態で `docker stats --no-stream` を実測した値
