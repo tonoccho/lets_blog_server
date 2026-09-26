@@ -654,11 +654,14 @@ def _flag_value(args, long_name):
 def check_merge_flags(command):
     """CLAUDE.md → Completion Definition: Issue の MR は squash のみ。
 
+    `--squash` の明示を要求する理由と、プロジェクト設定だけに頼らない根拠は CLAUDE.md →
+    Enforcement → Where squash is enforced が単一の定義であり、ここはそれを判定として
+    符号化しているだけ。二層構造の根拠・網羅性の検証は CLAUDE.md 側に書く。ここに
+    理由を再掲しない。
+
     `gh pr merge` は方式を指定しないと対話的に尋ねる仕様だったため、旧実装は
-    `--merge` / `--rebase` を明示したときだけ拒否すれば足りていた。GitLab は違う。
-    `glab mr merge` に方式のフラグを付けないと**黙ってマージコミットを作る**
-    (プロジェクト設定 `squash_option` が `default_off` のため)。したがって判定は
-    「禁止フラグの検出」ではなく「squash 指定の要求」でなければならない。
+    `--merge` / `--rebase` を明示したときだけ拒否すれば足りていた。GitLab はここが
+    異なり、判定は「禁止フラグの検出」ではなく「squash 指定の要求」でなければならない。
 
     `--admin` に相当する管理者バイパスは GitLab には無い。保護ブランチの回避は
     フックではなく GitLab 側の権限設定で防ぐ(CLAUDE.md → Merge Conflicts)。
@@ -673,8 +676,9 @@ def check_merge_flags(command):
             )
         if not _has_flag(args, "--squash", "s", value_shorts):
             emit_deny(
-                "`glab mr merge` にマージ方式が指定されていません。GitLab は方式未指定だと"
-                "マージコミットを作ります(このプロジェクトの squash_option は default_off)。"
+                "`glab mr merge` にマージ方式が指定されていません。設定は変わりうる"
+                "ため、プロジェクト設定だけに頼らず常に `--squash` を明示してください"
+                "(CLAUDE.md → Enforcement → Where squash is enforced)。"
                 "このリポジトリの Issue MR は squash のみです"
                 "(CLAUDE.md → Completion Definition)。"
                 "`glab mr merge --squash --remove-source-branch` を使ってください。"

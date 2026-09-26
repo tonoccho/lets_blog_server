@@ -56,10 +56,11 @@ def bash_payload(command, cwd=None):
 class MergeMethodGuard(unittest.TestCase):
     """CLAUDE.md → Completion Definition: Issue の MR は squash のみ。
 
-    GitLab の `glab mr merge` は、マージ方式のフラグを付けないとマージコミットを作る
-    (プロジェクト設定 `squash_option` が `default_off` のため)。`gh pr merge` は方式未指定だと
-    対話的に尋ねる仕様だったので「禁止フラグの検出」で足りていたが、GitLab では
-    **`--squash` の不在そのものが規約違反**になる。判定は「squash の要求」でなければならない。
+    `--squash` の明示を要求する理由(なぜプロジェクト設定だけに頼らないか)は CLAUDE.md →
+    Enforcement → Where squash is enforced が単一の定義であり、ここはそれをテストとして
+    検証しているだけ。理由の再掲はしない。`gh pr merge` は方式未指定だと対話的に尋ねる
+    仕様だったので「禁止フラグの検出」で足りていたが、GitLab では**`--squash` の不在
+    そのものが規約違反**になる。判定は「squash の要求」でなければならない(#1442)。
     """
 
     def test_squash_is_allowed(self):
@@ -83,10 +84,18 @@ class MergeMethodGuard(unittest.TestCase):
         self.assertIsNotNone(run_hook("bash", bash_payload("glab mr merge 42 -r")))
 
     def test_missing_merge_method_is_denied(self):
-        """方式を指定しない `glab mr merge` はマージコミットになるため拒否する。"""
+        """方式を指定しない `glab mr merge` は squash 指定漏れとして拒否する。"""
         reason = run_hook("bash", bash_payload("glab mr merge 42"))
         self.assertIsNotNone(reason, "方式未指定の glab mr merge が拒否されていない")
         self.assertIn("squash", reason)
+
+    def test_missing_merge_method_denial_cites_where_squash_is_enforced(self):
+        """拒否理由は CLAUDE.md → Where squash is enforced を根拠にし、実態と食い違う
+        `squash_option: default_off` を持ち出さない(#1442)。"""
+        reason = run_hook("bash", bash_payload("glab mr merge 42"))
+        self.assertIsNotNone(reason, "方式未指定の glab mr merge が拒否されていない")
+        self.assertNotIn("default_off", reason)
+        self.assertIn("Where squash is enforced", reason)
 
     def test_squash_message_alone_does_not_count_as_squash(self):
         """`--squash-message` は方式の指定ではない。前方一致で誤判定しないこと。"""
