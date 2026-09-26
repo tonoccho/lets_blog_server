@@ -540,10 +540,18 @@ def simple_commands(command):
 #
 # `git` 呼び出し元(`check_no_verify` / `check_commit_phase`)とは値を取るフラグの
 # 集合が異なる(`git` は `-C` / `--git-dir` / `-c` など)ため、program ごとのテーブルに
-# しておく。`git` の集合を実際に埋めるのは #1440 の仕事(このテーブルにキーを足すだけ
-# で済む形にしてある)。
+# しておく(#1440)。
+#
+# `-p`/`-P` は `git` ではブール(`--paginate`/`--no-pager`)だが、`glab` では値を取る
+# (`--page`/`--per-page`)。program 共通の集合にまとめると、一方にしか存在しない意味で
+# 他方のトークンを誤って消費するため、意図的に分けたテーブルのままにする。
+#
+# `--exec-path` は `=` 無しでは値を取らない(bare form は値を表示して終了するだけで、
+# 次のトークンを消費しない)ので含めない。`--bare` / `--paginate` / `-P`(`--no-pager`)
+# などブール型フラグも同様に含めない。
 GLOBAL_VALUE_FLAGS = {
     "glab": {"-R", "--repo", "--jq", "-F", "--output", "-p", "--page", "-P", "--per-page"},
+    "git": {"-C", "--git-dir", "--work-tree", "-c", "--namespace", "--config-env"},
 }
 
 

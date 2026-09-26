@@ -1396,6 +1396,191 @@ class GlobalFlagBeforeSubcommand(unittest.TestCase):
         )
 
 
+# --------------------------------------------------------------------------- #1440
+
+
+class GitGlobalFlagBeforeSubcommand(unittest.TestCase):
+    """`invokes()` は、値を取るグローバルオプション(`-C <path>` など)が `commit`/`push` より
+    前に置かれても、`git` の対象サブコマンド呼び出しを検出しなければならない(#1440)。
+
+    #1435 は同じ欠陥を `glab` 側について直した(`GlobalFlagBeforeSubcommand`)。`git` は
+    値を取るフラグの集合が異なる(`-C`/`--git-dir`/`--work-tree`/`-c`/`--namespace`/
+    `--config-env`)ため、`GLOBAL_VALUE_FLAGS["git"]` を別に埋める必要がある。program ごとに
+    集合を分けているのは、`-p`/`-P` が `git` ではブール(`--paginate`/`--no-pager`)だが
+    `glab` では値を取る(`--page`/`--per-page`)という食い違いがあるため — 共通集合に
+    まとめると、一方にしか存在しない意味で他方のトークンを誤って消費する。
+    """
+
+    # --- AC1: check_no_verify(commit) ---
+
+    def test_dash_C_prefixed_commit_no_verify_is_denied(self):
+        reason = run_hook("bash", bash_payload("git -C /tmp commit --no-verify -m x"))
+        self.assertIsNotNone(reason, "-C 前置の git commit --no-verify が拒否されていない")
+        self.assertIn("no-verify", reason)
+
+    def test_git_dir_prefixed_commit_no_verify_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git --git-dir /tmp/x/.git commit --no-verify -m x")
+        )
+        self.assertIsNotNone(reason, "--git-dir 前置の git commit --no-verify が拒否されていない")
+
+    def test_work_tree_prefixed_commit_no_verify_is_denied(self):
+        reason = run_hook(
+            "bash",
+            bash_payload(
+                "git --git-dir /tmp/x/.git --work-tree /tmp/x commit --no-verify -m x"
+            ),
+        )
+        self.assertIsNotNone(
+            reason, "--work-tree 前置の git commit --no-verify が拒否されていない"
+        )
+
+    def test_dash_c_config_prefixed_commit_no_verify_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git -c user.name=x commit --no-verify -m x")
+        )
+        self.assertIsNotNone(reason, "-c 前置の git commit --no-verify が拒否されていない")
+
+    def test_namespace_prefixed_commit_no_verify_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git --namespace foo commit --no-verify -m x")
+        )
+        self.assertIsNotNone(
+            reason, "--namespace 前置の git commit --no-verify が拒否されていない"
+        )
+
+    def test_config_env_prefixed_commit_no_verify_is_denied(self):
+        reason = run_hook(
+            "bash",
+            bash_payload("git --config-env user.name=ENVVAR commit --no-verify -m x"),
+        )
+        self.assertIsNotNone(
+            reason, "--config-env 前置の git commit --no-verify が拒否されていない"
+        )
+
+    # --- AC2: check_no_verify(push) ---
+
+    def test_dash_C_prefixed_push_no_verify_is_denied(self):
+        reason = run_hook("bash", bash_payload("git -C /tmp push --no-verify"))
+        self.assertIsNotNone(reason, "-C 前置の git push --no-verify が拒否されていない")
+
+    def test_git_dir_prefixed_push_no_verify_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git --git-dir /tmp/x/.git push --no-verify")
+        )
+        self.assertIsNotNone(reason, "--git-dir 前置の git push --no-verify が拒否されていない")
+
+    # --- AC4: ブール型グローバルフラグを前置してもサブコマンド検出が壊れないこと ---
+
+    def test_dash_p_boolean_prefixed_commit_no_verify_is_still_denied(self):
+        """`-p` は git ではブール(`--paginate`)。直後のトークンを値として消費しないこと。
+
+        `glab` では `-p` は値を取る(`--page`)ため、program 共通のテーブルにまとめると
+        ここが誤って `commit` を飲み込み、検出漏れ(過検知の逆、#1029 が戒める失敗)になる。
+        """
+        reason = run_hook("bash", bash_payload("git -p commit --no-verify -m x"))
+        self.assertIsNotNone(reason, "-p 前置の git commit --no-verify が拒否されていない")
+
+    def test_dash_P_boolean_prefixed_commit_no_verify_is_still_denied(self):
+        """`-P` も同様(git では `--no-pager`、glab では `--per-page`)。"""
+        reason = run_hook("bash", bash_payload("git -P commit --no-verify -m x"))
+        self.assertIsNotNone(reason, "-P 前置の git commit --no-verify が拒否されていない")
+
+    def test_paginate_boolean_prefixed_commit_no_verify_is_still_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git --paginate commit --no-verify -m x")
+        )
+        self.assertIsNotNone(
+            reason, "--paginate 前置の git commit --no-verify が拒否されていない"
+        )
+
+    def test_bare_boolean_prefixed_commit_no_verify_is_still_denied(self):
+        reason = run_hook("bash", bash_payload("git --bare commit --no-verify -m x"))
+        self.assertIsNotNone(reason, "--bare 前置の git commit --no-verify が拒否されていない")
+
+    def test_exec_path_is_not_treated_as_value_taking(self):
+        """`--exec-path` は `=` 無しでは値を取らない(bare form は値を表示して終了する)。
+
+        誤って値取りの集合に入れると、次のトークン(ここでは `commit`)を値として飲み込み、
+        `--no-verify` 禁止の検出漏れになる。
+        """
+        reason = run_hook(
+            "bash", bash_payload("git --exec-path commit --no-verify -m x")
+        )
+        self.assertIsNotNone(
+            reason, "--exec-path 前置の git commit --no-verify が拒否されていない"
+        )
+
+    def test_wrapped_dash_C_prefixed_commit_no_verify_is_denied(self):
+        """回帰: `timeout` などの前置ラッパーとの併用でも見逃さないこと(#1029)。"""
+        reason = run_hook(
+            "bash", bash_payload("timeout 60 git -C /tmp commit --no-verify -m x")
+        )
+        self.assertIsNotNone(
+            reason, "ラッパー併用の -C 前置 git commit --no-verify が拒否されていない"
+        )
+
+
+def _git_phase_project(*staged_rel_paths):
+    """実際の git リポジトリを作り、渡したパスをステージ済みにして root を返す。
+
+    `check_commit_phase` は `root = project_dir(payload)`(ツール呼び出しの実際の cwd)から
+    `git diff --cached --name-only` を読む。`git -C <path>` 自身の対象がどこであるかは
+    ここでは無関係 — 検査対象はあくまで cwd 側のリポジトリであり、それがこのテストの
+    確認したいこと(`invokes()` が `-C` 越しでも `commit` を検出し、この検査自体が
+    起動すること)そのものである。
+    """
+    root = tempfile.mkdtemp()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    for rel in staged_rel_paths:
+        path = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write("x")
+    subprocess.run(["git", "add"] + list(staged_rel_paths), cwd=root, check=True)
+    return root
+
+
+def _run_in_git_phase_project(command, root):
+    env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+    try:
+        return run_hook("bash", bash_payload(command, cwd=root))
+    finally:
+        if env_backup is not None:
+            os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+
+class GitDashCPhaseSeparation(unittest.TestCase):
+    """AC3: `git -C <path> commit` でもフェーズ分離検査(`check_commit_phase`)が働くこと。"""
+
+    def test_dash_C_prefixed_mixed_commit_is_denied(self):
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project("git -C /tmp commit -m x", root)
+        self.assertIsNotNone(
+            reason, "-C 前置の git commit がフェーズ分離検査をすり抜けている"
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_git_dir_prefixed_mixed_commit_is_denied(self):
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --git-dir /tmp/other/.git commit -m x", root
+        )
+        self.assertIsNotNone(
+            reason, "--git-dir 前置の git commit がフェーズ分離検査をすり抜けている"
+        )
+
+    def test_dash_C_prefixed_test_only_commit_is_allowed(self):
+        root = _git_phase_project("apps/web/e2e/features/a.feature")
+        self.assertIsNone(_run_in_git_phase_project("git -C /tmp commit -m x", root))
+
+
 class WriteEditSilencerDenial(unittest.TestCase):
     """#1219: `cmd_write` の `SILENCERS` 拒否と、その免除パスを検査する。
 
