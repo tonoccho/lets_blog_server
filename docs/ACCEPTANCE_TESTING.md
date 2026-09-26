@@ -102,9 +102,18 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 [apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md](../apps/extension/MANUAL_ACCEPTANCE_CHECKLIST.md)
 で人が確認する。
 
-`<domain>` は AT Issue の区切りに合わせる:
-`auth` / `users` / `projects` / `posts` / `bulk` / `ai` / `plans` / `media` / `diagrams` /
-`content` / `analytics` / `system` / `logs` / `extension` / `cross-cutting`。
+`<domain>` は `features/` 直下の**実在するディレクトリ名**を正とする(#1134)。
+一覧は実体から書き起こしたもので、`scripts/test_acceptance_domain_dirs.py` が
+実体とのずれを検出する。新しい領域を足すときは、ディレクトリと次の一覧を同時に更新する。
+
+- web(`apps/web/e2e/features/`): `ai` / `analytics` / `article-plan` / `auth` / `cross-cutting` / `custom-tag` / `diagram` / `identity` / `logging` / `media` / `platform` / `project` / `publishing` / `ui-quality`
+- 拡張(`apps/extension/e2e/features/`): `ai` / `articles` / `auth` / `cross-cutting` / `diagrams` / `media` / `projects`
+
+**揃えない理由(web `diagram` / 拡張 `diagrams`、web `project` / 拡張 `projects`)。**
+web 側の名前は各 AT Issue が実装時に決めたもので、`docs/ACCEPTANCE_CRITERIA.md` の
+「対応シナリオ」列が全行でそのパスを参照している。拡張側は別ランナー・別ステップ定義
+(`acceptance.test.ts`、`steps/diagrams.steps.ts`)で、名前を揃えても両者が共有するファイルは
+無く得るものが小さい。改名は参照元の書き換えだけを生むため、揃えずに一覧で両方を明示する。
 
 このほか、製品ではなく**受け入れテストの土台**を検証するものが2つある。
 土台が壊れると、それに乗るシナリオが理由の分からない形で落ちるため、
