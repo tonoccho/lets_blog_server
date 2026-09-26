@@ -341,7 +341,7 @@ export default defineConfig({
   // シナリオ/フィーチャ単位の`@timeout:`タグ(90000 / 180000 / 300000 / 600000)は
   // 従来どおりこの値を上書きする。
   timeout: 90_000,
-  reporter: 'html',
+  reporter: [['html'], ['./e2e/reporters/at-metrics-reporter.ts']],
 
   // テスト開始前に docker compose の全サービスがhealthyになるまで待ち、公開URLとKeycloakへの
   // 疎通を確認する(#588)。終了後はE2E_DB_CLEANUP=1のときのみ全スキーマの後片付けを行う。

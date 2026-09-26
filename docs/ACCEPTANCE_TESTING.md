@@ -1800,7 +1800,45 @@ Playwrightの依存機構によって自動連結される単一コマンドで�
 
 ---
 
-## 17. 参考
+## 17. 受け入れテスト実行時間ログ(#1209)
+
+`apps/web/e2e/reporters/at-metrics-reporter.ts` は Playwright の Reporter で、`playwright.config.ts` の
+`reporter`(`html` と併記)に配線されている。`npm run test:at` でも `npx playwright test` の直接起動でも、
+バックグラウンド起動+ログ待ちでも、**実行自身**が開始・終了・所要時間・結果を追記する。
+呼び出し側のコマンド文字列(`classify()`)に頼らない、併用の情報源である。
+
+### 書き出し先
+
+- 既定: `~/.local/state/claude-auto/at-runs.jsonl`(リポジトリ外。worktree ごとに分断されないため)
+- `AT_METRICS_LOG` で変更できる。親ディレクトリが無ければ作る。
+- JSONL(1行1レコード、追記のみ)。ローテーションはしない。
+
+### レコード
+
+| `kind` | 内容 |
+| --- | --- |
+| `begin` | 実行開始。`run`(実行ID)、`ts`、`projects`、`tests`(テスト数)、`workers`、`grep`、`branch`、`issue` |
+| `test` | シナリオ1件ごと。`project`、`file`、`title`、`status`、`durationMs`、`retry`、`errors` |
+| `run` | 実行1回ぶんの集計。`startedAt`、`endedAt`、`durationMs`、`testMs`、`status`、`projects`、`counts`、`branch`、`issue`。集計はこれを使う |
+
+`projects` は**実際に選択された**プロジェクトのみ(`--project=at-main` なら `["at-main"]`)。
+`durationMs` は `onBegin` から `onEnd` までの壁時計で、`globalSetup` の時間は含まない。
+`bddgen`(Playwright の外)も対象外。
+
+### 失敗の扱い
+
+記録の失敗(書き込み不可=`EACCES`、ディスクフル=`ENOSPC`)は握りつぶす。テスト結果・終了コード・出力に影響しない。
+
+### 検証
+
+`scripts/test_at_metrics_reporter.py`。ブラウザを使わない最小の Playwright 設定で実際に実行して JSONL を読む。
+Reporter は製品の振る舞いではないため Gherkin ではなくサービスレベルのテストとしている。
+`e2e/reporters/` は lint・型検査の対象であり、除外リストには足さない。ファイル名に `.spec.` / `.test.` を含めない
+(含めるとテストとして拾われる)。`BDD_COMMON.steps` にも足さない。
+
+---
+
+## 18. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)
