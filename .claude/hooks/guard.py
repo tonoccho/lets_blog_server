@@ -592,16 +592,51 @@ def invokes(command, program, subcommands=()):
     return found
 
 
+# `_has_flag()` の短縮フラグクラスタ判定で、値を取ることが分かっている短縮フラグの
+# 集合。呼び出し文脈(プログラム + サブコマンド)ごとに異なるため、GLOBAL_VALUE_FLAGS
+# (#1435/#1440)と同じ「program ごとのテーブル」の考え方でここも分ける(#1441)。
+#
+# `-Rowner/repo` や `-mメッセージ` のように短縮フラグへ値を直結できる形は1トークンで
+# `-` から始まるため、素朴な「`-` から始まる各文字をブールフラグとみなす」走査では、
+# 値の中の文字を無関係な別の短縮フラグと誤認する。値を取ると判明している短縮フラグに
+# 出会った時点で、そのトークンの残りは値として扱いを打ち切る必要がある。
+#
+# `glab mr merge --help` で確認: `-m`(--message、コミットメッセージ)と
+# `-R`(--repo。GLOBAL_VALUE_FLAGS の一部と同じ意味)が値を取る短縮フラグ。
+# `git commit --help` で確認: `-m`/`-F`/`-c`/`-C`/`-S` が値を取る短縮フラグ
+# (Issue #1441 の要求する最低限。網羅は求められていない)。
+SHORT_VALUE_FLAGS = {
+    ("glab", "mr merge"): {"m", "R"},
+    ("git", "commit"): {"m", "F", "c", "C", "S"},
+}
+
+
+def _cluster_has_flag(cluster, short, value_shorts):
+    """短縮フラグクラスタ(`-` を除いた残り)の中に、ブールフラグ `short` があるか。
+
+    値を取ることが分かっている短縮フラグ(`value_shorts`)に出会ったら、それ以降は
+    直結された値とみなして走査を打ち切る(`-Rowner/repo` の `owner/repo` を
+    フラグの並びとして読まない)。本物のブールクラスタ(`-sd`)は、含まれる文字が
+    どれも値を取らないため最後まで走査され、目的の文字が見つかる。
+    """
+    for ch in cluster:
+        if ch == short:
+            return True
+        if ch in value_shorts:
+            return False
+    return False
+
+
 # マージ方式のフラグ。長いフラグと、cobra が受け付ける短縮フラグの結合(`-sd`)の両方。
 # `--squash-message` はコミットメッセージの指定であって方式の指定ではないので、
 # `--squash` の前方一致で拾ってはいけない。`-R`(--repo)は `-r`(--rebase)ではない。
-def _has_flag(args, long_name, short):
+def _has_flag(args, long_name, short, value_shorts=frozenset()):
     for arg in args:
         if arg == long_name or arg.startswith(long_name + "="):
             return True
         if arg.startswith("--"):
             continue
-        if arg.startswith("-") and len(arg) > 1 and short in arg[1:]:
+        if arg.startswith("-") and len(arg) > 1 and _cluster_has_flag(arg[1:], short, value_shorts):
             return True
     return False
 
@@ -628,14 +663,15 @@ def check_merge_flags(command):
     `--admin` に相当する管理者バイパスは GitLab には無い。保護ブランチの回避は
     フックではなく GitLab 側の権限設定で防ぐ(CLAUDE.md → Merge Conflicts)。
     """
+    value_shorts = SHORT_VALUE_FLAGS[("glab", "mr merge")]
     for args in invokes(command, "glab", ("mr", "merge")):
-        if _has_flag(args, "--rebase", "r"):
+        if _has_flag(args, "--rebase", "r", value_shorts):
             emit_deny(
                 "このリポジトリの Issue MR のマージ方式は squash のみです"
                 "(CLAUDE.md → Completion Definition)。`--rebase` は使えません。"
                 "`glab mr merge --squash --remove-source-branch` を使ってください。"
             )
-        if not _has_flag(args, "--squash", "s"):
+        if not _has_flag(args, "--squash", "s", value_shorts):
             emit_deny(
                 "`glab mr merge` にマージ方式が指定されていません。GitLab は方式未指定だと"
                 "マージコミットを作ります(このプロジェクトの squash_option は default_off)。"
@@ -948,7 +984,8 @@ def check_commit_phase(payload, command):
     if staged is None:
         return
     files = [p for p in staged.splitlines() if p.strip()]
-    if any(_has_flag(args, "--all", "a") for args in commits):
+    commit_value_shorts = SHORT_VALUE_FLAGS[("git", "commit")]
+    if any(_has_flag(args, "--all", "a", commit_value_shorts) for args in commits):
         tracked = git(["diff", "--name-only"], root) or ""
         files += [p for p in tracked.splitlines() if p.strip()]
     tests, prod = classify(files)

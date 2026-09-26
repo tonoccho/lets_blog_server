@@ -106,6 +106,51 @@ class MergeMethodGuard(unittest.TestCase):
             run_hook("bash", bash_payload("glab mr merge 42 --squash -R seiji/lets_blog_server"))
         )
 
+    def test_attached_repo_value_is_not_mistaken_for_rebase(self):
+        """回帰(#1441): `-Rowner/repo`(値直結、値に小文字 r を含む)を -r と誤認しないこと。
+
+        AC1: `glab -Rowner/repo mr merge --squash` は許可される。
+        """
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab -Rowner/repo mr merge --squash"))
+        )
+
+    def test_attached_repo_value_without_squash_is_still_denied(self):
+        """AC2: squash 無しは、値直結の -R があっても引き続き拒否される。
+
+        誤って -r(rebase)と誤認されて拒否されるのではなく、squash 未指定として
+        正しい理由で拒否されること。
+        """
+        reason = run_hook("bash", bash_payload("glab -Rowner/repo mr merge"))
+        self.assertIsNotNone(reason, "glab -Rowner/repo mr merge が拒否されていない")
+        self.assertIn(
+            "マージ方式が指定されていません",
+            reason,
+            "squash 未指定としてではなく、誤って --rebase 相当として拒否されている",
+        )
+
+    def test_attached_repo_value_containing_s_does_not_fake_squash(self):
+        """回帰(#1441): 逆方向の誤認。値に小文字 s を含んでいても squash 指定済みと
+
+        誤認せず、squash 必須検査が空振りしないこと。
+        """
+        reason = run_hook("bash", bash_payload("glab -Rsss mr merge"))
+        self.assertIsNotNone(
+            reason,
+            "値中の s を squash 済みと誤認し、squash 必須検査が空振りしている",
+        )
+        self.assertIn("マージ方式が指定されていません", reason)
+
+    def test_real_short_rebase_flag_with_squash_present_is_denied(self):
+        """AC3: 本物の -r 単体は、--squash が同時に指定されていても拒否される。"""
+        reason = run_hook("bash", bash_payload("glab mr merge --squash -r"))
+        self.assertIsNotNone(reason)
+        self.assertIn("--rebase", reason)
+
+    def test_ac4_squash_and_remove_source_branch_cluster_is_allowed(self):
+        """AC4: 本物のブールクラスタ `-sd` は、値直結の誤認防止後も引き続き許可される。"""
+        self.assertIsNone(run_hook("bash", bash_payload("glab mr merge -sd")))
+
     def test_unrelated_command_is_ignored(self):
         self.assertIsNone(run_hook("bash", bash_payload("glab mr view 42")))
 
@@ -1579,6 +1624,51 @@ class GitDashCPhaseSeparation(unittest.TestCase):
     def test_dash_C_prefixed_test_only_commit_is_allowed(self):
         root = _git_phase_project("apps/web/e2e/features/a.feature")
         self.assertIsNone(_run_in_git_phase_project("git -C /tmp commit -m x", root))
+
+
+class ShortValueFlagAttachedValueMisdetection(unittest.TestCase):
+    """AC5(#1441): `_has_flag` の短縮フラグクラスタ判定が、値を取る短縮フラグに直結
+
+    した値の文字を、別の無関係な短縮フラグと誤認しないこと。ここでは
+    `check_commit_phase` の `--all`/`-a` 判定を対象にする。
+    """
+
+    def test_attached_message_value_containing_a_is_not_mistaken_for_all(self):
+        """`-m'Add bar'`(値に小文字 a を含む直結形)を `-a` と誤認しないこと。
+
+        誤認すると `check_commit_phase` が未ステージの変更(`git diff --name-only`)
+        まで分類対象に加え、ステージ内容は test のみなのに production の未ステージ
+        変更が混ざって「混在」と誤って拒否されうる。
+        """
+        root = tempfile.mkdtemp()
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+
+        prod_path = os.path.join(root, "services/foo/src/Bar.java")
+        os.makedirs(os.path.dirname(prod_path), exist_ok=True)
+        with open(prod_path, "w") as f:
+            f.write("x")
+        subprocess.run(["git", "add", "services/foo/src/Bar.java"], cwd=root, check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "seed"], cwd=root, check=True
+        )
+        # production ファイルの未ステージの変更(-a と誤認されると巻き込まれる)。
+        with open(prod_path, "w") as f:
+            f.write("y")
+
+        test_path = os.path.join(root, "apps/web/e2e/features/a.feature")
+        os.makedirs(os.path.dirname(test_path), exist_ok=True)
+        with open(test_path, "w") as f:
+            f.write("z")
+        subprocess.run(["git", "add", "apps/web/e2e/features/a.feature"], cwd=root, check=True)
+
+        reason = _run_in_git_phase_project("git commit -m'Add bar'", root)
+        self.assertIsNone(
+            reason,
+            "-m の値中の a を --all と誤認し、未ステージの production 変更を"
+            "混入させて誤って混在と判定している: %s" % reason,
+        )
 
 
 class WriteEditSilencerDenial(unittest.TestCase):
