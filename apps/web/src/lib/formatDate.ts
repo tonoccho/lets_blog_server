@@ -118,3 +118,57 @@ export function formatOperationLogDateTime(iso: string, timeZone?: string | null
     hour12: false,
   });
 }
+
+/**
+ * 閲覧者TZの壁時計(`<input type="datetime-local">` の値。例 `2026-09-10T09:30`)を、
+ * バックエンドが受ける UTC の日時文字列(オフセット指定子なし。例 `2026-09-10T00:30:00`)へ
+ * 換算する(issue #1138)。
+ *
+ * バックエンドの `LocalDateTime` はオフセット無しを UTC の壁時計として扱う
+ * (`normalizeToUtcIfOffsetMissing` と同じ前提)。表示は閲覧者TZで行うので、入力も同じTZで
+ * 受け、ここで UTC へ戻す。
+ *
+ * 換算は「入力をUTCとみなした瞬間 t0 の、指定TZでの壁時計」との差でオフセットを求め、
+ * 求めた結果の時点でもう一度オフセットを取り直す(夏時間の境界をまたいでも、その時点の
+ * オフセットで換算するため)。
+ *
+ * 空・パース不能な値は `undefined`(絞り込みなし)。
+ *
+ * @param options.endOfMinute `datetime-local` は分単位なので、終了側に使うときは
+ *   その分の最後の秒(:59)まで含める。
+ */
+export function localDateTimeToUtcIso(
+  local: string | undefined,
+  timeZone?: string | null,
+  options: { endOfMinute?: boolean } = {}
+): string | undefined {
+  if (!local) {
+    return undefined;
+  }
+  const match = local.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    return undefined;
+  }
+  const [, y, mo, d, h, mi, sec] = match;
+  const seconds = sec !== undefined ? Number(sec) : options.endOfMinute ? 59 : 0;
+  const wallAsUtc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), seconds);
+  const tz = timeZone ?? getDefaultTimeZone();
+  const offsetAt = (instant: number): number => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(new Date(instant));
+    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+    const shown = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+    return shown - Math.floor(instant / 1000) * 1000;
+  };
+  const first = wallAsUtc - offsetAt(wallAsUtc);
+  const result = wallAsUtc - offsetAt(first);
+  return new Date(result).toISOString().slice(0, 19);
+}

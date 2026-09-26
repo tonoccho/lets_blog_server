@@ -7,6 +7,7 @@ import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
 import com.letsblog.logwriter.repository.AuditLogRepository;
 import com.letsblog.logwriter.repository.OperationLogRepository;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -40,6 +41,10 @@ public class UnifiedOperationLogService {
 
     private static final int SOURCE_FETCH_LIMIT = 200;
 
+    /** 日時の範囲で片側だけが指定されたときの、もう一方の側(実質「境界なし」)。 */
+    private static final LocalDateTime MIN_BOUND = LocalDateTime.of(1970, 1, 1, 0, 0);
+    private static final LocalDateTime MAX_BOUND = LocalDateTime.of(9999, 12, 31, 23, 59, 59);
+
     private final OperationLogRepository operationLogRepository;
     private final GenerationJobClient generationJobClient;
     private final AuditLogRepository auditLogRepository;
@@ -54,19 +59,31 @@ public class UnifiedOperationLogService {
     }
 
     /**
+     * @param startDate 範囲の開始(含む)。{@code startDate}と{@code endDate}の両方がnullなら従来どおり
+     *                  各ソースの直近{@value #SOURCE_FETCH_LIMIT}件。どちらかが指定されたら、各ソースの
+     *                  <b>取得段階</b>でその範囲に絞ってから直近{@value #SOURCE_FETCH_LIMIT}件を取る
+     *                  (マージ後に絞るだけでは直近の窓の外にある古いログへ到達できない、issue #1138)。
+     *                  AI_JOBはai-serviceが直近分しか返さないため、取得後に範囲で絞る。
+     * @param endDate 範囲の終了(含む)。
      * @param bearerToken 呼び出し元の{@code Authorization}ヘッダー(AI_JOBソース取得のため
      *                    ai-serviceへ転送する。GenerationJobClientのJavadoc参照)。
      */
     @Transactional(readOnly = true)
     public Page<UnifiedLogEntryResponse> list(
-            Long viewerUserId, boolean viewerIsAdmin, String sourceType, String query, Pageable pageable,
-            String bearerToken) {
+            Long viewerUserId, boolean viewerIsAdmin, String sourceType, String query,
+            LocalDateTime startDate, LocalDateTime endDate, Pageable pageable, String bearerToken) {
         List<UnifiedLogEntryResponse> entries = new ArrayList<>();
         PageRequest fetchWindow = PageRequest.of(0, SOURCE_FETCH_LIMIT);
+        boolean ranged = startDate != null || endDate != null;
+        LocalDateTime from = startDate != null ? startDate : MIN_BOUND;
+        LocalDateTime to = endDate != null ? endDate : MAX_BOUND;
 
         if (includeSource(sourceType, "OPERATION")) {
-            operationLogRepository.findByUserIdOrderByCreatedAtDesc(viewerUserId, fetchWindow)
-                    .forEach(log -> entries.add(fromOperationLog(log)));
+            Page<OperationLog> operationLogs = ranged
+                    ? operationLogRepository.findByUserIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+                            viewerUserId, from, to, fetchWindow)
+                    : operationLogRepository.findByUserIdOrderByCreatedAtDesc(viewerUserId, fetchWindow);
+            operationLogs.forEach(log -> entries.add(fromOperationLog(log)));
         }
         if (includeSource(sourceType, "AI_JOB")) {
             // AIジョブはai-serviceへの同期HTTP呼び出しで取得する唯一の外部依存。ここが落ちても
@@ -81,6 +98,7 @@ public class UnifiedOperationLogService {
             // 作らないため。
             try {
                 generationJobClient.listRecent(bearerToken).stream()
+                        .filter(job -> !ranged || (!job.createdAt().isBefore(from) && !job.createdAt().isAfter(to)))
                         .limit(SOURCE_FETCH_LIMIT)
                         .forEach(job -> entries.add(fromGenerationJob(job)));
             } catch (GenerationJobUnavailableException e) {
@@ -91,8 +109,10 @@ public class UnifiedOperationLogService {
             }
         }
         if (viewerIsAdmin && includeSource(sourceType, "AUDIT")) {
-            auditLogRepository.findAllByOrderByCreatedAtDesc(fetchWindow)
-                    .forEach(auditLog -> entries.add(fromAuditLog(auditLog)));
+            Page<AuditLog> auditLogs = ranged
+                    ? auditLogRepository.findByCreatedAtBetweenOrderByCreatedAtDesc(from, to, fetchWindow)
+                    : auditLogRepository.findAllByOrderByCreatedAtDesc(fetchWindow);
+            auditLogs.forEach(auditLog -> entries.add(fromAuditLog(auditLog)));
         }
 
         List<UnifiedLogEntryResponse> filtered = entries;

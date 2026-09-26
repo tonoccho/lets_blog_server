@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listUnifiedOperationLogs, type UnifiedLogSourceType } from "@/lib/apiClient";
 import { requireSession, getViewerTimeZone } from "@/lib/session";
+import { localDateTimeToUtcIso } from "@/lib/formatDate";
 import { UnifiedLogRow } from "./UnifiedLogRow";
 
 const PAGE_SIZE = 50;
@@ -14,17 +15,27 @@ const TYPE_LABEL: Record<UnifiedLogSourceType, string> = {
 export default async function OperationLogsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; type?: string; q?: string }>;
+  searchParams: Promise<{ page?: string; type?: string; q?: string; startDate?: string; endDate?: string }>;
 }) {
   const session = await requireSession();
   const params = await searchParams;
   const page = Number(params.page ?? "0") || 0;
   const type = (params.type || undefined) as UnifiedLogSourceType | undefined;
   const q = params.q || undefined;
+  // 日時は閲覧者TZの壁時計(datetime-local)で受け、APIへはUTCのISO日時で渡す(issue #1138)。
+  const startDate = params.startDate || undefined;
+  const endDate = params.endDate || undefined;
   const timezone = await getViewerTimeZone();
   const isAdmin = session.user.role === "admin";
 
-  const result = await listUnifiedOperationLogs({ type, q, page, size: PAGE_SIZE }).catch(() => ({
+  const result = await listUnifiedOperationLogs({
+    type,
+    q,
+    startDate: localDateTimeToUtcIso(startDate, timezone),
+    endDate: localDateTimeToUtcIso(endDate, timezone, { endOfMinute: true }),
+    page,
+    size: PAGE_SIZE,
+  }).catch(() => ({
     content: [],
     totalElements: 0,
     totalPages: 0,
@@ -36,6 +47,8 @@ export default async function OperationLogsPage({
     const query = new URLSearchParams();
     if (type) query.set("type", type);
     if (q) query.set("q", q);
+    if (startDate) query.set("startDate", startDate);
+    if (endDate) query.set("endDate", endDate);
     query.set("page", String(targetPage));
     return query.toString();
   };
@@ -76,6 +89,24 @@ export default async function OperationLogsPage({
             type="text"
             defaultValue={q ?? ""}
             placeholder="パス・操作種別などで検索"
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">開始日時</span>
+          <input
+            name="startDate"
+            type="datetime-local"
+            defaultValue={startDate ?? ""}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">終了日時</span>
+          <input
+            name="endDate"
+            type="datetime-local"
+            defaultValue={endDate ?? ""}
             className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
           />
         </label>

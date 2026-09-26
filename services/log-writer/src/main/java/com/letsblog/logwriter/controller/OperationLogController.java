@@ -7,9 +7,11 @@ import com.letsblog.logwriter.service.CurrentActorService;
 import com.letsblog.logwriter.service.ForbiddenException;
 import com.letsblog.logwriter.service.OperationLogService;
 import com.letsblog.logwriter.service.UnifiedOperationLogService;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -71,10 +73,13 @@ public class OperationLogController {
     public Page<UnifiedLogEntryResponse> listUnified(
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String q,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
             Pageable pageable) {
         Long userId = requireActorId();
         return unifiedOperationLogService.list(
-                userId, currentActorService.isAdmin(), type, q, pageable, currentActorService.getAuthorizationHeader());
+                userId, currentActorService.isAdmin(), type, q, startDate, endDate, pageable,
+                currentActorService.getAuthorizationHeader());
     }
 
     private Long requireActorId() {

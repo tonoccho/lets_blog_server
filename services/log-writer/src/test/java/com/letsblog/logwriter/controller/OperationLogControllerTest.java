@@ -7,6 +7,7 @@ import com.letsblog.logwriter.service.CurrentActorService;
 import com.letsblog.logwriter.service.ForbiddenException;
 import com.letsblog.logwriter.service.OperationLogService;
 import com.letsblog.logwriter.service.UnifiedOperationLogService;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -113,10 +114,10 @@ class OperationLogControllerTest {
         when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer test-token");
         Pageable pageable = PageRequest.of(0, 20);
         Page<UnifiedLogEntryResponse> page = new PageImpl<>(List.of());
-        when(unifiedOperationLogService.list(1L, true, "AI_JOB", "draft", pageable, "Bearer test-token"))
+        when(unifiedOperationLogService.list(1L, true, "AI_JOB", "draft", null, null, pageable, "Bearer test-token"))
                 .thenReturn(page);
 
-        Page<UnifiedLogEntryResponse> result = controller.listUnified("AI_JOB", "draft", pageable);
+        Page<UnifiedLogEntryResponse> result = controller.listUnified("AI_JOB", "draft", null, null, pageable);
 
         assertEquals(page, result);
     }
@@ -127,6 +128,24 @@ class OperationLogControllerTest {
         when(currentActorService.getCurrentActorId()).thenReturn(null);
         Pageable pageable = PageRequest.of(0, 20);
 
-        assertThrows(ForbiddenException.class, () -> controller.listUnified(null, null, pageable));
+        assertThrows(ForbiddenException.class, () -> controller.listUnified(null, null, null, null, pageable));
+    }
+
+    @Test
+    void listUnified_日時の範囲をサービスへそのまま渡す() {
+        OperationLogController controller = controller();
+        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        when(currentActorService.isAdmin()).thenReturn(false);
+        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer test-token");
+        Pageable pageable = PageRequest.of(0, 20);
+        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
+        LocalDateTime end = LocalDateTime.of(2026, 1, 2, 0, 0);
+        Page<UnifiedLogEntryResponse> page = new PageImpl<>(List.of());
+        when(unifiedOperationLogService.list(1L, false, null, null, start, end, pageable, "Bearer test-token"))
+                .thenReturn(page);
+
+        Page<UnifiedLogEntryResponse> result = controller.listUnified(null, null, start, end, pageable);
+
+        assertEquals(page, result);
     }
 }

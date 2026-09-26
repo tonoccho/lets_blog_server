@@ -28,6 +28,7 @@ import {
   deleteGeneratedImage,
   streamConnectedServiceStatuses,
   listReviewStepSettings,
+  listUnifiedOperationLogs,
   updateReviewStepSetting,
 } from '@/lib/apiClient'
 
@@ -354,5 +355,40 @@ describe('レビューステップ別のLLM設定(issue #1212)', () => {
 
     const [, init] = calls()[0]
     expect(JSON.parse(String(init.body))).toEqual({ provider: null, model: null })
+  })
+})
+
+describe('listUnifiedOperationLogs の日時範囲(issue #1138)', () => {
+  const emptyPage = { content: [], totalElements: 0, totalPages: 0, number: 0, size: 50 }
+
+  it('startDate / endDate をクエリへそのまま載せる', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(emptyPage))
+
+    await listUnifiedOperationLogs({
+      type: 'OPERATION',
+      q: 'sites',
+      startDate: '2026-09-10T00:30:00',
+      endDate: '2026-09-11T00:30:59',
+      page: 2,
+    })
+
+    const query = new URL(calls()[0][0], 'http://localhost').searchParams
+    expect(query.get('startDate')).toBe('2026-09-10T00:30:00')
+    expect(query.get('endDate')).toBe('2026-09-11T00:30:59')
+    expect(query.get('type')).toBe('OPERATION')
+    expect(query.get('q')).toBe('sites')
+    expect(query.get('page')).toBe('2')
+  })
+
+  it('未指定ならクエリに startDate / endDate を載せない(従来どおり)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(emptyPage))
+
+    await listUnifiedOperationLogs({})
+
+    const query = new URL(calls()[0][0], 'http://localhost').searchParams
+    expect(query.has('startDate')).toBe(false)
+    expect(query.has('endDate')).toBe(false)
+    expect(query.get('page')).toBe('0')
+    expect(query.get('size')).toBe('50')
   })
 })

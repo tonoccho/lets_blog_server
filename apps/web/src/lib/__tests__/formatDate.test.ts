@@ -1,4 +1,9 @@
-import { formatDateTime, formatOperationLogDateTime, formatDateYYYYMMDD } from '../formatDate'
+import {
+  formatDateTime,
+  formatOperationLogDateTime,
+  formatDateYYYYMMDD,
+  localDateTimeToUtcIso,
+} from '../formatDate'
 
 describe('formatDateTime', () => {
   it('formats ISO string to Japanese locale', () => {
@@ -175,5 +180,44 @@ describe('formatDateYYYYMMDD — 個人設定TZ・ブラウザTZに従ったYYYY
   it('パース不能な文字列を渡しても例外を投げない(Intl.DateTimeFormatへInvalid Dateを渡すとRangeErrorになるため、その手前でガードする)', () => {
     expect(() => formatDateYYYYMMDD('not-a-date', 'UTC')).not.toThrow()
     expect(formatDateYYYYMMDD('not-a-date', 'UTC')).toBe('NaNNaNNaN')
+  })
+})
+
+describe('localDateTimeToUtcIso(issue #1138: 閲覧者TZの壁時計 -> バックエンドのUTC壁時計)', () => {
+  it('Asia/Tokyo(+09:00)の入力をUTCへ換算し、オフセット指定子を付けない', () => {
+    expect(localDateTimeToUtcIso('2026-09-10T09:30', 'Asia/Tokyo')).toBe('2026-09-10T00:30:00')
+  })
+
+  it('日付をまたぐ換算ができる', () => {
+    expect(localDateTimeToUtcIso('2026-09-10T05:00', 'Asia/Tokyo')).toBe('2026-09-09T20:00:00')
+    expect(localDateTimeToUtcIso('2026-09-10T22:00', 'America/New_York')).toBe('2026-09-11T02:00:00')
+  })
+
+  it('UTCならそのまま', () => {
+    expect(localDateTimeToUtcIso('2026-09-10T09:30', 'UTC')).toBe('2026-09-10T09:30:00')
+  })
+
+  it('秒付きの入力も受け付ける', () => {
+    expect(localDateTimeToUtcIso('2026-09-10T09:30:15', 'UTC')).toBe('2026-09-10T09:30:15')
+  })
+
+  it('endOfMinuteを指定すると、その分の最後の秒まで含める', () => {
+    expect(localDateTimeToUtcIso('2026-09-10T09:30', 'UTC', { endOfMinute: true })).toBe('2026-09-10T09:30:59')
+  })
+
+  it('夏時間の切り替えを跨いでも、その時点のオフセットで換算する', () => {
+    // America/New_York: 2026-01-15 は EST(-05:00)、2026-07-15 は EDT(-04:00)。
+    expect(localDateTimeToUtcIso('2026-01-15T12:00', 'America/New_York')).toBe('2026-01-15T17:00:00')
+    expect(localDateTimeToUtcIso('2026-07-15T12:00', 'America/New_York')).toBe('2026-07-15T16:00:00')
+  })
+
+  it('timeZoneがnullでも例外を投げず、ブラウザ既定TZで換算する', () => {
+    expect(localDateTimeToUtcIso('2026-09-10T09:30', null)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
+  })
+
+  it('空文字・パース不能な値はundefinedを返す(絞り込みなし)', () => {
+    expect(localDateTimeToUtcIso('', 'UTC')).toBeUndefined()
+    expect(localDateTimeToUtcIso(undefined, 'UTC')).toBeUndefined()
+    expect(localDateTimeToUtcIso('not-a-date', 'UTC')).toBeUndefined()
   })
 })

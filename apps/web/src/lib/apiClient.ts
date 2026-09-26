@@ -1199,11 +1199,22 @@ export interface UnifiedLogPage {
 }
 
 export function listUnifiedOperationLogs(
-  params: { type?: UnifiedLogSourceType; q?: string; page?: number; size?: number }
+  params: {
+    type?: UnifiedLogSourceType;
+    q?: string;
+    /** 範囲の開始(含む)。UTCのISO日時(オフセット指定子なし)。未指定なら従来どおり直近から。 */
+    startDate?: string;
+    /** 範囲の終了(含む)。UTCのISO日時(オフセット指定子なし)。 */
+    endDate?: string;
+    page?: number;
+    size?: number;
+  }
 ): Promise<UnifiedLogPage> {
   const query = new URLSearchParams();
   if (params.type) query.set('type', params.type);
   if (params.q) query.set('q', params.q);
+  if (params.startDate) query.set('startDate', params.startDate);
+  if (params.endDate) query.set('endDate', params.endDate);
   query.set('page', String(params.page ?? 0));
   query.set('size', String(params.size ?? 50));
   return apiFetch<UnifiedLogPage>(`/api/operation-logs/unified?${query.toString()}`);

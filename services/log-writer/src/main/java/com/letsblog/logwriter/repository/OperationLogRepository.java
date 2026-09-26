@@ -10,6 +10,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface OperationLogRepository extends JpaRepository<OperationLog, Long> {
     Page<OperationLog> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
 
+    Page<OperationLog> findByUserIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+            Long userId, LocalDateTime start, LocalDateTime end, Pageable pageable);
+
     List<OperationLog> findByUserIdAndOperationIdOrderByCreatedAtAsc(Long userId, String operationId);
 
     List<OperationLog> findByCreatedAtBefore(LocalDateTime threshold);

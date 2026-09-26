@@ -94,7 +94,7 @@ class UnifiedOperationLogServiceTest {
                 .thenReturn(new PageImpl<>(List.of(auditLog(3L, now.minusMinutes(1)))));
 
         Page<UnifiedLogEntryResponse> result =
-                service().list(10L, true, null, null, PageRequest.of(0, 20), "Bearer test-token");
+                service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         assertEquals(3, result.getTotalElements());
         assertEquals("AI_JOB", result.getContent().get(0).sourceType());
@@ -108,7 +108,7 @@ class UnifiedOperationLogServiceTest {
     void list_admin以外は監査ログを取得しない() {
         stubEmptySources();
 
-        service().list(10L, false, null, null, PageRequest.of(0, 20), "Bearer test-token");
+        service().list(10L, false, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         verify(auditLogRepository, never()).findAllByOrderByCreatedAtDesc(any());
     }
@@ -117,7 +117,7 @@ class UnifiedOperationLogServiceTest {
     void list_typeフィルタで対象ソースのみ取得する() {
         stubEmptySources();
 
-        service().list(10L, true, "AI_JOB", null, PageRequest.of(0, 20), "Bearer test-token");
+        service().list(10L, true, "AI_JOB", null, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         verify(operationLogRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
         verify(auditLogRepository, never()).findAllByOrderByCreatedAtDesc(any());
@@ -131,9 +131,9 @@ class UnifiedOperationLogServiceTest {
         when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of(generationJob(1L, now)));
 
         Page<UnifiedLogEntryResponse> matched =
-                service().list(10L, true, null, "draft", PageRequest.of(0, 20), "Bearer test-token");
+                service().list(10L, true, null, "draft", null, null, PageRequest.of(0, 20), "Bearer test-token");
         Page<UnifiedLogEntryResponse> unmatched =
-                service().list(10L, true, null, "nonexistent", PageRequest.of(0, 20), "Bearer test-token");
+                service().list(10L, true, null, "nonexistent", null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         assertEquals(1, matched.getTotalElements());
         assertTrue(unmatched.getContent().isEmpty());
@@ -150,7 +150,7 @@ class UnifiedOperationLogServiceTest {
         when(generationJobClient.listRecent("Bearer test-token")).thenReturn(jobs);
 
         Pageable pageable = PageRequest.of(1, 2);
-        Page<UnifiedLogEntryResponse> result = service().list(10L, true, null, null, pageable, "Bearer test-token");
+        Page<UnifiedLogEntryResponse> result = service().list(10L, true, null, null, null, null, pageable, "Bearer test-token");
 
         assertEquals(3, result.getTotalElements());
         assertEquals(1, result.getContent().size());
@@ -180,7 +180,7 @@ class UnifiedOperationLogServiceTest {
                 .thenThrow(new GenerationJobUnavailableException("ai-service down", new RuntimeException()));
 
         Page<UnifiedLogEntryResponse> result =
-                service().list(10L, true, null, null, PageRequest.of(0, 20), "Bearer test-token");
+                service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         assertEquals(2, result.getTotalElements());
         assertEquals("AUDIT", result.getContent().get(0).sourceType());
@@ -194,7 +194,7 @@ class UnifiedOperationLogServiceTest {
                 .thenThrow(new GenerationJobUnavailableException("ai-service down", new RuntimeException()));
 
         Page<UnifiedLogEntryResponse> result =
-                service().list(10L, true, "AI_JOB", null, PageRequest.of(0, 20), "Bearer test-token");
+                service().list(10L, true, "AI_JOB", null, null, null, PageRequest.of(0, 20), "Bearer test-token");
 
         assertEquals(0, result.getTotalElements());
     }
@@ -211,6 +211,79 @@ class UnifiedOperationLogServiceTest {
                 .thenThrow(new IdentityServiceUnavailableException("identity down", new RuntimeException()));
 
         assertThrows(IdentityServiceUnavailableException.class,
-                () -> service().list(10L, true, null, null, PageRequest.of(0, 20), "Bearer test-token"));
+                () -> service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token"));
+    }
+
+    // ---------------------------------------------- 日時の範囲による絞り込み(issue #1138)
+
+    private static final LocalDateTime RANGE_START = LocalDateTime.of(2026, 1, 10, 0, 0);
+    private static final LocalDateTime RANGE_END = LocalDateTime.of(2026, 1, 11, 0, 0);
+    private static final LocalDateTime MIN_BOUND = LocalDateTime.of(1970, 1, 1, 0, 0);
+    private static final LocalDateTime MAX_BOUND = LocalDateTime.of(9999, 12, 31, 23, 59, 59);
+
+    @Test
+    void list_日時の範囲を各ソースの取得段階で絞る() {
+        stubEmptySources();
+        LocalDateTime inside = RANGE_START.plusHours(1);
+        // 範囲指定のクエリは直近200件の窓の外(古い側)も引けるので、範囲内の行だけが返る。
+        when(operationLogRepository.findByUserIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+                eq(10L), eq(RANGE_START), eq(RANGE_END), any()))
+                .thenReturn(new PageImpl<>(List.of(operationLog(1L, inside))));
+        when(auditLogRepository.findByCreatedAtBetweenOrderByCreatedAtDesc(eq(RANGE_START), eq(RANGE_END), any()))
+                .thenReturn(new PageImpl<>(List.of(auditLog(3L, inside.plusMinutes(1)))));
+        when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of(
+                generationJob(2L, inside.plusMinutes(2)),
+                generationJob(4L, RANGE_START.minusSeconds(1)),
+                generationJob(5L, RANGE_END.plusSeconds(1))));
+
+        Page<UnifiedLogEntryResponse> result = service().list(
+                10L, true, null, null, RANGE_START, RANGE_END, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(3, result.getTotalElements());
+        assertEquals(List.of("AI_JOB", "AUDIT", "OPERATION"),
+                result.getContent().stream().map(UnifiedLogEntryResponse::sourceType).toList());
+        verify(operationLogRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
+        verify(auditLogRepository, never()).findAllByOrderByCreatedAtDesc(any());
+    }
+
+    @Test
+    void list_開始のみ指定なら終了は上限なしで絞る() {
+        stubEmptySources();
+        when(operationLogRepository.findByUserIdAndCreatedAtBetweenOrderByCreatedAtDesc(
+                eq(10L), eq(RANGE_START), eq(MAX_BOUND), any()))
+                .thenReturn(new PageImpl<>(List.of(operationLog(1L, RANGE_START.plusDays(30)))));
+        when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of(
+                generationJob(2L, RANGE_START.plusDays(60)), generationJob(3L, RANGE_START.minusDays(1))));
+
+        Page<UnifiedLogEntryResponse> result = service().list(
+                10L, false, null, null, RANGE_START, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(2, result.getTotalElements());
+    }
+
+    @Test
+    void list_終了のみ指定なら開始は下限なしで絞る() {
+        stubEmptySources();
+        when(auditLogRepository.findByCreatedAtBetweenOrderByCreatedAtDesc(eq(MIN_BOUND), eq(RANGE_END), any()))
+                .thenReturn(new PageImpl<>(List.of(auditLog(3L, RANGE_END.minusDays(400)))));
+
+        Page<UnifiedLogEntryResponse> result = service().list(
+                10L, true, "AUDIT", null, null, RANGE_END, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(1, result.getTotalElements());
+        assertEquals("AUDIT", result.getContent().get(0).sourceType());
+    }
+
+    @Test
+    void list_日時未指定なら従来どおり直近の窓のクエリを使う() {
+        stubEmptySources();
+
+        service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        verify(operationLogRepository).findByUserIdOrderByCreatedAtDesc(eq(10L), any());
+        verify(auditLogRepository).findAllByOrderByCreatedAtDesc(any());
+        verify(operationLogRepository, never())
+                .findByUserIdAndCreatedAtBetweenOrderByCreatedAtDesc(any(), any(), any(), any());
+        verify(auditLogRepository, never()).findByCreatedAtBetweenOrderByCreatedAtDesc(any(), any(), any());
     }
 }

@@ -796,6 +796,56 @@ Then('操作ログ画面をキーワードで絞ると、そのキーワード�
   ).toHaveCount(0);
 });
 
+/** 画面の日時表示(`formatOperationLogDateTime`: "2026/09/10 09:30:15")を datetime-local の値へ直す。 */
+function toDateTimeLocalValue(text: string, shiftMinutes: number): string {
+  const match = text.trim().match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+  expect(match, `画面の日時表示を解釈できません: "${text}"`).not.toBeNull();
+  const [, y, mo, d, h, mi] = match as RegExpMatchArray;
+  // 壁時計値のまま加減算する(タイムゾーンは画面表示と入力で揃っているので触らない)。
+  const wall = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi)) + shiftMinutes * 60_000;
+  return new Date(wall).toISOString().slice(0, 16);
+}
+
+/** 一覧に表示されている各行の日時表示(`formatOperationLogDateTime` の出力)。 */
+async function displayedTimestamps(page: Page): Promise<string[]> {
+  const texts = await operationLogList(page).locator('span.w-36').allTextContents();
+  return texts.map((text) => text.trim());
+}
+
+Then('操作ログ画面を日時の範囲で絞ると、その範囲の行だけが表示される', async ({ page }) => {
+  // 基準は画面に出ている最新の行の日時。ホストと閲覧者のタイムゾーンが違っても、
+  // 「画面が表示した壁時計」をそのまま入力へ戻すので換算がずれない。
+  await page.goto('/operation-logs?type=OPERATION');
+  const list = operationLogList(page);
+  await expect(list.locator('span.w-36').first()).toBeVisible({ timeout: 30_000 });
+  const newest = (await displayedTimestamps(page))[0];
+  const start = toDateTimeLocalValue(newest, -2);
+  const end = toDateTimeLocalValue(newest, 2);
+
+  const applyRange = async (from: string, to: string) => {
+    await page.goto('/operation-logs?type=OPERATION');
+    await page.locator('input[name="startDate"]').fill(from);
+    await page.locator('input[name="endDate"]').fill(to);
+    await page.getByRole('button', { name: '絞り込み' }).click();
+    await expect(page).toHaveURL(/startDate=/);
+  };
+
+  // 範囲内: 最新の行が残り、範囲外の日時の行は1つも無い。
+  await applyRange(start, end);
+  await expect(operationLogList(page).getByText(newest).first()).toBeVisible({ timeout: 30_000 });
+  for (const shown of await displayedTimestamps(page)) {
+    const local = toDateTimeLocalValue(shown, 0);
+    expect(
+      local >= start && local <= end,
+      `範囲 ${start} 〜 ${end} の外の行「${shown}」が表示されています`
+    ).toBe(true);
+  }
+
+  // 範囲外(未来の1日): 何も表示されない。
+  await applyRange(toDateTimeLocalValue(newest, 24 * 60), toDateTimeLocalValue(newest, 48 * 60));
+  await expect(page.getByText('該当するログはありません')).toBeVisible({ timeout: 30_000 });
+});
+
 Then('その監査ログは日時の範囲で絞り込める', async ({ ctx, request }) => {
   const token = await adminToken(request);
   const entry = ctx.at15AuditEntry as AuditLogEntry;
