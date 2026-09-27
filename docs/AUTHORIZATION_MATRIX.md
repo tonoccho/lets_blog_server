@@ -1078,7 +1078,7 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | GET .../llm/review-steps | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。多段レビュー(#1210)の5ステップぶんの選択値・選択可能なprovider/model一覧(`ProjectLlmModelController.java`) |
 | PUT .../llm/review-steps/{stepKey} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。同上。provider/modelが空ならそのステップの上書きを解除する(`ProjectLlmModelController.java`) |
 
-## ProjectApiKeyController (17エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
+## ProjectApiKeyController (19エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1095,6 +1095,8 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | PUT .../google-analytics/property | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。選択したプロパティIDの保存 |
 | DELETE .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | 連携解除(リフレッシュトークン・プロパティ・OAuthクライアントを破棄) |
 | GET .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
+| GET .../adsense/accounts | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1232 で追加**。AdSense Management API `accounts.list` 由来の、連携したGoogleアカウントが利用できるアカウント一覧(読み取り専用) |
+| PUT .../adsense/account | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1232 で追加**。選択したパブリッシャーIDの保存 |
 | PUT .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | PUT .../adsense/client-secret | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | DELETE .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |

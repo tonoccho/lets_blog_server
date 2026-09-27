@@ -28,6 +28,7 @@ import {
   clearProjectGoogleAnalyticsCredentials,
   setProjectAdSenseSettings,
   setProjectAdSenseClientSecret,
+  selectProjectAdSenseAccount,
   clearProjectAdSenseCredentials,
   syncCategoryToMaster,
   deleteCategoryEverywhere,
@@ -444,9 +445,7 @@ export async function setProjectAdSenseSettingsAction(
   const accountId = String(formData.get("accountId") ?? "").trim();
   const clientId = String(formData.get("clientId") ?? "").trim();
   const clientSecret = String(formData.get("clientSecret") ?? "").trim();
-  if (!accountId) {
-    return { error: "AdSenseパブリッシャーIDを入力してください。" };
-  }
+  // パブリッシャーIDは任意(#1232): 空ならGoogleアカウント連携後に自動取得される。
   if (!clientId) {
     return { error: "Google OAuthクライアントIDを入力してください。" };
   }
@@ -456,6 +455,30 @@ export async function setProjectAdSenseSettingsAction(
     if (clientSecret) {
       await setProjectAdSenseClientSecret(projectId, clientSecret);
     }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/adsense`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
+  return { success: true };
+}
+
+/** 連携したGoogleアカウントが利用できるAdSenseアカウントの中から、ダッシュボードで使うものを選んで保存する(#1232)。 */
+export async function selectProjectAdSenseAccountAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  await requireAdminSession();
+
+  const accountId = String(formData.get("selectedAccountId") ?? "").trim();
+  if (!accountId) {
+    return { error: "AdSenseアカウントを選択してください。" };
+  }
+
+  try {
+    await selectProjectAdSenseAccount(projectId, accountId);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

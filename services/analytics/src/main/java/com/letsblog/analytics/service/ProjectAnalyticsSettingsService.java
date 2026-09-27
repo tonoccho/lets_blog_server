@@ -1,10 +1,14 @@
 package com.letsblog.analytics.service;
 
+import com.letsblog.analytics.adsense.AdSenseAccountSummary;
 import com.letsblog.analytics.adsense.AdSenseClient;
+import com.letsblog.analytics.adsense.AdSenseException;
 import com.letsblog.analytics.adsense.GoogleOAuthTokens;
 import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
 import com.letsblog.analytics.analytics.GoogleAnalyticsPropertySummary;
 import com.letsblog.common.crypto.CredentialCipher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -24,6 +28,8 @@ import java.util.List;
  */
 @Service
 public class ProjectAnalyticsSettingsService {
+
+    private static final Logger log = LoggerFactory.getLogger(ProjectAnalyticsSettingsService.class);
 
     private final AnalyticsCredentialsService analyticsCredentialsService;
     private final AdSenseClient adSenseClient;
@@ -134,8 +140,15 @@ public class ProjectAnalyticsSettingsService {
         return analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId);
     }
 
+    /** Googleアカウントとの連携(リフレッシュトークンの保存)が済んでいるか。パブリッシャーIDの有無は問わない。 */
+    public boolean isAdSenseConnected(Long projectId) {
+        return analyticsCredentialsService.hasAdsenseRefreshToken(projectId);
+    }
+
+    /** パブリッシャーIDは任意入力(issue #1232)。空(null/空白)はnullとして保存する。 */
     public void setAdSenseSettings(Long projectId, String accountId, String clientId) {
-        analyticsCredentialsService.setAdSenseSettings(projectId, accountId, clientId);
+        String normalized = (accountId == null || accountId.isBlank()) ? null : accountId.trim();
+        analyticsCredentialsService.setAdSenseSettings(projectId, normalized, clientId);
     }
 
     public void setAdSenseClientSecret(Long projectId, String clientSecret) {
@@ -148,18 +161,62 @@ public class ProjectAnalyticsSettingsService {
 
     /**
      * AdSenseのOAuth認可コードをリフレッシュトークンへ交換して保存する。
-     * アカウントIDは別途{@link #setAdSenseSettings}で設定済みの前提
-     * (OAuth同意自体はどのAdSenseアカウントかを教えてくれないため)。
      * クライアントID/シークレットはこのプロジェクトに保存されたものを使う。
+     *
+     * <p>issue #1232: OAuth同意自体はどのAdSenseアカウントかを教えてくれないが、同意直後のアクセストークンで
+     * accounts.listを1回呼べば分かる。利用できるアカウントが1件ならそのパブリッシャーIDを保存する
+     * (既存の値があっても、連携したアカウントが到達できるものの方が正しいので上書きする)。
+     * 複数件・0件・取得失敗のときはIDを保存しない。取得失敗でもリフレッシュトークンは保存したままにし、
+     * 理由は設定画面のアカウント一覧({@link #listAdSenseAccounts})が示す(手入力でも復旧できる)。
      */
     public void completeAdSenseOAuth(Long projectId, String code, String redirectUri) {
-        String clientId = analyticsCredentialsService.getAdsenseOauthClientId(projectId);
-        String clientSecret = analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId)
-                ? credentialCipher.decrypt(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(projectId))
-                : null;
-        GoogleOAuthTokens tokens =
-                adSenseClient.exchangeAuthorizationCode(clientId, clientSecret, code, redirectUri);
+        GoogleOAuthTokens tokens = adSenseClient.exchangeAuthorizationCode(
+                analyticsCredentialsService.getAdsenseOauthClientId(projectId),
+                decryptAdSenseClientSecret(projectId),
+                code,
+                redirectUri);
         analyticsCredentialsService.setAdsenseRefreshTokenEncrypted(
                 projectId, credentialCipher.encrypt(tokens.refreshToken()));
+        try {
+            List<AdSenseAccountSummary> accounts = adSenseClient.listAccounts(tokens.accessToken());
+            if (accounts.size() == 1) {
+                analyticsCredentialsService.setAdsenseAccountId(projectId, accounts.get(0).accountId());
+            }
+        } catch (AdSenseException e) {
+            log.warn("AdSenseアカウント一覧の取得に失敗したためパブリッシャーIDの自動取得を見送ります(projectId={}): {}",
+                    projectId, e.getMessage());
+        }
+    }
+
+    /** 連携したGoogleアカウントが利用できるAdSenseアカウントの一覧(設定画面の選択肢)。 */
+    public List<AdSenseAccountSummary> listAdSenseAccounts(Long projectId) {
+        requireAdSenseConnected(projectId);
+        String accessToken = adSenseClient.refreshAccessToken(
+                analyticsCredentialsService.getAdsenseOauthClientId(projectId),
+                decryptAdSenseClientSecret(projectId),
+                credentialCipher.decrypt(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(projectId)));
+        return adSenseClient.listAccounts(accessToken);
+    }
+
+    /** ダッシュボードで使うAdSenseアカウントを選択して保存する。"accounts/pub-XXXX"形式も受け付ける。 */
+    public void selectAdSenseAccount(Long projectId, String accountId) {
+        requireAdSenseConnected(projectId);
+        String normalized = accountId == null ? "" : accountId.trim().replaceFirst("^accounts/", "");
+        if (!normalized.matches("pub-\\d+")) {
+            throw new IllegalArgumentException("AdSenseパブリッシャーIDは pub-1234567890123456 の形式で指定してください");
+        }
+        analyticsCredentialsService.setAdsenseAccountId(projectId, normalized);
+    }
+
+    private void requireAdSenseConnected(Long projectId) {
+        if (!analyticsCredentialsService.hasAdsenseRefreshToken(projectId)) {
+            throw new IllegalArgumentException("Googleアカウントと連携していません。先にGoogleアカウントと連携してください");
+        }
+    }
+
+    private String decryptAdSenseClientSecret(Long projectId) {
+        return analyticsCredentialsService.hasAdsenseOauthClientSecret(projectId)
+                ? credentialCipher.decrypt(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(projectId))
+                : null;
     }
 }

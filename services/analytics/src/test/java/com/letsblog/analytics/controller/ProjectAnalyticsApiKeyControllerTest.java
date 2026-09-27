@@ -1,5 +1,6 @@
 package com.letsblog.analytics.controller;
 
+import com.letsblog.analytics.adsense.AdSenseAccountSummary;
 import com.letsblog.analytics.analytics.GoogleAnalyticsPropertySummary;
 import com.letsblog.analytics.service.AdminAuthorizationService;
 import com.letsblog.analytics.service.ProjectAnalyticsSettingsService;
@@ -110,5 +111,58 @@ class ProjectAnalyticsApiKeyControllerTest {
         InOrder order = inOrder(authorization, settings);
         order.verify(authorization).requireProjectMemberOrAdmin(1L);
         order.verify(settings).clearGoogleAnalyticsCredentials(1L);
+    }
+
+    @Test
+    void getAdSenseStatus_連携状態を返しシークレットは含まない() {
+        when(settings.hasAdSense(1L)).thenReturn(false);
+        when(settings.adSenseAccountId(1L)).thenReturn(null);
+        when(settings.adSenseClientId(1L)).thenReturn("cid");
+        when(settings.hasAdSenseClientSecret(1L)).thenReturn(true);
+        when(settings.isAdSenseConnected(1L)).thenReturn(true);
+
+        var response = controller().getAdSenseStatus(1L);
+
+        assertFalse(response.configured());
+        assertEquals(null, response.accountId());
+        assertEquals("cid", response.clientId());
+        assertTrue(response.hasClientSecret());
+        assertTrue(response.connected());
+        verify(authorization).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void setAdSenseSettings_パブリッシャーIDは省略できる() {
+        var response = controller().setAdSenseSettings(
+                1L, new ProjectAnalyticsApiKeyController.SetProjectAdSenseSettingsRequest(null, "cid"));
+
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        InOrder order = inOrder(authorization, settings);
+        order.verify(authorization).requireProjectMemberOrAdmin(1L);
+        order.verify(settings).setAdSenseSettings(1L, null, "cid");
+    }
+
+    @Test
+    void listAdSenseAccounts_パブリッシャーIDと表示名の一覧を返す() {
+        when(settings.listAdSenseAccounts(1L))
+                .thenReturn(List.of(new AdSenseAccountSummary("pub-1", "Site A")));
+
+        var response = controller().listAdSenseAccounts(1L);
+
+        assertEquals(1, response.size());
+        assertEquals("pub-1", response.get(0).accountId());
+        assertEquals("Site A", response.get(0).displayName());
+        verify(authorization).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void selectAdSenseAccount_認可後に選択したIDを保存する() {
+        var response = controller().selectAdSenseAccount(
+                1L, new ProjectAnalyticsApiKeyController.SelectAdSenseAccountRequest("pub-2"));
+
+        assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+        InOrder order = inOrder(authorization, settings);
+        order.verify(authorization).requireProjectMemberOrAdmin(1L);
+        order.verify(settings).selectAdSenseAccount(1L, "pub-2");
     }
 }

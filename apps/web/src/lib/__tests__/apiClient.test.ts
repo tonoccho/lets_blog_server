@@ -28,7 +28,9 @@ import {
   deleteGeneratedImage,
   streamConnectedServiceStatuses,
   listReviewStepSettings,
+  listProjectAdSenseAccounts,
   listUnifiedOperationLogs,
+  selectProjectAdSenseAccount,
   updateReviewStepSetting,
 } from '@/lib/apiClient'
 
@@ -390,5 +392,30 @@ describe('listUnifiedOperationLogs の日時範囲(issue #1138)', () => {
     expect(query.has('endDate')).toBe(false)
     expect(query.get('page')).toBe('0')
     expect(query.get('size')).toBe('50')
+  })
+})
+
+describe('AdSenseのパブリッシャーID自動発見(issue #1232)', () => {
+  it('連携したGoogleアカウントが利用できるAdSenseアカウントの一覧を取得する', async () => {
+    const body = [{ accountId: 'pub-1', displayName: 'A' }]
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await listProjectAdSenseAccounts(7)
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/api-keys/adsense/accounts')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('選んだパブリッシャーIDをPUTで保存する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(null, 204))
+
+    await selectProjectAdSenseAccount(7, 'pub-2')
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/api-keys/adsense/account')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ accountId: 'pub-2' })
   })
 })

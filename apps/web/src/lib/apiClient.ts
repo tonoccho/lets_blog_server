@@ -1546,15 +1546,18 @@ export interface ProjectAdSenseStatus {
   accountId: string | null;
   clientId: string | null;
   hasClientSecret: boolean;
+  /** Googleアカウントとの連携(リフレッシュトークン保存)済みか。パブリッシャーIDの有無は問わない(#1232)。 */
+  connected: boolean;
 }
 
 export function getProjectAdSenseStatus(projectId: number): Promise<ProjectAdSenseStatus> {
   return apiFetch<ProjectAdSenseStatus>(`/api/projects/${projectId}/api-keys/adsense`);
 }
 
+/** `accountId`(パブリッシャーID)は任意。空なら連携後にaccounts.listから自動取得される(#1232)。 */
 export function setProjectAdSenseSettings(
   projectId: number,
-  input: { accountId: string; clientId: string }
+  input: { accountId?: string; clientId: string }
 ): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense`, {
     method: 'PUT',
@@ -1571,6 +1574,23 @@ export function setProjectAdSenseClientSecret(
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientSecret }),
+  });
+}
+
+export interface AdSenseAccountOption {
+  accountId: string;
+  displayName: string | null;
+}
+
+export function listProjectAdSenseAccounts(projectId: number): Promise<AdSenseAccountOption[]> {
+  return apiFetch<AdSenseAccountOption[]>(`/api/projects/${projectId}/api-keys/adsense/accounts`);
+}
+
+export function selectProjectAdSenseAccount(projectId: number, accountId: string): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/adsense/account`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId }),
   });
 }
 

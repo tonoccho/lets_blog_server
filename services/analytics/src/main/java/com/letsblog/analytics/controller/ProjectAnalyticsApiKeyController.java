@@ -64,11 +64,22 @@ public class ProjectAnalyticsApiKeyController {
     public record GoogleAnalyticsPropertyResponse(String propertyId, String displayName, String accountDisplayName) {
     }
 
+    /**
+     * AdSense連携の状態。{@code connected}はGoogleアカウントとの連携(リフレッシュトークン保存)済みか、
+     * {@code configured}はさらにパブリッシャーIDまで揃ってダッシュボードに表示できるか(issue #1232)。
+     */
     public record ProjectAdSenseStatusResponse(
-            boolean configured, String accountId, String clientId, boolean hasClientSecret) {
+            boolean configured, String accountId, String clientId, boolean hasClientSecret, boolean connected) {
     }
 
-    public record SetProjectAdSenseSettingsRequest(@NotBlank String accountId, String clientId) {
+    /** {@code accountId}は任意(issue #1232)。省略時は連携後にaccounts.listから自動取得される。 */
+    public record SetProjectAdSenseSettingsRequest(String accountId, String clientId) {
+    }
+
+    public record SelectAdSenseAccountRequest(@NotBlank String accountId) {
+    }
+
+    public record AdSenseAccountResponse(String accountId, String displayName) {
     }
 
     public record SetProjectAdSenseClientSecretRequest(@NotBlank String clientSecret) {
@@ -138,7 +149,24 @@ public class ProjectAnalyticsApiKeyController {
                 projectAnalyticsSettingsService.hasAdSense(projectId),
                 projectAnalyticsSettingsService.adSenseAccountId(projectId),
                 projectAnalyticsSettingsService.adSenseClientId(projectId),
-                projectAnalyticsSettingsService.hasAdSenseClientSecret(projectId));
+                projectAnalyticsSettingsService.hasAdSenseClientSecret(projectId),
+                projectAnalyticsSettingsService.isAdSenseConnected(projectId));
+    }
+
+    @GetMapping("/adsense/accounts")
+    public List<AdSenseAccountResponse> listAdSenseAccounts(@PathVariable Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return projectAnalyticsSettingsService.listAdSenseAccounts(projectId).stream()
+                .map(a -> new AdSenseAccountResponse(a.accountId(), a.displayName()))
+                .toList();
+    }
+
+    @PutMapping("/adsense/account")
+    public ResponseEntity<Void> selectAdSenseAccount(
+            @PathVariable Long projectId, @Valid @RequestBody SelectAdSenseAccountRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        projectAnalyticsSettingsService.selectAdSenseAccount(projectId, request.accountId());
+        return ResponseEntity.noContent().build();
     }
 
     @PutMapping("/adsense")

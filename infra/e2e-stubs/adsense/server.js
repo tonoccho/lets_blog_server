@@ -6,7 +6,13 @@
  *   1. OAuth トークン交換(POST {googleOauthTokenUri})
  *      - 認可コード → アクセストークン + リフレッシュトークン(初回連携)
  *      - リフレッシュトークン → アクセストークン(以降)
- *   2. レポート取得(GET {adsenseDataApiBaseUrl}/v2/accounts/{accountId}/reports:generate)
+ *   2. アカウント一覧(GET {adsenseDataApiBaseUrl}/v2/accounts、issue #1232)
+ *      連携したGoogleアカウントが利用できるAdSenseアカウント。パブリッシャーIDの自動取得に使われる。
+ *      認可コードごとに返す内容が変わる(リフレッシュトークン→アクセストークンが認可コードに紐づく)。
+ *        - 既定(どの認可コードでも)                    : 1件(pub-1234567890123456)
+ *        - `e2e-stub-adsense-multi-accounts-code`      : 2件(複数件のときは選択UIになる)
+ *        - `e2e-stub-adsense-accounts-error-code`      : 403(取得失敗。トークンは保存され手入力で復旧できる)
+ *   3. レポート取得(GET {adsenseDataApiBaseUrl}/v2/accounts/{accountId}/reports:generate)
  *      - ディメンション無し(合計)/ DATE(日次)/ PLATFORM_TYPE_NAME(内訳)の3種
  *
  * 認可コード `e2e-stub-invalid-code` と リフレッシュトークン `e2e-stub-invalid-refresh` は
@@ -16,6 +22,37 @@ const { createStub } = require('../lib/stub');
 
 const ACCESS_TOKEN = 'e2e-stub-adsense-access-token';
 const REFRESH_TOKEN = 'e2e-stub-adsense-refresh-token';
+
+/**
+ * accounts.list の振る舞いを決めるトークン組(issue #1232)。認可コードで組を選び、以後の
+ * リフレッシュトークン → アクセストークン → accounts.list が同じ組で一貫する。
+ */
+const MULTI_CODE = 'e2e-stub-adsense-multi-accounts-code';
+const ERROR_CODE = 'e2e-stub-adsense-accounts-error-code';
+const TOKEN_SETS = {
+  single: { access: ACCESS_TOKEN, refresh: REFRESH_TOKEN },
+  multi: { access: 'e2e-stub-adsense-access-token-multi', refresh: 'e2e-stub-adsense-refresh-token-multi' },
+  error: { access: 'e2e-stub-adsense-access-token-list-error', refresh: 'e2e-stub-adsense-refresh-token-list-error' },
+};
+
+/** accounts.list が返すアカウント。`name` は実APIと同じ resource name(`accounts/` 接頭辞つき)。 */
+const ACCOUNTS = {
+  single: [{ name: 'accounts/pub-1234567890123456', displayName: 'E2E Stub Publisher', state: 'READY' }],
+  multi: [
+    { name: 'accounts/pub-1234567890123456', displayName: 'E2E Stub Publisher', state: 'READY' },
+    { name: 'accounts/pub-2222222222222222', displayName: 'E2E Stub Second Publisher', state: 'READY' },
+  ],
+};
+
+function tokenSetForCode(code) {
+  if (code === MULTI_CODE) return TOKEN_SETS.multi;
+  if (code === ERROR_CODE) return TOKEN_SETS.error;
+  return TOKEN_SETS.single;
+}
+
+function tokenSetForRefresh(refresh) {
+  return Object.values(TOKEN_SETS).find((set) => set.refresh === refresh) || TOKEN_SETS.single;
+}
 
 /** 合計。AdSenseClient#parseReport は totals.cells[0..2] を earnings/clicks/impressions として読む。 */
 const TOTALS = { earnings: '12.34', clicks: '56', impressions: '7890' };
@@ -74,7 +111,7 @@ function formValue(body, key) {
 createStub({
   name: 'adsense',
   port: Number(process.env.PORT || 8080),
-  async handle({ method, pathname, query, body, res, sendJson }) {
+  async handle({ req, method, pathname, query, body, res, sendJson }) {
     // 1. OAuth トークン交換。
     if (method === 'POST' && (pathname === '/token' || pathname === '/oauth2/token')) {
       const grantType = formValue(body, 'grant_type');
@@ -89,18 +126,37 @@ createStub({
         return true;
       }
       // 認可コードフロー(初回)だけ refresh_token を返す。実APIと同じ挙動。
+      const tokens = grantType === 'authorization_code' ? tokenSetForCode(code) : tokenSetForRefresh(refresh);
       const payload = {
-        access_token: ACCESS_TOKEN,
+        access_token: tokens.access,
         token_type: 'Bearer',
         expires_in: 3599,
         scope: 'https://www.googleapis.com/auth/adsense.readonly',
       };
-      if (grantType === 'authorization_code') payload.refresh_token = REFRESH_TOKEN;
+      if (grantType === 'authorization_code') payload.refresh_token = tokens.refresh;
       sendJson(res, 200, payload);
       return true;
     }
 
-    // 2. レポート取得。
+    // 2. アカウント一覧(issue #1232)。Bearer のアクセストークンで振る舞いが決まる。
+    if (method === 'GET' && pathname === '/v2/accounts') {
+      const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+      const token = bearer ? bearer[1] : null;
+      if (token === TOKEN_SETS.error.access) {
+        sendJson(res, 403, {
+          error: { code: 403, status: 'PERMISSION_DENIED', message: '[stub] アカウント一覧を取得する権限がありません' },
+        });
+      } else if (token === TOKEN_SETS.multi.access) {
+        sendJson(res, 200, { accounts: ACCOUNTS.multi });
+      } else if (token === TOKEN_SETS.single.access) {
+        sendJson(res, 200, { accounts: ACCOUNTS.single });
+      } else {
+        sendJson(res, 401, { error: { code: 401, status: 'UNAUTHENTICATED', message: '[stub] アクセストークンが不正です' } });
+      }
+      return true;
+    }
+
+    // 3. レポート取得。
     if (method === 'GET' && /^\/v2\/accounts\/[^/]+\/reports:generate$/.test(pathname)) {
       sendJson(res, 200, report(query.get('dimensions')));
       return true;

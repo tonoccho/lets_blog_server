@@ -28,6 +28,8 @@ public class AdSenseClient {
 
     private static final String GRANT_TYPE_AUTHORIZATION_CODE = "authorization_code";
     private static final String GRANT_TYPE_REFRESH_TOKEN = "refresh_token";
+    private static final String ACCOUNT_PREFIX = "accounts/";
+    private static final int ACCOUNTS_PAGE_SIZE = 100;
     private static final List<String> METRICS = List.of("ESTIMATED_EARNINGS", "CLICKS", "IMPRESSIONS");
 
     private final RestClient client;
@@ -111,6 +113,45 @@ public class AdSenseClient {
 
     private String urlEncode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 連携したGoogleアカウントが利用できるAdSenseアカウントを、AdSense Management API v2のaccounts.listで
+     * 全ページ(nextPageToken)取得して結合する(issue #1232)。読み取り専用スコープ(adsense.readonly)で呼べる。
+     */
+    public List<AdSenseAccountSummary> listAccounts(String accessToken) {
+        List<AdSenseAccountSummary> accounts = new ArrayList<>();
+        String pageToken = null;
+        do {
+            String uri = dataApiBaseUrl + "/v2/accounts?pageSize=" + ACCOUNTS_PAGE_SIZE
+                    + (pageToken == null ? "" : "&pageToken=" + urlEncode(pageToken));
+            JsonNode response;
+            try {
+                response = client.get()
+                        .uri(uri)
+                        .header("Authorization", "Bearer " + accessToken)
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (RestClientResponseException e) {
+                throw new AdSenseException(
+                        GoogleApiFailureMessage.of(
+                                "AdSenseアカウント一覧の取得", e.getStatusCode(), e.getResponseBodyAsString()),
+                        e);
+            }
+            if (response == null) {
+                break;
+            }
+            for (JsonNode account : response.path("accounts")) {
+                String name = account.path("name").asText("");
+                if (name.isBlank()) {
+                    continue;
+                }
+                String accountId = name.startsWith(ACCOUNT_PREFIX) ? name.substring(ACCOUNT_PREFIX.length()) : name;
+                accounts.add(new AdSenseAccountSummary(accountId, account.path("displayName").asText(null)));
+            }
+            pageToken = response.path("nextPageToken").asText(null);
+        } while (pageToken != null && !pageToken.isBlank());
+        return accounts;
     }
 
     /** AdSense Management API v2のaccounts.reports.generateを、指定したプリセット期間(dateRange)で呼び出す。 */

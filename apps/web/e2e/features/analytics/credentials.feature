@@ -124,3 +124,65 @@
     かつ AdSenseは連携済みにならない
     もし 認証なしでAdSenseのOAuthコールバックURLを開く
     ならば 認可コードは処理されず、ログイン画面へ戻される
+
+  # ## パブリッシャーIDの自動取得(#1232)
+  #
+  # 手入力を不要にする。OAuthクライアントだけを保存して連携すると、連携したGoogleアカウントが
+  # 利用できるAdSenseアカウント(accounts.list)からパブリッシャーIDが決まる。
+  # adsense-stub は accounts.list を認可コードで切り替える(docs/ACCEPTANCE_TESTING.md §9):
+  # 既定=1件 / `e2e-stub-adsense-multi-accounts-code`=2件 / `e2e-stub-adsense-accounts-error-code`=取得失敗(403)。
+
+  シナリオ: AdSense のパブリッシャーIDを空のままOAuthクライアントだけを保存でき、連携リンクが現れる
+    前提 管理者としてログインする
+    かつ Analytics を確かめるためのプロジェクトがある
+    もし そのプロジェクトのGoogle AdSense設定でパブリッシャーIDを空のままOAuthクライアントを保存する
+    ならば 保存しましたと表示される
+    かつ Google AdSense設定のパブリッシャーID欄は空である
+    かつ Google AdSense設定にクライアントシークレットが設定済みとして表示される
+    かつ Googleアカウントとの連携を始めるリンクが現れる
+
+  @api
+  シナリオ: AdSense のアカウントが1件なら、認可コードのコールバックでパブリッシャーIDが自動で保存される
+    前提 Analytics を確かめるためのプロジェクトがある
+    かつ そのプロジェクトにパブリッシャーIDなしでAdSenseのOAuthクライアントが登録されている
+    もし 認可コード「at1232-single-account-code」でAdSenseのOAuth連携を完了する
+    ならば AdSenseは連携済みで保存されたパブリッシャーIDは「pub-1234567890123456」である
+    かつ 保存されたリフレッシュトークンでAdSenseのレポートを取得できる
+
+  シナリオ: 自動で取得したパブリッシャーIDが設定画面に表示され、ダッシュボードのウィジェットが収益レポートを表示する
+    前提 管理者としてログインする
+    かつ Analytics を確かめるためのプロジェクトがある
+    かつ そのプロジェクトにパブリッシャーIDなしでAdSenseのOAuthクライアントが登録されている
+    かつ 認可コード「at1232-single-account-code」でAdSenseのOAuth連携を完了する
+    もし Google AdSense設定の画面を開き直す
+    ならば Google AdSense設定の状態に「連携済み(パブリッシャーID: pub-1234567890123456)」と表示される
+    もし そのプロジェクトのダッシュボードを開く
+    ならば Google AdSenseのパネルに「推定収益」として「12.34」が表示される
+    かつ Google AdSenseのパネルに日次推移とプラットフォーム別内訳が表示される
+
+  シナリオ: AdSense のアカウントが複数あるときは、一覧から選んで保存できる
+    前提 管理者としてログインする
+    かつ Analytics を確かめるためのプロジェクトがある
+    かつ そのプロジェクトにパブリッシャーIDなしでAdSenseのOAuthクライアントが登録されている
+    かつ 認可コード「e2e-stub-adsense-multi-accounts-code」でAdSenseのOAuth連携を完了する
+    もし Google AdSense設定の画面を開き直す
+    ならば Google AdSense設定の状態に「連携済み(パブリッシャーID未設定)」と表示される
+    かつ AdSenseのアカウント一覧に表示名「E2E Stub Publisher」とパブリッシャーID「pub-1234567890123456」がある
+    かつ AdSenseのアカウント一覧に表示名「E2E Stub Second Publisher」とパブリッシャーID「pub-2222222222222222」がある
+    もし パブリッシャーID「pub-2222222222222222」を一覧から選んで保存する
+    ならば Google AdSense設定の状態に「連携済み(パブリッシャーID: pub-2222222222222222)」と表示される
+    かつ AdSenseの保存されたパブリッシャーIDは「pub-2222222222222222」である
+
+  シナリオ: AdSense のアカウント一覧を取得できなくても、リフレッシュトークンは残り、手入力で連携を完了できる
+    前提 管理者としてログインする
+    かつ Analytics を確かめるためのプロジェクトがある
+    かつ そのプロジェクトにパブリッシャーIDなしでAdSenseのOAuthクライアントが登録されている
+    かつ 認可コード「e2e-stub-adsense-accounts-error-code」でAdSenseのOAuth連携を完了する
+    ならば AdSenseはGoogleアカウントと連携済みだがパブリッシャーIDは未取得である
+    もし Google AdSense設定の画面を開き直す
+    ならば AdSenseのアカウント一覧を取得できなかった理由が表示される
+    かつ Google AdSense設定の状態に「連携済み(パブリッシャーID未設定)」と表示される
+    もし パブリッシャーID「pub-9999999999999999」を手入力して保存する
+    ならば Google AdSense設定の状態に「連携済み(パブリッシャーID: pub-9999999999999999)」と表示される
+    かつ AdSenseの保存されたパブリッシャーIDは「pub-9999999999999999」である
+    かつ 保存されたリフレッシュトークンでAdSenseのレポートを取得できる

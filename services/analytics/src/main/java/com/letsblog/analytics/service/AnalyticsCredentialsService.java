@@ -115,6 +115,12 @@ public class AnalyticsCredentialsService {
         return findByProjectId(projectId).map(AnalyticsCredentials::hasAdsenseCredentials).orElse(false);
     }
 
+    /** Googleアカウントとの連携(リフレッシュトークンの保存)が済んでいるか。パブリッシャーIDの有無は問わない。 */
+    @Transactional(readOnly = true)
+    public boolean hasAdsenseRefreshToken(Long projectId) {
+        return findByProjectId(projectId).map(AnalyticsCredentials::hasAdsenseConnection).orElse(false);
+    }
+
     @Transactional(readOnly = true)
     public boolean hasAdsenseOauthClientSecret(Long projectId) {
         return findByProjectId(projectId).map(AnalyticsCredentials::hasAdsenseOauthClientSecret).orElse(false);
@@ -151,6 +157,14 @@ public class AnalyticsCredentialsService {
         AnalyticsCredentials credentials = getOrCreate(projectId);
         credentials.setAdsenseAccountId(accountId);
         credentials.setAdsenseOauthClientId(clientId);
+        repository.save(credentials);
+    }
+
+    /** AdSenseパブリッシャーIDだけを保存する(リフレッシュトークンやOAuthクライアントには触れない)。 */
+    @Transactional
+    public void setAdsenseAccountId(Long projectId, String accountId) {
+        AnalyticsCredentials credentials = getOrCreate(projectId);
+        credentials.setAdsenseAccountId(accountId);
         repository.save(credentials);
     }
 

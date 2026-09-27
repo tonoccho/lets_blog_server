@@ -90,6 +90,9 @@ const GA_CLIENT_ID = 'at1231-ga.apps.googleusercontent.com';
 /** adsense-stub が認可コードフローで返すリフレッシュトークン。漏れていないことの確認に使う。 */
 const STUB_REFRESH_TOKEN = 'e2e-stub-adsense-refresh-token';
 
+// adsense-stub は accounts.list を認可コードごとに切り替えて返す(issue #1232)。既定(どの認可コードでも)は1件、
+// `e2e-stub-adsense-multi-accounts-code` は2件、`e2e-stub-adsense-accounts-error-code` は一覧の取得失敗(403)。
+
 const GA_PROPERTY_ID = '987654321';
 const ADSENSE_ACCOUNT_ID = 'pub-1234567890123456';
 const ADSENSE_CLIENT_ID = 'at13-acceptance.apps.googleusercontent.com';
@@ -265,15 +268,19 @@ async function connectGoogleAnalytics(
   await connectGoogleAnalyticsFor(request, currentProject(ctx).id, gaClientSecret(ctx), code);
 }
 
+/**
+ * @param accountId パブリッシャーID。`null`なら送らない(#1232: 任意入力で、連携後に自動取得される)。
+ */
 async function putAdSenseClient(
   request: APIRequestContext,
   projectId: number,
-  secret: string
+  secret: string,
+  accountId: string | null = ADSENSE_ACCOUNT_ID
 ): Promise<void> {
   const headers = await adminHeaders(request);
   const settings = await request.put(`/api/projects/${projectId}/api-keys/adsense`, {
     headers,
-    data: { accountId: ADSENSE_ACCOUNT_ID, clientId: ADSENSE_CLIENT_ID },
+    data: accountId === null ? { clientId: ADSENSE_CLIENT_ID } : { accountId, clientId: ADSENSE_CLIENT_ID },
   });
   expect(
     settings.ok(),
@@ -288,6 +295,20 @@ async function putAdSenseClient(
     stored.ok(),
     `AdSenseのクライアントシークレット保存に失敗しました (status=${stored.status()}): ${await stored.text()}`
   ).toBe(true);
+}
+
+interface AdSenseStatusBody {
+  configured: boolean;
+  connected: boolean;
+  accountId: string | null;
+}
+
+async function adSenseStatus(request: APIRequestContext, projectId: number): Promise<AdSenseStatusBody> {
+  const response = await request.get(`/api/projects/${projectId}/api-keys/adsense`, {
+    headers: await adminHeaders(request),
+  });
+  expect(response.status(), 'AdSenseの設定状態を取得できない').toBe(200);
+  return (await response.json()) as AdSenseStatusBody;
 }
 
 async function completeAdSenseOAuth(
@@ -329,6 +350,10 @@ Given('そのプロジェクトにGoogle Analyticsが連携済みでプロパテ
 
 Given('そのプロジェクトにAdSenseのパブリッシャーIDとOAuthクライアントが登録されている', async ({ ctx, request }) => {
   await putAdSenseClient(request, currentProject(ctx).id, clientSecret(ctx));
+});
+
+Given('そのプロジェクトにパブリッシャーIDなしでAdSenseのOAuthクライアントが登録されている', async ({ ctx, request }) => {
+  await putAdSenseClient(request, currentProject(ctx).id, clientSecret(ctx), null);
 });
 
 Given('そのプロジェクトにAdSenseの資格情報が登録されている', async ({ ctx, request }) => {
@@ -539,6 +564,72 @@ When('そのプロジェクトのGoogle AdSense設定でパブリッシャーID�
   });
 });
 
+When('そのプロジェクトのGoogle AdSense設定でパブリッシャーIDを空のままOAuthクライアントを保存する', async ({ ctx, page }) => {
+  const project = currentProject(ctx);
+  await openSettings(page, adSenseSettingsPath(project.id), /Google AdSense設定$/);
+  const secret = clientSecret(ctx);
+
+  // パブリッシャーID欄には触れない(空のまま)。ハイドレーション前のfill()が戻される問題(#1385)は
+  // 他の保存ステップと同じくfill()から含めて再試行して避ける。
+  await retryUntilPass(async () => {
+    await page.locator('input[name="clientId"]').fill(ADSENSE_CLIENT_ID);
+    await page.locator('input[name="clientSecret"]').fill(secret);
+    await page.getByRole('button', { name: 'まとめて保存', exact: true }).click();
+    await page
+      .getByText('保存しました。')
+      .first()
+      .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+  });
+});
+
+Then('Google AdSense設定のパブリッシャーID欄は空である', async ({ page }) => {
+  await expect(page.locator('input[name="accountId"]')).toHaveValue('', { timeout: 30_000 });
+});
+
+Then(
+  /^Google AdSense設定の状態に「([^」]+)」と表示される$/,
+  async ({ page }, expected: string) => {
+    await expect(page.getByText(expected, { exact: true })).toBeVisible({ timeout: 30_000 });
+  }
+);
+
+Then(
+  /^AdSenseのアカウント一覧に表示名「([^」]+)」とパブリッシャーID「([^」]+)」がある$/,
+  async ({ page }, displayName: string, accountId: string) => {
+    const option = page.locator('select[name="selectedAccountId"] option', { hasText: displayName });
+    await expect(option).toHaveCount(1, { timeout: 30_000 });
+    await expect(option).toHaveAttribute('value', accountId);
+    await expect(option).toContainText(accountId);
+  }
+);
+
+When(/^パブリッシャーID「([^」]+)」を一覧から選んで保存する$/, async ({ page }, accountId: string) => {
+  // ハイドレーション前のselectOptionは値が戻りうる(#1385)ため、選択から含めて再試行する。
+  await retryUntilPass(async () => {
+    await page.locator('select[name="selectedAccountId"]').selectOption(accountId);
+    await page.getByRole('button', { name: 'パブリッシャーIDを保存', exact: true }).click();
+    await page
+      .getByText('パブリッシャーIDを保存しました。')
+      .first()
+      .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+  });
+});
+
+Then('AdSenseのアカウント一覧を取得できなかった理由が表示される', async ({ page }) => {
+  await expect(page.getByText(/アカウント一覧を取得できませんでした: .+/)).toBeVisible({ timeout: 30_000 });
+});
+
+When(/^パブリッシャーID「([^」]+)」を手入力して保存する$/, async ({ page }, accountId: string) => {
+  await retryUntilPass(async () => {
+    await page.locator('input[name="accountId"]').fill(accountId);
+    await page.getByRole('button', { name: 'まとめて保存', exact: true }).click();
+    await page
+      .getByText('保存しました。')
+      .first()
+      .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+  });
+});
+
 Then('Google AdSense設定にクライアントシークレットが設定済みとして表示される', async ({ page }) => {
   // 値は返らない。フォームは「設定済み」であることだけを placeholder で示す。
   await expect(page.locator('input[name="clientSecret"]')).toHaveAttribute(
@@ -654,6 +745,24 @@ Then('AdSenseは連携済みにならない', async ({ ctx, request }) => {
     ((await response.json()) as { configured: boolean }).configured,
     '拒否されたはずの認可コードで連携済みになっている'
   ).toBe(false);
+});
+
+Then(/^AdSenseは連携済みで保存されたパブリッシャーIDは「([^」]+)」である$/, async ({ ctx, request }, expected: string) => {
+  const status = await adSenseStatus(request, currentProject(ctx).id);
+  expect(status.configured, 'パブリッシャーIDが自動保存されていない').toBe(true);
+  expect(status.accountId).toBe(expected);
+  expect(status.accountId, '保存値に accounts/ 接頭辞が残っている').not.toContain('accounts/');
+});
+
+Then('AdSenseはGoogleアカウントと連携済みだがパブリッシャーIDは未取得である', async ({ ctx, request }) => {
+  const status = await adSenseStatus(request, currentProject(ctx).id);
+  expect(status.connected, 'リフレッシュトークンが保存されていない').toBe(true);
+  expect(status.configured, 'パブリッシャーIDが無いのに設定済み扱いになっている').toBe(false);
+  expect(status.accountId).toBeNull();
+});
+
+Then(/^AdSenseの保存されたパブリッシャーIDは「([^」]+)」である$/, async ({ ctx, request }, expected: string) => {
+  expect((await adSenseStatus(request, currentProject(ctx).id)).accountId).toBe(expected);
 });
 
 Then('保存されたリフレッシュトークンでAdSenseのレポートを取得できる', async ({ ctx, request }) => {

@@ -93,6 +93,8 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/projects/1/api-keys/google-analytics/property"),
                 new Endpoint("DELETE", "/api/projects/1/api-keys/google-analytics"),
                 new Endpoint("GET", "/api/projects/1/api-keys/adsense"),
+                new Endpoint("GET", "/api/projects/1/api-keys/adsense/accounts"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/adsense/account"),
                 new Endpoint("PUT", "/api/projects/1/api-keys/adsense"),
                 new Endpoint("PUT", "/api/projects/1/api-keys/adsense/client-secret"),
                 new Endpoint("DELETE", "/api/projects/1/api-keys/adsense"),

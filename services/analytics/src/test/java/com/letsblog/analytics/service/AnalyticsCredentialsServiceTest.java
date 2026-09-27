@@ -165,4 +165,47 @@ class AnalyticsCredentialsServiceTest {
         existing.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
         assertTrue(service().hasAdsenseCredentials(1L));
     }
+
+    @Test
+    void hasAdsenseRefreshToken_パブリッシャーID未取得でもリフレッシュトークンがあればtrue() {
+        AnalyticsCredentials existing = new AnalyticsCredentials(1L);
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        assertFalse(service().hasAdsenseRefreshToken(1L));
+
+        existing.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
+        assertTrue(service().hasAdsenseRefreshToken(1L));
+        // パブリッシャーID未取得なので、ダッシュボードの資格情報としては未設定のまま
+        assertFalse(service().hasAdsenseCredentials(1L));
+    }
+
+    @Test
+    void hasAdsenseRefreshToken_空のリフレッシュトークンは連携済みと見なさない() {
+        AnalyticsCredentials existing = new AnalyticsCredentials(1L);
+        existing.setAdsenseRefreshTokenEncrypted(new byte[0]);
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+
+        assertFalse(service().hasAdsenseRefreshToken(1L));
+    }
+
+    @Test
+    void hasAdsenseRefreshToken_行が無ければfalse() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+
+        assertFalse(service().hasAdsenseRefreshToken(1L));
+    }
+
+    @Test
+    void setAdsenseAccountId_リフレッシュトークンを変えずにIDだけを保存する() {
+        AnalyticsCredentials existing = new AnalyticsCredentials(1L);
+        existing.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
+        existing.setAdsenseOauthClientId("client-id");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().setAdsenseAccountId(1L, "pub-1234567890123456");
+
+        assertEquals("pub-1234567890123456", existing.getAdsenseAccountId());
+        assertEquals("client-id", existing.getAdsenseOauthClientId());
+        assertTrue(existing.hasAdsenseCredentials());
+    }
 }

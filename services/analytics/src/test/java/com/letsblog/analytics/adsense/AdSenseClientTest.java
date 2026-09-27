@@ -7,6 +7,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -302,6 +304,102 @@ class AdSenseClientTest {
         assertEquals("0", report.estimatedEarnings());
         assertEquals(0, report.dailyDataPoints().size());
         assertEquals(0, report.platformBreakdown().size());
+    }
+
+    // ---- accounts.list(issue #1232: パブリッシャーIDの自動発見) ----
+
+    private static final String ACCOUNTS_URI = DATA_API_BASE_URL + "/v2/accounts?pageSize=100";
+
+    @Test
+    void listAccounts_resource_nameからaccounts接頭辞を除いた素のパブリッシャーIDと表示名を返す() {
+        server.expect(requestTo(ACCOUNTS_URI))
+                .andExpect(method(GET))
+                .andExpect(header("Authorization", "Bearer access-abc"))
+                .andRespond(withSuccess(
+                        "{\"accounts\":[{\"name\":\"accounts/pub-1234567890123456\",\"displayName\":\"My Site\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        List<AdSenseAccountSummary> accounts = client.listAccounts("access-abc");
+
+        assertEquals(List.of(new AdSenseAccountSummary("pub-1234567890123456", "My Site")), accounts);
+        server.verify();
+    }
+
+    @Test
+    void listAccounts_接頭辞が無い名前はそのまま返し名前が空の要素は捨てる() {
+        server.expect(requestTo(ACCOUNTS_URI))
+                .andRespond(withSuccess(
+                        "{\"accounts\":[{\"name\":\"pub-1\"},{\"displayName\":\"no name\"},{\"name\":\"\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(List.of(new AdSenseAccountSummary("pub-1", null)), client.listAccounts("t"));
+    }
+
+    @Test
+    void listAccounts_nextPageTokenがある間は全ページを結合する() {
+        server.expect(requestTo(ACCOUNTS_URI))
+                .andRespond(withSuccess(
+                        "{\"accounts\":[{\"name\":\"accounts/pub-1\",\"displayName\":\"A\"}],\"nextPageToken\":\"tok 2\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ACCOUNTS_URI + "&pageToken=tok+2"))
+                .andRespond(withSuccess(
+                        "{\"accounts\":[{\"name\":\"accounts/pub-2\",\"displayName\":\"B\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(
+                List.of(new AdSenseAccountSummary("pub-1", "A"), new AdSenseAccountSummary("pub-2", "B")),
+                client.listAccounts("t"));
+        server.verify();
+    }
+
+    @Test
+    void listAccounts_nextPageTokenが空文字なら次のページを取りに行かない() {
+        server.expect(requestTo(ACCOUNTS_URI))
+                .andRespond(withSuccess(
+                        "{\"accounts\":[{\"name\":\"accounts/pub-1\"}],\"nextPageToken\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(List.of(new AdSenseAccountSummary("pub-1", null)), client.listAccounts("t"));
+        server.verify();
+    }
+
+    @Test
+    void listAccounts_アカウントが無い応答は空の一覧() {
+        server.expect(requestTo(ACCOUNTS_URI)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        assertTrue(client.listAccounts("t").isEmpty());
+    }
+
+    @Test
+    void listAccounts_応答に本文が無くても空の一覧() {
+        server.expect(requestTo(ACCOUNTS_URI)).andRespond(withSuccess());
+
+        assertTrue(client.listAccounts("t").isEmpty());
+    }
+
+    @Test
+    void listAccounts_失敗すると理由の分かるAdSenseExceptionになる() {
+        server.expect(requestTo(ACCOUNTS_URI))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"error\":{\"message\":\"secret raw body\"}}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        AdSenseException e = assertThrows(AdSenseException.class, () -> client.listAccounts("t"));
+
+        assertTrue(e.getMessage().contains("AdSenseアカウント一覧の取得"), e.getMessage());
+        assertFalse(e.getMessage().contains("secret raw body"), "生の応答本文を利用者に見せない");
+    }
+
+    @Test
+    void listAccounts_権限不足の403は理由を含めた例外になる() {
+        server.expect(requestTo(ACCOUNTS_URI))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN)
+                        .body("{\"error\":\"forbidden\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        AdSenseException e = assertThrows(AdSenseException.class, () -> client.listAccounts("t"));
+
+        assertTrue(e.getMessage().contains("403"), e.getMessage());
     }
 
     private String reportUri(String dimensions) {

@@ -93,6 +93,11 @@ public class AnalyticsCredentials {
                 && adsenseRefreshTokenEncrypted != null && adsenseRefreshTokenEncrypted.length > 0;
     }
 
+    /** Googleアカウントとの連携(リフレッシュトークンの保存)が済んでいるか。パブリッシャーIDの有無は問わない。 */
+    public boolean hasAdsenseConnection() {
+        return adsenseRefreshTokenEncrypted != null && adsenseRefreshTokenEncrypted.length > 0;
+    }
+
     public boolean hasAdsenseOauthClientSecret() {
         return adsenseOauthClientSecretEncrypted != null && adsenseOauthClientSecretEncrypted.length > 0;
     }

@@ -1,6 +1,8 @@
 package com.letsblog.analytics.service;
 
+import com.letsblog.analytics.adsense.AdSenseAccountSummary;
 import com.letsblog.analytics.adsense.AdSenseClient;
+import com.letsblog.analytics.adsense.AdSenseException;
 import com.letsblog.analytics.adsense.GoogleOAuthTokens;
 import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
 import com.letsblog.analytics.analytics.GoogleAnalyticsPropertySummary;
@@ -164,6 +166,179 @@ class ProjectAnalyticsSettingsServiceTest {
         verify(analyticsCredentialsService).clearGoogleAnalyticsCredentials(1L);
         assertNull(analyticsCredentialsService.getGaPropertyId(1L));
         assertFalse(analyticsCredentialsService.hasGaRefreshToken(1L));
+    }
+
+    // ---- AdSense: パブリッシャーIDの自動発見(issue #1232) ----
+
+    private void stubAdSenseClient() {
+        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn("cid");
+        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("secret"));
+    }
+
+    private void stubAdSenseConnected() {
+        stubAdSenseClient();
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("refresh"));
+    }
+
+    @Test
+    void completeAdSenseOAuth_アカウントが1件なら素のパブリッシャーIDを自動保存する() {
+        stubAdSenseClient();
+        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
+                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
+        when(adSenseClient.listAccounts("access"))
+                .thenReturn(List.of(new AdSenseAccountSummary("pub-1234567890123456", "Site")));
+
+        service().completeAdSenseOAuth(1L, "code", "https://x/cb");
+
+        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), captor.capture());
+        assertEquals("refresh-xyz", credentialCipher.decrypt(captor.getValue()));
+        verify(analyticsCredentialsService).setAdsenseAccountId(1L, "pub-1234567890123456");
+    }
+
+    @Test
+    void completeAdSenseOAuth_アカウントが複数なら自動保存しない() {
+        stubAdSenseClient();
+        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
+                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
+        when(adSenseClient.listAccounts("access")).thenReturn(List.of(
+                new AdSenseAccountSummary("pub-1", "A"), new AdSenseAccountSummary("pub-2", "B")));
+
+        service().completeAdSenseOAuth(1L, "code", "https://x/cb");
+
+        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), any());
+        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+    }
+
+    @Test
+    void completeAdSenseOAuth_アカウントが0件でもリフレッシュトークンは保存する() {
+        stubAdSenseClient();
+        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
+                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
+        when(adSenseClient.listAccounts("access")).thenReturn(List.of());
+
+        service().completeAdSenseOAuth(1L, "code", "https://x/cb");
+
+        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), any());
+        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+    }
+
+    @Test
+    void completeAdSenseOAuth_一覧の取得に失敗してもリフレッシュトークンは保存され例外は伝えない() {
+        stubAdSenseClient();
+        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
+                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
+        when(adSenseClient.listAccounts("access")).thenThrow(new AdSenseException("403", null));
+
+        service().completeAdSenseOAuth(1L, "code", "https://x/cb");
+
+        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), any());
+        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+    }
+
+    @Test
+    void completeAdSenseOAuth_認可コードの交換に失敗したら何も保存しない() {
+        stubAdSenseClient();
+        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "bad", "https://x/cb"))
+                .thenThrow(new AdSenseException("invalid_grant", null));
+
+        assertThrows(AdSenseException.class, () -> service().completeAdSenseOAuth(1L, "bad", "https://x/cb"));
+
+        verify(analyticsCredentialsService, never()).setAdsenseRefreshTokenEncrypted(any(), any());
+        verify(adSenseClient, never()).listAccounts(any());
+    }
+
+    @Test
+    void completeAdSenseOAuth_クライアントシークレット未保存ならnullを渡してクライアント側で拒否する() {
+        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn(null);
+        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(false);
+        when(adSenseClient.exchangeAuthorizationCode(null, null, "code", "https://x/cb"))
+                .thenThrow(new AdSenseException("未設定", null));
+
+        assertThrows(AdSenseException.class, () -> service().completeAdSenseOAuth(1L, "code", "https://x/cb"));
+    }
+
+    @Test
+    void listAdSenseAccounts_保存済みのリフレッシュトークンで一覧を取得する() {
+        stubAdSenseConnected();
+        List<AdSenseAccountSummary> expected = List.of(new AdSenseAccountSummary("pub-1", "A"));
+        when(adSenseClient.refreshAccessToken("cid", "secret", "refresh")).thenReturn("access");
+        when(adSenseClient.listAccounts("access")).thenReturn(expected);
+
+        assertEquals(expected, service().listAdSenseAccounts(1L));
+    }
+
+    @Test
+    void listAdSenseAccounts_未連携なら拒否してGoogleへ問い合わせない() {
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(false);
+
+        assertThrows(IllegalArgumentException.class, () -> service().listAdSenseAccounts(1L));
+        verify(adSenseClient, never()).listAccounts(any());
+    }
+
+    @Test
+    void listAdSenseAccounts_クライアントシークレット未保存ならnullを渡す() {
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn("cid");
+        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(false);
+        when(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("refresh"));
+        when(adSenseClient.refreshAccessToken("cid", null, "refresh"))
+                .thenThrow(new AdSenseException("未設定", null));
+
+        assertThrows(AdSenseException.class, () -> service().listAdSenseAccounts(1L));
+    }
+
+    @Test
+    void selectAdSenseAccount_素のパブリッシャーIDを保存する() {
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+
+        service().selectAdSenseAccount(1L, " pub-2222222222222222 ");
+
+        verify(analyticsCredentialsService).setAdsenseAccountId(1L, "pub-2222222222222222");
+    }
+
+    @Test
+    void selectAdSenseAccount_accountsプレフィックスは取り除く() {
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+
+        service().selectAdSenseAccount(1L, "accounts/pub-333");
+
+        verify(analyticsCredentialsService).setAdsenseAccountId(1L, "pub-333");
+    }
+
+    @Test
+    void selectAdSenseAccount_未連携やpub形式でないIDは拒否する() {
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(false);
+        assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(1L, "pub-1"));
+
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(2L)).thenReturn(true);
+        assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, "abc"));
+        assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, "accounts/pub-1/x"));
+        assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, ""));
+        assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, null));
+        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+    }
+
+    @Test
+    void setAdSenseSettings_パブリッシャーIDが空ならnullとして保存する() {
+        service().setAdSenseSettings(1L, "  ", "cid");
+        service().setAdSenseSettings(1L, null, "cid");
+        service().setAdSenseSettings(1L, " pub-1 ", "cid");
+
+        verify(analyticsCredentialsService, org.mockito.Mockito.times(2)).setAdSenseSettings(1L, null, "cid");
+        verify(analyticsCredentialsService).setAdSenseSettings(1L, "pub-1", "cid");
+    }
+
+    @Test
+    void isAdSenseConnected_資格情報サービスへ委譲する() {
+        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+
+        assertTrue(service().isAdSenseConnected(1L));
     }
 
     private void stubConnected() {

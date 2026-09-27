@@ -423,7 +423,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 | --- | --- | --- | --- |
 | `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | `LLM_BASE_URL`(ai / platform) | 18081 |
 | `ga-stub` | Google Analytics Data API + Admin API(`accountSummaries`)+ OAuth | `GOOGLE_ANALYTICS_DATA_API_BASE_URL`, `GOOGLE_ANALYTICS_ADMIN_API_BASE_URL`, `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` | 18082 |
-| `adsense-stub` | AdSense Management API + Google OAuth | `ADSENSE_DATA_API_BASE_URL`, `GOOGLE_OAUTH_TOKEN_URI` | 18083 |
+| `adsense-stub` | AdSense Management API(`accounts.list` + `reports:generate`)+ Google OAuth | `ADSENSE_DATA_API_BASE_URL`, `GOOGLE_OAUTH_TOKEN_URI` | 18083 |
 | `brave-stub` | Brave Search API | `BRAVE_SEARCH_BASE_URL` | 18084 |
 | `image-stub` | OpenAI 画像生成(gpt-image-1) | `IMAGE_LLM_BASE_URL`(platform) | 18085 |
 | `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
@@ -767,6 +767,8 @@ issue #1374 のスコープでは解消していない。ファイル冒頭に�
 | `ga-stub` | 認可コード `e2e-stub-ga-expired-code`(後で失効するリフレッシュトークン `e2e-stub-ga-invalid-refresh` を返す) | 連携は成功するが、以後のアクセストークン取得が401(ダッシュボードで再認証を促す表示になる) |
 | `adsense-stub` | 認可コード `e2e-stub-invalid-code` | トークン交換が401 |
 | `adsense-stub` | リフレッシュトークン `e2e-stub-invalid-refresh` | トークン交換が401 |
+| `adsense-stub` | 認可コード `e2e-stub-adsense-multi-accounts-code`(#1232) | 連携は成功し、`GET /v2/accounts` が2件を返す(パブリッシャーIDは自動保存されず、設定画面の一覧から選ぶ) |
+| `adsense-stub` | 認可コード `e2e-stub-adsense-accounts-error-code`(#1232) | 連携は成功するが、`GET /v2/accounts` が403(リフレッシュトークンは保存され、理由が画面に出て、パブリッシャーIDの手入力で復旧できる) |
 | `brave-stub` | APIキー `e2e-stub-invalid-key` | 401 |
 | `github-stub` | トークン `e2e-stub-invalid-token` | 401 |
 | `github-stub` | トークン `e2e-stub-readonly-token` | 書き込みが403 |
@@ -793,6 +795,13 @@ LLM と画像生成の接続設定は「DB(`lbs_platform.system_settings`)に値
 GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB設定**であって
 システム設定ではないため、この問題は起きない。向き先(baseUrl)だけが環境変数で決まる。
 
+> **AdSenseのパブリッシャーIDは自動取得される(#1232)。** `adsense-stub` の `GET /v2/accounts`
+> は、認可コードから決まるトークンの組(認可コード → リフレッシュトークン → アクセストークン)ごとに
+> 返す内容を変える。既定(どの認可コードでも)は1件(`pub-1234567890123456`。`accounts/` 接頭辞つきの
+> resource name で返す)、上表の2つの認可コードが複数件 / 取得失敗である。制御エンドポイントは使わない。
+> 認可コードの交換は、GAと同じ理由(同意画面をスタブ化しない)で `@api` から
+> `POST .../api-keys/adsense/oauth-callback` を直接叩いて確かめる。
+>
 > **GAはユーザーOAuthである(#1231)。** サービスアカウントJSON(`token_uri` が環境変数より優先される
 > 落とし穴を含む)は廃止した。`ga-stub` はトークン交換(`authorization_code` / `refresh_token`)と
 > プロパティ一覧(`GET /v1beta/accountSummaries`、2ページ)、`runReport` を提供し、Admin API と Data API は
