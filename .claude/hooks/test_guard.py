@@ -1939,6 +1939,109 @@ class GitDashCCrossRepoPhaseSeparation(unittest.TestCase):
         self.assertIsNone(reason, "通常の git commit の許可判定に回帰がある: %s" % reason)
 
 
+class LeadingGlobalGitFlagsBooleanAndEqualsForm(unittest.TestCase):
+    """#1448: `_leading_global_git_flags()`(#1443)のうち、`GLOBAL_VALUE_FLAGS["git"]` に
+
+    一致しない `-` 始まりトークン(ブール型のグローバルフラグ、`--git-dir=path` のような
+    `=` 結合形)を「値を読み飛ばさずに1トークンだけ消費してプレフィックスに含める」分岐
+    を通る回帰テスト。この分岐は #1443 の時点では手動確認のみで、committed なテストが
+    無かった。
+
+    `--bare` は #1443 の QA が「`-C` と併用すると probe と本物の commit が同一に fail-open
+    する」と評価しているため、ブール型の例には副作用の無い `--paginate` を使う。
+
+    `=` 結合形は2つ(`--git-dir=<path> --work-tree=<path>`)を同時に渡すシナリオに加え、
+    単独の1トークンだけを渡すシナリオも用意する(#1448 レビュー、2026-09-27): フォール
+    スルー分岐の `i += 1` を `i += 2` に食い過ぎさせるミューテーションは、`=` 結合形
+    トークンがちょうど2つ並ぶケースでは正しい境界に landing してしまい見逃されるが、
+    単独の1トークンなら見逃しが再現する。
+    """
+
+    def test_ac1_boolean_flag_prefixed_dash_c_target_mixed_cwd_clean_is_denied(self):
+        """ブール型グローバルフラグ(`--paginate`)前置でも、`-C` の対象(cwdとは別の
+
+        repoB)の混在ステージが正しく検出されること。cwd(repoA)はクリーンにしておき、
+        cwd 側を見てしまう退行(あるいは `--paginate` の次のトークン `-C` を値として
+        読み飛ばしてしまう退行)なら見逃されて許可されてしまう。
+        """
+        repo_a = _git_phase_project()  # cwd 側: クリーン
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --paginate -C %s commit -m x" % repo_b, repo_a
+        )
+        self.assertIsNotNone(
+            reason,
+            "ブール型グローバルフラグ(--paginate)前置の -C 対象(repoB)が混在ステージ"
+            "なのに、cwd(repoA)がクリーンだからと見逃している",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_ac2_git_dir_equals_form_target_mixed_cwd_clean_is_denied(self):
+        """`--git-dir=<path>` `--work-tree=<path>`(`=` 結合形)でも、対象(cwdとは別の
+
+        repoB)の混在ステージが正しく検出されること。`=` 結合形は
+        `GLOBAL_VALUE_FLAGS["git"]` の要素(空白区切り形)とは文字列として一致しない
+        ため、誤って境界(サブコマンド)と扱って break すると cwd(repoA、クリーン)を
+        見てしまい、混在を見逃して許可してしまう。
+        """
+        repo_a = _git_phase_project()  # cwd 側: クリーン
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --git-dir=%s --work-tree=%s commit -m x"
+            % (os.path.join(repo_b, ".git"), repo_b),
+            repo_a,
+        )
+        self.assertIsNotNone(
+            reason,
+            "--git-dir=<path>(= 結合形)の対象(repoB)が混在ステージなのに、"
+            "cwd(repoA)がクリーンだからと見逃している",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_ac2_git_dir_equals_form_alone_target_mixed_cwd_clean_is_denied(self):
+        """`--git-dir=<path>` を(`--work-tree=` を伴わず)単独で使っても、対象
+
+        (cwdとは別のrepoB)の混在ステージが正しく検出されること。
+
+        `test_ac2_git_dir_equals_form_target_mixed_cwd_clean_is_denied` は
+        `--git-dir=<path> --work-tree=<path>` を常に2つ同時に渡しているため、
+        フォールスルー分岐の `i += 1` を `i += 2` に食い過ぎさせるミューテーションを
+        見逃す(#1448 レビュー、2026-09-27): `=` 結合形トークンがちょうど2つ並ぶと、
+        最初のトークンで index を2進めても2トークン分正しく進めたのと同じ境界
+        (`commit` の手前)に landing してしまうため。単独の `=` 結合形(このトークン
+        1つだけを消費してから `commit` に到達する)なら、食い過ぎが1トークン分の
+        ずれとして現れ、`commit` そのものをプレフィックスに巻き込んで
+        `git diff --cached` が失敗し、`reason` が `None` になって見逃しが再現する。
+
+        `--work-tree=<path>` 単独ではなく `--git-dir=<path>` 単独を選んだ理由:
+        `--git-dir` を指定しない場合、git は起動時の cwd から `.git` を discovery
+        するため、`--work-tree=<path>` だけを cwd(repoA)から渡しても参照される
+        リポジトリは repoA の `.git` のままで、repoB の staged 内容を全く検出できず
+        (実地確認: cwd=repoA で `git --work-tree=repoB diff --cached --name-only`
+        は空を返す)、そもそもクロスリポジトリ検出のテストとして成立しない。
+        `--git-dir=<path>` 単独なら GIT_DIR が明示され、work tree の状態に関係なく
+        `diff --cached --name-only` は repoB の索引を正しく読む(実地確認済み)。
+        """
+        repo_a = _git_phase_project()  # cwd 側: クリーン
+        repo_b = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --git-dir=%s commit -m x" % os.path.join(repo_b, ".git"),
+            repo_a,
+        )
+        self.assertIsNotNone(
+            reason,
+            "--git-dir=<path>(= 結合形、単独)の対象(repoB)が混在ステージなのに、"
+            "cwd(repoA)がクリーンだからと見逃している",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+
 class ShortValueFlagAttachedValueMisdetection(unittest.TestCase):
     """AC5(#1441): `_has_flag` の短縮フラグクラスタ判定が、値を取る短縮フラグに直結
 
