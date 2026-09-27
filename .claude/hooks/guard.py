@@ -560,6 +560,17 @@ def invokes(command, program, subcommands=()):
 
     解析できない場合は、生の文字列に対する緩い照合へフォールバックする。
     見逃す(#1029)よりは過検知に倒す。
+
+    `subcommands` を渡した呼び出しは、サブコマンド一致に加えて `--help`/`-h` だけの
+    呼び出しを除外する(#1446)。ヘルプ表示は副作用の無い読み取り専用の操作であり、
+    サブコマンド一致で判定するどのガードにとっても「操作」ではないため。判定対象は
+    サブコマンドに一致した分とグローバル値フラグの対を除いた残り(`_is_help_invocation`
+    参照)であり、それ以外のトークン(他のフラグ・その値・追加の位置引数)が1つでも
+    残っていれば非ヘルプとして通常判定に委ねる。
+    `subcommands=()` で呼ぶ `check_status_label_integrity` と、
+    `check_hotfix_label_immutability` 内の `glab api ... --method PUT` を拾うループは
+    この判定を経由しない — 特定のサブコマンドへの一致を前提にしていないので、
+    `--help` の有無を云々する対象でもない。
     """
     parsed = simple_commands(command)
     if parsed is None:
@@ -575,7 +586,10 @@ def invokes(command, program, subcommands=()):
             continue
         rest = argv[1:]
         if subcommands:
+            target = list(subcommands)
             positional = []
+            residual = []
+            matched = 0
             skip_next = False
             for a in rest:
                 if skip_next:
@@ -584,9 +598,17 @@ def invokes(command, program, subcommands=()):
                 if a in value_flags:
                     skip_next = True
                     continue
-                if not a.startswith("-"):
-                    positional.append(a)
+                if a.startswith("-"):
+                    residual.append(a)
+                    continue
+                positional.append(a)
+                if matched < len(target) and a == target[matched]:
+                    matched += 1
+                else:
+                    residual.append(a)
             if positional[: len(subcommands)] != list(subcommands):
+                continue
+            if _is_help_invocation(residual):
                 continue
         found.append(rest)
     return found
@@ -615,6 +637,14 @@ def invokes(command, program, subcommands=()):
 #   -u[<mode>]                 --untracked-files(直結のみ値を取る)
 # 将来 git の版でこの一覧が増減したら、`git commit -h` を取り直してこの集合を
 # 更新すること。
+#
+# `("glab", "issue update")` / `("glab", "issue create")` のエントリは #1446 以前に
+# `_is_help_invocation` の誤認防止用として置かれていたが、`_has_flag`/`_cluster_has_flag`
+# はどちらの呼び出し元でも使われていない(ラベルの抽出は `_issue_update_label_args` /
+# `_short_flag_attached_value` が別に行う)。`_is_help_invocation` は #1446 のレビュー
+# 対応で完全一致方式に切り替わり、この一覧を引かなくなった(下記参照)。使われなくなった
+# エントリを残すと「curated なリストを安全側の判断に使ってよい」という誤った前例に
+# なるため削除する。
 SHORT_VALUE_FLAGS = {
     ("glab", "mr merge"): {"m", "R"},
     ("git", "commit"): {"m", "F", "c", "C", "S", "t", "U", "u"},
@@ -635,6 +665,42 @@ def _cluster_has_flag(cluster, short, value_shorts):
         if ch in value_shorts:
             return False
     return False
+
+
+def _is_help_invocation(residual):
+    """`residual`(サブコマンドに一致した分と、グローバル値フラグの対を `invokes()` が
+    既に取り除いた残り)が、`--help`/`-h` だけのヘルプ表示呼び出しか。
+
+    判定: `residual` が空でなく、かつ**すべての**トークンが `--help` または独立した
+    トークンとしての `-h` であるときだけ真。1つでも他のトークン(他のフラグ、その値、
+    位置引数)が残っていれば偽。
+
+    ## 経緯(#1446、レビュー2回まで)
+
+    1回目までの実装(クラスタ内の文字一致 → 完全一致)はどちらも「`residual` の中に
+    `--help`/`-h` が**1つでも**含まれていれば真」という OR 方式だった。これは、値を
+    取るフラグの値としてたまたま独立トークンの `-h` が渡された形を、本物の `-h` と
+    区別できない: `git commit -m -h --no-verify` の `-h` は `-m` の値、
+    `glab issue update ... --title -h` の `-h` は `--title` の値であり、どちらも
+    ヘルプ表示ではなく通常の操作(かつ危険なフラグを伴う)である。`residual` には
+    `-m`/`--title` 自身も残っているのに、OR 方式はそれらを無視して `-h` の存在だけで
+    真と判定し、後続の危険フラグ検査(`--no-verify` 禁止、hotfix 不変性)ごと
+    スキップしてしまっていた(fail-open。レビュー2回目 BLOCKING の指摘)。
+
+    「すべてのトークンが help」という AND 方式にすることで、`-h`/`--help` 以外の
+    トークンが1つでも残っていれば非ヘルプと判定するようになり、上記の fail-open を
+    防ぐ。
+
+    副作用として、位置引数や他のフラグが `--help`/`-h` と共存する呼び出し
+    (`glab mr merge 42 --help` の `42`、`-h --rebase` の `--rebase`)は、実際の cobra
+    ではヘルプだけを表示し `42` のマージや `--rebase` の適用は起きないはずだが、この
+    実装では非ヘルプと判定し通常判定(deny/発火)に倒す。これは意図的に受け入れる
+    誤拒否(fail-closed)であり、値を取る短縮フラグを curated に列挙したリスト
+    (旧 `SHORT_VALUE_FLAGS` 依存方式)の網羅性に頼る設計へ戻らないためのトレードオフ
+    として、呼び出し元(2026-09-27 レビュー2回目)が明示的に受け入れた。fail-open では
+    なく実害はない。
+    """
+    return bool(residual) and all(tok in ("--help", "-h") for tok in residual)
 
 
 # マージ方式のフラグ。長いフラグと、cobra が受け付ける短縮フラグの結合(`-sd`)の両方。

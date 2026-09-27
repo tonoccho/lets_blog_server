@@ -1477,12 +1477,38 @@ class GlobalFlagBeforeSubcommand(unittest.TestCase):
         """落とし穴1: `--help` はブール型。次のトークン `mr` を値として消費しないこと。
 
         消費すると `mr merge` が見えなくなり、逆に検出漏れになる(過検知に倒すべき
-        という `invokes()` 自身の方針、#1029 に反する)。ここでは保守的に「サブコマンド
-        は見えたまま」であることを、squash 必須検査が発火することで確かめる。
+        という `invokes()` 自身の方針、#1029 に反する)。
+
+        当初(#1435)は「サブコマンドは見えたまま」であることを、squash 必須検査が
+        発火することで間接的に確かめていた — 当時 `--help` はここでは特別扱いされて
+        おらず、消費されていれば見逃し(allow)、されていなければ検出(deny)という
+        違いがそのまま信号になっていたため。
+
+        #1446 で `--help`/`-h` はサブコマンドの前後どちらにあっても正しくヘルプ表示
+        として allow されるようになった(cobra は永続フラグと同じくサブコマンド解決を
+        済ませてからヘルプフラグを見るため、`glab --help mr merge` も実際には
+        `mr merge` を実行せずヘルプを表示するだけで、AC1 の「サブコマンド一致で判定
+        するどのガードにとっても操作ではない」という Goal に合致する)。そのため
+        squash 必須検査の発火はもはや「トークンが消費されていない」ことの信号として
+        使えない — 消費されていてもいなくても、正しい実装では同じく allow になる。
+
+        ここでは `explain` の解析結果で `mr`/`merge` がそのままトークンとして残って
+        いること(= 消費されていないこと)を直接確認し、最終判定が意図どおり allow に
+        なることも合わせて確認する。
         """
-        reason = run_hook("bash", bash_payload("glab --help mr merge"))
-        self.assertIsNotNone(
-            reason, "--help の次のトークンが誤って消費され、mr merge を見失っている"
+        out = subprocess.run(
+            [sys.executable, HOOK, "explain", "glab --help mr merge"],
+            capture_output=True, text=True, timeout=60,
+        ).stdout
+        self.assertIn(
+            "['glab', '--help', 'mr', 'merge']",
+            out,
+            "--help の次のトークンが消費され、mr/merge が解析結果に残っていない: %s" % out,
+        )
+        self.assertIn(
+            "判定: allow",
+            out,
+            "--help によるヘルプ表示のはずなのに allow になっていない(#1446): %s" % out,
         )
 
     def test_wrapped_repo_prefixed_merge_without_squash_is_denied(self):
@@ -2121,3 +2147,496 @@ class WriteEditSilencerDenial(unittest.TestCase):
                 self.session,
             )
         )
+
+
+# --------------------------------------------------------------------------- #1446
+
+
+class HelpInvocationIsNotAnOperation(unittest.TestCase):
+    """`invokes()` にサブコマンドを渡すどのガードも、`--help`/`-h` だけの呼び出しを
+
+    操作として扱わないこと(#1446)。
+
+    `invokes(command, program, subcommands)` はサブコマンドの一致だけを見ており、
+    `--help`/`-h` を特別扱いしない。その結果、ヘルプ表示だけの呼び出しが実際の操作と
+    同じ理由で拒否されたり(`mr merge`/`issue create`)、カバレッジ計測を実際に
+    走らせたり(`mr create`)していた。ここで直すのは `invokes()` 自身であり、
+    `subcommands` を渡す呼び出し元すべてに一律に効く。
+    """
+
+    # --- AC1: `glab mr merge --help` / `-h` は許可される ---
+
+    def test_mr_merge_help_long_flag_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("glab mr merge --help")))
+
+    def test_mr_merge_help_short_flag_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("glab mr merge -h")))
+
+    # --- AC2: `glab issue create --help` は許可される(status:: 必須チェック不発火) ---
+
+    def test_issue_create_help_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("glab issue create --help")))
+
+    # --- AC3: `glab mr create --help` で Coverage Gate が発火しない ---
+
+    def test_mr_create_help_does_not_trigger_coverage_check(self):
+        """カバレッジ検査スクリプトが実際に起動しないこと。
+
+        スクリプトを「必ず拒否する」ものにしておき、それでも許可されることで
+        `check_pr_coverage` が early return し、スクリプトを一切起動していないことを
+        確かめる(#1446 が問題にしているのは「カバレッジ計測が実際に走る」こと自体)。
+        """
+        root = tempfile.mkdtemp()
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write("import sys\nsys.exit(1)\n")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook("bash", bash_payload("glab mr create --help", cwd=root))
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNone(
+            reason, "glab mr create --help でカバレッジ検査スクリプトが起動し拒否された"
+        )
+
+    def test_mr_create_help_explain_does_not_report_coverage_check(self):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "glab mr create --help"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertNotIn("カバレッジ検査が走る", proc.stdout)
+        self.assertIn("判定: allow", proc.stdout)
+
+    # --- AC4: --help 無しの既存判定は変わらない ---
+
+    def test_bare_mr_merge_is_still_denied(self):
+        reason = run_hook("bash", bash_payload("glab mr merge"))
+        self.assertIsNotNone(reason, "方式未指定の glab mr merge が拒否されていない")
+        self.assertIn("squash", reason)
+
+    def test_mr_merge_squash_and_remove_source_branch_is_still_allowed(self):
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("glab mr merge --squash --remove-source-branch"),
+            )
+        )
+
+    # --- AC5: status:: 無しの issue create は引き続き拒否される ---
+
+    def test_issue_create_without_status_and_without_help_is_still_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("glab issue create --title x --label priority::P2")
+        )
+        self.assertIsNotNone(reason, "status:: 無しの起票が誤って許可された")
+        self.assertIn("status::", reason)
+
+    # --- fail-open の防止(必須): -h の誤検知は許されない ---
+
+    def test_attached_repo_value_starting_with_h_is_not_mistaken_for_help(self):
+        """`-Rh/x`(--repo の値が `h/x`)を `-h` と誤認しないこと。
+
+        誤認すると squash 必須検査そのものがスキップされ、方式未指定のマージが
+        通ってしまう(fail-open)。#1441 の `_cluster_has_flag` と同じ「値を取る
+        短縮フラグに出会ったらそこで走査を打ち切る」方式で防ぐ。
+        """
+        reason = run_hook("bash", bash_payload("glab mr merge -Rh/x"))
+        self.assertIsNotNone(
+            reason, "-Rh/x がヘルプと誤認され、squash 必須検査がスキップされた(fail-open)"
+        )
+        self.assertIn("squash", reason)
+
+    def test_attached_repo_value_containing_help_is_not_mistaken_for_help(self):
+        """`-Rhelp/repo`(--repo の値が `help/repo`)も同様。"""
+        reason = run_hook("bash", bash_payload("glab mr merge -Rhelp/repo"))
+        self.assertIsNotNone(
+            reason,
+            "-Rhelp/repo がヘルプと誤認され、squash 必須検査がスキップされた(fail-open)",
+        )
+        self.assertIn("squash", reason)
+
+    def test_message_value_flag_key_is_actually_looked_up(self):
+        """`SHORT_VALUE_FLAGS[("glab", "mr merge")]` の `m` エントリが実際に引かれること。
+
+        `-mhelp`(`-m` の値直結形、値が `help`)は `-R` を経由しないので、
+        `GLOBAL_VALUE_FLAGS` 由来のフォールバックだけでは守られない。ここで拒否される
+        (squash 未指定)ことは、`invokes()` が `SHORT_VALUE_FLAGS` の**サブコマンド固有の
+        エントリ**を実際に引いていることの証拠になる — 引けずに空集合だと `m` が
+        ブールとして走査され、直後の `h` を `-h` と誤認して許可されてしまう。
+        """
+        reason = run_hook("bash", bash_payload("glab mr merge -mhelp"))
+        self.assertIsNotNone(
+            reason,
+            "-mhelp がヘルプと誤認された。SHORT_VALUE_FLAGS[('glab','mr merge')] の "
+            "'m' エントリが invokes() 内で引けていない(fail-open)",
+        )
+        self.assertIn("squash", reason)
+
+    # --- 既存判定の無傷確認(回帰) ---
+
+    def test_rebase_is_still_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload("glab mr merge --rebase")))
+
+    def test_repo_flag_before_subcommand_is_still_denied_without_squash(self):
+        """#1435: グローバルフラグの前置は引き続き検出される。"""
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab --repo o/r mr merge"))
+        )
+
+    def test_attached_repo_value_with_squash_is_still_allowed(self):
+        """#1441: 値直結の -R は squash 指定を隠さない。"""
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab -Rowner/repo mr merge --squash"))
+        )
+
+    def test_attached_repo_value_containing_s_still_denied(self):
+        """#1441: 値中の s を squash 済みと誤認しない。"""
+        reason = run_hook("bash", bash_payload("glab -Rsss mr merge"))
+        self.assertIsNotNone(reason)
+
+    def test_git_dash_c_no_verify_commit_still_denied(self):
+        """#1440: git 側のグローバルフラグ前置も引き続き検出される。"""
+        reason = run_hook("bash", bash_payload("git -C /tmp commit --no-verify -m x"))
+        self.assertIsNotNone(reason)
+
+    def test_hotfix_creation_gate_without_marker_still_denied(self):
+        """#1434: hotfix ゲートは --help と無関係にそのまま働く。"""
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue create --title x --label hotfix,status::Backlog"),
+        )
+        self.assertIsNotNone(reason)
+        self.assertIn("hotfix", reason)
+
+    # --- Out of Scope 側(git の --help)。中央修正が効くかどうかの実測記録であり、
+    #     受入基準ではない(Issue #1446 の Out of Scope)。
+
+    def test_git_commit_help_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("git commit --help")))
+
+    def test_git_push_help_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("git push --help")))
+
+    def test_issue_update_with_extra_positional_and_help_is_not_treated_as_help_by_design(
+        self,
+    ):
+        """`glab issue update 42 --label hotfix --help` の実測結果を記録する。
+
+        レビュー2回目(#1446)が確定させた規則は「`rest` の全トークンが `--help`/`-h`
+        であること」を要求する。この呼び出しは位置引数 `42` と `--label hotfix` が
+        `--help` と共存しており、`rest` が `--help` だけにならないため、この実装では
+        ヘルプ呼び出しと認識されない(= 通常の `issue update` として扱われ、
+        `hotfix` ラベルの付与が検出されて拒否される)。
+
+        当初(#1446 初回対応時点)は「ヘルプ表示は実際には hotfix を付け外ししない
+        はずなので許可を期待値として固定する」としていたが、レビュー2回目が
+        `glab mr merge 42 --help` について明示的に受け入れた「位置引数が残る形は
+        意図的に誤拒否する(fail-closed)」というトレードオフは、この呼び出しにも
+        同じ理由で一様に適用される。個々の呼び出し文脈ごとに例外を設けると、結局
+        「この文脈は安全に見えるから」という curated な判断へ逆戻りしてしまうため、
+        本テストの期待値を拒否に更新する。
+        """
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue update 42 --label hotfix --help"),
+        )
+        self.assertIsNotNone(
+            reason,
+            "42 --label hotfix --help が意図に反してヘルプ扱いされ、"
+            "hotfix 不変性検査がスキップされた",
+        )
+        self.assertIn("hotfix", reason)
+
+
+# ------------------------------------------------------------- #1446 Review差し戻し
+
+
+class HelpDetectionDoesNotFailOpenOnAttachedShortFlagValues(unittest.TestCase):
+    """レビュー(2026-09-27、1回目、BLOCKING)への対応。
+
+    curated な `SHORT_VALUE_FLAGS` を土台にした `_is_help_invocation` のクラスタ判定は、
+    値直結の短縮フラグ(`-l<label>`/`-m<message>`/`-t<template>` 等)がリストに無い
+    呼び出し文脈では、値の中の `h` を `-h` と誤認して allow に倒れていた(fail-open)。
+    `invokes()` を呼ぶ8箇所の呼び出し元それぞれについて、これが起きないことを確認する。
+    `glab mr merge`(呼び出し元1/8)は既存の
+    `test_attached_repo_value_starting_with_h_is_not_mistaken_for_help` /
+    `test_attached_repo_value_containing_help_is_not_mistaken_for_help` /
+    `test_message_value_flag_key_is_actually_looked_up` が担っており、ここでは残り
+    7箇所を確認する。
+    """
+
+    # --- 呼び出し元2/8: check_hotfix_label_immutability(`glab issue update`) ---
+    # レビュー本文の再現コマンドそのもの。
+
+    def test_issue_update_hotfix_label_with_attached_h_value_is_denied(self):
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue update 42 --label hotfix -mhelp"),
+        )
+        self.assertIsNotNone(
+            reason,
+            "-mhelp がヘルプと誤認され、既存 Issue への hotfix 付与が許可された"
+            "(fail-open)",
+        )
+        self.assertIn("hotfix", reason)
+
+    # --- 呼び出し元3/8: check_hotfix_creation(`glab issue create` の hotfix ゲート) ---
+
+    def test_issue_create_hotfix_label_with_attached_h_value_is_denied(self):
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue create --title x --label hotfix -mhelp"),
+        )
+        self.assertIsNotNone(
+            reason,
+            "-mhelp がヘルプと誤認され、hotfix 付きの Issue 作成ゲートが"
+            "スキップされた(fail-open)",
+        )
+        self.assertIn("hotfix", reason)
+
+    # --- 呼び出し元4/8: check_issue_creation_requires_status(`glab issue create`) ---
+    # レビュー本文の再現コマンドそのもの。
+
+    def test_issue_create_without_status_with_attached_h_value_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("glab issue create --title x -mhelp")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-mhelp がヘルプと誤認され、status:: 必須検査がスキップされた(fail-open)",
+        )
+        self.assertIn("status::", reason)
+
+    # --- 呼び出し元5/8: check_no_verify(`git commit`) ---
+    # レビュー本文の再現コマンドそのもの。
+
+    def test_git_commit_no_verify_with_attached_h_value_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git commit --no-verify -thelp")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-thelp がヘルプと誤認され、--no-verify 禁止検査がスキップされた"
+            "(fail-open)",
+        )
+        self.assertIn("no-verify", reason)
+
+    # --- 呼び出し元6/8: check_no_verify(`git push`) ---
+    # `git push` には値を取る短縮フラグの専用エントリが無く、`-u`(--set-upstream、
+    # ブール)の直後の `h` を拾う経路がある。
+
+    def test_git_push_no_verify_with_attached_h_value_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("git push --no-verify -uhelp")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-uhelp がヘルプと誤認され、--no-verify 禁止検査がスキップされた"
+            "(fail-open)",
+        )
+        self.assertIn("no-verify", reason)
+
+    # --- 呼び出し元7/8: check_commit_phase(`git commit`) ---
+    # `invokes()` がヘルプと誤認して空リストを返すと、`check_commit_phase` は
+    # コミットが無いものとして早期returnし、フェーズ分離の混在検査自体が丸ごと
+    # スキップされる。
+
+    def test_git_commit_phase_separation_with_attached_h_value_is_denied(self):
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project("git commit -m x -thelp", root)
+        self.assertIsNotNone(
+            reason,
+            "-thelp がヘルプと誤認され、フェーズ分離検査(check_commit_phase)自体が"
+            "スキップされた(fail-open)",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    # --- 呼び出し元8/8: check_pr_coverage(`glab mr create`)、および explain の同判定 ---
+    # レビュー本文の再現コマンドそのもの。
+
+    def test_mr_create_with_attached_h_value_triggers_coverage_check(self):
+        """カバレッジ検査スクリプトが実際に起動すること(必ず拒否するスクリプトで確認)。"""
+        root = tempfile.mkdtemp()
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write("import sys\nsys.exit(1)\n")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash", bash_payload("glab mr create --title x -lhotfix", cwd=root)
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNotNone(
+            reason,
+            "-lhotfix がヘルプと誤認され、カバレッジ検査スクリプトが起動しなかった"
+            "(fail-open)",
+        )
+        self.assertIn("カバレッジ", reason)
+
+    def test_mr_create_with_attached_h_value_explain_reports_coverage_check(self):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "glab mr create --title x -lhotfix"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIn(
+            "カバレッジ検査が走る",
+            proc.stdout,
+            "-lhotfix がヘルプと誤認され、explain がカバレッジ検査の発火を"
+            "報告しなかった(fail-open)",
+        )
+
+
+# ------------------------------------------------------------- #1446 Review差し戻し(2回目)
+
+
+class HelpDetectionDoesNotMistakeAValueTokenForARealHelpFlag(unittest.TestCase):
+    """レビュー(2026-09-27、2回目、BLOCKING)への対応。
+
+    1回目の対応で `_is_help_invocation` は「クラスタ内の文字一致」から「独立したトークン
+    としての完全一致」に切り替わったが、それでもなお `"--help" in rest or "-h" in rest`
+    という **いずれか1つ含まれていれば真** の判定だったため、`-h` が「直前の値取り
+    フラグの値」として独立トークンで渡された形(`git commit -m -h`、`--title -h` 等)を、
+    本物の `-h` と区別できなかった(レビュー本文より)。
+
+    呼び出し元が確定させた規則: ヘルプ呼び出しと見なすのは、`rest` の**すべての**
+    トークンが `--help` または `-h` であり、かつ1つ以上存在するときだけ。ここでは、
+    レビュー本文が示した表の「ヘルプでない → DENY / 発火」の8行すべてを確認する。
+    """
+
+    # --- 呼び出し元5/8 相当: check_no_verify(`git commit`)。レビュー本文の再現コマンド。
+
+    def test_dash_m_value_h_with_no_verify_is_denied(self):
+        """`-m -h`: `-h` は `-m` の値であって本物のヘルプフラグではない。"""
+        reason = run_hook(
+            "bash", bash_payload("git commit -m -h --no-verify")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-m の値である -h がヘルプと誤認され、--no-verify 禁止検査がスキップ"
+            "された(fail-open)",
+        )
+        self.assertIn("no-verify", reason)
+
+    def test_dash_dash_message_value_h_with_no_verify_is_denied(self):
+        """`--message -h`: 長いフラグの値としての `-h` も同様。"""
+        reason = run_hook(
+            "bash", bash_payload("git commit --message -h --no-verify")
+        )
+        self.assertIsNotNone(
+            reason,
+            "--message の値である -h がヘルプと誤認され、--no-verify 禁止検査が"
+            "スキップされた(fail-open)",
+        )
+        self.assertIn("no-verify", reason)
+
+    # --- 呼び出し元2/8 相当: check_hotfix_label_immutability(`glab issue update`)
+
+    def test_issue_update_hotfix_label_with_title_value_h_is_denied(self):
+        """`--title -h`: `-h` は `--title` の値。既存 Issue への hotfix 付与は拒否対象。"""
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue update 42 --label hotfix --title -h"),
+        )
+        self.assertIsNotNone(
+            reason,
+            "--title の値である -h がヘルプと誤認され、既存 Issue への hotfix 付与が"
+            "許可された(fail-open)",
+        )
+        self.assertIn("hotfix", reason)
+
+    # --- 呼び出し元3/8 相当: check_hotfix_creation(`glab issue create` の hotfix ゲート)
+
+    def test_issue_create_hotfix_label_with_title_value_h_is_denied(self):
+        reason = run_hook(
+            "bash",
+            bash_payload("glab issue create --title -h --label hotfix"),
+        )
+        self.assertIsNotNone(
+            reason,
+            "--title の値である -h がヘルプと誤認され、hotfix 付きの Issue 作成"
+            "ゲートがスキップされた(fail-open)",
+        )
+        self.assertIn("hotfix", reason)
+
+    # --- 呼び出し元8/8 相当: check_pr_coverage(`glab mr create`)
+
+    def test_mr_create_title_value_h_with_short_label_triggers_coverage_check(self):
+        """`--title -h -lhotfix`: `-h` は `--title` の値であって、カバレッジゲートは
+        引き続き発火しなければならない。"""
+        root = tempfile.mkdtemp()
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write("import sys\nsys.exit(1)\n")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash",
+                bash_payload("glab mr create --title -h -lhotfix", cwd=root),
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNotNone(
+            reason,
+            "--title の値である -h がヘルプと誤認され、カバレッジ検査スクリプトが"
+            "起動しなかった(fail-open)",
+        )
+        self.assertIn("カバレッジ", reason)
+
+    # --- `--` 以降の pathspec 位置にある `-h`(レビュー本文の再現コマンド)
+
+    def test_no_verify_with_pathspec_looking_like_h_after_dashdash_is_denied(self):
+        """`-- -h`: `--` 以降なので pathspec の可能性すらあり、なおのことヘルプではない。"""
+        reason = run_hook(
+            "bash", bash_payload("git commit --no-verify -m x -- -h")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-- 以降の -h がヘルプと誤認され、--no-verify 禁止検査がスキップされた"
+            "(fail-open)",
+        )
+        self.assertIn("no-verify", reason)
+
+    # --- 本物の -h と他のフラグが同居する形(独立トークンとしての -h 自体は本物)
+
+    def test_short_help_flag_coexisting_with_rebase_is_not_treated_as_help(self):
+        """`-h --rebase`: `-h` 自体は本物のヘルプフラグだが、`--rebase` という他の
+        トークンが残っている以上、この呼び出し全体は「ヘルプだけ」ではない。
+        `--rebase` の禁止検査がそのまま働くこと。"""
+        reason = run_hook("bash", bash_payload("glab mr merge -h --rebase"))
+        self.assertIsNotNone(
+            reason, "-h --rebase がヘルプ全体として扱われ、--rebase の禁止検査が"
+            "スキップされた"
+        )
+        self.assertIn("squash", reason)
+
+    # --- 意図的に受け入れる誤拒否(fail-closed側のトレードオフ) ---
+
+    def test_positional_arg_with_help_is_not_treated_as_help_by_design(self):
+        """`glab mr merge 42 --help`: 位置引数 `42`(MR番号)が残っている以上、
+        `rest` の全トークンが `--help`/`-h` ではなくなるため、この実装ではヘルプ
+        呼び出しと認識されない(=squash 未指定の通常のマージ操作として拒否される)。
+
+        実際の cobra の挙動では `--help` があればヘルプだけを表示し `42` の
+        マージは実行されないはずなので、これは無害な過拒否(fail-closed)である。
+        値を取る短縮フラグを curated に列挙したリストの網羅性に依存する設計へ
+        戻らないためのトレードオフとして、呼び出し元(2026-09-27 レビュー2回目)が
+        明示的に受け入れた。fail-open ではなく、実害はない。
+        """
+        reason = run_hook("bash", bash_payload("glab mr merge 42 --help"))
+        self.assertIsNotNone(
+            reason,
+            "42 --help が意図に反してヘルプ扱いされ、squash 必須検査がスキップ"
+            "された",
+        )
+        self.assertIn("squash", reason)
