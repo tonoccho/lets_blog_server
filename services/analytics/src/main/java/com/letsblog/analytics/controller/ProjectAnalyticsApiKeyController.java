@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * プロジェクト単位の Google Analytics / AdSense 資格情報のWeb管理画面向けAPI(issue #184)。
  * 値そのものは返さず、設定済みかどうか(とアカウントID等の識別子)のみを返す。
@@ -40,11 +42,26 @@ public class ProjectAnalyticsApiKeyController {
         this.adminAuthorizationService = adminAuthorizationService;
     }
 
-    public record ProjectGoogleAnalyticsStatusResponse(boolean configured, String propertyId) {
+    /**
+     * GA連携の状態。{@code connected}はGoogleアカウントとの連携(リフレッシュトークン保存)済みか、
+     * {@code configured}はさらにプロパティ選択まで済んでダッシュボードに表示できるか。
+     * クライアントシークレット/リフレッシュトークンは値を返さず、シークレットは有無({@code hasClientSecret})のみ。
+     */
+    public record ProjectGoogleAnalyticsStatusResponse(
+            boolean configured, String propertyId, String clientId, boolean hasClientSecret, boolean connected) {
     }
 
-    public record SetProjectGoogleAnalyticsCredentialsRequest(
-            @NotBlank String propertyId, @NotBlank String serviceAccountJson) {
+    /** {@code clientSecret}は省略(または空)なら既存の値を変更しない。 */
+    public record SetProjectGoogleAnalyticsClientRequest(@NotBlank String clientId, String clientSecret) {
+    }
+
+    public record CompleteGoogleAnalyticsOAuthRequest(@NotBlank String code, @NotBlank String redirectUri) {
+    }
+
+    public record SelectGoogleAnalyticsPropertyRequest(@NotBlank String propertyId) {
+    }
+
+    public record GoogleAnalyticsPropertyResponse(String propertyId, String displayName, String accountDisplayName) {
     }
 
     public record ProjectAdSenseStatusResponse(
@@ -65,15 +82,45 @@ public class ProjectAnalyticsApiKeyController {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return new ProjectGoogleAnalyticsStatusResponse(
                 projectAnalyticsSettingsService.hasGoogleAnalytics(projectId),
-                projectAnalyticsSettingsService.googleAnalyticsPropertyId(projectId));
+                projectAnalyticsSettingsService.googleAnalyticsPropertyId(projectId),
+                projectAnalyticsSettingsService.googleAnalyticsClientId(projectId),
+                projectAnalyticsSettingsService.hasGoogleAnalyticsClientSecret(projectId),
+                projectAnalyticsSettingsService.isGoogleAnalyticsConnected(projectId));
     }
 
-    @PutMapping("/google-analytics")
-    public ResponseEntity<Void> setGoogleAnalyticsCredentials(
-            @PathVariable Long projectId, @Valid @RequestBody SetProjectGoogleAnalyticsCredentialsRequest request) {
+    @PutMapping("/google-analytics/client")
+    public ResponseEntity<Void> setGoogleAnalyticsClient(
+            @PathVariable Long projectId, @Valid @RequestBody SetProjectGoogleAnalyticsClientRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        projectAnalyticsSettingsService.setGoogleAnalyticsCredentials(
-                projectId, request.propertyId(), request.serviceAccountJson());
+        projectAnalyticsSettingsService.setGoogleAnalyticsClient(projectId, request.clientId(), request.clientSecret());
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Next.js側のOAuthコールバックルート({@code /connect/google-analytics/callback})から呼ばれる、
+     * 認可コード交換の完了通知(AdSenseの{@link #completeAdSenseOAuth}と同じ経路)。
+     */
+    @PostMapping("/google-analytics/oauth-callback")
+    public ResponseEntity<Void> completeGoogleAnalyticsOAuth(
+            @PathVariable Long projectId, @Valid @RequestBody CompleteGoogleAnalyticsOAuthRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        projectAnalyticsSettingsService.completeGoogleAnalyticsOAuth(projectId, request.code(), request.redirectUri());
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/google-analytics/properties")
+    public List<GoogleAnalyticsPropertyResponse> listGoogleAnalyticsProperties(@PathVariable Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return projectAnalyticsSettingsService.listGoogleAnalyticsProperties(projectId).stream()
+                .map(p -> new GoogleAnalyticsPropertyResponse(p.propertyId(), p.displayName(), p.accountDisplayName()))
+                .toList();
+    }
+
+    @PutMapping("/google-analytics/property")
+    public ResponseEntity<Void> selectGoogleAnalyticsProperty(
+            @PathVariable Long projectId, @Valid @RequestBody SelectGoogleAnalyticsPropertyRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        projectAnalyticsSettingsService.selectGoogleAnalyticsProperty(projectId, request.propertyId());
         return ResponseEntity.noContent().build();
     }
 

@@ -1,19 +1,22 @@
 'use strict';
 /**
- * Google Analytics Data API v1beta のスタブ(issue #928 / AT-2)。
+ * Google Analytics Admin API v1beta / Data API v1beta / Google OAuth のスタブ(issue #928 / AT-2、
+ * issue #1231でサービスアカウントJWTからユーザーOAuthへ移行)。
  *
- * analytics-service の GoogleAnalyticsClient は次の2つを叩く。
- *   1. サービスアカウントJWT → アクセストークン交換(POST {tokenUri})
- *   2. レポート取得(POST {dataApiBaseUrl}/v1beta/properties/{propertyId}:runReport)
+ * analytics-service の GoogleAnalyticsClient は次を叩く。
+ *   1. OAuth トークン交換(POST {GOOGLE_ANALYTICS_OAUTH_TOKEN_URI})
+ *      - authorization_code: 認可コード → アクセストークン + リフレッシュトークン(初回連携)
+ *      - refresh_token: リフレッシュトークン → アクセストークン(以降)
+ *   2. プロパティ一覧(GET {GOOGLE_ANALYTICS_ADMIN_API_BASE_URL}/v1beta/accountSummaries、2ページ)
+ *   3. レポート取得(POST {dataApiBaseUrl}/v1beta/properties/{propertyId}:runReport)
  *
- * トークン交換の向き先はサービスアカウントJSONの token_uri が優先され、
- * 未設定のときだけ GOOGLE_ANALYTICS_OAUTH_TOKEN_URI が使われる。
- * したがってスタブ用のサービスアカウントJSONには token_uri を書かないこと
- * (docs/ACCEPTANCE_TESTING.md に明記した)。
+ * 資格情報不正の再現(制御エンドポイント無し):
+ *   - 認可コード `e2e-stub-invalid-code` はトークン交換を401にする。
+ *   - 認可コード `e2e-stub-ga-expired-code` は「後で失効するリフレッシュトークン」
+ *     `e2e-stub-ga-invalid-refresh` を返し、そのリフレッシュトークンでのアクセストークン取得は401になる。
  *
- * 資格情報不正の再現: サービスアカウントJSONの client_email が
- * `invalid@` で始まるときトークン交換を401にする。制御エンドポイントを使わずに
- * 「不正な資格情報を登録したらどうなるか」を検証できるようにするため。
+ * Admin API / Data API はBearerのアクセストークンを検証する(保存済みリフレッシュトークンから
+ * 取得したトークンで呼ばれたことを受け入れテストで確かめるため)。
  */
 const { createStub } = require('../lib/stub');
 
@@ -87,30 +90,104 @@ function runReport(payload) {
   };
 }
 
+const ACCESS_TOKEN = 'e2e-stub-ga-access-token';
+const REFRESH_TOKEN = 'e2e-stub-ga-refresh-token';
+const EXPIRED_REFRESH_TOKEN = 'e2e-stub-ga-invalid-refresh';
+
+/** accountSummaries.list は2ページに分けて返し、クライアントが全ページを取得することを確かめる。 */
+const ACCOUNT_SUMMARY_PAGES = {
+  '': {
+    accountSummaries: [
+      {
+        name: 'accountSummaries/1001',
+        account: 'accounts/1001',
+        displayName: 'E2E Stub Account',
+        propertySummaries: [
+          { property: 'properties/987654321', displayName: 'E2E Stub Site', propertyType: 'PROPERTY_TYPE_ORDINARY' },
+        ],
+      },
+    ],
+    nextPageToken: 'e2e-stub-page-2',
+  },
+  'e2e-stub-page-2': {
+    accountSummaries: [
+      {
+        name: 'accountSummaries/1002',
+        account: 'accounts/1002',
+        displayName: 'E2E Stub Second Account',
+        propertySummaries: [
+          { property: 'properties/555000111', displayName: 'E2E Stub Second Site', propertyType: 'PROPERTY_TYPE_ORDINARY' },
+        ],
+      },
+    ],
+  },
+};
+
+function formValue(body, key) {
+  const m = new RegExp(`(?:^|&)${key}=([^&]*)`).exec(body || '');
+  return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : null;
+}
+
+function hasValidAccessToken(req) {
+  return req.headers.authorization === `Bearer ${ACCESS_TOKEN}`;
+}
+
 createStub({
   name: 'google-analytics',
   port: Number(process.env.PORT || 8080),
-  async handle({ method, pathname, body, res, sendJson }) {
-    // 1. サービスアカウントJWT → アクセストークン。
+  async handle({ req, method, pathname, query, body, res, sendJson }) {
+    // 1. OAuth トークン交換。
     if (method === 'POST' && (pathname === '/token' || pathname === '/oauth2/token')) {
-      // JWTのペイロードに invalid@ の issuer が入っていたら資格情報不正として扱う。
-      if (/invalid%40|invalid@/.test(body) || decodedIssuerIsInvalid(body)) {
+      const grantType = formValue(body, 'grant_type');
+      const code = formValue(body, 'code');
+      const refresh = formValue(body, 'refresh_token');
+
+      if (grantType !== 'authorization_code' && grantType !== 'refresh_token') {
+        sendJson(res, 400, { error: 'unsupported_grant_type', error_description: '[stub] 未対応のグラント種別です' });
+        return true;
+      }
+      if (code === 'e2e-stub-invalid-code' || refresh === EXPIRED_REFRESH_TOKEN) {
         sendJson(res, 401, {
           error: 'invalid_grant',
-          error_description: '[stub] サービスアカウントの資格情報が不正です',
+          error_description: '[stub] 認可コードまたはリフレッシュトークンが不正です',
         });
         return true;
       }
-      sendJson(res, 200, {
-        access_token: 'e2e-stub-ga-access-token',
+      // 認可コードフロー(初回)だけ refresh_token を返す。実APIと同じ挙動。
+      const payload = {
+        access_token: ACCESS_TOKEN,
         token_type: 'Bearer',
         expires_in: 3599,
-      });
+        scope: 'https://www.googleapis.com/auth/analytics.readonly',
+      };
+      if (grantType === 'authorization_code') {
+        payload.refresh_token = code === 'e2e-stub-ga-expired-code' ? EXPIRED_REFRESH_TOKEN : REFRESH_TOKEN;
+      }
+      sendJson(res, 200, payload);
+      return true;
+    }
+
+    // 2. プロパティ一覧(Admin API)。
+    if (method === 'GET' && pathname === '/v1beta/accountSummaries') {
+      if (!hasValidAccessToken(req)) {
+        sendJson(res, 401, { error: { code: 401, message: '[stub] invalid access token' } });
+        return true;
+      }
+      const page = ACCOUNT_SUMMARY_PAGES[query.get('pageToken') || ''];
+      if (!page) {
+        sendJson(res, 400, { error: { code: 400, message: '[stub] invalid pageToken' } });
+        return true;
+      }
+      sendJson(res, 200, page);
       return true;
     }
 
     // 2. レポート取得。
     if (method === 'POST' && /^\/v1beta\/properties\/[^/]+:runReport$/.test(pathname)) {
+      if (!hasValidAccessToken(req)) {
+        sendJson(res, 401, { error: { code: 401, message: '[stub] invalid access token' } });
+        return true;
+      }
       let payload = {};
       try {
         payload = JSON.parse(body || '{}');
@@ -125,20 +202,3 @@ createStub({
     return false;
   },
 });
-
-/**
- * form-urlencoded の assertion=<JWT> からペイロードを覗き、iss が invalid@ かを判定する。
- * 署名は検証しない(スタブなので鍵を持たない)。
- */
-function decodedIssuerIsInvalid(body) {
-  const m = /assertion=([^&]+)/.exec(body || '');
-  if (!m) return false;
-  const parts = decodeURIComponent(m[1]).split('.');
-  if (parts.length < 2) return false;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return typeof payload.iss === 'string' && payload.iss.startsWith('invalid@');
-  } catch {
-    return false;
-  }
-}

@@ -23,7 +23,8 @@ import {
   syncProjectEnvironment,
   applyToEnvironment,
   applyToAllEnvironments,
-  setProjectGoogleAnalyticsCredentials,
+  saveProjectGoogleAnalyticsClient,
+  selectProjectGoogleAnalyticsProperty,
   clearProjectGoogleAnalyticsCredentials,
   setProjectAdSenseSettings,
   setProjectAdSenseClientSecret,
@@ -375,7 +376,35 @@ export async function clearProjectBraveSearchApiKeyAction(projectId: number): Pr
   revalidatePath(`/projects/${projectId}`);
 }
 
-export async function setProjectGoogleAnalyticsCredentialsAction(
+/** GA用のGoogle OAuthクライアント(ID/シークレット)を保存する。シークレット欄が空なら保存済みの値を変更しない。 */
+export async function setProjectGoogleAnalyticsClientAction(
+  projectId: number,
+  _prevState: ProjectApiKeyFormState,
+  formData: FormData
+): Promise<ProjectApiKeyFormState> {
+  await requireAdminSession();
+
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const clientSecret = String(formData.get("clientSecret") ?? "").trim();
+  if (!clientId) {
+    return { error: "Google OAuthクライアントIDを入力してください。" };
+  }
+
+  try {
+    await saveProjectGoogleAnalyticsClient(projectId, {
+      clientId,
+      clientSecret: clientSecret || undefined,
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}/settings/google-analytics`);
+  return { success: true };
+}
+
+/** 連携したGoogleアカウントがアクセスできるGA4プロパティの中から、ダッシュボードで使うものを選んで保存する。 */
+export async function selectProjectGoogleAnalyticsPropertyAction(
   projectId: number,
   _prevState: ProjectApiKeyFormState,
   formData: FormData
@@ -383,16 +412,12 @@ export async function setProjectGoogleAnalyticsCredentialsAction(
   await requireAdminSession();
 
   const propertyId = String(formData.get("propertyId") ?? "").trim();
-  const serviceAccountJson = String(formData.get("serviceAccountJson") ?? "").trim();
   if (!propertyId) {
-    return { error: "GA4プロパティIDを入力してください。" };
-  }
-  if (!serviceAccountJson) {
-    return { error: "サービスアカウントのJSON鍵を入力してください。" };
+    return { error: "GA4プロパティを選択してください。" };
   }
 
   try {
-    await setProjectGoogleAnalyticsCredentials(projectId, { propertyId, serviceAccountJson });
+    await selectProjectGoogleAnalyticsProperty(projectId, propertyId);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

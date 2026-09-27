@@ -231,8 +231,8 @@ services:
   analytics:
     environment:
       GOOGLE_ANALYTICS_DATA_API_BASE_URL: http://ga-stub:8080
-      # サービスアカウントJSONに token_uri が書かれているとそちらが優先される。
-      # スタブ用のJSONには token_uri を入れないこと(docs/ACCEPTANCE_TESTING.md)。
+      # GAはユーザーOAuthへ移行した(#1231)。トークン交換とプロパティ一覧(Admin API)もga-stubへ向ける。
+      GOOGLE_ANALYTICS_ADMIN_API_BASE_URL: http://ga-stub:8080
       GOOGLE_ANALYTICS_OAUTH_TOKEN_URI: http://ga-stub:8080/token
       ADSENSE_DATA_API_BASE_URL: http://adsense-stub:8080
       GOOGLE_OAUTH_TOKEN_URI: http://adsense-stub:8080/token

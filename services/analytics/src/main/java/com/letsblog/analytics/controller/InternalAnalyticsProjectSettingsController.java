@@ -22,8 +22,11 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>実処理は{@link ProjectAnalyticsSettingsService}が持ち、公開側と共有する。
  *
- * <p>サービスアカウントJSON/クライアントシークレットは平文のままこのエンドポイントへ渡され、
+ * <p>クライアントシークレットは平文のままこのエンドポイントへ渡され、
  * 暗号化は{@code ProjectAnalyticsSettingsService}(全サービス共通のAPP_ENCRYPTION_KEY)で行う。
+ *
+ * <p>Google Analyticsはissue #1231でユーザーOAuthに一本化し、サービスアカウントJSONを保存する経路は廃止した
+ * (GAの連携操作はOAuthが必要なため公開エンドポイント側のみで、ここは状態取得と解除だけを持つ)。
  */
 @RestController
 public class InternalAnalyticsProjectSettingsController {
@@ -49,18 +52,6 @@ public class InternalAnalyticsProjectSettingsController {
         return new GoogleAnalyticsStatusResponse(
                 projectAnalyticsSettingsService.hasGoogleAnalytics(projectId),
                 projectAnalyticsSettingsService.googleAnalyticsPropertyId(projectId));
-    }
-
-    public record SetGoogleAnalyticsCredentialsRequest(
-            @NotBlank String propertyId, @NotBlank String serviceAccountJson) {
-    }
-
-    /** 認可不要: {@link #googleAnalyticsStatus}と同じ理由(gateway非経由・呼び出し元が認可済み、issue #583)。 */
-    @PutMapping("/api/internal/analytics/projects/{projectId}/google-analytics")
-    public void setGoogleAnalyticsCredentials(
-            @PathVariable Long projectId, @RequestBody SetGoogleAnalyticsCredentialsRequest request) {
-        projectAnalyticsSettingsService.setGoogleAnalyticsCredentials(
-                projectId, request.propertyId(), request.serviceAccountJson());
     }
 
     /** 認可不要: {@link #googleAnalyticsStatus}と同じ理由(gateway非経由・呼び出し元が認可済み、issue #583)。 */

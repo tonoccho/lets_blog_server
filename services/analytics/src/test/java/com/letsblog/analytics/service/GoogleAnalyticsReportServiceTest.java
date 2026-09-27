@@ -1,6 +1,5 @@
 package com.letsblog.analytics.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.analytics.analytics.GoogleAnalyticsChannelBreakdown;
 import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
 import com.letsblog.analytics.analytics.GoogleAnalyticsDailyDataPoint;
@@ -54,16 +53,24 @@ class GoogleAnalyticsReportServiceTest {
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
             Base64.getEncoder().encodeToString(new byte[32]));
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private GoogleAnalyticsReportService service() {
         return new GoogleAnalyticsReportService(
                 projectBridgeClient, analyticsCredentialsService, googleAnalyticsClient,
-                adminAuthorizationService, currentActorService, credentialCipher, objectMapper);
+                adminAuthorizationService, currentActorService, credentialCipher);
     }
 
-    private static final String SERVICE_ACCOUNT_JSON =
-            "{\"client_email\":\"svc@example.com\",\"private_key\":\"key\"}";
+    /** 保存済みのリフレッシュトークンとOAuthクライアントを返すよう、資格情報サービスをスタブする。 */
+    private void stubOauthCredentials() {
+        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
+        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("client-id");
+        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("client-secret"));
+        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("refresh-token"));
+        when(googleAnalyticsClient.refreshAccessToken("client-id", "client-secret", "refresh-token"))
+                .thenReturn("access-token");
+    }
 
     @Test
     void getReport_GA未設定なら未対象でAPIを呼ばない() {
@@ -94,10 +101,8 @@ class GoogleAnalyticsReportServiceTest {
         lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
                 .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
-        when(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt(SERVICE_ACCOUNT_JSON));
-        when(googleAnalyticsClient.fetchReport(any(), eq("123456789"), anyInt()))
+        stubOauthCredentials();
+        when(googleAnalyticsClient.fetchReport(eq("access-token"), eq("123456789"), anyInt()))
                 .thenReturn(new GoogleAnalyticsReport(120, 80, 300,
                         List.of(new GoogleAnalyticsDailyDataPoint("2024-01-01", 10, 5, 20)),
                         List.of(new GoogleAnalyticsChannelBreakdown("Organic Search", 120, 80, 300))));
@@ -116,14 +121,31 @@ class GoogleAnalyticsReportServiceTest {
     }
 
     @Test
+    void getReport_クライアントシークレットが未保存ならnullを渡しクライアント側で失敗として返す() {
+        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
+                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("client-id");
+        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L)).thenReturn(null);
+        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("refresh-token"));
+        when(googleAnalyticsClient.refreshAccessToken("client-id", null, "refresh-token"))
+                .thenThrow(new GoogleAnalyticsException("クライアントが未設定です", null));
+
+        GoogleAnalyticsReportResponse response = service().getReport(1L);
+
+        assertTrue(response.eligible());
+        assertEquals("クライアントが未設定です", response.errorMessage());
+        verify(googleAnalyticsClient, never()).fetchReport(any(), any(), anyInt());
+    }
+
+    @Test
     void getReport_取得に失敗したら対象のままerrorMessageを設定する() {
         lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
                 .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
-        when(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt(SERVICE_ACCOUNT_JSON));
-        when(googleAnalyticsClient.fetchReport(any(), eq("123456789"), anyInt()))
+        stubOauthCredentials();
+        when(googleAnalyticsClient.fetchReport(eq("access-token"), eq("123456789"), anyInt()))
                 .thenThrow(new GoogleAnalyticsException("APIエラー", null));
 
         GoogleAnalyticsReportResponse response = service().getReport(1L);

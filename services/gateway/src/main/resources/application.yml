@@ -112,6 +112,9 @@ app:
         uri: ${ANALYTICS_SERVICE_URI:http://analytics:8080}
         paths:
           - /api/projects/*/api-keys/google-analytics
+          # OAuth化(#1231)で client / oauth-callback / properties / property が増えた。
+          # 完全一致だけでは404になる(#771と同型)ため、adsenseと同じく配下を通す。
+          - /api/projects/*/api-keys/google-analytics/**
           - /api/projects/*/api-keys/adsense
           - /api/projects/*/api-keys/adsense/**
       # 画像生成プロンプトの生成(AiController#generateImagePrompt)はai-serviceへ移設した
@@ -399,7 +402,7 @@ app:
           - /api/taxonomy/resolve
       # analytics-service へのルートは、実体のあるパスだけを上に置いてある。
       #   - /api/projects/*/dashboard/**            (project-dashboard-analytics)
-      #   - /api/projects/*/api-keys/{google-analytics,adsense}  (project-api-keys-analytics、#583)
+      #   - /api/projects/*/api-keys/{google-analytics,adsense}  (project-api-keys-analytics、#583。google-analytics は #1231 で配下も通す)
       # かつて /api/analytics/** を「将来直接公開する場合に備えて」置いていたが、対応する
       # コントローラは無く、叩けば analytics-service が404を返すだけだった。実体の無いルートは
       # 「ルート表にあるから届くはず」という誤解を生むので issue #913 で削除した。

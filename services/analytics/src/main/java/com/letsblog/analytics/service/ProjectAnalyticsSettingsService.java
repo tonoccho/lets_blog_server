@@ -1,15 +1,17 @@
 package com.letsblog.analytics.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.analytics.adsense.AdSenseClient;
 import com.letsblog.analytics.adsense.GoogleOAuthTokens;
-import com.letsblog.analytics.analytics.GoogleServiceAccountKey;
+import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
+import com.letsblog.analytics.analytics.GoogleAnalyticsPropertySummary;
 import com.letsblog.common.crypto.CredentialCipher;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 /**
  * プロジェクト単位の Google Analytics / AdSense 資格情報の設定操作。
+ * GAはissue #1231でサービスアカウントJSONからAdSenseと同じユーザーOAuthへ移行した。
  *
  * <p>issue #583以前、この処理は{@code InternalAnalyticsProjectSettingsController}(内部ブリッジ)
  * にだけ存在し、Web管理画面からはlegacy-apiの{@code ProjectApiKeyController}が
@@ -25,18 +27,18 @@ public class ProjectAnalyticsSettingsService {
 
     private final AnalyticsCredentialsService analyticsCredentialsService;
     private final AdSenseClient adSenseClient;
+    private final GoogleAnalyticsClient googleAnalyticsClient;
     private final CredentialCipher credentialCipher;
-    private final ObjectMapper objectMapper;
 
     public ProjectAnalyticsSettingsService(
             AnalyticsCredentialsService analyticsCredentialsService,
             AdSenseClient adSenseClient,
-            CredentialCipher credentialCipher,
-            ObjectMapper objectMapper) {
+            GoogleAnalyticsClient googleAnalyticsClient,
+            CredentialCipher credentialCipher) {
         this.analyticsCredentialsService = analyticsCredentialsService;
         this.adSenseClient = adSenseClient;
+        this.googleAnalyticsClient = googleAnalyticsClient;
         this.credentialCipher = credentialCipher;
-        this.objectMapper = objectMapper;
     }
 
     public boolean hasGoogleAnalytics(Long projectId) {
@@ -47,14 +49,73 @@ public class ProjectAnalyticsSettingsService {
         return analyticsCredentialsService.getGaPropertyId(projectId);
     }
 
-    public void setGoogleAnalyticsCredentials(Long projectId, String propertyId, String serviceAccountJson) {
-        validateGoogleServiceAccountJson(serviceAccountJson);
-        analyticsCredentialsService.setGoogleAnalyticsCredentials(
-                projectId, propertyId, credentialCipher.encrypt(serviceAccountJson));
+    public String googleAnalyticsClientId(Long projectId) {
+        return analyticsCredentialsService.getGaOauthClientId(projectId);
+    }
+
+    public boolean hasGoogleAnalyticsClientSecret(Long projectId) {
+        return analyticsCredentialsService.hasGaOauthClientSecret(projectId);
+    }
+
+    /** Googleアカウントとの連携(リフレッシュトークンの保存)が済んでいるか。プロパティ選択の有無は問わない。 */
+    public boolean isGoogleAnalyticsConnected(Long projectId) {
+        return analyticsCredentialsService.hasGaRefreshToken(projectId);
+    }
+
+    /** GA用OAuthクライアントを保存する。シークレットが空(null/空白)なら既存の値を変更しない。 */
+    public void setGoogleAnalyticsClient(Long projectId, String clientId, String clientSecret) {
+        byte[] encryptedSecret =
+                (clientSecret == null || clientSecret.isBlank()) ? null : credentialCipher.encrypt(clientSecret);
+        analyticsCredentialsService.setGaOauthClient(projectId, clientId, encryptedSecret);
+    }
+
+    /**
+     * GAのOAuth認可コードをリフレッシュトークンへ交換して暗号化保存する。
+     * クライアントID/シークレットはこのプロジェクトに保存されたものを使う。
+     */
+    public void completeGoogleAnalyticsOAuth(Long projectId, String code, String redirectUri) {
+        String clientId = analyticsCredentialsService.getGaOauthClientId(projectId);
+        String clientSecret = decryptGaClientSecret(projectId);
+        GoogleOAuthTokens tokens =
+                googleAnalyticsClient.exchangeAuthorizationCode(clientId, clientSecret, code, redirectUri);
+        analyticsCredentialsService.setGaRefreshTokenEncrypted(
+                projectId, credentialCipher.encrypt(tokens.refreshToken()));
+    }
+
+    /** 連携したGoogleアカウントがアクセスできるGA4プロパティの一覧(設定画面の選択肢)。 */
+    public List<GoogleAnalyticsPropertySummary> listGoogleAnalyticsProperties(Long projectId) {
+        requireGoogleAnalyticsConnected(projectId);
+        String accessToken = googleAnalyticsClient.refreshAccessToken(
+                analyticsCredentialsService.getGaOauthClientId(projectId),
+                decryptGaClientSecret(projectId),
+                credentialCipher.decrypt(analyticsCredentialsService.getGaRefreshTokenEncrypted(projectId)));
+        return googleAnalyticsClient.listProperties(accessToken);
+    }
+
+    /** ダッシュボードで使うGA4プロパティを選択して保存する。"properties/123"形式も受け付ける。 */
+    public void selectGoogleAnalyticsProperty(Long projectId, String propertyId) {
+        requireGoogleAnalyticsConnected(projectId);
+        String normalized = propertyId == null ? "" : propertyId.trim().replaceFirst("^properties/", "");
+        if (!normalized.matches("\\d+")) {
+            throw new IllegalArgumentException("GA4プロパティIDは数字で指定してください");
+        }
+        analyticsCredentialsService.setGaPropertyId(projectId, normalized);
     }
 
     public void clearGoogleAnalyticsCredentials(Long projectId) {
         analyticsCredentialsService.clearGoogleAnalyticsCredentials(projectId);
+    }
+
+    private void requireGoogleAnalyticsConnected(Long projectId) {
+        if (!analyticsCredentialsService.hasGaRefreshToken(projectId)) {
+            throw new IllegalArgumentException("Googleアカウントと連携していません。先にGoogleアカウントと連携してください");
+        }
+    }
+
+    private String decryptGaClientSecret(Long projectId) {
+        return analyticsCredentialsService.hasGaOauthClientSecret(projectId)
+                ? credentialCipher.decrypt(analyticsCredentialsService.getGaOauthClientSecretEncrypted(projectId))
+                : null;
     }
 
     public boolean hasAdSense(Long projectId) {
@@ -100,19 +161,5 @@ public class ProjectAnalyticsSettingsService {
                 adSenseClient.exchangeAuthorizationCode(clientId, clientSecret, code, redirectUri);
         analyticsCredentialsService.setAdsenseRefreshTokenEncrypted(
                 projectId, credentialCipher.encrypt(tokens.refreshToken()));
-    }
-
-    /** 保存前にJSONとして解析可能で、GA4 Data API呼び出しに必要な項目を含むことを確認する。 */
-    private void validateGoogleServiceAccountJson(String serviceAccountJson) {
-        GoogleServiceAccountKey key;
-        try {
-            key = objectMapper.readValue(serviceAccountJson, GoogleServiceAccountKey.class);
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("サービスアカウントJSONの形式が正しくありません", e);
-        }
-        if (key.clientEmail() == null || key.clientEmail().isBlank()
-                || key.privateKey() == null || key.privateKey().isBlank()) {
-            throw new IllegalArgumentException("サービスアカウントJSONにclient_email/private_keyが含まれていません");
-        }
     }
 }

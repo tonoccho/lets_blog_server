@@ -35,7 +35,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-mysql'
 
-    // analytics_credentials.ga_service_account_json_encrypted/adsense_refresh_token_encrypted/
+    // analytics_credentials.ga_refresh_token_encrypted/ga_oauth_client_secret_encrypted/adsense_refresh_token_encrypted/
     // adsense_oauth_client_secret_encryptedの暗号化(CredentialCipher、lbs-common)。
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'

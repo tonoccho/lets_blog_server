@@ -1078,7 +1078,7 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | GET .../llm/review-steps | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。多段レビュー(#1210)の5ステップぶんの選択値・選択可能なprovider/model一覧(`ProjectLlmModelController.java`) |
 | PUT .../llm/review-steps/{stepKey} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。同上。provider/modelが空ならそのステップの上書きを解除する(`ProjectLlmModelController.java`) |
 
-## ProjectApiKeyController (14エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
+## ProjectApiKeyController (17エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1089,8 +1089,11 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | PUT .../brave-search-api-key | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | DELETE .../brave-search-api-key | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | GET .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
-| PUT .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
-| DELETE .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
+| PUT .../google-analytics/client | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。GA用OAuthクライアントID/シークレットの保存(旧`PUT .../google-analytics`のサービスアカウントJSON保存は廃止) |
+| POST .../google-analytics/oauth-callback | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。Next.js側OAuthコールバックからのサーバー間呼び出し(AdSenseと同じ) |
+| GET .../google-analytics/properties | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。Admin API `accountSummaries.list` 由来のGA4プロパティ一覧 |
+| PUT .../google-analytics/property | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。選択したプロパティIDの保存 |
+| DELETE .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | 連携解除(リフレッシュトークン・プロパティ・OAuthクライアントを破棄) |
 | GET .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | PUT .../adsense | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | PUT .../adsense/client-secret | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |

@@ -29,14 +29,22 @@ public class AnalyticsCredentials {
     private Long projectId;
 
     /**
-     * Google Analytics連携(issue #386)。GA4プロパティID自体は秘匿情報ではないので平文で保持し、
-     * サービスアカウントの認証情報(JSON鍵ファイル全体)のみ暗号化して保持する。
+     * Google Analytics連携(issue #386、issue #1231でサービスアカウントJSONからユーザーOAuthへ移行)。
+     * GA4プロパティID自体は秘匿情報ではないので平文で保持する。AdSenseと同じ3-legged OAuthで取得した
+     * リフレッシュトークンとOAuthクライアントのシークレットのみ暗号化して保持する。
      */
     @Column(name = "ga_property_id", length = 64)
     private String gaPropertyId;
 
-    @Column(name = "ga_service_account_json_encrypted", columnDefinition = "VARBINARY(4096)")
-    private byte[] gaServiceAccountJsonEncrypted;
+    /** GA用のGoogle OAuthクライアント。AdSenseの設定とは独立(issue #1231)。client_idは平文で保持する。 */
+    @Column(name = "ga_oauth_client_id", length = 255)
+    private String gaOauthClientId;
+
+    @Column(name = "ga_oauth_client_secret_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] gaOauthClientSecretEncrypted;
+
+    @Column(name = "ga_refresh_token_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] gaRefreshTokenEncrypted;
 
     /**
      * Google AdSense連携(issue #387)。AdSense Management APIはサービスアカウント委任に対応していないため、
@@ -70,9 +78,14 @@ public class AnalyticsCredentials {
         this.projectId = projectId;
     }
 
+    /** Googleアカウントとの連携(リフレッシュトークンの保存)が済んでいるか。プロパティ選択の有無は問わない。 */
+    public boolean hasGoogleAnalyticsConnection() {
+        return gaRefreshTokenEncrypted != null && gaRefreshTokenEncrypted.length > 0;
+    }
+
+    /** ダッシュボードのレポート取得に必要な資格情報が揃っているか(連携済みかつプロパティ選択済み)。 */
     public boolean hasGoogleAnalyticsCredentials() {
-        return gaPropertyId != null && !gaPropertyId.isBlank()
-                && gaServiceAccountJsonEncrypted != null && gaServiceAccountJsonEncrypted.length > 0;
+        return gaPropertyId != null && !gaPropertyId.isBlank() && hasGoogleAnalyticsConnection();
     }
 
     public boolean hasAdsenseCredentials() {

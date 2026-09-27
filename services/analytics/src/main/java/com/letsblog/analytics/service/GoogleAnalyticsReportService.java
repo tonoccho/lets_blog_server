@@ -1,10 +1,7 @@
 package com.letsblog.analytics.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
 import com.letsblog.analytics.analytics.GoogleAnalyticsReport;
-import com.letsblog.analytics.analytics.GoogleServiceAccountKey;
 import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.dto.GoogleAnalyticsReportResponse;
 import com.letsblog.common.crypto.CredentialCipher;
@@ -32,7 +29,6 @@ public class GoogleAnalyticsReportService {
     private final AdminAuthorizationService adminAuthorizationService;
     private final CurrentActorService currentActorService;
     private final CredentialCipher credentialCipher;
-    private final ObjectMapper objectMapper;
 
     public GoogleAnalyticsReportService(
             ProjectBridgeClient projectBridgeClient,
@@ -40,15 +36,13 @@ public class GoogleAnalyticsReportService {
             GoogleAnalyticsClient googleAnalyticsClient,
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService,
-            CredentialCipher credentialCipher,
-            ObjectMapper objectMapper) {
+            CredentialCipher credentialCipher) {
         this.projectBridgeClient = projectBridgeClient;
         this.analyticsCredentialsService = analyticsCredentialsService;
         this.googleAnalyticsClient = googleAnalyticsClient;
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
         this.credentialCipher = credentialCipher;
-        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -60,23 +54,19 @@ public class GoogleAnalyticsReportService {
             return GoogleAnalyticsReportResponse.notEligible();
         }
         try {
-            GoogleServiceAccountKey key = resolveServiceAccountKey(projectId);
+            String refreshToken =
+                    credentialCipher.decrypt(analyticsCredentialsService.getGaRefreshTokenEncrypted(projectId));
+            byte[] encryptedClientSecret = analyticsCredentialsService.getGaOauthClientSecretEncrypted(projectId);
+            String clientSecret = encryptedClientSecret == null ? null : credentialCipher.decrypt(encryptedClientSecret);
+            String clientId = analyticsCredentialsService.getGaOauthClientId(projectId);
+            String accessToken = googleAnalyticsClient.refreshAccessToken(clientId, clientSecret, refreshToken);
             String gaPropertyId = analyticsCredentialsService.getGaPropertyId(projectId);
             GoogleAnalyticsReport report =
-                    googleAnalyticsClient.fetchReport(key, gaPropertyId, REPORT_PERIOD_DAYS);
+                    googleAnalyticsClient.fetchReport(accessToken, gaPropertyId, REPORT_PERIOD_DAYS);
             return GoogleAnalyticsReportResponse.of(report, PERIOD_LABEL);
         } catch (RuntimeException e) {
             log.warn("Google Analyticsレポートの取得に失敗しました(project={}): {}", projectId, e.getMessage());
             return GoogleAnalyticsReportResponse.error(e.getMessage());
-        }
-    }
-
-    private GoogleServiceAccountKey resolveServiceAccountKey(Long projectId) {
-        String json = credentialCipher.decrypt(analyticsCredentialsService.getGaServiceAccountJsonEncrypted(projectId));
-        try {
-            return objectMapper.readValue(json, GoogleServiceAccountKey.class);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("保存済みのサービスアカウントJSONの解析に失敗しました", e);
         }
     }
 }

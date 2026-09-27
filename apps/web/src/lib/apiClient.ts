@@ -1442,8 +1442,14 @@ export function clearProjectBraveSearchApiKey(projectId: number): Promise<void> 
 }
 
 export interface ProjectGoogleAnalyticsStatus {
+  /** 連携済みかつプロパティ選択済み(ダッシュボードに表示できる)。 */
   configured: boolean;
   propertyId: string | null;
+  clientId: string | null;
+  /** クライアントシークレットは値を返さず、保存済みかどうかだけ。 */
+  hasClientSecret: boolean;
+  /** Googleアカウントとの連携(リフレッシュトークン保存)済み。プロパティ選択の有無は問わない。 */
+  connected: boolean;
 }
 
 export function getProjectGoogleAnalyticsStatus(
@@ -1452,14 +1458,51 @@ export function getProjectGoogleAnalyticsStatus(
   return apiFetch<ProjectGoogleAnalyticsStatus>(`/api/projects/${projectId}/api-keys/google-analytics`);
 }
 
-export function setProjectGoogleAnalyticsCredentials(
+/** clientSecretを省略すると保存済みのシークレットは変更されない。 */
+export function saveProjectGoogleAnalyticsClient(
   projectId: number,
-  input: { propertyId: string; serviceAccountJson: string }
+  input: { clientId: string; clientSecret?: string }
 ): Promise<void> {
-  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics/client`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+  });
+}
+
+export function completeProjectGoogleAnalyticsOAuth(
+  projectId: number,
+  input: { code: string; redirectUri: string }
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics/oauth-callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export interface GoogleAnalyticsPropertyOption {
+  propertyId: string;
+  displayName: string | null;
+  accountDisplayName: string | null;
+}
+
+export function listProjectGoogleAnalyticsProperties(
+  projectId: number
+): Promise<GoogleAnalyticsPropertyOption[]> {
+  return apiFetch<GoogleAnalyticsPropertyOption[]>(
+    `/api/projects/${projectId}/api-keys/google-analytics/properties`
+  );
+}
+
+export function selectProjectGoogleAnalyticsProperty(
+  projectId: number,
+  propertyId: string
+): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics/property`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ propertyId }),
   });
 }
 

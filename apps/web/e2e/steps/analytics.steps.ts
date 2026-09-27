@@ -76,54 +76,16 @@ async function memberHeaders(request: APIRequestContext): Promise<Record<string,
 // --------------------------------------------------------- 資格情報の作り物
 
 /**
- * 受け入れテスト専用のRSA秘密鍵。**実在のGoogleアカウントとは無関係**で、
- * `services/analytics/src/test/java/.../GoogleServiceAccountJwtSignerTest.java` が使っている
- * ものと同じ鍵である(同じ用途の値を2つ持たない)。
- *
- * 本物である必要はないが、**RSAの鍵として妥当**である必要はある。analytics-service は
- * これで自己署名JWTを組み立ててからスタブへ投げる(`GoogleServiceAccountJwtSigner`)。
- * 壊れた鍵を入れると署名の段で落ち、「スタブが何を返したか」を確かめる前に終わる。
+ * ga-stub は、認可コード `e2e-stub-invalid-code` のトークン交換を401にする。
+ * また、認可コード `e2e-stub-ga-expired-code` は「後で失効するリフレッシュトークン」を返し、
+ * そのリフレッシュトークンでのアクセストークン取得は401になる(失効の再現に制御エンドポイントを使わない)。
  */
-const TEST_PRIVATE_KEY_PEM = [
-  '-----BEGIN PRIVATE KEY-----',
-  'MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC2mlclKKyllzeV',
-  'Cx3Qgwdk7Jrrpk6lA77G6TbnXjmNB9EDbn0IqYa/eqmbixUKywLHPRi2ZZ/4pjcf',
-  'XgCPsJo72/yVmlA0pHSFsxhS61RZqfJRtZx+jW/isty30OimWvwJtCHgMTdsWUFt',
-  'LJ264s30CiQ1ZNVtPCzCoYJ/qNOR+rvoEr/CMCU9ZU8TGQD08csdurBW2+SY7Buw',
-  'o2NnypgGH98gVLdF9BY6xVRGvCvWHfM3kfo8gzQz4amVyKfXw8GllPScn1wcpu9m',
-  '2EU7Eoct34GVITVzD7qvY+jHvtsZgBoxUvL6H3MMmaxtzh0nrA3Xtw7FX32f0ZH3',
-  'snBQch+PAgMBAAECggEAJokKxAJB8Q4pAjCe4Z6NRGy0Qu/NYACa1bJozknxvkP8',
-  'hYtfIqFYGPejbHpc/fKayv4nRXLL4Db/ogR9/NTpr6E8vDudGobsOjzx8KnOGsAF',
-  'Ld40QPbLOl3Bu58AQf8oeknD7mKkjh6F8qq8PLDZgttTCduWON++mHJqLlOsFn2m',
-  'hV3sdIJOvFxFEAEz/+wS1bWmYcCkDYyiSAlvCAAECWBAsxG3QumH0AuvJKTETEw5',
-  'm18W9w9PcdSvIk5y3SLp7zXZPDoDBVnNq/22VM50XP3UhG+uwvnslVQUdMt9Inn9',
-  '6syXxmQqqKEW8jSpoIII5RJ20xqdD5VKPpz7Q1MjgQKBgQDoSo/zXdSQfZN4MboM',
-  '0bQlQFh3Aw8Ygx3gsAkhB6oNZH5kH4cj1D/io5CiF2luu8g+AJLCmNMbJk5aVLQV',
-  'B+s/ikd4qCU/Ld1bLTAvdaUis2DbXh8CVId/8Fe1/buQ+MP6gvpuBASvLgiCV7Ih',
-  '3QX5Lv5puls1pcAqT6VOAkRCgQKBgQDJPX4Gsv3oWIQscjbtFUYXxzftZIORFOUo',
-  'c82+OdRWAC7NMKSpw75GpSTPpXt2G3al2ZMDEZpzV18mSsvmmrCNsQX4+AkbI82D',
-  'DUprXpc7FRENcG582aT5X8sJ4B+0FCVV5BIBPuxZz9s9Qc8YTXWRemATv70LB5U5',
-  'ynmyROE6DwKBgQDn6JDgoju2aXiSFesuIypbymrHnokyqqxohrcGf9VZe4vnv8Y2',
-  'kg+Z4DxkZ0U+ZUFcDUx39QVF5K9y5X/IQ1is3gvOvOg6tDp7bZjeuPA9vaIkQEpr',
-  'FCMXKscWjZP1/zYBY0RME7zte+LI5m6T+kqdZTpgKconvCwm0c8yG3c0gQKBgQDE',
-  '+Z+lxwWoqxuUtab1oOEe3Szs/HmbRKyZT+CO1eP02fD1fyttz98rHvJNHVkfXfpg',
-  'k/rGAjD/vQGxZXz3l2pBBokmDQI8wmqiYBv7xHaaqiAq22YKZq6IOS9v1ySxCxcQ',
-  'X1EQTxrhPgcGiqe+zfLKFtJ8Ai1z4lQ6YOmFiM48GQKBgCexCI5KqOZyqHTiY771',
-  '7qyurXk4LWahFSZDGIH2KZDp/pi6yyvjdWDkx9lTDFgVCwN1Tqv7PEgLhJMsiVds',
-  'doXjpGoqdYqqPDRvBuui5cx3j4tmJX+lidWmays+JCk54vyvJ0rm4JxCAZgN6XoS',
-  'nlG1wg12bvzlmVtRVjDv67mH',
-  '-----END PRIVATE KEY-----',
-].join('\n');
+const EXPIRED_AUTHORIZATION_CODE = 'e2e-stub-ga-expired-code';
 
-/**
- * 「保存した秘密情報が後から読み出せない」ことを探すための目印(#939 受け入れ基準3)。
- * 秘密鍵そのものの一部を使う。別の文字列を目印に混ぜても「その文字列が出ない」ことしか
- * 言えず、**鍵が漏れていない**ことの証拠にはならない。
- */
-const PRIVATE_KEY_FINGERPRINT = 'MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC2mlclKKyllzeV';
+/** ga-stub が認可コードフローで返すリフレッシュトークン。漏れていないことの確認に使う。 */
+const STUB_GA_REFRESH_TOKEN = 'e2e-stub-ga-refresh-token';
 
-/** ga-stub は `client_email` が `invalid@` で始まるときトークン交換を401にする。 */
-const EXPIRED_CLIENT_EMAIL = 'invalid@at13-expired.iam.gserviceaccount.com';
+const GA_CLIENT_ID = 'at1231-ga.apps.googleusercontent.com';
 
 /** adsense-stub が認可コードフローで返すリフレッシュトークン。漏れていないことの確認に使う。 */
 const STUB_REFRESH_TOKEN = 'e2e-stub-adsense-refresh-token';
@@ -131,18 +93,6 @@ const STUB_REFRESH_TOKEN = 'e2e-stub-adsense-refresh-token';
 const GA_PROPERTY_ID = '987654321';
 const ADSENSE_ACCOUNT_ID = 'pub-1234567890123456';
 const ADSENSE_CLIENT_ID = 'at13-acceptance.apps.googleusercontent.com';
-
-function serviceAccountJson(clientEmail: string): string {
-  // token_uri は入れない(入れると環境変数より優先され実 Google へ出ていく)。
-  return JSON.stringify({
-    type: 'service_account',
-    project_id: 'at13-acceptance',
-    private_key_id: 'at13',
-    client_email: clientEmail,
-    client_id: '100000000000000000001',
-    private_key: TEST_PRIVATE_KEY_PEM,
-  });
-}
 
 // ------------------------------------------------------------ フィクスチャ
 
@@ -164,6 +114,12 @@ function currentProject(ctx: ScenarioState): AnalyticsProject {
     throw new Error('先にプロジェクトを用意するステップを実行すること');
   }
   return project;
+}
+
+/** このシナリオ限りのGA用クライアントシークレット。漏れていないことを目印で確かめる。 */
+function gaClientSecret(ctx: ScenarioState): string {
+  ctx.analyticsGaClientSecret ??= `at1231-ga-client-secret-${uniqueSuffix()}`;
+  return ctx.analyticsGaClientSecret as string;
 }
 
 /** このシナリオ限りのクライアントシークレット。漏れていないことを目印で確かめる。 */
@@ -246,19 +202,67 @@ async function createAnalyticsProject(
   return project;
 }
 
-async function putGoogleAnalyticsCredentials(
+async function putGoogleAnalyticsClient(
   request: APIRequestContext,
   projectId: number,
-  clientEmail: string
+  secret: string
 ): Promise<void> {
-  const response = await request.put(`/api/projects/${projectId}/api-keys/google-analytics`, {
+  const response = await request.put(`/api/projects/${projectId}/api-keys/google-analytics/client`, {
     headers: await adminHeaders(request),
-    data: { propertyId: GA_PROPERTY_ID, serviceAccountJson: serviceAccountJson(clientEmail) },
+    data: { clientId: GA_CLIENT_ID, clientSecret: secret },
   });
   expect(
     response.ok(),
-    `GAの資格情報の登録に失敗しました (status=${response.status()}): ${await response.text()}`
+    `GAのOAuthクライアント保存に失敗しました (status=${response.status()}): ${await response.text()}`
   ).toBe(true);
+}
+
+async function completeGoogleAnalyticsOAuth(
+  request: APIRequestContext,
+  projectId: number,
+  code: string
+): Promise<{ status: number; body: string }> {
+  const response = await request.post(`/api/projects/${projectId}/api-keys/google-analytics/oauth-callback`, {
+    headers: await adminHeaders(request),
+    data: { code, redirectUri: 'https://localhost/connect/google-analytics/callback' },
+  });
+  return { status: response.status(), body: await response.text() };
+}
+
+async function selectGoogleAnalyticsProperty(
+  request: APIRequestContext,
+  projectId: number,
+  propertyId: string
+): Promise<void> {
+  const response = await request.put(`/api/projects/${projectId}/api-keys/google-analytics/property`, {
+    headers: await adminHeaders(request),
+    data: { propertyId },
+  });
+  expect(
+    response.ok(),
+    `GAのプロパティ選択に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+}
+
+/** クライアント保存 → 認可コード交換 → プロパティ選択 まで済ませる(ダッシュボード表示の前提)。 */
+async function connectGoogleAnalyticsFor(
+  request: APIRequestContext,
+  projectId: number,
+  secret: string,
+  code: string
+): Promise<void> {
+  await putGoogleAnalyticsClient(request, projectId, secret);
+  const outcome = await completeGoogleAnalyticsOAuth(request, projectId, code);
+  expect(outcome.status, `GAのOAuth連携に失敗しました: ${outcome.body}`).toBe(204);
+  await selectGoogleAnalyticsProperty(request, projectId, GA_PROPERTY_ID);
+}
+
+async function connectGoogleAnalytics(
+  request: APIRequestContext,
+  ctx: ScenarioState,
+  code: string
+): Promise<void> {
+  await connectGoogleAnalyticsFor(request, currentProject(ctx).id, gaClientSecret(ctx), code);
 }
 
 async function putAdSenseClient(
@@ -305,15 +309,22 @@ Given('Analytics を確かめるためのプロジェクトがある', async ({ 
 });
 
 Given('そのプロジェクトにGoogle Analyticsの資格情報が登録されている', async ({ ctx, request }) => {
-  await putGoogleAnalyticsCredentials(
-    request,
-    currentProject(ctx).id,
-    'at13-acceptance@at13.iam.gserviceaccount.com'
-  );
+  await connectGoogleAnalytics(request, ctx, 'at1231-authorization-code');
 });
 
 Given('そのプロジェクトに失効したGoogle Analyticsの資格情報が登録されている', async ({ ctx, request }) => {
-  await putGoogleAnalyticsCredentials(request, currentProject(ctx).id, EXPIRED_CLIENT_EMAIL);
+  await connectGoogleAnalytics(request, ctx, EXPIRED_AUTHORIZATION_CODE);
+});
+
+Given('そのプロジェクトにGoogle AnalyticsのOAuthクライアントが登録されている', async ({ ctx, request }) => {
+  await putGoogleAnalyticsClient(request, currentProject(ctx).id, gaClientSecret(ctx));
+});
+
+Given('そのプロジェクトにGoogle Analyticsが連携済みでプロパティは未選択である', async ({ ctx, request }) => {
+  const projectId = currentProject(ctx).id;
+  await putGoogleAnalyticsClient(request, projectId, gaClientSecret(ctx));
+  const outcome = await completeGoogleAnalyticsOAuth(request, projectId, 'at1231-authorization-code');
+  expect(outcome.status, `GAのOAuth連携に失敗しました: ${outcome.body}`).toBe(204);
 });
 
 Given('そのプロジェクトにAdSenseのパブリッシャーIDとOAuthクライアントが登録されている', async ({ ctx, request }) => {
@@ -332,7 +343,7 @@ Given('そのプロジェクトにAdSenseの資格情報が登録されている
 
 Given('そのプロジェクトにGoogle AnalyticsとAdSenseの資格情報が登録されている', async ({ ctx, request }) => {
   const projectId = currentProject(ctx).id;
-  await putGoogleAnalyticsCredentials(request, projectId, 'at13-acceptance@at13.iam.gserviceaccount.com');
+  await connectGoogleAnalytics(request, ctx, 'at1231-authorization-code');
   await putAdSenseClient(request, projectId, clientSecret(ctx));
   const outcome = await completeAdSenseOAuth(request, projectId, 'at13-authorization-code');
   expect(
@@ -369,36 +380,80 @@ async function openSettings(page: Page, path: string, heading: RegExp): Promise<
   await expect(page.getByRole('heading', { name: heading })).toBeVisible({ timeout: 30_000 });
 }
 
-When(
-  /^そのプロジェクトのGoogle Analytics設定でプロパティID「([^」]+)」とサービスアカウントのJSON鍵を保存する$/,
-  async ({ ctx, page }, propertyId: string) => {
-    const project = currentProject(ctx);
-    await openSettings(page, gaSettingsPath(project.id), /Google Analytics設定$/);
+When('そのプロジェクトのGoogle Analytics設定でOAuthクライアントを保存する', async ({ ctx, page }) => {
+  const project = currentProject(ctx);
+  await openSettings(page, gaSettingsPath(project.id), /Google Analytics設定$/);
+  const secret = gaClientSecret(ctx);
 
-    // goto直後はハイドレーション前の可能性があり、fill()はDOMの値を書き換えても、
-    // ハイドレーション完了時の最初のレンダリングでReactの制御コンポーネントがstate
-    // (サーバ描画時の空文字列)へ戻してしまう(#1317実測: goto直後のselectOptionが
-    // DOM操作としては成功するのにlocalStorageに書かれず値が戻る)。クリックだけでなく
-    // fill()から含めてやり直す必要がある(#1385)。
-    //
-    // 【冪等性についての注記】retryClick.tsの`clickUntilVisible`は「べき等な操作にのみ
-    // 使うこと」としているが、ここではその制約を持つヘルパーは使わず、より緩い
-    // `retryUntilPass`で「同じ値によるfill+保存」全体を再試行している。再試行のたびに
-    // 書き込む値は毎回同一(`propertyId`と固定のサービスアカウントJSON)であり、
-        // 既に保存済みの値をもう一度同じ値で上書き保存しても実害は無いため安全である。
-    await retryUntilPass(async () => {
-      await page.locator('input[name="propertyId"]').fill(propertyId);
-      await page
-        .locator('textarea[name="serviceAccountJson"]')
-        .fill(serviceAccountJson('at13-acceptance@at13.iam.gserviceaccount.com'));
-      await page.getByRole('button', { name: '保存', exact: true }).click();
-      await page
-        .getByText('保存しました。')
-        .first()
-        .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
-    });
+  // AdSenseの保存ステップと同じ理由(#1385): goto直後のfill()はハイドレーション完了時の
+  // 最初のレンダリングでReactのstateへ戻されうるため、fill()から含めて再試行する。
+  // 同じ値による再送信でありべき等なので安全。
+  await retryUntilPass(async () => {
+    await page.locator('input[name="clientId"]').fill(GA_CLIENT_ID);
+    await page.locator('input[name="clientSecret"]').fill(secret);
+    await page.getByRole('button', { name: 'クライアントを保存', exact: true }).click();
+    await page
+      .getByText('保存しました。')
+      .first()
+      .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+  });
+});
+
+Then('Google Analytics設定にクライアントシークレットが設定済みとして表示される', async ({ page }) => {
+  await expect(page.locator('input[name="clientSecret"]')).toHaveAttribute(
+    'placeholder',
+    '設定済み(変更する場合のみ入力)',
+    { timeout: 30_000 }
+  );
+});
+
+Then('Google Analytics設定にサービスアカウントの入力欄は無い', async ({ page }) => {
+  await expect(page.locator('textarea[name="serviceAccountJson"]')).toHaveCount(0);
+  await expect(page.locator('input[name="propertyId"]')).toHaveCount(0);
+});
+
+Then(
+  'Google Analyticsの連携リンクの遷移先はanalytics.readonlyだけを要求するGoogleの認可URLである',
+  async ({ ctx, page }) => {
+    const link = page.getByRole('link', { name: 'Googleアカウントと連携', exact: true });
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await expect(link).toHaveAttribute(
+      'href',
+      `/connect/google-analytics/start?projectId=${currentProject(ctx).id}`
+    );
+    // 同意画面(accounts.google.com)へは出ない: リダイレクト先のURLだけを読む。
+    const href = (await link.getAttribute('href')) ?? '';
+    const response = await page.request.get(href, { maxRedirects: 0 });
+    expect(response.status(), `連携の起点がリダイレクトしていない (status=${response.status()})`).toBeGreaterThanOrEqual(300);
+    const authorizeUrl = new URL(response.headers().location ?? '');
+    expect(authorizeUrl.origin + authorizeUrl.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(authorizeUrl.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/analytics.readonly');
+    expect(authorizeUrl.searchParams.get('client_id')).toBe(GA_CLIENT_ID);
+    expect(authorizeUrl.searchParams.get('access_type')).toBe('offline');
   }
 );
+
+Then(
+  /^プロパティの一覧に表示名「([^」]+)」とプロパティID「([^」]+)」がある$/,
+  async ({ page }, displayName: string, propertyId: string) => {
+    const option = page.locator('select[name="propertyId"] option', { hasText: displayName });
+    await expect(option).toHaveCount(1, { timeout: 30_000 });
+    await expect(option).toHaveAttribute('value', propertyId);
+    await expect(option).toContainText(propertyId);
+  }
+);
+
+When(/^プロパティ「([^」]+)」を選んで保存する$/, async ({ page }, propertyId: string) => {
+  // ハイドレーション前のselectOptionは値が戻りうる(#1385)ため、選択から含めて再試行する。
+  await retryUntilPass(async () => {
+    await page.locator('select[name="propertyId"]').selectOption(propertyId);
+    await page.getByRole('button', { name: 'プロパティを保存', exact: true }).click();
+    await page
+      .getByText('プロパティを保存しました。')
+      .first()
+      .waitFor({ state: 'visible', timeout: DEFAULT_VISIBLE_TIMEOUT_MS });
+  });
+});
 
 Then(
   /^Google Analytics設定の状態に「([^」]+)」と表示される$/,
@@ -407,7 +462,7 @@ Then(
   }
 );
 
-When('そのプロジェクトのGoogle Analytics設定を削除する', async ({ ctx, page }) => {
+When('そのプロジェクトのGoogle Analytics設定で連携を解除する', async ({ ctx, page }) => {
   const project = currentProject(ctx);
   await openSettings(page, gaSettingsPath(project.id), /Google Analytics設定$/);
 
@@ -425,7 +480,7 @@ When('そのプロジェクトのGoogle Analytics設定を削除する', async (
   // まだ見えていなければボタンは既にDOMから無いため2回目の削除が物理的に飛ぶことはない。
   await withDialogAccepted(page, () =>
     clickUntilVisible(
-      page.getByRole('button', { name: '設定を削除', exact: true }),
+      page.getByRole('button', { name: '連携を解除', exact: true }),
       page.getByText('未設定', { exact: true })
     )
   );
@@ -437,10 +492,30 @@ Then('Google Analytics設定のAPI応答は未設定を示す', async ({ ctx, re
     { headers: await adminHeaders(request) }
   );
   expect(response.status(), 'GAの設定状態を取得できない').toBe(200);
-  const status = (await response.json()) as { configured: boolean; propertyId: string | null };
-  expect(status.configured, '削除したのに設定済みのままである').toBe(false);
-  expect(status.propertyId, '削除したのにプロパティIDが残っている').toBeNull();
+  const status = (await response.json()) as {
+    configured: boolean;
+    connected: boolean;
+    propertyId: string | null;
+  };
+  expect(status.configured, '解除したのに設定済みのままである').toBe(false);
+  expect(status.connected, '解除したのに連携済みのままである').toBe(false);
+  expect(status.propertyId, '解除したのにプロパティIDが残っている').toBeNull();
 });
+
+Then(
+  /^Google Analytics設定のAPI応答は設定済みでプロパティIDが「([^」]+)」である$/,
+  async ({ ctx, request }, propertyId: string) => {
+    const response = await request.get(
+      `/api/projects/${currentProject(ctx).id}/api-keys/google-analytics`,
+      { headers: await adminHeaders(request) }
+    );
+    expect(response.status(), 'GAの設定状態を取得できない').toBe(200);
+    expect((await response.json()) as { configured: boolean; propertyId: string }).toMatchObject({
+      configured: true,
+      propertyId,
+    });
+  }
+);
 
 // ------------------------------------------------- 設定画面(AdSense)
 
@@ -492,29 +567,31 @@ When('Google AdSense設定の画面を開き直す', async ({ ctx, page }) => {
   await openSettings(page, adSenseSettingsPath(currentProject(ctx).id), /Google AdSense設定$/);
 });
 
-Then('画面にサービスアカウントの秘密鍵は現れない', async ({ page }) => {
+Then('画面にGoogle Analyticsのクライアントシークレットとリフレッシュトークンは現れない', async ({ ctx, page }) => {
   const html = await page.content();
-  expect(html, '保存したサービスアカウントの秘密鍵が画面に再表示されている').not.toContain(
-    PRIVATE_KEY_FINGERPRINT
+  expect(html, '保存したGAのクライアントシークレットが画面に再表示されている').not.toContain(
+    gaClientSecret(ctx)
   );
-  expect(html, '保存した秘密鍵のPEMヘッダが画面に再表示されている').not.toContain(
-    'BEGIN PRIVATE KEY'
+  expect(html, '保存したGAのリフレッシュトークンが画面に再表示されている').not.toContain(
+    STUB_GA_REFRESH_TOKEN
   );
 });
 
-Then('Google Analytics設定のAPI応答にサービスアカウントの秘密鍵は含まれない', async ({ ctx, request }) => {
+Then('Google Analytics設定のAPI応答にクライアントシークレットもリフレッシュトークンも含まれない', async ({ ctx, request }) => {
   const response = await request.get(
     `/api/projects/${currentProject(ctx).id}/api-keys/google-analytics`,
     { headers: await adminHeaders(request) }
   );
   expect(response.status(), 'GAの設定状態を取得できない').toBe(200);
   const body = await response.text();
-  expect(body, 'API応答にサービスアカウントの秘密鍵が含まれている').not.toContain(
-    PRIVATE_KEY_FINGERPRINT
-  );
+  expect(body, 'API応答にクライアントシークレットが含まれている').not.toContain(gaClientSecret(ctx));
+  expect(body, 'API応答にリフレッシュトークンが含まれている').not.toContain(STUB_GA_REFRESH_TOKEN);
   expect(body, 'API応答にサービスアカウントJSONが含まれている').not.toContain('private_key');
   // 設定済みであること自体は返る(それが無いと画面が状態を出せない)。
-  expect((await response.json()) as { configured: boolean }).toMatchObject({ configured: true });
+  expect((await response.json()) as { configured: boolean; hasClientSecret: boolean }).toMatchObject({
+    configured: true,
+    hasClientSecret: true,
+  });
 });
 
 Then('画面にクライアントシークレットは現れない', async ({ ctx, page }) => {
@@ -594,6 +671,45 @@ Then('保存されたリフレッシュトークンでAdSenseのレポートを�
   expect(report.estimatedEarnings, 'スタブが返す推定収益が返っていない').toBe('12.34');
 });
 
+When(
+  /^認可コード「([^」]+)」でGoogle AnalyticsのOAuth連携を完了する$/,
+  async ({ ctx, request }, code: string) => {
+    const outcome = await completeGoogleAnalyticsOAuth(request, currentProject(ctx).id, code);
+    expect(outcome.status, `OAuth連携が成功しない: ${outcome.body}`).toBe(204);
+    ctx.analyticsOAuth = outcome;
+  }
+);
+
+When(
+  /^認可コード「([^」]+)」でGoogle AnalyticsのOAuth連携を完了しようとする$/,
+  async ({ ctx, request }, code: string) => {
+    ctx.analyticsOAuth = await completeGoogleAnalyticsOAuth(request, currentProject(ctx).id, code);
+  }
+);
+
+async function googleAnalyticsStatus(
+  request: APIRequestContext,
+  projectId: number
+): Promise<{ configured: boolean; connected: boolean; propertyId: string | null }> {
+  const response = await request.get(`/api/projects/${projectId}/api-keys/google-analytics`, {
+    headers: await adminHeaders(request),
+  });
+  expect(response.status(), 'GAの設定状態を取得できない').toBe(200);
+  return (await response.json()) as { configured: boolean; connected: boolean; propertyId: string | null };
+}
+
+Then('Google Analyticsは連携済みでプロパティは未選択になる', async ({ ctx, request }) => {
+  const status = await googleAnalyticsStatus(request, currentProject(ctx).id);
+  expect(status.connected, '認可コードの交換後も連携済みになっていない').toBe(true);
+  expect(status.configured, 'プロパティ未選択なのに設定済み扱いになっている').toBe(false);
+  expect(status.propertyId).toBeNull();
+});
+
+Then('Google Analyticsは連携済みにならない', async ({ ctx, request }) => {
+  const status = await googleAnalyticsStatus(request, currentProject(ctx).id);
+  expect(status.connected, '拒否されたはずの認可コードで連携済みになっている').toBe(false);
+});
+
 Then('OAuth連携は拒否される', async ({ ctx }) => {
   const outcome = seenOAuth(ctx);
   expect(outcome.status, '不正な認可コードでOAuth連携が通っている').toBeGreaterThanOrEqual(400);
@@ -604,17 +720,37 @@ Then('OAuth連携は拒否される', async ({ ctx }) => {
   }
 });
 
-When('認証なしでAdSenseのOAuthコールバックURLを開く', async ({ ctx, request }) => {
+async function openUnauthenticatedCallback(
+  request: APIRequestContext,
+  ctx: ScenarioState,
+  kind: 'adsense' | 'google-analytics'
+): Promise<void> {
   const project = currentProject(ctx);
   const response = await request.get(
-    `/connect/adsense/callback?code=at13-forged-code&state=${project.id}.forged-nonce`,
+    `/connect/${kind}/callback?code=forged-code&state=${project.id}.forged-nonce`,
     { maxRedirects: 0 }
   );
-  ctx.analyticsCallback = { status: response.status(), location: response.headers().location ?? '' };
+  ctx.analyticsCallback = {
+    kind,
+    status: response.status(),
+    location: response.headers().location ?? '',
+  };
+}
+
+When('認証なしでAdSenseのOAuthコールバックURLを開く', async ({ ctx, request }) => {
+  await openUnauthenticatedCallback(request, ctx, 'adsense');
+});
+
+When('認証なしでGoogle AnalyticsのOAuthコールバックURLを開く', async ({ ctx, request }) => {
+  await openUnauthenticatedCallback(request, ctx, 'google-analytics');
 });
 
 Then('認可コードは処理されず、ログイン画面へ戻される', async ({ ctx, request }) => {
-  const outcome = ctx.analyticsCallback as { status: number; location: string };
+  const outcome = ctx.analyticsCallback as {
+    kind: 'adsense' | 'google-analytics';
+    status: number;
+    location: string;
+  };
   expect(
     outcome.status,
     `未認証のコールバックがリダイレクトで拒否されていない (status=${outcome.status})`
@@ -622,11 +758,12 @@ Then('認可コードは処理されず、ログイン画面へ戻される', as
   expect(outcome.status, '未認証のコールバックが成功扱いになっている').toBeLessThan(400);
   expect(outcome.location, `ログイン画面へ戻されていない: ${outcome.location}`).toContain('/login');
 
-  const status = await request.get(`/api/projects/${currentProject(ctx).id}/api-keys/adsense`, {
+  const status = await request.get(`/api/projects/${currentProject(ctx).id}/api-keys/${outcome.kind}`, {
     headers: await adminHeaders(request),
   });
+  const body = (await status.json()) as { configured: boolean; connected?: boolean };
   expect(
-    ((await status.json()) as { configured: boolean }).configured,
+    body.configured || body.connected === true,
     '未認証のコールバックで連携が完了してしまっている'
   ).toBe(false);
 });
@@ -774,7 +911,7 @@ interface DeniedOutcome {
   body: string;
 }
 
-/** 資格情報のエンドポイント8本。1本でも外れれば秘密情報が漏れるのでまとめて叩く。 */
+/** 資格情報のエンドポイント(GA 6本 + AdSense 5本)。1本でも外れれば秘密情報が漏れるのでまとめて叩く。 */
 async function requestAllCredentialEndpoints(
   request: APIRequestContext,
   projectId: number,
@@ -784,11 +921,23 @@ async function requestAllCredentialEndpoints(
   const calls: { what: string; run: () => Promise<{ status: number; body: string }> }[] = [
     { what: 'GET google-analytics', run: () => send(request.get(`${base}/google-analytics`, { headers })) },
     {
-      what: 'PUT google-analytics',
-      run: () => send(request.put(`${base}/google-analytics`, {
+      what: 'PUT google-analytics/client',
+      run: () => send(request.put(`${base}/google-analytics/client`, {
         headers,
-        data: { propertyId: '111', serviceAccountJson: serviceAccountJson('intruder@example.com') },
+        data: { clientId: 'intruder.apps.googleusercontent.com', clientSecret: 'intruder-secret' },
       })),
+    },
+    {
+      what: 'POST google-analytics/oauth-callback',
+      run: () => send(request.post(`${base}/google-analytics/oauth-callback`, {
+        headers,
+        data: { code: 'intruder-code', redirectUri: 'https://localhost/connect/google-analytics/callback' },
+      })),
+    },
+    { what: 'GET google-analytics/properties', run: () => send(request.get(`${base}/google-analytics/properties`, { headers })) },
+    {
+      what: 'PUT google-analytics/property',
+      run: () => send(request.put(`${base}/google-analytics/property`, { headers, data: { propertyId: '111' } })),
     },
     { what: 'DELETE google-analytics', run: () => send(request.delete(`${base}/google-analytics`, { headers })) },
     { what: 'GET adsense', run: () => send(request.get(`${base}/adsense`, { headers })) },
@@ -890,10 +1039,11 @@ Given('Analyticsを確かめるプロジェクトが2つあり、一般利用者
 
   // 他プロジェクト側には既知の資格情報を入れておく。書き換えられていないことを後で見る。
   await putAdSenseClient(request, otherProject.id, clientSecret(ctx));
-  await putGoogleAnalyticsCredentials(
+  await connectGoogleAnalyticsFor(
     request,
     otherProject.id,
-    'at13-owner@at13.iam.gserviceaccount.com'
+    gaClientSecret(ctx),
+    'at1231-authorization-code'
   );
 
   ctx.analyticsMemberProject = memberProject;

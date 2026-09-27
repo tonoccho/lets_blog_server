@@ -19,10 +19,11 @@
   いるかどうかは分からない。自分のプロジェクトの資格情報は読み書きできる(対照)ことも
   同じシナリオで確かめる。
 
-  ## 対象は8本すべて
+  ## 対象は11本すべて
 
-  資格情報のエンドポイントは GET/PUT/DELETE × (google-analytics, adsense) に
-  `adsense/client-secret` と `adsense/oauth-callback` を足した8本ある。
+  資格情報のエンドポイントは google-analytics の6本(GET / DELETE / `client` / `oauth-callback` /
+  `properties` / `property`、#1231 でOAuth化)と、adsense の5本(GET / PUT / DELETE /
+  `client-secret` / `oauth-callback`)がある。
   1本でも認可が外れれば秘密情報が漏れるので、まとめて確かめる。
   ダッシュボードの2本も同じ判定を通るため併せて見る。
 

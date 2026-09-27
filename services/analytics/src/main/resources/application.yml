@@ -96,6 +96,7 @@ app:
   # Google Analytics連携(issue #386、legacy-apiから移設)。
   google-analytics-data-api-base-url: ${GOOGLE_ANALYTICS_DATA_API_BASE_URL:https://analyticsdata.googleapis.com}
   google-analytics-oauth-token-uri: ${GOOGLE_ANALYTICS_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}
+  google-analytics-admin-api-base-url: ${GOOGLE_ANALYTICS_ADMIN_API_BASE_URL:https://analyticsadmin.googleapis.com}
   # AdSense連携(issue #387、legacy-apiから移設)。OAuthクライアントID/シークレットはプロジェクトごとに
   # 異なるため、プロジェクト単位のDB設定(issue #407)で保持し、環境変数では扱わない。
   google-oauth-token-uri: ${GOOGLE_OAUTH_TOKEN_URI:https://oauth2.googleapis.com/token}

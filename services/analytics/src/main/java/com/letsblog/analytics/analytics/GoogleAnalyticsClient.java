@@ -2,6 +2,7 @@ package com.letsblog.analytics.analytics;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.letsblog.analytics.adsense.GoogleOAuthTokens;
 import com.letsblog.analytics.client.GoogleApiFailureMessage;
 import com.letsblog.analytics.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,42 +19,143 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * サービスアカウント認証(JWT Bearerグラント)でGoogle OAuth2トークンを取得し、
- * GA4 Data API(runReport)を呼び出す薄いクライアント。認証情報の復号・productionSiteの判定等は
- * 呼び出し側(GoogleAnalyticsReportService)が行い、このクラス自体は鍵の出どころを知らない
- * (BraveSearchClientと同じ方針)。
+ * ユーザーOAuth(3-legged、AdSenseと同じ方式)で取得したトークンにより、GA4 Admin API(accountSummaries.list)と
+ * GA4 Data API(runReport)を呼び出す薄いクライアント(issue #1231でサービスアカウントJWT Bearerグラントから移行)。
+ * 要求するスコープは{@code analytics.readonly}のみで、GA4側の設定を変更するAPIは呼ばない。
+ * クライアントID/シークレット/リフレッシュトークンの復号・productionSiteの判定等は呼び出し側
+ * (ProjectAnalyticsSettingsService / GoogleAnalyticsReportService)が行い、このクラス自体は
+ * 資格情報の出どころを知らない(BraveSearchClientと同じ方針)。
  */
 @Component
 public class GoogleAnalyticsClient {
 
-    private static final String SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
-    private static final String GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+    private static final String GRANT_TYPE_AUTHORIZATION_CODE = "authorization_code";
+    private static final String GRANT_TYPE_REFRESH_TOKEN = "refresh_token";
+    private static final String ACCOUNT_SUMMARIES_PAGE_SIZE = "200";
+    private static final String PROPERTY_PREFIX = "properties/";
 
     private final RestClient client;
     private final String dataApiBaseUrl;
-    private final String defaultTokenUri;
-    private final GoogleServiceAccountJwtSigner jwtSigner;
+    private final String adminApiBaseUrl;
+    private final String tokenUri;
 
     @Autowired
     public GoogleAnalyticsClient(
             @Value("${app.google-analytics-data-api-base-url}") String dataApiBaseUrl,
-            @Value("${app.google-analytics-oauth-token-uri}") String defaultTokenUri,
-            GoogleServiceAccountJwtSigner jwtSigner) {
-        this(RestClient.builder(), dataApiBaseUrl, defaultTokenUri, jwtSigner);
+            @Value("${app.google-analytics-admin-api-base-url}") String adminApiBaseUrl,
+            @Value("${app.google-analytics-oauth-token-uri}") String tokenUri) {
+        this(RestClient.builder(), dataApiBaseUrl, adminApiBaseUrl, tokenUri);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
-    GoogleAnalyticsClient(RestClient.Builder builder, String dataApiBaseUrl, String defaultTokenUri,
-            GoogleServiceAccountJwtSigner jwtSigner) {
+    GoogleAnalyticsClient(RestClient.Builder builder, String dataApiBaseUrl, String adminApiBaseUrl, String tokenUri) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
         this.dataApiBaseUrl = dataApiBaseUrl;
-        this.defaultTokenUri = defaultTokenUri;
-        this.jwtSigner = jwtSigner;
+        this.adminApiBaseUrl = adminApiBaseUrl;
+        this.tokenUri = tokenUri;
     }
 
-    public GoogleAnalyticsReport fetchReport(GoogleServiceAccountKey key, String propertyId, int periodDays) {
-        String accessToken = fetchAccessToken(key);
+    /** OAuth同意画面からの認可コードを、アクセストークン/リフレッシュトークンに交換する。 */
+    public GoogleOAuthTokens exchangeAuthorizationCode(
+            String clientId, String clientSecret, String code, String redirectUri) {
+        requireClientCredentials(clientId, clientSecret);
+        String body = "grant_type=" + GRANT_TYPE_AUTHORIZATION_CODE
+                + "&code=" + urlEncode(code)
+                + "&redirect_uri=" + urlEncode(redirectUri)
+                + "&client_id=" + urlEncode(clientId)
+                + "&client_secret=" + urlEncode(clientSecret);
+        GoogleOAuthTokens tokens = postForTokens(body);
+        if (tokens.refreshToken() == null || tokens.refreshToken().isBlank()) {
+            throw new GoogleAnalyticsException(
+                    "Googleからリフレッシュトークンを取得できませんでした"
+                            + "(既に同意済みの場合、Googleアカウントの連携済みアプリから一度解除してから再度連携してください)",
+                    null);
+        }
+        return tokens;
+    }
+
+    public String refreshAccessToken(String clientId, String clientSecret, String refreshToken) {
+        requireClientCredentials(clientId, clientSecret);
+        String body = "grant_type=" + GRANT_TYPE_REFRESH_TOKEN
+                + "&refresh_token=" + urlEncode(refreshToken)
+                + "&client_id=" + urlEncode(clientId)
+                + "&client_secret=" + urlEncode(clientSecret);
+        GoogleOAuthTokens tokens = postForTokens(body);
+        if (tokens.accessToken() == null || tokens.accessToken().isBlank()) {
+            throw new GoogleAnalyticsException("Googleからアクセストークンを取得できませんでした", null);
+        }
+        return tokens.accessToken();
+    }
+
+    private void requireClientCredentials(String clientId, String clientSecret) {
+        if (clientId == null || clientId.isBlank() || clientSecret == null || clientSecret.isBlank()) {
+            throw new GoogleAnalyticsException(
+                    "このプロジェクトにはGoogle OAuthクライアントID/シークレットが設定されていません"
+                            + "(Google Analytics設定から設定してください)",
+                    null);
+        }
+    }
+
+    private GoogleOAuthTokens postForTokens(String formBody) {
+        try {
+            GoogleOAuthTokens tokens = client.post()
+                    .uri(tokenUri)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(formBody)
+                    .retrieve()
+                    .body(GoogleOAuthTokens.class);
+            if (tokens == null) {
+                throw new GoogleAnalyticsException("Googleからのトークンレスポンスが空でした", null);
+            }
+            return tokens;
+        } catch (RestClientResponseException e) {
+            throw new GoogleAnalyticsException(
+                    GoogleApiFailureMessage.of("Google OAuth認証", e.getStatusCode(), e.getResponseBodyAsString()), e);
+        }
+    }
+
+    /**
+     * 連携したGoogleアカウントがアクセスできるGA4プロパティを、Admin APIのaccountSummaries.listで
+     * 全ページ(nextPageToken)取得して結合する。
+     */
+    public List<GoogleAnalyticsPropertySummary> listProperties(String accessToken) {
+        List<GoogleAnalyticsPropertySummary> properties = new ArrayList<>();
+        String pageToken = null;
+        do {
+            String uri = adminApiBaseUrl + "/v1beta/accountSummaries?pageSize=" + ACCOUNT_SUMMARIES_PAGE_SIZE
+                    + (pageToken == null ? "" : "&pageToken=" + urlEncode(pageToken));
+            JsonNode response;
+            try {
+                response = client.get()
+                        .uri(uri)
+                        .header("Authorization", "Bearer " + accessToken)
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (RestClientResponseException e) {
+                throw new GoogleAnalyticsException(
+                        GoogleApiFailureMessage.of(
+                                "Google Analytics Admin APIの呼び出し", e.getStatusCode(), e.getResponseBodyAsString()),
+                        e);
+            }
+            if (response == null) {
+                break;
+            }
+            for (JsonNode account : response.path("accountSummaries")) {
+                String accountName = account.path("displayName").asText(null);
+                for (JsonNode property : account.path("propertySummaries")) {
+                    String name = property.path("property").asText("");
+                    String propertyId = name.startsWith(PROPERTY_PREFIX) ? name.substring(PROPERTY_PREFIX.length()) : name;
+                    properties.add(new GoogleAnalyticsPropertySummary(
+                            propertyId, property.path("displayName").asText(null), accountName));
+                }
+            }
+            pageToken = response.path("nextPageToken").asText(null);
+        } while (pageToken != null && !pageToken.isBlank());
+        return properties;
+    }
+
+    public GoogleAnalyticsReport fetchReport(String accessToken, String propertyId, int periodDays) {
         GoogleAnalyticsReport totals = runReport(accessToken, propertyId, periodDays);
         List<GoogleAnalyticsDailyDataPoint> dailyDataPoints = fetchDailyDataPoints(accessToken, propertyId, periodDays);
         List<GoogleAnalyticsChannelBreakdown> channelBreakdown = fetchChannelBreakdown(accessToken, propertyId, periodDays);
@@ -61,25 +163,8 @@ public class GoogleAnalyticsClient {
                 totals.sessions(), totals.activeUsers(), totals.pageViews(), dailyDataPoints, channelBreakdown);
     }
 
-    private String fetchAccessToken(GoogleServiceAccountKey key) {
-        String tokenUri = (key.tokenUri() == null || key.tokenUri().isBlank()) ? defaultTokenUri : key.tokenUri();
-        String jwt = jwtSigner.sign(key, SCOPE, tokenUri);
-        try {
-            JsonNode response = client.post()
-                    .uri(tokenUri)
-                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                    .body("grant_type=" + URLEncoder.encode(GRANT_TYPE, StandardCharsets.UTF_8) + "&assertion=" + jwt)
-                    .retrieve()
-                    .body(JsonNode.class);
-            String accessToken = response == null ? null : response.path("access_token").asText(null);
-            if (accessToken == null || accessToken.isBlank()) {
-                throw new GoogleAnalyticsException("Googleからアクセストークンを取得できませんでした", null);
-            }
-            return accessToken;
-        } catch (RestClientResponseException e) {
-            throw new GoogleAnalyticsException(
-                    GoogleApiFailureMessage.of("Google OAuth認証", e.getStatusCode(), e.getResponseBodyAsString()), e);
-        }
+    private static String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private GoogleAnalyticsReport runReport(String accessToken, String propertyId, int periodDays) {

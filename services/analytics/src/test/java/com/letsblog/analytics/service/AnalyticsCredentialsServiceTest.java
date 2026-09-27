@@ -38,31 +38,104 @@ class AnalyticsCredentialsServiceTest {
     }
 
     @Test
-    void setGoogleAnalyticsCredentials_新規行を作成して保存する() {
+    void setGaRefreshTokenEncrypted_新規行を作成して保存する() {
         when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
         when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        service().setGoogleAnalyticsCredentials(1L, "123456789", new byte[]{1, 2, 3});
+        service().setGaRefreshTokenEncrypted(1L, new byte[]{1, 2, 3});
 
         org.mockito.ArgumentCaptor<AnalyticsCredentials> captor = org.mockito.ArgumentCaptor.forClass(AnalyticsCredentials.class);
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
         AnalyticsCredentials saved = captor.getValue();
-        assertEquals("123456789", saved.getGaPropertyId());
-        assertTrue(saved.hasGoogleAnalyticsCredentials());
+        assertEquals(3, saved.getGaRefreshTokenEncrypted().length);
+        assertTrue(saved.hasGoogleAnalyticsConnection());
+        // プロパティ未選択なので、ダッシュボードの資格情報としては未設定のまま
+        assertFalse(saved.hasGoogleAnalyticsCredentials());
     }
 
     @Test
-    void clearGoogleAnalyticsCredentials_両方nullにする() {
+    void hasGoogleAnalyticsCredentials_プロパティIDとリフレッシュトークンの両方が必要() {
+        AnalyticsCredentials existing = new AnalyticsCredentials(1L);
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        assertFalse(service().hasGoogleAnalyticsCredentials(1L));
+        assertFalse(service().hasGaRefreshToken(1L));
+
+        service().setGaPropertyId(1L, "123456789");
+        assertFalse(existing.hasGoogleAnalyticsCredentials());
+        assertEquals("123456789", service().getGaPropertyId(1L));
+
+        service().setGaRefreshTokenEncrypted(1L, new byte[]{1});
+        assertTrue(service().hasGoogleAnalyticsCredentials(1L));
+        assertTrue(service().hasGaRefreshToken(1L));
+
+        existing.setGaPropertyId(" ");
+        assertFalse(existing.hasGoogleAnalyticsCredentials());
+        existing.setGaPropertyId("1");
+        existing.setGaRefreshTokenEncrypted(new byte[0]);
+        assertFalse(existing.hasGoogleAnalyticsCredentials());
+        existing.setGaRefreshTokenEncrypted(null);
+        assertFalse(existing.hasGoogleAnalyticsConnection());
+    }
+
+    @Test
+    void setGaOauthClient_シークレットがnullなら既存のシークレットを保つ() {
+        AnalyticsCredentials existing = new AnalyticsCredentials(1L);
+        existing.setGaOauthClientSecretEncrypted(new byte[]{9});
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().setGaOauthClient(1L, "client-id", null);
+
+        assertEquals("client-id", service().getGaOauthClientId(1L));
+        assertTrue(service().hasGaOauthClientSecret(1L));
+        assertEquals(1, service().getGaOauthClientSecretEncrypted(1L).length);
+
+        service().setGaOauthClient(1L, "client-id-2", new byte[]{1, 2});
+        assertEquals(2, existing.getGaOauthClientSecretEncrypted().length);
+    }
+
+    @Test
+    void hasGaOauthClientSecret_行があってもシークレットがnullや空なら未保存() {
+        AnalyticsCredentials existing = new AnalyticsCredentials(1L);
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+
+        assertFalse(service().hasGaOauthClientSecret(1L));
+        existing.setGaOauthClientSecretEncrypted(new byte[0]);
+        assertFalse(service().hasGaOauthClientSecret(1L));
+        existing.setGaOauthClientSecretEncrypted(new byte[]{1});
+        assertTrue(service().hasGaOauthClientSecret(1L));
+    }
+
+    @Test
+    void gaの読み取りは行が無ければ未設定として返す() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+
+        assertNull(service().getGaOauthClientId(1L));
+        assertFalse(service().hasGaOauthClientSecret(1L));
+        assertNull(service().getGaOauthClientSecretEncrypted(1L));
+        assertNull(service().getGaRefreshTokenEncrypted(1L));
+        assertNull(service().getGaPropertyId(1L));
+    }
+
+    @Test
+    void clearGoogleAnalyticsCredentials_リフレッシュトークンとプロパティとクライアントを破棄する() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
         existing.setGaPropertyId("123456789");
-        existing.setGaServiceAccountJsonEncrypted(new byte[]{1, 2, 3});
+        existing.setGaRefreshTokenEncrypted(new byte[]{1, 2, 3});
+        existing.setGaOauthClientId("client-id");
+        existing.setGaOauthClientSecretEncrypted(new byte[]{4});
         when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
         when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
 
         service().clearGoogleAnalyticsCredentials(1L);
 
         assertFalse(existing.hasGoogleAnalyticsCredentials());
+        assertFalse(existing.hasGoogleAnalyticsConnection());
         assertNull(existing.getGaPropertyId());
+        assertNull(existing.getGaOauthClientId());
+        assertNull(existing.getGaOauthClientSecretEncrypted());
     }
 
     @Test

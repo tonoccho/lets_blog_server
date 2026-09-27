@@ -78,7 +78,6 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- 内部ブリッジ(InternalAnalyticsProjectSettingsController) --
                 new Endpoint("GET", "/api/internal/analytics/projects/1/google-analytics"),
-                new Endpoint("PUT", "/api/internal/analytics/projects/1/google-analytics"),
                 new Endpoint("DELETE", "/api/internal/analytics/projects/1/google-analytics"),
                 new Endpoint("GET", "/api/internal/analytics/projects/1/adsense"),
                 new Endpoint("PUT", "/api/internal/analytics/projects/1/adsense"),
@@ -88,7 +87,10 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- ProjectAnalyticsApiKeyController(issue #583でlegacy-apiから移設) --
                 new Endpoint("GET", "/api/projects/1/api-keys/google-analytics"),
-                new Endpoint("PUT", "/api/projects/1/api-keys/google-analytics"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/google-analytics/client"),
+                new Endpoint("POST", "/api/projects/1/api-keys/google-analytics/oauth-callback"),
+                new Endpoint("GET", "/api/projects/1/api-keys/google-analytics/properties"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/google-analytics/property"),
                 new Endpoint("DELETE", "/api/projects/1/api-keys/google-analytics"),
                 new Endpoint("GET", "/api/projects/1/api-keys/adsense"),
                 new Endpoint("PUT", "/api/projects/1/api-keys/adsense"),

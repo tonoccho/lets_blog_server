@@ -422,7 +422,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |
 | --- | --- | --- | --- |
 | `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | `LLM_BASE_URL`(ai / platform) | 18081 |
-| `ga-stub` | Google Analytics Data API + OAuth | `GOOGLE_ANALYTICS_DATA_API_BASE_URL`, `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` | 18082 |
+| `ga-stub` | Google Analytics Data API + Admin API(`accountSummaries`)+ OAuth | `GOOGLE_ANALYTICS_DATA_API_BASE_URL`, `GOOGLE_ANALYTICS_ADMIN_API_BASE_URL`, `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` | 18082 |
 | `adsense-stub` | AdSense Management API + Google OAuth | `ADSENSE_DATA_API_BASE_URL`, `GOOGLE_OAUTH_TOKEN_URI` | 18083 |
 | `brave-stub` | Brave Search API | `BRAVE_SEARCH_BASE_URL` | 18084 |
 | `image-stub` | OpenAI 画像生成(gpt-image-1) | `IMAGE_LLM_BASE_URL`(platform) | 18085 |
@@ -763,7 +763,8 @@ issue #1374 のスコープでは解消していない。ファイル冒頭に�
 
 | スタブ | 値 | 結果 |
 | --- | --- | --- |
-| `ga-stub` | サービスアカウントJSONの `client_email` が `invalid@` で始まる | トークン交換が401 |
+| `ga-stub` | 認可コード `e2e-stub-invalid-code` | トークン交換が401 |
+| `ga-stub` | 認可コード `e2e-stub-ga-expired-code`(後で失効するリフレッシュトークン `e2e-stub-ga-invalid-refresh` を返す) | 連携は成功するが、以後のアクセストークン取得が401(ダッシュボードで再認証を促す表示になる) |
 | `adsense-stub` | 認可コード `e2e-stub-invalid-code` | トークン交換が401 |
 | `adsense-stub` | リフレッシュトークン `e2e-stub-invalid-refresh` | トークン交換が401 |
 | `brave-stub` | APIキー `e2e-stub-invalid-key` | 401 |
@@ -792,9 +793,11 @@ LLM と画像生成の接続設定は「DB(`lbs_platform.system_settings`)に値
 GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB設定**であって
 システム設定ではないため、この問題は起きない。向き先(baseUrl)だけが環境変数で決まる。
 
-> **GAのトークン交換先はサービスアカウントJSONが優先する。** `token_uri` がJSONに書いてあると
-> `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` は無視される。スタブ用のサービスアカウントJSONには
-> `token_uri` を**書かないこと**。
+> **GAはユーザーOAuthである(#1231)。** サービスアカウントJSON(`token_uri` が環境変数より優先される
+> 落とし穴を含む)は廃止した。`ga-stub` はトークン交換(`authorization_code` / `refresh_token`)と
+> プロパティ一覧(`GET /v1beta/accountSummaries`、2ページ)、`runReport` を提供し、Admin API と Data API は
+> Bearer のアクセストークン(`e2e-stub-ga-access-token`)を検証する。Google の同意画面はスタブ化しないため、
+> 認可コードの交換は `@api` でエンドポイント(`POST .../api-keys/google-analytics/oauth-callback`)を直接叩いて確かめる。
 
 ### スタブ未起動は「スキップ」ではなく「失敗」
 
