@@ -147,8 +147,21 @@ Then('取り込んだサイトの疎通確認が成功する', async ({ ctx, req
 /** WordPress自身のログイン画面からCookie認証する(project-serviceの認証とは独立)。 */
 async function loginToWordPressAdmin(page: Page, slug: string, adminUser: string, adminPassword: string): Promise<void> {
   await page.goto(`/sites/${slug}/wp-login.php`);
-  await page.locator('#user_login').fill(adminUser);
-  await page.locator('#user_pass').fill(adminPassword);
+  const user = page.locator('#user_login');
+  const pass = page.locator('#user_pass');
+
+  // wp-login.php は読み込み完了後に `#user_login` へ自動でフォーカスを移す。
+  // その割り込みが2つの fill の間に入ると、2つ目の入力がユーザー名欄へ流れ込み、
+  // 「ユーザー名欄にパスワードが入り、パスワード欄が空のまま送信される」形で落ちる。
+  // 送信前に両欄の値を確認し、崩れていたら入れ直す。復旧できなければ waitForURL の
+  // タイムアウトではなく、どちらの欄が不正かを示す toHaveValue で落ちる。
+  await expect(async () => {
+    await user.fill(adminUser);
+    await pass.fill(adminPassword);
+    await expect(user).toHaveValue(adminUser);
+    await expect(pass).toHaveValue(adminPassword);
+  }).toPass({ timeout: 30000 });
+
   await page.locator('#wp-submit').click();
   await page.waitForURL(`**/sites/${slug}/wp-admin/**`, { timeout: 30000 });
 }
