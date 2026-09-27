@@ -55,6 +55,8 @@ function combinedOutput(string $stdout, string $stderr): string
 // runCommand/runWp/runWpWithStdinはproc_open経由の外部コマンド実行を担う(issue #1122で
 // process-runner.phpへ切り出し、stdout/stderrの多重化・実行時間上限を追加した)。
 require __DIR__ . '/process-runner.php';
+// core downloadの壊れたキャッシュからの回復(issue #1419)。
+require __DIR__ . '/core-download.php';
 
 /**
  * 指定slugのサイトディレクトリパスを返す。存在しなければnullを返す
@@ -177,7 +179,7 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // 該当バージョンの翻訳済みコアパッケージがwordpress.org側にまだ存在しない場合に
     // "The requested locale (...) was not found." で失敗することがあるため、
     // 未翻訳コアのダウンロード → 言語パックの個別インストール(下記)の2段階に分離する。
-    [$code, $out, $err] = runWp(['core', 'download', "--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = downloadWordPressCore($sitePath);
     if ($code !== 0) {
         cleanupAndRespond(500, ['error' => 'WordPressコアのダウンロードに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
