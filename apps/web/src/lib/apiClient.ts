@@ -3,6 +3,7 @@ import { after } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getToken } from 'next-auth/jwt';
 import { gatewayUrl } from './apiBaseUrl';
+import { SESSION_EXPIRED_MESSAGE } from './sessionExpired';
 
 export type CmsType = "WORDPRESS";
 
@@ -216,7 +217,6 @@ interface ApiRequestInit extends RequestInit {
  * 401のときだけ再ログインを促す文言に差し替える(他のステータスコードの文言整備は
  * 本Issueのスコープ外)。
  */
-const SESSION_EXPIRED_MESSAGE = 'セッションの有効期限が切れました。お手数ですが再度ログインしてください。';
 
 /**
  * バックエンド(gateway)への全リクエストが通る唯一の共通経路(issue #584)。

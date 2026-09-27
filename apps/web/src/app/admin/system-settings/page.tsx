@@ -1,10 +1,12 @@
 import { requireAdminSession } from "@/lib/session";
 import { listAppSettings } from "@/lib/apiClient";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { AppSettingsPanel } from "./AppSettingsPanel";
 
 export default async function AdminSystemSettingsPage() {
   await requireAdminSession();
-  const settings = await listAppSettings().catch(() => []);
+  const settings = await loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []);
 
   return (
     <div className="space-y-8">
@@ -17,7 +19,9 @@ export default async function AdminSystemSettingsPage() {
           この保存操作での変更が全てロールバックされます。
         </p>
       </div>
-      <AppSettingsPanel settings={settings} />
+      <FetchErrorNotice labels={failedLabels(settings)} />
+      {/* 取得失敗時に空の設定を表示すると、そのまま保存して既存値を消しかねないため描画しない */}
+      {!settings.failed && <AppSettingsPanel settings={settings.data} />}
     </div>
   );
 }

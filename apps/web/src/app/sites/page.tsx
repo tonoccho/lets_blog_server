@@ -1,4 +1,6 @@
 import { listSites, listProjects, listUsers, listSshKeyPairs } from "@/lib/apiClient";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { SiteCreationPanel } from "./SiteCreationPanel";
 import { SiteListTable } from "./SiteListTable";
@@ -9,19 +11,25 @@ export default async function SitesPage() {
   // 遷移できなかった。
   const session = await requireSession();
   const [sites, projects, users, timezone] = await Promise.all([
-    listSites().catch(() => []),
-    listProjects().catch(() => []),
-    listUsers().catch(() => []),
+    loadOrReport("sites", "サイト一覧", listSites(), []),
+    loadOrReport("sites", "プロジェクト一覧", listProjects(), []),
+    loadOrReport("sites", "ユーザー一覧", listUsers(), []),
     getViewerTimeZone(),
   ]);
   const isAdmin = session?.user.role === "admin";
-  const sshKeyPairs = isAdmin ? await listSshKeyPairs().catch(() => []) : [];
+  const sshKeyPairs = isAdmin
+    ? await loadOrReport("sites", "SSH鍵一覧", listSshKeyPairs(), [])
+    : { data: [], failed: false, label: "SSH鍵一覧" };
 
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">サイト</h1>
 
-      <SiteListTable sites={sites} projects={projects} isAdmin={isAdmin} timezone={timezone} />
+      <FetchErrorNotice labels={failedLabels(sites, projects, users, sshKeyPairs)} />
+
+      {!sites.failed && (
+        <SiteListTable sites={sites.data} projects={projects.data} isAdmin={isAdmin} timezone={timezone} />
+      )}
 
       {/*
         サイト登録は admin 限定(issue #824 で registerSiteAction /
@@ -30,9 +38,9 @@ export default async function SitesPage() {
         黙ってトップページへリダイレクトされる行き止まりになる
         (useActionState 経由なのでエラー表示も出ない)。
       */}
-      {isAdmin && (
+      {isAdmin && !users.failed && !sites.failed && !sshKeyPairs.failed && (
         <div id="site-creation">
-          <SiteCreationPanel users={users} sites={sites} sshKeyPairs={sshKeyPairs} />
+          <SiteCreationPanel users={users.data} sites={sites.data} sshKeyPairs={sshKeyPairs.data} />
         </div>
       )}
     </div>

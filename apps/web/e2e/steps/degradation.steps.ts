@@ -1,4 +1,4 @@
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { After, Step, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
@@ -86,16 +86,28 @@ When('content-serviceを復旧させる', async ({ ctx, $testInfo }) => {
   startService(ctx, 'content');
 });
 
-Then('投稿履歴ページは空状態で表示される', async ({ page }) => {
+// 取得失敗の通知(FetchErrorNotice)。Next.jsのルートアナウンサーも role=alert を持つので文言で絞る。
+function fetchErrorNotice(page: Page, label: string) {
+  return page.getByRole('alert').filter({ hasText: `${label}を取得できませんでした` });
+}
+
+Then('投稿履歴ページは取得失敗を示し、0件とは表示しない', async ({ page }) => {
   await page.goto('/posts');
   // ページ自体は描画される(500やエラーバウンダリにならない)。
   await expect(page.locator('h1:has-text("投稿履歴")')).toBeVisible();
   await expect(page.getByText('エラーが発生しました')).toHaveCount(0);
-  // 取得できなかったデータは空リストとして縮退表示される。
-  await expect(page.getByText('全0件を表示')).toBeVisible();
-  await expect(
-    page.getByText('投稿履歴はまだありません(VSCode拡張から投稿すると表示されます)')
-  ).toBeVisible();
+  // 取得できなかったことを示し、「データが0件」とは表示しない(issue #1235)。
+  await expect(fetchErrorNotice(page, '投稿履歴')).toBeVisible();
+  await expect(page.getByText('全0件を表示')).toHaveCount(0);
+  await expect(page.getByText('投稿履歴はまだありません', { exact: false })).toHaveCount(0);
+});
+
+Then('生成画像ギャラリーは取得失敗を示し、画像なしとは表示しない', async ({ page }) => {
+  await page.goto('/image-gallery');
+  await expect(page.locator('h1:has-text("生成画像ギャラリー")')).toBeVisible();
+  await expect(page.getByText('エラーが発生しました')).toHaveCount(0);
+  await expect(fetchErrorNotice(page, '生成画像')).toBeVisible();
+  await expect(page.getByText('生成画像がありません', { exact: false })).toHaveCount(0);
 });
 
 Then('投稿履歴ページは通常どおり表示される', async ({ page }) => {
@@ -104,6 +116,8 @@ Then('投稿履歴ページは通常どおり表示される', async ({ page }) 
   await expect(page.getByText('エラーが発生しました')).toHaveCount(0);
   // 復旧したサービスから件数を取得できている(縮退時の「全0件」ではなく実際の件数が出る)。
   await expect(page.getByText(/全\d+件を表示/)).toBeVisible();
+  // 復旧後は失敗の通知が残らない。
+  await expect(fetchErrorNotice(page, '投稿履歴')).toHaveCount(0);
 });
 
 Then('AIを使わない画面とAPIは通常どおり使える', async ({ page, request }) => {

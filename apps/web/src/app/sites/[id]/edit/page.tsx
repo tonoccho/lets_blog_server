@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { getSiteDetail, listSshKeyPairs, listStaticContent } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SiteEditForm } from "./SiteEditForm";
 import { StaticContentPanel } from "./StaticContentPanel";
@@ -13,11 +15,21 @@ export default async function SiteEditPage({
   await requireAdminSession();
   const { id } = await params;
 
-  const [site, sshKeyPairs, staticContents] = await Promise.all([
-    getSiteDetail(Number(id)).catch(() => null),
-    listSshKeyPairs().catch(() => []),
-    listStaticContent(Number(id)).catch(() => []),
+  // 404だけを「存在しない」として扱い、それ以外の失敗は notFound() にせず通知する(issue #1235)。
+  const scope = `sites/${id}/edit`;
+  const [siteResult, sshKeyPairs, staticContents] = await Promise.all([
+    loadOrReport(scope, "サイト情報", getSiteDetail(Number(id)), null, { notFoundIsEmpty: true }),
+    loadOrReport(scope, "SSH鍵一覧", listSshKeyPairs(), []),
+    loadOrReport(scope, "静的コンテンツ一覧", listStaticContent(Number(id)), []),
   ]);
+  if (siteResult.failed) {
+    return (
+      <div className="space-y-8">
+        <FetchErrorNotice labels={failedLabels(siteResult)} />
+      </div>
+    );
+  }
+  const site = siteResult.data;
   if (!site) {
     notFound();
   }
@@ -32,8 +44,10 @@ export default async function SiteEditPage({
         ]}
       />
       <h1 className="text-xl font-semibold">サイト管理</h1>
-      <SiteEditForm site={site} sshKeyPairs={sshKeyPairs} />
-      <StaticContentPanel siteId={site.id} initialContents={staticContents} />
+      <FetchErrorNotice labels={failedLabels(sshKeyPairs, staticContents)} />
+      {/* 選択肢が空のフォームを保存すると鍵の紐付けを外しかねないため、取得失敗時は描画しない */}
+      {!sshKeyPairs.failed && <SiteEditForm site={site} sshKeyPairs={sshKeyPairs.data} />}
+      {!staticContents.failed && <StaticContentPanel siteId={site.id} initialContents={staticContents.data} />}
     </div>
   );
 }

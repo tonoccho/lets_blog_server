@@ -1,4 +1,6 @@
 import { listPosts } from "@/lib/apiClient";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { PostsTable } from "./PostsTable";
@@ -8,11 +10,20 @@ export default async function PostsPage() {
   // 以前はセッションの状態を見ずに描画しており、失敗したlistPosts()を
   // catch(() => [])で握り潰すため「投稿履歴が0件」に見えていた。
   await requireSession();
-  const [posts, timezone] = await Promise.all([listPosts().catch(() => []), getViewerTimeZone()]);
+  const [postsResult, timezone] = await Promise.all([
+    loadOrReport("posts", "投稿履歴", listPosts(), []),
+    getViewerTimeZone(),
+  ]);
+  const posts = postsResult.data;
 
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">投稿履歴</h1>
+
+      <FetchErrorNotice labels={failedLabels(postsResult)} />
+
+      {!postsResult.failed && (
+      <>
 
       <div className="text-sm text-neutral-600 dark:text-neutral-400">
         全{posts.length}件を表示
@@ -57,6 +68,8 @@ export default async function PostsPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 }
