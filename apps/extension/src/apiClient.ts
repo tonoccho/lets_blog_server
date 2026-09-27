@@ -272,6 +272,7 @@ import type {
   AiDraftResult,
   AiImagePromptResult,
   AiImageResult,
+  AiReviewStepSuggestionsResult,
   AiSectionResult,
   AiTagsResult,
   AssignIssueResult,
@@ -298,6 +299,7 @@ export type {
   AiDraftResult,
   AiImagePromptResult,
   AiImageResult,
+  AiReviewStepSuggestionsResult,
   AiSectionResult,
   AiTagsResult,
   AssignIssueResult,
@@ -630,6 +632,30 @@ export async function proofreadContent(
     createBody: jsonBody({ text, provider: provider || undefined }),
     retryable: true,
   }, schemas.ProofreadResultSchema);
+}
+
+/**
+ * 多段レビューの1ステップ分の指摘をAIへ依頼する(issue #1215)。
+ * プロバイダー/モデルはサーバーがプロジェクトのステップ設定から決めるため、本文だけを送る。
+ * @param stepKey JAPANESE / PROOFREADING / FACT_CHECK / READER_PERSPECTIVE / STYLE
+ * @param signal 再実行時に古いリクエストを打ち切るためのキャンセル用
+ */
+export async function reviewStepSuggestions(
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  stepKey: string,
+  text: string,
+  signal?: AbortSignal
+): Promise<AiReviewStepSuggestionsResult> {
+  return requestJson(`/api/projects/${projectId}/ai/review-steps/${encodeURIComponent(stepKey)}/suggestions`, {
+    label: 'reviewStepSuggestions',
+    signal,
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody({ text }),
+    retryable: true,
+  }, schemas.AiReviewStepSuggestionsResultSchema);
 }
 
 /** プロジェクトのマスター環境サイトに既に存在するタグ名一覧。サイト未紐付け等の場合は空配列(issue #525)。 */

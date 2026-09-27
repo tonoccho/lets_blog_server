@@ -1,4 +1,4 @@
-import { ProofreadIssue } from './schemas';
+import { ReviewStepSuggestion } from './schemas';
 
 /**
  * 校正チェック(issue #523)のうち、vscode APIに依存しない純粋なロジック。
@@ -15,8 +15,8 @@ export function computeBodyOffset(rawText: string): number {
 }
 
 /** 本文中で位置が特定できた指摘。開始・終了位置はrawText全体(front matter込み)に対するオフセット。 */
-export interface LocatedProofreadIssue {
-  issue: ProofreadIssue;
+export interface LocatedProofreadIssue<T extends { originalText: string } = { originalText: string }> {
+  issue: T;
   startOffset: number;
   endOffset: number;
 }
@@ -27,12 +27,12 @@ export interface LocatedProofreadIssue {
  * 登場する場合でもAIが指摘した順番通りの箇所に対応付けられるようにする。見つからない場合は
  * 本文全体を再検索し、それでも見つからない指摘(originalTextの引用が不正確等)は除外する。
  */
-export function locateContentIssues(
+export function locateContentIssues<T extends { originalText: string }>(
   content: string,
   bodyOffset: number,
-  issues: ProofreadIssue[]
-): LocatedProofreadIssue[] {
-  const located: LocatedProofreadIssue[] = [];
+  issues: T[]
+): LocatedProofreadIssue<T>[] {
+  const located: LocatedProofreadIssue<T>[] = [];
   let cursor = 0;
   for (const issue of issues) {
     if (!issue.originalText) continue;
@@ -98,4 +98,78 @@ export function isValidStatus(status: string | undefined, validValues: string[])
   if (!status) return true;
   if (validValues.length === 0) return true;
   return validValues.some((v) => v.toLowerCase() === status.toLowerCase());
+}
+
+export type ReviewStepKey = 'JAPANESE' | 'PROOFREADING' | 'FACT_CHECK' | 'READER_PERSPECTIVE' | 'STYLE';
+
+/** レビューの1ステップ。colorIdはステップ別のアンダーライン色(VS CodeのThemeColor ID)。 */
+export interface ReviewStepDefinition {
+  key: ReviewStepKey;
+  label: string;
+  colorId: string;
+}
+
+/** レビュー5ステップ。実行順そのもの(issue #1215)。色はライト/ダーク双方で読めるテーマ色を使う。 */
+export const REVIEW_STEPS: readonly ReviewStepDefinition[] = [
+  { key: 'JAPANESE', label: '日本語チェック', colorId: 'charts.red' },
+  { key: 'PROOFREADING', label: '校正チェック', colorId: 'charts.orange' },
+  { key: 'FACT_CHECK', label: '校閲', colorId: 'charts.blue' },
+  { key: 'READER_PERSPECTIVE', label: '読者視点でのチェック', colorId: 'charts.green' },
+  { key: 'STYLE', label: '文体チェック', colorId: 'charts.purple' },
+];
+
+/** 進捗表示の文言。indexは0始まり。 */
+export function reviewProgressMessage(index: number, total: number, label: string): string {
+  return `${label} (${index + 1}/${total})`;
+}
+
+/** 指摘箇所のホバーに出すMarkdown。ステップ名・指摘内容と、あれば提案・出典を含める。 */
+export function buildFindingHover(
+  label: string,
+  message: string,
+  suggestion: string | null | undefined,
+  sources: { title?: string; url: string }[]
+): string {
+  const lines = [`**${label}**`, '', message];
+  if (suggestion) lines.push('', `提案: ${suggestion}`);
+  for (const source of sources) {
+    lines.push('', source.title ? `[${source.title}](${source.url})` : source.url);
+  }
+  return lines.join('\n');
+}
+
+/** 位置が特定できた、あるステップの指摘。 */
+export interface StepFinding {
+  step: ReviewStepDefinition;
+  suggestion: ReviewStepSuggestion;
+  startOffset: number;
+  endOffset: number;
+}
+
+export interface RunReviewStepsOptions {
+  content: string;
+  bodyOffset: number;
+  fetchStep: (key: ReviewStepKey, text: string) => Promise<ReviewStepSuggestion[]>;
+  onStep: (step: ReviewStepDefinition, index: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * 5ステップを定義順に1つずつ実行し、全ステップの指摘を本文中の位置へ解決して集約する。
+ * ステップごとに利用者の操作は待たない。signalが中断されたら次のステップへ進まず例外を投げる。
+ */
+export async function runReviewSteps(options: RunReviewStepsOptions): Promise<StepFinding[]> {
+  const findings: StepFinding[] = [];
+  for (let index = 0; index < REVIEW_STEPS.length; index++) {
+    if (options.signal?.aborted) {
+      throw new Error('レビューが中断されました');
+    }
+    const step = REVIEW_STEPS[index];
+    options.onStep(step, index, REVIEW_STEPS.length);
+    const suggestions = await options.fetchStep(step.key, options.content);
+    for (const located of locateContentIssues(options.content, options.bodyOffset, suggestions)) {
+      findings.push({ step, suggestion: located.issue, startOffset: located.startOffset, endOffset: located.endOffset });
+    }
+  }
+  return findings;
 }

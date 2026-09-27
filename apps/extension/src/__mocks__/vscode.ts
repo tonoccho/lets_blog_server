@@ -24,6 +24,10 @@ export function resetMocks(): void {
   workspaceFolders = undefined;
   appliedEdits.length = 0;
   shownInformations.length = 0;
+  decorationTypes.length = 0;
+  progressRuns.length = 0;
+  diagnosticCollections.length = 0;
+  visibleTextEditors = [];
 }
 
 /** showWarningMessage が返す選択肢(未設定なら「閉じた」= undefined)。 */
@@ -97,11 +101,77 @@ export const workspace = {
 
 /** vscode.Position / vscode.Range の最小再現(位置は文字オフセットで表す)。 */
 export class Position {
-  constructor(public readonly offset: number) {}
+  public readonly line: number;
+  constructor(public readonly offset: number, public readonly character: number = 0) {
+    this.line = offset;
+  }
 }
 
 export class Range {
   constructor(public readonly start: unknown, public readonly end: unknown) {}
+
+  isEqual(other: Range): boolean {
+    return JSON.stringify(this.start) === JSON.stringify(other.start) && JSON.stringify(this.end) === JSON.stringify(other.end);
+  }
+}
+
+/** vscode.ThemeColor の最小再現。 */
+export class ThemeColor {
+  constructor(public readonly id: string) {}
+}
+
+/** vscode.MarkdownString の最小再現。 */
+export class MarkdownString {
+  constructor(public value: string = '') {}
+}
+
+export const DiagnosticSeverity = { Error: 0, Warning: 1, Information: 2, Hint: 3 } as const;
+
+export class Diagnostic {
+  source?: string;
+  code?: string | number;
+  constructor(public range: Range, public message: string, public severity?: number) {}
+}
+
+export const CodeActionKind = { QuickFix: 'quickfix' } as const;
+
+export class CodeAction {
+  diagnostics?: Diagnostic[];
+  edit?: WorkspaceEdit;
+  command?: { command: string; title: string; arguments?: unknown[] };
+  constructor(public title: string, public kind?: string) {}
+}
+
+/** createDiagnosticCollection が返す診断コレクションの記録先(uri文字列 -> 診断)。 */
+export const diagnosticCollections: Map<string, Diagnostic[]>[] = [];
+
+export const languages = {
+  createDiagnosticCollection: () => {
+    const store = new Map<string, Diagnostic[]>();
+    diagnosticCollections.push(store);
+    return {
+      set: (uri: unknown, diagnostics: Diagnostic[]) => store.set(String(uri), diagnostics),
+      delete: (uri: unknown) => store.delete(String(uri)),
+      dispose: () => store.clear(),
+    };
+  },
+};
+
+/** createTextEditorDecorationType が作った装飾タイプの記録(色分けの検証用)。 */
+export interface MockDecorationType {
+  options: Record<string, unknown>;
+  disposed: boolean;
+  dispose: () => void;
+}
+export const decorationTypes: MockDecorationType[] = [];
+
+/** withProgress に渡された設定と、task内で report された内容。 */
+export const progressRuns: { options: Record<string, unknown>; reports: { message?: string }[] }[] = [];
+
+/** window.visibleTextEditors の差し替え口。 */
+let visibleTextEditors: unknown[] = [];
+export function setVisibleTextEditors(editors: unknown[]): void {
+  visibleTextEditors = editors;
 }
 
 /** vscode.WorkspaceEdit の最小再現。適用はせず、内容を記録するだけ。 */
@@ -142,6 +212,22 @@ interface MockWebviewPanel {
 }
 
 export const window = {
+  get visibleTextEditors() {
+    return visibleTextEditors;
+  },
+  createTextEditorDecorationType: (options: Record<string, unknown>): MockDecorationType => {
+    const type: MockDecorationType = { options, disposed: false, dispose: () => { type.disposed = true; } };
+    decorationTypes.push(type);
+    return type;
+  },
+  withProgress: async <T>(
+    options: Record<string, unknown>,
+    task: (progress: { report: (value: { message?: string }) => void }) => Promise<T>
+  ): Promise<T> => {
+    const run = { options, reports: [] as { message?: string }[] };
+    progressRuns.push(run);
+    return task({ report: (value) => run.reports.push(value) });
+  },
   createOutputChannel: () => ({
     appendLine: () => undefined,
     show: () => undefined,

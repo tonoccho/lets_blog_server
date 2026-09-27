@@ -1,55 +1,42 @@
 import * as vscode from 'vscode';
-import { getActor, getAccessToken, getConfiguredAiProvider, getProjectId } from './config';
+import { getActor, getAccessToken, getProjectId, requireProjectId } from './config';
 import { parseArticle, validateScheduledPublication } from './frontMatter';
 import * as api from './apiClient';
-import { CancelledError, messageOf } from './errorHandler';
+import { messageOf } from './errorHandler';
 import { logger } from './logger';
 import {
+  buildFindingHover,
   computeBodyOffset,
   findFrontMatterFieldLine,
   findInvalidCategories,
   isValidStatus,
-  locateContentIssues,
+  REVIEW_STEPS,
+  reviewProgressMessage,
+  ReviewStepKey,
+  runReviewSteps,
+  StepFinding,
 } from './proofreadLogic';
-import { ProofreadIssue } from './schemas';
 
 /**
- * 校正チェック(issue #523)のvscode連携部分。
+ * 校正チェック(issue #523)と多段レビュー(issue #1215)のvscode連携部分。
  *
  * front matterの検証(publish_scheduled_atの過去日時・statusの妥当性・categoriesの実在確認)は
- * LLMを呼ばないため常時・短いデバウンスで実行する。一方、本文のAI校正(誤字脱字・読みやすさ・
- * 冗長表現)は編集の都度、設定した外部AIプロバイダーへ本文を送信することになるため、
- * letsBlog.proofreadEnabled(既定false)でオプトインした場合のみ実行する
- * (「Proofread Now」コマンドは設定に関わらず両方を即時実行する)。
+ * LLMを呼ばないため、編集の都度・短いデバウンスで実行する。
+ *
+ * 本文のレビュー(日本語チェック→校正チェック→校閲→読者視点でのチェック→文体チェックの5ステップ)は
+ * LLMを呼ぶため自動実行せず、「Proofread Now」コマンドの明示的な操作だけを起点にする。
+ * 結果はステップ別の色のアンダーライン(TextEditorDecorationType)で示す。
+ * DiagnosticはDiagnosticSeverityでしか色を変えられずステップ別の色分けができないため、
+ * 本文の指摘にはDiagnosticを使わない。
  */
 
-const DIAGNOSTIC_SOURCE_CONTENT = 'letsBlog-proofread';
 const DIAGNOSTIC_SOURCE_FRONTMATTER = 'letsBlog-frontmatter';
 const FRONT_MATTER_DEBOUNCE_MS = 500;
-const DEFAULT_CONTENT_DEBOUNCE_MS = 2000;
-
-const CONTENT_ISSUE_LABELS: Record<string, string> = {
-  typo: '誤字脱字',
-  readability: '読みやすさ',
-  unnecessary: '冗長な表現',
-};
 
 type ProofreadFix =
-  | { range: vscode.Range; kind: 'applySuggestion'; suggestion: string }
   | { range: vscode.Range; kind: 'schedulePublication' }
   | { range: vscode.Range; kind: 'fixInvalidStatus' }
   | { range: vscode.Range; kind: 'removeInvalidCategory'; category: string };
-
-function isProofreadEnabled(): boolean {
-  return vscode.workspace.getConfiguration('letsBlog').get<boolean>('proofreadEnabled', false);
-}
-
-function getContentDebounceMs(): number {
-  const configured = vscode.workspace
-    .getConfiguration('letsBlog')
-    .get<number>('proofreadDebounceMs', DEFAULT_CONTENT_DEBOUNCE_MS);
-  return typeof configured === 'number' && configured > 0 ? configured : DEFAULT_CONTENT_DEBOUNCE_MS;
-}
 
 function toRange(location: { line: number; startColumn: number; endColumn: number }): vscode.Range {
   return new vscode.Range(
@@ -65,31 +52,39 @@ function buildDiagnostic(range: vscode.Range, message: string, source: string, c
   return diagnostic;
 }
 
-function formatContentMessage(issue: ProofreadIssue): string {
-  const label = CONTENT_ISSUE_LABELS[issue.type] ?? issue.type;
-  return issue.suggestion ? `[${label}] ${issue.message}(提案: ${issue.suggestion})` : `[${label}] ${issue.message}`;
+function createStepDecorationType(colorId: string): vscode.TextEditorDecorationType {
+  const color = new vscode.ThemeColor(colorId);
+  return vscode.window.createTextEditorDecorationType({
+    borderStyle: 'none none solid none',
+    borderWidth: '0 0 2px 0',
+    borderColor: color,
+    overviewRulerColor: color,
+  });
 }
 
 /**
- * エディタの校正診断(赤い波線)を管理する。1インスタンスを拡張全体で共有し、
- * ドキュメントURIごとにデバウンスタイマー・進行中リクエスト・診断内容を保持する。
+ * エディタの校正表示を管理する。1インスタンスを拡張全体で共有し、ドキュメントURIごとに
+ * front matterのデバウンスタイマー・診断内容と、本文レビューの進行中リクエスト・装飾内容を保持する。
  */
 export class ProofreadController implements vscode.Disposable, vscode.CodeActionProvider {
   private readonly diagnostics = vscode.languages.createDiagnosticCollection('letsBlog-proofread');
   private readonly frontMatterTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly contentTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly contentAbortControllers = new Map<string, AbortController>();
   private readonly frontMatterDiagnostics = new Map<string, vscode.Diagnostic[]>();
-  private readonly contentDiagnostics = new Map<string, vscode.Diagnostic[]>();
   private readonly frontMatterFixes = new Map<string, ProofreadFix[]>();
-  private readonly contentFixes = new Map<string, ProofreadFix[]>();
+  /** ステップ別の装飾タイプ。ステップ数は固定のため、生成は1回だけ。 */
+  private readonly stepDecorationTypes = new Map<ReviewStepKey, vscode.TextEditorDecorationType>(
+    REVIEW_STEPS.map((step) => [step.key, createStepDecorationType(step.colorId)])
+  );
+  /** ドキュメントごと・ステップごとの、直近のレビュー結果の装飾(エディタを開き直したときの再表示用)。 */
+  private readonly findingRanges = new Map<string, vscode.DecorationOptions[][]>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   dispose(): void {
     for (const timer of this.frontMatterTimers.values()) clearTimeout(timer);
-    for (const timer of this.contentTimers.values()) clearTimeout(timer);
     for (const controller of this.contentAbortControllers.values()) controller.abort();
+    for (const type of this.stepDecorationTypes.values()) type.dispose();
     this.diagnostics.dispose();
   }
 
@@ -98,20 +93,19 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     const key = document.uri.toString();
     const fmTimer = this.frontMatterTimers.get(key);
     if (fmTimer) clearTimeout(fmTimer);
-    const contentTimer = this.contentTimers.get(key);
-    if (contentTimer) clearTimeout(contentTimer);
     this.contentAbortControllers.get(key)?.abort();
     this.frontMatterTimers.delete(key);
-    this.contentTimers.delete(key);
     this.contentAbortControllers.delete(key);
     this.frontMatterDiagnostics.delete(key);
-    this.contentDiagnostics.delete(key);
     this.frontMatterFixes.delete(key);
-    this.contentFixes.delete(key);
+    this.findingRanges.delete(key);
     this.diagnostics.delete(document.uri);
   }
 
-  /** 編集/オープンの度に呼ばれる。front matterチェックは常時、本文AI校正はオプトイン時のみ予約する。 */
+  /**
+   * 編集/オープンの度に呼ばれる。front matterチェックだけをデバウンスして予約する。
+   * 本文のレビューはLLMを呼ぶため、ここからは決して起動しない(issue #1215)。
+   */
   scheduleCheck(document: vscode.TextDocument): void {
     if (document.languageId !== 'markdown') return;
     const key = document.uri.toString();
@@ -125,20 +119,9 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
         void this.runFrontMatterCheck(document);
       }, FRONT_MATTER_DEBOUNCE_MS)
     );
-
-    if (!isProofreadEnabled()) return;
-    const existingContentTimer = this.contentTimers.get(key);
-    if (existingContentTimer) clearTimeout(existingContentTimer);
-    this.contentTimers.set(
-      key,
-      setTimeout(() => {
-        this.contentTimers.delete(key);
-        void this.runContentCheck(document);
-      }, getContentDebounceMs())
-    );
   }
 
-  /** 「Proofread Now」コマンド用。設定(letsBlog.proofreadEnabled)に関わらず両方を即時実行する。 */
+  /** 「Proofread Now」コマンド用。front matter検証を即時実行したうえで、本文の5ステップレビューを実行する。 */
   async runManual(document: vscode.TextDocument): Promise<void> {
     const key = document.uri.toString();
     const fmTimer = this.frontMatterTimers.get(key);
@@ -146,23 +129,30 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       clearTimeout(fmTimer);
       this.frontMatterTimers.delete(key);
     }
-    const contentTimer = this.contentTimers.get(key);
-    if (contentTimer) {
-      clearTimeout(contentTimer);
-      this.contentTimers.delete(key);
-    }
 
     await this.runFrontMatterCheck(document);
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: '校正チェック中…' },
-      () => this.runContentCheck(document, { manual: true })
+      (progress) => this.runContentReview(document, (message) => progress.report({ message }))
     );
+  }
+
+  /** エディタが(再)表示されたとき、保持しているレビュー結果の装飾をそのエディタへ置き直す。 */
+  refreshEditor(editor: vscode.TextEditor): void {
+    const ranges = this.findingRanges.get(editor.document.uri.toString());
+    if (!ranges) return;
+    this.setDecorationsOn(editor, ranges);
+  }
+
+  private setDecorationsOn(editor: vscode.TextEditor, perStep: vscode.DecorationOptions[][]): void {
+    REVIEW_STEPS.forEach((step, index) => {
+      editor.setDecorations(this.stepDecorationTypes.get(step.key)!, perStep[index]);
+    });
   }
 
   private applyDiagnostics(document: vscode.TextDocument): void {
     const key = document.uri.toString();
-    const combined = [...(this.frontMatterDiagnostics.get(key) ?? []), ...(this.contentDiagnostics.get(key) ?? [])];
-    this.diagnostics.set(document.uri, combined);
+    this.diagnostics.set(document.uri, this.frontMatterDiagnostics.get(key) ?? []);
   }
 
   private async runFrontMatterCheck(document: vscode.TextDocument): Promise<void> {
@@ -243,15 +233,13 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     this.applyDiagnostics(document);
   }
 
-  private async runContentCheck(document: vscode.TextDocument, options: { manual?: boolean } = {}): Promise<void> {
+  private async runContentReview(document: vscode.TextDocument, report: (message: string) => void): Promise<void> {
     const key = document.uri.toString();
     const rawText = document.getText();
     const article = parseArticle(rawText);
 
     if (!article.content.trim()) {
-      this.contentDiagnostics.set(key, []);
-      this.contentFixes.set(key, []);
-      this.applyDiagnostics(document);
+      this.showFindings(document, []);
       return;
     }
 
@@ -262,51 +250,55 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     try {
       const apiKey = await getAccessToken(this.context);
       if (!apiKey) {
-        if (options.manual) {
-          throw new Error("ログインしていません。「Let's Blog: Login」を先に実行してください。");
-        }
-        return;
+        throw new Error("ログインしていません。「Let's Blog: Login」を先に実行してください。");
       }
       const actor = await getActor(this.context);
-      const provider = getConfiguredAiProvider();
-      const result = await api.proofreadContent(
-        apiKey,
-        actor,
-        article.content,
-        provider || undefined,
-        controller.signal
-      );
-      // 実行中に別のスケジュールが割り込んでいた場合、古い結果で上書きしない。
+      const projectId = (article.data.project_id as number | undefined) ?? requireProjectId(this.context);
+      const findings = await runReviewSteps({
+        content: article.content,
+        bodyOffset: computeBodyOffset(rawText),
+        signal: controller.signal,
+        onStep: (step, index, total) => report(reviewProgressMessage(index, total, step.label)),
+        fetchStep: async (stepKey, text) =>
+          (await api.reviewStepSuggestions(apiKey, actor, projectId, stepKey, text, controller.signal)).suggestions,
+      });
+      // 実行中に別のレビューが始まっていた場合、古い結果で上書きしない。
       if (this.contentAbortControllers.get(key) !== controller) {
         return;
       }
-
-      const bodyOffset = computeBodyOffset(rawText);
-      const located = locateContentIssues(article.content, bodyOffset, result.issues);
-      const diagnostics: vscode.Diagnostic[] = [];
-      const fixes: ProofreadFix[] = [];
-      for (const item of located) {
-        const range = new vscode.Range(document.positionAt(item.startOffset), document.positionAt(item.endOffset));
-        diagnostics.push(buildDiagnostic(range, formatContentMessage(item.issue), DIAGNOSTIC_SOURCE_CONTENT, item.issue.type));
-        if (item.issue.suggestion) {
-          fixes.push({ range, kind: 'applySuggestion', suggestion: item.issue.suggestion });
-        }
-      }
-      this.contentDiagnostics.set(key, diagnostics);
-      this.contentFixes.set(key, fixes);
-      this.applyDiagnostics(document);
+      this.showFindings(document, findings);
     } catch (err) {
-      if (err instanceof CancelledError) {
+      if (this.contentAbortControllers.get(key) !== controller) {
         return;
       }
-      if (options.manual) {
-        throw err;
-      }
-      // バックグラウンドの自動チェック失敗はタイピング中に通知を出すと煩わしいため、ログのみに残す。
-      logger.warn('校正チェックに失敗しました(バックグラウンド実行のためスキップ)', { reason: messageOf(err) });
+      throw err;
     } finally {
       if (this.contentAbortControllers.get(key) === controller) {
         this.contentAbortControllers.delete(key);
+      }
+    }
+  }
+
+  /** レビュー結果をステップ別の装飾に変換して保持し、そのドキュメントを開いているエディタへ反映する。 */
+  private showFindings(document: vscode.TextDocument, findings: StepFinding[]): void {
+    const key = document.uri.toString();
+    const perStep: vscode.DecorationOptions[][] = REVIEW_STEPS.map(() => []);
+    for (const finding of findings) {
+      const range = new vscode.Range(document.positionAt(finding.startOffset), document.positionAt(finding.endOffset));
+      const hover = new vscode.MarkdownString(
+        buildFindingHover(
+          finding.step.label,
+          finding.suggestion.message,
+          finding.suggestion.suggestion,
+          finding.suggestion.sources
+        )
+      );
+      perStep[REVIEW_STEPS.indexOf(finding.step)].push({ range, hoverMessage: hover });
+    }
+    this.findingRanges.set(key, perStep);
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.uri.toString() === key) {
+        this.setDecorationsOn(editor, perStep);
       }
     }
   }
@@ -317,10 +309,10 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     context: vscode.CodeActionContext
   ): vscode.CodeAction[] {
     const key = document.uri.toString();
-    const fixes = [...(this.frontMatterFixes.get(key) ?? []), ...(this.contentFixes.get(key) ?? [])];
+    const fixes = this.frontMatterFixes.get(key) ?? [];
     const actions: vscode.CodeAction[] = [];
     for (const diagnostic of context.diagnostics) {
-      if (diagnostic.source !== DIAGNOSTIC_SOURCE_CONTENT && diagnostic.source !== DIAGNOSTIC_SOURCE_FRONTMATTER) {
+      if (diagnostic.source !== DIAGNOSTIC_SOURCE_FRONTMATTER) {
         continue;
       }
       for (const fix of fixes.filter((f) => f.range.isEqual(diagnostic.range))) {
@@ -332,14 +324,6 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
 
   private buildCodeAction(document: vscode.TextDocument, diagnostic: vscode.Diagnostic, fix: ProofreadFix): vscode.CodeAction {
     switch (fix.kind) {
-      case 'applySuggestion': {
-        const action = new vscode.CodeAction('提案を適用', vscode.CodeActionKind.QuickFix);
-        action.diagnostics = [diagnostic];
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(document.uri, fix.range, fix.suggestion);
-        action.edit = edit;
-        return action;
-      }
       case 'schedulePublication': {
         const action = new vscode.CodeAction('公開予定日時を設定し直す…', vscode.CodeActionKind.QuickFix);
         action.diagnostics = [diagnostic];

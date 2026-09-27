@@ -116,7 +116,7 @@
       },
       {
         "command": "letsBlog.proofreadNow",
-        "title": "Let's Blog: 校正チェックを今すぐ実行"
+        "title": "Let's Blog: 校正チェックを今すぐ実行(5ステップレビュー)"
       }
     ],
     "keybindings": [
@@ -226,13 +226,15 @@
         "letsBlog.proofreadEnabled": {
           "type": "boolean",
           "default": false,
-          "description": "編集の都度、本文をletsBlog.aiProviderで設定したAIへ自動送信して校正チェック(誤字脱字・読みやすさ・冗長表現)を行い、エディタに波線で表示する。既定はfalse(無効)。front matterの検証(公開予定日時・ステータス・カテゴリ)はこの設定に関わらず常に行われる。「Let's Blog: 校正チェックを今すぐ実行」コマンドは、この設定が無効でも都度AI校正を実行できる。"
+          "deprecationMessage": "この設定は廃止されました。本文のAIレビューは自動実行されなくなり、「Let's Blog: 校正チェックを今すぐ実行」コマンドでのみ実行されます。設定は削除して構いません。",
+          "description": "(廃止)本文のAI校正の自動実行は廃止されました。"
         },
         "letsBlog.proofreadDebounceMs": {
           "type": "number",
           "default": 2000,
           "minimum": 500,
-          "description": "letsBlog.proofreadEnabled有効時、入力が止まってから本文のAI校正を実行するまでの待機時間(ミリ秒)。"
+          "deprecationMessage": "この設定は廃止されました。本文のAIレビューの自動実行(デバウンス)は無くなり、値は使われません。設定は削除して構いません。",
+          "description": "(廃止)本文のAI校正の自動実行は廃止されたため、この値は使われません。"
         }
       }
     }

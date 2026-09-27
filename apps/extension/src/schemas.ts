@@ -78,6 +78,28 @@ export const ProofreadResultSchema = z.object({
 });
 export type ProofreadResult = z.infer<typeof ProofreadResultSchema>;
 
+/**
+ * 多段レビューの1ステップが返した1件の指摘。
+ * POST /api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions のレスポンス(issue #1215)。
+ * suggestionはサーバーが返す場合に備えた任意項目(現行のOpenAPIには無いため既定はnull)。
+ */
+export const ReviewStepSuggestionSchema = z.object({
+  id: z.string().optional(),
+  stepKey: z.string().optional(),
+  originalText: z.string().default(''),
+  message: z.string().default(''),
+  suggestion: z.string().nullable().default(null),
+  sources: z.array(z.object({ title: z.string().optional(), url: z.string() })).default([]),
+});
+export type ReviewStepSuggestion = z.infer<typeof ReviewStepSuggestionSchema>;
+
+export const AiReviewStepSuggestionsResultSchema = z.object({
+  suggestions: z.array(ReviewStepSuggestionSchema).default([]),
+  skipped: z.boolean().default(false),
+  skipReason: z.string().optional(),
+});
+export type AiReviewStepSuggestionsResult = z.infer<typeof AiReviewStepSuggestionsResultSchema>;
+
 export const AiImageResultSchema = z.object({
   id: z.number(),
   fileName: z.string(),

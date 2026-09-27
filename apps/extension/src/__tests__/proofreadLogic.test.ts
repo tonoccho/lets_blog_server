@@ -4,6 +4,10 @@ import {
   findInvalidCategories,
   isValidStatus,
   locateContentIssues,
+  REVIEW_STEPS,
+  reviewProgressMessage,
+  buildFindingHover,
+  runReviewSteps,
 } from '../proofreadLogic';
 import { ProofreadIssue } from '../schemas';
 
@@ -104,5 +108,126 @@ describe('isValidStatus', () => {
 
   it('validValuesが空(取得失敗)の場合はチェックをスキップしtrueを返す', () => {
     expect(isValidStatus('unknown', [])).toBe(true);
+  });
+});
+
+describe('REVIEW_STEPS', () => {
+  it('5ステップを日本語チェック→校正チェック→校閲→読者視点でのチェック→文体チェックの順に持つ', () => {
+    expect(REVIEW_STEPS.map((s) => s.key)).toEqual([
+      'JAPANESE',
+      'PROOFREADING',
+      'FACT_CHECK',
+      'READER_PERSPECTIVE',
+      'STYLE',
+    ]);
+    expect(REVIEW_STEPS.map((s) => s.label)).toEqual([
+      '日本語チェック',
+      '校正チェック',
+      '校閲',
+      '読者視点でのチェック',
+      '文体チェック',
+    ]);
+  });
+
+  it('ステップごとに異なるテーマカラーが割り当てられている', () => {
+    const colors = REVIEW_STEPS.map((s) => s.colorId);
+    expect(new Set(colors).size).toBe(5);
+    for (const id of colors) expect(id).toMatch(/^charts\./);
+  });
+});
+
+describe('reviewProgressMessage', () => {
+  it('現在のステップ名と進行位置を含める', () => {
+    expect(reviewProgressMessage(1, 5, '校正チェック')).toBe('校正チェック (2/5)');
+  });
+});
+
+describe('buildFindingHover', () => {
+  it('ステップ名・指摘内容を含む', () => {
+    const text = buildFindingHover('校閲', '事実と異なる可能性があります', null, []);
+    expect(text).toContain('校閲');
+    expect(text).toContain('事実と異なる可能性があります');
+    expect(text).not.toContain('提案');
+  });
+
+  it('提案があれば読める形で含める', () => {
+    const text = buildFindingHover('文体チェック', '口調が混在', 'です・ます調に統一', []);
+    expect(text).toContain('提案');
+    expect(text).toContain('です・ます調に統一');
+  });
+
+  it('出典があればタイトルとURLを含め、タイトルが無ければURLだけにする', () => {
+    const text = buildFindingHover('校閲', 'm', undefined, [
+      { title: '公式', url: 'https://a.test' },
+      { url: 'https://b.test' },
+    ]);
+    expect(text).toContain('[公式](https://a.test)');
+    expect(text).toContain('https://b.test');
+  });
+});
+
+describe('runReviewSteps', () => {
+  const content = 'AはBです。CはDです。';
+
+  it('5ステップを順に実行し、各ステップの指摘を位置つきで集約する', async () => {
+    const order: string[] = [];
+    const progress: string[] = [];
+    const result = await runReviewSteps({
+      content,
+      bodyOffset: 10,
+      fetchStep: async (key) => {
+        order.push(key);
+        return key === 'JAPANESE'
+          ? [{ stepKey: key, originalText: 'AはB', message: 'm1', suggestion: null, sources: [] }]
+          : key === 'STYLE'
+            ? [
+                { stepKey: key, originalText: 'CはD', message: 'm2', suggestion: 'E', sources: [] },
+                { stepKey: key, originalText: '存在しない', message: 'm3', suggestion: null, sources: [] },
+              ]
+            : [];
+      },
+      onStep: (step, index, total) => progress.push(`${index}/${total}:${step.label}`),
+    });
+    expect(order).toEqual(['JAPANESE', 'PROOFREADING', 'FACT_CHECK', 'READER_PERSPECTIVE', 'STYLE']);
+    expect(progress).toEqual([
+      '0/5:日本語チェック',
+      '1/5:校正チェック',
+      '2/5:校閲',
+      '3/5:読者視点でのチェック',
+      '4/5:文体チェック',
+    ]);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ step: { key: 'JAPANESE' }, startOffset: 10, endOffset: 13 });
+    expect(result[1]).toMatchObject({ step: { key: 'STYLE' }, startOffset: 16, endOffset: 19 });
+  });
+
+  it('前のステップの完了を待ってから次のステップを呼ぶ(並列実行しない)', async () => {
+    let running = 0;
+    let maxRunning = 0;
+    await runReviewSteps({
+      content,
+      bodyOffset: 0,
+      fetchStep: async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await Promise.resolve();
+        running--;
+        return [];
+      },
+      onStep: () => undefined,
+    });
+    expect(maxRunning).toBe(1);
+  });
+
+  it('signalが中断済みなら次のステップへ進まず例外を投げる', async () => {
+    const controller = new AbortController();
+    const fetchStep = jest.fn(async () => {
+      controller.abort();
+      return [];
+    });
+    await expect(
+      runReviewSteps({ content, bodyOffset: 0, fetchStep, onStep: () => undefined, signal: controller.signal })
+    ).rejects.toThrow();
+    expect(fetchStep).toHaveBeenCalledTimes(1);
   });
 });

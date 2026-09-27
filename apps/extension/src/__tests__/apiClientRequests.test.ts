@@ -53,6 +53,31 @@ describe('apiClientが組み立てるリクエスト', () => {
     setConfiguration('letsBlog.allowInsecureTls', true);
   });
 
+  it('レビューステップの指摘生成は、projectIdとステップキーをパスに、本文だけをボディに送る', async () => {
+    respondWith({
+      suggestions: [{ id: 'a', stepKey: 'JAPANESE', originalText: '誤', message: '直す' }],
+      skipped: false,
+    });
+
+    const result = await apiClient.reviewStepSuggestions('token', undefined, 42, 'READER_PERSPECTIVE', '本文です');
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].method).toBe('POST');
+    expect(recorded[0].url).toBe('https://stack.test/api/projects/42/ai/review-steps/READER_PERSPECTIVE/suggestions');
+    expect(recorded[0].body).toEqual({ text: '本文です' });
+    expect(result.suggestions[0]).toMatchObject({ originalText: '誤', message: '直す', suggestion: null, sources: [] });
+    expect(result.skipped).toBe(false);
+  });
+
+  it('レビューステップの応答でsuggestionsが欠けていれば空配列として扱う', async () => {
+    respondWith({});
+
+    const result = await apiClient.reviewStepSuggestions('token', undefined, 1, 'FACT_CHECK', '本文');
+
+    expect(result.suggestions).toEqual([]);
+    expect(result.skipped).toBe(false);
+  });
+
   it('校正チェックは本文とプロバイダーだけを送る', async () => {
     respondWith({ issues: [] });
 

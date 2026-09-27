@@ -65,14 +65,15 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // issue #523: front matter検証(publish_scheduled_at/status/categories)は常時、本文のAI校正は
-  // letsBlog.proofreadEnabled(既定false)でオプトインした場合のみ、編集の都度デバウンスして実行する。
+  // issue #523: front matter検証(publish_scheduled_at/status/categories)は編集の都度デバウンスして実行する。
+  // issue #1215: 本文のAIレビュー(5ステップ)は自動実行せず、letsBlog.proofreadNowコマンドの明示操作だけで実行する。
   const proofreadController = new ProofreadController(context);
   context.subscriptions.push(
     proofreadController,
     vscode.languages.registerCodeActionsProvider({ language: 'markdown' }, proofreadController, {
       providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
     }),
+    vscode.window.onDidChangeVisibleTextEditors((editors) => editors.forEach((e) => proofreadController.refreshEditor(e))),
     vscode.workspace.onDidChangeTextDocument((event) => proofreadController.scheduleCheck(event.document)),
     vscode.workspace.onDidOpenTextDocument((document) => proofreadController.scheduleCheck(document)),
     vscode.workspace.onDidCloseTextDocument((document) => proofreadController.clearDocument(document))
@@ -850,8 +851,8 @@ async function commandSuggestTags(context: vscode.ExtensionContext): Promise<voi
 }
 
 /**
- * issue #523: front matter検証と本文のAI校正を即時実行する。letsBlog.proofreadEnabledが
- * 無効(既定)でも、このコマンドは常に本文のAI校正まで実行する。
+ * issue #523 / #1215: front matter検証と、本文の5ステップAIレビュー(日本語チェック→校正チェック→
+ * 校閲→読者視点でのチェック→文体チェック)を即時実行する。本文のレビューはこのコマンドでのみ実行される。
  */
 async function commandProofreadNow(proofreadController: ProofreadController): Promise<void> {
   const editor = getActiveMarkdownEditor();
