@@ -69,6 +69,12 @@ identity media ai content analytics project publishing platform log-writer"
 
 TIMEOUT_SECONDS=600
 TARGET_SERVICES="$REQUIRED_SERVICES"
+
+# 正常終了(exited, code 0)がゴールのワンショットジョブ(issue #1439)。
+# docker-compose.yml で `restart: "no"` のサービスは全てここに載せること
+# (scripts/test_wait_all_one_shot.py が突き合わせて、載っていなければ落とす)。
+# 載せ忘れると --all が定常状態の exited を永久に待ち、必ずタイムアウトする。
+ONE_SHOT_JOBS="ollama-model-init"
 WAIT_ALL=0
 QUIET=0
 HTTP_ONLY=0
@@ -220,7 +226,7 @@ while true; do
     exit 1
   fi
   rm -f "$PS_STDERR"
-  PENDING="$(WAIT_ALL="$WAIT_ALL" TARGET_SERVICES="$TARGET_SERVICES" \
+  PENDING="$(WAIT_ALL="$WAIT_ALL" TARGET_SERVICES="$TARGET_SERVICES" ONE_SHOT_JOBS="$ONE_SHOT_JOBS" \
     python3 -c '
 import json
 import os
@@ -238,7 +244,7 @@ if raw:
                 containers.append(json.loads(line))
 
 wait_all = os.environ.get("WAIT_ALL") == "1"
-ONE_SHOT_JOBS = set()
+ONE_SHOT_JOBS = set(os.environ.get("ONE_SHOT_JOBS", "").split())
 targets = os.environ.get("TARGET_SERVICES", "").split()
 
 by_service = {c.get("Service", "?"): c for c in containers}
@@ -258,8 +264,7 @@ for service in targets:
     exit_code = c.get("ExitCode", 0)
 
     # 一回限りのジョブ(ワンショットコンテナ)は正常終了(exited, code 0)がゴール。
-    # issue #583で legacy-schema-migrate を削除したため現在は該当が無いが、
-    # 同種のジョブを足したときのためにこの分岐は残す。
+    # 対象は bash 側の ONE_SHOT_JOBS(現在は ollama-model-init。issue #1439)。
     if service in ONE_SHOT_JOBS:
         if not (state == "exited" and exit_code == 0):
             pending.append(f"{service} (state={state}, exitCode={exit_code})")
