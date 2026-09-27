@@ -351,10 +351,6 @@ class UnchangedGuards(unittest.TestCase):
                 os.environ["CLAUDE_PROJECT_DIR"] = env_backup
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WrapperPrefixBypass(unittest.TestCase):
     """#1029: 前置詞でガードが外れないこと。
 
@@ -2743,3 +2739,7 @@ class HelpDetectionDoesNotMistakeAValueTokenForARealHelpFlag(unittest.TestCase):
             "された",
         )
         self.assertIn("squash", reason)
+
+
+if __name__ == "__main__":
+    unittest.main()

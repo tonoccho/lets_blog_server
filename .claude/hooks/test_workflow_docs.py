@@ -235,10 +235,6 @@ class SelectionOrderSingleSource(unittest.TestCase):
                 self.assertIn("hotfix", read(path), "%s が選定理由に hotfix を含めていない" % path)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class NoDeadCiConfiguration(unittest.TestCase):
     """動かない見込みの CI 設定を残さないこと(#1027)。
 
@@ -861,3 +857,6 @@ class NoStaleEntryPointEnumerations(unittest.TestCase):
         offenders = [path for path in claude_docs() if "three entry points" in read(path)]
         self.assertEqual([], offenders, "古い件数表記が残っている: %s" % offenders)
 
+
+if __name__ == "__main__":
+    unittest.main()

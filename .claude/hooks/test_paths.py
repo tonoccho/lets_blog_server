@@ -291,10 +291,6 @@ class RepositoryExhaustiveness(unittest.TestCase):
         self.assertEqual(unclassified, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class AgentWorktree(unittest.TestCase):
     """エージェントの git worktree 配下を、実体のパスとして分類すること(#1036)。
 
@@ -363,3 +359,6 @@ class WorktreeIsIgnored(unittest.TestCase):
             0, result.returncode, ".claude/worktrees/ が .gitignore で無視されていない"
         )
 
+
+if __name__ == "__main__":
+    unittest.main()
