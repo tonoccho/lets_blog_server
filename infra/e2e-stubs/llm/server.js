@@ -186,9 +186,14 @@ function proofreadJsonCompletion(prompt) {
  */
 const JAPANESE_STEP_MARKER = 'ら抜き言葉';
 const PROOFREADING_STEP_MARKER = '衍字';
+/** READER_PERSPECTIVE / STYLE(issue #1221)。各テンプレートだけが持つ観点の語(他ステップのテンプレートには現れない)。 */
+const READER_PERSPECTIVE_STEP_MARKER = '前提知識の飛躍';
+const STYLE_STEP_MARKER = '文末表現';
 
 const JAPANESE_STEP_MESSAGE = 'E2Eスタブが検出した日本語チェックの指摘です。';
 const PROOFREADING_STEP_MESSAGE = 'E2Eスタブが検出した校正チェックの指摘です。';
+const READER_PERSPECTIVE_STEP_MESSAGE = 'E2Eスタブが検出した読者視点でのチェックの指摘です。';
+const STYLE_STEP_MESSAGE = 'E2Eスタブが検出した文体チェックの指摘です。';
 
 /**
  * 本文の**最後の**文断片を引用として使う(校正チェック用の{@link proofreadQuotes}が先頭からN件
@@ -270,6 +275,10 @@ function jsonFormatCompletionFor(prompt) {
   if (prompt.includes(PROOFREADING_STEP_MARKER)) {
     return reviewStepJsonCompletion(prompt, PROOFREADING_STEP_MESSAGE);
   }
+  if (prompt.includes(READER_PERSPECTIVE_STEP_MARKER)) {
+    return reviewStepJsonCompletion(prompt, READER_PERSPECTIVE_STEP_MESSAGE);
+  }
+  if (prompt.includes(STYLE_STEP_MARKER)) return reviewStepJsonCompletion(prompt, STYLE_STEP_MESSAGE);
   return null;
 }
 

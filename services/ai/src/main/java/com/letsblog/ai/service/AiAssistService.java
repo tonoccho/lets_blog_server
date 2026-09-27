@@ -155,10 +155,9 @@ public class AiAssistService {
      * PROMPT_TEMPLATE(3観点まとめて1回で返す、エディタのリアルタイム校正用)とは異なり、
      * ステップごとに1観点だけを問い、応答も{originalText, message}のみ(typeやsuggestionは持たない)。
      * 識別子(id)は本文中の出現位置を含めないためLLMには出させず、サーバ側で
-     * {@link #computeSuggestionId}が算出する。5ステップのうちプロンプト未実装のステップ
-     * (READER_PERSPECTIVE/STYLE)はこのMapに含めない。FACT_CHECKは検索を伴い形が違うため
-     * {@link #generateFactCheckSuggestions}が別に扱う(issue #1214)。
-     * (#1221が担当。{@link #generateReviewStepSuggestions}が未実装ステップを例外にする)。
+     * {@link #computeSuggestionId}が算出する。JAPANESE/PROOFREADING(issue #1213)に加え、
+     * READER_PERSPECTIVE/STYLE(issue #1221)も同じ形・同じ規則で持つ。FACT_CHECKだけは検索を伴い
+     * 形が違うため{@link #generateFactCheckSuggestions}が別に扱う(issue #1214)。
      */
     private static final Map<ReviewStepKey, String> REVIEW_STEP_PROMPT_TEMPLATES = buildReviewStepPromptTemplates();
 
@@ -181,6 +180,35 @@ public class AiAssistService {
                 あなたは日本語のプロの校正者です。以下のブログ記事本文を読み、表記の正しさ
                 (誤字脱字、表記ゆれ(例: サーバ/サーバー)、送り仮名、半角/全角の不統一、衍字など)の観点でのみ問題を指摘してください。
                 日本語の文法的な正しさは対象外です(別の観点で扱います)。
+
+                出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
+                originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+
+                [{"originalText": "本文中の該当箇所", "message": "指摘内容"}]
+
+                本文:
+                %s
+                """);
+        templates.put(ReviewStepKey.READER_PERSPECTIVE, """
+                あなたはこのブログ記事の想定読者(記事のテーマについて詳しくない一般の読者)の立場に立つ編集者です。
+                以下のブログ記事本文を読み、読者にとっての前提知識の飛躍・説明不足
+                (説明なしに使われている専門用語・略語、定義されていない概念、論理や手順の飛び、
+                読者が知っている前提で省かれた背景説明など)の観点でのみ問題を指摘してください。
+                日本語の正しさ、表記、事実の正誤、文体は対象外です(別の観点で扱います)。
+
+                出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
+                originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。
+
+                [{"originalText": "本文中の該当箇所", "message": "指摘内容"}]
+
+                本文:
+                %s
+                """);
+        templates.put(ReviewStepKey.STYLE, """
+                あなたは文章のトーンと読み口を整える編集者です。以下のブログ記事本文を読み、文体
+                (文末表現(です・ます調とだ・である調)の統一、一文の長さ、受動態の多用、記事全体のトーンの一貫性など)
+                の観点でのみ問題を指摘してください。
+                日本語の文法的な正しさ、表記の正しさ、事実の正誤、読者にとっての分かりやすさは対象外です(別の観点で扱います)。
 
                 出力は必ず次のJSON配列の形式のみとし、他の文章は一切含めないでください。問題が無ければ空配列 [] を返してください。
                 originalTextには本文中の該当箇所を、一字一句変えずにそのまま引用してください(位置の特定に使うため)。

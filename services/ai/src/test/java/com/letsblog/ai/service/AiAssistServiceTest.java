@@ -652,9 +652,85 @@ class AiAssistServiceTest {
     }
 
     @Test
-    void generateReviewStepSuggestions_プロンプト未実装のステップキーは例外() {
-        assertThrows(IllegalArgumentException.class,
-                () -> service.generateReviewStepSuggestions(1L, ReviewStepKey.STYLE, "本文"));
+    void generateReviewStepSuggestions_READER_PERSPECTIVEステップはそのステップキーを持つ指摘一覧を返す() {
+        when(reviewStepModelService.resolveModel(1L, ReviewStepKey.READER_PERSPECTIVE)).thenReturn("model-r");
+        when(reviewStepModelService.resolveProvider(1L, ReviewStepKey.READER_PERSPECTIVE))
+                .thenReturn(AiProvider.OLLAMA);
+        when(llmClient.generate(anyString(), eq("model-r"), eq(AiProvider.OLLAMA))).thenReturn(
+                "[{\"originalText\": \"CQRSを導入した\", \"message\": \"CQRSの説明が無く初学者には飛躍です\"}]");
+
+        AiReviewStepSuggestionsResponse response = service.generateReviewStepSuggestions(
+                1L, ReviewStepKey.READER_PERSPECTIVE, "そこでCQRSを導入したので高速になった");
+
+        assertEquals(1, response.suggestions().size());
+        assertEquals("READER_PERSPECTIVE", response.suggestions().get(0).stepKey());
+        assertEquals("CQRSを導入した", response.suggestions().get(0).originalText());
+        assertEquals("CQRSの説明が無く初学者には飛躍です", response.suggestions().get(0).message());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_STYLEステップはそのステップキーを持つ指摘一覧を返す() {
+        when(reviewStepModelService.resolveModel(1L, ReviewStepKey.STYLE)).thenReturn("model-s");
+        when(reviewStepModelService.resolveProvider(1L, ReviewStepKey.STYLE)).thenReturn(AiProvider.CLAUDE);
+        when(llmClient.generate(anyString(), eq("model-s"), eq(AiProvider.CLAUDE))).thenReturn(
+                "[{\"originalText\": \"である。\", \"message\": \"文末が「です・ます」調と混在しています\"}]");
+
+        AiReviewStepSuggestionsResponse response = service.generateReviewStepSuggestions(
+                1L, ReviewStepKey.STYLE, "これは例です。あれは例である。");
+
+        assertEquals(1, response.suggestions().size());
+        assertEquals("STYLE", response.suggestions().get(0).stepKey());
+        assertEquals("である。", response.suggestions().get(0).originalText());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_READER_PERSPECTIVEとSTYLEも本文に存在しないoriginalTextは除外する() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"本文に無い文字列\", \"message\": \"指摘\"}]");
+
+        assertEquals(List.of(), service.generateReviewStepSuggestions(
+                1L, ReviewStepKey.READER_PERSPECTIVE, "こんにちは世界").suggestions());
+        assertEquals(List.of(), service.generateReviewStepSuggestions(
+                1L, ReviewStepKey.STYLE, "こんにちは世界").suggestions());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_READER_PERSPECTIVEとSTYLEも同じ本文なら識別子が一致し_ステップ間では異なる() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn(
+                "[{\"originalText\": \"対象の指摘\", \"message\": \"指摘内容\"}]");
+        String body = "本文中に対象の指摘があります";
+
+        for (ReviewStepKey key : List.of(ReviewStepKey.READER_PERSPECTIVE, ReviewStepKey.STYLE)) {
+            String first = service.generateReviewStepSuggestions(1L, key, body).suggestions().get(0).id();
+            String second = service.generateReviewStepSuggestions(1L, key, body).suggestions().get(0).id();
+            assertEquals(first, second);
+        }
+        assertNotEquals(
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.READER_PERSPECTIVE, body)
+                        .suggestions().get(0).id(),
+                service.generateReviewStepSuggestions(1L, ReviewStepKey.STYLE, body).suggestions().get(0).id());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_READER_PERSPECTIVEとSTYLEはそれぞれ自分の観点だけを問うプロンプトを送る() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("[]");
+
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.READER_PERSPECTIVE, "本文A");
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.STYLE, "本文B");
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(2)).generate(prompts.capture(), any(), any());
+        String reader = prompts.getAllValues().get(0);
+        String style = prompts.getAllValues().get(1);
+        assertTrue(reader.contains("前提知識") && reader.contains("説明不足"));
+        assertTrue(reader.endsWith("本文A\n"));
+        assertTrue(style.contains("文末表現") && style.contains("受動態") && style.contains("一文の長さ"));
+        assertTrue(style.endsWith("本文B\n"));
+        // 観点の取り違え(スタブのマーカー判定の前提)を防ぐ: 互いの・他ステップの固有語を含まない
+        assertTrue(!reader.contains("文末表現") && !style.contains("前提知識"));
+        for (String other : List.of("ら抜き言葉", "衍字", "事実確認")) {
+            assertTrue(!reader.contains(other) && !style.contains(other), other);
+        }
     }
 
     @Test

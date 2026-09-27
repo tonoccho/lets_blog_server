@@ -69,7 +69,7 @@ async function requestReviewStepSuggestions(
 // ここでは専用の Given を定義せず ctx.aiGenerationProject を読むだけにする。
 
 When(
-  /^「(JAPANESE|PROOFREADING)」ステップで「(.+)」という本文の指摘生成を依頼する$/,
+  /^「(JAPANESE|PROOFREADING|READER_PERSPECTIVE|STYLE)」ステップで「(.+)」という本文の指摘生成を依頼する$/,
   async ({ ctx, request }, stepKey: string, text: string) => {
     const projectId = currentProjectId(ctx);
     ctx.aiReviewStepKey = stepKey;
@@ -79,7 +79,7 @@ When(
 );
 
 When(
-  /^同じ本文で「(JAPANESE|PROOFREADING)」ステップの指摘生成を2回依頼する$/,
+  /^同じ本文で「(JAPANESE|PROOFREADING|READER_PERSPECTIVE|STYLE)」ステップの指摘生成を2回依頼する$/,
   async ({ ctx, request }, stepKey: string) => {
     const projectId = currentProjectId(ctx);
     const text = 'この文章は決定性確認のために書きました。二文目もここに置きます。';

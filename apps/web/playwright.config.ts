@@ -127,6 +127,7 @@ const atMain = defineBddProject({
  *                                     resilience.feature の仕込みを横取りしうる側でもある)
  *   - `ai/review-step-suggestions.feature` 通常系(`/api/projects/{id}/ai/review-steps/**`)
  *   - `ai/review-step-fact-check.feature` 通常系+Brave Searchスタブへ500を仕込む(校閲、issue #1214)
+ *   - `ai/review-step-reader-style.feature` 通常系(`/api/projects/{id}/ai/review-steps/**`、issue #1221)
  *   - `ai/tag-and-proofread.feature`  通常系(`/api/ai/tags` `/api/ai/proofread`)
  *   - `ai/web-search.feature`         通常系(`/api/projects/{id}/article-plan/chat` が llm を使う)
  *   - `stubs/external-stubs.feature`  llmを含む全スタブへ決定性・注入の直接プローブを送る
