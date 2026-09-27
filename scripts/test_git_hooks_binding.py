@@ -47,6 +47,7 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 HOOKS_DIR = "scripts/git-hooks"
 SETUP_SCRIPT = os.path.join(HERE, "setup-git-hooks.sh")
 PRE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-commit")
+PRE_MERGE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-merge-commit")
 
 FIX_HINT = "bash scripts/setup-git-hooks.sh"
 
@@ -114,6 +115,12 @@ class TempRepo(unittest.TestCase):
         shutil.copy(SETUP_SCRIPT, os.path.join(self.tmp, "scripts", "setup-git-hooks.sh"))
         shutil.copy(PRE_COMMIT, os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"))
         os.chmod(os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"), 0o755)
+        # `pre-merge-commit` はまだ実装されていない間は存在しない(#1452 の RED)。
+        # 実装後は本物のクローンと同じく両方の hook が揃った状態を再現する。
+        if os.path.isfile(PRE_MERGE_COMMIT):
+            dst = os.path.join(self.tmp, "scripts", "git-hooks", "pre-merge-commit")
+            shutil.copy(PRE_MERGE_COMMIT, dst)
+            os.chmod(dst, 0o755)
         shutil.copy(
             os.path.join(REPO_ROOT, ".claude", "hooks", "paths.py"),
             os.path.join(self.tmp, ".claude", "hooks", "paths.py"),
@@ -216,6 +223,36 @@ class Detection(TempRepo):
         os.chmod(os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"), 0o644)
         r = self.run_setup("--check")
         self.assertNotEqual(0, r.returncode, r.stdout)
+
+
+class PreMergeCommitHookIsChecked(TempRepo):
+    """受入基準4 最終箇条(#1452): `--check` は `pre-commit` だけでなく、コンフリクトなしの
+    `git merge` を拾う `pre-merge-commit` の存在と実行ビットも点検する。
+
+    `core.hooksPath` はディレクトリ単位で束縛されるので束縛自体は自動だが、点検が
+    片方の hook しか見ていなければ、`pre-merge-commit` が欠けた/実行できない状態に
+    気づく手段が無い。
+    """
+
+    def test_check_fails_when_pre_merge_commit_is_missing(self):
+        pmc = os.path.join(self.tmp, "scripts", "git-hooks", "pre-merge-commit")
+        if os.path.exists(pmc):
+            os.remove(pmc)
+        r = self.run_setup("--check")
+        self.assertNotEqual(
+            0, r.returncode, "pre-merge-commit が無いのに --check が成功した: " + r.stdout
+        )
+        self.assertIn("pre-merge-commit", r.stdout + r.stderr)
+
+    def test_check_fails_when_pre_merge_commit_is_not_executable(self):
+        pmc = os.path.join(self.tmp, "scripts", "git-hooks", "pre-merge-commit")
+        if not os.path.exists(pmc):
+            with open(pmc, "w", encoding="utf-8") as f:
+                f.write("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
+        os.chmod(pmc, 0o644)
+        r = self.run_setup("--check")
+        self.assertNotEqual(0, r.returncode, r.stdout)
+        self.assertIn("pre-merge-commit", r.stdout + r.stderr)
 
 
 class PlainGitEnforcesPhaseSeparation(TempRepo):

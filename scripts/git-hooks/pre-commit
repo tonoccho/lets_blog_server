@@ -7,11 +7,23 @@ Claude Code のフック(.claude/hooks/guard.py)はエージェントの操作�
 検査するもの:
   1. フェーズ分離 — テストコードとプロダクションコードを同じコミットに入れない
   2. テストの黙殺 — @Disabled / test.skip などを追加しない
-     (マージコミットでは、1 は免除、2 は MERGE_HEAD 側に既にある記述に限り免除 — #1125)
+     (マージコミットでは、1 は免除、2 は MERGE_HEAD 側に既にある記述に限り免除、
+     5 は免除しない — #1125、#1452)
   3. テストファースト — プロダクションコードのコミットより前に、
      このブランチにテストコードの変更が存在すること
+  4. `apps/web` のリポジトリ全体カバレッジ床 — apps/web に触れるコミットに限り
+     `npm run test:coverage` を走らせる(#1040)
+  5. 未分類パスの拒否 — `.claude/hooks/paths.py` がテスト/プロダクション/宣言済み中立の
+     どれにも分類しないパスのコミットを拒否する(#1452)
 
-有効化:
+このスクリプトは `git commit` と、コンフリクトを解決した後の明示コミットしか拾わない —
+git はコミット経路ごとに別のフックを起動するため(`man githooks`)、**コンフリクトなしの
+`git merge`(= 最も普通の結果)はこのスクリプトを一切通らない**。その経路は
+`scripts/git-hooks/pre-merge-commit` が別途拾い、上記5だけを検査する。理由と、
+2・4 をそちらへ委譲しない理由は同スクリプトの docstring を参照。
+
+有効化(`core.hooksPath` はディレクトリ単位なので、このスクリプトと
+`pre-merge-commit` は同時に束縛される):
     git config core.hooksPath scripts/git-hooks
 """
 
@@ -23,7 +35,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "..", ".claude", "hooks"))
-from paths import classify, is_production, is_test  # noqa: E402
+from paths import classify, is_declared_neutral, is_production, is_test  # noqa: E402
 from silencers import SILENCERS  # noqa: E402
 
 # apps/web のリポジトリ全体カバレッジ床(#1040)。`apps/web/jest.config.ts` の
@@ -79,6 +91,64 @@ def check_phase_separation(files):
             "  git commit -m 'test: ...'   # テストフェーズ\n"
             "  git commit -m 'feat: ...'   # プロダクションフェーズ"
             % ("\n  ".join(tests), "\n  ".join(prod)),
+        )
+
+
+def check_unclassified(files, merging=None):
+    """`paths.py` の3分類(テスト/プロダクション/宣言済み中立)のどれにも
+    当たらないパスのコミットを拒否する(#1452)。
+
+    `.claude/hooks/test_paths.py` の `RepositoryExhaustiveness` は同じ不変条件を
+    `develop` に取り込まれた後に事後検査するが、直下にスクリプトが増えるたびに
+    develop がそのとき初めて赤くなる再発が繰り返された(#1208 → #1321 → #1452)。
+    ここでコミット時点で止めることで、CLAUDE.md → 「ちょうど1つ」の強制が2層で
+    ある理由 と同じ構成(事前のフックと事後の単体テストの2層)にする。
+
+    マージコミットは免除しない。`check_phase_separation` がマージコミットを
+    免除する(#1125)のは、マージでは取り込む側の全コミット分の差分に
+    テストとプロダクションが混在するのが構造的に正常だからである。未分類パスは
+    事情が異なる — マージで未分類パスが取り込まれることは正常な事象ではなく、
+    まさにこの検査が閉じようとしている欠陥そのものであるため、免除すると
+    ローカルでの衝突解決マージ(CLAUDE.md → Merge Conflicts)が同じ抜け道に
+    なってしまう。詳細: `docs/WORKFLOW_RULE_RATIONALE.md` → Unclassified path rejection。
+
+    この免除しない判断が詰みにならない前提(同じコミットに新ファイルと分類を足せば
+    解決できること)は、フックが**コミットする側の** worktree から `paths.py` を
+    読むことに依存する。これは `core.hooksPath` が現在**相対値**
+    (`scripts/git-hooks`)であるためで、絶対パスに切り替えると linked worktree は
+    自分自身の `paths.py` を分類に使えなくなる(#1319、未解決)。
+
+    `merging` は「マージコミットか」を明示的に渡すための引数で、省略時(`None`)は
+    `merge_in_progress()`(`MERGE_HEAD` の有無)で判定する — このスクリプトが
+    `git commit` から呼ばれる通常の経路。`scripts/git-hooks/pre-merge-commit` は
+    `merging=True` を明示的に渡す。これは省略できない: `pre-merge-commit` フックは
+    「マージが自動で成立した後、コミットを作る前」に実行され、この時点では
+    まだ `MERGE_HEAD` が書かれていない(`man githooks`、および実測)。
+    `merge_in_progress()` に頼ると、まさにこの経路でマージ用ヒントが常に欠落する。
+    呼び出し元(`pre-merge-commit`)は自分がマージ経路であることを文脈上知っているので、
+    それをそのまま渡す。
+    """
+    if merging is None:
+        merging = merge_in_progress()
+    unclassified = [
+        p for p in files if not (is_test(p) or is_production(p) or is_declared_neutral(p))
+    ]
+    if unclassified:
+        hint = ""
+        if merging:
+            hint = (
+                "\n\nマージコミットです。CLAUDE.md → Merge Conflicts の下で許される通り、"
+                "この同じコミットに上記パスの分類(paths.py への追記)を足せば解決できます"
+                "(免除ではなく、衝突解決コミットとして分類を含めてください)。"
+            )
+        fail(
+            "テスト / プロダクション / 中立のいずれにも分類されていないパスがあります",
+            "  %s\n\n"
+            "`.claude/hooks/paths.py` の TEST_PATTERNS / PRODUCTION_PATTERNS / "
+            "NEUTRAL_PATTERNS のいずれかに追加し、分類の根拠をコメントに書いてください。"
+            "(黙って中立に落ちるファイルを防ぐための検査です。#983、#1452)"
+            "%s"
+            % ("\n  ".join(unclassified), hint),
         )
 
 
@@ -195,6 +265,7 @@ def main():
     if not files:
         return 0
     check_phase_separation(files)
+    check_unclassified(files)
     check_silencers(files)
     check_test_first(files)
     check_web_coverage_floor(files)

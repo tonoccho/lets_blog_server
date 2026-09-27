@@ -800,17 +800,43 @@ as one. Rationale: `docs/WORKFLOW_RULE_RATIONALE.md` → release の直接 push 
 ## Git hook — `scripts/git-hooks/pre-commit`
 
 Bound by `bash scripts/setup-git-hooks.sh` (idempotent; step 1 of the clone procedure in `README.md`),
-which sets `core.hooksPath` to `scripts/git-hooks`. It enforces, for **any** committer:
+which sets `core.hooksPath` to `scripts/git-hooks`. That directory holds two hook scripts, and
+`core.hooksPath` binds the whole directory at once, so both are always bound together — but git
+invokes a **different** one depending on the commit route (`man githooks`), and they do not
+enforce the same set of checks:
 
-1. **Phase separation** — no commit mixes test and production paths.
-2. **No test silencing** — nothing that disables a test is added to a test or production file.
-3. **Test-first** — a commit containing production code is refused while the branch has no test
-   change at all. Write the failing Gherkin scenario first.
-4. **`apps/web` coverage floor** (#1040) — any commit touching `apps/web/**` runs
-   `cd apps/web && npm run test:coverage` and is refused if it exits non-zero. It is skipped when
-   `apps/web/package.json` does not exist, is separate from `scripts/check-changed-coverage.py`
-   (which gates only changed-line C1/C2), and resolves `apps/web` from the worktree the commit is
-   made in (`git rev-parse --show-toplevel`), not from the hook script's own location.
+- **`pre-commit`** — invoked by `git commit`, and by the explicit commit that concludes a
+  conflicted merge (CLAUDE.md → Merge Conflicts). Enforces, for **any** committer:
+
+  1. **Phase separation** — no commit mixes test and production paths.
+  2. **No test silencing** — nothing that disables a test is added to a test or production file.
+  3. **Test-first** — a commit containing production code is refused while the branch has no test
+     change at all. Write the failing Gherkin scenario first.
+  4. **`apps/web` coverage floor** (#1040) — any commit touching `apps/web/**` runs
+     `cd apps/web && npm run test:coverage` and is refused if it exits non-zero. It is skipped when
+     `apps/web/package.json` does not exist, is separate from `scripts/check-changed-coverage.py`
+     (which gates only changed-line C1/C2), and resolves `apps/web` from the worktree the commit is
+     made in (`git rev-parse --show-toplevel`), not from the hook script's own location.
+  5. **Unclassified path rejection** (#1452) — a commit staging a path that
+     `.claude/hooks/paths.py` classifies as none of test / production / declared-neutral is
+     refused, naming the path(s). This is the pre-commit-time layer for the same invariant
+     `.claude/hooks/test_paths.py` → `RepositoryExhaustiveness` checks after the fact — a script
+     landing at the repository root only turned `develop` red once it merged (#1208 → #1321 →
+     #1452). Not exempted on a merge commit.
+
+- **`pre-merge-commit`** (#1452) — invoked only by a **conflict-free** `git merge`'s automatic
+  commit (the most common outcome of `git merge origin/develop`, and the route `pre-commit`
+  never sees). Runs **only check 5 above**, not 1–4. `git`'s own default `pre-merge-commit`
+  sample runs `pre-commit` wholesale, but this repository deliberately does not: check 3
+  (test-first) has no merge exemption, and would reject a legitimate `git merge origin/develop`
+  on a branch that only touches neutral paths (`.claude/`, `docs/` — the most common shape of an
+  Issue in this repository) because such a branch has no test-classified change of its own.
+  Checks 2 and 4 are unaddressed on this route by design — see #1460. Not exempted on this route
+  either: see `scripts/git-hooks/pre-merge-commit`'s own docstring for why, and for why this is
+  not a dead end (the merge result stays in the index after the hook rejects it, so the same
+  commit can add the missing classification and complete the merge through `pre-commit`).
+
+  Rationale for both: `docs/WORKFLOW_RULE_RATIONALE.md` → Unclassified path rejection.
 
 **Never assert that the binding is in place — check it.** `core.hooksPath` is git configuration,
 not repository content, and an unbound hook's only symptom is that nothing happens:

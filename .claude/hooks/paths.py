@@ -145,6 +145,24 @@ PRODUCTION_PATTERNS = [
 #       (開発・運用の道具で出荷物に入らない)に当てはまる。ワイルドカードでは
 #       なく `^setup\.sh$` の個別指定にするのは、直下の他のファイルを
 #       まとめて中立化しないため。
+#   update.sh(リポジトリ直下、個別指定。#1452。#1321 の3回目の再発)
+#       setup.sh と同型: 利用者がホストで直接実行する運用スクリプト(#962)で、
+#       update.sh:119 で既に中立の scripts/wait-for-stack-healthy.sh へ委譲して
+#       いる。以下のいずれの Dockerfile / docker-compose*.yml の ENTRYPOINT/CMD
+#       からも呼ばれない(2026-09-27 実測):
+#         grep -rn "update\.sh" --include=Dockerfile* --include=docker-compose*.yml \
+#           --include=*.sh --include=*.yml --include=*.yaml .
+#         → update.sh 自身の usage 文と BASH_SOURCE ガード(L5-7, L21, L34)のみ
+#         grep -rn -E "ENTRYPOINT|CMD" --include=Dockerfile* . | grep -i update
+#         → 0件
+#       よって #1208 の根拠は当てはまらず、`^scripts/` を中立とする根拠に当てはまる。
+#       ワイルドカードにせず個別指定にする理由は setup.sh と同じ。
+#
+#       代償: 直下にスクリプトが増えるたびに、この個別指定のリストへ追記しない限り
+#       「黙って中立」に落ち、develop 上で test_every_tracked_file_is_classified が
+#       事後的に落ちる(#1208 → #1321 → #1452 と3回発生)。この代償を merge 前の
+#       時点で止める層が scripts/git-hooks/pre-commit の check_unclassified()
+#       (#1452)であり、ステージされた未分類パスをコミット時点で拒否する。
 NEUTRAL_PATTERNS = [
     r"^\.claude/",
     r"^docs/",
@@ -172,6 +190,7 @@ NEUTRAL_PATTERNS = [
     r"(^|/)\.env\.local\.example$",
     r"(^|/)\.node-version$",
     r"^setup\.sh$",
+    r"^update\.sh$",
 ]
 
 # Claude Code のサブエージェントが作る git worktree(#1036)。

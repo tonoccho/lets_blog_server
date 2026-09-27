@@ -280,6 +280,90 @@ GitLab へ移行した際に番号の対応が壊れた。それらは推測せ�
 物理位置(`__file__`)から導くと、リンクされた `git worktree` で誤ったディレクトリを検査した — QA が見つけた
 退行(#1040, #1319)である。
 
+## Unclassified path rejection がマージコミットを免除しない理由 (#1208, #1321, #1452)
+
+`scripts/git-hooks/pre-commit` → `check_unclassified` は、`.claude/hooks/paths.py` が
+テスト/プロダクション/宣言済み中立のどれにも分類しないパスのコミットを拒否する。
+`check_phase_separation` はマージコミットを免除する(#1125)が、`check_unclassified` は
+**免除しない**。理由は事情が違うからである: マージでテストとプロダクションが同じ差分に
+混在するのは、取り込む側の複数コミット分がまとめて見えるという構造上正常な事象だが、
+未分類パスがマージ経由で `develop` に入ることは正常な事象ではなく、まさに本節が名指す
+再発そのものである(直下にスクリプトが1本増えるたびに `develop` が赤くなった
+#1208 → #1321 → #1452)。ここで免除すると、CLAUDE.md → Merge Conflicts が許すローカルでの
+衝突解決マージが、この検査を回避する抜け道になってしまう。
+
+### 経路が1本足りなかった — `pre-merge-commit` の新設 (#1452、QA FAIL)
+
+上の「免除しない」判断は、実装の初版では `scripts/git-hooks/pre-commit` にしか置かれていな
+かった。ところが git は**コミットの経路ごとに別のフックを起動する**(`man githooks`):
+`pre-commit` は `git commit` と、コンフリクトを解決した後の明示コミットしか拾わない。
+**コンフリクトなしの `git merge`(= 最も普通の結果)は、自動でコミットを作る前に
+`pre-merge-commit` だけを呼び出し、`pre-commit` は一切起動しない。** このリポジトリの
+`scripts/git-hooks/` に `pre-merge-commit` が無かったため、`CLAUDE.md` → Merge Conflicts が
+標準手順として示す `git merge origin/develop` の**最も普通の実行結果**が、この検査を
+一切通らずに成立していた — QA が実測: `rc=0`、フックの出力なし。まさに
+#1208 → #1321 → #1452 自身が繰り返してきた事故パターン(他ブランチで追加された未分類パスが
+develop の取り込みで気づかれず入り込む)が通る道であり、しかも検査が発火しないので
+気づく手段がそもそも無い、という形で現れた。欠陥は判断の誤りではなく、置き場所が
+1つ足りないという**不足**だった。
+
+是正は `scripts/git-hooks/pre-merge-commit` を新設し、その経路でも同じ「免除しない」判断を
+実行することである。ただし `pre-commit` を丸ごと委譲はしない。`man githooks` の既定の
+`pre-merge-commit` サンプルは有効なら `pre-commit` を走らせるが、それに倣うと次の理由で
+**正当なマージを壊す**:
+
+- 検査1(フェーズ分離)は `merge_in_progress()` で即 return するので、委譲しても何も得ない。
+- **検査3(テストファースト)にはマージ免除が無い。** マージでステージされる差分は取り込む側の
+  全コミット分なので `prod`(プロダクションパス)はほぼ常に非空になる。一方
+  `check_test_first` が「テストが先にあるか」を見るのは
+  `git diff --name-only <merge-base> HEAD` — つまり**自ブランチ**の変更だけであり、
+  `.claude/` と `docs/` は中立分類なので、ワークフローや文書だけを直す Issue のブランチ
+  (このリポジトリで最も普通の Issue の形)には `is_test` が1件も無い。委譲すると、
+  そのブランチで `develop` を取り込む**正当な** `git merge origin/develop` が拒否されてしまう。
+- 検査2(テストの黙殺)・検査4(`apps/web` カバレッジ床)は、この経路で免除するかどうかの
+  判断自体が **#1460** の範囲であり、本 Issue では扱わない。
+
+したがって `pre-merge-commit` はこの検査(検査5)だけを走らせる。実装は
+`scripts/git-hooks/pre-commit` を `importlib` でモジュールとして読み込み、
+`check_unclassified(files, merging=True)` を直接呼ぶ — ロジックの実体は1箇所に保つ。
+`merging=True` を明示するのは、`pre-merge-commit` フックの実行時点では **`MERGE_HEAD` が
+まだ書かれていない**ため(`man githooks`: 「マージが自動で成立した後、コミットを作る前」に
+呼ばれる。実測でも `git rev-parse -q --verify MERGE_HEAD` は空)。`merge_in_progress()` に
+任せると、まさにこの経路でマージ用ヒントが常に欠落する。
+
+**免除しなくても詰みにはならない — レビュアーが実際の `git worktree` で実測した。** マージコミットが
+未分類パスを持ち込んだときの解決策は、**その同じコミットに新ファイルと `paths.py` への分類を
+両方含める**ことである(CLAUDE.md → Merge Conflicts が許す「衝突解決コミットは機械的な
+突き合わせ」の範囲内)。これが成立する前提は、フックが**コミットする側の** worktree から
+`paths.py` を読むことにある。`core.hooksPath` は現在**相対値**(`scripts/git-hooks`、
+`git config --show-origin core.hooksPath` → `file:.git/config  scripts/git-hooks`)なので、
+どの worktree からコミットしても、git はそのコミットを行っている worktree 自身の
+`pre-commit` を起動し、`pre-commit` はそこから相対的に `paths.py` を import する
+(`scripts/git-hooks/pre-commit` の `HERE`/`sys.path.insert` を参照)。レビュアーの実測:
+
+- 相対 `core.hooksPath`(現状): 新規ファイルとその分類を1コミットでステージ → 成功(`rc=0`)
+- 同じリポジトリで `core.hooksPath` を main worktree への絶対パスに書き換え: 同じコミットが
+  拒否される — その worktree 自身の `paths.py` が分類しているにもかかわらず、フックは
+  main worktree の `pre-commit`/`paths.py` を実行するため
+
+つまり `check_unclassified` がマージコミットを免除しなくても解決不能にならないのは、
+`core.hooksPath` が相対値であることに依存した性質であり、絶対値に切り替わると崩れる。
+`committing_worktree_root()`(`scripts/git-hooks/pre-commit`)の docstring と
+`scripts/test_check_web_coverage_floor.py` は、このリポジトリの実環境が絶対パス構成である
+ことを前提に書かれており、**#1319(未解決)** がその構成のもとでの linked worktree の
+扱いを扱っている。`check_unclassified` はこの依存を自身の docstring に明記するに留め、
+`core.hooksPath` の構成自体は #1319 の領域として変更しない。
+
+**`pre-merge-commit` 経路の脱出路も、同じ「コミットする側の worktree」への依存に帰着する。**
+`pre-merge-commit` が非0で終わると、git は**コミットを作らずにマージを中断する**が、
+**マージ結果は index に残り、`MERGE_HEAD` もこの時点で書かれる**(`man githooks`)。つまり
+中断した直後の状態は、上の「相対 `core.hooksPath` で新規ファイルとその分類を1コミットで
+ステージ」する場合と同じ状態(`MERGE_HEAD` あり、index にマージ結果あり)になり、その場で
+`paths.py` に分類を足して `git commit` すれば、以後は(`pre-merge-commit` ではなく)
+`pre-commit` が起動して解決する。実測:
+`scripts/test_pre_merge_commit_unclassified.py` →
+`test_paths_py_classification_added_after_aborted_merge_lets_commit_succeed`。
+
 ## Coverage check が測定不能なコードを失敗にしない理由 (#942, #935)
 
 カバレッジランナーが通らない production コード(`apps/*/webviews/` の素の `.js`、`infra/e2e-stubs/**`

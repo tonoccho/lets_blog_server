@@ -33,6 +33,11 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOKS_DIR="scripts/git-hooks"
 HOOK="$HOOKS_DIR/pre-commit"
+# `pre-commit` は `git commit`(とコンフリクト解決後の明示コミット)しか拾わない。
+# コンフリクトなしの `git merge` は別のフック `pre-merge-commit` の担当で(#1452、
+# `man githooks`)、`core.hooksPath` はディレクトリ単位で束縛されるため個別の設定は
+# 要らないが、実体が欠けている/実行できない状態は個別に点検する必要がある。
+HOOK_NAMES=("pre-commit" "pre-merge-commit")
 
 MODE="fix"
 case "${1:-}" in
@@ -56,23 +61,28 @@ fi
 
 # フックの実体が無い/実行できない状態で束縛すると、git のあらゆるコミットが
 # 落ちるか、あるいは黙って飛ばされる。どちらも束縛より先に直すべき問題なので、
-# 束縛の前に見る。
+# 束縛の前に見る。`pre-commit` と `pre-merge-commit` の両方を点検する(#1452) —
+# 前者だけを見ていると、後者が欠けている/実行できないことに気づく手段が無い。
 check_hook_file() {
     if [ ! -d "$REPO_ROOT/$HOOKS_DIR" ]; then
         echo "✗ $HOOKS_DIR が存在しません。"
         echo "    → 束縛先が無い状態です。リポジトリの状態を確認してください。"
         return 1
     fi
-    if [ ! -f "$REPO_ROOT/$HOOK" ]; then
-        echo "✗ $HOOK が存在しません。"
-        return 1
-    fi
-    if [ ! -x "$REPO_ROOT/$HOOK" ]; then
-        echo "✗ $HOOK に実行ビットがありません。"
-        echo "    → git は実行できないフックを**黙って飛ばす**ため、束縛しても何も起きません。"
-        echo "      chmod +x $HOOK"
-        return 1
-    fi
+    local name path
+    for name in "${HOOK_NAMES[@]}"; do
+        path="$HOOKS_DIR/$name"
+        if [ ! -f "$REPO_ROOT/$path" ]; then
+            echo "✗ $path が存在しません。"
+            return 1
+        fi
+        if [ ! -x "$REPO_ROOT/$path" ]; then
+            echo "✗ $path に実行ビットがありません。"
+            echo "    → git は実行できないフックを**黙って飛ばす**ため、束縛しても何も起きません。"
+            echo "      chmod +x $path"
+            return 1
+        fi
+    done
     return 0
 }
 
@@ -96,7 +106,8 @@ report_unbound() {
     if [ -z "$configured" ]; then
         echo "✗ core.hooksPath が未設定です。git フックが一切動いていません。"
         echo "    症状は「何も起きない」ことだけです。テストとプロダクションの混在コミットも、"
-        echo "    テストを黙らせる変更も、テストより先のプロダクションコミットも素通りします。"
+        echo "    テストを黙らせる変更も、テストより先のプロダクションコミットも、"
+        echo "    apps/web のカバレッジ床割れも、未分類パスのコミットも素通りします。"
     else
         echo "✗ core.hooksPath が $HOOKS_DIR ではなく '$configured' を指しています。"
     fi
@@ -136,5 +147,8 @@ fi
 
 echo "✓ git フックを有効にしました (core.hooksPath = $CONFIGURED)"
 echo "  あらゆるコミッタ(エージェント・人間を問わず)のコミットが"
-echo "  $HOOK の検査を受けます: フェーズ分離 / テストの黙殺 / テストファースト。"
+echo "  $HOOK の検査を受けます: フェーズ分離 / テストの黙殺 / テストファースト /"
+echo "  apps/web カバレッジ床 / 未分類パスの拒否。"
+echo "  コンフリクトなしの git merge(pre-commit を通らない経路)は"
+echo "  $HOOKS_DIR/pre-merge-commit が未分類パスの拒否だけを別途検査します(#1452)。"
 echo "  点検: bash scripts/setup-git-hooks.sh --check"

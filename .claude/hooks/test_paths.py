@@ -174,6 +174,10 @@ class NeutralClassification(unittest.TestCase):
         # Dockerfile / docker-compose からも呼ばれない(#1208 の
         # apps/*/docker-entrypoint.sh とは異なる)。
         "setup.sh",
+        # #1452(#1321 の3回目の再発): リポジトリ直下の update.sh。setup.sh と同型
+        # (update.sh:119 で既に中立の scripts/wait-for-stack-healthy.sh へ委譲、
+        # ENTRYPOINT/CMD からは呼ばれない)。
+        "update.sh",
     ]
 
     def test_neutral_is_neither(self):

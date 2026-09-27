@@ -34,6 +34,7 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 HOOKS_DIR = "scripts/git-hooks"
 SETUP_SCRIPT = os.path.join(HERE, "setup-git-hooks.sh")
 PRE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-commit")
+PRE_MERGE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-merge-commit")
 
 FAKE_NPM = """#!/bin/bash
 echo "$@" >> "$FAKE_NPM_LOG"
@@ -69,6 +70,13 @@ class TempRepo(unittest.TestCase):
         shutil.copy(SETUP_SCRIPT, os.path.join(self.tmp, "scripts", "setup-git-hooks.sh"))
         shutil.copy(PRE_COMMIT, os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"))
         os.chmod(os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"), 0o755)
+        # setup-git-hooks.sh は #1452 で pre-commit と pre-merge-commit の両方が
+        # 揃っていることを束縛の前提にした。ここに pre-merge-commit を置かないと
+        # 束縛そのものが失敗し、フックが1つも配線されない temp repo になる。
+        if os.path.isfile(PRE_MERGE_COMMIT):
+            dst = os.path.join(self.tmp, "scripts", "git-hooks", "pre-merge-commit")
+            shutil.copy(PRE_MERGE_COMMIT, dst)
+            os.chmod(dst, 0o755)
         shutil.copy(
             os.path.join(REPO_ROOT, ".claude", "hooks", "paths.py"),
             os.path.join(self.tmp, ".claude", "hooks", "paths.py"),
@@ -83,9 +91,12 @@ class TempRepo(unittest.TestCase):
         git(["add", "-A"], cwd=self.tmp)
         git(["commit", "-q", "-m", "init"], cwd=self.tmp)
 
-        subprocess.run(
+        setup = subprocess.run(
             ["bash", os.path.join(self.tmp, "scripts", "setup-git-hooks.sh")],
             capture_output=True, text=True, timeout=60, cwd=self.tmp,
+        )
+        assert setup.returncode == 0, (
+            "fixture の setup-git-hooks.sh が束縛に失敗した: " + setup.stdout + setup.stderr
         )
 
         self.bin = os.path.join(self.tmp, "fakebin")

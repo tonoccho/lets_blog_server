@@ -157,14 +157,20 @@ class OriginFixture:
 
     def _add_git_hooks_fixture(self):
         """#1298: 隔離チェックアウトでの `bash scripts/setup-git-hooks.sh` 実行を検証できるよう、
-        本物の `scripts/setup-git-hooks.sh` と、実行ビット付きのダミー `pre-commit` を
-        fixture リポジトリへコミットする(実物の origin には両方とも入っている)。
+        本物の `scripts/setup-git-hooks.sh` と、実行ビット付きのダミー `pre-commit` /
+        `pre-merge-commit` を fixture リポジトリへコミットする(実物の origin には
+        両方とも入っている)。
 
-        `pre-commit` はダミー(`exit 0`)で十分: この Issue が検証したいのは
-        「束縛されるかどうか」(`core.hooksPath`)であって、pre-commit の中身(#1039 が
-        別途担保)ではない。ダミーなら、束縛後に隔離チェックアウト内で行われるマージ
-        コミット(事前確認・本番)がフックの実ロジック(フェーズ分離チェック等)に
+        `pre-commit` / `pre-merge-commit` はダミー(`exit 0`)で十分: この Issue が
+        検証したいのは「束縛されるかどうか」(`core.hooksPath`)であって、フックの中身
+        (#1039、#1452 が別途担保)ではない。ダミーなら、束縛後に隔離チェックアウト内で
+        行われるマージコミット(事前確認・本番)がフックの実ロジック(フェーズ分離チェック等)に
         巻き込まれてテストを不安定にすることもない。
+
+        `pre-merge-commit` も置くのは、本物の `scripts/setup-git-hooks.sh` の
+        `check_hook_file()` が両方の存在と実行ビットを点検するため(#1452) —
+        置かなければ `bash scripts/setup-git-hooks.sh` 自体がここで失敗し、
+        このテストが検証したい対象(隔離チェックアウトでの束縛)より手前で落ちる。
         """
         setup_script_src = os.path.join(REPO_ROOT, "scripts", "setup-git-hooks.sh")
         setup_script_dst = os.path.join(self.seed, "scripts", "setup-git-hooks.sh")
@@ -175,8 +181,20 @@ class OriginFixture:
         write_file(pre_commit_dst, "#!/bin/sh\nexit 0\n")
         os.chmod(pre_commit_dst, 0o755)
 
-        git(["add", "scripts/setup-git-hooks.sh", "scripts/git-hooks/pre-commit"], cwd=self.seed)
-        commit(self.seed, "add git-hooks fixture (#1298)")
+        pre_merge_commit_dst = os.path.join(self.seed, "scripts", "git-hooks", "pre-merge-commit")
+        write_file(pre_merge_commit_dst, "#!/bin/sh\nexit 0\n")
+        os.chmod(pre_merge_commit_dst, 0o755)
+
+        git(
+            [
+                "add",
+                "scripts/setup-git-hooks.sh",
+                "scripts/git-hooks/pre-commit",
+                "scripts/git-hooks/pre-merge-commit",
+            ],
+            cwd=self.seed,
+        )
+        commit(self.seed, "add git-hooks fixture (#1298, #1452)")
 
     def add_direct_main_commit(self, message="unexpected direct commit to main"):
         """main の木をAからずらす(木不一致 fixture)。"""

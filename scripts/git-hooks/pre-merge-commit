@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""コンフリクトなしの `git merge` が未分類パスを持ち込むコミットを拒否する git フック(#1452)。
+
+## なぜこのファイルが要る — `pre-commit` だけでは経路が1本足りない
+
+git はコミットの経路ごとに**別のフック**を起動する(`man githooks`)。`pre-commit` は
+`git commit` と、コンフリクトを解決した後の明示コミットしか拾わない。**コンフリクトなしの
+`git merge`(= 最も普通の結果)は、自動でコミットを作る前に `pre-merge-commit` だけを
+呼び出し、`pre-commit` は一切起動しない。** このリポジトリの `scripts/git-hooks/` に
+`pre-merge-commit` が無かったため、`CLAUDE.md` → Merge Conflicts が標準手順として示す
+`git merge origin/develop` の最も普通の実行結果が、`check_unclassified`(#1452 が
+`pre-commit` に足した検査)を一切通らずに成立していた(QA #1452 が実測: `rc=0`、
+フックの出力なし)。これは #1208 → #1321 → #1452 自身が繰り返してきた事故パターン
+そのもの(他ブランチで追加された未分類パスが `develop` の取り込みで気づかれず入り込む)
+が通る道であり、しかも検査が発火しないので気づく手段がそもそも無い、という形で現れた。
+
+## `pre-commit` を丸ごと委譲しない — `check_unclassified` だけを走らせる理由
+
+`man githooks` は「既定の `pre-merge-commit` は、有効なら `pre-commit` を走らせる」と
+述べているが、本リポジトリはそれに倣わない。`pre-commit` の5つの検査をこの経路でも
+そのまま実行すると、次の理由で**正当なマージを壊す**:
+
+  - 検査1(フェーズ分離)は `merge_in_progress()` で即 return するので、委譲しても
+    何も得ない。
+  - 検査3(テストファースト)には**マージ免除が無い**。マージでステージされる差分は
+    取り込む側の全コミット分なので `prod`(プロダクションパス)はほぼ常に非空になる。
+    一方 `check_test_first` が「テストが先にあるか」を見るのは
+    `branch_files = git diff --name-only <merge-base> HEAD` — つまり**自ブランチ**の
+    変更だけであり、`.claude/` と `docs/` は中立分類なので、ワークフローや文書だけを
+    直す Issue のブランチ(このリポジトリで最も普通の Issue の形)には `is_test` が
+    1件も無い。委譲すると、そのブランチで `develop` を取り込む**正当な**
+    `git merge origin/develop` が拒否されてしまう。
+  - 検査2(テストの黙殺)・検査4(`apps/web` カバレッジ床)は、免除するかバイパスを
+    許容するかの判断自体が #1460 の範囲であり、本フックでは扱わない。
+
+したがって、この経路で走らせるのは検査5(未分類パスの拒否)だけにする。マージで
+未分類パスが取り込まれることは正常な事象ではなく、まさに #1208 → #1321 → #1452 が
+繰り返し踏んできた欠陥そのものなので、免除しない(`pre-commit` の `check_unclassified`
+と同じ判断)。
+
+## 詰みにならない理由
+
+このフックが非0で終わると、git は**コミットを作らずにマージを中断する**が、
+**マージ結果は index に残る**(`man githooks`: 「conflicts なしで完了した後、
+コミットを作る前」に呼ばれ、非0終了は「コミット作成前にマージを中断させる」)。
+`.claude/hooks/paths.py` への分類を、その同じ index に追記して `git commit` すれば
+解決できる — その時点では `MERGE_HEAD` が書かれているので `git commit` は
+マージコミットとして扱われ、(この `pre-merge-commit` ではなく)`pre-commit` が起動する。
+実測: `scripts/test_pre_merge_commit_unclassified.py`
+`test_paths_py_classification_added_after_aborted_merge_lets_commit_succeed`。
+
+## `check_unclassified` に `merging=True` を明示的に渡す理由
+
+`pre-commit` の `merge_in_progress()` は `MERGE_HEAD` の有無で判定するが、
+**このフックが実行される時点では `MERGE_HEAD` はまだ書かれていない**
+(`man githooks`: 「マージが自動で成立した後、コミットログメッセージを得る前」に
+呼ばれる。実測でも `git rev-parse -q --verify MERGE_HEAD` は空)。`merge_in_progress()`
+に任せると、まさにこの経路でマージ用ヒント(拒否メッセージの一部)が常に欠落する。
+このフックは自分がマージ経路であることを文脈上知っているので、`merging=True` を
+明示的に渡す。
+
+有効化(`core.hooksPath` はディレクトリ単位で束縛されるので、`pre-commit` と
+同時に自動で束縛される。個別の追加設定は要らない):
+    git config core.hooksPath scripts/git-hooks
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# ハイフンを含み `.py` 拡張子も無いファイル名は `import` 文で読めず、
+# `importlib.util.spec_from_file_location` も拡張子からローダーを推測できないため、
+# `SourceFileLoader` を明示する。こうすることで `check_unclassified` / `staged_files` の
+# 実体を1箇所(`pre-commit`)に保ち、ここではコピーしない。
+_LOADER = importlib.machinery.SourceFileLoader("pre_commit_hook", os.path.join(HERE, "pre-commit"))
+_SPEC = importlib.util.spec_from_loader(_LOADER.name, _LOADER)
+_pre_commit = importlib.util.module_from_spec(_SPEC)
+_LOADER.exec_module(_pre_commit)
+
+
+def main():
+    files = _pre_commit.staged_files()
+    if not files:
+        return 0
+    _pre_commit.check_unclassified(files, merging=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
