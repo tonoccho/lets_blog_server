@@ -5,6 +5,7 @@ import { NAV_ITEMS, ADMIN_NAV_ITEMS } from "@/lib/navigation";
 import { HeaderNav } from "./HeaderNav";
 import { LogoutButton } from "./LogoutButton";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { ThemeScript } from "./ThemeScript";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { VscodeExtensionDownloadIconButton } from "./VscodeExtensionDownloadIconButton";
 import { I18nProvider } from "./I18nProvider";
@@ -41,16 +42,8 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <head>
-        <script
-          // Resolve the theme before first paint to avoid a flash of the wrong theme.
-          // Mirrors ThemeSwitcher's resolveEffectiveTheme logic.
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("theme");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.setAttribute("data-theme",d?"dark":"light");}catch(e){}})();`,
-          }}
-        />
-      </head>
       <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50">
+        <ThemeScript />
         <SessionProvider session={session}>
           <I18nProvider>
             <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
