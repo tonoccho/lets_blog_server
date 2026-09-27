@@ -1958,6 +1958,100 @@ class ShortValueFlagAttachedValueMisdetection(unittest.TestCase):
         )
 
 
+def _repo_with_staged_test_and_unstaged_prod_change():
+    """テストファイルのみをステージし、production ファイルには未ステージの変更を
+    残したリポジトリを作る(#1445)。
+
+    本物の `-a`/`-am` はこの未ステージ変更を拾うので混在として拒否されるべきで
+    (AC3)、値直結の短縮フラグ(`-uall`/`-tfeature-a.txt`)がこれと誤認されなければ
+    拾われず、ステージ済みのテストのみのコミットとして許可されるべき(AC1/AC2)。
+    """
+    root = tempfile.mkdtemp()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+
+    prod_path = os.path.join(root, "services/foo/src/Bar.java")
+    os.makedirs(os.path.dirname(prod_path), exist_ok=True)
+    with open(prod_path, "w") as f:
+        f.write("x")
+    subprocess.run(["git", "add", "services/foo/src/Bar.java"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=root, check=True)
+    # production ファイルの未ステージの変更(本物の -a / -am で拾われる)。
+    with open(prod_path, "w") as f:
+        f.write("y")
+
+    test_path = os.path.join(root, "apps/web/e2e/features/a.feature")
+    os.makedirs(os.path.dirname(test_path), exist_ok=True)
+    with open(test_path, "w") as f:
+        f.write("z")
+    subprocess.run(["git", "add", "apps/web/e2e/features/a.feature"], cwd=root, check=True)
+    return root
+
+
+class GitCommitShortValueFlagsCoverage(unittest.TestCase):
+    """#1445: `SHORT_VALUE_FLAGS[("git","commit")]` は `git commit -h` が挙げる、値を
+    取る短縮フラグ8つ(`m`/`F`/`c`/`C`/`S`/`t`/`U`/`u`)を網羅しなければならない。
+
+    欠けているフラグの値に `a` が含まれると `_has_flag(args, "--all", "a", ...)` が
+    `-a` と誤認し、`check_commit_phase` が未ステージの変更まで巻き込んで正当な
+    コミットを誤って「混在」と拒否する(fail-closed)。`-t`/`-U`/`-u` の3つが
+    修正前の集合 `{m, F, c, C, S}` に無かった。
+    """
+
+    def test_dash_u_all_attached_value_is_not_mistaken_for_all(self):
+        """AC1: `-uall`(--untracked-files=all の直結形)を `-a` と誤認しないこと。"""
+        root = _repo_with_staged_test_and_unstaged_prod_change()
+        reason = _run_in_git_phase_project("git commit -uall -m x", root)
+        self.assertIsNone(
+            reason,
+            "-u の値 'all' 中の a を --all と誤認し、未ステージの production 変更を"
+            "混入させて誤って混在と判定している: %s" % reason,
+        )
+
+    def test_dash_t_attached_value_containing_a_is_not_mistaken_for_all(self):
+        """AC2: `-tfeature-a.txt`(--template の直結形、値に a を含む)を `-a` と
+        誤認しないこと。"""
+        root = _repo_with_staged_test_and_unstaged_prod_change()
+        reason = _run_in_git_phase_project("git commit -tfeature-a.txt -m x", root)
+        self.assertIsNone(
+            reason,
+            "-t の値中の a を --all と誤認し、未ステージの production 変更を"
+            "混入させて誤って混在と判定している: %s" % reason,
+        )
+
+    def test_real_dash_a_flag_mixed_is_still_denied(self):
+        """AC3: 本物の `-a`(--all)は引き続き検出され、混在として拒否されること。"""
+        root = _repo_with_staged_test_and_unstaged_prod_change()
+        reason = _run_in_git_phase_project("git commit -a -m x", root)
+        self.assertIsNotNone(
+            reason, "本物の -a の検出に回帰があり、混在が見逃されている"
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_real_dash_am_cluster_mixed_is_still_denied(self):
+        """AC3: 本物の `-am`(-a と -m のクラスタ結合)は引き続き検出され、混在として
+        拒否されること。"""
+        root = _repo_with_staged_test_and_unstaged_prod_change()
+        reason = _run_in_git_phase_project("git commit -am x", root)
+        self.assertIsNotNone(
+            reason, "-am クラスタでの -a 検出に回帰があり、混在が見逃されている"
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_short_value_flags_for_git_commit_covers_all_eight(self):
+        """AC4: 集合が `git commit -h` の値を取る短縮フラグ8つを網羅していること。"""
+        hooks_dir = os.path.dirname(HOOK)
+        if hooks_dir not in sys.path:
+            sys.path.insert(0, hooks_dir)
+        import guard
+
+        self.assertEqual(
+            guard.SHORT_VALUE_FLAGS[("git", "commit")],
+            {"m", "F", "c", "C", "S", "t", "U", "u"},
+        )
+
+
 class WriteEditSilencerDenial(unittest.TestCase):
     """#1219: `cmd_write` の `SILENCERS` 拒否と、その免除パスを検査する。
 

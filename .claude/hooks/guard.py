@@ -603,11 +603,21 @@ def invokes(command, program, subcommands=()):
 #
 # `glab mr merge --help` で確認: `-m`(--message、コミットメッセージ)と
 # `-R`(--repo。GLOBAL_VALUE_FLAGS の一部と同じ意味)が値を取る短縮フラグ。
-# `git commit --help` で確認: `-m`/`-F`/`-c`/`-C`/`-S` が値を取る短縮フラグ
-# (Issue #1441 の要求する最低限。網羅は求められていない)。
+# `git commit -h` で確認: 値を取る短縮フラグは次の8つ全部(#1445。#1441 時点では
+# `m`/`F`/`c`/`C`/`S` の5つしか登録されておらず、`t`/`U`/`u` が漏れていた)。
+#   -F <file>                 --file
+#   -m <message>               --message
+#   -c <commit>                --reedit-message
+#   -C <commit>                --reuse-message
+#   -t <file>                  --template
+#   -S[<key-id>]               --gpg-sign(直結のみ値を取る)
+#   -U <n>                     --unified
+#   -u[<mode>]                 --untracked-files(直結のみ値を取る)
+# 将来 git の版でこの一覧が増減したら、`git commit -h` を取り直してこの集合を
+# 更新すること。
 SHORT_VALUE_FLAGS = {
     ("glab", "mr merge"): {"m", "R"},
-    ("git", "commit"): {"m", "F", "c", "C", "S"},
+    ("git", "commit"): {"m", "F", "c", "C", "S", "t", "U", "u"},
 }
 
 
