@@ -17,6 +17,7 @@ GitLab への移行後、`check_merge_flags` と `check_pr_coverage` は `gh pr 
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -2994,6 +2995,784 @@ class GlobalValueFlagBeforeSubcommandBypassesAllGuards(unittest.TestCase):
             reason,
             "一致前に置かれた --repo o/r --help が誤って deny された"
             "(前置形のヘルプ判定が壊れている)",
+        )
+
+
+# --------------------------------------------------------------------------- #1454
+
+
+def _run_bash_in_process(command, cwd=None, global_value_flags=None):
+    """`guard.cmd_bash` を**同一プロセス内で**呼び、(拒否理由 or None) を返す。
+
+    AC2(`GLOBAL_VALUE_FLAGS` を空集合に差し替えても AC1 が全 DENY のまま)は
+    `guard` モジュールのグローバル辞書そのものを差し替える必要があり、
+    `run_hook()`(別プロセス起動)では差し替えが子プロセスに伝わらない。
+    `cmd_explain` が同じモジュールグローバル(`EXPLAIN_MODE`)を使って `emit_deny` を
+    `sys.exit()` の代わりに `Denied` 例外にする、という既存の仕組みをそのまま流用する。
+    """
+    hooks_dir = os.path.dirname(HOOK)
+    if hooks_dir not in sys.path:
+        sys.path.insert(0, hooks_dir)
+    import guard
+
+    payload = bash_payload(command, cwd=cwd)
+    backup_flags = guard.GLOBAL_VALUE_FLAGS
+    backup_explain = guard.EXPLAIN_MODE
+    try:
+        if global_value_flags is not None:
+            guard.GLOBAL_VALUE_FLAGS = global_value_flags
+        guard.EXPLAIN_MODE = True
+        try:
+            guard.cmd_bash(payload)
+        except guard.Denied as denied:
+            return denied.reason
+        except SystemExit:
+            return None
+        return None
+    finally:
+        guard.GLOBAL_VALUE_FLAGS = backup_flags
+        guard.EXPLAIN_MODE = backup_explain
+
+
+def _coverage_denying_root():
+    """`scripts/check-changed-coverage.py` が常に rc 1 を返す作業ツリーを作る。"""
+    root = tempfile.mkdtemp()
+    scripts = os.path.join(root, "scripts")
+    os.makedirs(scripts)
+    with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+        f.write("import sys\nsys.exit(1)\n")
+    return root
+
+
+# AC1 が要求する7コマンド(git の1件を含む)。値の中身ではなく「サブコマンドより前に
+# 任意のフラグを置いても検出が崩れない」という性質を1箇所にまとめ、AC1/AC2 の両方の
+# テストから再利用する。カバレッジゲート対象(`mr create`)だけは作業ツリーの用意が
+# 要るため別枠にする。
+AC1_SIMPLE_COMMANDS = [
+    ("glab --sha abc123 mr merge --rebase", "squash"),
+    ("glab -m msg mr merge --rebase", "squash"),
+    ("glab -l foo issue update 42 -l hotfix", "hotfix"),
+    ("glab -t title issue update 42 -l hotfix", "hotfix"),
+    ("glab --due-date 2026-01-01 issue create -l hotfix -t x", "hotfix"),
+    ("glab -z 1 mr merge --rebase", "squash"),
+    ("glab --zz 1 mr merge --rebase", "squash"),
+    ("git --attr-source HEAD commit --no-verify", "no-verify"),
+]
+
+# #1454 レビュー1回目 BLOCKING1: サブコマンド2語の「あいだ」に GLOBAL_VALUE_FLAGS の
+# フラグ(値ペア込み)を挟んだ形。merge-base(617c4a88)の位置引数整列は一致未完了の
+# あいだ常にこの対を読み飛ばしたため元から DENY だったが、連続一致だけに絞った
+# 現ブランチ(8291bf53)では検出が `None` になり ALLOW へ退行した。RED はこの
+# 現ブランチに対して記録する(merge-base では退行していないため)。
+AC1_BETWEEN_POSITION_COMMANDS = [
+    ("glab mr -R o/r merge --rebase", "squash"),
+    ("glab issue -R o/r update 42 -l hotfix", "hotfix"),
+    ("glab mr -p 2 merge --rebase", "squash"),
+    ("glab mr -R o/r -p 2 merge --rebase", "squash"),
+]
+
+
+class OrderIndependentSubcommandDetection(unittest.TestCase):
+    """#1454 AC1: 葉のサブコマンドが定義する値フラグ(`--sha`/`-m`/`--title`/`-l`/`-t`/
+    `--due-date` 等)や、`GLOBAL_VALUE_FLAGS` に無い任意のフラグ(`-z`/`--zz`)、
+    さらに `GLOBAL_VALUE_FLAGS["git"]` に無い実在の git グローバル値フラグ
+    (`--attr-source`)が、サブコマンドより前に置かれても `invokes()` が呼び出しを
+    見失わないこと。
+
+    ## 受け入れる代償(#1454 本文より)
+
+    - **値の中身の誤検出**: `mr`/`merge` のような語がクォート無しで別々のトークンとして
+      連続すると、それだけで一致とみなす(例: `glab issue create -t mr merge` は
+      `-t` の値のつもりの `mr merge` を `mr merge` コマンドと誤認する)。クォートされた
+      `--title "mr merge"` は `split_commands()` が1トークンとして扱うため一致しない。
+    - `glab -z 1 mr merge --help` は `-z`/`1` が `residual` に残るため非ヘルプ判定になり、
+      誤拒否になる(fail-closed、無害)。
+    - 向きはすべて fail-closed(無害な誤拒否)であり、#1446/#1449 が既に受け入れている
+      代償と同種。
+    """
+
+    def test_all_ac1_commands_are_denied(self):
+        for command, expected_substring in AC1_SIMPLE_COMMANDS:
+            with self.subTest(command=command):
+                reason = run_hook("bash", bash_payload(command))
+                self.assertIsNotNone(
+                    reason,
+                    "%r が許可された(サブコマンドより前の任意のフラグで位置引数が"
+                    "ずれ、invokes() が空を返した可能性がある)" % command,
+                )
+                self.assertIn(expected_substring, reason)
+
+    def test_between_position_flag_commands_are_denied(self):
+        """#1454 レビュー1回目 BLOCKING1 への対応(AC1 あいだ位置4形)。
+
+        `glab mr -R o/r merge --rebase` のように、`GLOBAL_VALUE_FLAGS` に載っている
+        フラグでもサブコマンド2語の**あいだ**に置かれると、連続トークン一致だけでは
+        検出が `None` になり、依存する全ガードが見えなくなる(#1435/#1440 が
+        閉じたはずの回避経路の再発)。RED は本文の指示どおり現ブランチ(8291bf53)に
+        対して記録する: merge-base はこれらを既に DENY していた。
+        """
+        for command, expected_substring in AC1_BETWEEN_POSITION_COMMANDS:
+            with self.subTest(command=command):
+                reason = run_hook("bash", bash_payload(command))
+                self.assertIsNotNone(
+                    reason,
+                    "%r が許可された(サブコマンド語のあいだのフラグで連続一致が"
+                    "破れ、invokes() が空を返した可能性がある。#1454 レビュー"
+                    "1回目 BLOCKING1)" % command,
+                )
+                self.assertIn(expected_substring, reason)
+
+    def test_title_value_prefixed_mr_create_triggers_coverage_gate(self):
+        """`--title x` が `mr create` より前にあっても Coverage Gate が到達すること。"""
+        root = _coverage_denying_root()
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash",
+                bash_payload("glab --title x mr create --description y", cwd=root),
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNotNone(
+            reason,
+            "--title x mr create --description y が許可された"
+            "(Coverage Gate が到達していない)",
+        )
+        self.assertIn("カバレッジ", reason)
+
+    # --- AC2: 判定が GLOBAL_VALUE_FLAGS の網羅性に依存しないこと(性質そのものの固定) ---
+
+    def test_ac1_commands_still_denied_with_empty_global_value_flags(self):
+        """`GLOBAL_VALUE_FLAGS` の `glab`/`git` 両エントリを空集合に差し替えても、
+        AC1 のすべてが引き続き DENY のままであること。
+
+        インスタンス(`-z`/`--zz` 個別のケース)ではなく「検出が curated なリストの
+        網羅性に依存しない」という性質そのものを固定する(#1454 Readiness Report)。
+        これが通っていれば、`GLOBAL_VALUE_FLAGS` に載っていない別のフラグで同種の
+        fail-open が再発しない。
+        """
+        empty_flags = {"glab": set(), "git": set()}
+        for command, expected_substring in AC1_SIMPLE_COMMANDS:
+            with self.subTest(command=command):
+                reason = _run_bash_in_process(command, global_value_flags=empty_flags)
+                self.assertIsNotNone(
+                    reason,
+                    "%r が GLOBAL_VALUE_FLAGS 空集合下で許可された"
+                    "(検出が curated なリストの網羅性に依存している)" % command,
+                )
+                self.assertIn(expected_substring, reason)
+
+    def test_title_value_prefixed_mr_create_coverage_gate_with_empty_global_value_flags(self):
+        root = _coverage_denying_root()
+        empty_flags = {"glab": set(), "git": set()}
+        reason = _run_bash_in_process(
+            "glab --title x mr create --description y",
+            cwd=root,
+            global_value_flags=empty_flags,
+        )
+        self.assertIsNotNone(
+            reason,
+            "GLOBAL_VALUE_FLAGS 空集合下で --title x mr create --description y が"
+            "許可された(Coverage Gate が到達していない)",
+        )
+        self.assertIn("カバレッジ", reason)
+
+    def test_between_position_commands_still_denied_with_empty_global_value_flags(self):
+        """AC2 をあいだ位置4形にも適用する(#1454 レビュー SUGGESTION への対応)。
+
+        あいだ位置4形は `p_prev` が `GLOBAL_VALUE_FLAGS` を引くため空集合では
+        不成立になり、集合を引かない `p_proj` だけが検出を救う。したがって
+        「検出が `GLOBAL_VALUE_FLAGS` を再び引くようにする」変異は、この4形が
+        空集合下で allow に反転することで必ず落ちる。
+        """
+        empty_flags = {"glab": set(), "git": set()}
+        for command, expected_substring in AC1_BETWEEN_POSITION_COMMANDS:
+            with self.subTest(command=command):
+                reason = _run_bash_in_process(command, global_value_flags=empty_flags)
+                self.assertIsNotNone(
+                    reason,
+                    "%r が GLOBAL_VALUE_FLAGS 空集合下で許可された"
+                    "(あいだ位置の検出が curated なリストの網羅性に依存している)"
+                    % command,
+                )
+                self.assertIn(expected_substring, reason)
+
+    def test_leading_flag_projected_tokens_cobra_limits_are_pinned_directly(self):
+        """`_leading_flag_projected_tokens()` の cobra 制限を直接の単体 assert で
+        固定する(#1454 AC2、レビュー2回目 IMPORTANT: 射影が全ての dash トークンで
+        次を落とす変異は、`p_prev` が `--repo=o/r`/`-Ro/r` を覆うため end-to-end
+        テストでは merge-base 比 0 件で捕まらない)。
+
+        3文字以上の短縮形(`-Ro/r`)・`=` 結合形(`--repo=o/r`)は次を**落とさず**、
+        ちょうど2文字の短縮形(`-R o/r`)は次を**落とす** — cobra の `stripFlags`
+        と同じ形であることを直接固定する。
+        """
+        guard = _import_guard_module()
+        self.assertEqual(
+            guard._leading_flag_projected_tokens(
+                ["mr", "-Ro/r", "merge", "--rebase"], 4
+            ),
+            [(0, "mr"), (2, "merge")],
+        )
+        self.assertEqual(
+            guard._leading_flag_projected_tokens(["mr", "--repo=o/r", "merge"], 3),
+            [(0, "mr"), (2, "merge")],
+        )
+        self.assertEqual(
+            guard._leading_flag_projected_tokens(["mr", "-R", "o/r", "merge"], 4),
+            [(0, "mr"), (3, "merge")],
+        )
+
+    # --- AC3: fail-closed の維持(#1435 の元テストと同種、glab が rc 1 で拒否する形) ---
+
+    def test_jq_value_prefixed_mr_create_still_triggers_coverage_gate(self):
+        """`glab --jq . mr create`(glab は rc 1 で受理しない形)でも `invokes()` が
+        呼び出しを検出し、Coverage Gate が到達すること。"""
+        root = _coverage_denying_root()
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash", bash_payload("glab --jq . mr create", cwd=root)
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNotNone(reason, "glab --jq . mr create が許可された")
+        self.assertIn("カバレッジ", reason)
+
+    # --- AC4: 既存の判定が無傷であること ---
+
+    def test_repo_prefixed_mr_merge_rebase_is_still_denied(self):
+        """#1435 の対照。"""
+        reason = run_hook("bash", bash_payload("glab -R o/r mr merge --rebase"))
+        self.assertIsNotNone(reason)
+        self.assertIn("squash", reason)
+
+    def test_p_prefixed_issue_update_hotfix_is_still_denied(self):
+        """#1450 の対照。"""
+        reason = run_hook(
+            "bash", bash_payload("glab -p 42 issue update -l hotfix")
+        )
+        self.assertIsNotNone(reason)
+        self.assertIn("hotfix", reason)
+
+    def test_clustered_repo_short_flag_mr_merge_is_still_denied(self):
+        """#1441 の対照。"""
+        reason = run_hook("bash", bash_payload("glab -Rsss mr merge"))
+        self.assertIsNotNone(reason)
+
+    def test_repo_prefixed_mr_merge_help_is_still_allowed(self):
+        """#1446 の対照。"""
+        reason = run_hook(
+            "bash", bash_payload("glab --repo o/r mr merge --help")
+        )
+        self.assertIsNone(reason)
+
+    def test_bare_mr_merge_help_is_still_allowed(self):
+        reason = run_hook("bash", bash_payload("glab mr merge --help"))
+        self.assertIsNone(reason)
+
+    def test_bare_mr_merge_help_short_flag_is_still_allowed(self):
+        reason = run_hook("bash", bash_payload("glab mr merge -h"))
+        self.assertIsNone(reason)
+
+    def test_no_advice_prefixed_commit_no_verify_is_still_denied(self):
+        """方式A(cobra 同等規則)却下の根拠そのもの。`--no-advice` は git が実際に
+        値を取らず受理するブールのグローバルフラグであり(実測: `git --no-advice
+        --version` は rc 0)、方式Aを採ると `commit` を値として消費して ALLOW に
+        変わってしまう(#1454 Readiness Report)。方式Bはフラグと値を区別しないので
+        この回帰を起こさない。"""
+        reason = run_hook(
+            "bash", bash_payload("git --no-advice commit --no-verify")
+        )
+        self.assertIsNotNone(
+            reason,
+            "git --no-advice commit --no-verify が許可された"
+            "(方式Aと同じ新規 fail-open が発生している)",
+        )
+        self.assertIn("no-verify", reason)
+
+    def test_dash_z_value_before_no_advice_prefixed_commit_no_verify_is_denied(self):
+        """`git -z 1 --no-advice commit --no-verify`: AC1 が名指しする、**`p_raw`
+        (生のトークン列の連続一致)だけが救う形(#1454 本文 Requirement 1)。
+
+        `p_prev`(merge-base の整列)は `-z` の値のつもりの `1` を最初の位置引数
+        として拾ってしまい(`1` は `-` で始まらないので読み飛ばされない)、
+        `positional[:1] == ["commit"]` の前方一致が `1 != "commit"` で崩れて
+        `None` を返す。`p_proj` は `--no-advice`(長形・`=` を含まない)が cobra
+        規則で直後の `commit` を値として落とすため、射影列に `commit` が残らず
+        一致しない。生の列をそのまま連続一致で探す `p_raw` だけが `commit`
+        (index3)を見つける。
+
+        RED は merge-base(617c4a88)に対して記録する: merge-base の整列は
+        `p_prev` と同一であり、上記のとおりこの呼び出しを検出できず ALLOW して
+        いた(実装報告に記録)。
+        """
+        reason = run_hook(
+            "bash", bash_payload("git -z 1 --no-advice commit --no-verify")
+        )
+        self.assertIsNotNone(
+            reason,
+            "git -z 1 --no-advice commit --no-verify が許可された"
+            "(p_raw だけが検出できる形で回帰している)",
+        )
+        self.assertIn("no-verify", reason)
+
+    # --- AC5: `_leading_global_git_flags` が同じ一致位置から前置フラグ列を導くこと ---
+
+    def test_attr_source_prefixed_commit_phase_separation_is_denied(self):
+        """`--attr-source`(`GLOBAL_VALUE_FLAGS["git"]` に無い、git 2.40 以降の実在する
+        値取りグローバルフラグ)を前置しても、`check_commit_phase` が対象リポジトリの
+        ステージ内容を正しく読み、テスト/プロダクション混在を検出すること。
+
+        修正前は前置列を `['--attr-source']` と誤って切り出し、
+        `git --attr-source <root> diff --cached --name-only` が失敗して
+        `staged is None` → `continue` となり、フェーズ分離検査自体が素通りする
+        (#1454 Readiness Report)。
+        """
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --attr-source %s commit -m x" % root, root
+        )
+        self.assertIsNotNone(
+            reason,
+            "--attr-source 前置の git commit がフェーズ分離検査をすり抜けている"
+            "(前置フラグ列の切り出しが invokes() の一致位置と食い違っている)",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_attr_source_prefixed_commit_test_only_is_allowed(self):
+        root = _git_phase_project("apps/web/e2e/features/a.feature")
+        reason = _run_in_git_phase_project(
+            "git --attr-source %s commit -m x" % root, root
+        )
+        self.assertIsNone(
+            reason,
+            "--attr-source 前置でテストのみのコミットが誤って拒否された: %s" % reason,
+        )
+
+
+class SubcommandDetectionTruncatesAtBareDashDash(unittest.TestCase):
+    """#1454 AC3(b)(レビュー1回目 IMPORTANT への対応、レビュー2回目 SUGGESTION で
+    論拠を訂正): 探索は最初の裸の `--` で打ち切るという Requirement 1 の規定を
+    固定する。
+
+    非空虚性の論拠は **`p_raw` の打ち切りの削除だけ**である(手元の変異注入で確認、
+    実装報告に記録): `_subcommand_match_position()`(`p_raw`)の打ち切りループを
+    削除すると、この2件はどちらも DENY に変わる。**`p_proj` の打ち切りだけを
+    外しても2件は allow のまま**である — `_subcommand_match_position_proj()` の
+    `limit` を `_rest_limit_before_bare_dashdash(rest)` から `len(rest)` に
+    変えても、`--` 自身が cobra 規則上「`=` を含まない長形」として射影に一致し、
+    続く `mr`/`commit` を値として落としてしまうため、`p_proj` は依然一致しない
+    (手元の変異注入で確認、実装報告に記録)。旧 docstring は「`p_raw`/`p_proj` の
+    打ち切りを丸ごと削除するとどちらも DENY に変わる」と書いていたが、これは
+    `p_proj` については事実に反していた(#1454 レビュー2回目 SUGGESTION)。
+
+    `--` 以降のサブコマンドは実際には実行されない(実測: `glab -- mr list` は root の
+    ヘルプ、`git -- status` は `unknown option: --`)ので、許可のままが正しい。
+    """
+
+    def test_glab_bare_dashdash_before_subcommand_stays_allowed(self):
+        reason = run_hook("bash", bash_payload("glab -z 1 -- mr merge --rebase"))
+        self.assertIsNone(
+            reason,
+            "打ち切りが壊れ、`--` 以降の mr merge --rebase まで検出してしまった: %s"
+            % reason,
+        )
+
+    def test_git_bare_dashdash_before_subcommand_stays_allowed(self):
+        reason = run_hook("bash", bash_payload("git -z 1 -- commit --no-verify"))
+        self.assertIsNone(
+            reason,
+            "打ち切りが壊れ、`--` 以降の commit --no-verify まで検出してしまった: %s"
+            % reason,
+        )
+
+
+class MatchEndUsesLastMatchedTokenNotFirst(unittest.TestCase):
+    """#1454 AC3(c)(2026-09-27 の本文訂正で新設。レビュー2回目 IMPORTANT への対応)。
+
+    Requirement 1 は「`match_end` を**最後に**一致したトークンの生 index と定義し」
+    「一致が生の列で非連続な場合(`glab mr -R o/r merge --help`)…`residual` は
+    `['--help']` → **許可(merge-base と同一)**」と明記している。この規則を
+    `match_end = min(matched_indices)`(**最初に**一致したトークン)にする変異は、
+    AC1〜AC5 のどのテストにも捕まらず全 suite を緑のまま生き残っていた
+    (#1454 レビュー2回目 IMPORTANT)。**AC4 は allow 方向の退行だけを見る性質
+    テストなので、この allow→DENY への反転は原理的に AC4 では捕まらない** — これが
+    AC3(c) を独立に新設した理由。
+
+    非空虚性: `match_end = min(matched_indices)` への変異を手元で注入すると、
+    この2件はどちらも allow から DENY に反転する(実装報告に貼付)。
+    """
+
+    def test_repo_short_flag_between_subcommands_help_stays_allowed(self):
+        """`glab mr -R o/r merge --help`: `-R o/r` は `mr` と `merge` の**あいだ**
+        にあり、`p_prev` が非連続一致(`mr`=index0, `merge`=index3)する。
+        `match_end` は最後に一致した `merge`(index3)であるべきで、それより前の
+        `-R`/`o/r`(`GLOBAL_VALUE_FLAGS["glab"]` の対)は読み飛ばされ、`residual`
+        は `['--help']` になり許可される(merge-base と同一)。"""
+        reason = run_hook("bash", bash_payload("glab mr -R o/r merge --help"))
+        self.assertIsNone(
+            reason,
+            "glab mr -R o/r merge --help が拒否された"
+            "(match_end が最後に一致したトークンではなく最初になっている疑い): %s"
+            % reason,
+        )
+
+    def test_page_flag_between_subcommands_help_stays_allowed(self):
+        """`glab mr -p 2 merge --help`: 同上、あいだのフラグが `-p 2` の形。"""
+        reason = run_hook("bash", bash_payload("glab mr -p 2 merge --help"))
+        self.assertIsNone(
+            reason,
+            "glab mr -p 2 merge --help が拒否された"
+            "(match_end が最後に一致したトークンではなく最初になっている疑い): %s"
+            % reason,
+        )
+
+
+class LeadingGlobalGitFlagsCandidateRetry(unittest.TestCase):
+    """#1454 AC5 / レビュー1回目 BLOCKING2 とその鏡像(Readiness 再評価、反例3・4)。
+
+    `_leading_global_git_flags()` が単一の一致位置だけから前置列を導くと、
+    グローバルフラグの値がサブコマンド語と同名のときに境界を誤り、
+    `check_commit_phase` が `staged is None` から早期 `continue` して
+    フェーズ分離検査そのものが素通りする。候補集合(`p_prev`/`p_proj`/`p_raw` の
+    一致位置から導いた前置列を重複排除・短い順に並べたもの)+失敗時リトライで
+    初めて閉じる。
+    """
+
+    def test_dash_C_value_shares_subcommand_name_is_denied(self):
+        """`git -C commit commit -m x`: `-C` の値がたまたま `commit`(ディレクトリ名)。
+
+        `p_prev`/`p_proj` は正しく `['-C', 'commit']` を導くが、`p_raw`(生の連続一致)
+        は最初の `commit`(`-C` の値)に一致してしまい `['-C']` を導く。単一候補
+        (`p_raw` 優先、あるいは `p_raw` のみ)では誤った前置列が採用され、
+        `git -C diff --cached --name-only` が失敗して `staged is None` になる。
+        """
+        parent = tempfile.mkdtemp()
+        target = os.path.join(parent, "commit")
+        os.makedirs(target)
+        subprocess.run(["git", "init", "-q"], cwd=target, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@example.com"], cwd=target, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "t"], cwd=target, check=True)
+        for rel in ("apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"):
+            path = os.path.join(target, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write("x")
+        subprocess.run(
+            ["git", "add", "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"],
+            cwd=target,
+            check=True,
+        )
+        reason = _run_in_git_phase_project("git -C commit commit -m x", parent)
+        self.assertIsNotNone(
+            reason,
+            "-C の値がサブコマンド語と同名(commit)のディレクトリのとき前置列の"
+            "境界を誤り、フェーズ分離検査が素通りした(#1454 レビュー1回目 "
+            "BLOCKING2)",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_dash_C_value_shares_subcommand_name_test_only_is_allowed(self):
+        parent = tempfile.mkdtemp()
+        target = os.path.join(parent, "commit")
+        os.makedirs(target)
+        subprocess.run(["git", "init", "-q"], cwd=target, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@example.com"], cwd=target, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "t"], cwd=target, check=True)
+        path = os.path.join(target, "apps/web/e2e/features/a.feature")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write("x")
+        subprocess.run(
+            ["git", "add", "apps/web/e2e/features/a.feature"], cwd=target, check=True
+        )
+        reason = _run_in_git_phase_project("git -C commit commit -m x", parent)
+        self.assertIsNone(
+            reason,
+            "-C commit commit のテストのみのコミットが誤って拒否された: %s" % reason,
+        )
+
+    def test_attr_source_value_shares_subcommand_name_requires_candidate_retry(self):
+        """`git --attr-source commit commit -m x`: `--attr-source` の値がたまたま
+        `commit`。BLOCKING2 の鏡像(Readiness 再評価、反例4): `p_prev`/`p_raw` は
+        どちらも最初の `commit`(`--attr-source` の値)に一致し、単一候補では
+        前置列が `['--attr-source']` になって `git --attr-source diff --cached
+        --name-only` が失敗する。`p_proj` だけが正しい境界(`['--attr-source',
+        'commit']`)を与えるので、候補集合+短い順リトライで初めて閉じる。
+        """
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --attr-source commit commit -m x", root
+        )
+        self.assertIsNotNone(
+            reason,
+            "--attr-source の値がサブコマンド語と同名のとき前置列の候補選択に"
+            "失敗し、フェーズ分離検査が素通りした",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_no_advice_boolean_then_positional_named_like_subcommand_is_denied(self):
+        """`git --no-advice commit foo commit`: AC5 が名指しする3つ目の witness
+        (#1454 レビュー2回目 IMPORTANT: 前回はこの witness の代わりに別の入力
+        (`--attr-source commit commit -m x`)で代替しており、この witness 自体の
+        回帰テストが無かった。別の入力での代替は禁止されている)。
+
+        `--no-advice` はブールのグローバルフラグ、`foo` はその直後の無関係な
+        位置引数、2つ目の `commit` が本当のサブコマンド。`p_prev`/`p_raw` は
+        どちらも**最初の** `commit`(index1、`--no-advice` の直後の無関係な
+        位置引数ではなく `commit` 自身)に一致し、`p_proj` は `--no-advice` が
+        直後を値として落とすため `foo`(index2)を経て2つ目の `commit`
+        (index3)に一致する。`_leading_global_git_flags` の候補は
+        `[['--no-advice'], ['--no-advice', 'commit', 'foo']]` になり、**最短の
+        候補(`['--no-advice']`)が正しい** — これが正しい唯一の witness であり、
+        候補を逆順(長い方から)に試す変異はこの witness 以外では捕まらない。
+        """
+        root = _git_phase_project(
+            "apps/web/e2e/features/a.feature", "services/foo/src/Bar.java"
+        )
+        reason = _run_in_git_phase_project(
+            "git --no-advice commit foo commit", root
+        )
+        self.assertIsNotNone(
+            reason,
+            "git --no-advice commit foo commit がフェーズ分離検査をすり抜けた"
+            "(候補の並びが崩れている疑い、#1454 レビュー2回目 IMPORTANT)",
+        )
+        self.assertIn("テストコードとプロダクションコード", reason)
+
+    def test_no_advice_boolean_then_positional_named_like_subcommand_test_only_is_allowed(
+        self,
+    ):
+        root = _git_phase_project("apps/web/e2e/features/a.feature")
+        reason = _run_in_git_phase_project(
+            "git --no-advice commit foo commit", root
+        )
+        self.assertIsNone(
+            reason,
+            "--no-advice commit foo commit のテストのみのコミットが誤って"
+            "拒否された: %s" % reason,
+        )
+
+    def test_leading_global_git_flags_candidates_are_deduped_and_shortest_first(self):
+        """`_leading_global_git_flags()` が返す候補列が重複排除済みかつ短い順で
+        あることを、この2 witness に対する直接の単体 assert で固定する(#1454
+        AC5、レビュー2回目 IMPORTANT: 候補を逆順にする変異は274件の多候補ケースの
+        end-to-end テストでは差0で捕まらなかった)。
+
+        `--no-advice commit foo commit` は**最短の候補が正しい**唯一の witness、
+        `-C commit commit -m x` は**2番目の候補が正しい**唯一の witness であり、
+        この対でリスト等価(順序込み)の assert により候補の並びが一意に固定される。
+        """
+        guard = _import_guard_module()
+        self.assertEqual(
+            guard._leading_global_git_flags(
+                ["--no-advice", "commit", "foo", "commit"]
+            ),
+            [["--no-advice"], ["--no-advice", "commit", "foo"]],
+        )
+        self.assertEqual(
+            guard._leading_global_git_flags(["-C", "commit", "commit", "-m", "x"]),
+            [["-C"], ["-C", "commit"]],
+        )
+
+
+# --------------------------------------------------------------------------- #1454 AC4
+
+
+# merge-base(617c4a88)時点の `GLOBAL_VALUE_FLAGS` を凍結したコピー。production の
+# 辞書が将来変わっても、この参照実装は 617c4a88 時点の値のまま固定する。
+_FROZEN_617C4A88_GLOBAL_VALUE_FLAGS = {
+    "glab": {"-R", "--repo", "--jq", "-F", "--output", "-p", "--page", "-P", "--per-page"},
+    "git": {"-C", "--git-dir", "--work-tree", "-c", "--namespace", "--config-env"},
+}
+
+
+def _frozen_617c4a88_is_help_invocation(residual):
+    """merge-base(617c4a88)時点の `_is_help_invocation` を凍結したコピー。"""
+    return bool(residual) and all(tok in ("--help", "-h") for tok in residual)
+
+
+def _frozen_617c4a88_invokes_detects(rest, subcommands, value_flags):
+    """merge-base(617c4a88)の `invokes()` の位置引数整列をそのまま凍結して再現した
+    参照実装(AC4)。**production の `guard.py` に合わせて更新しないこと** —
+    production 側の検出規則が変わっても、ここは 617c4a88 時点の規則のまま固定する。
+    基準はこの関数であり、production の `invokes()` ではない。
+
+    `rest`(`program` 後続のトークン列)が `subcommands` への呼び出しとして
+    merge-base に検出され(`positional[:len(subcommands)] == subcommands`)、かつ
+    ヘルプ専用呼び出しでもないときに True を返す。
+    """
+    target = list(subcommands)
+    n = len(target)
+    positional = []
+    residual = []
+    matched = 0
+    skip_next = False
+    for a in rest:
+        if skip_next:
+            skip_next = False
+            continue
+        match_complete = matched >= n
+        if not match_complete and a in value_flags:
+            skip_next = True
+            continue
+        if a.startswith("-"):
+            residual.append(a)
+            continue
+        positional.append(a)
+        if not match_complete and a == target[matched]:
+            matched += 1
+        else:
+            residual.append(a)
+    if positional[:n] != target:
+        return False
+    return not _frozen_617c4a88_is_help_invocation(residual)
+
+
+# 基準コマンド(program, 後続トークン列, サブコマンド)。#1454 レビュー1回目が
+# 実際に突いた4呼び出し元(check_merge_flags/check_hotfix_label_immutability/
+# check_hotfix_creation/check_pr_coverage 相当)と、単一トークンのサブコマンド
+# (git commit)を含む。
+_AC4_BASELINES = [
+    ("glab", ["mr", "merge", "--rebase"], ("mr", "merge")),
+    ("glab", ["issue", "update", "42", "-l", "hotfix"], ("issue", "update")),
+    ("glab", ["issue", "create", "-l", "hotfix", "-t", "x"], ("issue", "create")),
+    ("glab", ["mr", "create", "--fill"], ("mr", "create")),
+    ("glab", ["mr", "list", "--per-page", "5"], ("mr", "list")),
+    ("git", ["commit", "--no-verify"], ("commit",)),
+]
+
+# 単一トークンで挿入するフラグ。curated な集合の内外、定義すら無いもの
+# (`-z`/`--zz`/`-Q`)を混ぜる。裸の `--`(打ち切り)、`=` 結合形(`--repo=o/r`)、
+# 2文字を超える短縮形(`-Ro/r`)も含める(#1454 レビュー2回目 SUGGESTION:
+# 1回目の回帰 family(あいだフラグ)がこの3形の変種で再発していないことを
+# 性質テストとしても押さえる。正しさそのものは `p_prev` が merge-base を厳密に
+# 再現することで構造的に成り立つため、ここは多様性を広げるための追加)。
+_AC4_SINGLE_INSERTS = [
+    "-z",
+    "--zz",
+    "-Q",
+    "--long-unknown",
+    "-R",
+    "--repo",
+    "--jq",
+    "-F",
+    "--output",
+    "-p",
+    "--page",
+    "-P",
+    "--per-page",
+    "-C",
+    "--git-dir",
+    "--work-tree",
+    "-c",
+    "--namespace",
+    "--config-env",
+    "--attr-source",
+    "--no-advice",
+    "--bare",
+    "--",
+    "--repo=o/r",
+    "-Ro/r",
+]
+
+# 対トークン(フラグ+値)で挿入する組。curated な集合の内外、各サブコマンドが
+# 個別に定義する値フラグ(`--sha`/`-m`/`--title`/`--due-date`)を含む。
+# `("-C", "commit")`(値がサブコマンド語と同名)も含める(#1454 レビュー2回目
+# SUGGESTION: BLOCKING2 が突いた形をこの性質テストの生成器にも足す)。
+_AC4_PAIR_INSERTS = [
+    ("-R", "o/r"),
+    ("--repo", "o/r"),
+    ("--jq", ".x"),
+    ("-F", "json"),
+    ("--output", "json"),
+    ("-p", "2"),
+    ("--page", "2"),
+    ("-P", "2"),
+    ("--per-page", "2"),
+    ("-C", "somepath"),
+    ("--git-dir", ".git"),
+    ("--work-tree", "."),
+    ("-c", "a=b"),
+    ("--namespace", "ns"),
+    ("--config-env", "a=B"),
+    ("--attr-source", "HEAD"),
+    ("--sha", "abc123"),
+    ("-m", "msg"),
+    ("--title", "x"),
+    ("--due-date", "2026-01-01"),
+    ("-C", "commit"),
+]
+
+
+def _ac4_generate_cases():
+    """基準コマンド×各位置への単一/対トークン挿入で入力を生成する(AC4)。"""
+    cases = []
+    for program, base_rest, subcommands in _AC4_BASELINES:
+        value_flags = _FROZEN_617C4A88_GLOBAL_VALUE_FLAGS.get(program, set())
+        for pos in range(len(base_rest) + 1):
+            for tok in _AC4_SINGLE_INSERTS:
+                rest = base_rest[:pos] + [tok] + base_rest[pos:]
+                cases.append((program, rest, subcommands, value_flags))
+            for flag, value in _AC4_PAIR_INSERTS:
+                rest = base_rest[:pos] + [flag, value] + base_rest[pos:]
+                cases.append((program, rest, subcommands, value_flags))
+    return cases
+
+
+def _import_guard_module():
+    hooks_dir = os.path.dirname(HOOK)
+    if hooks_dir not in sys.path:
+        sys.path.insert(0, hooks_dir)
+    import guard
+
+    return guard
+
+
+class FrozenMergeBaseAlignmentIsNeverLostByNewDetection(unittest.TestCase):
+    """#1454 AC4: merge-base(617c4a88)の判定が allow 方向へ動いた入力が1件も無い
+    ことを、列挙ではなく性質として固定する。
+
+    基準コマンド×各位置への単一/対トークン挿入で生成した1,000件以上の入力について、
+    凍結した参照実装(merge-base の位置引数整列をそのまま再現したもの)が呼び出しを
+    検出する入力では、production の新しい `invokes()` も同じ `rest` を返す
+    ことを検査する。判定文字列の同一性は要求しない(どのガードが先に発火するかは
+    変わりうる)。
+    """
+
+    def test_new_invokes_detects_everything_the_frozen_reference_detects(self):
+        guard = _import_guard_module()
+        cases = _ac4_generate_cases()
+        self.assertGreaterEqual(
+            len(cases), 1000, "AC4 が要求する1,000件以上の生成に届いていない"
+        )
+        checked = 0
+        for program, rest, subcommands, value_flags in cases:
+            if not _frozen_617c4a88_invokes_detects(rest, subcommands, value_flags):
+                continue
+            checked += 1
+            command = program + " " + " ".join(shlex.quote(t) for t in rest)
+            found = guard.invokes(command, program, subcommands)
+            self.assertEqual(
+                found,
+                [rest],
+                "参照実装(merge-base)が検出した入力 %r (%s %s) を新しい "
+                "invokes() が見失った、または residual/help 判定が変わった"
+                % (rest, program, subcommands),
+            )
+        self.assertGreater(
+            checked, 0, "参照実装が検出した入力が1件も無い(このテストは空虚)"
         )
 
 

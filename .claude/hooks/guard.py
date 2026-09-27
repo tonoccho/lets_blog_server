@@ -601,14 +601,196 @@ def simple_commands(command):
 #
 # **この8エントリの網羅性に安全性を依存させていない。** ここに載っていない値フラグ
 # (`--sha` / `-m` / `--title` / `-l` / `-t` / `--due-date` など、各サブコマンドが
-# 個別に定義する値フラグ)をサブコマンドより前に置いても同じ位置引数ずれは起きるが、
+# 個別に定義する値フラグ)をサブコマンドより前に置いても同じ位置引数ずれが起き、
 # それはこの集合を拡張しても閉じられない(cobra は未知フラグすべてで次トークンを
-# 食うため、curated なリストは原理的に後追いにしかならない)。この先行欠陥は
-# #1450 の範囲外であり、#1454(P1)として別に起票されている。
+# 食うため、curated なリストは原理的に後追いにしかならない)。#1454 でこの依存を
+# 断ち切った: `invokes()` の**検出**(`_subcommand_match_position()`)はこの集合を
+# 一切引かない。ここに残っているのは、一致より前のトークンを `residual`(ヘルプ判定
+# 対象)から取り除くためだけであり(#1450 の規則、`invokes()` のコメント参照)、
+# **この集合が空でも検出そのものは崩れない**(#1454 AC2)。
 GLOBAL_VALUE_FLAGS = {
     "glab": {"-R", "--repo", "--jq", "-F", "--output", "-p", "--page", "-P", "--per-page"},
     "git": {"-C", "--git-dir", "--work-tree", "-c", "--namespace", "--config-env"},
 }
+
+
+def _subcommand_match_position(rest, subcommands):
+    """`rest` の中で `subcommands` と完全一致する連続トークン列が現れる最初の位置を
+    返す。無ければ `None`。これが3候補のうちの **`p_raw`**(#1454)。
+
+    フラグか値かの区別を一切しない、生のトークン列そのものに対する連続一致。
+    探索は最初の裸の `--` で打ち切る。`glab -- mr list` は root のヘルプを表示する
+    だけで、`git -- status` は `unknown option: --` になり、どちらも実際には
+    サブコマンドを実行しない(実測)ので、打ち切りは無害な誤拒否だけを生む。
+
+    ## この関数**単独**では閉じない理由(#1454 レビュー1回目 BLOCKING1)
+
+    サブコマンド2語の**あいだ**に別のトークンが挟まると、この関数は連続性が
+    崩れて `None` を返す(`glab mr -R o/r merge` は `("mr","merge")` が連続しない)。
+    `-R o/r` は #1435/#1440 が閉じたはずの `GLOBAL_VALUE_FLAGS` の一員であり、
+    実行可能な形(実測: `glab mr -R gitlab-org/cli merge --help` は rc 0)である
+    にもかかわらず検出を失う。そのため `invokes()` はこの関数(`p_raw`)を
+    `_subcommand_match_position_prev`(`p_prev`)/`_subcommand_match_position_proj`
+    (`p_proj`)との **OR** として使う。この関数はそれでも必要: `p_prev`/`p_proj`
+    がどちらも見逃す形(例: `git -z 1 --no-advice commit --no-verify` のように
+    `p_proj` がブール長形の次を誤って落とす場合)を `p_raw` が拾う。
+
+    ## 受け入れる代償(#1454 本文で明示的に受け入れ済み。3候補共通)
+
+    - **値の中身の誤検出**: `glab issue create -t mr merge` のように、`-t` の値の
+      つもりで書いた `mr merge` が別トークンで連続していると、`("mr", "merge")` の
+      検索に一致してしまう。クォートされた `--title "mr merge"` は `split_commands()`
+      が1トークンとして扱うため一致しない。単一トークンのサブコマンド
+      (`("commit",)` / `("push",)`)では `git log --oneline commit` のような
+      リビジョン名が一致しうる。
+    - 向きはすべて **fail-closed(無害な誤拒否)** であり、#1446 の「位置引数が残る
+      ヘルプ呼び出しの誤拒否」、#1449 の「値直結形の誤拒否」と同種のトレードオフ。
+    """
+    if not subcommands:
+        return None
+    target = list(subcommands)
+    n = len(target)
+    limit = len(rest)
+    for idx, a in enumerate(rest):
+        if a == "--":
+            limit = idx
+            break
+    for i in range(max(0, limit - n + 1)):
+        if rest[i : i + n] == target:
+            return i
+    return None
+
+
+def _leading_flag_projected_tokens(rest, limit):
+    """`rest[:limit]` を cobra の `stripFlags` と同じ形で射影した
+    `(生 index, トークン)` の列を返す(`p_proj` の下請け、#1454)。
+
+    `-` で始まる各トークンは射影から落とす。さらに、そのトークンが
+    **「ちょうど2文字の短縮形(`-x`)」または「`--` で始まる長形」であり、
+    かつ `=` を含まない場合に限って**、直後のトークンも落とす —
+    cobra のコマンド探索 `stripFlags` が未知フラグの次トークンを一律に消費する
+    のと同じ形。3文字以上の短縮形(`-Ro/r`)・短縮クラスタ(`-sd`)・`=` 結合形
+    (`--repo=o/r`)は、cobra がその次を消費しない(実測)ため、ここでも次を
+    落とさない — 一律に落とすと `glab mr --repo=o/r merge --rebase` /
+    `glab mr -Ro/r merge --rebase` という**実行される**形(cobra は次を消費せず
+    そのまま `merge --rebase` に到達する)を検出から逃してしまう
+    (#1454 Readiness 再評価で判明した反例)。
+    """
+    projected = []
+    skip_next = False
+    idx = 0
+    while idx < limit:
+        a = rest[idx]
+        if skip_next:
+            skip_next = False
+            idx += 1
+            continue
+        if a.startswith("-"):
+            is_short = len(a) == 2 and not a.startswith("--")
+            is_long = a.startswith("--") and "=" not in a
+            if (is_short or is_long) and idx + 1 < limit:
+                skip_next = True
+            idx += 1
+            continue
+        projected.append((idx, a))
+        idx += 1
+    return projected
+
+
+def _rest_limit_before_bare_dashdash(rest):
+    """`rest` のうち、最初の裸の `--` より前の範囲の長さを返す(無ければ全長)。
+
+    `p_raw`/`p_proj` の探索はこの範囲だけを見る(#1454 Requirement 1)。
+    """
+    for idx, a in enumerate(rest):
+        if a == "--":
+            return idx
+    return len(rest)
+
+
+def _subcommand_match_position_proj(rest, subcommands):
+    """`p_proj`(#1454): 射影列(`_leading_flag_projected_tokens`)上で
+    `subcommands` と連続一致する最初の位置を、生のトークン列の index 列として
+    返す。無ければ `None`。curated な `GLOBAL_VALUE_FLAGS` を一切引かない —
+    このリストに載っていない値フラグ(`--attr-source` 等)や、定義すら無い
+    任意のフラグ(`-z`/`--zz`)がサブコマンドの**あいだ**に置かれても、cobra が
+    実際に次を消費する形とだけ一致するように振る舞う。
+
+    探索は最初の裸の `--` で打ち切る(打ち切り無しだと `glab -z 1 -- mr merge
+    --rebase` のような実行されない形まで検出してしまい、AC3(b) が守る性質が
+    崩れる)。
+    """
+    if not subcommands:
+        return None
+    target = list(subcommands)
+    n = len(target)
+    limit = _rest_limit_before_bare_dashdash(rest)
+    projected = _leading_flag_projected_tokens(rest, limit)
+    tokens = [tok for _, tok in projected]
+    for i in range(max(0, len(tokens) - n + 1)):
+        if tokens[i : i + n] == target:
+            return tuple(idx for idx, _ in projected[i : i + n])
+    return None
+
+
+def _subcommand_match_position_prev(rest, subcommands, value_flags):
+    """`p_prev`(#1454): merge-base(617c4a88)の位置引数整列をそのまま再現する。
+
+    `-` で始まるトークンは読み飛ばし、一致が未完了のあいだは `value_flags`
+    (`GLOBAL_VALUE_FLAGS[program]`)に一致するトークンと**その次**のトークンを
+    読み飛ばす。残った位置引数列の**先頭**が `subcommands` に一致するときだけ
+    成立し、一致した先頭 `len(subcommands)` 個の生 index を返す。無ければ
+    `None`。裸の `--` で打ち切らない(merge-base と同一挙動を保つため —
+    `glab -- mr merge --rebase` はこの関数だけなら「一致」と判定しうるが、
+    `invokes()` の OR 相手である `p_raw`/`p_proj` が打ち切るので、検出全体としては
+    #1454 Readiness 再評価のスイープで allow 方向の変化 0 件を維持できている)。
+
+    `GLOBAL_VALUE_FLAGS` の網羅性を引く**唯一**の候補であり、`p_proj` が
+    curated リストに依存せず検出を担保する(AC2)。`invokes()`/
+    `_leading_global_git_flags()` の両方から呼ばれ、一致位置の求め方を1箇所に
+    まとめる(#1454 Scope: `_leading_global_git_flags` は独自にフラグを走査しない)。
+    """
+    if not subcommands:
+        return None
+    target = list(subcommands)
+    n = len(target)
+    positional_raw = []
+    matched = 0
+    skip_next = False
+    for idx, a in enumerate(rest):
+        if skip_next:
+            skip_next = False
+            continue
+        match_complete = matched >= n
+        if not match_complete and a in value_flags:
+            skip_next = True
+            continue
+        if a.startswith("-"):
+            continue
+        positional_raw.append(idx)
+        if not match_complete and a == target[matched]:
+            matched += 1
+    if matched < n:
+        return None
+    head = positional_raw[:n]
+    if [rest[i] for i in head] != target:
+        return None
+    return tuple(head)
+
+
+def _subcommand_match_candidates(rest, subcommands, value_flags):
+    """`p_prev`/`p_proj`/`p_raw` の3候補をまとめて計算する(#1454)。
+
+    それぞれ「一致した `subcommands` トークンの生 index のタプル」または
+    `None` を返す。`invokes()`(検出+`residual` 組み立て)と
+    `_leading_global_git_flags()`(前置フラグ列の候補列)の両方がこの1関数を
+    経由することで、「どちらも同じ一致規則を使う」という前提を1箇所で保つ。
+    """
+    prev = _subcommand_match_position_prev(rest, subcommands, value_flags)
+    proj = _subcommand_match_position_proj(rest, subcommands)
+    raw_start = _subcommand_match_position(rest, subcommands)
+    raw = tuple(range(raw_start, raw_start + len(subcommands))) if raw_start is not None else None
+    return prev, proj, raw
 
 
 def invokes(command, program, subcommands=()):
@@ -628,31 +810,47 @@ def invokes(command, program, subcommands=()):
     この判定を経由しない — 特定のサブコマンドへの一致を前提にしていないので、
     `--help` の有無を云々する対象でもない。
 
-    ## `GLOBAL_VALUE_FLAGS` の読み飛ばしは、サブコマンド一致が完了するまでだけ(#1450)
+    ## サブコマンド検出は3候補の OR(#1454、レビュー1回目 BLOCKING1 対応)
 
-    `-p` のように、サブコマンドの前後で扱いが変わるべきトークンがある。サブコマンドの
-    前で `-p` は永続フラグではなく値も取らない(`GLOBAL_VALUE_FLAGS` 直前のコメントの
-    実測表 (a) 参照 — `glab -p x/y version` は rc 1)。それでも一致前に読み飛ばす必要が
-    あるのは、cobra のコマンド探索が使う `stripFlags` が未知フラグの次トークンを一律に
-    消費するためである(同コメント参照)。一方サブコマンドの後で `-p` は `issue update`
-    が定義するブールの `--public` であり、次のトークンを消費してはならない。単一の
-    集合で「読み飛ばす/読み飛ばさない」を位置に関係なく決め打つと、どちらかの方向で
-    `invokes()` が呼び出しを丸ごと見失う:
+    検出そのもの(呼び出しがあるかどうか)は `_subcommand_match_candidates()` が
+    返す3候補(`p_prev`/`p_proj`/`p_raw`)の**いずれかが成立すれば真**とする。
+    単独の連続一致(`p_raw` だけ)では、サブコマンド2語の**あいだ**に
+    `GLOBAL_VALUE_FLAGS` のフラグ(`glab mr -R o/r merge` の `-R o/r`)が挟まると
+    検出を失う(#1435/#1440 が閉じたはずの回避経路の再発、レビュー1回目
+    BLOCKING1)。`p_prev`(merge-base の従来整列)を候補に含めることで、
+    merge-base が検出していた呼び出しを1つも失わない — 検出集合が真に広がる
+    だけになる(#1454 Readiness 再評価で 3,013 件のスイープにより確認: 2候補案
+    では 77 件が merge-base の DENY を失ったが、`p_prev` を第3候補として OR に
+    加えると 0 件)。
 
-    - **一致完了前**に読み飛ばさない場合: 値(`glab -p 2 mr merge` の `2`)が位置引数
-      として数えられ、`positional[:len(subcommands)]` の前方一致が崩れて
-      `invokes()` が空リストを返す — 依存する全ガードが到達しなくなる(fail-open。
-      #1450 レビュー1回目 BLOCKING)。
-    - **一致完了後**に読み飛ばす場合: 値を取ると仮定したトークンの次が読み飛ばされて
-      `residual` から消え、`_is_help_invocation` が誤ってヘルプと判定しうる
-      (fail-open。#1450 元の欠陥)。
+    **安全性は `GLOBAL_VALUE_FLAGS` の網羅性に依存しない**: `p_proj`(cobra の
+    `stripFlags` と同じ規則の射影)は curated なリストを一切引かず、このリストに
+    無い値フラグ(`--sha`/`-m`/`--title`/`--attr-source` 等)や定義すら無い任意の
+    フラグ(`-z`/`--zz`)がサブコマンドの前後・あいだのどこにあっても検出する
+    (AC2: `GLOBAL_VALUE_FLAGS` を空集合にしても `p_prev` は不成立になるだけで
+    `p_proj` が検出を保つ)。
 
-    そのため位置で使い分ける: **一致完了前(`matched < len(target)`)は
-    `GLOBAL_VALUE_FLAGS[program]` をそのまま使って読み飛ばす**(位置引数整列に必要。
-    根拠は cobra のコマンド探索時 `stripFlags` が未知フラグの次トークンを一律に
-    消費すること — 上記コメントの表と同じ)。**一致完了後は一切読み飛ばさない**
-    (curated なリストを引かない。`residual` に本物のトークンが残るので
-    `_is_help_invocation` は安全側=非ヘルプに倒れる)。
+    ## 採用位置: `p_prev` → `p_proj` → `p_raw` の順(`residual` 組み立て用)
+
+    3候補のうち最初に成立したものを`residual` 組み立てに使う。`p_prev` を
+    最優先するのは、`p_prev` が成立する入力(既存呼び出しの大半)では `residual`
+    が merge-base と**完全に同一**になり、#1446/#1450 のヘルプ判定がそのまま
+    保たれるため。
+
+    ## `residual` の組み立て(#1450 の規則を一般化。値の変更はしない)
+
+    採用した候補の一致トークン(生 index の集合)は `residual` に含めない。
+    `match_end` を「**最後に**一致したトークンの生 index」と定義し、
+    **`match_end` より前**では `GLOBAL_VALUE_FLAGS[program]` に一致するトークンと
+    その次を読み飛ばし、**`match_end` 以降**は一切読み飛ばさない。それ以外の
+    トークンは `-` で始まるかどうかを問わず一律 `residual` に積む。一致が生の列で
+    非連続な場合(`glab mr -R o/r merge --help` の `p_prev` は `mr`=index0、
+    `merge`=index3 に一致し、`match_end`=3)、`-R`/`o/r`(index1・2)は
+    `match_end` より前なので読み飛ばされ、`residual` は `['--help']` になる —
+    #1450 が確定した「一致完了までは読み飛ばす/一致後は読み飛ばさない」を
+    非連続一致へ一般化した言い換えであり、矛盾しない。連続一致(`p_raw` 由来)の
+    場合は `match_end = match_at + len(subcommands) - 1` と等価になるので、
+    #1450 までの挙動は変わらない。
 
     受け入れる代償: 一致後に置かれたグローバル値フラグと `--help`(または `-h`)の併記
     (`glab mr merge --repo o/r --help`)は、`--repo`/`o/r` が読み飛ばされず
@@ -680,29 +878,24 @@ def invokes(command, program, subcommands=()):
             continue
         rest = argv[1:]
         if subcommands:
-            target = list(subcommands)
-            positional = []
+            prev, proj, raw = _subcommand_match_candidates(rest, subcommands, value_flags)
+            matched_indices = prev if prev is not None else (proj if proj is not None else raw)
+            if matched_indices is None:
+                continue
+            matched_set = set(matched_indices)
+            match_end = max(matched_indices)
             residual = []
-            matched = 0
             skip_next = False
-            for a in rest:
+            for idx, a in enumerate(rest):
                 if skip_next:
                     skip_next = False
                     continue
-                match_complete = matched >= len(target)
-                if not match_complete and a in value_flags:
+                if idx in matched_set:
+                    continue
+                if idx < match_end and a in value_flags:
                     skip_next = True
                     continue
-                if a.startswith("-"):
-                    residual.append(a)
-                    continue
-                positional.append(a)
-                if not match_complete and a == target[matched]:
-                    matched += 1
-                else:
-                    residual.append(a)
-            if positional[: len(subcommands)] != list(subcommands):
-                continue
+                residual.append(a)
             if _is_help_invocation(residual):
                 continue
         found.append(rest)
@@ -1184,30 +1377,48 @@ def check_no_verify(command):
 
 
 def _leading_global_git_flags(args):
-    """`args`(`git` の後続トークン列)のうち、最初の positional トークン(サブコマンド)
+    """`args`(`invokes(command, "git", ("commit",))` が返す、`git` の後続トークン列)
+    のうち、`commit` サブコマンドより前のグローバルフラグ列の**候補列**を返す
+    (#1443、#1454 Requirement 3)。
 
-    より前のグローバルフラグ列を返す(#1443)。`invokes()` がサブコマンド検出に使う
-    のと全く同じ規則(`GLOBAL_VALUE_FLAGS["git"]` にあるフラグは次のトークンも値として
-    読み飛ばす)で走査するので、`invokes()` が返す `args` の先頭が確実にこの境界に
-    一致する。
+    単一のリストではなく、`_subcommand_match_candidates()` の3候補
+    (`p_prev`/`p_proj`/`p_raw`)それぞれの一致開始位置から導いた `args[:開始位置]`
+    を重複排除し、**短いものから順に**並べたリストを返す。呼び出し元
+    (`check_commit_phase`)はこれを順に試し、実際に `git <候補> diff --cached
+    --name-only` が成功した最初の候補を採用する。
+
+    ## なぜ単一候補では原理的に閉じないか(#1454 レビュー1回目 BLOCKING2)
+
+    グローバルフラグの値がサブコマンド語と同名のとき(`git -C commit commit`)は
+    `p_proj`/`p_prev` の一致開始位置が正しく、ブールのグローバルフラグの直後に
+    サブコマンド語と同名の位置引数があるとき(`git --attr-source commit commit`
+    — `commit` を値に取る `--attr-source` の場合)は逆に `p_proj` だけが正しい
+    位置を返す。どちらが正しいかは「どのグローバルフラグが値を取るか」を
+    知らないと決まらず、それは curated なリストの再導入である。そのため
+    「正しい1つを選ぶ」のではなく、**候補をすべて試して実際に動く1つを採用する**。
+
+    `p_prev` は常に候補に含まれる(#1454 Readiness 再評価のスイープ、17,380件で
+    反例0)ため、merge-base のフェーズ分離検出を1件も失わない。短い候補から
+    試すのは、誤った候補が git 自身のグローバルオプション解釈で必ず失敗するため
+    (実測: `git -C docs --cached --name-only` → `unknown option: --cached`)。
+
+    `args` は `invokes()` が `("commit",)` への一致を確認済みの `rest` そのものであり、
+    一致位置の求め方は `_subcommand_match_candidates()` 一箇所に集約している —
+    `invokes()` の検出規則が変わってもここが自動的に追従する。
     """
     value_flags = GLOBAL_VALUE_FLAGS.get("git", set())
-    i = 0
-    skip_next = False
-    while i < len(args):
-        a = args[i]
-        if skip_next:
-            skip_next = False
-            i += 1
-            continue
-        if a in value_flags:
-            skip_next = True
-            i += 1
-            continue
-        if not a.startswith("-"):
-            break
-        i += 1
-    return args[:i]
+    prev, proj, raw = _subcommand_match_candidates(args, ("commit",), value_flags)
+    starts = sorted({m[0] for m in (prev, proj, raw) if m is not None})
+    if not starts:
+        # `args` は呼び出し元が `invokes()` で一致を確認済みのものしか渡さないため、
+        # 通常はここに来ない。来た場合、`args` 全体を前置として `git` に渡すと
+        # `commit` 自身やその引数まで `diff --cached --name-only` の前に紛れ込み、
+        # `git` がエラーになって `check_commit_phase` が `staged is None` から
+        # 早期 `continue` する(フェーズ分離検査そのものが素通りする fail-open)。
+        # 前置が特定できないなら「前置無し」(空リスト)の方が安全: 通常の
+        # `git commit`(前置無し)と同じ経路になり、cwd のリポジトリをそのまま見る。
+        return [[]]
+    return [args[:s] for s in starts]
 
 
 def check_commit_phase(payload, command):
@@ -1221,8 +1432,18 @@ def check_commit_phase(payload, command):
         # 呼び出し側が書いたとおりの形で `git` 自身に渡す(#1443)。こうすることで
         # 相対パスの解決(cwd 基準)・複数の `-C` の累積・`--git-dir` と
         # `--work-tree` の優先順位を、すべて git 自身の実装に委ねられる。
-        prefix = _leading_global_git_flags(args)
-        staged = git(prefix + ["diff", "--cached", "--name-only"], root)
+        #
+        # 前置列は候補集合であり、単一の「正しい」ものを事前に決められない
+        # (#1454 Requirement 3)。実際に `diff --cached --name-only` が成功した
+        # 最初の候補を採用し、すべて失敗したときだけ検査自体を諦める。
+        staged = None
+        prefix = []
+        for candidate in _leading_global_git_flags(args):
+            result = git(candidate + ["diff", "--cached", "--name-only"], root)
+            if result is not None:
+                staged = result
+                prefix = candidate
+                break
         if staged is None:
             continue
         files = [p for p in staged.splitlines() if p.strip()]
