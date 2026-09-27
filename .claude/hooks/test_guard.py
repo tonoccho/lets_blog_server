@@ -2741,5 +2741,261 @@ class HelpDetectionDoesNotMistakeAValueTokenForARealHelpFlag(unittest.TestCase):
         self.assertIn("squash", reason)
 
 
+# --------------------------------------------------------------------------- #1450
+
+
+class PerSubcommandGlobalValueFlagConflict(unittest.TestCase):
+    """`invokes()` の残余(`residual`)計算は、`GLOBAL_VALUE_FLAGS[program]` をプログラム単位
+    (`glab`/`git`)で一律に適用し、トークンが「値を取る」かどうかがサブコマンドごとに違う
+    ケースを区別しない(#1450)。
+
+    `glab issue update` の `-p` は実際には `--public`(値を取らないブール、実測は
+    `glab issue update --help`)だが、`GLOBAL_VALUE_FLAGS["glab"]` は `-p` を常に
+    `--page`(値取り、`glab issue list --help` で実測)の短縮形として扱う。この食い違いに
+    より、`-p` の直後の本物のトークンが「-p の値」として読み飛ばされ、`residual` に残らなく
+    なる。残った `residual` がたまたま `--help`/`-h` だけになると、`_is_help_invocation`
+    が真を返し、`invokes()` はこの呼び出しを丸ごと `continue` で捨てる — 個々のチェック
+    関数(`check_hotfix_label_immutability` など)は一切呼ばれない。
+
+    再現には、読み飛ばされる「値」が単一トークンの短縮結合形(`-lhotfix`)であることが要る。
+    `--label`/`hotfix` のように2トークンに分かれていると、`-p` 1個につき1トークンしか
+    飲み込めないため、`--label` と `hotfix` を両方隠すには `-p` が2回要り、その場合
+    `_issue_update_label_args` 自身が(`--label` の直後のトークンを無条件に値として読む、
+    これも「値を取ると分かっている」前提の実装のため)2個目の `-p` を値として拾ってしまい、
+    結果的に元から `hotfix` を検出できない — これが #1450 Issue 本文の実測例
+    (`glab issue update 42 -p --label -p hotfix --help`)が「今回突いた具体例では実害は
+    無かった」と書いている理由。`-lhotfix` は1トークンなので `-p` 1個で丸ごと隠れ、かつ
+    `_issue_update_label_args` は独立に `-l` 接頭の直結値として正しく `hotfix` を読み取れる
+    ため、両者の判定が食い違う実例になる。
+    """
+
+    def test_attached_label_flag_swallowed_by_boolean_public_flag_bypasses_hotfix_check(self):
+        """AC1: `-p`(--public、ブール)の直後の `-lhotfix`(値直結)が `-p` の値として
+        読み飛ばされ、残余が `--help` だけになって help 誤判定 → hotfix 付与の検査が
+        まるごとスキップされないこと。"""
+        reason = run_hook(
+            "bash", bash_payload("glab issue update -p -lhotfix --help")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-p の直後の -lhotfix が値として読み飛ばされ、残余が --help だけになって"
+            "help と誤判定され、hotfix 付与の検査がまるごとスキップされた(#1450)",
+        )
+        self.assertIn("hotfix", reason)
+
+    def test_attached_unlabel_flag_swallowed_by_boolean_public_flag_bypasses_hotfix_check(self):
+        """AC1 の対称形: `-u`(--unlabel)の直結値でも同じ穴が開くこと。"""
+        reason = run_hook(
+            "bash", bash_payload("glab issue update -p -uhotfix --help")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-p の直後の -uhotfix が値として読み飛ばされ、hotfix 剥奪の検査が"
+            "まるごとスキップされた(#1450)",
+        )
+        self.assertIn("hotfix", reason)
+
+    def test_duplicate_subcommand_token_after_match_does_not_wrap_around_into_help(self):
+        """AC2 の別形(#1450 QA(2026-09-27)が変異注入で発見): サブコマンド一致完了
+        **後**に、対象の先頭トークンと同じ綴りの位置引数(`mr`)が重ねて置かれた形。
+        `invokes()` の整列ループの `not match_complete and a == target[matched]` から
+        `not match_complete` のゲートを落とし `target[matched % len(target)]` へ
+        index を折り返す変異を入れると、この余分な `mr` が再び `target[0]` に一致した
+        ことにされて `residual` に積まれず、残余が `--help` だけになって help と
+        誤判定される(mutant では allow)。正しい実装ではこの `mr` は `match_complete`
+        により `residual` に積まれるため `--help` 単独ではなくなり、help 誤判定を
+        免れて `check_merge_flags` が通常どおり deny する。"""
+        reason = run_hook("bash", bash_payload("glab mr merge mr --help"))
+        self.assertIsNotNone(
+            reason,
+            "サブコマンド一致後の余分な mr トークンが match_complete ゲートを"
+            "回避して読み飛ばされ、残余が --help だけになって help と誤判定され、"
+            "マージ方式必須検査(check_merge_flags)がスキップされた",
+        )
+        self.assertIn("squash", reason)
+
+    def test_status_label_integrity_is_not_reachable_via_subcommand_help_misdetection(self):
+        """AC1 の残り半分(`check_status_label_integrity`): この関数は
+        `invokes(command, "glab", ())` -- 空の `subcommands` -- しか使わず、`invokes()`
+        の `if subcommands:` 分岐(値フラグの読み飛ばしと `_is_help_invocation` 判定)を
+        一切経由しない(guard.py の `invokes()` docstring、570-573行)。したがってこの
+        #1450 の欠陥の影響を構造的に受けない。ここでは、この関数が(修正の前後を問わず)
+        今までどおり正しく発火することを確かめる回帰テストとして残す。
+        """
+        command = (
+            "glab api projects/:id/issues/42 --method PUT -p "
+            '-f "add_labels=status::Ready" --help'
+        )
+        reason = run_hook("bash", bash_payload(command))
+        self.assertIsNotNone(
+            reason,
+            "status:: を追加するだけの PUT が -p/--help 併記で誤って見逃された",
+        )
+
+
+# --------------------------------------------------------------------------- #1450 レビュー1回目
+
+
+class GlobalValueFlagBeforeSubcommandBypassesAllGuards(unittest.TestCase):
+    """#1450 レビュー1回目 BLOCKING: `-p` をプログラム全体で外した実装は
+    `GLOBAL_VALUE_FLAGS["glab"]` から `-p` そのものを除いてしまっていた。この結果、
+    `-p <値>` が**サブコマンドより前**に置かれると、値(例: `2`)が読み飛ばされずに**位置引数として
+    数えられ**、`invokes()` の `positional[: len(subcommands)] != list(subcommands)` の
+    前方一致が崩れる。一致しない呼び出しは `invokes()` にとって「そのような呼び出しは
+    無い」と同じであり、`found` に積まれず**空リストが返る** — 個々のチェック関数
+    (`check_merge_flags` 等)のループは1回も回らない。前回の欠陥(help 誤判定による
+    `continue`)とは経路が違うが、「依存する全ガードが到達しない」という結果は同じ。
+
+    採るべき規則(レビュアーが確定): `-p` の曖昧さは位置によって意味が変わることに
+    起因するので、**一致前の走査では `GLOBAL_VALUE_FLAGS[program]` をそのまま全部使い
+    (`-p` を戻す)、一致後の `residual` の組み立てではグローバル値フラグの読み飛ばしを
+    一切行わない**(curated なリストを引かない)。
+    """
+
+    def test_global_value_flag_before_mr_merge_does_not_bypass_merge_flags_check(self):
+        """呼び出し元1/4: `check_merge_flags`(#1435)。`-p 2` がサブコマンドより前に
+        あっても `mr merge` への一致が崩れず、`--rebase` 禁止検査が発火すること。"""
+        reason = run_hook("bash", bash_payload("glab -p 2 mr merge --rebase"))
+        self.assertIsNotNone(
+            reason,
+            "-p 2 がサブコマンドより前に置かれたことで位置引数がずれ、"
+            "invokes() が空を返し --rebase 禁止検査(check_merge_flags)が"
+            "スキップされた(#1450 レビュー1回目)",
+        )
+        self.assertIn("squash", reason)
+
+    def test_global_value_flag_before_issue_update_does_not_bypass_hotfix_immutability(self):
+        """呼び出し元2/4: `check_hotfix_label_immutability`(#1433)。`-p 2` が
+        サブコマンドより前にあっても `issue update` への一致が崩れず、hotfix 不変性
+        検査が発火すること。"""
+        reason = run_hook(
+            "bash", bash_payload("glab -p 2 issue update 42 -lhotfix")
+        )
+        self.assertIsNotNone(
+            reason,
+            "-p 2 がサブコマンドより前に置かれたことで位置引数がずれ、"
+            "invokes() が空を返し hotfix 不変性検査(check_hotfix_label_immutability)"
+            "がスキップされた(#1450 レビュー1回目)",
+        )
+        self.assertIn("hotfix", reason)
+
+    def test_global_value_flag_before_issue_create_does_not_bypass_hotfix_creation_gate(self):
+        """呼び出し元3/4: `check_hotfix_creation`(#1434)。マーカー無しでの `hotfix`
+        付き起票は、`-p 1` がサブコマンドより前にあっても拒否され続けること。"""
+        reason = run_hook(
+            "bash",
+            bash_payload("glab -p 1 issue create --title x --label hotfix"),
+        )
+        self.assertIsNotNone(
+            reason,
+            "-p 1 がサブコマンドより前に置かれたことで位置引数がずれ、"
+            "invokes() が空を返し hotfix 作成ゲート(check_hotfix_creation)が"
+            "スキップされた(#1450 レビュー1回目)",
+        )
+        self.assertIn("hotfix", reason)
+
+    def test_global_value_flag_before_mr_create_does_not_bypass_coverage_gate(self):
+        """呼び出し元4/4: `check_pr_coverage`。`-p 1` がサブコマンドより前にあっても
+        `mr create` への一致が崩れず、カバレッジゲートが発火すること。"""
+        root = tempfile.mkdtemp()
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write("import sys\nsys.exit(1)\n")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash",
+                bash_payload("glab -p 1 mr create --title x", cwd=root),
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNotNone(
+            reason,
+            "-p 1 がサブコマンドより前に置かれたことで位置引数がずれ、"
+            "invokes() が空を返しカバレッジゲート(check_pr_coverage)が"
+            "スキップされた(#1450 レビュー1回目)",
+        )
+        self.assertIn("カバレッジ", reason)
+
+    def test_global_value_flag_after_subcommand_with_help_is_denied_by_design(self):
+        """意図的に受け入れる代償(fail-closed側のトレードオフ、レビュー確定事項):
+        一致**後**に置かれたグローバル値フラグ(`--repo o/r`)と `--help` が併記された
+        呼び出しは、`residual` の組み立てでグローバル値フラグの読み飛ばしを一切
+        行わないため、`residual` に `--repo`/`o/r` が残る。`_is_help_invocation` は
+        全トークンが `--help`/`-h` のときだけ真を返す(AND方式、#1446)ので、この
+        呼び出しはヘルプとは判定されず、`--squash` 未指定として通常どおり deny される。
+
+        一致**前**に置かれた同じ形(`glab --repo o/r mr merge --help`)は、`-R`/`--repo`
+        を読み飛ばして位置引数を正しく揃えたうえで、残余が `--help` だけになりヘルプと
+        判定され続ける(このテストでは検査しないが、対照として #1435/#1446 の既存テストが
+        カバーしている)。向きは無害な誤拒否(fail-closed)であり、#1449 が既に受け入れて
+        いる代償と同種(呼び出し元、2026-09-27、#1450 レビュー1回目)。
+        """
+        reason = run_hook(
+            "bash", bash_payload("glab mr merge --repo o/r --help")
+        )
+        self.assertIsNotNone(
+            reason,
+            "一致後に置かれた --repo o/r --help がヘルプ扱いされ、squash 必須検査が"
+            "スキップされた(この形は意図的に deny 側に倒す設計)",
+        )
+        self.assertIn("squash", reason)
+
+    def test_global_value_flag_after_mr_create_with_help_is_denied_by_design(self):
+        """AC4 2/3: `mr create` でも同じ代償が起きること。一致後の `--repo o/r` が
+        `residual` に残るため `--help` と誤判定されず、カバレッジゲート
+        (`check_pr_coverage`)が通常どおり発火して deny されること。"""
+        root = tempfile.mkdtemp()
+        scripts = os.path.join(root, "scripts")
+        os.makedirs(scripts)
+        with open(os.path.join(scripts, "check-changed-coverage.py"), "w") as f:
+            f.write("import sys\nsys.exit(1)\n")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash",
+                bash_payload("glab mr create --repo o/r --help", cwd=root),
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNotNone(
+            reason,
+            "一致後に置かれた --repo o/r --help がヘルプ扱いされ、カバレッジゲートが"
+            "スキップされた(この形は意図的に deny 側に倒す設計)",
+        )
+        self.assertIn("カバレッジ", reason)
+
+    def test_global_value_flag_after_issue_create_with_help_is_denied_by_design(self):
+        """AC4 3/3: `issue create` でも同じ代償が起きること。一致後の `--repo o/r` が
+        `residual` に残るため `--help` と誤判定されず、`status::` 必須検査
+        (`check_issue_creation_requires_status`)が通常どおり発火して deny されること。"""
+        reason = run_hook(
+            "bash", bash_payload("glab issue create --repo o/r --help")
+        )
+        self.assertIsNotNone(
+            reason,
+            "一致後に置かれた --repo o/r --help がヘルプ扱いされ、status:: 必須検査が"
+            "スキップされた(この形は意図的に deny 側に倒す設計)",
+        )
+        self.assertIn("status::", reason)
+
+    def test_global_value_flag_before_subcommand_with_help_is_still_allowed(self):
+        """AC4 の対照: 一致**前**に置かれた同じ形(`glab --repo o/r mr merge --help`)は、
+        `-R`/`--repo` が読み飛ばされて位置引数が正しく揃うため、残余が `--help` だけに
+        なりヘルプ判定され続ける(allow のまま)。前置形の read-only な用途
+        (`glab --repo o/r mr merge --help` でヘルプだけ見る)を壊さないことの固定。"""
+        reason = run_hook(
+            "bash", bash_payload("glab --repo o/r mr merge --help")
+        )
+        self.assertIsNone(
+            reason,
+            "一致前に置かれた --repo o/r --help が誤って deny された"
+            "(前置形のヘルプ判定が壊れている)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

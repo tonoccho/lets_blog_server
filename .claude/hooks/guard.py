@@ -524,10 +524,11 @@ def simple_commands(command):
     return out
 
 
-# サブコマンド一致判定(invokes())の前に読み飛ばす、値を取るグローバルな永続フラグ。
+# サブコマンド一致判定(invokes())の前に読み飛ばす、グローバルな永続フラグの集合。
 # `glab`(cobra/pflag)は永続フラグをサブコマンドの前後どちらに置いても受け付けるため、
 # `glab --repo owner/repo mr merge` のように値が独立したトークンになる形では、値が
-# サブコマンドの位置にずれ込んで一致しなくなる(#1435)。
+# サブコマンドの位置にずれ込んで一致しなくなる(#1435)。読み飛ばしの根拠は「値を
+# 取るから」ではない — 詳細と `-p` の位置依存性は下記(#1450)を参照。
 #
 # `=` 結合形(`--repo=owner/repo`)と短縮形の直結(`-Rowner/repo`)は1トークンで `-`
 # から始まるため、素朴な `not a.startswith("-")` フィルタで元から正しく除外されている。
@@ -542,13 +543,68 @@ def simple_commands(command):
 # 集合が異なる(`git` は `-C` / `--git-dir` / `-c` など)ため、program ごとのテーブルに
 # しておく(#1440)。
 #
-# `-p`/`-P` は `git` ではブール(`--paginate`/`--no-pager`)だが、`glab` では値を取る
-# (`--page`/`--per-page`)。program 共通の集合にまとめると、一方にしか存在しない意味で
-# 他方のトークンを誤って消費するため、意図的に分けたテーブルのままにする。
-#
 # `--exec-path` は `=` 無しでは値を取らない(bare form は値を表示して終了するだけで、
 # 次のトークンを消費しない)ので含めない。`--bare` / `--paginate` / `-P`(`--no-pager`)
 # などブール型フラグも同様に含めない。
+#
+# ## `-p` を一致前は使い、一致後は使わない(#1450 レビュー1回目で確定)
+#
+# #1450 レビュー1回目は、`issue update` の `-p`(`--public`、ブール)が
+# `GLOBAL_VALUE_FLAGS["glab"]` の想定と食い違うことへの対処として `-p` をこの
+# 集合(または集合全体)から除外する実装を提出したが、差し戻された。この集合は
+# `invokes()` の**サブコマンド一致が完了するまでの位置引数整列**にも使われており、
+# そこで `-p` を除外すると逆方向の穴が開く: `glab -p 2 mr merge --rebase` のように
+# `-p <値>` が**サブコマンドより前**に置かれると、値(`2`)が読み飛ばされずに
+# 位置引数として数えられ、`positional[:len(subcommands)]` の前方一致が崩れて
+# `invokes()` が**空リストを返す** — `check_merge_flags` 等の個々のチェック関数が
+# 丸ごと呼ばれなくなる(#1450 レビュー1回目 BLOCKING)。
+#
+# `-p` の曖昧さは「値を取るかどうか」ではなく「**位置によって意味が変わる**」ことに
+# 起因する。この読み飛ばしが必要なのは各エントリが「値を取るフラグだから」ではない
+# — 根拠は glab(cobra)のコマンド探索が使う `stripFlags` が、**定義の有無や値の
+# 要否に関わらず、`-` で始まる未知のトークンの次のトークンを一律に消費する**ことに
+# ある。値がサブコマンドより前に着地するのはその副作用であり、「そのフラグが値を
+# 取ると分かっているから読み飛ばす」のではなく「読み飛ばさないとサブコマンドの
+# 位置がずれる」という理由で読み飛ばす。実機(glab 1.116.0)で確認:
+#
+#   $ glab -p   issue list   → Unknown command "list" for "glab".
+#   $ glab -z   issue list   → Unknown command "list" for "glab".   ← 定義すら無いフラグ
+#   $ glab --zz issue list   → Unknown command "list" for "glab".   ← 同上
+#
+# 3つとも同一の壊れ方であり、`-z`/`--zz` は `GLOBAL_VALUE_FLAGS` にも glab の実際の
+# フラグ定義にも存在しない。次トークンを食うのは「値を取るフラグだから」ではなく
+# 「未知フラグすべてで一律にそうなる」ことの証拠である。
+#
+# したがって「値を取る」という語彙でこの集合を正当化しない。以下は
+# `GLOBAL_VALUE_FLAGS["glab"]` 8エントリそれぞれについて、実行したコマンドと rc の
+# 実測(glab 1.116.0)。(a) `glab <flag> <値> version` の rc — root の永続フラグかどうか。
+# (b) `glab <flag> <値> <対象4サブコマンドのいずれか> --help` の rc — 前置形が受理
+# されるかどうか(`-p` を除く4つで同一の結果だったため1列にまとめた。`-p` は行に
+# 併記)。
+#
+#   | エントリ     | (a) rc | (b) rc               | 備考                          |
+#   | ------------ | ------ | --------------------- | ----------------------------- |
+#   | `-R`         | 0      | 0                      | 4サブコマンドすべてに実在      |
+#   | `--repo`     | 0      | 0                      | 4サブコマンドすべてに実在      |
+#   | `--jq`       | 1      | 1                      | どれにも無い(Unknown flag)     |
+#   | `-F`         | 1      | 1                      | 同上(Unknown shorthand flag)   |
+#   | `--output`   | 1      | 1                      | 同上                           |
+#   | `-p`         | 1      | 0(`issue update` のみ) | `issue update` のみに実在。ただしブール(`--public`) |
+#   | `--page`     | 1      | 1                      | どれにも無い                   |
+#   | `-P`         | 1      | 1                      | 同上                           |
+#   | `--per-page` | 1      | 1                      | 同上                           |
+#
+# `-p` の (b) rc=0 は `issue update` が独自にブールの `-p`(`--public`)を定義して
+# いるために起きるのであって、`-p` が値を取ることの証拠ではない。読み飛ばしの根拠は
+# あくまで上記の `stripFlags` であり、この (a)(b) の表は根拠ではなく実測の記録に
+# すぎない。
+#
+# **この8エントリの網羅性に安全性を依存させていない。** ここに載っていない値フラグ
+# (`--sha` / `-m` / `--title` / `-l` / `-t` / `--due-date` など、各サブコマンドが
+# 個別に定義する値フラグ)をサブコマンドより前に置いても同じ位置引数ずれは起きるが、
+# それはこの集合を拡張しても閉じられない(cobra は未知フラグすべてで次トークンを
+# 食うため、curated なリストは原理的に後追いにしかならない)。この先行欠陥は
+# #1450 の範囲外であり、#1454(P1)として別に起票されている。
 GLOBAL_VALUE_FLAGS = {
     "glab": {"-R", "--repo", "--jq", "-F", "--output", "-p", "--page", "-P", "--per-page"},
     "git": {"-C", "--git-dir", "--work-tree", "-c", "--namespace", "--config-env"},
@@ -571,6 +627,44 @@ def invokes(command, program, subcommands=()):
     `check_hotfix_label_immutability` 内の `glab api ... --method PUT` を拾うループは
     この判定を経由しない — 特定のサブコマンドへの一致を前提にしていないので、
     `--help` の有無を云々する対象でもない。
+
+    ## `GLOBAL_VALUE_FLAGS` の読み飛ばしは、サブコマンド一致が完了するまでだけ(#1450)
+
+    `-p` のように、サブコマンドの前後で扱いが変わるべきトークンがある。サブコマンドの
+    前で `-p` は永続フラグではなく値も取らない(`GLOBAL_VALUE_FLAGS` 直前のコメントの
+    実測表 (a) 参照 — `glab -p x/y version` は rc 1)。それでも一致前に読み飛ばす必要が
+    あるのは、cobra のコマンド探索が使う `stripFlags` が未知フラグの次トークンを一律に
+    消費するためである(同コメント参照)。一方サブコマンドの後で `-p` は `issue update`
+    が定義するブールの `--public` であり、次のトークンを消費してはならない。単一の
+    集合で「読み飛ばす/読み飛ばさない」を位置に関係なく決め打つと、どちらかの方向で
+    `invokes()` が呼び出しを丸ごと見失う:
+
+    - **一致完了前**に読み飛ばさない場合: 値(`glab -p 2 mr merge` の `2`)が位置引数
+      として数えられ、`positional[:len(subcommands)]` の前方一致が崩れて
+      `invokes()` が空リストを返す — 依存する全ガードが到達しなくなる(fail-open。
+      #1450 レビュー1回目 BLOCKING)。
+    - **一致完了後**に読み飛ばす場合: 値を取ると仮定したトークンの次が読み飛ばされて
+      `residual` から消え、`_is_help_invocation` が誤ってヘルプと判定しうる
+      (fail-open。#1450 元の欠陥)。
+
+    そのため位置で使い分ける: **一致完了前(`matched < len(target)`)は
+    `GLOBAL_VALUE_FLAGS[program]` をそのまま使って読み飛ばす**(位置引数整列に必要。
+    根拠は cobra のコマンド探索時 `stripFlags` が未知フラグの次トークンを一律に
+    消費すること — 上記コメントの表と同じ)。**一致完了後は一切読み飛ばさない**
+    (curated なリストを引かない。`residual` に本物のトークンが残るので
+    `_is_help_invocation` は安全側=非ヘルプに倒れる)。
+
+    受け入れる代償: 一致後に置かれたグローバル値フラグと `--help`(または `-h`)の併記
+    (`glab mr merge --repo o/r --help`)は、`--repo`/`o/r` が読み飛ばされず
+    `residual` に残るため、ヘルプ呼び出しと判定されなくなる(→ 通常判定に委ねられ、
+    このケースでは `--squash` 未指定として deny される)。この代償は `--repo` に限らず
+    `GLOBAL_VALUE_FLAGS[program]` のどのエントリでも、また `--help` に限らず `-h` でも
+    同様に生じる(例: `glab mr merge --jq .x --help` / `glab issue create --per-page 2
+    --help` / `glab mr merge -R o/r -h` / `glab mr create --output json --help` は
+    いずれも一致前なら許可されるヘルプ相当の形が一致後では通常判定に委ねられる)。
+    向きはすべて無害な誤拒否(fail-closed)であり、#1449 が受け入れている代償と同種。
+    一致**前**の同じ形(`glab --repo o/r mr merge --help`)はこれまでどおりヘルプ判定
+    される。
     """
     parsed = simple_commands(command)
     if parsed is None:
@@ -595,14 +689,15 @@ def invokes(command, program, subcommands=()):
                 if skip_next:
                     skip_next = False
                     continue
-                if a in value_flags:
+                match_complete = matched >= len(target)
+                if not match_complete and a in value_flags:
                     skip_next = True
                     continue
                 if a.startswith("-"):
                     residual.append(a)
                     continue
                 positional.append(a)
-                if matched < len(target) and a == target[matched]:
+                if not match_complete and a == target[matched]:
                     matched += 1
                 else:
                     residual.append(a)
