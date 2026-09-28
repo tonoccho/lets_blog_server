@@ -321,20 +321,152 @@ FD_DUPLICATIONS = {">&"}
 REDIRECTS = FILE_REDIRECTS | FD_DUPLICATIONS
 
 # 先頭から剥がすラッパー。値を取る引数を持つものは、その分も読み飛ばす。
-# 網羅は不可能なので、これは「既知の穴を塞ぐ」列挙である。
 #   name: (値を取るフラグの集合, フラグ以外の引数をいくつ読み飛ばすか)
+#
+# ## 実機での洗い出し(#1462 Requirement 1・2)
+#
+# 以前は `WRAPPERS["env"]` が空集合のままで、`env -u FOO glab mr merge --rebase` /
+# `env -C /tmp glab mr merge --rebase` のように、値取りフラグの**値**が読み飛ばされず
+# 実体コマンドの検出に混入していた(`-u FOO` の `FOO` が誤って先頭トークン扱いになり、
+# `glab` との一致が崩れる)。それぞれ実機で実際に動く形である
+# (`env -u FOO git --version` / `env -C /tmp git --version` はどちらも rc 0)。
+#
+# 以下は、このマシンに実際にインストールされている各ラッパーの `--help`(または
+# `--version`)を実行して確認した、値を取るフラグの網羅である。ブールフラグ
+# (値を取らない)は `WRAPPER_BOOL_FLAGS` 側に分けて持つ — Requirement 4 の
+# fail-closed 判定(`_unknown_wrapper_flags` / `check_unknown_wrapper_flag`)が、
+# 「値フラグでもブールフラグでもないフラグ」を未知とみなすために両方必要になる。
+#
+# ### env(`env --version`: uutils coreutils 0.8.0。`env --help` で確認)
+#
+#   値を取る:   -C/--chdir <DIR>, -u/--unset <NAME>, -f/--file <PATH>,
+#               -S/--split-string <S>, -a/--argv0 <a>
+#   ブール:     -i/--ignore-environment, -0/--null, -v/--debug,
+#               --ignore-signal[=SIG], --default-signal[=SIG],
+#               --block-signal[=SIG], --list-signal-handling
+#               (`[=SIG]` は `=` 付きでのみ値を持つ形なので、素の形は次の
+#               トークンを消費しない。`=` 付きの形はどのラッパーでも下記の
+#               ループが自己完結として扱う。#1449 と同種)
+#
+#   **`env -S'...'`(文字列を分割して実行)は間接実行なので、その内容の解析は
+#   ここでは行わない(CLAUDE.md → Enforcement → What the guards are, and are not。
+#   Requirement 3)。ここで扱うのは `-S` の次のトークンを値として読み飛ばすことだけ。**
+#
+# ### timeout(uutils coreutils 0.8.0。`timeout --help` で確認。
+#   旧集合は実機の全フラグと一致していたため変更なし)
+#
+#   値を取る:   -s/--signal <SIGNAL>, -k/--kill-after <DURATION>
+#   ブール:     -f/--foreground, -p/--preserve-status, -v/--verbose
+#
+# ### nice(uutils coreutils 0.8.0。`nice --help` で確認。変更なし)
+#
+#   値を取る:   -n/--adjustment <N>
+#
+# ### ionice(util-linux 2.41.3。`ionice --help` で確認。
+#   旧集合は短縮形の一部(`-c`/`-n`/`-p`)だけで、長い形と `-P`/`-u` が漏れていた)
+#
+#   値を取る:   -c/--class <class>, -n/--classdata <num>, -p/--pid <pid>,
+#               -P/--pgid <pgrp>, -u/--uid <uid>
+#   ブール:     -t/--ignore
+#
+# ### sudo(sudo-rs 0.2.13-0ubuntu1.2。`sudo --help` で確認。
+#   旧集合は `-u`/`-g`/`-p` 系のみで、`-D`/`--chdir`・`-U`/`--other-user` が漏れていた)
+#
+#   値を取る:   -u/--user <user>, -g/--group <group>, -p/--prompt <prompt>,
+#               -D/--chdir <directory>, -U/--other-user <user>
+#   ブール:     -A/--askpass, -b/--background, -B/--bell, -e/--edit, -i/--login,
+#               -K/--remove-timestamp, -k/--reset-timestamp, -l/--list,
+#               -n/--non-interactive, -S/--stdin, -s/--shell, -v/--validate
+#               (`--preserve-env=list` は `=` 付きの形しかドキュメントに無いため、
+#               素の `--preserve-env` は未知フラグとして fail-closed の対象にする)
+#
+# ### time(GNU Time、`/usr/bin/time --help` で確認。bash 組み込みの `time`
+#   キーワードとは別物 — シェル組み込みには `--version`/`--help` が無い。
+#   旧集合は空集合で、`-f`/`--format`・`-o`/`--output` が漏れていた)
+#
+#   値を取る:   -f/--format <FORMAT>, -o/--output <FILE>
+#   ブール:     -a/--append, -p/--portability, -q/--quiet, -v/--verbose
+#
+# ### command(bash 組み込み。`help command` で確認。値フラグは無い。変更なし)
+#
+#   ブール:     -p, -V, -v
+#
+# ### nohup(uutils coreutils 0.8.0。`nohup --help` で確認。
+#   `--help`/`--version` 以外にフラグは無い。変更なし)
+#
+# ### stdbuf(uutils coreutils 0.8.0。`stdbuf --help` で確認。
+#   旧集合は短縮形のみで、長い形が漏れていた)
+#
+#   値を取る:   -i/--input <MODE>, -o/--output <MODE>, -e/--error <MODE>
+#
+# ### xargs(GNU findutils 4.10.0。`xargs --help` で確認。
+#   旧集合は短縮形の一部のみで、`-L`/`--max-lines` が漏れており、長い形も無かった。
+#   `--help`/`--version` に短縮形(`-h`/`-V`)は無い)
+#
+#   値を取る:   -a/--arg-file <FILE>, -d/--delimiter <CHARACTER>, -E <END>
+#               (`-e`/`--eof` とは別物), -I <R>(空白区切りで必須),
+#               -L/--max-lines <MAX-LINES>, -n/--max-args <MAX-ARGS>,
+#               -P/--max-procs <MAX-PROCS>, -s/--max-chars <MAX-CHARS>
+#   ブール:     -0/--null, -r/--no-run-if-empty, -t/--verbose, -x/--exit,
+#               -p/--interactive, -o/--open-tty, --show-limits
+#               (`-e`/`--eof[=END]`・`-i`/`--replace[=R]`・`-l[MAX-LINES]` は
+#               角括弧内、つまり省略可能な形でしか値を示していない。素の形は
+#               次のトークンを消費しないのでブール扱いにする。`--process-slot-var=VAR`
+#               も `=` 付きの形しかドキュメントに無く、sudo の `--preserve-env` と
+#               同様に素の形は未知フラグ扱いにする)
+#
+# ### setsid(util-linux 2.41.3。`setsid --help` で確認。
+#   値フラグは無い。変更なし)
+#
+#   ブール:     -c/--ctty, -f/--fork, -w/--wait
 WRAPPERS = {
     "timeout": ({"-s", "--signal", "-k", "--kill-after"}, 1),  # 継続時間を1つ取る
-    "env": (set(), 0),
+    "env": ({"-C", "--chdir", "-u", "--unset", "-f", "--file",
+             "-S", "--split-string", "-a", "--argv0"}, 0),
     "nice": ({"-n", "--adjustment"}, 0),
-    "ionice": ({"-c", "-n", "-p"}, 0),
-    "sudo": ({"-u", "--user", "-g", "--group", "-p", "--prompt"}, 0),
-    "time": (set(), 0),
+    "ionice": ({"-c", "--class", "-n", "--classdata", "-p", "--pid",
+                "-P", "--pgid", "-u", "--uid"}, 0),
+    "sudo": ({"-u", "--user", "-g", "--group", "-p", "--prompt",
+              "-D", "--chdir", "-U", "--other-user"}, 0),
+    "time": ({"-f", "--format", "-o", "--output"}, 0),
     "command": (set(), 0),
     "nohup": (set(), 0),
-    "stdbuf": ({"-i", "-o", "-e"}, 0),
-    "xargs": ({"-I", "-n", "-P", "-d", "-a", "-E", "-s"}, 0),
+    "stdbuf": ({"-i", "--input", "-o", "--output", "-e", "--error"}, 0),
+    "xargs": ({"-I", "-n", "--max-args", "-P", "--max-procs", "-d", "--delimiter",
+               "-a", "--arg-file", "-E", "-s", "--max-chars", "-L", "--max-lines"}, 0),
     "setsid": (set(), 0),
+}
+
+# `-h`/`--help`/`-V`/`--version` はどのラッパーにも共通のブールフラグなので、
+# 各エントリの固有フラグとは別に持つ。一部のラッパー(`xargs` の短縮形、`command`
+# の `--help`/`--version` など)には実在しない組み合わせも含むが、値を取らないと
+# いう性質は変わらないので、Requirement 4 の判定を過検知させることはない。
+COMMON_BOOL_FLAGS = {"-h", "--help", "-V", "--version"}
+
+# 値を取らないと確認した(=ブール)フラグ。`WRAPPERS`(値取り)にも `COMMON_BOOL_FLAGS`
+# にも無いフラグに出会ったら「未知」と判定し、fail-closed で拒否する
+# (Requirement 4。`_unknown_wrapper_flags` / `check_unknown_wrapper_flag` 参照)。
+# 各エントリの根拠は上の `WRAPPERS` のコメントに実行したコマンドとともに記載している。
+WRAPPER_BOOL_FLAGS = {
+    "timeout": {"-f", "--foreground", "-p", "--preserve-status", "-v", "--verbose"},
+    "env": {"-i", "--ignore-environment", "-0", "--null", "-v", "--debug",
+            "--ignore-signal", "--default-signal", "--block-signal",
+            "--list-signal-handling"},
+    "nice": set(),
+    "ionice": {"-t", "--ignore"},
+    "sudo": {"-A", "--askpass", "-b", "--background", "-B", "--bell", "-e", "--edit",
+             "-i", "--login", "-K", "--remove-timestamp", "-k", "--reset-timestamp",
+             "-l", "--list", "-n", "--non-interactive", "-S", "--stdin", "-s", "--shell",
+             "-v", "--validate"},
+    "time": {"-a", "--append", "-p", "--portability", "-q", "--quiet",
+             "-v", "--verbose"},
+    "command": {"-p", "-V", "-v"},
+    "nohup": set(),
+    "stdbuf": set(),
+    "xargs": {"-0", "--null", "-e", "--eof", "-i", "--replace", "-l", "-r",
+              "--no-run-if-empty", "-t", "--verbose", "-x", "--exit", "-p",
+              "--interactive", "-o", "--open-tty", "--show-limits"},
+    "setsid": {"-c", "--ctty", "-f", "--fork", "-w", "--wait"},
 }
 
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -484,8 +616,19 @@ def split_commands(command):
 
 
 def strip_wrappers(argv):
-    """環境変数代入と既知のラッパーを剥がし、(実体のargv, 剥がしたもの) を返す。"""
+    """環境変数代入と既知のラッパーを剥がし、(実体のargv, 剥がしたもの, 未知フラグ) を返す。
+
+    3つ目の要素は、既知のラッパーの直後で「値を取るかどうか判定できない」フラグに
+    出会った場合の `(ラッパー名, フラグ)`。無ければ `None`(Requirement 4、#1462)。
+    `WRAPPERS`/`WRAPPER_BOOL_FLAGS` の網羅性そのものに安全性を依存させないための
+    合図であり、`check_unknown_wrapper_flag` がこれを見て fail-closed に拒否する。
+
+    実体argv の組み立て自体はこれまでと変えない — 未知フラグも従来どおり値を取らない
+    ものとして扱い(0個読み飛ばす)、既存の呼び出し元(各 `check_*` 関数)の挙動を
+    変えない。安全側の拒否は `check_unknown_wrapper_flag` という別のガードが担う。
+    """
     stripped = []
+    unknown = None
     argv = list(argv)
     while argv:
         head = argv[0]
@@ -496,20 +639,38 @@ def strip_wrappers(argv):
         if name not in WRAPPERS:
             break
         value_flags, positionals = WRAPPERS[name]
+        bool_flags = WRAPPER_BOOL_FLAGS.get(name, set()) | COMMON_BOOL_FLAGS
         stripped.append(argv.pop(0))
         # ラッパー自身のフラグを読み飛ばす。値を取るフラグは次のトークンも。
         while argv and argv[0].startswith("-") and argv[0] != "--":
             flag = argv.pop(0)
             base = flag.split("=", 1)[0]
-            if base in value_flags and "=" not in flag and len(base) == len(flag):
+            if "=" in flag:
+                # 値直結(`--chdir=/tmp` 形)。既知未知を問わず1トークンで完結する
+                # ので安全(#1449と同種)。
+                continue
+            # POSIX短縮直結形(`-C/tmp`, `-uFOO` = `-C /tmp` / `-u FOO` を1トークン
+            # に詰めた形)。値がすでに同じトークンに埋め込まれているので、次の
+            # トークンを消費してはいけない — `=` 付き直結形とは別チェックが要る
+            # (#1462 レビュー2回目)。短い方の2文字(`-` + 1文字)が value_flags の
+            # 短縮形と一致し、かつそれより長いトークンである場合に限る。
+            short = flag[:2]
+            if len(flag) > 2 and not flag.startswith("--") and short in value_flags:
+                continue
+            if base in value_flags:
                 if argv:
                     argv.pop(0)
+                continue
+            if base in bool_flags:
+                continue
+            if unknown is None:
+                unknown = (name, flag)
         if argv and argv[0] == "--":
             argv.pop(0)
         for _ in range(positionals):
             if argv:
                 stripped.append(argv.pop(0))
-    return argv, stripped
+    return argv, stripped, unknown
 
 
 def simple_commands(command):
@@ -519,9 +680,26 @@ def simple_commands(command):
         return None
     out = []
     for argv, redirects in parsed:
-        real, _ = strip_wrappers(argv)
+        real, _stripped, _unknown = strip_wrappers(argv)
         out.append((real, redirects))
     return out
+
+
+def _unknown_wrapper_flags(command):
+    """既知のラッパーに続く、値を取るかどうか判定できないフラグを列挙する(Requirement 4)。
+
+    解析不能なコマンドは(生文字列へのフォールバックの対象であって、ここでは)
+    空リストを返す — `invokes()` 側のフォールバックが別途、見逃しより過検知に倒す。
+    """
+    parsed = split_commands(command)
+    if parsed is None:
+        return []
+    found = []
+    for argv, _redirects in parsed:
+        _real, _stripped, unknown = strip_wrappers(argv)
+        if unknown:
+            found.append(unknown)
+    return found
 
 
 # サブコマンド一致判定(invokes())の前に読み飛ばす、グローバルな永続フラグの集合。
@@ -1366,6 +1544,30 @@ def check_issue_creation_requires_status(command):
             )
 
 
+def check_unknown_wrapper_flag(command):
+    """CLAUDE.md → Enforcement → What the guards are, and are not(#1462 Requirement 4)。
+
+    `env -u FOO ...` の `-u` のように、既知のラッパーに続くフラグが値を取るかどうか
+    判定できないと、その値が実体コマンドの検出に混入し、`--rebase` 禁止・
+    `--no-verify` 禁止・hotfix 不変性・カバレッジゲートのいずれも素通りしてしまう
+    — この Issue で `env` の `-u`/`-C` が実際に踏んだ壊れ方そのもの。
+
+    `WRAPPERS`/`WRAPPER_BOOL_FLAGS` は実機の `--help` で洗い出した既知のフラグの
+    列挙だが、将来のバージョンでフラグが増減する可能性は消せない(網羅性の主張は
+    しない、CLAUDE.md → ガード)。未知のフラグに出会ったら、どの下流ガードが
+    対象にすべきコマンドかを推測せず、ここで一律に拒否する — 安全性をテーブルの
+    網羅性に依存させないための、#1446 が到達した方向と同じ考え方。
+    """
+    for name, flag in _unknown_wrapper_flags(command):
+        emit_deny(
+            "`%s` の直後のフラグ `%s` を認識できません。値を取るかどうか判定できないため、"
+            "後続のどこから実体のコマンドが始まるか安全に判定できません"
+            "(CLAUDE.md → Enforcement → What the guards are, and are not)。"
+            "`.claude/hooks/guard.py` の `WRAPPERS`/`WRAPPER_BOOL_FLAGS` を実機の "
+            "`--help` で確認したうえで追加してください。" % (name, flag)
+        )
+
+
 def check_no_verify(command):
     for sub in ("commit", "push"):
         for args in invokes(command, "git", (sub,)):
@@ -1525,6 +1727,7 @@ def check_pr_coverage(payload, command):
 def cmd_bash(payload):
     command = cmd_of(payload)
     check_read_only(payload, command)
+    check_unknown_wrapper_flag(command)
     check_merge_flags(command)
     check_status_label_integrity(command)
     check_hotfix_label_immutability(command)
@@ -1561,10 +1764,12 @@ def cmd_explain(command):
     else:
         print("解析: %d 個のコマンド" % len(parsed))
         for i, (argv, redirects) in enumerate(parsed, 1):
-            real, stripped = strip_wrappers(argv)
+            real, stripped, unknown = strip_wrappers(argv)
             print("  [%d] 実体      : %s" % (i, real))
             if stripped:
                 print("      剥がした前置: %s" % stripped)
+            if unknown:
+                print("      未知フラグ  : %s の %s(fail-closed の対象、Requirement 4)" % unknown)
             if redirects:
                 print("      書き込み先  : %s" % redirects)
             reason = destructive_reason(real)
@@ -1572,6 +1777,7 @@ def cmd_explain(command):
                 print("      読み取り専用ステージ: 拒否(%s)" % reason)
 
     for label, check in (
+        ("未知のラッパーフラグ", check_unknown_wrapper_flag),
         ("マージ方式", check_merge_flags),
         ("ステータスラベル", check_status_label_integrity),
         ("hotfixラベル", check_hotfix_label_immutability),

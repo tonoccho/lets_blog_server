@@ -424,6 +424,91 @@ class WrapperPrefixBypass(unittest.TestCase):
         )
 
 
+class EnvWrapperValueFlags(unittest.TestCase):
+    """#1462: `WRAPPERS["env"]` が値取りフラグを持たず、`env -u`/`env -C` を前置する
+    だけでガードが全て素通りしていたこと。
+
+    `env -u FOO glab mr merge --rebase` は `-u` の値 `FOO` が読み飛ばされないまま
+    実体コマンドの検出に混入し、`glab mr merge --rebase` が検出できなくなっていた
+    (実機: `env -u FOO git --version` は rc 0 で実際に動く)。`env -C DIR` も同様。
+    """
+
+    VALUE_FLAG_BYPASSES_MUST_DENY = [
+        "env -u FOO glab mr merge --rebase",
+        "env -C /tmp glab mr merge --rebase",
+    ]
+
+    def test_env_value_flag_bypass_is_denied(self):
+        for command in self.VALUE_FLAG_BYPASSES_MUST_DENY:
+            with self.subTest(command=command):
+                self.assertIsNotNone(
+                    run_hook("bash", bash_payload(command)),
+                    "env の値取りフラグの値混入でガードが外れた: %s" % command,
+                )
+
+    REGRESSIONS_MUST_STAY_DENIED = [
+        "env -i glab mr merge --rebase",
+        "timeout 60 git push --no-verify",
+    ]
+
+    def test_existing_denials_still_deny(self):
+        for command in self.REGRESSIONS_MUST_STAY_DENIED:
+            with self.subTest(command=command):
+                self.assertIsNotNone(
+                    run_hook("bash", bash_payload(command)),
+                    "既存の拒否が緩んだ: %s" % command,
+                )
+
+    def test_plain_env_prefixed_squash_merge_is_allowed(self):
+        """`env glab mr merge --squash --remove-source-branch` は許可のまま。"""
+        self.assertIsNone(
+            run_hook(
+                "bash",
+                bash_payload("env glab mr merge --squash --remove-source-branch"),
+            )
+        )
+
+    def test_unknown_wrapper_flag_fails_closed(self):
+        """Requirement 4: 未知のフラグを前置した形は、値取りかどうか判定できないので
+        安全側(fail-closed)で拒否する。"""
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("env --zz 1 glab mr merge --rebase")),
+            "未知のラッパーフラグが安全側に倒れず許可された",
+        )
+
+    GLUED_SHORT_VALUE_FLAG_COMPLIANT_COMMANDS = [
+        # `-C/tmp` は `env -C /tmp` の POSIX 短縮直結形。値は同じトークンに埋め込まれて
+        # いるので次のトークンを消費しない。実機: `env -C/tmp pwd` は rc 0 で実際に動く。
+        "env -C/tmp glab mr merge --squash --remove-source-branch",
+        # `-uFOO` も同様(`env -u FOO` の直結形)。実機: `env -uFOO printenv FOO` は動く。
+        "env -uFOO glab mr merge --squash --remove-source-branch",
+    ]
+
+    def test_glued_short_value_flag_with_compliant_command_is_allowed(self):
+        """#1462 レビュー2回目: `-C/tmp`/`-uFOO` のような POSIX 短縮直結形の値取り
+        フラグを、`=` 付き直結形(`--chdir=/tmp`)としか比較していなかったために
+        「未知のラッパーフラグ」と誤判定し、コンプライアントな squash マージまで
+        fail-closed で拒否していた回帰。"""
+        for command in self.GLUED_SHORT_VALUE_FLAG_COMPLIANT_COMMANDS:
+            with self.subTest(command=command):
+                self.assertIsNone(
+                    run_hook("bash", bash_payload(command)),
+                    "短縮直結形の値取りフラグが未知フラグと誤判定され拒否された: %s"
+                    % command,
+                )
+
+    def test_genuinely_unknown_short_flag_still_fails_closed(self):
+        """`-z`(env に実在しないフラグ)は短縮直結形の救済対象にせず、引き続き
+        fail-closed で拒否する — AC4 の回帰防止。"""
+        self.assertIsNotNone(
+            run_hook(
+                "bash",
+                bash_payload("env -z 1 glab mr merge --squash --remove-source-branch"),
+            ),
+            "実在しないフラグまで許可されてしまった",
+        )
+
+
 class ReadOnlyStageFalsePositives(unittest.TestCase):
     """#986: 読み取り専用ステージが正当な調査コマンドを誤って拒否しないこと。
 
