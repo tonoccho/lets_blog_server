@@ -35,6 +35,12 @@ module.exports = {
     './src/apiBaseUrl.ts': { branches: 100, functions: 100, lines: 100, statements: 100 },
     './src/cache.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
     './src/proofreadLogic.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
+    // issue #1216: 指摘チェックリストの識別・永続化ロジック。
+    './src/reviewChecklistLogic.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
+    './src/reviewChecklistStore.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
+    // issue #1216: 他のPanelと異なりWebview境界のメッセージだけで挙動を100%固定できたため、
+    // Panelクラスとしては例外的に数値目標を置く。
+    './src/reviewChecklistPanel.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
     './src/bodyCustomTagCompletionLogic.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
     './src/frontMatterCompletionLogic.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },
     './src/downstreamServices.ts': { branches: 90, functions: 90, lines: 90, statements: 90 },

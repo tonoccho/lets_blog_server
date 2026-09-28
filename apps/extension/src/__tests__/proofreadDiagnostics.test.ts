@@ -10,6 +10,7 @@ import {
 import { ProofreadController } from '../proofreadDiagnostics';
 import * as api from '../apiClient';
 import { REVIEW_STEPS } from '../proofreadLogic';
+import { ReviewChecklistStore } from '../reviewChecklistStore';
 
 jest.mock('../apiClient', () => ({
   reviewStepSuggestions: jest.fn(),
@@ -374,5 +375,30 @@ describe('ProofreadController.scheduleCheck(自動実行)', () => {
     await jest.advanceTimersByTimeAsync(1_000);
     expect(mocked.getPostStatuses).not.toHaveBeenCalled();
     controller.dispose();
+  });
+});
+
+describe('ProofreadController と指摘チェックリスト(issue #1216)', () => {
+  it('checklistStoreを渡した場合、レビュー結果を記事ファイルごとに記録する', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+      if (step === 'PROOFREADING') {
+        return { suggestions: [{ stepKey: step, originalText: 'AはB', message: '誤り', suggestion: null, sources: [] }], skipped: false };
+      }
+      return { suggestions: [], skipped: false };
+    }) as never);
+    const store = new ReviewChecklistStore({} as never);
+    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+    const document = makeDocument(ARTICLE);
+
+    await new ProofreadController(context, store).runManual(document as never);
+
+    expect(recordReview).toHaveBeenCalledWith(document.uri.toString(), expect.any(Array), expect.any(String));
+    const findings = recordReview.mock.calls[0][1] as { suggestion: { originalText: string } }[];
+    expect(findings).toHaveLength(1);
+    expect(findings[0].suggestion.originalText).toBe('AはB');
+  });
+
+  it('checklistStoreを渡さない場合も、従来どおり動作する(後方互換)', async () => {
+    await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).resolves.toBeUndefined();
   });
 });

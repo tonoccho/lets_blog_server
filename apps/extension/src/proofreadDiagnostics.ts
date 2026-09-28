@@ -16,6 +16,9 @@ import {
   runReviewSteps,
   StepFinding,
 } from './proofreadLogic';
+import { computeBodyHash } from './reviewChecklistLogic';
+import { ReviewChecklistPanel } from './reviewChecklistPanel';
+import { ReviewChecklistStore } from './reviewChecklistStore';
 
 /**
  * 校正チェック(issue #523)と多段レビュー(issue #1215)のvscode連携部分。
@@ -79,7 +82,14 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
   /** ドキュメントごと・ステップごとの、直近のレビュー結果の装飾(エディタを開き直したときの再表示用)。 */
   private readonly findingRanges = new Map<string, vscode.DecorationOptions[][]>();
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  /**
+   * 指摘チェックリスト(issue #1216)の永続化。省略可能なのは、既存の呼び出し元/テストを
+   * 壊さないため(チェックリスト機能が無くても本文レビュー自体は従来どおり動く)。
+   */
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly checklistStore?: ReviewChecklistStore
+  ) {}
 
   dispose(): void {
     for (const timer of this.frontMatterTimers.values()) clearTimeout(timer);
@@ -267,6 +277,10 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
         return;
       }
       this.showFindings(document, findings);
+      if (this.checklistStore) {
+        const state = await this.checklistStore.recordReview(key, findings, computeBodyHash(article.content));
+        ReviewChecklistPanel.refreshIfShowing(key, state.items);
+      }
     } catch (err) {
       if (this.contentAbortControllers.get(key) !== controller) {
         return;

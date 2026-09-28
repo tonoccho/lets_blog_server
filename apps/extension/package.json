@@ -117,6 +117,10 @@
       {
         "command": "letsBlog.proofreadNow",
         "title": "Let's Blog: 校正チェックを今すぐ実行(5ステップレビュー)"
+      },
+      {
+        "command": "letsBlog.reviewChecklist",
+        "title": "Let's Blog: 指摘チェックリストを表示"
       }
     ],
     "keybindings": [
@@ -184,6 +188,11 @@
           "command": "letsBlog.proofreadNow",
           "when": "editorTextFocus && resourceLangId == markdown",
           "group": "letsBlog@9"
+        },
+        {
+          "command": "letsBlog.reviewChecklist",
+          "when": "editorTextFocus && resourceLangId == markdown",
+          "group": "letsBlog@10"
         }
       ]
     },

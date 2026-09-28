@@ -1,5 +1,6 @@
 import * as api from './apiClient';
 import { SectionContext } from './headingContext';
+import { ReviewChecklistStatus } from './reviewChecklistLogic';
 
 /**
  * WebviewとExtension間でやり取りするメッセージの型定義。
@@ -207,3 +208,12 @@ export type DiagramGalleryOutboundCommand =
   | 'deleteCancelled'
   | 'cancelled'
   | 'error';
+
+// --- 指摘チェックリスト パネル(issue #1216) ---
+
+export type ReviewChecklistInboundMessage = WebviewMessageBase<'setStatus'> & {
+  id: string;
+  status: ReviewChecklistStatus;
+};
+
+export type ReviewChecklistOutboundCommand = 'checklist' | 'error';

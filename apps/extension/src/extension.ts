@@ -45,6 +45,8 @@ import { logger } from './logger';
 import { CancelledError, messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
+import { ReviewChecklistPanel } from './reviewChecklistPanel';
+import { ReviewChecklistStore } from './reviewChecklistStore';
 import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
 import { BodyCustomTagCompletionProvider } from './bodyCustomTagCompletionProvider';
 
@@ -65,9 +67,13 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // issue #1216: 指摘チェックリストの対応状態とレビュー結果(本文スナップショット込み)は
+  // ワークスペース状態(context.workspaceState)へローカル保存する。サーバー側は追加しない。
+  const reviewChecklistStore = new ReviewChecklistStore(context);
+
   // issue #523: front matter検証(publish_scheduled_at/status/categories)は編集の都度デバウンスして実行する。
   // issue #1215: 本文のAIレビュー(5ステップ)は自動実行せず、letsBlog.proofreadNowコマンドの明示操作だけで実行する。
-  const proofreadController = new ProofreadController(context);
+  const proofreadController = new ProofreadController(context, reviewChecklistStore);
   context.subscriptions.push(
     proofreadController,
     vscode.languages.registerCodeActionsProvider({ language: 'markdown' }, proofreadController, {
@@ -105,6 +111,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
     vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context)),
     vscode.commands.registerCommand('letsBlog.proofreadNow', () => commandProofreadNow(proofreadController)),
+    vscode.commands.registerCommand('letsBlog.reviewChecklist', () =>
+      commandReviewChecklist(context, reviewChecklistStore)
+    ),
     vscode.commands.registerCommand('letsBlog.fixInvalidStatus', (uri: vscode.Uri) =>
       commandFixInvalidStatus(context, uri)
     ),
@@ -863,6 +872,21 @@ async function commandProofreadNow(proofreadController: ProofreadController): Pr
   } catch (err) {
     reportError('校正チェックに失敗しました', err);
   }
+}
+
+/**
+ * issue #1216: 指摘チェックリストを別タブに表示する。永続化済みの対応状態(未実行なら空)を
+ * ステップごとにまとめて表示し、レビューが(再)実行されると自動で更新される。
+ */
+async function commandReviewChecklist(
+  context: vscode.ExtensionContext,
+  reviewChecklistStore: ReviewChecklistStore
+): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  const panel = ReviewChecklistPanel.createOrShow(context, reviewChecklistStore);
+  panel.show(editor.document.uri.toString());
 }
 
 /** issue #523: front matterのstatusが不正な値だった際のクイックフィックス。有効な値から選び直す。 */
