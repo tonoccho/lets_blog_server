@@ -4,16 +4,19 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
-export interface SetProjectGoogleAnalyticsCredentialsRequest {
+export interface SelectGoogleAnalyticsPropertyRequest {
   /** @minLength 1 */
   propertyId: string;
+}
+
+export interface SetProjectGoogleAnalyticsClientRequest {
   /** @minLength 1 */
-  serviceAccountJson: string;
+  clientId: string;
+  clientSecret?: string;
 }
 
 export interface SetProjectAdSenseSettingsRequest {
-  /** @minLength 1 */
-  accountId: string;
+  accountId?: string;
   clientId?: string;
 }
 
@@ -22,11 +25,9 @@ export interface SetProjectAdSenseClientSecretRequest {
   clientSecret: string;
 }
 
-export interface SetGoogleAnalyticsCredentialsRequest {
+export interface SelectAdSenseAccountRequest {
   /** @minLength 1 */
-  propertyId: string;
-  /** @minLength 1 */
-  serviceAccountJson: string;
+  accountId: string;
 }
 
 export interface SetAdSenseSettingsRequest {
@@ -38,6 +39,13 @@ export interface SetAdSenseSettingsRequest {
 export interface SetAdSenseClientSecretRequest {
   /** @minLength 1 */
   clientSecret: string;
+}
+
+export interface CompleteGoogleAnalyticsOAuthRequest {
+  /** @minLength 1 */
+  code: string;
+  /** @minLength 1 */
+  redirectUri: string;
 }
 
 export interface CompleteAdSenseOAuthRequest {
@@ -100,6 +108,15 @@ export interface AdSenseReportResponse {
 export interface ProjectGoogleAnalyticsStatusResponse {
   configured?: boolean;
   propertyId?: string;
+  clientId?: string;
+  hasClientSecret?: boolean;
+  connected?: boolean;
+}
+
+export interface GoogleAnalyticsPropertyResponse {
+  propertyId?: string;
+  displayName?: string;
+  accountDisplayName?: string;
 }
 
 export interface ProjectAdSenseStatusResponse {
@@ -107,6 +124,12 @@ export interface ProjectAdSenseStatusResponse {
   accountId?: string;
   clientId?: string;
   hasClientSecret?: boolean;
+  connected?: boolean;
+}
+
+export interface AdSenseAccountResponse {
+  accountId?: string;
+  displayName?: string;
 }
 
 export interface GoogleAnalyticsStatusResponse {

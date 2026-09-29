@@ -5,76 +5,42 @@
  * OpenAPI spec version: v0
  */
 import type {
+  AdSenseAccountResponse,
   CompleteAdSenseOAuthRequest,
+  CompleteGoogleAnalyticsOAuthRequest,
+  GoogleAnalyticsPropertyResponse,
   ProjectAdSenseStatusResponse,
   ProjectGoogleAnalyticsStatusResponse,
+  SelectAdSenseAccountRequest,
+  SelectGoogleAnalyticsPropertyRequest,
   SetProjectAdSenseClientSecretRequest,
   SetProjectAdSenseSettingsRequest,
-  SetProjectGoogleAnalyticsCredentialsRequest
+  SetProjectGoogleAnalyticsClientRequest
 } from '../openAPIDefinition.schemas';
 
 
-export type getGoogleAnalyticsStatusResponse200 = {
-  data: ProjectGoogleAnalyticsStatusResponse
-  status: 200
-}
-
-export type getGoogleAnalyticsStatusResponseSuccess = (getGoogleAnalyticsStatusResponse200) & {
-  headers: Headers;
-};
-;
-
-export type getGoogleAnalyticsStatusResponse = (getGoogleAnalyticsStatusResponseSuccess)
-
-export const getGetGoogleAnalyticsStatusUrl = (projectId: number,) => {
-
-
-
-
-  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics`
-}
-
-export const getGoogleAnalyticsStatus = async (projectId: number, options?: RequestInit): Promise<getGoogleAnalyticsStatusResponse> => {
-
-  const res = await fetch(getGetGoogleAnalyticsStatusUrl(projectId),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getGoogleAnalyticsStatusResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getGoogleAnalyticsStatusResponse
-}
-
-
-export type setGoogleAnalyticsCredentialsResponse200 = {
+export type selectGoogleAnalyticsPropertyResponse200 = {
   data: void
   status: 200
 }
 
-export type setGoogleAnalyticsCredentialsResponseSuccess = (setGoogleAnalyticsCredentialsResponse200) & {
+export type selectGoogleAnalyticsPropertyResponseSuccess = (selectGoogleAnalyticsPropertyResponse200) & {
   headers: Headers;
 };
 ;
 
-export type setGoogleAnalyticsCredentialsResponse = (setGoogleAnalyticsCredentialsResponseSuccess)
+export type selectGoogleAnalyticsPropertyResponse = (selectGoogleAnalyticsPropertyResponseSuccess)
 
-export const getSetGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
-
-
+export const getSelectGoogleAnalyticsPropertyUrl = (projectId: number,) => {
 
 
-  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics`
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics/property`
 }
 
-export const setGoogleAnalyticsCredentials = async (projectId: number,
-    setProjectGoogleAnalyticsCredentialsRequest: SetProjectGoogleAnalyticsCredentialsRequest, options?: RequestInit): Promise<setGoogleAnalyticsCredentialsResponse> => {
+export const selectGoogleAnalyticsProperty = async (projectId: number,
+    selectGoogleAnalyticsPropertyRequest: SelectGoogleAnalyticsPropertyRequest, options?: RequestInit): Promise<selectGoogleAnalyticsPropertyResponse> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -82,59 +48,66 @@ export const setGoogleAnalyticsCredentials = async (projectId: number,
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-const res = await fetch(getSetGoogleAnalyticsCredentialsUrl(projectId),
+const res = await fetch(getSelectGoogleAnalyticsPropertyUrl(projectId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(setProjectGoogleAnalyticsCredentialsRequest)
+    body: JSON.stringify(selectGoogleAnalyticsPropertyRequest)
   }
 )
 
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: setGoogleAnalyticsCredentialsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as setGoogleAnalyticsCredentialsResponse
+  const data: selectGoogleAnalyticsPropertyResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as selectGoogleAnalyticsPropertyResponse
 }
 
 
-export type clearGoogleAnalyticsCredentialsResponse200 = {
+export type setGoogleAnalyticsClientResponse200 = {
   data: void
   status: 200
 }
 
-export type clearGoogleAnalyticsCredentialsResponseSuccess = (clearGoogleAnalyticsCredentialsResponse200) & {
+export type setGoogleAnalyticsClientResponseSuccess = (setGoogleAnalyticsClientResponse200) & {
   headers: Headers;
 };
 ;
 
-export type clearGoogleAnalyticsCredentialsResponse = (clearGoogleAnalyticsCredentialsResponseSuccess)
+export type setGoogleAnalyticsClientResponse = (setGoogleAnalyticsClientResponseSuccess)
 
-export const getClearGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
-
-
+export const getSetGoogleAnalyticsClientUrl = (projectId: number,) => {
 
 
-  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics`
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics/client`
 }
 
-export const clearGoogleAnalyticsCredentials = async (projectId: number, options?: RequestInit): Promise<clearGoogleAnalyticsCredentialsResponse> => {
+export const setGoogleAnalyticsClient = async (projectId: number,
+    setProjectGoogleAnalyticsClientRequest: SetProjectGoogleAnalyticsClientRequest, options?: RequestInit): Promise<setGoogleAnalyticsClientResponse> => {
 
-  const res = await fetch(getClearGoogleAnalyticsCredentialsUrl(projectId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getSetGoogleAnalyticsClientUrl(projectId),
   {
     ...options,
-    method: 'DELETE'
-
-
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(setProjectGoogleAnalyticsClientRequest)
   }
 )
 
 
   const body = [204, 205, 304].includes(res.status) ? null : await res.text();
 
-  const data: clearGoogleAnalyticsCredentialsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as clearGoogleAnalyticsCredentialsResponse
+  const data: setGoogleAnalyticsClientResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as setGoogleAnalyticsClientResponse
 }
 
 
@@ -308,6 +281,98 @@ const res = await fetch(getSetAdSenseClientSecretUrl(projectId),
 }
 
 
+export type selectAdSenseAccountResponse200 = {
+  data: void
+  status: 200
+}
+
+export type selectAdSenseAccountResponseSuccess = (selectAdSenseAccountResponse200) & {
+  headers: Headers;
+};
+;
+
+export type selectAdSenseAccountResponse = (selectAdSenseAccountResponseSuccess)
+
+export const getSelectAdSenseAccountUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/adsense/account`
+}
+
+export const selectAdSenseAccount = async (projectId: number,
+    selectAdSenseAccountRequest: SelectAdSenseAccountRequest, options?: RequestInit): Promise<selectAdSenseAccountResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getSelectAdSenseAccountUrl(projectId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(selectAdSenseAccountRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: selectAdSenseAccountResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as selectAdSenseAccountResponse
+}
+
+
+export type completeGoogleAnalyticsOAuthResponse200 = {
+  data: void
+  status: 200
+}
+
+export type completeGoogleAnalyticsOAuthResponseSuccess = (completeGoogleAnalyticsOAuthResponse200) & {
+  headers: Headers;
+};
+;
+
+export type completeGoogleAnalyticsOAuthResponse = (completeGoogleAnalyticsOAuthResponseSuccess)
+
+export const getCompleteGoogleAnalyticsOAuthUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics/oauth-callback`
+}
+
+export const completeGoogleAnalyticsOAuth = async (projectId: number,
+    completeGoogleAnalyticsOAuthRequest: CompleteGoogleAnalyticsOAuthRequest, options?: RequestInit): Promise<completeGoogleAnalyticsOAuthResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getCompleteGoogleAnalyticsOAuthUrl(projectId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(completeGoogleAnalyticsOAuthRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: completeGoogleAnalyticsOAuthResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as completeGoogleAnalyticsOAuthResponse
+}
+
+
 export type completeAdSenseOAuthResponse200 = {
   data: void
   status: 200
@@ -351,6 +416,162 @@ const res = await fetch(getCompleteAdSenseOAuthUrl(projectId),
 
   const data: completeAdSenseOAuthResponse['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as completeAdSenseOAuthResponse
+}
+
+
+export type getGoogleAnalyticsStatusResponse200 = {
+  data: ProjectGoogleAnalyticsStatusResponse
+  status: 200
+}
+
+export type getGoogleAnalyticsStatusResponseSuccess = (getGoogleAnalyticsStatusResponse200) & {
+  headers: Headers;
+};
+;
+
+export type getGoogleAnalyticsStatusResponse = (getGoogleAnalyticsStatusResponseSuccess)
+
+export const getGetGoogleAnalyticsStatusUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics`
+}
+
+export const getGoogleAnalyticsStatus = async (projectId: number, options?: RequestInit): Promise<getGoogleAnalyticsStatusResponse> => {
+
+  const res = await fetch(getGetGoogleAnalyticsStatusUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getGoogleAnalyticsStatusResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as getGoogleAnalyticsStatusResponse
+}
+
+
+export type clearGoogleAnalyticsCredentialsResponse200 = {
+  data: void
+  status: 200
+}
+
+export type clearGoogleAnalyticsCredentialsResponseSuccess = (clearGoogleAnalyticsCredentialsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type clearGoogleAnalyticsCredentialsResponse = (clearGoogleAnalyticsCredentialsResponseSuccess)
+
+export const getClearGoogleAnalyticsCredentialsUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics`
+}
+
+export const clearGoogleAnalyticsCredentials = async (projectId: number, options?: RequestInit): Promise<clearGoogleAnalyticsCredentialsResponse> => {
+
+  const res = await fetch(getClearGoogleAnalyticsCredentialsUrl(projectId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: clearGoogleAnalyticsCredentialsResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as clearGoogleAnalyticsCredentialsResponse
+}
+
+
+export type listGoogleAnalyticsPropertiesResponse200 = {
+  data: GoogleAnalyticsPropertyResponse[]
+  status: 200
+}
+
+export type listGoogleAnalyticsPropertiesResponseSuccess = (listGoogleAnalyticsPropertiesResponse200) & {
+  headers: Headers;
+};
+;
+
+export type listGoogleAnalyticsPropertiesResponse = (listGoogleAnalyticsPropertiesResponseSuccess)
+
+export const getListGoogleAnalyticsPropertiesUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/google-analytics/properties`
+}
+
+export const listGoogleAnalyticsProperties = async (projectId: number, options?: RequestInit): Promise<listGoogleAnalyticsPropertiesResponse> => {
+
+  const res = await fetch(getListGoogleAnalyticsPropertiesUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listGoogleAnalyticsPropertiesResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as listGoogleAnalyticsPropertiesResponse
+}
+
+
+export type listAdSenseAccountsResponse200 = {
+  data: AdSenseAccountResponse[]
+  status: 200
+}
+
+export type listAdSenseAccountsResponseSuccess = (listAdSenseAccountsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type listAdSenseAccountsResponse = (listAdSenseAccountsResponseSuccess)
+
+export const getListAdSenseAccountsUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/projects/${projectId}/api-keys/adsense/accounts`
+}
+
+export const listAdSenseAccounts = async (projectId: number, options?: RequestInit): Promise<listAdSenseAccountsResponse> => {
+
+  const res = await fetch(getListAdSenseAccountsUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: listAdSenseAccountsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as listAdSenseAccountsResponse
 }
 
 

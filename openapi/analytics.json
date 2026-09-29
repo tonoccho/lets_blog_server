@@ -11,41 +11,12 @@
     }
   ],
   "paths": {
-    "/api/projects/{projectId}/api-keys/google-analytics": {
-      "get": {
-        "tags": [
-          "project-analytics-api-key-controller"
-        ],
-        "operationId": "getGoogleAnalyticsStatus",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectGoogleAnalyticsStatusResponse"
-                }
-              }
-            }
-          }
-        }
-      },
+    "/api/projects/{projectId}/api-keys/google-analytics/property": {
       "put": {
         "tags": [
           "project-analytics-api-key-controller"
         ],
-        "operationId": "setGoogleAnalyticsCredentials",
+        "operationId": "selectGoogleAnalyticsProperty",
         "parameters": [
           {
             "name": "projectId",
@@ -61,7 +32,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetProjectGoogleAnalyticsCredentialsRequest"
+                "$ref": "#/components/schemas/SelectGoogleAnalyticsPropertyRequest"
               }
             }
           },
@@ -72,12 +43,14 @@
             "description": "OK"
           }
         }
-      },
-      "delete": {
+      }
+    },
+    "/api/projects/{projectId}/api-keys/google-analytics/client": {
+      "put": {
         "tags": [
           "project-analytics-api-key-controller"
         ],
-        "operationId": "clearGoogleAnalyticsCredentials",
+        "operationId": "setGoogleAnalyticsClient",
         "parameters": [
           {
             "name": "projectId",
@@ -89,6 +62,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProjectGoogleAnalyticsClientRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -215,41 +198,12 @@
         }
       }
     },
-    "/api/internal/analytics/projects/{projectId}/google-analytics": {
-      "get": {
-        "tags": [
-          "internal-analytics-project-settings-controller"
-        ],
-        "operationId": "googleAnalyticsStatus",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GoogleAnalyticsStatusResponse"
-                }
-              }
-            }
-          }
-        }
-      },
+    "/api/projects/{projectId}/api-keys/adsense/account": {
       "put": {
         "tags": [
-          "internal-analytics-project-settings-controller"
+          "project-analytics-api-key-controller"
         ],
-        "operationId": "setGoogleAnalyticsCredentials_1",
+        "operationId": "selectAdSenseAccount",
         "parameters": [
           {
             "name": "projectId",
@@ -265,34 +219,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetGoogleAnalyticsCredentialsRequest"
+                "$ref": "#/components/schemas/SelectAdSenseAccountRequest"
               }
             }
           },
           "required": true
         },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "internal-analytics-project-settings-controller"
-        ],
-        "operationId": "clearGoogleAnalyticsCredentials_1",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "OK"
@@ -407,6 +339,40 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SetAdSenseClientSecretRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/api-keys/google-analytics/oauth-callback": {
+      "post": {
+        "tags": [
+          "project-analytics-api-key-controller"
+        ],
+        "operationId": "completeGoogleAnalyticsOAuth",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteGoogleAnalyticsOAuthRequest"
               }
             }
           },
@@ -548,41 +514,221 @@
           }
         }
       }
+    },
+    "/api/projects/{projectId}/api-keys/google-analytics": {
+      "get": {
+        "tags": [
+          "project-analytics-api-key-controller"
+        ],
+        "operationId": "getGoogleAnalyticsStatus",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectGoogleAnalyticsStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "project-analytics-api-key-controller"
+        ],
+        "operationId": "clearGoogleAnalyticsCredentials",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/api-keys/google-analytics/properties": {
+      "get": {
+        "tags": [
+          "project-analytics-api-key-controller"
+        ],
+        "operationId": "listGoogleAnalyticsProperties",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GoogleAnalyticsPropertyResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/api-keys/adsense/accounts": {
+      "get": {
+        "tags": [
+          "project-analytics-api-key-controller"
+        ],
+        "operationId": "listAdSenseAccounts",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdSenseAccountResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/analytics/projects/{projectId}/google-analytics": {
+      "get": {
+        "tags": [
+          "internal-analytics-project-settings-controller"
+        ],
+        "operationId": "googleAnalyticsStatus",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleAnalyticsStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "internal-analytics-project-settings-controller"
+        ],
+        "operationId": "clearGoogleAnalyticsCredentials_1",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
-      "SetProjectGoogleAnalyticsCredentialsRequest": {
+      "SelectGoogleAnalyticsPropertyRequest": {
         "type": "object",
         "properties": {
           "propertyId": {
             "type": "string",
             "minLength": 1
-          },
-          "serviceAccountJson": {
-            "type": "string",
-            "minLength": 1
           }
         },
         "required": [
-          "propertyId",
-          "serviceAccountJson"
+          "propertyId"
+        ]
+      },
+      "SetProjectGoogleAnalyticsClientRequest": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "clientSecret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientId"
         ]
       },
       "SetProjectAdSenseSettingsRequest": {
         "type": "object",
         "properties": {
           "accountId": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "clientId": {
             "type": "string"
           }
-        },
-        "required": [
-          "accountId"
-        ]
+        }
       },
       "SetProjectAdSenseClientSecretRequest": {
         "type": "object",
@@ -596,21 +742,16 @@
           "clientSecret"
         ]
       },
-      "SetGoogleAnalyticsCredentialsRequest": {
+      "SelectAdSenseAccountRequest": {
         "type": "object",
         "properties": {
-          "propertyId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "serviceAccountJson": {
+          "accountId": {
             "type": "string",
             "minLength": 1
           }
         },
         "required": [
-          "propertyId",
-          "serviceAccountJson"
+          "accountId"
         ]
       },
       "SetAdSenseSettingsRequest": {
@@ -638,6 +779,23 @@
         },
         "required": [
           "clientSecret"
+        ]
+      },
+      "CompleteGoogleAnalyticsOAuthRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "redirectUri": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "code",
+          "redirectUri"
         ]
       },
       "CompleteAdSenseOAuthRequest": {
@@ -818,6 +976,29 @@
           },
           "propertyId": {
             "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "hasClientSecret": {
+            "type": "boolean"
+          },
+          "connected": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GoogleAnalyticsPropertyResponse": {
+        "type": "object",
+        "properties": {
+          "propertyId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "accountDisplayName": {
+            "type": "string"
           }
         }
       },
@@ -835,6 +1016,20 @@
           },
           "hasClientSecret": {
             "type": "boolean"
+          },
+          "connected": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdSenseAccountResponse": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
           }
         }
       },

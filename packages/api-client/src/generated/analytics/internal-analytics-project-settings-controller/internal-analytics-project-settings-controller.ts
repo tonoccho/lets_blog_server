@@ -9,133 +9,8 @@ import type {
   CompleteAdSenseOAuthRequest,
   GoogleAnalyticsStatusResponse,
   SetAdSenseClientSecretRequest,
-  SetAdSenseSettingsRequest,
-  SetGoogleAnalyticsCredentialsRequest
+  SetAdSenseSettingsRequest
 } from '../openAPIDefinition.schemas';
-
-
-export type googleAnalyticsStatusResponse200 = {
-  data: GoogleAnalyticsStatusResponse
-  status: 200
-}
-
-export type googleAnalyticsStatusResponseSuccess = (googleAnalyticsStatusResponse200) & {
-  headers: Headers;
-};
-;
-
-export type googleAnalyticsStatusResponse = (googleAnalyticsStatusResponseSuccess)
-
-export const getGoogleAnalyticsStatusUrl = (projectId: number,) => {
-
-
-
-
-  return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
-}
-
-export const googleAnalyticsStatus = async (projectId: number, options?: RequestInit): Promise<googleAnalyticsStatusResponse> => {
-
-  const res = await fetch(getGoogleAnalyticsStatusUrl(projectId),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: googleAnalyticsStatusResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as googleAnalyticsStatusResponse
-}
-
-
-export type setGoogleAnalyticsCredentials1Response200 = {
-  data: void
-  status: 200
-}
-
-export type setGoogleAnalyticsCredentials1ResponseSuccess = (setGoogleAnalyticsCredentials1Response200) & {
-  headers: Headers;
-};
-;
-
-export type setGoogleAnalyticsCredentials1Response = (setGoogleAnalyticsCredentials1ResponseSuccess)
-
-export const getSetGoogleAnalyticsCredentials1Url = (projectId: number,) => {
-
-
-
-
-  return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
-}
-
-export const setGoogleAnalyticsCredentials1 = async (projectId: number,
-    setGoogleAnalyticsCredentialsRequest: SetGoogleAnalyticsCredentialsRequest, options?: RequestInit): Promise<setGoogleAnalyticsCredentials1Response> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-const res = await fetch(getSetGoogleAnalyticsCredentials1Url(projectId),
-  {
-    ...options,
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(setGoogleAnalyticsCredentialsRequest)
-  }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: setGoogleAnalyticsCredentials1Response['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as setGoogleAnalyticsCredentials1Response
-}
-
-
-export type clearGoogleAnalyticsCredentials1Response200 = {
-  data: void
-  status: 200
-}
-
-export type clearGoogleAnalyticsCredentials1ResponseSuccess = (clearGoogleAnalyticsCredentials1Response200) & {
-  headers: Headers;
-};
-;
-
-export type clearGoogleAnalyticsCredentials1Response = (clearGoogleAnalyticsCredentials1ResponseSuccess)
-
-export const getClearGoogleAnalyticsCredentials1Url = (projectId: number,) => {
-
-
-
-
-  return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
-}
-
-export const clearGoogleAnalyticsCredentials1 = async (projectId: number, options?: RequestInit): Promise<clearGoogleAnalyticsCredentials1Response> => {
-
-  const res = await fetch(getClearGoogleAnalyticsCredentials1Url(projectId),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: clearGoogleAnalyticsCredentials1Response['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as clearGoogleAnalyticsCredentials1Response
-}
 
 
 export type adSenseStatusResponse200 = {
@@ -351,6 +226,84 @@ const res = await fetch(getCompleteAdSenseOAuth1Url(projectId),
 
   const data: completeAdSenseOAuth1Response['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as completeAdSenseOAuth1Response
+}
+
+
+export type googleAnalyticsStatusResponse200 = {
+  data: GoogleAnalyticsStatusResponse
+  status: 200
+}
+
+export type googleAnalyticsStatusResponseSuccess = (googleAnalyticsStatusResponse200) & {
+  headers: Headers;
+};
+;
+
+export type googleAnalyticsStatusResponse = (googleAnalyticsStatusResponseSuccess)
+
+export const getGoogleAnalyticsStatusUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
+}
+
+export const googleAnalyticsStatus = async (projectId: number, options?: RequestInit): Promise<googleAnalyticsStatusResponse> => {
+
+  const res = await fetch(getGoogleAnalyticsStatusUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: googleAnalyticsStatusResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as googleAnalyticsStatusResponse
+}
+
+
+export type clearGoogleAnalyticsCredentials1Response200 = {
+  data: void
+  status: 200
+}
+
+export type clearGoogleAnalyticsCredentials1ResponseSuccess = (clearGoogleAnalyticsCredentials1Response200) & {
+  headers: Headers;
+};
+;
+
+export type clearGoogleAnalyticsCredentials1Response = (clearGoogleAnalyticsCredentials1ResponseSuccess)
+
+export const getClearGoogleAnalyticsCredentials1Url = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/analytics/projects/${projectId}/google-analytics`
+}
+
+export const clearGoogleAnalyticsCredentials1 = async (projectId: number, options?: RequestInit): Promise<clearGoogleAnalyticsCredentials1Response> => {
+
+  const res = await fetch(getClearGoogleAnalyticsCredentials1Url(projectId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: clearGoogleAnalyticsCredentials1Response['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as clearGoogleAnalyticsCredentials1Response
 }
 
 
