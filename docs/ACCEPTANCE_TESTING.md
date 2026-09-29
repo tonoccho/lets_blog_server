@@ -509,12 +509,43 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 
 #### `@requires-gpu`: リリース検証だけは除外する(#1318、利用者の決定 2026-09-15)
 
-GPU の無いホスト(実機 `lbs-comfyui` を起動できない)でも `scripts/release-verify-tag.py`
-によるリリース検証(`test:at:clean`)がゼロ許容で通せるよう、実機 GPU が無いと必ず失敗する
-シナリオ(`comfyui-checkpoints.feature` の導入・削除の2つ)には `@requires-gpu` を付けている。
-一覧取得のシナリオと `image-generation.feature` は GPU の無いホストでも(スタブを相手に)通るため
-対象にしていない。ただしスタブで通っている以上、これらは実機を検証していない — その是正は
-#1318 の Out of Scope として残っている。
+`comfyui-checkpoints.feature` の導入・削除の2シナリオは、**受け入れテスト環境が実機 `lbs-comfyui`
+ではなく `comfyui-stub` を向いている限り、必ず失敗する。** そのため `scripts/release-verify-tag.py`
+によるリリース検証(`test:at:clean`)がゼロ許容で通せるよう、この2つには `@requires-gpu` を付けている。
+一覧取得のシナリオと `image-generation.feature` は(スタブを相手に)通るため対象にしていない。
+ただしスタブで通っている以上、これらは実機を検証していない — その是正は #1401(実機 AI レーン)が
+引き受ける。
+
+**除外の根拠(#1400 で再評価、2026-09-30)。** 当初(#1318、2026-09-15)の根拠は「このホストに GPU が
+無い」だったが、これはホスト依存で、実機に GPU がある日(2026-09-24 の報告では RTX 5070 Ti と稼働中の
+`lbs-comfyui` を確認。実装時のホストとは状態が異なる)には成立しない。除外の**現在の根拠は GPU の有無ではない**:
+
+| 事実 | 出典 |
+| --- | --- |
+| AT 環境は `docker-compose.yml` に `docker-compose.e2e-stubs.yml` を重ねて起動する | `scripts/rebuild-acceptance-env.sh` |
+| その overlay が platform の `COMFYUI_BASE_URL` を `http://comfyui-stub:8080` に固定する | `docker-compose.e2e-stubs.yml` |
+| media は生成・一覧のたびに platform から baseUrl を取り直す | `services/media/src/main/java/com/letsblog/media/ai/ComfyUiClient.java` |
+| スタブの `/object_info` が返すチェックポイント一覧は固定値で、導入したものは決して現れない | `infra/e2e-stubs/comfyui/server.js` の `CHECKPOINTS` |
+
+したがって実機に GPU があり `lbs-comfyui` が稼働していても、AT が実機を向いていない以上
+2シナリオの結果は変わらない(一覧に導入分が現れず落ちる)。除外は**継続する**。
+継続の条件が消えるのは、AT 環境が実機 ComfyUI を向く構成(#1401)が入ったときである。
+
+実測の記録: 本 Issue の実装時点(2026-09-30)のホストには `nvidia-smi` も `/dev/nvidia*` も無く、
+`lbs-comfyui` は `Created` のまま起動しておらず、稼働中は `lbs-e2e-comfyui-stub` のみだった。
+共有スタックは初回セットアップ済みで、`at-main` の依存段階 `at-setup` は
+`test:at:clean`(共有スタックの初期化を伴う)でしか成立しない。初期化はループと共有する
+スタックを止めるため行わず、`--project=at-main --no-deps` で2シナリオを実行したところ、
+両方とも `Keycloakからのトークン取得に失敗しました (status=400): invalid_grant`
+(seed/provision を飛ばしたため検証用アカウントが無い)で落ちた。これは**シナリオ本来の
+失敗理由ではなく**、実機に対して通るかの測定としては無効である。よって「実機に対して通るか」は
+未測定であり、上の根拠はコード上の事実(`COMFYUI_BASE_URL` の固定とスタブの固定一覧)と、
+#1400 への 2026-09-24 の利用者コメント(この結論を測定を待たず出せるとしたもの)による。
+実機 AI レーン(#1401)で実測すること。
+
+なお名称: このタグが実際に意味するのは「実機 ComfyUI を向いている必要がある」であり、演算デバイス
+(GPU/CPU、#1395)の話ではない。改名(例 `@requires-real-comfyui`)は仕組みと
+`release-verify-tag.py`・テストに波及するため、本 Issue では行わず #1401 で検討する。
 
 - **リリース検証(`release-verify-tag.py`)だけが除外する。** `web-test-at-clean` 手順は
   `AT_EXCLUDE_REQUIRES_GPU=1` を設定して `test:at:clean` を実行し、
@@ -1816,7 +1847,7 @@ systemd-run --user --unit=at1295-<epoch> --collect \
 | `analytics/credentials.feature`・`analytics/report-failures.feature` | #1281(Done)と同系統の既知の不安定さ |
 | `auth/token-lifecycle.feature`の2シナリオ(UI要素の可視性タイムアウト。`invalid_grant`ではない) | 本Issueとは無関係な画面側のタイミング |
 | `identity/project-members.feature` | 既存の`@slow`系不安定さ |
-| `media/comfyui-checkpoints.feature`の2シナリオ | 既に`@requires-gpu`付き。本ホストは実機GPU無し(`docker ps`に`lbs-e2e-comfyui-stub`のみ) |
+| `media/comfyui-checkpoints.feature`の2シナリオ | 既に`@requires-gpu`付き。**この記録の時点(2026-09-16)では**本ホストは実機GPU無し(`docker ps`に`lbs-e2e-comfyui-stub`のみ)。現在の除外根拠は「AT環境が実機を向いていない」であり、GPUの有無ではない(上の`@requires-gpu`の節、#1400) |
 | `platform/vscode-extension.feature`の2シナリオ・`project/ssh-key-pairs.feature` | 本Issueと無関係なビルド/API検証 |
 | `ui-quality/accessibility.feature`・`ui-quality/internationalization.feature`(タイムゾーン) | #1317(Done)と同系統の既知の不安定さ |
 
