@@ -1,5 +1,7 @@
 package com.letsblog.content.dto;
 
+import java.util.List;
+
 /**
  * PreviewSkeletonFetcherの取得結果(issue #576でcontent-serviceへ移管)。legacy-api側の
  * ArticlePreviewController向けThemeSkeletonResponse(previewPostId/warningを含む7フィールド版)とは
@@ -10,7 +12,10 @@ package com.letsblog.content.dto;
  *             内容へ差し替えたHTML断片。
  * @param eyecatchSpliced テーマの実マークアップ(既存の&lt;img&gt;要素)へアイキャッチを差し替えられたか。
  * @param css 骨格として実際にナビゲートしたページで読み込まれていたスタイルシートを連結したCSS。
+ * @param unreadableStylesheets {@code cssRules}を読めなかった(クロスオリジンでCORSヘッダーが無い等)
+ *             stylesheetのhref。cssには含まれないため、呼び出し側がテーマCSS取得と同じ経路で取得して
+ *             補完する(issue #1370)。無ければ空リスト。
  */
 public record ThemeSkeletonResponse(String html, boolean available, String reason, boolean eyecatchSpliced,
-        String css) {
+        String css, List<String> unreadableStylesheets) {
 }

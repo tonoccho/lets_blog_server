@@ -503,11 +503,13 @@ public class ArticlePreviewService {
                 : referenceLink;
 
         ThemeSkeletonResponse spliced;
+        List<String> unreadable;
         try {
             ContentServiceClient.ThemeSkeletonBridgeResponse bridged = contentServiceClient.fetchAndSplice(
                     navigateUrl, titleRendered, contentRendered, title, contentHtml, featuredImageDataUri);
             spliced = new ThemeSkeletonResponse(
                     bridged.html(), bridged.available(), bridged.reason(), bridged.eyecatchSpliced(), bridged.css());
+            unreadable = bridged.unreadableStylesheets();
         } catch (Exception e) {
             logger.warn("Failed to render skeleton preview for site: {}", site.getSiteKey(), e);
             return new ThemeSkeletonResponse(null, false, "記事ページの取得に失敗しました: " + e.getMessage(), false, "");
@@ -516,7 +518,8 @@ public class ArticlePreviewService {
         // Webviewから実際に読み込める公開オリジンへ戻してから返す。本文の差し替え位置を特定できず
         // htmlがavailable=falseの場合でも、ナビゲーション自体には成功していればcssは収集できているため、
         // 呼び出し側(拡張機能)がトップページのCSSとマージできるよう合わせて返す。
-        String css = internalOrigin != null ? spliced.css().replace(internalOrigin, publicOrigin) : spliced.css();
+        String mergedCss = supplementUnreadableStylesheets(spliced.css(), unreadable, site, credentials);
+        String css = internalOrigin != null ? mergedCss.replace(internalOrigin, publicOrigin) : mergedCss;
         if (!spliced.available() || spliced.html() == null) {
             return new ThemeSkeletonResponse(spliced.html(), false, spliced.reason(), spliced.eyecatchSpliced(), css);
         }
@@ -598,11 +601,13 @@ public class ArticlePreviewService {
                 : result.link();
 
         ThemeSkeletonResponse fetched;
+        List<String> unreadable;
         try {
             ContentServiceClient.ThemeSkeletonBridgeResponse bridged =
                     contentServiceClient.fetchRealPost(navigateUrl, cookie.name(), cookie.value());
             fetched = new ThemeSkeletonResponse(
                     bridged.html(), bridged.available(), bridged.reason(), bridged.eyecatchSpliced(), bridged.css());
+            unreadable = bridged.unreadableStylesheets();
         } catch (Exception e) {
             logger.warn("プレビュー用投稿ページの取得に失敗しました: {}", site.getSiteKey(), e);
             // issue #1207 Requirement 4: 401/403(認証エラー)は、タイムアウト・5xx・通信断といった
@@ -615,12 +620,69 @@ public class ArticlePreviewService {
                     null, false, prefix + e.getMessage(), false, "", result.id());
         }
 
-        String css = internalOrigin != null ? fetched.css().replace(internalOrigin, publicOrigin) : fetched.css();
+        String mergedCss = supplementUnreadableStylesheets(fetched.css(), unreadable, site, credentials);
+        String css = internalOrigin != null ? mergedCss.replace(internalOrigin, publicOrigin) : mergedCss;
         if (!fetched.available() || fetched.html() == null) {
             return new ThemeSkeletonResponse(fetched.html(), false, fetched.reason(), false, css, result.id());
         }
         String html = internalOrigin != null ? fetched.html().replace(internalOrigin, publicOrigin) : fetched.html();
         return new ThemeSkeletonResponse(html, true, null, false, css, result.id(), eyecatchWarning);
+    }
+
+    /**
+     * 骨格取得(Playwright)で{@code cssRules}を読めなかったstylesheet(issue #1370)を、テーマCSS取得と
+     * 同じ経路(SSH管理サイトは{@link SshPageSource}=SFTP→HTTP、それ以外はHTTP)で取得して
+     * 骨格のCSSへ追記する。
+     *
+     * <p>hrefで重複排除する(既にCSSに{@code /* href *}/の見出しで含まれるものは取得しない)。
+     * ベストエフォートで、取得失敗はhref付きでログに残して読み飛ばす。追記後のCSSが
+     * {@link #MAX_CSS_LENGTH}を超えるstylesheetは(構文を壊さないよう)丸ごとスキップする。
+     * hrefはPlaywrightがナビゲートしたオリジン基準(managedサイトでは内部オリジン)のため、
+     * そのまま取得でき、呼び出し側が公開オリジンへ戻す前に合流させる。
+     */
+    private String supplementUnreadableStylesheets(
+            String css, List<String> hrefs, Site site, CmsCredentials credentials) {
+        if (hrefs == null || hrefs.isEmpty()) {
+            return css;
+        }
+        java.util.function.Function<String, String> loader = stylesheetLoaderFor(site, credentials);
+        StringBuilder merged = new StringBuilder(css);
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String href : hrefs) {
+            if (!seen.add(href) || css.contains("/* " + href + " */")) {
+                continue;
+            }
+            try {
+                String body = loader.apply(href);
+                if (body == null || body.isBlank()) {
+                    continue;
+                }
+                String entry = "\n/* " + href + " */\n" + rewriteRelativeCssUrls(body, href) + "\n";
+                if (merged.length() + entry.length() > MAX_CSS_LENGTH) {
+                    logger.warn("Skipping unreadable-stylesheet supplement because CSS would exceed "
+                            + "MAX_CSS_LENGTH ({}): {}", MAX_CSS_LENGTH, href);
+                    continue;
+                }
+                merged.append(entry);
+            } catch (Exception e) {
+                logger.warn("骨格プレビューの読めなかったstylesheetの補完取得に失敗しました: {} (site: {})",
+                        href, site.getSiteKey(), e);
+            }
+        }
+        return merged.toString();
+    }
+
+    /** SSH管理サイトはSFTP→HTTP、それ以外(またはSSHのレイアウト取得失敗時)はHTTPで取得する。 */
+    private java.util.function.Function<String, String> stylesheetLoaderFor(
+            Site site, CmsCredentials credentials) {
+        if (credentials instanceof CmsCredentials.WordPressCredentials wp && wp.isSsh()) {
+            try {
+                return new SshPageSource(wp, wordPressSshOperations.fetchSiteFileLayout(wp))::load;
+            } catch (Exception e) {
+                logger.warn("SSHのレイアウト取得に失敗したためHTTPで補完します: {}", site.getSiteKey(), e);
+            }
+        }
+        return httpLoader();
     }
 
     /**

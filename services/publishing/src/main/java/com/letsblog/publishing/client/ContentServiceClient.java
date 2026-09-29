@@ -188,8 +188,12 @@ public class ContentServiceClient {
         }
     }
 
+    /**
+     * @param unreadableStylesheets content-serviceのPlaywrightが{@code cssRules}を読めなかった
+     *             stylesheetのhref(issue #1370)。cssには含まれない。古いcontent-serviceの応答ではnull。
+     */
     public record ThemeSkeletonBridgeResponse(String html, boolean available, String reason,
-            boolean eyecatchSpliced, String css) {
+            boolean eyecatchSpliced, String css, java.util.List<String> unreadableStylesheets) {
     }
 
     /**

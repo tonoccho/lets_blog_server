@@ -93,6 +93,36 @@ class PreviewSkeletonFetcherResponseTest {
     }
 
     @Test
+    @DisplayName("cssRulesを読めなかったstylesheetのhrefを応答に含める(重複と空は除く)")
+    void 読めなかったstylesheetのhrefを返す() {
+        Map<String, Object> map = result("body{margin:0}");
+        map.put("unreadableStylesheets", java.util.Arrays.asList(
+                "https://cdn.example.com/a.css", "https://cdn.example.com/a.css", null, "  ",
+                "https://cdn.example.com/b.css"));
+
+        ThemeSkeletonResponse response = fetchWith(map);
+
+        assertThat(response.unreadableStylesheets())
+                .containsExactly("https://cdn.example.com/a.css", "https://cdn.example.com/b.css");
+    }
+
+    @Test
+    @DisplayName("読めなかったstylesheetが無い(キー無し・配列以外)なら空リストにする")
+    void 読めなかったstylesheetが無ければ空リストになる() {
+        assertThat(fetchWith(result("x")).unreadableStylesheets()).isEmpty();
+
+        Map<String, Object> notList = result("x");
+        notList.put("unreadableStylesheets", "https://cdn.example.com/a.css");
+        assertThat(fetchWith(notList).unreadableStylesheets()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Map以外の結果でも読めなかったstylesheetは空リスト")
+    void 想定外の結果形式でも空リストになる() {
+        assertThat(fetchWith("まさかの文字列").unreadableStylesheets()).isEmpty();
+    }
+
+    @Test
     @DisplayName("ブラウザ側の失敗はContentScrapingExceptionに変換される")
     void ブラウザの失敗は変換される() {
         when(browser.newPage()).thenReturn(page);

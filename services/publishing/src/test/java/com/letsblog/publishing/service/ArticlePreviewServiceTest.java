@@ -502,7 +502,227 @@ class ArticlePreviewServiceTest {
 
     private ContentServiceClient.ThemeSkeletonBridgeResponse bridged(
             String html, boolean available, String reason, boolean eyecatchSpliced, String css) {
-        return new ContentServiceClient.ThemeSkeletonBridgeResponse(html, available, reason, eyecatchSpliced, css);
+        return new ContentServiceClient.ThemeSkeletonBridgeResponse(
+                html, available, reason, eyecatchSpliced, css, java.util.List.of());
+    }
+
+    private ContentServiceClient.ThemeSkeletonBridgeResponse bridgedWithUnreadable(
+            String css, java.util.List<String> unreadableStylesheets) {
+        return new ContentServiceClient.ThemeSkeletonBridgeResponse(
+                "<article>spliced</article>", true, null, true, css, unreadableStylesheets);
+    }
+
+    /** 参照記事1件を返し、スクレイプ&amp;スプライス経路(bridge fetchAndSplice)で骨格を取得させる。 */
+    private ThemeSkeletonResponse renderSkeletonScrapeWith(
+            ContentServiceClient.ThemeSkeletonBridgeResponse bridgeResult) {
+        return renderSkeletonScrapeWith(bridgeResult, () -> { });
+    }
+
+    /** expectStylesheetsは、参照記事のREST取得の期待より後に登録する(MockRestServiceServerは順序を見る)。 */
+    private ThemeSkeletonResponse renderSkeletonScrapeWith(
+            ContentServiceClient.ThemeSkeletonBridgeResponse bridgeResult, Runnable expectStylesheets) {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        server.expect(requestTo("http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc"
+                        + "&_fields=id,link,title,content"))
+                .andRespond(withSuccess(
+                        "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+                        + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]",
+                        MediaType.APPLICATION_JSON));
+        when(contentServiceClient.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(bridgeResult);
+        expectStylesheets.run();
+        return service.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+    }
+
+    // ---- issue #1370: 骨格プレビューで読めなかったstylesheetの補完 ----
+
+    @Test
+    void renderSkeleton_読めなかったstylesheetをHTTPで取得して骨格のCSSへ補完する() {
+        ThemeSkeletonResponse response = renderSkeletonScrapeWith(
+                bridgedWithUnreadable("body{margin:0}", java.util.List.of("http://cdn.example.com/a.css")),
+                () -> server.expect(requestTo("http://cdn.example.com/a.css"))
+                        .andRespond(withSuccess("a{color:red}", MediaType.valueOf("text/css"))));
+
+        assertTrue(response.available());
+        assertTrue(response.css().startsWith("body{margin:0}"));
+        assertTrue(response.css().contains("/* http://cdn.example.com/a.css */\na{color:red}"));
+        server.verify();
+    }
+
+    @Test
+    void renderSkeleton_同じhrefは一度だけ取得し二重に連結しない() {
+        ThemeSkeletonResponse response = renderSkeletonScrapeWith(bridgedWithUnreadable(
+                "body{margin:0}",
+                java.util.List.of("http://cdn.example.com/a.css", "http://cdn.example.com/a.css")),
+                () -> server.expect(requestTo("http://cdn.example.com/a.css"))
+                        .andRespond(withSuccess("a{color:red}", MediaType.valueOf("text/css"))));
+
+        assertEquals(1, response.css().split("a\\{color:red\\}", -1).length - 1);
+        server.verify();
+    }
+
+    @Test
+    void renderSkeleton_既にCSSに含まれるhrefは取得しない() {
+        // 期待を登録しない: 取得しようとすればMockRestServiceServerが失敗する
+        String base = "/* http://cdn.example.com/a.css */\na{color:red}";
+
+        ThemeSkeletonResponse response = renderSkeletonScrapeWith(
+                bridgedWithUnreadable(base, java.util.List.of("http://cdn.example.com/a.css")));
+
+        assertEquals(base, response.css());
+        server.verify();
+    }
+
+    @Test
+    void renderSkeleton_補完の取得に失敗しても骨格は表示され失敗したhrefがログに残る() {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ArticlePreviewService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        ThemeSkeletonResponse response;
+        try {
+            response = renderSkeletonScrapeWith(bridgedWithUnreadable(
+                    "body{margin:0}",
+                    java.util.List.of("http://cdn.example.com/broken.css", "http://cdn.example.com/ok.css")),
+                    () -> {
+                        server.expect(requestTo("http://cdn.example.com/broken.css"))
+                                .andRespond(withServerError());
+                        server.expect(requestTo("http://cdn.example.com/ok.css"))
+                                .andRespond(withSuccess("ok{color:blue}", MediaType.valueOf("text/css")));
+                    });
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertTrue(response.available());
+        assertEquals("<article>spliced</article>", response.html());
+        assertTrue(response.css().contains("ok{color:blue}"));
+        assertFalse(response.css().contains("broken.css"));
+        assertTrue(appender.list.stream().anyMatch(e ->
+                e.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && e.getFormattedMessage().contains("http://cdn.example.com/broken.css")));
+    }
+
+    @Test
+    void renderSkeleton_空本文のstylesheetは連結しない() {
+        ThemeSkeletonResponse response = renderSkeletonScrapeWith(
+                bridgedWithUnreadable("body{margin:0}", java.util.List.of("http://cdn.example.com/empty.css")),
+                () -> server.expect(requestTo("http://cdn.example.com/empty.css"))
+                        .andRespond(withSuccess("  ", MediaType.valueOf("text/css"))));
+
+        assertEquals("body{margin:0}", response.css());
+    }
+
+    @Test
+    void renderSkeleton_補完後のCSSがMAX_CSS_LENGTHを超えるstylesheetは丸ごとスキップし超えない() {
+        String base = "x".repeat(3_000_000 - 50);
+        ThemeSkeletonResponse response = renderSkeletonScrapeWith(bridgedWithUnreadable(
+                base, java.util.List.of("http://cdn.example.com/big.css", "http://cdn.example.com/small.css")),
+                () -> {
+                    server.expect(requestTo("http://cdn.example.com/big.css"))
+                            .andRespond(withSuccess("b".repeat(200), MediaType.valueOf("text/css")));
+                    server.expect(requestTo("http://cdn.example.com/small.css"))
+                            .andRespond(withSuccess("s{}", MediaType.valueOf("text/css")));
+                });
+
+        assertTrue(response.css().length() <= 3_000_000);
+        assertFalse(response.css().contains("bbbb"));
+        assertTrue(response.css().contains("s{}"));
+    }
+
+    @Test
+    void renderSkeleton_未指定または空の補完リストは何も取得せずCSSをそのまま返す() {
+        ThemeSkeletonResponse withNull = renderSkeletonScrapeWith(bridgedWithUnreadable("body{margin:0}", null));
+        assertEquals("body{margin:0}", withNull.css());
+    }
+
+    private void givenSshRealPost(ContentServiceClient.ThemeSkeletonBridgeResponse bridgeResult) {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 40L, null));
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(sshCredentials()),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "99", "http://production.example.com/?p=99", "private"));
+        when(cmsAdapter.generateAuthCookie(sshCredentials()))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("wordpress_logged_in_x", "cookie-value"));
+        when(contentServiceClient.fetchRealPost(
+                "http://production.example.com/?p=99", "wordpress_logged_in_x", "cookie-value"))
+                .thenReturn(bridgeResult);
+    }
+
+    @Test
+    void renderRealPrivatePost_SSHサイトの読めなかった自サイトstylesheetはSFTPで読んで補完する() {
+        String href = "http://production.example.com/wp-content/themes/t/style.css";
+        givenSshRealPost(bridgedWithUnreadable("body{margin:0}", java.util.List.of(href)));
+        when(wordPressSshOperations.fetchSiteFileLayout(sshCredentials())).thenReturn(sshLayout());
+        when(wordPressSshOperations.readStylesheetFile(sshCredentials(), sshLayout(), href))
+                .thenReturn(Optional.of(".theme{color:red}"));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertEquals("99", response.previewPostId());
+        assertTrue(response.css().contains("/* " + href + " */\n.theme{color:red}"));
+        server.verify();
+    }
+
+    @Test
+    void renderRealPrivatePost_SSHのレイアウト取得に失敗したらHTTPで補完を試みる() {
+        String href = "http://cdn.example.com/font.css";
+        givenSshRealPost(bridgedWithUnreadable("body{margin:0}", java.util.List.of(href)));
+        when(wordPressSshOperations.fetchSiteFileLayout(sshCredentials()))
+                .thenThrow(new IllegalStateException("ssh down"));
+        server.expect(requestTo(href)).andRespond(withSuccess("f{}", MediaType.valueOf("text/css")));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("f{}"));
+        server.verify();
+    }
+
+    @Test
+    void renderRealPrivatePost_非SSHサイトの補完は内部オリジンで取得し公開オリジンへ戻す() {
+        Project project = projectWithMaster("test", 10L, null);
+        project.setLocalSiteId(30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.createOrUpdatePost(org.mockito.ArgumentMatchers.eq(agentCredentials("local-site")),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.PostResult(
+                        "7", "https://localhost/sites/local-site/?p=7", "private"));
+        when(cmsAdapter.generateAuthCookie(agentCredentials("local-site")))
+                .thenReturn(new com.letsblog.publishing.cms.AuthCookie("c", "v"));
+        when(contentServiceClient.fetchRealPost("http://wordpress/sites/local-site/?p=7", "c", "v"))
+                .thenReturn(bridgedWithUnreadable("body{margin:0}",
+                        java.util.List.of("http://wordpress/sites/local-site/wp-content/x.css")));
+        server.expect(requestTo("http://wordpress/sites/local-site/wp-content/x.css"))
+                .andRespond(withSuccess("x{}", MediaType.valueOf("text/css")));
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 30L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("/* https://localhost/sites/local-site/wp-content/x.css */\nx{}"));
+        assertFalse(response.css().contains("http://wordpress/"));
+        server.verify();
     }
 
     @Test

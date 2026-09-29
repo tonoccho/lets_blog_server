@@ -77,6 +77,7 @@ public class PreviewSkeletonFetcher {
     private static final String COMMON_HELPERS_SCRIPT = """
               function collectCss() {
                 const parts = [];
+                const unreadable = [];
                 for (const sheet of Array.from(document.styleSheets)) {
                   try {
                     const rules = Array.from(sheet.cssRules).map((r) => r.cssText).join('\\n');
@@ -85,10 +86,14 @@ public class PreviewSkeletonFetcher {
                     }
                   } catch (e) {
                     // クロスオリジンのstylesheet(CORSヘッダー無し)はcssRulesへのアクセスがブロックされる。
-                    // その場合はスキップする(トップページ経由のCSS取得側で別途カバーされ得る)。
+                    // 内容は取得できないため、hrefだけを列挙して返す(issue #1370)。呼び出し側(publishing)が
+                    // テーマCSS取得と同じ経路で取得して補完する。
+                    if (sheet.href && !unreadable.includes(sheet.href)) {
+                      unreadable.push(sheet.href);
+                    }
                   }
                 }
-                return parts.join('\\n');
+                return { css: parts.join('\\n'), unreadable: unreadable };
               }
               function absolutizeUrls(root) {
                 root.querySelectorAll('script').forEach((el) => el.remove());
@@ -123,7 +128,9 @@ public class PreviewSkeletonFetcher {
     private static final String SPLICE_SCRIPT = """
             (args) => {
             """ + COMMON_HELPERS_SCRIPT + """
-              const css = collectCss();
+              const collected = collectCss();
+              const css = collected.css;
+              const unreadableStylesheets = collected.unreadable;
               try {
                 const titleRendered = args.titleRendered;
                 const contentRenderedRaw = (args.contentRendered || '').trim();
@@ -160,7 +167,8 @@ public class PreviewSkeletonFetcher {
                 if (!contentEl) {
                   return {
                     available: false, reason: '本文の位置を特定できませんでした', html: null,
-                    eyecatchSpliced: false, css: css
+                    eyecatchSpliced: false, css: css,
+                    unreadableStylesheets: unreadableStylesheets
                   };
                 }
 
@@ -228,12 +236,14 @@ public class PreviewSkeletonFetcher {
 
                 return {
                   available: true, reason: null, html: ancestor.outerHTML,
-                  eyecatchSpliced: eyecatchSpliced, css: css
+                  eyecatchSpliced: eyecatchSpliced, css: css,
+                  unreadableStylesheets: unreadableStylesheets
                 };
               } catch (e) {
                 return {
                   available: false, reason: 'DOM解析に失敗しました: ' + e.message, html: null,
-                  eyecatchSpliced: false, css: css
+                  eyecatchSpliced: false, css: css,
+                    unreadableStylesheets: unreadableStylesheets
                 };
               }
             }
@@ -247,17 +257,21 @@ public class PreviewSkeletonFetcher {
     private static final String REAL_POST_SCRIPT = """
             () => {
             """ + COMMON_HELPERS_SCRIPT + """
-              const css = collectCss();
+              const collected = collectCss();
+              const css = collected.css;
+              const unreadableStylesheets = collected.unreadable;
               try {
                 absolutizeUrls(document.body);
                 return {
                   available: true, reason: null, html: document.body.innerHTML,
-                  eyecatchSpliced: false, css: css
+                  eyecatchSpliced: false, css: css,
+                    unreadableStylesheets: unreadableStylesheets
                 };
               } catch (e) {
                 return {
                   available: false, reason: 'DOM解析に失敗しました: ' + e.message, html: null,
-                  eyecatchSpliced: false, css: css
+                  eyecatchSpliced: false, css: css,
+                    unreadableStylesheets: unreadableStylesheets
                 };
               }
             }
@@ -395,7 +409,7 @@ public class PreviewSkeletonFetcher {
     @SuppressWarnings("unchecked")
     private ThemeSkeletonResponse toResponse(Object result) {
         if (!(result instanceof Map)) {
-            return new ThemeSkeletonResponse(null, false, "予期しない結果形式です", false, "");
+            return new ThemeSkeletonResponse(null, false, "予期しない結果形式です", false, "", List.of());
         }
         Map<String, Object> map = (Map<String, Object>) result;
         boolean available = Boolean.TRUE.equals(map.get("available"));
@@ -403,6 +417,20 @@ public class PreviewSkeletonFetcher {
         String reason = (String) map.get("reason");
         boolean eyecatchSpliced = Boolean.TRUE.equals(map.get("eyecatchSpliced"));
         String css = (String) map.get("css");
-        return new ThemeSkeletonResponse(html, available, reason, eyecatchSpliced, css != null ? css : "");
+        return new ThemeSkeletonResponse(html, available, reason, eyecatchSpliced, css != null ? css : "",
+                toHrefList(map.get("unreadableStylesheets")));
+    }
+
+    /** ブラウザ側が返したhref配列を、空・null・重複を除いた文字列リストにする(配列以外は空)。 */
+    private static List<String> toHrefList(Object value) {
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream()
+                .filter(String.class::isInstance)
+                .map(o -> ((String) o).trim())
+                .filter(h -> !h.isEmpty())
+                .distinct()
+                .toList();
     }
 }
