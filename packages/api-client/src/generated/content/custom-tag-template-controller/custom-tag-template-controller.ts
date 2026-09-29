@@ -5,7 +5,9 @@
  * OpenAPI spec version: v0
  */
 import type {
+  ApplyCustomTagTemplateRequest,
   CloneCustomTagTemplateRequest,
+  CustomTagResponse,
   CustomTagTemplateRequest,
   CustomTagTemplateResponse,
   List1Params
@@ -348,6 +350,52 @@ const res = await fetch(getCloneUrl(id),
 
   const data: cloneResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as cloneResponse
+}
+
+
+export type applyResponse200 = {
+  data: CustomTagResponse
+  status: 200
+}
+
+export type applyResponseSuccess = (applyResponse200) & {
+  headers: Headers;
+};
+;
+
+export type applyResponse = (applyResponseSuccess)
+
+export const getApplyUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/custom-tag-templates/${id}/apply`
+}
+
+export const apply = async (id: number,
+    applyCustomTagTemplateRequest: ApplyCustomTagTemplateRequest, options?: RequestInit): Promise<applyResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getApplyUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(applyCustomTagTemplateRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: applyResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as applyResponse
 }
 
 

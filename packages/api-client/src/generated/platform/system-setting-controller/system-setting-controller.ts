@@ -6,7 +6,8 @@
  */
 import type {
   BraveSearchApiKeyStatusResponse,
-  SetBraveSearchApiKeyRequest
+  SetBraveSearchApiKeyRequest,
+  SiteAdminPathResponse
 } from '../openAPIDefinition.schemas';
 
 
@@ -130,6 +131,45 @@ export const clearBraveSearchApiKey = async ( options?: RequestInit): Promise<cl
 
   const data: clearBraveSearchApiKeyResponse['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as clearBraveSearchApiKeyResponse
+}
+
+
+export type getSiteAdminPathResponse200 = {
+  data: SiteAdminPathResponse
+  status: 200
+}
+
+export type getSiteAdminPathResponseSuccess = (getSiteAdminPathResponse200) & {
+  headers: Headers;
+};
+;
+
+export type getSiteAdminPathResponse = (getSiteAdminPathResponseSuccess)
+
+export const getGetSiteAdminPathUrl = () => {
+
+
+
+
+  return `http://localhost:8080/api/system-settings/site-admin-path`
+}
+
+export const getSiteAdminPath = async ( options?: RequestInit): Promise<getSiteAdminPathResponse> => {
+
+  const res = await fetch(getGetSiteAdminPathUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: getSiteAdminPathResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as getSiteAdminPathResponse
 }
 
 

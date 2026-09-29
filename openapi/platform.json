@@ -182,6 +182,26 @@
         }
       }
     },
+    "/api/system-settings/site-admin-path": {
+      "get": {
+        "tags": [
+          "system-setting-controller"
+        ],
+        "operationId": "getSiteAdminPath",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteAdminPathResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/internal/platform/system-settings/brave-search-api-key": {
       "get": {
         "tags": [
@@ -396,6 +416,14 @@
         "required": [
           "apiKey"
         ]
+      },
+      "SiteAdminPathResponse": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
       },
       "BraveSearchApiKeyStatusResponse": {
         "type": "object",

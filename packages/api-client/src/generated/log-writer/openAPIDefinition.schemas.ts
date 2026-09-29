@@ -176,6 +176,8 @@ pageable: Pageable;
 export type ListUnifiedParams = {
 type?: string;
 q?: string;
+startDate?: string;
+endDate?: string;
 pageable: Pageable;
 };
 

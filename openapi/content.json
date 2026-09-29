@@ -894,6 +894,47 @@
         }
       }
     },
+    "/api/custom-tag-templates/{id}/apply": {
+      "post": {
+        "tags": [
+          "custom-tag-template-controller"
+        ],
+        "operationId": "apply",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyCustomTagTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomTagResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{projectId}/custom-tags": {
       "get": {
         "tags": [
@@ -1781,6 +1822,24 @@
         },
         "required": [
           "newTemplateName"
+        ]
+      },
+      "ApplyCustomTagTemplateRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tagName": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "required": [
+          "projectId",
+          "tagName"
         ]
       },
       "PostSummaryResponse": {

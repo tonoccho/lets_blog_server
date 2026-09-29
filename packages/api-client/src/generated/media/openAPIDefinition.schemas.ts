@@ -15,8 +15,8 @@ export interface UpdateImageGenerationSizeDefaultsRequest {
      * @maximum 2048
      */
   defaultGeneratedImageHeight?: number;
-  widthMultipleOf8?: boolean;
   heightMultipleOf8?: boolean;
+  widthMultipleOf8?: boolean;
 }
 
 export interface ProjectImageSettingsResponse {
@@ -289,8 +289,8 @@ export interface AiImageRequest {
      */
   loraWeight?: number;
   projectId?: number;
-  widthMultipleOf8?: boolean;
   heightMultipleOf8?: boolean;
+  widthMultipleOf8?: boolean;
 }
 
 export interface AiImageResponse {

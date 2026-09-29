@@ -7,6 +7,7 @@
 import type {
   AiImageBatchResponse,
   AiImageRequest,
+  GenerationJobResponse,
   ImageGenerationOptionsResponse,
   ImageOptionsParams
 } from '../openAPIDefinition.schemas';
@@ -54,6 +55,51 @@ const res = await fetch(getImageUrl(),
 
   const data: imageResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as imageResponse
+}
+
+
+export type imageJobResponse200 = {
+  data: GenerationJobResponse
+  status: 200
+}
+
+export type imageJobResponseSuccess = (imageJobResponse200) & {
+  headers: Headers;
+};
+;
+
+export type imageJobResponse = (imageJobResponseSuccess)
+
+export const getImageJobUrl = () => {
+
+
+
+
+  return `http://localhost:8080/api/ai/image/jobs`
+}
+
+export const imageJob = async (aiImageRequest: AiImageRequest, options?: RequestInit): Promise<imageJobResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getImageJobUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(aiImageRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: imageJobResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as imageJobResponse
 }
 
 

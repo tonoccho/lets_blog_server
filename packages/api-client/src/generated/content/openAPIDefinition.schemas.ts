@@ -230,6 +230,15 @@ export interface CloneCustomTagTemplateRequest {
   projectId?: number;
 }
 
+export interface ApplyCustomTagTemplateRequest {
+  projectId: number;
+  /**
+     * @minLength 1
+     * @pattern ^[a-zA-Z][a-zA-Z0-9_-]*$
+     */
+  tagName: string;
+}
+
 export interface PostSummaryResponse {
   id?: number;
   siteId?: number;

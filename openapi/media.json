@@ -827,6 +827,46 @@
         }
       }
     },
+    "/api/ai/image/jobs": {
+      "post": {
+        "tags": [
+          "image-generation-controller"
+        ],
+        "operationId": "imageJob",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationJobResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{id}/media-garbage-collection/scan": {
       "get": {
         "tags": [
@@ -1194,10 +1234,10 @@
             "maximum": 2048,
             "minimum": 64
           },
-          "widthMultipleOf8": {
+          "heightMultipleOf8": {
             "type": "boolean"
           },
-          "heightMultipleOf8": {
+          "widthMultipleOf8": {
             "type": "boolean"
           }
         }
@@ -1864,10 +1904,10 @@
             "type": "integer",
             "format": "int64"
           },
-          "widthMultipleOf8": {
+          "heightMultipleOf8": {
             "type": "boolean"
           },
-          "heightMultipleOf8": {
+          "widthMultipleOf8": {
             "type": "boolean"
           }
         },

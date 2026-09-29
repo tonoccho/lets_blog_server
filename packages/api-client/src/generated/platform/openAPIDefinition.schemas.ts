@@ -9,6 +9,10 @@ export interface SetBraveSearchApiKeyRequest {
   apiKey: string;
 }
 
+export interface SiteAdminPathResponse {
+  path?: string;
+}
+
 export interface BraveSearchApiKeyStatusResponse {
   configured?: boolean;
   source?: string;
