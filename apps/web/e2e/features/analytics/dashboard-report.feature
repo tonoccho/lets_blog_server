@@ -1,5 +1,5 @@
 # language: ja
-@analytics @stub
+@analytics @stub @stub-isolation:analytics
 機能: プロジェクトダッシュボードのAnalyticsレポート
 
   資格情報を預けた利用者が、アクセス状況と広告収益をダッシュボードで把握できる

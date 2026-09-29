@@ -81,7 +81,8 @@ const excludeRequiresGpu = process.env.AT_EXCLUDE_REQUIRES_GPU === '1' ? ' and n
 
 /** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。
  * `@stub-isolation:llm`(下の at-llm-exclusive)、`@account-isolation:timezone`
- * (下の at-timezone-exclusive、issue #1374)も除く。 */
+ * (下の at-timezone-exclusive、issue #1374)、`@stub-isolation:analytics`
+ * (下の at-analytics-exclusive、issue #1372)も除く。 */
 const atMain = defineBddProject({
   ...BDD_COMMON,
   name: 'at-main',
@@ -89,6 +90,7 @@ const atMain = defineBddProject({
   tags:
     'not @stage:setup and not @stage:provision and not @destructive'
     + ' and not @stub-isolation:llm and not @account-isolation:timezone'
+    + ' and not @stub-isolation:analytics'
     + excludeRequiresGpu,
 });
 
@@ -143,11 +145,22 @@ const atMain = defineBddProject({
  * シナリオが互いに直列化される分だけで、`at-main` 全体の所要時間の方が長い前提であれば
  * 実質的なコストはない。
  *
- * GA/AdSenseスタブ(`ga-stub` / `adsense-stub`)にも同型の構造的リスクが実在する
- * (`analytics/report-failures.feature` が注入・`analytics/dashboard-report.feature` 等が
- * 通常系で同じスタブを読む)ことをissue #1188で確認済みだが、対処はこのIssueのAcceptance
- * Criteriaの対象外(確認のみが要件)。対処はissue #1372で追跡する。
+ * GA/AdSenseスタブ(`ga-stub` / `adsense-stub`)にも同型の構造的リスクが実在することを
+ * issue #1188で確認済み(対処はこのIssueのAcceptance Criteriaの対象外・確認のみが要件)。
+ * issue #1372で対処した(下の `atAnalyticsExclusive`)。
  * `docs/ACCEPTANCE_TESTING.md` §9 に記録した。
+ *
+ * `stubs/external-stubs.feature`(このファイルの対象、下記)は llm-stub だけでなく
+ * `ga-stub` / `adsense-stub` へも実際にトラフィックを送る(1シナリオの中で
+ * 全スタブを1つのループで叩くため、GA/AdSense だけをこのファイルから切り出すことは
+ * シナリオ内容の変更を要し、このIssueおよび issue #1372 の Out of Scope
+ * 「注入シナリオ自体の追加・削除」に抵触する)。そのため `at-analytics-exclusive`
+ * (issue #1372)は `at-provision` ではなく `at-llm-exclusive` の完了を待つよう
+ * `dependencies` を設定し、この2レーンが互いに並行して走らないようにした ——
+ * さもないと `external-stubs.feature` の GA/AdSense プローブ(このレーン内)と
+ * `analytics/report-failures.feature` の注入(`at-analytics-exclusive`)が、レーンを
+ * 分けたにもかかわらず**レーン間で**同じ衝突を再現してしまう。詳細は
+ * `atAnalyticsExclusive` 自身のコメントを参照。
  */
 const atLlmExclusive = defineBddProject({
   ...BDD_COMMON,
@@ -220,6 +233,74 @@ const atTimezoneExclusive = defineBddProject({
 });
 
 /**
+ * issue #1372: `ga-stub` / `adsense-stub`(共有・単一プロセス、`llm-stub`と同型)へ
+ * 実際にトラフィックを送る、または `POST /__control/force` でその共有状態を仕込む/読む
+ * (`analytics.steps.ts` の `After({ tags: '@analytics' })` が毎シナリオ後に無条件で呼ぶ
+ * `resetStub()` による暗黙の書き込みを含む)、全シナリオの専用レーン。issue #1188 が
+ * `llm-stub` について確認だけして対処を持ち越した同型リスクを、ここで解消する。
+ *
+ * ## `@stub-isolation:llm` と同じレースが `ga-stub` / `adsense-stub` でも実測できる
+ *
+ * `analytics/report-failures.feature`(`@mode:serial`、`POST /__control/force` で
+ * 401/429/500/タイムアウトを注入)と、`analytics/dashboard-report.feature` 等
+ * **別ファイル**が同じスタブへ通常系のリクエストを送ると、`ai/resilience.feature` の
+ * ケース(#1188)と同じ2つの故障モードが起こる。issue #1372 で実機の `ga-stub`
+ * (`http://127.0.0.1:18082`)へ直接 `curl` して実測(2026-09-30):
+ *
+ *   1. `POST /__control/force '{"status":429,"count":1}'` の直後に、認証済みの
+ *      `runReport` リクエスト(dashboard-report.feature 相当)を割り込ませると、
+ *      **横取りされた側が429を受け取る**(`{"error":{"code":429,...,"status":"FORCED"}}`)。
+ *   2. その後に届く報告注入シナリオ自身の `runReport` リクエストは、仕込みを消費され
+ *      尽くしているため **200(実データ)を受け取る** —— 注入シナリオが自分の注入を
+ *      観測できない。
+ *   3. 仕込み直後(消費される前)に、`resetStub()` だけが割り込んでも同じことが起きる:
+ *      `analytics/analytics-authorization.feature` のように、それ自体はスタブへ
+ *      トラフィックを送らないシナリオでも、`After({ tags: '@analytics' })` が並行して
+ *      `resetStub('google-analytics')` / `resetStub('adsense')` を呼べば、注入シナリオの
+ *      仕込みは消え、その後のリクエストは200になる。
+ *
+ * `llm-stub` の場合と同じ理由(相関IDをサービス境界越しに伝播させる変更はプロダクション
+ * コードの変更を要し、このIssueおよび `infra/e2e-stubs/lib/stub.js` の注入機構自体の
+ * Scope外)で、採ったのは `ga-stub` / `adsense-stub` へ触れる全ファイルを1つの
+ * プロジェクトへ集め、`workers: 1` で内部を完全直列化する案 —— `at-llm-exclusive`
+ * (#1188)・`at-timezone-exclusive`(#1374)と同型。
+ *
+ * ## `@stub-isolation:analytics` を付けたファイル
+ *
+ *   - `analytics/report-failures.feature`  注入元(401・429・500・タイムアウト)
+ *   - `analytics/dashboard-report.feature`  通常系(GA/AdSenseの指標・収益をダッシュボードに表示)
+ *   - `analytics/credentials.feature`       通常系(資格情報のCRUD・OAuth連携、実際にga-stub/adsense-stubへトークン交換する)
+ *   - `analytics/analytics-authorization.feature` 認可チェック。2番目のシナリオが
+ *     対照として実際にOAuth連携する。1番目のシナリオはスタブへ触れないが、`@analytics`の
+ *     `After`フックが両シナリオ後に無条件で`resetStub()`を呼ぶため、ファイル全体を対象にした
+ *     (上記「実測」3.)。
+ *
+ * ## `at-provision` ではなく `at-llm-exclusive` に依存する理由
+ *
+ * `stubs/external-stubs.feature`(`@stub-isolation:llm`、上の `atLlmExclusive`)は
+ * llm-stub だけでなく `ga-stub` / `adsense-stub` へも実トラフィックを送る「同じ入力に
+ * 対して常に同じ応答を返す」等のシナリオを持つ(1シナリオが全スタブを1ループで叩くため、
+ * GA/AdSense 分だけを切り出すには機能ファイル自体の変更が要り、このIssueの Out of Scope
+ * 「注入シナリオ自体の追加・削除」に抵触するため切り出さなかった)。したがって
+ * `at-llm-exclusive` と `at-analytics-exclusive` を互いに独立させて `at-provision` にだけ
+ * 依存させると、2つの専用レーンが並行実行され、レーンを分けた意味がそのまま失われる ——
+ * `external-stubs.feature` の GA/AdSense プローブ(`at-llm-exclusive`内)と
+ * `report-failures.feature` の注入(`at-analytics-exclusive`内)が、レーン間で同じ衝突を
+ * 再現しうる。そこで `at-analytics-exclusive` は `at-llm-exclusive` の完了を待つ
+ * (`dependencies: ['at-llm-exclusive']`。`at-provision` は `at-llm-exclusive` の依存を
+ * 通じて推移的に含まれる)。両レーンとも通常は `at-main` に比べて小さいため、直列に
+ * つないでもスイート全体の所要時間への影響は小さいと判断した(Requirement 4)。
+ *
+ * `at-main` とは並列に走る(`at-main` はどちらの排他レーンにも依存しないため)。
+ */
+const atAnalyticsExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-analytics-exclusive',
+  outputDir: '.features-gen/at-analytics-exclusive',
+  tags: '@stub-isolation:analytics' + excludeRequiresGpu,
+});
+
+/**
  * 段階5: `@destructive` のシナリオ(issue #929)。
  *
  * 環境の状態を壊すシナリオを**最後に、それだけで**実行する。
@@ -255,8 +336,9 @@ const atTimezoneExclusive = defineBddProject({
  * 正常終了している。
  *
  * したがって `workers: 1` で内部も完全に直列化する。`at-llm-exclusive`(#1188)・
- * `at-timezone-exclusive`(#1374)と同じ手法で、`TestProject.workers` はグローバルの
- * `workers`(`E2E_WORKERS` での上書きを含む)より優先される。
+ * `at-timezone-exclusive`(#1374)・`at-analytics-exclusive`(#1372)と同じ手法で、
+ * `TestProject.workers` はグローバルの `workers`(`E2E_WORKERS` での上書きを含む)より
+ * 優先される。
  */
 const atDestructive = defineBddProject({
   ...BDD_COMMON,
@@ -334,7 +416,8 @@ export default defineConfig({
   //
   // **代償**: この `timeout` はトップレベル設定で、`projects` のどれも上書きしていないため
   // **全プロジェクト**(at-setup / at-seed / at-provision / at-main / at-llm-exclusive /
-  // at-timezone-exclusive / at-destructive / クロスブラウザ系)に効く。30秒で落ちていたはずの
+  // at-timezone-exclusive / at-analytics-exclusive / at-destructive / クロスブラウザ系)に
+  // 効く。30秒で落ちていたはずの
   // 将来の性能退行が、90秒なら通ってしまう範囲がスイート全体に広がる。Playwright には
   // ディレクトリ単位で既定予算を変える手段が無く、そのためだけに専用プロジェクトを増やすのは
   // 割に合わないと判断して、この代償を受け入れた。identity 以外のレーンは、旧30秒の天井付近に
@@ -374,7 +457,8 @@ export default defineConfig({
     // 受け入れテストが必要になった時点で AT-18 がプロジェクトを追加する。
     //
     // `--project=at-destructive` を指定すれば、依存する at-setup → at-seed →
-    // at-provision → at-main → at-llm-exclusive → at-timezone-exclusive も
+    // at-provision → at-main → at-llm-exclusive → at-timezone-exclusive →
+    // at-analytics-exclusive(at-llm-exclusiveの完了を待つ、issue #1372)も
     // Playwright が自動で先に実行する。段階を個別に指定する必要はない。
     {
       ...atSetup,
@@ -423,12 +507,23 @@ export default defineConfig({
       workers: 1,
     },
     {
+      // at-main とは並列に走るが、at-llm-exclusive とは並列に走らせない
+      // (at-provisionではなくat-llm-exclusiveに依存させる理由はatAnalyticsExclusive
+      // 自身のコメントを参照)。ga-stub/adsense-stubに触れるシナリオが他と同時実行
+      // されないよう、以下の at-destructive はこれの完了も待つ(issue #1372)。
+      ...atAnalyticsExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-llm-exclusive'],
+      // このプロジェクト内の同時実行を1に固定する(at-llm-exclusiveと同じ理由)。
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
       // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive /
-      // at-timezone-exclusive も共有状態に触れるため、at-main と同様に完了を待ってから
-      // 始める(issue #1188、issue #1374)。
-      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive'],
+      // at-timezone-exclusive / at-analytics-exclusive も共有状態に触れるため、at-main と
+      // 同様に完了を待ってから始める(issue #1188、issue #1374、issue #1372)。
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive'],
       // この段階の**内部**も直列化する(issue #1387)。dependencies は他プロジェクトの
       // 完了しか担保せず、24シナリオ同士は既定の並列度でそのまま走っていた。それぞれが
       // 別のサービスを止めるため互いの停止に巻き込まれ、2026-09-23 のリリース検証で

@@ -212,7 +212,8 @@ web 側の名前は各 AT Issue が実装時に決めたもので、`docs/ACCEPT
 
 この `timeout` はトップレベル設定で、`projects` のどれも上書きしていないため **全プロジェクト**
 (`at-setup` / `at-seed` / `at-provision` / `at-main` / `at-llm-exclusive` /
-`at-timezone-exclusive` / `at-destructive` / クロスブラウザ系)に効く。30 秒で落ちていたはずの
+`at-timezone-exclusive` / `at-analytics-exclusive` / `at-destructive` / クロスブラウザ系)に
+効く。30 秒で落ちていたはずの
 将来の性能退行が、90 秒なら通ってしまう範囲がスイート全体に広がる。
 
 Playwright にはディレクトリ単位で既定予算を変える手段が無く、そのためだけに専用プロジェクトを
@@ -612,8 +613,9 @@ curl      http://127.0.0.1:18081/__control/state    # 仕込みと受信件数
 >
 > **ただし `@mode:serial` だけでは、注入しない側(別ファイルの通常系シナリオ)との衝突は
 > 防げない。** 下の「`@mode:serial` は同一ファイル内しか直列化しない」を参照。
-> `llm-stub` はこれに対処済み(`@stub-isolation:llm`)。GA/AdSenseスタブは
-> 同型のリスクが確認済みだが未対処(issue #1188、下記)。
+> `llm-stub` はこれに対処済み(`@stub-isolation:llm`)。GA/AdSenseスタブも同型のリスクが
+> 確認され(issue #1188)、issue #1372 で同じ手法(`@stub-isolation:analytics`)により
+> 対処済み(下記)。
 
 `stubRequestCount()` は「サービスが実際に外部を呼んだか」の確認に使える。
 キャッシュが効いて外部を呼ばなかったのか、呼んで失敗したのかを区別できる。
@@ -683,12 +685,57 @@ npx playwright test --project=at-llm-exclusive --no-deps --grep "AI生成の異�
 コードの変更が要る。このIssueのScope(`playwright.config.ts` の変更、または
 `infra/e2e-stubs/lib/stub.js` の注入機構そのもの)を超えるため採らなかった。
 
-**GA/AdSenseスタブは同型のリスクが実在するが未対処**(issue #1188のAcceptance
-Criteriaは確認のみを要求): `analytics/report-failures.feature`(`@mode:serial`、
-`ga-stub` / `adsense-stub` へ制御エンドポイントで注入)と、`analytics/dashboard-report.feature`
-(`@mode:serial`無し、同じスタブへ通常系のリクエストを送る)が同じ形の関係にある。
-`llm-stub`と同じ対処(専用の直列プロジェクトへの集約)は技術的に転用できるはずだが、
-本Issueのスコープではない。対処はissue #1372で追跡する。
+**GA/AdSenseスタブの同型のリスクはissue #1372で対処済み**(issue #1188のAcceptance
+Criteriaは確認のみを要求していたため、当時は未対処のまま記録していた):
+`analytics/report-failures.feature`(`@mode:serial`、`ga-stub` / `adsense-stub` へ
+制御エンドポイントで注入)と、`analytics/dashboard-report.feature`(`@mode:serial`無し、
+同じスタブへ通常系のリクエストを送る)が同じ形の関係にある。
+
+対象は`ga-stub` / `adsense-stub`へ実際にトラフィックを送る、または制御エンドポイントで
+その共有状態を仕込む/読む全ファイル: `analytics/report-failures.feature`(注入元)・
+`analytics/dashboard-report.feature`・`analytics/credentials.feature`(通常系。
+`credentials.feature`は資格情報のOAuth連携で実際にトークン交換まで行う)・
+`analytics/analytics-authorization.feature`(認可チェック。2番目のシナリオが対照として
+実際にOAuth連携する)。`analytics.steps.ts`の`After({ tags: '@analytics' })`は
+`@analytics`が付いた**全シナリオの後**に無条件で`resetStub('google-analytics')` /
+`resetStub('adsense')`を呼ぶため、スタブへ直接は触れないシナリオ(認可チェックの
+1番目のシナリオ等)も、並行して走る注入シナリオの仕込みを消しうる。そのため
+`analytics-authorization.feature`はファイル全体を対象にした(ファイル単位の一部の
+シナリオだけがスタブに触れる場合でも、この`After`フックの影響はファイル内の全シナリオに
+及ぶため)。
+
+`llm-stub`と同じ対処(`@stub-isolation:analytics`タグ + 専用の直列プロジェクト
+`at-analytics-exclusive`、`workers: 1`、`apps/web/playwright.config.ts`)を転用した。
+2026-09-30、実機の`ga-stub`(`http://127.0.0.1:18082`)へ直接`curl`して衝突の機序を実測:
+`POST /__control/force '{"status":429,"count":1}'`で仕込んだ直後に認証済みの`runReport`
+リクエスト(dashboard-report.feature相当)を割り込ませると、割り込んだ側が429を受け取り
+(`{"error":{"code":429,...,"status":"FORCED"}}`)、その後に届く注入シナリオ自身の
+リクエストは仕込みを消費され尽くしていて200(実データ)を受け取る —— #1188で`llm-stub`
+について実測した2つの故障モード(仕込みの横取り・注入シナリオ自身が自分の注入を
+観測できない)と同型。`resetStub()`だけが割り込む場合も同じ結果になることを確認した
+(上記のAfterフックの影響)。
+
+`stubs/external-stubs.feature`(`@stub-isolation:llm`)はllm-stubだけでなく
+`ga-stub` / `adsense-stub`へも実トラフィックを送るシナリオを持つ(1シナリオが全スタブを
+1ループで叩くため、GA/AdSense分だけを切り出すには機能ファイル自体の変更が要り、
+Out of Scope「注入シナリオ自体の追加・削除」に抵触するため切り出さなかった)。
+そのため`at-analytics-exclusive`は`at-provision`ではなく`at-llm-exclusive`の完了を
+待つ(`dependencies: ['at-llm-exclusive']`)よう設定し、2つの専用レーンが互いに並行して
+走らないようにした —— 独立させると、レーンを分けた意味がレーン間の衝突として
+そのまま再現してしまう。詳細は`apps/web/playwright.config.ts`の`atAnalyticsExclusive`の
+コメントを参照。
+
+`--list`による構成確認(2026-09-30、`cd apps/web && rm -rf .features-gen && npx bddgen`):
+
+```bash
+# 対処前: analytics/ 配下22シナリオ全てが at-main の一部だった
+npx playwright test --project=at-main --no-deps --list .features-gen/at-main/analytics/
+# → Total: 22 tests in 4 files
+
+# 対処後: ga-stub/adsense-stubに触れるファイルは at-analytics-exclusive に移った
+npx playwright test --project=at-analytics-exclusive --no-deps --list
+# → analytics/ 配下22シナリオが at-analytics-exclusive に現れ、at-main には残らない
+```
 
 #### シナリオ単位の `@mode:serial` は生成物に一切反映されない(issue #1374)
 

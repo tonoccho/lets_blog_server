@@ -1,9 +1,21 @@
 # language: ja
-@analytics @api
+@analytics @api @stub-isolation:analytics
 機能: Analytics 資格情報の認可
 
   他人の Google の資格情報とレポートが、誰からでも読み書きできる状態になっていないことを
   固定する(issue #939 / AT-13、AC-ANA-001 / AC-ANA-003)。
+
+  ## `@stub-isolation:analytics` の理由(issue #1372)
+
+  2番目のシナリオは対照実験として`putAdSenseClient` / `connectGoogleAnalyticsFor`で
+  `ga-stub` / `adsense-stub`へ実際にOAuthトークン交換を行う。1番目のシナリオは
+  スタブへは触れないが、`@analytics`が付いた全シナリオの後に無条件で走る
+  `analytics.steps.ts`の`After({ tags: '@analytics' })`は本ファイルの両シナリオにも
+  掛かり、`resetStub('google-analytics')` / `resetStub('adsense')`でスタブ全体の
+  状態を消す。並行して走る`analytics/report-failures.feature`の仕込みを消しうるため、
+  このファイル全体を`@stub-isolation:analytics`の対象にした。詳細は
+  `analytics/report-failures.feature`と`apps/web/playwright.config.ts`の
+  `atAnalyticsExclusive`のコメントを参照。
 
   ## 401 と 403 を分けて見る
 

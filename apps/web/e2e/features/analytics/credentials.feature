@@ -1,5 +1,5 @@
 # language: ja
-@analytics @stub
+@analytics @stub @stub-isolation:analytics
 機能: Google Analytics / AdSense 資格情報の管理
 
   プロジェクト単位に Google の資格情報を預けて、ダッシュボードに自分の計測データと
