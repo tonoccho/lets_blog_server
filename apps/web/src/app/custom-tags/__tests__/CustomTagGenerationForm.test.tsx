@@ -361,3 +361,25 @@ describe('CustomTagGenerationForm: 生成結果の表示とやり直し', () => 
     expect(screen.queryByText('生成完了！')).not.toBeInTheDocument()
   })
 })
+
+/**
+ * issue #1414(#1413の横展開): マウント前は生成ボタンを押せない
+ * (CustomTagGenerationForm.mountGate.test.tsx)。マウント後は従来どおり押せて送信できる。
+ */
+describe('CustomTagGenerationForm: マウント後の送信(issue #1414)', () => {
+  it('マウント後は生成ボタンが有効で、送信すると生成を呼ぶ', () => {
+    mockedUseSession.mockReturnValue({
+      data: { user: { email: 'a@example.com', role: 'admin' }, expires: '2099-01-01' },
+      status: 'authenticated',
+      update: jest.fn(),
+    } as unknown as ReturnType<typeof useSession>)
+
+    const { container } = render(
+      <CustomTagGenerationForm projects={[]} currentProjectId={null} onGenerationSuccess={jest.fn()} />
+    )
+
+    expect(screen.getByRole('button', { name: '生成' })).toBeEnabled()
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    expect(mockGenerate).toHaveBeenCalled()
+  })
+})

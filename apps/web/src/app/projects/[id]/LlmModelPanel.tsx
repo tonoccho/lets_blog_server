@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LlmModelListResponse } from "@/lib/apiClient";
 import { fetchLlmModelsAction, selectLlmModelAction } from "./actions";
 
@@ -15,6 +15,13 @@ export function LlmModelPanel({
   const [modelName, setModelName] = useState(initialData.selected);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  // issue #1414: ハイドレーション完了(mounted)までは送信ボタンを押せないようにする(#1413と同じ方式)。
+  // 完了前はonSubmitが未結線で、クリックがネイティブ送信になり入力値だけが失われる。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   async function refresh() {
     setData(await fetchLlmModelsAction(projectId));
@@ -62,7 +69,7 @@ export function LlmModelPanel({
         </label>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || !mounted}
           className="rounded bg-neutral-900 px-3 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
         >
           {saving ? "保存中…" : "保存"}

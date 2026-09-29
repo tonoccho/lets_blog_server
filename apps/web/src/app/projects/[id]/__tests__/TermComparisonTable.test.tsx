@@ -387,3 +387,22 @@ describe("TermComparisonTable", () => {
     expect(screen.getAllByText("(未登録)").length).toBeGreaterThan(0);
   });
 });
+
+/** issue #1414(#1413の横展開): マウント前は押せない(TermComparisonTable.mountGate.test.tsx)。マウント後は押せる。 */
+describe("TermComparisonTable(マウント後、issue #1414)", () => {
+  it("マウント後は新規追加フォームの送信ボタンが有効", () => {
+    render(<TermComparisonTable projectId={1} kind="category" initialPage={page()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+ 新規追加" }));
+
+    expect(screen.getByRole("button", { name: "マスター環境に追加" })).toBeEnabled();
+  });
+
+  it("マウント後は編集フォームの送信ボタンが有効", () => {
+    render(<TermComparisonTable projectId={1} kind="category" initialPage={page()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "編集" }));
+
+    expect(screen.getByRole("button", { name: "保存(全環境に反映)" })).toBeEnabled();
+  });
+});

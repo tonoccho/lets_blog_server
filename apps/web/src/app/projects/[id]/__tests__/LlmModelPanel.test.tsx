@@ -78,3 +78,20 @@ describe("LlmModelPanel", () => {
     expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o");
   });
 });
+
+/** issue #1414(#1413の横展開): マウント前は押せない(LlmModelPanel.mountGate.test.tsx)。マウント後は押せて保存できる。 */
+describe("LlmModelPanel(マウント後、issue #1414)", () => {
+  it("マウント後は保存ボタンが有効で、押すと保存アクションを呼ぶ", async () => {
+    selectMock.mockReset();
+    fetchMock.mockReset();
+    selectMock.mockResolvedValue({});
+    fetchMock.mockResolvedValue(initialData());
+    render(<LlmModelPanel projectId={1} initialData={initialData()} />);
+
+    const button = screen.getByRole("button", { name: "保存" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+
+    await waitFor(() => expect(selectMock).toHaveBeenCalledWith(1, "gpt-4o-mini"));
+  });
+});

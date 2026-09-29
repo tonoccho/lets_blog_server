@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ProjectEnvironment, TermComparisonPage, TermComparisonRow, TermEnvironmentValue } from "@/lib/apiClient";
 import {
   applyToEnvironmentAction,
@@ -357,6 +357,13 @@ function NewItemForm({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // issue #1414: ハイドレーション完了(mounted)までは送信ボタンを押せないようにする(#1413と同じ方式)。
+  // 完了前はonSubmitが未結線で、クリックがネイティブ送信になり入力値だけが失われる。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -388,7 +395,7 @@ function NewItemForm({
       <Field label="説明(任意)" name="categoryDescription" />
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || !mounted}
         className="rounded bg-neutral-900 px-3 py-2 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
         {pending ? "保存中…" : "マスター環境に追加"}
@@ -415,6 +422,13 @@ function EditItemForm({
   const hasMasterValue = valueOf(row, masterEnvironment).available && !!valueOf(row, masterEnvironment).slug;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // issue #1414: ハイドレーション完了(mounted)までは送信ボタンを押せないようにする(#1413と同じ方式)。
+  // 完了前はonSubmitが未結線で、クリックがネイティブ送信になり入力値だけが失われる。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -454,7 +468,7 @@ function EditItemForm({
       <Field label="説明(任意)" name="categoryDescription" defaultValue={masterValue.description ?? ""} />
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || !mounted}
         className="rounded bg-neutral-900 px-3 py-2 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
         {pending ? "保存中…" : "保存(全環境に反映)"}

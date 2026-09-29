@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useCustomTagGeneration } from "@/lib/useCustomTagGeneration";
 import { useCustomTagValidation } from "@/lib/useCustomTagValidation";
@@ -29,6 +29,13 @@ export function CustomTagGenerationForm({
   const { isLoading: isValidating, error: validationError, result: validationResult, validate: validateContent, reset: resetValidation } = useCustomTagValidation();
   const formRef = useRef<HTMLFormElement>(null);
   const [showResults, setShowResults] = useState(false);
+  // issue #1414: ハイドレーション完了(mounted)までは送信ボタンを押せないようにする(#1413と同じ方式)。
+  // 完了前はonSubmitが未結線で、クリックがネイティブ送信になり入力値だけが失われる。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
   const formProjectId = currentProjectId;
@@ -152,7 +159,7 @@ export function CustomTagGenerationForm({
                 押せてしまうと、送信が捨てられたのか処理中なのかを利用者が区別できない。 */}
             <button
               type="submit"
-              disabled={isLoading || sessionStatus === "loading"}
+              disabled={isLoading || sessionStatus === "loading" || !mounted}
               className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
             >
               {isLoading ? "生成中..." : sessionStatus === "loading" ? "セッション確認中..." : "生成"}
