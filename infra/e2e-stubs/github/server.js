@@ -9,6 +9,20 @@
  *   GET   /repos/{owner}/{repo}/issues/{number}
  *   PATCH /repos/{owner}/{repo}/issues/{number}
  *
+ * issue #1334 で、publishing-service(#1333)が使う Pull Request / contents / comments API を足した。
+ *   GET    /repos/{owner}/{repo}
+ *   GET    /repos/{owner}/{repo}/pulls?state=
+ *   POST   /repos/{owner}/{repo}/pulls
+ *   GET    /repos/{owner}/{repo}/pulls/{number}
+ *   GET    /repos/{owner}/{repo}/pulls/{number}/files
+ *   PUT    /repos/{owner}/{repo}/pulls/{number}/merge
+ *   DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
+ *   GET    /repos/{owner}/{repo}/contents/{path}?ref=
+ *   GET    /repos/{owner}/{repo}/git/blobs/{sha}
+ *   GET|POST /repos/{owner}/{repo}/issues/{number}/comments   (PR も Issue として扱う)
+ * PR を作るとき head ブランチがスタブに無ければ、空のブランチを作る(実 GitHub なら 422 だが、
+ * スタブは受け入れテストが毎回一意な head を使えるよう寛容にしている)。
+ *
  * これをスタブ化する理由は、記事プラン(#935 / AT-9)の受け入れテストが**本リポジトリの
  * Issue を汚さずに**通るようにするため。実 GitHub へ向けると、テストのたびに Issue が
  * 作られ、担当者が書き換わる。
@@ -22,6 +36,7 @@
  *   Authorization: Bearer e2e-stub-readonly-token  → 書き込み(POST/PATCH)で403
  *   Authorization: Bearer e2e-stub-ratelimited-token → 403 + X-RateLimit-Remaining: 0
  */
+const crypto = require('node:crypto');
 const { createStub } = require('../lib/stub');
 
 const HTML_BASE = 'https://github.com/e2e-stub/acceptance/issues';
@@ -37,6 +52,116 @@ function seedIssues() {
 }
 
 const issues = seedIssues();
+
+const DEFAULT_BRANCH = 'main';
+const PR_HTML_BASE = 'https://github.com/e2e-stub/acceptance/pull';
+/** contents API が content を返さない境界(GitHub は 1MB 超で content を返さない)。 */
+const CONTENTS_LIMIT = 1024 * 1024;
+
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+);
+
+/** git の blob sha(sha1("blob <size>\0" + content))。同じ内容なら常に同じ sha になる。 */
+function blobSha(content) {
+  return crypto.createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex');
+}
+
+function commitSha(seed) {
+  return crypto.createHash('sha1').update(`commit ${seed}`).digest('hex');
+}
+
+function file(content) {
+  return { content, sha: blobSha(content) };
+}
+
+/**
+ * PR・ブランチ・コメントのシード。ブランチは path → { content, sha } の Map。
+ * `article/e2e-sample` には記事本文・PNG・1MB 超の画像を置く(1MB 超は実バイト列を持つが、
+ * 中身は同じバイトの繰り返しで決定的)。
+ */
+function seedRepo() {
+  const branches = new Map([
+    [DEFAULT_BRANCH, new Map([['README.md', file(Buffer.from('# e2e-stub/acceptance\n', 'utf8'))]])],
+    ['article/e2e-sample', new Map([
+      ['articles/e2e-sample/article.md', file(Buffer.from('# E2Eスタブの記事\n\n本文(スタブ)\n', 'utf8'))],
+      ['articles/e2e-sample/assets/cover.png', file(PNG_1X1)],
+      ['articles/e2e-sample/assets/large.png', file(Buffer.alloc(CONTENTS_LIMIT + 1024, 0x61))],
+    ])],
+  ]);
+  const prs = new Map([
+    [201, { number: 201, title: 'E2Eスタブ: 記事サンプル', body: '記事サンプルのPR(スタブ)', state: 'open',
+            head: 'article/e2e-sample', base: DEFAULT_BRANCH, merged: false, merge_commit_sha: null }],
+    [202, { number: 202, title: 'E2Eスタブ: 公開済みの記事', body: '公開済みのPR(スタブ)', state: 'closed',
+            head: 'article/e2e-published', base: DEFAULT_BRANCH, merged: true,
+            merge_commit_sha: commitSha('merged-202') }],
+  ]);
+  return { branches, prs, comments: [] };
+}
+
+let repo = seedRepo();
+
+function headSha(pr) {
+  return commitSha(`${pr.head}`);
+}
+
+function prToApi(pr) {
+  return {
+    number: pr.number,
+    title: pr.title,
+    body: pr.body,
+    state: pr.state,
+    html_url: `${PR_HTML_BASE}/${pr.number}`,
+    user: { login: 'e2e-stub-user' },
+    draft: false,
+    head: { ref: pr.head, sha: headSha(pr), label: `e2e-stub:${pr.head}` },
+    base: { ref: pr.base, sha: commitSha(`base-${pr.base}`) },
+    merged: pr.merged,
+    mergeable: pr.state === 'open',
+    merge_commit_sha: pr.merge_commit_sha,
+  };
+}
+
+/** head にあって base に無い(または内容が違う)ファイル。 */
+function changedFiles(pr) {
+  const head = repo.branches.get(pr.head) || new Map();
+  const base = repo.branches.get(pr.base) || new Map();
+  return [...head.entries()]
+    .filter(([path, f]) => !base.has(path) || base.get(path).sha !== f.sha)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([path, f]) => ({
+      filename: path,
+      status: base.has(path) ? 'modified' : 'added',
+      sha: f.sha,
+      additions: 1,
+      deletions: 0,
+      changes: 1,
+      blob_url: `https://github.com/e2e-stub/acceptance/blob/${pr.head}/${path}`,
+      raw_url: `https://github.com/e2e-stub/acceptance/raw/${pr.head}/${path}`,
+    }));
+}
+
+function commentToApi(c) {
+  return {
+    id: c.id,
+    body: c.body,
+    user: { login: 'e2e-stub-user' },
+    // 時刻も採番と同様に決定的にする(id から算出)。
+    created_at: new Date(Date.UTC(2026, 0, 1) + c.id * 1000).toISOString(),
+    html_url: `${HTML_BASE}/${c.number}#issuecomment-${c.id}`,
+  };
+}
+
+function parseJson(body) {
+  try {
+    return JSON.parse(body || '{}');
+  } catch {
+    return {};
+  }
+}
+
+const NOT_FOUND = { message: 'Not Found', documentation_url: 'stub' };
 
 function toApi(issue) {
   return {
@@ -82,6 +207,7 @@ createStub({
   onReset: () => {
     issues.clear();
     for (const [number, issue] of seedIssues()) issues.set(number, issue);
+    repo = seedRepo();
   },
   async handle({ method, pathname, query, body, req, res, sendJson }) {
     const denied = authFailure(req);
@@ -93,6 +219,155 @@ createStub({
     if (method === 'GET' && pathname === '/user') {
       sendJson(res, 200, { login: 'e2e-stub-user', id: 1, type: 'User' });
       return true;
+    }
+
+    const repoMatch = /^\/repos\/[^/]+\/[^/]+$/.exec(pathname);
+    if (repoMatch && method === 'GET') {
+      sendJson(res, 200, {
+        name: 'acceptance', full_name: 'e2e-stub/acceptance', private: false, default_branch: DEFAULT_BRANCH,
+      });
+      return true;
+    }
+
+    const pullsMatch = /^\/repos\/[^/]+\/[^/]+\/pulls$/.exec(pathname);
+    if (pullsMatch && method === 'GET') {
+      const state = query.get('state') || 'open';
+      sendJson(res, 200, [...repo.prs.values()]
+        .filter((p) => state === 'all' || p.state === state)
+        .sort((a, b) => a.number - b.number)
+        .map(prToApi));
+      return true;
+    }
+    if (pullsMatch && method === 'POST') {
+      const forbidden = writeForbidden(req);
+      if (forbidden) {
+        sendJson(res, forbidden.status, forbidden.body);
+        return true;
+      }
+      const payload = parseJson(body);
+      const head = payload.head || '(no head)';
+      if (!repo.branches.has(head)) repo.branches.set(head, new Map());
+      // 決定的な採番: 受信順ではなく現在の最大値+1。
+      const number = Math.max(...repo.prs.keys()) + 1;
+      const created = {
+        number, title: payload.title || '(no title)', body: payload.body || '', state: 'open',
+        head, base: payload.base || DEFAULT_BRANCH, merged: false, merge_commit_sha: null,
+      };
+      repo.prs.set(number, created);
+      sendJson(res, 201, prToApi(created));
+      return true;
+    }
+
+    const pullMatch = /^\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)(\/files|\/merge)?$/.exec(pathname);
+    if (pullMatch) {
+      const pr = repo.prs.get(Number(pullMatch[1]));
+      if (!pr) {
+        sendJson(res, 404, NOT_FOUND);
+        return true;
+      }
+      if (method === 'GET' && !pullMatch[2]) {
+        sendJson(res, 200, prToApi(pr));
+        return true;
+      }
+      if (method === 'GET' && pullMatch[2] === '/files') {
+        sendJson(res, 200, changedFiles(pr));
+        return true;
+      }
+      if (method === 'PUT' && pullMatch[2] === '/merge') {
+        const forbidden = writeForbidden(req);
+        if (forbidden) {
+          sendJson(res, forbidden.status, forbidden.body);
+          return true;
+        }
+        if (pr.state !== 'open') {
+          sendJson(res, 405, { message: 'Pull Request is not mergeable', documentation_url: 'stub' });
+          return true;
+        }
+        const base = repo.branches.get(pr.base) || new Map();
+        for (const [path, f] of repo.branches.get(pr.head) || []) base.set(path, f);
+        repo.branches.set(pr.base, base);
+        pr.state = 'closed';
+        pr.merged = true;
+        pr.merge_commit_sha = commitSha(`merge-${pr.number}`);
+        sendJson(res, 200, { sha: pr.merge_commit_sha, merged: true, message: 'Pull Request successfully merged' });
+        return true;
+      }
+    }
+
+    const refMatch = /^\/repos\/[^/]+\/[^/]+\/git\/refs\/heads\/(.+)$/.exec(pathname);
+    if (refMatch && method === 'DELETE') {
+      const forbidden = writeForbidden(req);
+      if (forbidden) {
+        sendJson(res, forbidden.status, forbidden.body);
+        return true;
+      }
+      const branch = decodeURIComponent(refMatch[1]);
+      if (branch === DEFAULT_BRANCH || !repo.branches.delete(branch)) {
+        sendJson(res, 422, { message: 'Reference does not exist', documentation_url: 'stub' });
+        return true;
+      }
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    const contentsMatch = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(pathname);
+    if (contentsMatch && method === 'GET') {
+      const path = decodeURIComponent(contentsMatch[1]);
+      const found = (repo.branches.get(query.get('ref') || DEFAULT_BRANCH) || new Map()).get(path);
+      if (!found) {
+        sendJson(res, 404, NOT_FOUND);
+        return true;
+      }
+      const big = found.content.length > CONTENTS_LIMIT;
+      sendJson(res, 200, {
+        type: 'file', name: path.split('/').pop(), path, sha: found.sha, size: found.content.length,
+        encoding: big ? 'none' : 'base64',
+        content: big ? null : found.content.toString('base64'),
+      });
+      return true;
+    }
+
+    const blobMatch = /^\/repos\/[^/]+\/[^/]+\/git\/blobs\/([0-9a-f]+)$/.exec(pathname);
+    if (blobMatch && method === 'GET') {
+      for (const files of repo.branches.values()) {
+        for (const f of files.values()) {
+          if (f.sha === blobMatch[1]) {
+            sendJson(res, 200, {
+              sha: f.sha, size: f.content.length, encoding: 'base64', content: f.content.toString('base64'),
+            });
+            return true;
+          }
+        }
+      }
+      sendJson(res, 404, NOT_FOUND);
+      return true;
+    }
+
+    const commentsMatch = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(pathname);
+    if (commentsMatch) {
+      const number = Number(commentsMatch[1]);
+      if (!issues.has(number) && !repo.prs.has(number)) {
+        sendJson(res, 404, NOT_FOUND);
+        return true;
+      }
+      if (method === 'GET') {
+        sendJson(res, 200, repo.comments.filter((c) => c.number === number).map(commentToApi));
+        return true;
+      }
+      if (method === 'POST') {
+        const forbidden = writeForbidden(req);
+        if (forbidden) {
+          sendJson(res, forbidden.status, forbidden.body);
+          return true;
+        }
+        // 決定的な採番: 現在の最大値+1(シードのコメントは無いので 5001 から)。
+        const id = Math.max(5000, ...repo.comments.map((c) => c.id)) + 1;
+        const comment = { id, number, body: parseJson(body).body || '' };
+        repo.comments.push(comment);
+        sendJson(res, 201, commentToApi(comment));
+        return true;
+      }
     }
 
     const listMatch = /^\/repos\/[^/]+\/[^/]+\/issues$/.exec(pathname);

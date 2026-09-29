@@ -228,6 +228,15 @@ services:
       comfyui-stub:
         condition: service_healthy
 
+  # publishing-service も GitHub の Pull Request / contents / comments API を使う(#1333)。
+  # 実 GitHub へ向けると受け入れテストが本リポジトリの PR を汚すので、github-stub へ向ける(#1334)。
+  publishing:
+    environment:
+      GITHUB_API_BASE_URL: http://github-stub:8080
+    depends_on:
+      github-stub:
+        condition: service_healthy
+
   analytics:
     environment:
       GOOGLE_ANALYTICS_DATA_API_BASE_URL: http://ga-stub:8080
