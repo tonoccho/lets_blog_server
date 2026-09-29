@@ -4,6 +4,7 @@ import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { localDateTimeToUtcIso } from "@/lib/formatDate";
 import { UnifiedLogRow } from "./UnifiedLogRow";
 import { OperationLogTimeZoneLabel } from "./OperationLogTimeZoneLabel";
+import { BrowserTimeZoneField } from "./BrowserTimeZoneField";
 
 const PAGE_SIZE = 50;
 
@@ -13,10 +14,21 @@ const TYPE_LABEL: Record<UnifiedLogSourceType, string> = {
   AUDIT: "監査",
 };
 
+/** IANA TZ名として解釈できる値だけ返す。空・不正な値は undefined(サーバー既定TZへフォールバック)。 */
+function validTimeZone(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
 export default async function OperationLogsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; type?: string; q?: string; startDate?: string; endDate?: string }>;
+  searchParams: Promise<{ page?: string; type?: string; q?: string; startDate?: string; endDate?: string; tz?: string }>;
 }) {
   const session = await requireSession();
   const params = await searchParams;
@@ -27,13 +39,16 @@ export default async function OperationLogsPage({
   const startDate = params.startDate || undefined;
   const endDate = params.endDate || undefined;
   const timezone = await getViewerTimeZone();
+  // 個人設定TZが無いときは、フォームが送ったブラウザTZで解釈する(issue #1437)。
+  const browserTimeZone = timezone === null ? validTimeZone(params.tz) : undefined;
+  const filterTimeZone = timezone ?? browserTimeZone;
   const isAdmin = session.user.role === "admin";
 
   const result = await listUnifiedOperationLogs({
     type,
     q,
-    startDate: localDateTimeToUtcIso(startDate, timezone),
-    endDate: localDateTimeToUtcIso(endDate, timezone, { endOfMinute: true }),
+    startDate: localDateTimeToUtcIso(startDate, filterTimeZone),
+    endDate: localDateTimeToUtcIso(endDate, filterTimeZone, { endOfMinute: true }),
     page,
     size: PAGE_SIZE,
   }).catch(() => ({
@@ -50,6 +65,7 @@ export default async function OperationLogsPage({
     if (q) query.set("q", q);
     if (startDate) query.set("startDate", startDate);
     if (endDate) query.set("endDate", endDate);
+    if (browserTimeZone) query.set("tz", browserTimeZone);
     query.set("page", String(targetPage));
     return query.toString();
   };
@@ -67,6 +83,7 @@ export default async function OperationLogsPage({
       </div>
 
       <form className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5" method="get">
+        <BrowserTimeZoneField personalTimeZone={timezone} />
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-600 dark:text-neutral-400">種別</span>
           <select

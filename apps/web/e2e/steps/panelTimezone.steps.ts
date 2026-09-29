@@ -909,6 +909,38 @@ Then(
   }
 );
 
+// issue #1437: 日時範囲フィルタがブラウザTZの壁時計で解釈されること。
+When(
+  /^操作ログの日時範囲を「([^」]+)」の壁時計で記録された操作の前後1分に指定して絞り込む$/,
+  async ({ ctx }, timeZone: string) => {
+    const tzPage = ctx.panelTzPage as Page;
+    const created = new Date(withUtcOffsetIfMissing(ctx.at18TimezoneEntryIso as string)).getTime();
+    const wall = (instant: number): string => {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).formatToParts(new Date(instant));
+      const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+      return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+    };
+    await tzPage.locator('input[name="startDate"]').fill(wall(created - 60_000));
+    await tzPage.locator('input[name="endDate"]').fill(wall(created + 60_000));
+    await tzPage.getByRole('button', { name: '絞り込み' }).click();
+    await tzPage.waitForLoadState('networkidle');
+  }
+);
+
+Then('絞り込んだ操作ログに記録された操作が表示される', async ({ ctx }) => {
+  const tzPage = ctx.panelTzPage as Page;
+  const marker = ctx.at18TimezoneMarker as string;
+  await expect(tzPage.getByText(marker, { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
 When('操作ログの最初の操作の「コピー」を押す', async ({ ctx }) => {
   const tzPage = ctx.panelTzPage as Page;
   const tzContext = ctx.panelTzContext as BrowserContext;

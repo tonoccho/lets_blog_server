@@ -25,6 +25,8 @@ jest.mock('@/lib/apiClient', () => ({
 jest.mock('../UnifiedLogRow', () => ({ UnifiedLogRow: () => null }));
 import { OperationLogTimeZoneLabel } from '../OperationLogTimeZoneLabel';
 jest.mock('../OperationLogTimeZoneLabel', () => ({ OperationLogTimeZoneLabel: () => null }));
+import { BrowserTimeZoneField } from '../BrowserTimeZoneField';
+jest.mock('../BrowserTimeZoneField', () => ({ BrowserTimeZoneField: () => null }));
 
 import OperationLogsPage from '../page';
 
@@ -145,3 +147,66 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
     expect(label?.props.personalTimeZone).toBeNull();
   });
 });
+
+describe('/operation-logs の日時範囲は表示と同じTZで解釈する(issue #1437)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    requireSession.mockResolvedValue({ user: { role: 'admin' } });
+    getViewerTimeZone.mockResolvedValue(null);
+    listUnifiedOperationLogs.mockResolvedValue(emptyPage);
+  });
+
+  it('個人設定TZが未設定なら、フォームで送られたブラウザTZの壁時計として換算する', async () => {
+    await render({ startDate: '2026-09-10T09:30', endDate: '2026-09-11T09:30', tz: 'Pacific/Auckland' });
+
+    // Auckland(9月はNZST+12)。UTCとして解釈されると 09:30 のままになる。
+    expect(listUnifiedOperationLogs).toHaveBeenCalledWith(
+      expect.objectContaining({ startDate: '2026-09-09T21:30:00', endDate: '2026-09-10T21:30:59' })
+    );
+  });
+
+  it('個人設定TZがあれば、ブラウザTZより個人設定TZを優先する', async () => {
+    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+
+    await render({ startDate: '2026-09-10T09:30', tz: 'Pacific/Auckland' });
+
+    expect(listUnifiedOperationLogs.mock.calls[0][0].startDate).toBe('2026-09-10T00:30:00');
+  });
+
+  it('不正なTZ名は無視する(例外を投げず、従来どおりの既定TZで換算する)', async () => {
+    await expect(render({ startDate: '2026-09-10T09:30', tz: 'Not/AZone' })).resolves.toBeDefined();
+
+    expect(listUnifiedOperationLogs.mock.calls[0][0].startDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('フォームにブラウザTZを送る入力を、個人設定TZを渡して置く', async () => {
+    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+
+    const tree = await render({});
+
+    const field = collect(tree, (e) => e.type === BrowserTimeZoneField)[0];
+    expect(field?.props.personalTimeZone).toBe('Asia/Tokyo');
+  });
+
+  it('ページ送りのリンクへブラウザTZを引き継ぐ(個人設定TZ未設定のとき)', async () => {
+    listUnifiedOperationLogs.mockResolvedValue({ ...emptyPage, totalElements: 120, totalPages: 3 });
+
+    const tree = await render({ startDate: '2026-09-10T09:30', tz: 'Pacific/Auckland' });
+
+    const links = collect(tree, (e) => typeof e.props?.href === 'string');
+    const query = new URL(links[1].props.href as string, 'http://localhost').searchParams;
+    expect(query.get('tz')).toBe('Pacific/Auckland');
+  });
+
+  it('個人設定TZがあるときはページ送りへtzを付けない', async () => {
+    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+    listUnifiedOperationLogs.mockResolvedValue({ ...emptyPage, totalElements: 120, totalPages: 3 });
+
+    const tree = await render({ startDate: '2026-09-10T09:30', tz: 'Pacific/Auckland' });
+
+    const links = collect(tree, (e) => typeof e.props?.href === 'string');
+    const query = new URL(links[1].props.href as string, 'http://localhost').searchParams;
+    expect(query.has('tz')).toBe(false);
+  });
+});
+
