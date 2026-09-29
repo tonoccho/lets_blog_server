@@ -2,9 +2,11 @@ import * as vscode from 'vscode';
 import * as api from './apiClient';
 import { Actor, getActor, getProjectId, requireAccessToken } from './config';
 import { buildArticleFrontMatter } from './frontMatter';
-import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
+import { assertValidSlug, createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
+import { scaffoldArticleOnBranch } from './articleGit';
 import { messageOf } from './errorHandler';
 import { extractIssueOutline, formatOutlineAsMarkdown } from './issueParser';
+import { resolveGitBackend } from './vscodeGit';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import { PlanInboundMessage, PlanOutboundCommand } from './webviewMessages';
 
@@ -160,21 +162,45 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
 
     const description = await api.getIssueDescription(apiKey, actor, projectId, issue.number);
 
-    const scaffold = await createArticleScaffold({
-      workspaceRoot: requireWorkspaceRoot(),
+    // ブランチ名に使う前に検証する。不正なslugでブランチだけが作られるのを防ぐ。
+    assertValidSlug(metadata.slug);
+    const workspaceRoot = requireWorkspaceRoot();
+    const result = await scaffoldArticleOnBranch({
+      root: workspaceRoot,
+      backend: await resolveGitBackend(workspaceRoot),
+      issueNumber: issue.number,
       slug: metadata.slug,
-      frontMatter: buildArticleFrontMatter({
-        title: metadata.title,
-        slug: metadata.slug,
-        categories: metadata.categories,
-        tags: metadata.tags,
-      }),
-      content: description,
+      title: metadata.title,
+      scaffold: () =>
+        createArticleScaffold({
+          workspaceRoot,
+          slug: metadata.slug,
+          frontMatter: buildArticleFrontMatter({
+            title: metadata.title,
+            slug: metadata.slug,
+            categories: metadata.categories,
+            tags: metadata.tags,
+          }),
+          content: description,
+        }),
+      chooseOnExistingBranch: async (branch) =>
+        (await vscode.window.showWarningMessage(
+          `ブランチ ${branch} は既に存在します。そのブランチへ切り替えて続けますか?`,
+          '切り替える',
+          '中断'
+        )) === '切り替える'
+          ? 'switch'
+          : 'abort',
     });
-    if (!scaffold) {
+    if (result.status === 'aborted') {
+      this.postMessage('error', { error: result.reason });
+      return;
+    }
+    if (result.status === 'cancelled') {
       this.postMessage('error', { error: 'キャンセルしました。' });
       return;
     }
+    const scaffold = result.scaffold;
     this._lastArticlePath = scaffold.articlePath;
 
     try {

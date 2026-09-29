@@ -38,6 +38,13 @@ const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 /** articleCreation.js / extension.ts の入口検証と同じ文言(issue #1062)。 */
 const INVALID_SLUG_MESSAGE = 'スラッグは半角英数字とハイフンのみで入力してください(先頭は英数字)。';
 
+/** slugが記事ディレクトリ名として安全でなければ例外を投げる。ブランチ名の組み立て前にも使う。 */
+export function assertValidSlug(slug: string): void {
+  if (!SLUG_PATTERN.test(slug)) {
+    throw new Error(INVALID_SLUG_MESSAGE);
+  }
+}
+
 /**
  * 記事ディレクトリと article.md、画像置き場の assets/ を生成する。
  * 既存ディレクトリがある場合は上書き確認を行い、拒否された場合はundefinedを返す。
@@ -50,9 +57,7 @@ const INVALID_SLUG_MESSAGE = 'スラッグは半角英数字とハイフンの�
 export async function createArticleScaffold(
   options: ArticleScaffoldOptions
 ): Promise<ArticleScaffoldResult | undefined> {
-  if (!SLUG_PATTERN.test(options.slug)) {
-    throw new Error(INVALID_SLUG_MESSAGE);
-  }
+  assertValidSlug(options.slug);
 
   const articleDir = path.join(options.workspaceRoot, 'articles', options.slug);
 

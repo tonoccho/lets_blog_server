@@ -292,6 +292,7 @@ export const window = {
  * 文字列ではなく fsPath / toString を持つオブジェクトを返す。
  */
 export const Uri = {
+  file: (fsPath: string) => ({ fsPath, toString: () => `file://${fsPath}` }),
   joinPath: (...segments: unknown[]) => {
     const joined = segments.join('/');
     return { fsPath: joined.replace(/^file:\/\//, ''), toString: () => joined };
@@ -300,3 +301,6 @@ export const Uri = {
 
 export const ViewColumn = { Beside: 2, One: 1 };
 export const ProgressLocation = { Notification: 15 };
+
+/** vscode.extensions の最小再現(issue #1335)。既定ではGit拡張が無い環境として振る舞う。 */
+export const extensions = { getExtension: jest.fn((): unknown => undefined) };

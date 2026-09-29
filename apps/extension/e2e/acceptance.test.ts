@@ -17,6 +17,7 @@ import './steps/common.steps';
 import './steps/auth.steps';
 import './steps/projects.steps';
 import './steps/articles.steps';
+import './steps/articleBranch.steps';
 import './steps/urlPaste.steps';
 import './steps/ai.steps';
 import './steps/reviewSteps.steps';
