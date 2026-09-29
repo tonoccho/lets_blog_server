@@ -1232,4 +1232,378 @@ class ArticlePreviewServiceTest {
 
         verify(cmsAdapter).deletePost(sshCredentials(), "99");
     }
+
+    // ---- Issue #1368: SSH管理サイトのテーマCSSはリモートホストから取得する ----
+    // 受け入れ基準はWeb UIから到達できない(ローカルスタックにSSHサーバーが無い、#1197)ため、
+    // モックしたWordPressSshOperations(SshCommandExecutor相当)に対するサービスレベルテストで表明する。
+
+    private static final String SSH_SITE_URL = "http://production.example.com";
+
+    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials givenSshSite() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        Site site = wordPressSite(10L, SSH_SITE_URL);
+        site.setSiteKey("production-site");
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
+        var creds = sshCredentials();
+        when(siteService.getCredentials("production-site")).thenReturn(creds);
+        return creds;
+    }
+
+    private WordPressSshOperations.SiteFileLayout sshLayout() {
+        return new WordPressSshOperations.SiteFileLayout(
+                SSH_SITE_URL, SSH_SITE_URL, SSH_SITE_URL + "/wp-content", "/var/www/html/",
+                "/var/www/html/wp-content");
+    }
+
+    private static final String TOP_HTML = "<html><head>"
+            + "<link rel=\"stylesheet\" href=\"/wp-content/themes/t/style.css\">"
+            + "<style>.inline-top{color:blue}</style></head></html>";
+    private static final String POST_HTML = "<html><head>"
+            + "<link rel=\"stylesheet\" href=\"/wp-content/plugins/p/post.css\">"
+            + "<style>.inline-post{color:green}</style></head></html>";
+
+    private void givenSshPagesAndFiles(com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds) {
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(TOP_HTML);
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .thenReturn(Optional.of(".theme{color:red}"));
+    }
+
+    private void givenReferencePost(com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds) {
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.of(
+                new ReferencePost("5", SSH_SITE_URL + "/hello/", "Hello", "<p>x</p>")));
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/hello/"))
+                .thenReturn(POST_HTML);
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/plugins/p/post.css"))
+                .thenReturn(Optional.of(".plugin-post{color:pink}"));
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトは公開URLへHTTP取得せずリモートから取得しavailableがtrueでsourceがSSH() {
+        var creds = givenSshSite();
+        givenSshPagesAndFiles(creds);
+        givenReferencePost(creds);
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".theme{color:red}"));
+        assertTrue(response.css().contains(".inline-top{color:blue}"));
+        assertTrue(response.css().contains(".plugin-post{color:pink}"));
+        assertTrue(response.css().contains(".inline-post{color:green}"));
+        // MockRestServiceServerに期待を1件も登録していない: 公開URLへHTTPしていれば失敗する
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトで外部ホストのstylesheet取得が失敗してもサイト内CSSだけでavailableになる() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(
+                "<html><head><link rel=\"stylesheet\" href=\"/wp-content/themes/t/style.css\">"
+                + "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css?family=Roboto\">"
+                + "</head></html>");
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .thenReturn(Optional.of(".theme{color:red}"));
+        server.expect(requestTo("https://fonts.googleapis.com/css?family=Roboto")).andRespond(withServerError());
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".theme{color:red}"));
+        assertFalse(response.css().contains("fonts.googleapis.com"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトの外部ホストstylesheetは従来どおりHTTPで取得して連結する() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(
+                "<html><head><link rel=\"stylesheet\" href=\"https://cdn.example.net/font.css\"></head></html>");
+        server.expect(requestTo("https://cdn.example.net/font.css"))
+                .andRespond(withSuccess(".font{a:b}", MediaType.valueOf("text/css")));
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".font{a:b}"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトでファイルを読めないサイト内stylesheetはHTTPで補う() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(TOP_HTML);
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .thenThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("sftp"));
+        server.expect(requestTo(SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .andRespond(withSuccess(".via-http{a:b}", MediaType.valueOf("text/css")));
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".via-http{a:b}"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSH経路が失敗したらHTTP経路へフォールバックしsourceがHTTP() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds))
+                .thenThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("ssh down"));
+        // SSHが落ちているので参照記事のwp-cli取得も失敗する。RESTへ落ちて成立すること
+        when(wordPressSshOperations.getLatestPost(creds))
+                .thenThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("ssh down"));
+        server.expect(requestTo(SSH_SITE_URL)).andRespond(withSuccess(
+                "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>", MediaType.TEXT_HTML));
+        server.expect(requestTo(SSH_SITE_URL + "/style.css"))
+                .andRespond(withSuccess("body{color:red}", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback(SSH_SITE_URL + "/");
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("HTTP", response.source());
+        assertTrue(response.css().contains("body{color:red}"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHで取得したHTMLが空ならHTTP経路へフォールバックする() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(" ");
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+        server.expect(requestTo(SSH_SITE_URL)).andRespond(withSuccess(
+                "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>", MediaType.TEXT_HTML));
+        server.expect(requestTo(SSH_SITE_URL + "/style.css"))
+                .andRespond(withSuccess("body{color:red}", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("HTTP", response.source());
+        assertTrue(response.available());
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHで取得したHTMLにstylesheetが無ければHTTP経路へフォールバックする() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/"))
+                .thenReturn("<html><body>challenge</body></html>");
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+        server.expect(requestTo(SSH_SITE_URL)).andRespond(withSuccess(
+                "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>", MediaType.TEXT_HTML));
+        server.expect(requestTo(SSH_SITE_URL + "/style.css"))
+                .andRespond(withSuccess("body{color:red}", MediaType.valueOf("text/css")));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("HTTP", response.source());
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHもHTTPも失敗した場合はavailableがfalseでsourceは無い() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds))
+                .thenThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("ssh down"));
+        server.expect(requestTo(SSH_SITE_URL)).andRespond(withServerError());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertFalse(response.available());
+        assertEquals(null, response.source());
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトの投稿ページ取得に失敗してもトップページのCSSは返す() {
+        var creds = givenSshSite();
+        givenSshPagesAndFiles(creds);
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.of(
+                new ReferencePost("5", SSH_SITE_URL + "/hello/", "Hello", "<p>x</p>")));
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/hello/"))
+                .thenThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("timeout"));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".theme{color:red}"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトの投稿ページが空または参照記事が無い場合もトップページのCSSは返す() {
+        var creds = givenSshSite();
+        givenSshPagesAndFiles(creds);
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.of(
+                new ReferencePost("5", SSH_SITE_URL + "/hello/", "Hello", "<p>x</p>")));
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/hello/")).thenReturn("");
+
+        assertTrue(service.fetchThemeCss(1L, 10L).css().contains(".theme{color:red}"));
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトの投稿ページにstylesheetもstyleも無ければ追記しない() {
+        var creds = givenSshSite();
+        givenSshPagesAndFiles(creds);
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.of(
+                new ReferencePost("5", SSH_SITE_URL + "/hello/", "Hello", "<p>x</p>")));
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/hello/"))
+                .thenReturn("<html><body>plain</body></html>");
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertFalse(response.css().contains("post page"));
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトのMAX_CSS_LENGTHを超えるstylesheetは丸ごとスキップする() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(TOP_HTML);
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .thenReturn(Optional.of("a".repeat(3_000_001)));
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertFalse(response.css().contains("aaaa"));
+        assertTrue(response.css().contains(".inline-top{color:blue}"));
+    }
+
+    @Test
+    void fetchThemeCss_非SSHサイトはSSH経路を使わずsourceがHTTP() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        server.expect(requestTo("http://example.com")).andRespond(withSuccess(
+                "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>", MediaType.TEXT_HTML));
+        server.expect(requestTo("http://example.com/style.css"))
+                .andRespond(withSuccess("body{}", MediaType.valueOf("text/css")));
+        expectNoReferencePostForCssFallback("http://example.com/");
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("HTTP", response.source());
+        verifyNoInteractions(wordPressSshOperations);
+    }
+
+    @Test
+    void fetchThemeCss_SSHで取得したHTMLがnullならHTTP経路へフォールバックする() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(null);
+        server.expect(requestTo(SSH_SITE_URL)).andRespond(withServerError());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertFalse(response.available());
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトはインラインstyleだけのページでもavailableになる() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/"))
+                .thenReturn("<html><head><style>.only-inline{a:b}</style></head></html>");
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".only-inline{a:b}"));
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトでstylesheetがちょうど上限ならインラインstyleは追記しない() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(TOP_HTML);
+        String url = SSH_SITE_URL + "/wp-content/themes/t/style.css";
+        int overhead = ("/* " + url + " */\n").length() + 1;
+        when(wordPressSshOperations.readStylesheetFile(creds, sshLayout(), url))
+                .thenReturn(Optional.of("a".repeat(3_000_000 - overhead)));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals(3_000_000, response.css().length());
+        assertFalse(response.css().contains("inline-top"));
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトのインラインstyleが上限を超えたら切り詰める() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/"))
+                .thenReturn("<html><head><style>" + "b".repeat(3_100_000) + "</style></head></html>");
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals(3_000_000, response.css().length());
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトでSFTPが空を返したサイト内stylesheetはHTTPで補う() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(TOP_HTML);
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .thenReturn(Optional.empty());
+        server.expect(requestTo(SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .andRespond(withSuccess(".via-http{a:b}", MediaType.valueOf("text/css")));
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.css().contains(".via-http{a:b}"));
+        server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトで参照記事の取得が失敗してもトップページのCSSは返す() {
+        var creds = givenSshSite();
+        givenSshPagesAndFiles(creds);
+        when(wordPressSshOperations.getLatestPost(creds))
+                .thenThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("wp eval failed"));
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".theme{color:red}"));
+    }
+
+    @Test
+    void fetchThemeCss_認証情報の取得が失敗してもHTTP取得失敗は例外にせずavailableがfalse() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        Site site = wordPressSite(10L, "http://example.com");
+        site.setSiteKey("rest-site");
+        when(siteService.getById(10L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("rest-site")).thenThrow(new IllegalStateException("credentials unavailable"));
+        server.expect(requestTo("http://example.com")).andRespond(withServerError());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertFalse(response.available());
+        assertEquals(null, response.source());
+        verifyNoInteractions(wordPressSshOperations);
+        server.verify();
+    }
 }

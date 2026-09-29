@@ -1555,4 +1555,255 @@ class WordPressSshOperationsTest {
 
         assertEquals("55", result.id());
     }
+
+    // ---- Issue #1368: テーマCSS取得のためのリモートHTML取得・パス解決・ファイル読み出し ----
+
+    private WordPressSshOperations.SiteFileLayout layout() {
+        return new WordPressSshOperations.SiteFileLayout(
+                "https://example.com", "https://example.com/wp", "https://example.com/wp-content",
+                "/var/www/html/wp/", "/var/www/html/wp-content");
+    }
+
+    private static String b64(String value) {
+        return java.util.Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void fetchSiteFileLayout_wp_evalのJSONからhome_siteurl_ABSPATH_WP_CONTENT_DIRを組み立てる() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"home\":\"https://example.com\",\"siteurl\":\"https://example.com/wp\","
+                        + "\"content_url\":\"https://example.com/wp-content\","
+                        + "\"abspath\":\"/var/www/html/wp/\",\"content_dir\":\"/var/www/html/wp-content\"}"));
+
+        WordPressSshOperations.SiteFileLayout result = operations.fetchSiteFileLayout(creds());
+
+        assertEquals(layout(), result);
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), isNull());
+        assertEquals(true, command.getValue().contains("ABSPATH"));
+        assertEquals(true, command.getValue().contains("WP_CONTENT_DIR"));
+    }
+
+    @Test
+    void fetchSiteFileLayout_wp_eval失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("boom"));
+
+        assertThrows(SshOperationException.class, () -> operations.fetchSiteFileLayout(creds()));
+    }
+
+    @Test
+    void fetchSiteFileLayout_必須項目が欠けたJSONは例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"home\":\"https://example.com\"}"));
+
+        assertThrows(SshOperationException.class, () -> operations.fetchSiteFileLayout(creds()));
+    }
+
+    @Test
+    void fetchPageHtml_リモートのwp_remote_getで取得しbase64本文を復号する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"status\":200,\"body_b64\":\"" + b64("<html>日本語</html>") + "\"}"));
+
+        String html = operations.fetchPageHtml(creds(), layout(), "https://example.com/hello/");
+
+        assertEquals("<html>日本語</html>", html);
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), isNull());
+        assertEquals(true, command.getValue().contains("wp_remote_get"));
+        // コマンドはShellQuote.singleで'が'\\''へエスケープされるため、クォートの形に依存せず判定する
+        assertEquals(true, java.util.regex.Pattern.compile("redirection\\W+=> 0").matcher(command.getValue()).find());
+        assertEquals(true, command.getValue().contains("https://example.com/hello/"));
+    }
+
+    @Test
+    void fetchPageHtml_サイト外のホストは実行せず例外() {
+        assertThrows(SshOperationException.class,
+                () -> operations.fetchPageHtml(creds(), layout(), "http://169.254.169.254/latest/"));
+
+        verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
+    }
+
+    @Test
+    void fetchPageHtml_HTTPエラー応答は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"status\":403,\"body_b64\":\"\"}"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.fetchPageHtml(creds(), layout(), "https://example.com/"));
+    }
+
+    @Test
+    void fetchPageHtml_WP_Error応答は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"error\":\"cURL error 7\"}"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.fetchPageHtml(creds(), layout(), "https://example.com/"));
+    }
+
+    @Test
+    void fetchPageHtml_コマンド失敗時は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(fail("eval error"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.fetchPageHtml(creds(), layout(), "https://example.com/"));
+    }
+
+    @Test
+    void readStylesheetFile_wp_content配下のURLはWP_CONTENT_DIRへ解決してSFTPで読む() {
+        when(executor.getFile(any(SshConnectionParams.class), any()))
+                .thenReturn("body{color:red}".getBytes(StandardCharsets.UTF_8));
+
+        java.util.Optional<String> css = operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp-content/themes/t/style.css?ver=1.2");
+
+        assertEquals("body{color:red}", css.orElseThrow());
+        verify(executor).getFile(any(SshConnectionParams.class),
+                eq("/var/www/html/wp-content/themes/t/style.css"));
+    }
+
+    @Test
+    void readStylesheetFile_siteurl配下のURLはABSPATHへ解決する() {
+        when(executor.getFile(any(SshConnectionParams.class), any()))
+                .thenReturn("a{}".getBytes(StandardCharsets.UTF_8));
+
+        operations.readStylesheetFile(creds(), layout(), "https://example.com/wp/wp-includes/css/dist/block-library/style.min.css");
+
+        verify(executor).getFile(any(SshConnectionParams.class),
+                eq("/var/www/html/wp/wp-includes/css/dist/block-library/style.min.css"));
+    }
+
+    @Test
+    void readStylesheetFile_homeのみに属するURLもABSPATHを基準に解決する() {
+        when(executor.getFile(any(SshConnectionParams.class), any()))
+                .thenReturn("a{}".getBytes(StandardCharsets.UTF_8));
+
+        operations.readStylesheetFile(creds(), layout(), "http://example.com/custom.css");
+
+        verify(executor).getFile(any(SshConnectionParams.class), eq("/var/www/html/wp/custom.css"));
+    }
+
+    @Test
+    void readStylesheetFile_外部ホストのURLは読まず空() {
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://fonts.googleapis.com/css?family=Roboto").isEmpty());
+
+        verify(executor, never()).getFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void readStylesheetFile_wpPathの外へ出るパスは読まず空() {
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp-content/../../../etc/x.css").isEmpty());
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp-content/%2e%2e/%2e%2e/%2e%2e/etc/x.css").isEmpty());
+
+        verify(executor, never()).getFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void readStylesheetFile_WP_CONTENT_DIRがwpPathの外にある構成では読まず空() {
+        WordPressSshOperations.SiteFileLayout outside = new WordPressSshOperations.SiteFileLayout(
+                "https://example.com", "https://example.com", "https://example.com/wp-content",
+                "/var/www/html/", "/srv/shared/wp-content");
+
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), outside, "https://example.com/wp-content/themes/t/style.css").isEmpty());
+
+        verify(executor, never()).getFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void readStylesheetFile_css以外の拡張子は読まず空() {
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp-content/../wp-config.php").isEmpty());
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp/").isEmpty());
+
+        verify(executor, never()).getFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void readStylesheetFile_不正なURLは読まず空() {
+        assertEquals(true, operations.readStylesheetFile(creds(), layout(), "http://exa mple.com/a.css").isEmpty());
+    }
+
+    @Test
+    void readStylesheetFile_空ファイルは空() {
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(new byte[0]);
+
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp-content/a.css").isEmpty());
+    }
+
+    @Test
+    void siteFileLayout_ownsは自サイトのオリジンだけを真とする() {
+        assertEquals(true, layout().owns("https://example.com/wp-content/a.css"));
+        assertEquals(true, layout().owns("http://example.com/a.css"));
+        assertEquals(false, layout().owns("https://cdn.example.net/a.css"));
+        assertEquals(false, layout().owns("::not a url::"));
+    }
+
+    @Test
+    void siteFileLayout_ownsはsiteurlとcontent_urlのホストでも真とし相対URLは偽とする() {
+        WordPressSshOperations.SiteFileLayout split = new WordPressSshOperations.SiteFileLayout(
+                "https://www.example.com", "https://cms.example.com", "https://assets.example.com/wp-content",
+                "/var/www/html/", "/var/www/html/wp-content");
+
+        assertEquals(true, split.owns("https://cms.example.com/wp-includes/a.css"));
+        assertEquals(true, split.owns("https://assets.example.com/wp-content/a.css"));
+        assertEquals(false, split.owns("/relative/a.css"));
+    }
+
+    @Test
+    void fetchSiteFileLayout_空文字の項目は例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"home\":\" \",\"siteurl\":\"https://example.com\","
+                        + "\"content_url\":\"https://example.com/wp-content\","
+                        + "\"abspath\":\"/var/www/html/\",\"content_dir\":\"/var/www/html/wp-content\"}"));
+
+        assertThrows(SshOperationException.class, () -> operations.fetchSiteFileLayout(creds()));
+    }
+
+    @Test
+    void fetchPageHtml_リダイレクト応答も例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"status\":301,\"body_b64\":\"\"}"));
+
+        assertThrows(SshOperationException.class,
+                () -> operations.fetchPageHtml(creds(), layout(), "https://example.com/"));
+    }
+
+    @Test
+    void readStylesheetFile_どの基準URLにも属さないサイト内パスは読まず空() {
+        WordPressSshOperations.SiteFileLayout subdir = new WordPressSshOperations.SiteFileLayout(
+                "https://example.com/blog", "https://example.com/blog", "https://example.com/blog/wp-content",
+                "/var/www/html/", "/var/www/html/wp-content");
+
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), subdir, "https://example.com/other/a.css").isEmpty());
+
+        verify(executor, never()).getFile(any(SshConnectionParams.class), any());
+    }
+
+    @Test
+    void readStylesheetFile_content_urlが別ホストでもホストが一致する基準へ解決する() {
+        WordPressSshOperations.SiteFileLayout cdn = new WordPressSshOperations.SiteFileLayout(
+                "https://example.com", "https://example.com", "https://assets.example.net/wp-content",
+                "/var/www/html/", "/var/www/html/wp-content");
+        when(executor.getFile(any(SshConnectionParams.class), any()))
+                .thenReturn("a{}".getBytes(StandardCharsets.UTF_8));
+
+        operations.readStylesheetFile(creds(), cdn, "https://example.com/style.css");
+
+        verify(executor).getFile(any(SshConnectionParams.class), eq("/var/www/html/style.css"));
+    }
+
+    @Test
+    void readStylesheetFile_SFTPがnullを返したら空() {
+        when(executor.getFile(any(SshConnectionParams.class), any())).thenReturn(null);
+
+        assertEquals(true, operations.readStylesheetFile(
+                creds(), layout(), "https://example.com/wp-content/a.css").isEmpty());
+    }
 }

@@ -887,6 +887,177 @@ public class WordPressSshOperations {
                 body.path("title").asText(), body.path("content").asText()));
     }
 
+    /**
+     * テーマCSS取得(issue #1368)でURLからリモートのファイルパスを解決するための、サイトの配置情報。
+     * home/siteurl/content_urlはwp-cliで取得したURL(末尾スラッシュなし)、abspath/contentDirは
+     * ABSPATH/WP_CONTENT_DIR。
+     */
+    public record SiteFileLayout(String home, String siteurl, String contentUrl, String abspath, String contentDir) {
+
+        /** urlがこのサイト(home/siteurl/content_urlのいずれか)のホストに属するか。 */
+        public boolean owns(String url) {
+            String authority = authorityOf(url);
+            return authority != null
+                    && (authority.equals(authorityOf(home)) || authority.equals(authorityOf(siteurl))
+                    || authority.equals(authorityOf(contentUrl)));
+        }
+    }
+
+    private static String authorityOf(String url) {
+        try {
+            String authority = java.net.URI.create(url).getAuthority();
+            return authority == null ? null : authority.toLowerCase(java.util.Locale.ROOT);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * テーマCSS取得向けに、home/siteurl/WP_CONTENT_URLとABSPATH/WP_CONTENT_DIRをwp evalで取得する。
+     * URL→ファイルパス解決({@link #readStylesheetFile})の基準になる。
+     */
+    public SiteFileLayout fetchSiteFileLayout(WordPressCredentials creds) {
+        String phpCode = "echo json_encode(['home' => home_url(), 'siteurl' => site_url(), "
+                + "'content_url' => content_url(), 'abspath' => ABSPATH, 'content_dir' => WP_CONTENT_DIR]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("サイト配置情報の取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        for (String field : List.of("home", "siteurl", "content_url", "abspath", "content_dir")) {
+            if (!body.hasNonNull(field) || body.path(field).asText().isBlank()) {
+                throw new SshOperationException("サイト配置情報に" + field + "がありません");
+            }
+        }
+        return new SiteFileLayout(
+                stripTrailingSlash(body.path("home").asText()), stripTrailingSlash(body.path("siteurl").asText()),
+                stripTrailingSlash(body.path("content_url").asText()), body.path("abspath").asText(),
+                body.path("content_dir").asText());
+    }
+
+    /**
+     * リモートホスト自身から(サイトのWordPressコアのHTTP APIで)ページのHTMLを取得する(issue #1368)。
+     *
+     * <p><b>採用した手段: {@code wp eval}で{@code wp_remote_get()}を呼ぶ。</b>WordPressは常に何らかの
+     * HTTPトランスポート(cURL/streams)を持つため、リモートに{@code curl}/{@code wget}バイナリが
+     * 入っている保証が要らない。取得元がサイト自身のホストなので、APIコンテナ→公開URLの経路で起きる
+     * WAF/ボット対策(#245)・IP制限・到達性の問題を避けられる。本文はbase64で返すため、テーマ/プラグインが
+     * 出力するPHP診断行や不正なUTF-8でJSONが壊れない。
+     *
+     * <p><b>採らなかった手段。</b>(1){@code curl}/{@code wget}をSSHで直接実行 — 共有ホスティングでは
+     * 入っていない/制限されていることがあり、前提が最も厚い。(2){@code wp eval}でテンプレートを直接
+     * 描画({@code load_template}/{@code the_content}等) — {@code wp_head}/{@code wp_enqueue_scripts}が
+     * 通常のリクエスト(is_single()等のクエリ状態、テーマの条件分岐)を前提とするため、CLIコンテキストでは
+     * enqueueされるstylesheetが実サイトと変わり、CSS取得の目的(実際に読み込まれるものを知る)に反する。
+     * (3){@code wp eval}での単純な{@code file_get_contents} — allow_url_fopenが無効なホストがある。
+     * 実際のHTTPリクエストとして描画させる{@code wp_remote_get}が、前提が最も薄く実サイトに最も忠実。
+     *
+     * <p>SSRF防止のため、URLのホストがサイト自身のもの({@link SiteFileLayout#owns})でなければ実行しない。
+     * リダイレクトも追従しない(redirection=0)。追従すると、サイト内URLからサイト外ホストへの
+     * 302でこの検査を迂回できてしまうため(リダイレクトはHTTP 3xxとして例外になり、HTTP経路へ落ちる)。
+     * 自己署名/不一致の証明書を持つホストでも自分自身のHTMLは取れるよう、sslverifyは無効にしている
+     * (取得するのは自サイトの公開ページで、結果はCSS抽出にしか使わない)。
+     */
+    public String fetchPageHtml(WordPressCredentials creds, SiteFileLayout layout, String url) {
+        if (!layout.owns(url)) {
+            throw new SshOperationException("サイト外のURLはリモートから取得できません: " + url);
+        }
+        String phpCode = "$r = wp_remote_get(" + phpSingleQuote(url) + ", ['timeout' => 20, 'redirection' => 0, "
+                + "'sslverify' => false, 'user-agent' => 'Mozilla/5.0 (compatible; LetsBlogPreview)']); "
+                + "if (is_wp_error($r)) { echo json_encode(['error' => $r->get_error_message()]); exit; } "
+                + "echo json_encode(['status' => wp_remote_retrieve_response_code($r), "
+                + "'body_b64' => base64_encode(wp_remote_retrieve_body($r))]);";
+        SshCommandResult result = exec(creds, wpCli(creds, "eval " + ShellQuote.single(phpCode)));
+        if (!result.ok()) {
+            throw new SshOperationException("ページの取得に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        JsonNode body = parseJsonObject(result.stdout());
+        if (body.has("error")) {
+            throw new SshOperationException("リモートからのページ取得に失敗しました: " + body.path("error").asText());
+        }
+        int status = body.path("status").asInt(0);
+        if (status < 200 || status >= 300) {
+            throw new SshOperationException("リモートからのページ取得がHTTP " + status + "を返しました: " + url);
+        }
+        return new String(Base64.getDecoder().decode(body.path("body_b64").asText("")), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * サイト内stylesheetのURLをリモートのファイルパスへ解決し、SFTPで読む(issue #1368)。
+     * 解決は、より具体的なWP_CONTENT_URL→WP_CONTENT_DIR、siteurl→ABSPATH、home→ABSPATHの順。
+     *
+     * <p>読まない(空を返す)のは次の場合: サイト外のURL(呼び出し側がHTTPで取得する)、解決したパスが
+     * {@code wpPath}配下から外れる(パストラバーサル防止。URLの{@code %2e%2e}等は復号後に判定し、
+     * 外れた場合はログに残す)、{@code .css}以外(wp-config.phpのような任意ファイルを、細工された
+     * リンクで読み出させないため)、空ファイル。
+     */
+    public java.util.Optional<String> readStylesheetFile(WordPressCredentials creds, SiteFileLayout layout, String url) {
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return java.util.Optional.empty();
+        }
+        if (!layout.owns(url)) {
+            return java.util.Optional.empty();
+        }
+        String path = uri.getPath();
+        String resolved = null;
+        String[][] candidates = {
+                {layout.contentUrl(), layout.contentDir()},
+                {layout.siteurl(), layout.abspath()},
+                {layout.home(), layout.abspath()},
+        };
+        for (String[] candidate : candidates) {
+            String rel = relativePath(candidate[0], authorityOf(url), path);
+            if (rel != null) {
+                resolved = stripTrailingSlash(candidate[1]) + "/" + rel;
+                break;
+            }
+        }
+        if (resolved == null) {
+            return java.util.Optional.empty();
+        }
+        java.nio.file.Path normalized = java.nio.file.Paths.get(resolved).normalize();
+        java.nio.file.Path root = java.nio.file.Paths.get(creds.wpPath()).normalize();
+        if (!normalized.startsWith(root)) {
+            log.warn("wpPath外を指すstylesheetパスはSFTPで読みません (url={}, resolved={}, wpPath={})",
+                    url, normalized, root);
+            return java.util.Optional.empty();
+        }
+        if (!normalized.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".css")) {
+            log.warn("CSS以外のパスはSFTPで読みません (url={}, resolved={})", url, normalized);
+            return java.util.Optional.empty();
+        }
+        byte[] bytes = executor.getFile(connectionParams(creds), normalized.toString());
+        if (bytes == null || bytes.length == 0) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new String(bytes, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * baseUrl配下のパスならbaseからの相対パス(先頭スラッシュなし)、配下でなければnull。
+     * pathは{@link java.net.URI#getPath()}で復号済み。
+     */
+    private static String relativePath(String baseUrl, String authority, String path) {
+        if (!java.util.Objects.equals(authorityOf(baseUrl), authority)) {
+            return null;
+        }
+        // authorityを持つ階層URIのgetPath()は(空文字はあっても)nullにならない
+        String basePath = stripTrailingSlash(java.net.URI.create(baseUrl).getPath());
+        if (!path.startsWith(basePath + "/")) {
+            return null;
+        }
+        return path.substring(basePath.length() + 1);
+    }
+
+    private static String stripTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
     /** PHPのシングルクォート文字列リテラルとして安全に埋め込むためのエスケープ(`\`と`'`のみ特殊)。 */
     private String phpSingleQuote(String value) {
         if (value == null) {

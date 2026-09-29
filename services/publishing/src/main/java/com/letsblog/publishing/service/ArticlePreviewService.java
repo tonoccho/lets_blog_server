@@ -142,6 +142,31 @@ public class ArticlePreviewService {
             }
         }
 
+        // SSH管理サイトは、まずリモートホスト自身からHTML/CSSを取得する(issue #1368)。失敗したら
+        // 従来のHTTP経路へ自動でフォールバックする。managed(AGENT)/RESTサイトは従来どおり。
+        // 認証情報の取得はSSH判定のためだけの先行参照。失敗しても非SSHとして扱い、従来どおり
+        // HTTP取得の結果(available=false等)を返せるようにする(要件6: 非SSHサイトの挙動は変えない)。
+        CmsCredentials credentials;
+        try {
+            credentials = siteService.getCredentials(site.getSiteKey());
+        } catch (Exception e) {
+            logger.debug("Credentials lookup failed, treating as non-SSH site: {}", site.getSiteKey(), e);
+            credentials = null;
+        }
+        boolean sshFallback = false;
+        if (credentials instanceof CmsCredentials.WordPressCredentials wpCredentials && wpCredentials.isSsh()) {
+            try {
+                ThemeCssResponse viaSsh = fetchThemeCssViaSsh(site, wpCredentials);
+                if (viaSsh != null) {
+                    return viaSsh;
+                }
+            } catch (Exception e) {
+                logger.warn("SSH経由のテーマCSS取得に失敗したためHTTP経路へフォールバックします: {}",
+                        site.getSiteKey(), e);
+            }
+            sshFallback = true;
+        }
+
         String html;
         try {
             logger.debug("Fetching site top page: {} (site: {})", fetchUrl, site.getSiteKey());
@@ -186,10 +211,87 @@ public class ArticlePreviewService {
             }
             css.append("/* inline <style> */\n").append(inlineStyle).append("\n");
         }
-        CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-        appendPostPageCss(css, fetchUrl, site, internalOrigin, credentials);
+        if (credentials == null) {
+            // 先行参照が失敗(またはnull)だった場合は、従来どおりここで改めて取得する
+            credentials = siteService.getCredentials(site.getSiteKey());
+        }
+        appendPostPageCss(css, fetchUrl, site, internalOrigin, credentials, sshFallback);
         String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
-        return new ThemeCssResponse(result, true, null);
+        return new ThemeCssResponse(result, true, null, ThemeCssResponse.SOURCE_HTTP);
+    }
+
+    /**
+     * SSH管理サイトのテーマCSSを、リモートホスト経由で取得する(issue #1368)。トップページ/参照投稿ページの
+     * HTMLは{@link WordPressSshOperations#fetchPageHtml}(リモートでのwp_remote_get)、サイト内stylesheetは
+     * SFTP({@link WordPressSshOperations#readStylesheetFile})で読み、外部ホストのstylesheetと、SFTPで
+     * 読めなかったサイト内stylesheetはHTTPでベストエフォート取得する。
+     *
+     * トップページのHTML取得に失敗、またはstylesheet/インラインstyleが1つも無い(ボット対策の
+     * チャレンジページ等)場合は、呼び出し側がHTTP経路へフォールバックできるよう例外またはnullを返す。
+     */
+    private ThemeCssResponse fetchThemeCssViaSsh(Site site, CmsCredentials.WordPressCredentials creds) {
+        WordPressSshOperations.SiteFileLayout layout = wordPressSshOperations.fetchSiteFileLayout(creds);
+        SshPageSource source = new SshPageSource(creds, layout);
+        String home = layout.home() + "/";
+        String html = wordPressSshOperations.fetchPageHtml(creds, layout, home);
+        if (html == null || html.isBlank()) {
+            logger.warn("Empty HTML fetched via SSH for site: {}", site.getSiteKey());
+            return null;
+        }
+        List<String> stylesheetUrls = extractStylesheetUrls(html, home);
+        List<String> inlineStyles = extractInlineStyles(html);
+        if (stylesheetUrls.isEmpty() && inlineStyles.isEmpty()) {
+            logger.warn("No stylesheet links or inline <style> blocks found via SSH for site: {}", site.getSiteKey());
+            return null;
+        }
+        StringBuilder css = new StringBuilder(concatStylesheets(stylesheetUrls, source::load));
+        for (String inlineStyle : inlineStyles) {
+            if (css.length() >= MAX_CSS_LENGTH) {
+                break;
+            }
+            css.append("/* inline <style> */\n").append(inlineStyle).append("\n");
+        }
+        // 投稿ページ分はベストエフォート: 失敗してもトップページ分のCSSは活かす
+        try {
+            appendPostPageCss(css, home, site, null, creds, false, source);
+        } catch (Exception e) {
+            logger.warn("SSH経由の投稿ページCSS取得に失敗しました(トップページ分のみ返します): {}",
+                    site.getSiteKey(), e);
+        }
+        String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
+        return new ThemeCssResponse(result, true, null, ThemeCssResponse.SOURCE_SSH);
+    }
+
+    /**
+     * SSH経路でのHTML/stylesheet取得。サイト内stylesheetはSFTP、それ以外(外部ホスト、SFTPで
+     * 読めなかったもの)はHTTPで取得する({@link #httpStylesheetLoader})。
+     */
+    private class SshPageSource {
+        private final CmsCredentials.WordPressCredentials creds;
+        private final WordPressSshOperations.SiteFileLayout layout;
+
+        SshPageSource(CmsCredentials.WordPressCredentials creds, WordPressSshOperations.SiteFileLayout layout) {
+            this.creds = creds;
+            this.layout = layout;
+        }
+
+        String fetchHtml(String url) {
+            return wordPressSshOperations.fetchPageHtml(creds, layout, url);
+        }
+
+        String load(String url) {
+            if (layout.owns(url)) {
+                try {
+                    java.util.Optional<String> file = wordPressSshOperations.readStylesheetFile(creds, layout, url);
+                    if (file.isPresent()) {
+                        return file.get();
+                    }
+                } catch (Exception e) {
+                    logger.debug("Failed to read stylesheet via SFTP, falling back to HTTP: {}", url, e);
+                }
+            }
+            return httpStylesheetLoader(url);
+        }
     }
 
     /**
@@ -202,12 +304,33 @@ public class ArticlePreviewService {
      * 例外はログのみで握りつぶす。
      */
     private void appendPostPageCss(
-            StringBuilder css, String fetchOrigin, Site site, String internalOrigin, CmsCredentials credentials) {
+            StringBuilder css, String fetchOrigin, Site site, String internalOrigin, CmsCredentials credentials,
+            boolean sshFallback) {
+        appendPostPageCss(css, fetchOrigin, site, internalOrigin, credentials, sshFallback, null);
+    }
+
+    /**
+     * sshSourceがnullでなければSSH経路(HTML/stylesheetをリモート経由で取得)、nullならHTTP経路。
+     * sshFallbackは、SSH経路が失敗してHTTP経路へ落ちてきたことを示す。SSHが落ちているので
+     * wp-cliでの参照記事取得も失敗しうるため、その場合は例外にせずREST取得へ落とす。
+     */
+    private void appendPostPageCss(
+            StringBuilder css, String fetchOrigin, Site site, String internalOrigin, CmsCredentials credentials,
+            boolean sshFallback, SshPageSource sshSource) {
         if (css.length() >= MAX_CSS_LENGTH) {
             return;
         }
         String referenceLink;
-        WpCliReferencePostLookup lookup = lookupReferencePostViaWpCli(credentials, site);
+        WpCliReferencePostLookup lookup;
+        try {
+            lookup = lookupReferencePostViaWpCli(credentials, site);
+        } catch (Exception e) {
+            if (!sshFallback) {
+                throw e;
+            }
+            logger.debug("Reference post lookup via SSH failed after SSH fallback: {}", site.getSiteKey(), e);
+            lookup = new WpCliReferencePostLookup(false, null);
+        }
         if (lookup.supported()) {
             if (lookup.referencePost() == null) {
                 return;
@@ -240,7 +363,9 @@ public class ArticlePreviewService {
 
         String postHtml;
         try {
-            postHtml = browserLikeClient().get().uri(URI.create(postPageUrl)).retrieve().body(String.class);
+            postHtml = sshSource != null
+                    ? sshSource.fetchHtml(postPageUrl)
+                    : browserLikeClient().get().uri(URI.create(postPageUrl)).retrieve().body(String.class);
         } catch (Exception e) {
             logger.debug("Failed to fetch post page for CSS fallback: {}", postPageUrl, e);
             return;
@@ -260,7 +385,9 @@ public class ArticlePreviewService {
             postStylesheetUrls = rewriteToInternalOrigin(postStylesheetUrls, publicOrigin, internalOrigin);
         }
 
-        String postCss = fetchAndConcatStylesheets(postStylesheetUrls);
+        String postCss = sshSource != null
+                ? concatStylesheets(postStylesheetUrls, sshSource::load)
+                : fetchAndConcatStylesheets(postStylesheetUrls);
         if (!postCss.isEmpty() && css.length() + postCss.length() <= MAX_CSS_LENGTH) {
             css.append(postCss);
         }
@@ -773,11 +900,24 @@ public class ArticlePreviewService {
     }
 
     private String fetchAndConcatStylesheets(List<String> stylesheetUrls) {
-        StringBuilder css = new StringBuilder();
+        return concatStylesheets(stylesheetUrls, httpLoader());
+    }
+
+    private java.util.function.Function<String, String> httpLoader() {
         RestClient client = browserLikeClient();
+        return url -> client.get().uri(URI.create(url)).retrieve().body(String.class);
+    }
+
+    private String httpStylesheetLoader(String url) {
+        return httpLoader().apply(url);
+    }
+
+    /** loaderが投げた例外・空の本文はベストエフォートとして読み飛ばす(取得元がHTTPかSFTPかは問わない)。 */
+    private String concatStylesheets(List<String> stylesheetUrls, java.util.function.Function<String, String> loader) {
+        StringBuilder css = new StringBuilder();
         for (String url : stylesheetUrls) {
             try {
-                String body = client.get().uri(URI.create(url)).retrieve().body(String.class);
+                String body = loader.apply(url);
                 if (body == null || body.isBlank()) {
                     continue;
                 }

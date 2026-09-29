@@ -2481,6 +2481,9 @@
           },
           "reason": {
             "type": "string"
+          },
+          "source": {
+            "type": "string"
           }
         }
       },

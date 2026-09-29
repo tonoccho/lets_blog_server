@@ -290,6 +290,7 @@ export interface ThemeCssResponse {
   css?: string;
   available?: boolean;
   reason?: string;
+  source?: string;
 }
 
 export interface StatusEnvironmentValue {
