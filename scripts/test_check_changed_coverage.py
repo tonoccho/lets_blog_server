@@ -151,6 +151,27 @@ class UnmeasurableProductionCode(unittest.TestCase):
         self.assertIn("services/gateway/src/main/resources/application.yml", out)
         self.assertIn("計測対象外", out)
 
+    def test_web_css_only_does_not_fail(self):
+        """#1459: `apps/web/src/app/globals.css` は `^apps/[^/]+/src/` に字面上マッチするが、
+        jest/v8 の分岐計測は CSS を対象にしないためレポートは原理的に存在しない。
+        """
+        code, out = run_main(["apps/web/src/app/globals.css"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("カバレッジレポートが見つかりません", out)
+
+    def test_web_css_is_reported_as_unmeasurable(self):
+        _, out = run_main(["apps/web/src/app/globals.css"])
+        self.assertIn("apps/web/src/app/globals.css", out)
+        self.assertIn("計測対象外", out)
+
+    def test_web_ts_without_report_still_fails(self):
+        """#1459: `.ts` / `.tsx` は従来どおりレポートを要求する。"""
+        for path in ("apps/web/src/lib/newThing.ts", "apps/web/src/app/NewPage.tsx"):
+            with self.subTest(path=path):
+                code, out = run_main([path])
+                self.assertEqual(code, 1, out)
+                self.assertIn("カバレッジレポートが見つかりません", out)
+
     def test_extension_ts_only_does_not_fail(self):
         """#1272: 拡張ホスト層(コマンド登録)は jest で原理的に到達できない。"""
         code, out = run_main(["apps/extension/src/extension.ts"])
@@ -326,6 +347,9 @@ class MeasurabilityClassifier(unittest.TestCase):
         "services/gateway/src/main/resources/application.yml",
         "services/platform/src/main/resources/application-test.properties",
         "services/ai/src/main/resources/logback-spring.xml",
+        # #1459: `apps/*/src/` の `.css` は jest/v8 の分岐計測の対象外。
+        "apps/web/src/app/globals.css",
+        "apps/web/src/components/widget.module.css",
     ]
 
     # #1379: JaCoCo が計測できるのはコンパイル済み JVM バイトコードだけなので、

@@ -119,6 +119,10 @@ UNMEASURABLE_OVERRIDE_PATTERNS = [
     # 「JVM バイトコードにコンパイルされない = 原理的に計測不能」であり、免除漏れの
     # 危険が無い。
     r"^services/[^/]+/src/(?!.*\.(?:java|kt)$)",
+    # #1459: `apps/*/src/` で jest/v8 が分岐を計測できるのは JS/TS 系のソースだけで、
+    # `.css`(`apps/web/src/app/globals.css` など)にレポートは原理的に存在しない。
+    # #1330 / #1379 と同じく拡張子を1つずつ免除せず、計測できる側を列挙して残りを免除する。
+    r"^apps/[^/]+/src/(?!.*\.(?:[cm]?[jt]sx?)$)",
 ]
 
 UNMEASURABLE_OVERRIDE_RE = [re.compile(p) for p in UNMEASURABLE_OVERRIDE_PATTERNS]
