@@ -1,6 +1,7 @@
 package com.letsblog.publishing.service;
 
 import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.config.EnvironmentFetchExecutorConfig;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
@@ -11,6 +12,7 @@ import com.letsblog.publishing.dto.TermComparisonRow;
 import com.letsblog.publishing.dto.TermEnvironmentValue;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,6 +22,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 
 /**
  * カテゴリ・タグを3環境(ローカル/テスト/本番)で横断比較し、マスター環境(Project#masterEnvironment)の
@@ -58,13 +63,28 @@ public class TermComparisonService {
     private final SiteService siteService;
     private final ProjectService projectService;
     private final WordPressSshOperations sshOperations;
+    private final ExecutorService environmentFetchExecutor;
 
+    /** 単体テスト用: 本番と同じ上限の専用Executorを内部で作る。 */
     public TermComparisonService(
             WordPressBulkManagementClient bulkManagementClient,
             BulkManagementService bulkManagementService,
             SiteService siteService,
             ProjectService projectService,
             WordPressSshOperations sshOperations) {
+        this(bulkManagementClient, bulkManagementService, siteService, projectService, sshOperations,
+                EnvironmentFetchExecutorConfig.newExecutor());
+    }
+
+    @Autowired
+    public TermComparisonService(
+            WordPressBulkManagementClient bulkManagementClient,
+            BulkManagementService bulkManagementService,
+            SiteService siteService,
+            ProjectService projectService,
+            WordPressSshOperations sshOperations,
+            ExecutorService environmentFetchExecutor) {
+        this.environmentFetchExecutor = environmentFetchExecutor;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
         this.siteService = siteService;
@@ -357,6 +377,7 @@ public class TermComparisonService {
     private Map<String, EnvironmentTerms> resolveTermsByEnvironment(Project project, boolean isCategory) {
         Map<String, EnvironmentTerms> result = new LinkedHashMap<>();
         Map<String, Map<String, CmsCredentials.WordPressCredentials>> sshGroupsByHost = new LinkedHashMap<>();
+        Map<String, CompletableFuture<EnvironmentTerms>> agentFetches = new LinkedHashMap<>();
 
         for (String environment : ENVIRONMENT_ORDER) {
             Site site = resolveSite(project, environment);
@@ -365,7 +386,10 @@ public class TermComparisonService {
                 continue;
             }
             if (site.isManagedWordpress()) {
-                result.put(environment, fetchViaAgent(site, isCategory));
+                // 取得は並列に走らせ、環境の並び(LinkedHashMapの挿入順)は従来どおりここで確定させる(issue #1474)
+                result.put(environment, null);
+                agentFetches.put(environment,
+                        CompletableFuture.supplyAsync(() -> fetchViaAgent(site, isCategory), environmentFetchExecutor));
                 continue;
             }
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
@@ -395,7 +419,21 @@ public class TermComparisonService {
                 }
             }
         }
+        // SSHの取得中にagent側も並行して進んでいる。既存キーへのputなので挿入順は変わらない
+        agentFetches.forEach((environment, future) -> result.put(environment, awaitFetch(future)));
         return result;
+    }
+
+    /** 並列化前と同じく、取得中の実行時例外はラップせずそのまま呼び出し元へ伝える。 */
+    private EnvironmentTerms awaitFetch(CompletableFuture<EnvironmentTerms> future) {
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            throw e;
+        }
     }
 
     private EnvironmentTerms fetchViaAgent(Site site, boolean isCategory) {

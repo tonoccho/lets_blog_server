@@ -449,4 +449,120 @@ class TermComparisonServiceTest {
                 eq(1L), eq(BulkOperationType.CATEGORY_FETCH), eq("test"), eq("Connection refused"),
                 eq("java.io.IOException: Connection refused\n\tat ..."));
     }
+
+    // ---- issue #1474: agent経路の環境別取得の並列化 ----
+
+    private Project threeManagedEnvironments() {
+        Project project = buildProject(10L, 20L, 30L, "test");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
+        return project;
+    }
+
+    @Test
+    void listCategoryComparison_agent経由の3環境の取得は並列に走る() {
+        threeManagedEnvironments();
+        // 3環境の取得が同時に走っていなければ、全員が揃う前にlatchの待機がタイムアウトする(直列実行では揃わない)
+        java.util.concurrent.CountDownLatch allStarted = new java.util.concurrent.CountDownLatch(3);
+        java.util.concurrent.atomic.AtomicInteger timedOut = new java.util.concurrent.atomic.AtomicInteger();
+        org.mockito.stubbing.Answer<List<CategoryInfo>> rendezvous = invocation -> {
+            allStarted.countDown();
+            if (!allStarted.await(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                timedOut.incrementAndGet();
+            }
+            return List.of(new CategoryInfo("お知らせ", "oshirase", null, null));
+        };
+        when(bulkManagementClient.listCategories(any())).thenAnswer(rendezvous);
+
+        TermComparisonPage page = service().listCategoryComparison(1L, 0, 20);
+
+        assertEquals(0, timedOut.get());
+        assertEquals(1, page.items().size());
+        assertTrue(page.items().get(0).local().available());
+        assertTrue(page.items().get(0).test().available());
+        assertTrue(page.items().get(0).production().available());
+    }
+
+    @Test
+    void listCategoryComparison_完了順が逆でも結果は環境ごとの正しい列に入る() throws Exception {
+        threeManagedEnvironments();
+        // localが最後に、productionが最初に終わる
+        when(bulkManagementClient.listCategories("local-site")).thenAnswer(invocation -> {
+            Thread.sleep(300);
+            return List.of(new CategoryInfo("L", "only-local", null, null));
+        });
+        when(bulkManagementClient.listCategories("test-site")).thenAnswer(invocation -> {
+            Thread.sleep(150);
+            return List.of(new CategoryInfo("T", "only-test", null, null));
+        });
+        when(bulkManagementClient.listCategories("production-site"))
+                .thenReturn(List.of(new CategoryInfo("P", "only-production", null, null)));
+
+        TermComparisonPage page = service().listCategoryComparison(1L, 0, 20);
+
+        assertEquals(3, page.items().size());
+        java.util.Map<String, com.letsblog.publishing.dto.TermComparisonRow> bySlug = new java.util.HashMap<>();
+        page.items().forEach(row -> bySlug.put(row.slug(), row));
+        assertTrue(bySlug.get("only-local").local().available());
+        assertEquals("only-local", bySlug.get("only-local").local().slug());
+        assertEquals("only-test", bySlug.get("only-test").test().slug());
+        assertEquals("only-production", bySlug.get("only-production").production().slug());
+    }
+
+    @Test
+    void listCategoryComparison_agentの取得が例外なら並列化前と同じ例外がそのまま伝わる() {
+        threeManagedEnvironments();
+        when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
+        when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of());
+        when(bulkManagementClient.listCategories("production-site"))
+                .thenThrow(new IllegalStateException("agent down"));
+
+        IllegalStateException thrown =
+                assertThrows(IllegalStateException.class, () -> service().listCategoryComparison(1L, 0, 20));
+
+        assertEquals("agent down", thrown.getMessage());
+    }
+
+    @Test
+    void listCategoryComparison_managedとSSHが混在してもSSHは1回にまとめagentは並列に取得する() {
+        Project project = buildProject(10L, 20L, 30L, "test");
+        Site testSite = buildExternalSite(20L, "test-site");
+        Site productionSite = buildExternalSite(30L, "production-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
+        when(siteService.resolveDataSource(testSite))
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
+        when(siteService.resolveDataSource(productionSite))
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/production")));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("News", "news", null, null)));
+        when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(
+                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
+                        java.util.Map.of(), java.util.Map.of("test", "refused", "production", "refused"),
+                        java.util.Map.of()));
+
+        TermComparisonPage page = service().listCategoryComparison(1L, 0, 20);
+
+        verify(sshOperations, org.mockito.Mockito.times(1)).fetchTermsForEnvironments(eq("category"), any());
+        assertEquals("news", page.items().get(0).local().slug());
+        assertEquals("refused", page.items().get(0).test().errorMessage());
+    }
+
+    @Test
+    void listCategoryComparison_agentの取得がErrorで落ちたときはCompletionExceptionとして伝わる() {
+        threeManagedEnvironments();
+        when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
+        when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of());
+        when(bulkManagementClient.listCategories("production-site"))
+                .thenThrow(new OutOfMemoryError("oom"));
+
+        java.util.concurrent.CompletionException thrown = assertThrows(
+                java.util.concurrent.CompletionException.class, () -> service().listCategoryComparison(1L, 0, 20));
+
+        assertTrue(thrown.getCause() instanceof OutOfMemoryError);
+    }
 }

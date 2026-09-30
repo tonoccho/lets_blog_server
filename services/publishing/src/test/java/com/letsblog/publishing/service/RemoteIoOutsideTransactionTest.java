@@ -159,6 +159,10 @@ class RemoteIoOutsideTransactionTest {
         context.registerBean(ProjectService.class, () -> projectService);
         context.registerBean(SiteService.class, () -> siteService);
         context.registerBean(CmsAdapterFactory.class, () -> cmsAdapterFactory);
+        // 本番の共有Executorは並列度に上限がある(issue #1474)。このテストの関心は「リモート待ちの間にDBを
+        // 保持しないこと」なので、20並行の呼び出しが全員リモートへ届けるよう十分大きいプールを使う。
+        context.registerBean("environmentFetchExecutor", ExecutorService.class,
+                () -> Executors.newFixedThreadPool(60));
         context.registerBean(BulkUploadStorageService.class, () -> mock(BulkUploadStorageService.class));
         context.registerBean(ImageResizeService.class, () -> mock(ImageResizeService.class));
         context.registerBean(
