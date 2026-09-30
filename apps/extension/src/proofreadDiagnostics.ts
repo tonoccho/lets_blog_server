@@ -11,6 +11,7 @@ import {
   findInvalidCategories,
   isValidStatus,
   REVIEW_STEPS,
+  reviewOutcomeMessages,
   reviewProgressMessage,
   ReviewStepKey,
   runReviewSteps,
@@ -144,8 +145,8 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
 
     await this.runFrontMatterCheck(document);
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: '校正チェック中…' },
-      (progress) => this.runContentReview(document, (message) => progress.report({ message }))
+      { location: vscode.ProgressLocation.Notification, title: '校正チェック中…', cancellable: true },
+      (progress, token) => this.runContentReview(document, (message) => progress.report({ message }), token)
     );
   }
 
@@ -174,8 +175,8 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       snapshot: this.checklistStore?.get(key),
       runReview: async () => {
         const state = await vscode.window.withProgress(
-          { location: vscode.ProgressLocation.Notification, title: progressTitle },
-          (progress) => this.runContentReview(document, (message) => progress.report({ message }))
+          { location: vscode.ProgressLocation.Notification, title: progressTitle, cancellable: true },
+          (progress, token) => this.runContentReview(document, (message) => progress.report({ message }), token)
         );
         if (!state) {
           throw new Error('レビュー結果を保持できなかったため、未対応の指摘を判定できません。もう一度お試しください。');
@@ -283,7 +284,8 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
 
   private async runContentReview(
     document: vscode.TextDocument,
-    report: (message: string) => void
+    report: (message: string) => void,
+    token?: vscode.CancellationToken
   ): Promise<ReviewChecklistDocumentState | undefined> {
     const key = document.uri.toString();
     const rawText = document.getText();
@@ -297,6 +299,8 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     this.contentAbortControllers.get(key)?.abort();
     const controller = new AbortController();
     this.contentAbortControllers.set(key, controller);
+    // 利用者のキャンセル(issue #1224)。応答待ちのリクエストを中断し、以降のステップを実行させない。
+    const cancelSubscription = token?.onCancellationRequested(() => controller.abort());
 
     try {
       const apiKey = await getAccessToken(this.context);
@@ -305,20 +309,29 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       }
       const actor = await getActor(this.context);
       const projectId = (article.data.project_id as number | undefined) ?? requireProjectId(this.context);
-      const findings = await runReviewSteps({
+      const result = await runReviewSteps({
         content: article.content,
         bodyOffset: computeBodyOffset(rawText),
         signal: controller.signal,
         onStep: (step, index, total) => report(reviewProgressMessage(index, total, step.label)),
         fetchStep: async (stepKey, text) =>
-          (await api.reviewStepSuggestions(apiKey, actor, projectId, stepKey, text, controller.signal)).suggestions,
+          await api.reviewStepSuggestions(apiKey, actor, projectId, stepKey, text, controller.signal),
       });
       // 実行中に別のレビューが始まっていた場合、古い結果で上書きしない。
       if (this.contentAbortControllers.get(key) !== controller) {
         return undefined;
       }
+      // 全ステップが失敗したなら、表示を空の結果で上書きせず、失敗として伝える。
+      if (result.failures.length === REVIEW_STEPS.length) {
+        throw result.failures[0].error;
+      }
+      const { findings } = result;
       this.showFindings(document, findings);
-      if (!this.checklistStore) {
+      const { warning, info } = reviewOutcomeMessages(result);
+      if (warning) void vscode.window.showWarningMessage(warning);
+      if (info) void vscode.window.showInformationMessage(info);
+      // 失敗したステップがあるレビューは、全ステップを終えたものとして記録しない(Publishの判定を誤らせない)。
+      if (!this.checklistStore || result.failures.length > 0) {
         return undefined;
       }
       const state = await this.checklistStore.recordReview(key, findings, computeBodyHash(article.content));
@@ -328,8 +341,14 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       if (this.contentAbortControllers.get(key) !== controller) {
         return undefined;
       }
+      if (controller.signal.aborted) {
+        // 利用者による中断。直前の表示・記録はそのまま残す。
+        void vscode.window.showInformationMessage('レビューを中断しました。直前のレビュー結果の表示はそのままです。');
+        return undefined;
+      }
       throw err;
     } finally {
+      cancelSubscription?.dispose();
       if (this.contentAbortControllers.get(key) === controller) {
         this.contentAbortControllers.delete(key);
       }

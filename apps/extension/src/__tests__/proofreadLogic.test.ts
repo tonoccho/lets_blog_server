@@ -7,9 +7,11 @@ import {
   REVIEW_STEPS,
   reviewProgressMessage,
   buildFindingHover,
+  REVIEW_CANCELLED_MESSAGE,
+  reviewOutcomeMessages,
   runReviewSteps,
 } from '../proofreadLogic';
-import { ProofreadIssue } from '../schemas';
+import { ProofreadIssue, ReviewStepSuggestion } from '../schemas';
 
 function issue(overrides: Partial<ProofreadIssue>): ProofreadIssue {
   return { type: 'typo', originalText: '', message: '', suggestion: null, ...overrides };
@@ -168,6 +170,7 @@ describe('buildFindingHover', () => {
 
 describe('runReviewSteps', () => {
   const content = 'AはBです。CはDです。';
+  const ok = (suggestions: ReviewStepSuggestion[] = []) => ({ suggestions, skipped: false });
 
   it('5ステップを順に実行し、各ステップの指摘を位置つきで集約する', async () => {
     const order: string[] = [];
@@ -178,13 +181,13 @@ describe('runReviewSteps', () => {
       fetchStep: async (key) => {
         order.push(key);
         return key === 'JAPANESE'
-          ? [{ stepKey: key, originalText: 'AはB', message: 'm1', suggestion: null, sources: [] }]
+          ? ok([{ stepKey: key, originalText: 'AはB', message: 'm1', suggestion: null, sources: [] }])
           : key === 'STYLE'
-            ? [
+            ? ok([
                 { stepKey: key, originalText: 'CはD', message: 'm2', suggestion: 'E', sources: [] },
                 { stepKey: key, originalText: '存在しない', message: 'm3', suggestion: null, sources: [] },
-              ]
-            : [];
+              ])
+            : ok();
       },
       onStep: (step, index, total) => progress.push(`${index}/${total}:${step.label}`),
     });
@@ -196,9 +199,11 @@ describe('runReviewSteps', () => {
       '3/5:読者視点でのチェック',
       '4/5:文体チェック',
     ]);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toMatchObject({ step: { key: 'JAPANESE' }, startOffset: 10, endOffset: 13 });
-    expect(result[1]).toMatchObject({ step: { key: 'STYLE' }, startOffset: 16, endOffset: 19 });
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]).toMatchObject({ step: { key: 'JAPANESE' }, startOffset: 10, endOffset: 13 });
+    expect(result.findings[1]).toMatchObject({ step: { key: 'STYLE' }, startOffset: 16, endOffset: 19 });
+    expect(result.failures).toEqual([]);
+    expect(result.skipped).toEqual([]);
   });
 
   it('前のステップの完了を待ってから次のステップを呼ぶ(並列実行しない)', async () => {
@@ -212,7 +217,7 @@ describe('runReviewSteps', () => {
         maxRunning = Math.max(maxRunning, running);
         await Promise.resolve();
         running--;
-        return [];
+        return ok();
       },
       onStep: () => undefined,
     });
@@ -223,11 +228,102 @@ describe('runReviewSteps', () => {
     const controller = new AbortController();
     const fetchStep = jest.fn(async () => {
       controller.abort();
-      return [];
+      return ok();
     });
     await expect(
       runReviewSteps({ content, bodyOffset: 0, fetchStep, onStep: () => undefined, signal: controller.signal })
     ).rejects.toThrow();
     expect(fetchStep).toHaveBeenCalledTimes(1);
+  });
+
+  it('中断によるステップの失敗は「ステップ失敗」ではなく中断として例外にし、以降のステップを呼ばない', async () => {
+    const controller = new AbortController();
+    const fetchStep = jest.fn(async () => {
+      controller.abort();
+      throw new Error('aborted by user');
+    });
+    await expect(
+      runReviewSteps({ content, bodyOffset: 0, fetchStep, onStep: () => undefined, signal: controller.signal })
+    ).rejects.toThrow(REVIEW_CANCELLED_MESSAGE);
+    expect(fetchStep).toHaveBeenCalledTimes(1);
+  });
+
+  it('1ステップが失敗しても残りのステップを実行し、失敗したステップを報告する', async () => {
+    const order: string[] = [];
+    const result = await runReviewSteps({
+      content,
+      bodyOffset: 0,
+      fetchStep: async (key) => {
+        order.push(key);
+        if (key === 'PROOFREADING') throw new Error('500 Internal Server Error');
+        return key === 'STYLE'
+          ? ok([{ stepKey: key, originalText: 'CはD', message: 'm', suggestion: null, sources: [] }])
+          : ok();
+      },
+      onStep: () => undefined,
+    });
+    expect(order).toHaveLength(5);
+    expect(result.findings.map((f) => f.step.key)).toEqual(['STYLE']);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].step.label).toBe('校正チェック');
+    expect(result.failures[0].error).toEqual(new Error('500 Internal Server Error'));
+  });
+
+  it('スキップされたステップは理由つきでskippedに載り、指摘0件とは別に報告される', async () => {
+    const result = await runReviewSteps({
+      content,
+      bodyOffset: 0,
+      fetchStep: async (key) =>
+        key === 'FACT_CHECK' ? { suggestions: [], skipped: true, skipReason: 'Brave Search APIキーが未設定です' } : ok(),
+      onStep: () => undefined,
+    });
+    expect(result.skipped).toEqual([{ step: REVIEW_STEPS[2], reason: 'Brave Search APIキーが未設定です' }]);
+    expect(result.failures).toEqual([]);
+    expect(result.findings).toEqual([]);
+  });
+
+  it('スキップの理由が応答に無ければ既定の文言を使う', async () => {
+    const result = await runReviewSteps({
+      content,
+      bodyOffset: 0,
+      fetchStep: async (key) => (key === 'FACT_CHECK' ? { suggestions: [], skipped: true } : ok()),
+      onStep: () => undefined,
+    });
+    expect(result.skipped[0].reason).toBe('理由は報告されませんでした');
+  });
+});
+
+describe('reviewOutcomeMessages', () => {
+  const [japanese, , factCheck] = REVIEW_STEPS;
+
+  it('失敗もスキップも無ければメッセージは無い', () => {
+    expect(reviewOutcomeMessages({ findings: [], failures: [], skipped: [] })).toEqual({});
+  });
+
+  it('失敗したステップ名を列挙した警告を返す', () => {
+    const { warning } = reviewOutcomeMessages({
+      findings: [],
+      failures: [
+        { step: japanese, error: new Error('boom') },
+        { step: factCheck, error: 'timeout' },
+      ],
+      skipped: [],
+    });
+    expect(warning).toContain('日本語チェック');
+    expect(warning).toContain('boom');
+    expect(warning).toContain('校閲');
+    expect(warning).toContain('timeout');
+  });
+
+  it('スキップしたステップ名と理由を、失敗とは別の通知として返す', () => {
+    const { info, warning } = reviewOutcomeMessages({
+      findings: [],
+      failures: [],
+      skipped: [{ step: factCheck, reason: 'APIキー未設定' }],
+    });
+    expect(warning).toBeUndefined();
+    expect(info).toContain('校閲');
+    expect(info).toContain('スキップ');
+    expect(info).toContain('APIキー未設定');
   });
 });

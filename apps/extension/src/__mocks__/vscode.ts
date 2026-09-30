@@ -166,7 +166,12 @@ export interface MockDecorationType {
 export const decorationTypes: MockDecorationType[] = [];
 
 /** withProgress に渡された設定と、task内で report された内容。 */
-export const progressRuns: { options: Record<string, unknown>; reports: { message?: string }[] }[] = [];
+export const progressRuns: {
+  options: Record<string, unknown>;
+  reports: { message?: string }[];
+  /** 利用者が進捗通知の「キャンセル」を押した状況の再現(issue #1224)。 */
+  cancel: () => void;
+}[] = [];
 
 /** window.visibleTextEditors の差し替え口。 */
 let visibleTextEditors: unknown[] = [];
@@ -222,11 +227,29 @@ export const window = {
   },
   withProgress: async <T>(
     options: Record<string, unknown>,
-    task: (progress: { report: (value: { message?: string }) => void }) => Promise<T>
+    task: (
+      progress: { report: (value: { message?: string }) => void },
+      token: { isCancellationRequested: boolean; onCancellationRequested: (listener: () => void) => { dispose: () => void } }
+    ) => Promise<T>
   ): Promise<T> => {
-    const run = { options, reports: [] as { message?: string }[] };
+    const listeners: (() => void)[] = [];
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested: (listener: () => void) => {
+        listeners.push(listener);
+        return { dispose: () => undefined };
+      },
+    };
+    const run = {
+      options,
+      reports: [] as { message?: string }[],
+      cancel: () => {
+        token.isCancellationRequested = true;
+        for (const listener of listeners) listener();
+      },
+    };
     progressRuns.push(run);
-    return task({ report: (value) => run.reports.push(value) });
+    return task({ report: (value) => run.reports.push(value) }, token);
   },
   createOutputChannel: () => ({
     appendLine: () => undefined,

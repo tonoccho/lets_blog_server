@@ -146,30 +146,91 @@ export interface StepFinding {
   endOffset: number;
 }
 
+/** 中断されたレビューが投げる例外のメッセージ。呼び出し側は中断と失敗を区別するため、この文言ではなくsignalを見る。 */
+export const REVIEW_CANCELLED_MESSAGE = 'レビューが中断されました';
+
+/** 1ステップぶんのAPI応答。skippedはサーバが実行しなかった(失敗ではない)ことを示す。 */
+export interface StepFetchResult {
+  suggestions: ReviewStepSuggestion[];
+  skipped: boolean;
+  skipReason?: string;
+}
+
+export interface StepFailure {
+  step: ReviewStepDefinition;
+  error: unknown;
+}
+
+export interface StepSkip {
+  step: ReviewStepDefinition;
+  reason: string;
+}
+
+export interface ReviewRunResult {
+  findings: StepFinding[];
+  /** サーバエラー等で実行できなかったステップ。他のステップの結果には影響しない。 */
+  failures: StepFailure[];
+  /** サーバが理由つきで実行を見送ったステップ。指摘0件とは区別する。 */
+  skipped: StepSkip[];
+}
+
 export interface RunReviewStepsOptions {
   content: string;
   bodyOffset: number;
-  fetchStep: (key: ReviewStepKey, text: string) => Promise<ReviewStepSuggestion[]>;
+  fetchStep: (key: ReviewStepKey, text: string) => Promise<StepFetchResult>;
   onStep: (step: ReviewStepDefinition, index: number, total: number) => void;
   signal?: AbortSignal;
 }
 
+const DEFAULT_SKIP_REASON = '理由は報告されませんでした';
+
 /**
  * 5ステップを定義順に1つずつ実行し、全ステップの指摘を本文中の位置へ解決して集約する。
  * ステップごとに利用者の操作は待たない。signalが中断されたら次のステップへ進まず例外を投げる。
+ * 中断ではないステップの失敗は記録して次のステップへ進み、スキップは理由つきで別に集める(issue #1224)。
  */
-export async function runReviewSteps(options: RunReviewStepsOptions): Promise<StepFinding[]> {
-  const findings: StepFinding[] = [];
+export async function runReviewSteps(options: RunReviewStepsOptions): Promise<ReviewRunResult> {
+  const result: ReviewRunResult = { findings: [], failures: [], skipped: [] };
   for (let index = 0; index < REVIEW_STEPS.length; index++) {
     if (options.signal?.aborted) {
-      throw new Error('レビューが中断されました');
+      throw new Error(REVIEW_CANCELLED_MESSAGE);
     }
     const step = REVIEW_STEPS[index];
     options.onStep(step, index, REVIEW_STEPS.length);
-    const suggestions = await options.fetchStep(step.key, options.content);
-    for (const located of locateContentIssues(options.content, options.bodyOffset, suggestions)) {
-      findings.push({ step, suggestion: located.issue, startOffset: located.startOffset, endOffset: located.endOffset });
+    let fetched: StepFetchResult;
+    try {
+      fetched = await options.fetchStep(step.key, options.content);
+    } catch (error) {
+      if (options.signal?.aborted) {
+        throw new Error(REVIEW_CANCELLED_MESSAGE);
+      }
+      result.failures.push({ step, error });
+      continue;
+    }
+    if (fetched.skipped) {
+      result.skipped.push({ step, reason: fetched.skipReason || DEFAULT_SKIP_REASON });
+    }
+    for (const located of locateContentIssues(options.content, options.bodyOffset, fetched.suggestions)) {
+      result.findings.push({ step, suggestion: located.issue, startOffset: located.startOffset, endOffset: located.endOffset });
     }
   }
-  return findings;
+  return result;
+}
+
+/** 失敗・スキップを利用者へ知らせる文言。失敗は警告、スキップは(失敗ではないため)情報として分ける。 */
+export function reviewOutcomeMessages(result: ReviewRunResult): { warning?: string; info?: string } {
+  const messages: { warning?: string; info?: string } = {};
+  if (result.failures.length > 0) {
+    const detail = result.failures.map((f) => `「${f.step.label}」(${errorText(f.error)})`).join('、');
+    messages.warning = `次のステップが失敗しました: ${detail}。他のステップの結果は表示しています。`;
+  }
+  if (result.skipped.length > 0) {
+    const detail = result.skipped.map((s) => `「${s.step.label}」(${s.reason})`).join('、');
+    messages.info = `次のステップはスキップされました(指摘0件ではありません): ${detail}`;
+  }
+  return messages;
+}
+
+function errorText(error: unknown): string {
+  return String(error instanceof Error ? error.message : error);
 }

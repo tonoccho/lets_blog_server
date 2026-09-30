@@ -2,6 +2,8 @@ import {
   decorationTypes,
   diagnosticCollections,
   progressRuns,
+  shownInformations,
+  shownWarnings,
   resetMocks,
   setConfiguration,
   setVisibleTextEditors,
@@ -272,6 +274,184 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
 
     controller.dispose();
     expect(decorationTypes.every((t) => t.disposed)).toBe(true);
+  });
+});
+
+/** signalが中断されたら拒否する、応答待ちのAPI呼び出しの模擬。 */
+function pendingUntilAborted(signal: AbortSignal | undefined): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    if (signal?.aborted) reject(new Error('The operation was aborted'));
+    signal?.addEventListener('abort', () => reject(new Error('The operation was aborted')));
+  });
+}
+
+const JAPANESE_FINDING = { stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] };
+
+describe('ProofreadController の中断・失敗・スキップ(issue #1224)', () => {
+  it('進捗通知はキャンセルできる', async () => {
+    await controllerWith().runManual(makeDocument(ARTICLE) as never);
+    expect(progressRuns[0].options.cancellable).toBe(true);
+  });
+
+  it('実行中にキャンセルすると、それ以降のステップは実行されず、応答待ちのリクエストも中断される', async () => {
+    let signal: AbortSignal | undefined;
+    mocked.reviewStepSuggestions.mockImplementation(((
+      _k: string,
+      _a: unknown,
+      _p: number,
+      _step: string,
+      _t: string,
+      sig?: AbortSignal
+    ) => {
+      signal = sig;
+      return pendingUntilAborted(sig);
+    }) as never);
+    const running = controllerWith().runManual(makeDocument(ARTICLE) as never);
+    await new Promise((r) => setImmediate(r));
+    progressRuns[0].cancel();
+
+    await expect(running).resolves.toBeUndefined();
+    expect(signal?.aborted).toBe(true);
+    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(1);
+    expect(shownInformations.some((m) => m.includes('中断'))).toBe(true);
+  });
+
+  it('ステップの合間にキャンセルされても、次のステップは実行されない', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+      if (step === 'PROOFREADING') progressRuns[0].cancel();
+      return { suggestions: [], skipped: false };
+    }) as never);
+    await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).resolves.toBeUndefined();
+    expect(mocked.reviewStepSuggestions.mock.calls.map((c) => c[3])).toEqual(['JAPANESE', 'PROOFREADING']);
+  });
+
+  it('キャンセルしても、直前のレビュー結果の表示を途中結果で上書きしない(チェックリストにも記録しない)', async () => {
+    const document = makeDocument(ARTICLE);
+    const editor = makeEditor(document);
+    setVisibleTextEditors([editor]);
+    const store = new ReviewChecklistStore({} as never);
+    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+    const controller = new ProofreadController(context, store);
+    mocked.reviewStepSuggestions.mockResolvedValueOnce({ suggestions: [JAPANESE_FINDING], skipped: false } as never);
+    await controller.runManual(document as never);
+    expect(lastDecorations(editor, decorationTypes[0])).toHaveLength(1);
+    recordReview.mockClear();
+    editor.setDecorations.mockClear();
+
+    // 2回目: 1ステップ目は指摘0件で完了、2ステップ目の途中でキャンセルされる。
+    mocked.reviewStepSuggestions.mockImplementation((async (
+      _k: string,
+      _a: unknown,
+      _p: number,
+      step: string,
+      _t: string,
+      sig?: AbortSignal
+    ) => {
+      if (step === 'PROOFREADING') {
+        progressRuns[1].cancel();
+        return pendingUntilAborted(sig);
+      }
+      return { suggestions: [], skipped: false };
+    }) as never);
+    await expect(controller.runManual(document as never)).resolves.toBeUndefined();
+
+    expect(editor.setDecorations).not.toHaveBeenCalled();
+    expect(recordReview).not.toHaveBeenCalled();
+    const fresh = makeEditor(document);
+    controller.refreshEditor(fresh as never);
+    expect(lastDecorations(fresh, decorationTypes[0])).toHaveLength(1);
+  });
+
+  it('キャンセル後に再実行すれば、通常どおり結果が表示される', async () => {
+    const document = makeDocument(ARTICLE);
+    const editor = makeEditor(document);
+    setVisibleTextEditors([editor]);
+    const controller = controllerWith();
+    mocked.reviewStepSuggestions.mockImplementationOnce(((
+      _k: string, _a: unknown, _p: number, _s: string, _t: string, sig?: AbortSignal
+    ) => pendingUntilAborted(sig)) as never);
+    const first = controller.runManual(document as never);
+    await new Promise((r) => setImmediate(r));
+    progressRuns[0].cancel();
+    await first;
+
+    mocked.reviewStepSuggestions.mockResolvedValue({ suggestions: [JAPANESE_FINDING], skipped: false } as never);
+    await controller.runManual(document as never);
+    expect(lastDecorations(editor, decorationTypes[0])).toHaveLength(1);
+  });
+
+  it('1ステップがサーバエラーで失敗しても、他ステップの指摘は表示し、失敗したステップ名を報告する', async () => {
+    const document = makeDocument(ARTICLE);
+    const editor = makeEditor(document);
+    setVisibleTextEditors([editor]);
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+      if (step === 'PROOFREADING') throw new Error('500 Internal Server Error');
+      if (step === 'STYLE') {
+        return { suggestions: [{ stepKey: step, originalText: 'CはD', message: '文体', suggestion: null, sources: [] }], skipped: false };
+      }
+      return { suggestions: [], skipped: false };
+    }) as never);
+
+    await expect(controllerWith().runManual(document as never)).resolves.toBeUndefined();
+
+    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(5);
+    expect(lastDecorations(editor, decorationTypes[4])).toHaveLength(1);
+    expect(shownWarnings).toHaveLength(1);
+    expect(shownWarnings[0]).toContain('校正チェック');
+    expect(shownWarnings[0]).toContain('500 Internal Server Error');
+  });
+
+  it('ステップが失敗したレビューは、完了したものとしてチェックリストへ記録しない', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+      if (step === 'STYLE') throw new Error('boom');
+      return { suggestions: [], skipped: false };
+    }) as never);
+    const store = new ReviewChecklistStore({} as never);
+    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+    await new ProofreadController(context, store).runManual(makeDocument(ARTICLE) as never);
+    expect(recordReview).not.toHaveBeenCalled();
+  });
+
+  it('全ステップが失敗した場合は、既存の表示を残したまま例外として伝える', async () => {
+    const document = makeDocument(ARTICLE);
+    const editor = makeEditor(document);
+    setVisibleTextEditors([editor]);
+    const controller = controllerWith();
+    mocked.reviewStepSuggestions.mockResolvedValueOnce({ suggestions: [JAPANESE_FINDING], skipped: false } as never);
+    await controller.runManual(document as never);
+    editor.setDecorations.mockClear();
+
+    mocked.reviewStepSuggestions.mockRejectedValue(new Error('down'));
+    await expect(controller.runManual(document as never)).rejects.toThrow('down');
+    expect(editor.setDecorations).not.toHaveBeenCalled();
+  });
+
+  it('校閲がスキップされたら、失敗ではなくスキップとして理由つきで知らせる(指摘0件とは別)', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+      step === 'FACT_CHECK'
+        ? { suggestions: [], skipped: true, skipReason: 'Brave Search APIキーが未設定です' }
+        : { suggestions: [], skipped: false }) as never);
+    await controllerWith().runManual(makeDocument(ARTICLE) as never);
+
+    expect(shownWarnings).toEqual([]);
+    expect(shownInformations).toHaveLength(1);
+    expect(shownInformations[0]).toContain('校閲');
+    expect(shownInformations[0]).toContain('スキップ');
+    expect(shownInformations[0]).toContain('Brave Search APIキーが未設定です');
+  });
+
+  it('スキップも失敗も無く指摘が0件なら、スキップの通知は出ない', async () => {
+    await controllerWith().runManual(makeDocument(ARTICLE) as never);
+    expect(shownInformations).toEqual([]);
+    expect(shownWarnings).toEqual([]);
+  });
+
+  it('未ログインで手動実行すると、ログインを促すメッセージで失敗し、APIは呼ばれない', async () => {
+    (config.getAccessToken as jest.Mock).mockResolvedValue(undefined);
+    await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).rejects.toThrow(
+      /ログインしていません.*Login/
+    );
+    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
   });
 });
 
