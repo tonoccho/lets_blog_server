@@ -792,6 +792,12 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 
 ---
 
+## AiConnectionController (1エンドポイント、ベースパス `/api/projects/{id}/ai-connections`)
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{id}/ai-connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1499 で追加**。プロジェクトから見たAIプロバイダー4種の接続情報と利用可否を返す。非メンバーは403 |
+
 ## AiController (9エンドポイント、ベースパスなし)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
