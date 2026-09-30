@@ -16,6 +16,7 @@ jest.mock('@/lib/session', () => ({ getSession: () => getSession() }))
 jest.mock('../HeaderNav', () => ({
   HeaderNav: ({ navItems }: { navItems: unknown[] }) => <nav data-count={navItems.length} />,
 }))
+jest.mock('../Footer', () => ({ Footer: () => <footer /> }))
 jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => null }))

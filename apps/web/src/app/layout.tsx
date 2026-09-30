@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getSession } from "@/lib/session";
 import { NAV_ITEMS, ADMIN_NAV_ITEMS } from "@/lib/navigation";
+import { Footer } from "./Footer";
 import { HeaderNav } from "./HeaderNav";
 import { LogoutButton } from "./LogoutButton";
 import { ThemeSwitcher } from "./ThemeSwitcher";
@@ -47,7 +48,7 @@ export default async function RootLayout({
         <SessionProvider session={session}>
           <I18nProvider>
             <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-              <div className="mx-auto max-w-7xl px-4">
+              <div className="px-4">
                 <div className="flex items-center gap-6 py-3">
                   <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
                   {session && <HeaderNav navItems={navItems} />}
@@ -63,7 +64,8 @@ export default async function RootLayout({
                 )}
               </div>
             </header>
-            <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+            <main className="w-full flex-1 px-4 py-8">{children}</main>
+            <Footer />
           </I18nProvider>
         </SessionProvider>
       </body>

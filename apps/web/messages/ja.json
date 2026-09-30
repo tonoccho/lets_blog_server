@@ -32,5 +32,8 @@
     "posts": "投稿数",
     "aiJobs": "AIジョブ数",
     "description": "サイト登録・投稿履歴・AIジョブ状況を管理する画面"
+  },
+  "footer": {
+    "copyright": "© 2025-2026 Let's Blog Server"
   }
 }

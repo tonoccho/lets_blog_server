@@ -32,5 +32,8 @@
     "posts": "Posts",
     "aiJobs": "AI Jobs",
     "description": "Manage site registration, post history, and AI job status"
+  },
+  "footer": {
+    "copyright": "© 2025-2026 Let's Blog Server"
   }
 }
