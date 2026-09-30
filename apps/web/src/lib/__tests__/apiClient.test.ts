@@ -28,6 +28,7 @@ import {
   deleteGeneratedImage,
   streamConnectedServiceStatuses,
   listReviewStepSettings,
+  listArticleReviewPullRequests,
   listProjectAdSenseAccounts,
   listUnifiedOperationLogs,
   selectProjectAdSenseAccount,
@@ -417,5 +418,25 @@ describe('AdSenseのパブリッシャーID自動発見(issue #1232)', () => {
     expect(url).toContain('/api/projects/7/api-keys/adsense/account')
     expect(init.method).toBe('PUT')
     expect(JSON.parse(String(init.body))).toEqual({ accountId: 'pub-2' })
+  })
+})
+
+describe('listArticleReviewPullRequests(issue #1340)', () => {
+  it('プロジェクトのレビュー待ちPR一覧を GET で取得する', async () => {
+    const body = [{ number: 201, title: 't', headBranch: 'article/x', createdAt: '2026-09-30T03:00:00Z', url: 'https://github.com/a/b/pull/201' }]
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await listArticleReviewPullRequests(7)
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/article-review/pull-requests')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('失敗は空配列にせず例外として伝える', async () => {
+    fetchMock.mockResolvedValue(textResponse('bad gateway', 502, 'Bad Gateway'))
+
+    await expect(listArticleReviewPullRequests(7)).rejects.toThrow('APIエラー (502)')
   })
 })

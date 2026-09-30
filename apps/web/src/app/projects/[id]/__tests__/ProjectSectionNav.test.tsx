@@ -24,4 +24,12 @@ describe("ProjectSectionNav", () => {
 
     expect(screen.getByRole("link", { name: "詳細" })).not.toHaveAttribute("aria-current");
   });
+
+  it("記事レビューへの導線があり、1クリックで到達できる(issue #1340)", () => {
+    render(<ProjectSectionNav projectId={1} active="article-review" />);
+
+    const link = screen.getByRole("link", { name: "記事レビュー" });
+    expect(link).toHaveAttribute("href", "/projects/1/article-review");
+    expect(link).toHaveAttribute("aria-current", "page");
+  });
 });

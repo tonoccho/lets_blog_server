@@ -124,6 +124,9 @@ function prToApi(pr) {
     body: pr.body,
     state: pr.state,
     html_url: `${PR_HTML_BASE}/${pr.number}`,
+    // 実 GitHub は PR の created_at を必ず返す。PR 一覧画面の作成日時表示(#1340)を確かめるため、
+    // 番号から決まる固定の時刻を返す(実行のたびに変わらない)。
+    created_at: new Date(Date.UTC(2026, 8, 1) + pr.number * 1000).toISOString(),
     user: { login: 'e2e-stub-user' },
     draft: false,
     head: { ref: pr.head, sha: headSha(pr), label: `e2e-stub:${pr.head}` },

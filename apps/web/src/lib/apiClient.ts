@@ -1328,6 +1328,24 @@ export function deleteProject(id: number): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE' });
 }
 
+/** レビュー待ち(開いている)Pull Request 1件(publishing-service、issue #1337)。 */
+export interface ArticleReviewPullRequest {
+  number: number;
+  title: string;
+  headBranch: string;
+  createdAt: string;
+  url: string;
+}
+
+/**
+ * プロジェクトの GitHub リポジトリで開いている Pull Request の一覧(issue #1340)。
+ * 未設定(409)・GitHub 認証失敗(502)などは例外になる。呼び出し側は空配列へ握り潰さず、
+ * 失敗として表示すること。
+ */
+export function listArticleReviewPullRequests(projectId: number): Promise<ArticleReviewPullRequest[]> {
+  return apiFetch<ArticleReviewPullRequest[]>(`/api/projects/${projectId}/article-review/pull-requests`);
+}
+
 export function updateProjectGithubRepository(
   id: number,
   githubRepository: string

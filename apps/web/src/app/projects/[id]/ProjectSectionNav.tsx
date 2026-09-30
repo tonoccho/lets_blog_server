@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export type ProjectSection = "dashboard" | "detail" | "plan" | "tags" | "posts";
+export type ProjectSection = "dashboard" | "detail" | "plan" | "tags" | "posts" | "article-review";
 
 const SECTIONS: { id: ProjectSection; label: string; hrefSuffix: string }[] = [
   { id: "dashboard", label: "ダッシュボード", hrefSuffix: "/dashboard" },
@@ -8,6 +8,7 @@ const SECTIONS: { id: ProjectSection; label: string; hrefSuffix: string }[] = [
   { id: "plan", label: "計画", hrefSuffix: "/plan" },
   { id: "tags", label: "タグ", hrefSuffix: "/tags" },
   { id: "posts", label: "投稿履歴", hrefSuffix: "/posts" },
+  { id: "article-review", label: "記事レビュー", hrefSuffix: "/article-review" },
 ];
 
 /** プロジェクトの詳細・計画・タグページ間を行き来するための共通ナビゲーション(issue #182)。 */
