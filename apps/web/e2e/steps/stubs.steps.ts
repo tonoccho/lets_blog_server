@@ -39,6 +39,8 @@ const PROBES: Record<StubName, { path: string; method: string; body?: unknown; h
     path: '/v1beta/properties/123456789:runReport',
     method: 'POST',
     body: { metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }], dimensions: [{ name: 'date' }] },
+    // #1231 以降、スタブは Bearer のアクセストークンを検証する
+    headers: { Authorization: 'Bearer e2e-stub-ga-access-token' },
   },
   adsense: {
     path: '/v2/accounts/pub-e2e/reports:generate?dateRange=LAST_7_DAYS&dimensions=DATE',
