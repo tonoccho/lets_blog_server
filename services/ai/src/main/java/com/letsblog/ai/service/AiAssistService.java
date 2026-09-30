@@ -797,7 +797,7 @@ public class AiAssistService {
     private String computeSuggestionId(ReviewStepKey stepKey, String originalText, String message) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            String payload = stepKey.name() + ' ' + originalText + ' ' + (message == null ? "" : message);
+            String payload = stepKey.name() + '\0' + originalText + '\0' + (message == null ? "" : message);
             byte[] hash = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder(hash.length * 2);
             for (byte b : hash) {

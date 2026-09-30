@@ -1100,4 +1100,16 @@ class AiAssistServiceTest {
         assertEquals(List.of(), response.suggestions());
         org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString(), any(), any());
     }
+
+    @Test
+    void computeSuggestionId_区切りのNUL文字を含むpayloadのSHA256を返す_1496() throws Exception {
+        java.lang.reflect.Method m = AiAssistService.class.getDeclaredMethod(
+                "computeSuggestionId", ReviewStepKey.class, String.class, String.class);
+        m.setAccessible(true);
+
+        assertEquals("5b2db6318dcfb5563d500384a137538f88362cfa4992852101f2145d304f3528",
+                m.invoke(service, ReviewStepKey.FACT_CHECK, "本文", "msg"));
+        assertEquals("c583bf53b3a900ded5b3577d568c7cee92438d450ee3f4e40bb9bd5084f6ffb4",
+                m.invoke(service, ReviewStepKey.FACT_CHECK, "本文", null));
+    }
 }
