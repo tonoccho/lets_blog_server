@@ -39,6 +39,9 @@ dependencies {
     // WordPressSshOperations(SSHトランスポート、legacy-apiのcms/sshパッケージから移設)。
     implementation 'com.hierynomus:sshj:0.38.0'
 
+    // PR上のarticle.mdのfront matter(YAML)を読む(issue #1338)。バージョンはSpring Bootの依存管理に従う。
+    implementation 'org.yaml:snakeyaml'
+
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
 
     compileOnly 'org.projectlombok:lombok'

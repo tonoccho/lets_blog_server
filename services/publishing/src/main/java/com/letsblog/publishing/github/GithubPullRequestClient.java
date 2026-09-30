@@ -6,8 +6,10 @@ import com.letsblog.publishing.config.LegacyJacksonRestClientConfig;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -31,6 +33,12 @@ public class GithubPullRequestClient {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(15);
+
+    private static final String GITHUB_JSON = "application/vnd.github+json";
+    private static final String GITHUB_RAW = "application/vnd.github.raw";
+    private static final int FILES_PER_PAGE = 100;
+    /** GitHubが変更ファイル一覧で返す上限(3000件)を{@link #FILES_PER_PAGE}件ずつ辿った場合のページ数。 */
+    private static final int MAX_FILE_PAGES = 30;
 
     private final RestClient client;
 
@@ -97,14 +105,88 @@ public class GithubPullRequestClient {
         return branch;
     }
 
+    /**
+     * PRの変更ファイル一覧(パスと状態)を返す(issue #1338)。{@code per_page=100}でページを辿り、
+     * 100件未満のページで止める。GitHubは変更ファイルを最大3000件までしか返さないため、
+     * 辿るページ数の上限もそこに合わせる。
+     */
+    public List<GithubChangedFile> listPullRequestFiles(GithubAccess access, int number) {
+        List<GithubChangedFile> result = new ArrayList<>();
+        for (int page = 1; page <= MAX_FILE_PAGES; page++) {
+            JsonNode response = get(access, "Pull Requestの変更ファイル取得",
+                    "Pull Request #" + number + " が見つかりません: " + slug(access),
+                    "/repos/{owner}/{repo}/pulls/" + number + "/files?per_page=" + FILES_PER_PAGE + "&page=" + page);
+            if (response == null || !response.isArray()) {
+                break;
+            }
+            for (JsonNode node : response) {
+                result.add(new GithubChangedFile(node.path("filename").asText(""), node.path("status").asText("")));
+            }
+            if (response.size() < FILES_PER_PAGE) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * {@code ref}(コミットSHAまたはブランチ名)時点のファイルの中身を返す(issue #1338)。
+     *
+     * <p>contents APIは1MBを超えるファイルの{@code content}を返さない({@code null}または空で{@code size}のみ)。
+     * アイキャッチ画像は容易に1MBを超えるため、その場合は{@code git/blobs/{sha}}を
+     * {@code Accept: application/vnd.github.raw}で読み直す(blobs APIの通常のJSON応答は1MB超で
+     * base64が肥大し上限にも当たるため、rawで生のバイト列を受ける)。
+     */
+    public byte[] getFileContent(GithubAccess access, String path, String ref) {
+        List<Object> vars = new ArrayList<>();
+        vars.add(access.owner());
+        vars.add(access.repo());
+        StringBuilder template = new StringBuilder("/repos/{owner}/{repo}/contents");
+        int index = 0;
+        for (String segment : path.split("/")) {
+            template.append("/{s").append(index++).append('}');
+            vars.add(segment);
+        }
+        template.append("?ref={ref}");
+        vars.add(ref);
+        String notFound = "ファイルが見つかりません: " + path + " (ref: " + ref + ", " + slug(access) + ")";
+        JsonNode response = exchange(access, "ファイルの取得", notFound, MediaType.parseMediaType(GITHUB_JSON),
+                JsonNode.class, template.toString(), vars.toArray());
+        if (response == null) {
+            throw new GithubApiException("GitHubから空の応答を受け取りました(" + path + ")");
+        }
+        JsonNode content = response.path("content");
+        if (content.isTextual() && "base64".equals(response.path("encoding").asText("base64"))
+                && (!content.asText().isEmpty() || response.path("size").asLong(0) == 0)) {
+            return Base64.getMimeDecoder().decode(content.asText());
+        }
+        String sha = response.path("sha").asText("");
+        if (sha.isBlank()) {
+            throw new GithubApiException("GitHubの応答からファイルの内容もblobのshaも読み取れませんでした: " + path);
+        }
+        byte[] raw = exchange(access, "blobの取得", "blobが見つかりません: " + path + " (" + sha + ")",
+                MediaType.parseMediaType(GITHUB_RAW), byte[].class, "/repos/{owner}/{repo}/git/blobs/{sha}",
+                access.owner(), access.repo(), sha);
+        if (raw == null || raw.length == 0) {
+            throw new GithubApiException("GitHubから空の応答を受け取りました(blob " + sha + ": " + path + ")");
+        }
+        return raw;
+    }
+
     private JsonNode get(GithubAccess access, String action, String notFoundMessage, String uriTemplate) {
+        return exchange(access, action, notFoundMessage, MediaType.parseMediaType(GITHUB_JSON), JsonNode.class,
+                uriTemplate, access.owner(), access.repo());
+    }
+
+    private <T> T exchange(GithubAccess access, String action, String notFoundMessage, MediaType accept,
+            Class<T> type, String uriTemplate, Object... uriVariables) {
         try {
             return client.get()
-                    .uri(uriTemplate, access.owner(), access.repo())
+                    .uri(uriTemplate, uriVariables)
                     .header("Authorization", "Bearer " + access.token())
-                    .header("Accept", "application/vnd.github+json")
+                    .accept(accept)
                     .retrieve()
-                    .body(JsonNode.class);
+                    .body(type);
         } catch (RestClientResponseException e) {
             throw new GithubApiException(errorMessage(e, action, notFoundMessage), e);
         } catch (RestClientException e) {

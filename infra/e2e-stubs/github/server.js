@@ -17,8 +17,9 @@
  *   GET    /repos/{owner}/{repo}/pulls/{number}/files
  *   PUT    /repos/{owner}/{repo}/pulls/{number}/merge
  *   DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
- *   GET    /repos/{owner}/{repo}/contents/{path}?ref=
- *   GET    /repos/{owner}/{repo}/git/blobs/{sha}
+ *   GET    /repos/{owner}/{repo}/contents/{path}?ref=      (ref はブランチ名または head の sha)
+ *   PUT    /repos/{owner}/{repo}/contents/{path}           (branch へファイルを置く/更新する。head の sha が進む)
+ *   GET    /repos/{owner}/{repo}/git/blobs/{sha}           (Accept: application/vnd.github.raw なら生のバイト列)
  *   GET|POST /repos/{owner}/{repo}/issues/{number}/comments   (PR も Issue として扱う)
  * PR を作るとき head ブランチがスタブに無ければ、空のブランチを作る(実 GitHub なら 422 だが、
  * スタブは受け入れテストが毎回一意な head を使えるよう寛容にしている)。
@@ -97,13 +98,23 @@ function seedRepo() {
             head: 'article/e2e-published', base: DEFAULT_BRANCH, merged: true,
             merge_commit_sha: commitSha('merged-202') }],
   ]);
-  return { branches, prs, comments: [] };
+  return { branches, prs, comments: [], commits: new Map() };
 }
 
 let repo = seedRepo();
 
+/** ブランチへ PUT contents するたびに増える。head の sha を「コミットが積まれた」ことで変えるため。 */
 function headSha(pr) {
-  return commitSha(`${pr.head}`);
+  return commitSha(`${pr.head}${(repo.commits.get(pr.head) || 0) > 0 ? `#${repo.commits.get(pr.head)}` : ''}`);
+}
+
+/** contents の ref(ブランチ名、または PR の head sha)からブランチ名を引く。 */
+function resolveBranch(ref) {
+  if (repo.branches.has(ref)) return ref;
+  for (const pr of repo.prs.values()) {
+    if (headSha(pr) === ref) return pr.head;
+  }
+  return undefined;
 }
 
 function prToApi(pr) {
@@ -314,7 +325,8 @@ createStub({
     const contentsMatch = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(pathname);
     if (contentsMatch && method === 'GET') {
       const path = decodeURIComponent(contentsMatch[1]);
-      const found = (repo.branches.get(query.get('ref') || DEFAULT_BRANCH) || new Map()).get(path);
+      const branch = resolveBranch(query.get('ref') || DEFAULT_BRANCH);
+      const found = (branch && repo.branches.get(branch) || new Map()).get(path);
       if (!found) {
         sendJson(res, 404, NOT_FOUND);
         return true;
@@ -327,12 +339,42 @@ createStub({
       });
       return true;
     }
+    if (contentsMatch && method === 'PUT') {
+      const forbidden = writeForbidden(req);
+      if (forbidden) {
+        sendJson(res, forbidden.status, forbidden.body);
+        return true;
+      }
+      const path = decodeURIComponent(contentsMatch[1]);
+      const payload = parseJson(body);
+      const branch = payload.branch || DEFAULT_BRANCH;
+      if (!repo.branches.has(branch)) {
+        sendJson(res, 404, NOT_FOUND);
+        return true;
+      }
+      const files = repo.branches.get(branch);
+      const existed = files.has(path);
+      const created = file(Buffer.from(payload.content || '', 'base64'));
+      files.set(path, created);
+      repo.commits.set(branch, (repo.commits.get(branch) || 0) + 1);
+      sendJson(res, existed ? 200 : 201, {
+        content: { type: 'file', name: path.split('/').pop(), path, sha: created.sha, size: created.content.length },
+        commit: { sha: commitSha(`${branch}#${repo.commits.get(branch)}`), message: payload.message || '' },
+      });
+      return true;
+    }
 
     const blobMatch = /^\/repos\/[^/]+\/[^/]+\/git\/blobs\/([0-9a-f]+)$/.exec(pathname);
     if (blobMatch && method === 'GET') {
       for (const files of repo.branches.values()) {
         for (const f of files.values()) {
           if (f.sha === blobMatch[1]) {
+            // 1MB 超の取得はこの経路を Accept: application/vnd.github.raw で使う(生のバイト列を返す)。
+            if (String(req.headers.accept || '').includes('application/vnd.github.raw')) {
+              res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': f.content.length });
+              res.end(f.content);
+              return true;
+            }
             sendJson(res, 200, {
               sha: f.sha, size: f.content.length, encoding: 'base64', content: f.content.toString('base64'),
             });

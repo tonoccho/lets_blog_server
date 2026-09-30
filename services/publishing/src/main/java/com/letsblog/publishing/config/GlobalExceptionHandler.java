@@ -13,6 +13,7 @@ import com.letsblog.publishing.service.InvalidPlantUmlTagException;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
 import com.letsblog.publishing.service.ProjectNotFoundException;
 import com.letsblog.publishing.service.ProvisioningException;
+import com.letsblog.publishing.service.PullRequestArticleException;
 import com.letsblog.publishing.service.SiteNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.servlet.autoconfigure.MultipartProperties;
@@ -176,6 +177,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(GithubApiException.class)
     public ResponseEntity<ErrorResponse> handleGithubApiException(GithubApiException e) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** PRから記事を取り出せない理由(issue #1338)。見つからない404・1 PR = 1 記事違反409・不正な記事422。 */
+    @ExceptionHandler(PullRequestArticleException.class)
+    public ResponseEntity<ErrorResponse> handlePullRequestArticle(PullRequestArticleException e) {
+        HttpStatus status = switch (e.getKind()) {
+            case NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case MULTIPLE -> HttpStatus.CONFLICT;
+            case INVALID -> HttpStatus.UNPROCESSABLE_ENTITY;
+        };
+        return ResponseEntity.status(status).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MediaRenderException.class)
