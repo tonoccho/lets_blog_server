@@ -849,6 +849,15 @@ requireProjectMemberOrAdmin をコントローラ側で呼ぶ点は同じ(プロ
 | POST .../skeleton | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#712) |
 | DELETE .../preview-post | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#712) |
 
+## ArticleReviewController (1エンドポイント、ベースパス `/api/projects/{projectId}/article-review`)
+
+publishing-service所有(issue #1337、Epic #1333)。プロジェクトのGitHubリポジトリで開いているPull Requestを返す。
+プロジェクトメンバー判定は `ArticlePreviewController` と同じ `requireProjectMemberOrAdmin` を使う。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET .../pull-requests | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#1337) |
+
 ## AuditLogController (1エンドポイント、ベースパス `/api/audit-logs`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |

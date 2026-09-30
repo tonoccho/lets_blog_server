@@ -58,6 +58,8 @@ const ROUTES: Route[] = [
   { pattern: '/api/posts/*/*', service: PUBLISHING },
   // 記事プラン(壁打ちチャット・構成提案・Issue操作)は ai-service(issue #574/#659)。
   { pattern: '/api/projects/*/article-plan/**', service: AI },
+  // 記事レビュー(レビュー待ちPRの一覧など)は publishing-service(issue #1337)。
+  { pattern: '/api/projects/*/article-review/**', service: PUBLISHING },
   // 画像生成プロンプト生成は ai-service(issue #583で legacy-api から移設。専用ルートが無かった
   // 頃は下の project ルートへ先勝ちマッチして404になっていた、issue #771)。
   { pattern: '/api/projects/*/ai/generate-image-prompt', service: AI },

@@ -5,6 +5,7 @@ import com.letsblog.publishing.cms.CmsApiException;
 import com.letsblog.publishing.cms.agent.AgentOperationException;
 import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import com.letsblog.publishing.cms.ssh.SshOperationException;
+import com.letsblog.publishing.github.GithubApiException;
 import com.letsblog.publishing.render.MediaRenderException;
 import com.letsblog.publishing.service.ForbiddenException;
 import com.letsblog.publishing.service.IdentityServiceUnavailableException;
@@ -169,6 +170,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(PostNotFoundException.class)
     public ResponseEntity<ErrorResponse> handlePostNotFound(PostNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** GitHub APIの失敗(認証失敗・権限不足・レート制限など、issue #1337)。汎用の500にせず、原因の分かる文面を502で返す。 */
+    @ExceptionHandler(GithubApiException.class)
+    public ResponseEntity<ErrorResponse> handleGithubApiException(GithubApiException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MediaRenderException.class)

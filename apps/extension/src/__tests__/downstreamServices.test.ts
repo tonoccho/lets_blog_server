@@ -52,6 +52,8 @@ describe('downstreamServiceFor', () => {
     ['/api/projects/3/article-plan/chat', 'ai'],
     ['/api/projects/3/article-plan/categories/hierarchy', 'ai'],
     ['/api/projects/3/article-plan/issues/12/assign', 'ai'],
+    // 記事レビュー(PR一覧)は publishing-service(issue #1337)。project の catch-all より前。
+    ['/api/projects/3/article-review/pull-requests', 'publishing'],
     // media-service(画像生成は issue #583 で legacy-api から media へ移設)
     ['/api/ai/image', 'media'],
     ['/api/ai/image-options?projectId=3', 'media'],

@@ -1,5 +1,8 @@
 package com.letsblog.publishing.client;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.service.ProjectNotFoundException;
@@ -31,6 +34,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class ProjectServiceClient {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
@@ -88,6 +92,53 @@ public class ProjectServiceClient {
 
     public record ProjectBridge(
             Long id, Long localSiteId, Long testSiteId, Long productionSiteId, String masterEnvironment) {
+    }
+
+    /** project-serviceのgithub-accessブリッジが返す、GitHubのトークンとowner/repo(issue #1337)。 */
+    public record GithubAccess(String token, String owner, String repo) {
+    }
+
+    /**
+     * プロジェクトに紐づくGitHubアクセス情報を解決する(issue #1337)。トークンの解決規則
+     * (プロジェクト自身のトークン優先、無ければ操作者本人の設定)はproject-service側が持ち、
+     * ここでは呼ぶだけで新しい規則を作らない。リポジトリ・トークン未設定はproject-serviceが409で
+     * 原因の分かる文面を返すので、その文面をそのまま{@link IllegalStateException}のメッセージにする
+     * (publishing-serviceのGlobalExceptionHandlerが409として返す)。
+     */
+    public GithubAccess resolveGithubAccess(Long projectId, Long actorUserId) {
+        try {
+            GithubAccess result = authorized(restClient.get()
+                    .uri("/api/internal/project/projects/{projectId}/github-access?actorUserId={actorUserId}",
+                            projectId, actorUserId))
+                    .retrieve()
+                    .body(GithubAccess.class);
+            if (result == null) {
+                throw new IllegalStateException("project-serviceから空の応答を受け取りました");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                throw new ProjectNotFoundException("id " + projectId + " のプロジェクトは登録されていません");
+            }
+            if (e.getStatusCode() == HttpStatus.CONFLICT) {
+                throw new IllegalStateException(conflictMessage(e), e);
+            }
+            throw new IllegalStateException(
+                    "project-serviceのgithub-access呼び出しに失敗しました: " + bodyOrMessage(e), e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException("project-serviceのgithub-access呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /** 409の本文({@code {"error":"..."}})から利用者向けの文面を取り出す。JSONでなければ本文をそのまま使う。 */
+    private String conflictMessage(RestClientResponseException e) {
+        String body = bodyOrMessage(e);
+        try {
+            JsonNode error = OBJECT_MAPPER.readTree(body).path("error");
+            return error.isTextual() && !error.asText().isBlank() ? error.asText() : body;
+        } catch (JsonProcessingException | RuntimeException parseFailure) {
+            return body;
+        }
     }
 
     /** PostPublishService/PostDeleteServiceが使う。未登録なら{@link SiteNotFoundException}。 */

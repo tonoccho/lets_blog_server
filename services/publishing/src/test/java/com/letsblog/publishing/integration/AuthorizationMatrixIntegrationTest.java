@@ -55,7 +55,7 @@ class AuthorizationMatrixIntegrationTest {
      * publishing-serviceがgateway経由で外部へ公開している全エンドポイント
      * ({@code posts-publish-legacy}・{@code posts-delete-legacy}・{@code publishing}・
      * {@code project-bulk-management-legacy}・{@code project-asset-images-legacy}・
-     * {@code project-preview-legacy}ルート)と、サービス間内部ブリッジ
+     * {@code project-preview-legacy}・{@code project-article-review}ルート)と、サービス間内部ブリッジ
      * ({@code /api/internal/publishing/**}・{@code /api/internal/ai/**}・
      * {@code /api/internal/project/cms/**}。#707時点から認証必須で、呼び出し元はBearerトークンを
      * 転送する。docs/SYNC_SERVICE_CALLS.md参照)。
@@ -76,6 +76,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/preview/theme-css"),
                 new Endpoint("POST", "/api/projects/1/preview/skeleton"),
                 new Endpoint("DELETE", "/api/projects/1/preview/preview-post"),
+
+                // -- ArticleReviewController --
+                new Endpoint("GET", "/api/projects/1/article-review/pull-requests"),
 
                 // -- BulkManagementController --
                 new Endpoint("POST", "/api/projects/1/bulk-management/apply"),

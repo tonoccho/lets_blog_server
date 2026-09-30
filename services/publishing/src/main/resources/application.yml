@@ -107,6 +107,9 @@ app:
   # サイト本体・CMS認証情報(project-serviceが所有、#575設計判断2)の内部ブリッジ呼び出し先
   # (ProjectServiceClient)。
   project-service-uri: ${PROJECT_SERVICE_URI:http://localhost:8080}
+  # GitHub REST APIのベースURL(GithubPullRequestClient、issue #1337)。受け入れテストが
+  # GitHubスタブへ向けられるよう設定値にしてある(ai-serviceのapp.github-api-base-urlと同じキー・既定値)。
+  github-api-base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
   # Markdownレンダリング・postsテーブルの読み書き(content-serviceが所有、#575設計判断1)の
   # 内部ブリッジ呼び出し先(ContentServiceClient)。
   content-service-uri: ${CONTENT_SERVICE_URI:http://localhost:8080}

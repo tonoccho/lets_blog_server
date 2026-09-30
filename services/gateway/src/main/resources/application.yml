@@ -275,6 +275,13 @@ app:
         uri: ${AI_SERVICE_URI:http://ai:8080}
         paths:
           - /api/projects/*/article-plan/**
+      # ArticleReviewController(レビュー待ちPRの一覧など、Epic #1333)はpublishing-serviceが持つ
+      # (issue #1337)。パスは/api/projects/**配下のままなので、より広い/api/projects/**(下のproject
+      # ルート)より先にここでマッチさせる。欠けると先勝ちでproject-serviceに落ちて404になる。
+      - id: project-article-review
+        uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
+        paths:
+          - /api/projects/*/article-review/**
       # Project/Site本体(CRUD・環境紐付け・CMS/WordPress自動プロビジョニング・サイト管理)を
       # project-serviceへ移設した(issue #577 stage2)。上記の、project-serviceへ移設していない
       # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys/
