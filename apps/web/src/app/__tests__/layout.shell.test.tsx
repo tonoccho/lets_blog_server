@@ -10,7 +10,11 @@ jest.mock('next/font/google', () => ({
 }))
 jest.mock('next/navigation', () => ({ useServerInsertedHTML: jest.fn(), usePathname: () => '/' }))
 jest.mock('@/lib/session', () => ({ getSession: () => Promise.resolve({ user: { role: 'user', email: 'u@example.com' } }) }))
-jest.mock('../HeaderNav', () => ({ HeaderNav: () => <nav /> }))
+jest.mock('../SideNav', () => ({
+  SideNavProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SideNavToggle: () => null,
+  SideNav: () => <aside data-testid="side-nav" />,
+}))
 jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => null }))
@@ -38,5 +42,15 @@ describe('RootLayout three-tier full-width shell (#1487)', () => {
     expect(mainTag).toContain('px-4')
     expect(mainTag).toContain('flex-1')
     expect(html.slice(h, html.indexOf('</header>'))).toContain('px-4')
+  })
+
+  it('places the side menu left of main inside the middle row, with no horizontal header nav', async () => {
+    const html = renderToStaticMarkup((await RootLayout({ children: <p>c</p> })) as ReactElement)
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'))
+    expect(header).not.toContain('<nav')
+    const aside = html.indexOf('data-testid="side-nav"')
+    expect(aside).toBeGreaterThan(html.indexOf('</header>'))
+    expect(aside).toBeLessThan(html.indexOf('<main'))
+    expect(html.indexOf('<main')).toBeLessThan(html.indexOf('<footer'))
   })
 })

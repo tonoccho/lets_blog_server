@@ -13,8 +13,10 @@ jest.mock('next/navigation', () => ({ useServerInsertedHTML: jest.fn(), usePathn
 const getSession = jest.fn()
 jest.mock('@/lib/session', () => ({ getSession: () => getSession() }))
 
-jest.mock('../HeaderNav', () => ({
-  HeaderNav: ({ navItems }: { navItems: unknown[] }) => <nav data-count={navItems.length} />,
+jest.mock('../SideNav', () => ({
+  SideNavProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SideNavToggle: () => null,
+  SideNav: ({ navItems }: { navItems: unknown[] }) => <nav data-count={navItems.length} />,
 }))
 jest.mock('../Footer', () => ({ Footer: () => <footer /> }))
 jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
@@ -40,6 +42,7 @@ describe('RootLayout theme script placement (#1238)', () => {
     expect(html.indexOf('<body')).toBeLessThan(html.indexOf('data-testid="theme-script"'))
     expect(html).not.toContain('<script')
     expect(html).toContain('child')
+    expect(html).not.toContain('<nav')
   })
 
   it('shows the nav for a regular user', async () => {

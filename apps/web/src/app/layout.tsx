@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { getSession } from "@/lib/session";
 import { NAV_ITEMS, ADMIN_NAV_ITEMS } from "@/lib/navigation";
 import { Footer } from "./Footer";
-import { HeaderNav } from "./HeaderNav";
+import { SideNav, SideNavProvider, SideNavToggle } from "./SideNav";
 import { LogoutButton } from "./LogoutButton";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { ThemeScript } from "./ThemeScript";
@@ -47,25 +47,30 @@ export default async function RootLayout({
         <ThemeScript />
         <SessionProvider session={session}>
           <I18nProvider>
-            <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-              <div className="px-4">
-                <div className="flex items-center gap-6 py-3">
-                  <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
-                  {session && <HeaderNav navItems={navItems} />}
-                </div>
-                {session && (
-                  <div className="flex items-center justify-end gap-4 border-t border-neutral-200 px-0 py-3 text-sm dark:border-neutral-800">
-                    <span className="text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
-                    <LanguageSwitcher />
-                    <ThemeSwitcher />
-                    <LogoutButton />
-                    <VscodeExtensionDownloadIconButton />
+            <SideNavProvider>
+              <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+                <div className="px-4">
+                  <div className="flex items-center gap-6 py-3">
+                    {session && <SideNavToggle />}
+                    <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
                   </div>
-                )}
+                  {session && (
+                    <div className="flex items-center justify-end gap-4 border-t border-neutral-200 px-0 py-3 text-sm dark:border-neutral-800">
+                      <span className="text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
+                      <LanguageSwitcher />
+                      <ThemeSwitcher />
+                      <LogoutButton />
+                      <VscodeExtensionDownloadIconButton />
+                    </div>
+                  )}
+                </div>
+              </header>
+              <div className="flex min-w-0 flex-1">
+                {session && <SideNav navItems={navItems} />}
+                <main className="min-w-0 w-full flex-1 px-4 py-8">{children}</main>
               </div>
-            </header>
-            <main className="w-full flex-1 px-4 py-8">{children}</main>
-            <Footer />
+              <Footer />
+            </SideNavProvider>
           </I18nProvider>
         </SessionProvider>
       </body>

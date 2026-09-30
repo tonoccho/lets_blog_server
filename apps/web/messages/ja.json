@@ -17,14 +17,17 @@
     "tagDesign": "グローバルタグデザイン"
   },
   "header": {
-    "admin": "管理",
-    "openAdminMenu": "管理メニューを開く",
-    "openMenu": "メニューを開く",
-    "closeMenu": "メニューを閉じる",
-    "navigation": "ナビゲーション",
     "logout": "ログアウト",
     "downloadVscodeExtension": "VSCode拡張機能をダウンロード (.vsix)",
     "downloadVscodeExtensionPending": "VSCode拡張機能をビルド中…"
+  },
+  "sideNav": {
+    "admin": "管理",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる",
+    "navigation": "ナビゲーション",
+    "collapse": "メニューを折りたたむ",
+    "expand": "メニューを展開する"
   },
   "dashboard": {
     "title": "ダッシュボード",

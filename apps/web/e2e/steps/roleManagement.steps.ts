@@ -213,11 +213,12 @@ When('そのメンバーがブラウザで再ログインする', async ({ page,
 });
 
 Then('管理メニューが表示される', async ({ page }) => {
-  await expect(page.getByRole('button', { name: '管理メニューを開く' })).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId('side-nav').getByRole('link', { name: 'ロール管理', exact: true })).toBeVisible({ timeout: 5000 });
 });
 
 Then('管理メニューが表示されない', async ({ page }) => {
-  await expect(page.getByRole('button', { name: '管理メニューを開く' })).toHaveCount(0);
+  await expect(page.getByTestId('side-nav')).toBeVisible({ timeout: 5000 });
+  await expect(page.getByRole('link', { name: 'ロール管理', exact: true })).toHaveCount(0);
 });
 
 When('管理者がそのメンバーをadminへ昇格させる', async ({ request, ctx }) => {

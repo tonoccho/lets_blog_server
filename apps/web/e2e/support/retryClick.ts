@@ -34,7 +34,7 @@ import { expect, type Dialog, type Locator, type Page } from '@playwright/test';
  * それ以降クリックが一切飛ばなくなる。現在の呼び出し箇所はどちらもこの前提を満たして
  * いる —— `timezoneOverride.steps.ts`の`[data-testid="timezone-select"]`は「個人設定」
  * タブを開くまで描画されず(`Tabs`は活性タブの内容だけを描画する)、
- * `uiQuality.steps.ts`の`role="dialog"`ドロワーは`HeaderNav`が`isOpen`のときだけ
+ * `uiQuality.steps.ts`の`role="dialog"`ドロワーは`SideNav`(旧`HeaderNav`)が`drawerOpen`のときだけ
  * 条件描画する。
  *
  * issue #1360で、この残存リスクを緩和するため、**2回目以降の試行に限り**、クリックの

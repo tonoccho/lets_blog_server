@@ -298,23 +298,24 @@ Then('欠落している翻訳キーは無い', async ({ ctx }) => {
   ).toEqual([]);
 });
 
-Then('header.adminキーを欠落させた状態を再現すると、その欠落が検出される', async ({ ctx }) => {
+Then('管理見出しのキーを欠落させた状態を再現すると、その欠落が検出される', async ({ ctx }) => {
   const callSites = ctx.at18CallSites as ReturnType<typeof scanTranslationCallSites>;
   const messagesByLocale = ctx.at18MessagesByLocale as ReturnType<typeof loadLocaleMessages>;
-  const reproduced = withoutKey(messagesByLocale, 'ja', 'header', 'admin');
+  const reproduced = withoutKey(messagesByLocale, 'ja', 'sideNav', 'admin');
   const missing = findMissingTranslations(callSites, reproduced);
-  const detected = missing.some((entry) => entry.locale === 'ja' && entry.namespace === 'header' && entry.key === 'admin');
+  const detected = missing.some((entry) => entry.locale === 'ja' && entry.namespace === 'sideNav' && entry.key === 'admin');
   expect(
     detected,
-    '#718(header.adminキー欠落)を再現しても検出できない。チェック関数自体が壊れている'
+    '#718(管理見出しのキー欠落)を再現しても検出できない。チェック関数自体が壊れている'
   ).toBe(true);
 });
 
 // #1317: 以前は `button[aria-expanded] span.font-medium` を `.first()` で掴んでいた。
 // 現状のDOMではモバイル用ハンバーガーボタンは`span.font-medium`を持たないため実害は無いが、
 // 要素が増えたときの取り違えを防ぐため、管理者メニュー見出し専用の`data-testid`
-// (`apps/web/src/app/HeaderNav.tsx`)を一意に指す形に変える。
-const ADMIN_LABEL_LOCATOR = '[data-testid="header-admin-menu-label"]';
+// (`apps/web/src/app/SideNav.tsx`、#1488で水平ヘッダーナビから左メニューへ移した)を
+// 一意に指す形に変える。
+const ADMIN_LABEL_LOCATOR = '[data-testid="side-nav-admin-label"]';
 
 /**
  * 表示言語を切り替える(#1317)。
@@ -360,15 +361,14 @@ When('表示言語を英語に切り替える', async ({ page }) => {
   await switchDisplayLocale(page, 'en');
 });
 
-Then('ヘッダーのラベルが英語表示になる', async ({ page }) => {
-  await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.header.admin);
+Then('左メニューの管理見出しが英語表示になる', async ({ page }) => {
+  await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.sideNav.admin);
 });
 
 Then('デスクトップ幅のナビゲーションの全項目が英語表示になる', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/', { waitUntil: 'load' });
-  await page.getByLabel(messagesEn.header.openAdminMenu).click();
-  const nav = page.locator('header');
+  const nav = page.getByTestId('side-nav');
   for (const label of Object.values(messagesEn.nav)) {
     await expect(nav.getByRole('link', { name: label, exact: true }).first()).toBeVisible();
   }
@@ -377,8 +377,8 @@ Then('デスクトップ幅のナビゲーションの全項目が英語表示�
 Then('モバイル幅のナビゲーションの全項目が英語表示になる', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 800 });
   await page.goto('/', { waitUntil: 'load' });
-  await page.getByLabel(messagesEn.header.openMenu).click();
-  const drawer = page.getByRole('dialog', { name: messagesEn.header.navigation });
+  await page.getByLabel(messagesEn.sideNav.openMenu).click();
+  const drawer = page.getByRole('dialog', { name: messagesEn.sideNav.navigation });
   for (const label of Object.values(messagesEn.nav)) {
     await expect(drawer.getByRole('link', { name: label, exact: true })).toBeVisible();
   }
@@ -388,8 +388,8 @@ When('ページを再読み込みする', async ({ page }) => {
   await page.reload({ waitUntil: 'load' });
 });
 
-Then('ヘッダーのラベルは英語表示のままである', async ({ page }) => {
-  await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.header.admin);
+Then('左メニューの管理見出しは英語表示のままである', async ({ page }) => {
+  await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.sideNav.admin);
 });
 
 // タイムゾーン(issue #944 シナリオ11)
@@ -545,8 +545,8 @@ When('ビューポート幅{int}pxでモバイル用ナビゲーションを開�
   await page.setViewportSize({ width, height: 800 });
   await page.goto('/', { waitUntil: 'load' });
 
-  const openButton = page.getByRole('button', { name: messagesJa.header.openMenu });
-  const dialog = page.getByRole('dialog', { name: messagesJa.header.navigation });
+  const openButton = page.getByRole('button', { name: messagesJa.sideNav.openMenu });
+  const dialog = page.getByRole('dialog', { name: messagesJa.sideNav.navigation });
   // issue #1360: `goto`直後はReactのハイドレーションが完了しておらず、サーバ描画済みの
   // ハンバーガーボタンをクリックしても空振りすることがある(#1360本文、#1381参照)。
   // このボタンは開閉トグルのため、`clickUntilVisible`のstate-aware化(#1360で追加)

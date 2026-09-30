@@ -17,14 +17,17 @@
     "tagDesign": "Global Tag Design"
   },
   "header": {
-    "admin": "Admin",
-    "openAdminMenu": "Open admin menu",
-    "openMenu": "Open menu",
-    "closeMenu": "Close menu",
-    "navigation": "Navigation",
     "logout": "Logout",
     "downloadVscodeExtension": "Download VSCode extension (.vsix)",
     "downloadVscodeExtensionPending": "Building VSCode extension…"
+  },
+  "sideNav": {
+    "admin": "Admin",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "navigation": "Navigation",
+    "collapse": "Collapse menu",
+    "expand": "Expand menu"
   },
   "dashboard": {
     "title": "Dashboard",

@@ -95,7 +95,7 @@ export interface MissingTranslation {
  *
  * 欠落しているキー(そのロケールの該当namespaceに存在しない、または値が空文字)を
  * ロケールごとにまとめて返す。1つの `namespace.key` を複数ファイルが呼んでいる場合は
- * `usedIn` にまとめる(#718は `HeaderNav.tsx` 単独の呼び出しだったが、将来複数箇所から
+ * `usedIn` にまとめる(#718は `SideNav.tsx` 単独の呼び出しだったが、将来複数箇所から
  * 呼ばれた場合でも重複報告にならないようにする)。
  */
 export function findMissingTranslations(
