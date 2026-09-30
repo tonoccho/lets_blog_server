@@ -9,6 +9,7 @@ import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import com.letsblog.media.service.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
+import com.letsblog.media.service.InvalidPagingParameterException;
 import com.letsblog.media.service.ProhibitedContentException;
 import com.letsblog.media.service.UnsupportedBatchSizeException;
 import org.slf4j.Logger;
@@ -65,6 +66,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RequestBodyTooLargeException.class)
     public ResponseEntity<ErrorResponse> handleRequestBodyTooLarge(RequestBodyTooLargeException e) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1472: 生成画像一覧のlimit/offsetが範囲外。 */
+    @ExceptionHandler(InvalidPagingParameterException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidPagingParameter(InvalidPagingParameterException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(GeneratedImageNotFoundException.class)

@@ -1,15 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClient";
 import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
-import { deleteGeneratedImageAction, getGeneratedImageAction, updateGeneratedImageTagsAction } from "./actions";
+import {
+  deleteGeneratedImageAction,
+  fetchGalleryImagesPageAction,
+  getGeneratedImageAction,
+  updateGeneratedImageTagsAction,
+} from "./actions";
+import { GALLERY_PAGE_SIZE } from "./pageSize";
 
 const PROVIDER_LABEL: Record<string, string> = {
   COMFYUI: "ComfyUI",
   CHATGPT: "ChatGPT",
 };
 
+/** id で重複を除いて末尾へ追加する。offset 取得中に画像が作られて境界がずれても同じ画像を2度出さない(issue #1472)。 */
+function appendUnique(current: GeneratedImageSummary[], incoming: GeneratedImageSummary[]): GeneratedImageSummary[] {
+  const seen = new Set(current.map((image) => image.id));
+  return [...current, ...incoming.filter((image) => !seen.has(image.id))];
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * 生成画像の一覧。`images` は最初の1ページ(issue #1472)。末尾が画面に近づくと次のページを
+ * Server Action で取得して追加する(無限スクロール)。タグの絞り込みはサーバ側で行い、
+ * 選ぶたびに offset=0 から取り直す。
+ */
 export function ImageGalleryGrid({
   images,
   timezone,
@@ -17,6 +38,19 @@ export function ImageGalleryGrid({
   images: GeneratedImageSummary[];
   timezone: string | null;
 }) {
+  /** 表示中の一覧(絞り込み中は絞り込み後の一覧)。 */
+  const [items, setItems] = useState<GeneratedImageSummary[]>(images);
+  /** 絞り込みなしで読み込み済みの画像。タグのチップの元になる(Requirements 10)。 */
+  const [knownImages, setKnownImages] = useState<GeneratedImageSummary[]>(images);
+  /** 表示中の一覧のサーバ側での取得済み件数(重複除去前)。次の offset になる。 */
+  const [fetchedCount, setFetchedCount] = useState(images.length);
+  const [hasMore, setHasMore] = useState(images.length >= GALLERY_PAGE_SIZE);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<{ label: string; message: string; retry: () => void } | null>(null);
+  /** 最後に発行した取得の番号。古い応答(タグを切り替える前の続き)を捨てるのに使う。 */
+  const requestSeq = useRef(0);
+  const loadingRef = useRef(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<GeneratedImageDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,13 +73,83 @@ export function ImageGalleryGrid({
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
-    images.forEach((image) => (image.tags || []).forEach((tag) => set.add(tag)));
+    knownImages.forEach((image) => (image.tags || []).forEach((tag) => set.add(tag)));
     return Array.from(set).sort();
-  }, [images]);
+  }, [knownImages]);
 
-  const visibleImages = activeTag
-    ? images.filter((image) => (image.tags || []).includes(activeTag))
-    : images;
+  /** 現在の一覧の続きを取得して末尾に追加する。 */
+  function loadMore() {
+    if (loadingRef.current || !hasMore) return;
+    const seq = ++requestSeq.current;
+    const tag = activeTag;
+    loadingRef.current = true;
+    setLoading(true);
+    setLoadError(null);
+    fetchGalleryImagesPageAction(fetchedCount, tag).then(
+      (next) => {
+        if (seq !== requestSeq.current) return;
+        loadingRef.current = false;
+        setItems((current) => appendUnique(current, next));
+        if (tag === null) setKnownImages((current) => appendUnique(current, next));
+        setFetchedCount((count) => count + next.length);
+        setHasMore(next.length >= GALLERY_PAGE_SIZE);
+        setLoading(false);
+      },
+      (err) => {
+        if (seq !== requestSeq.current) return;
+        loadingRef.current = false;
+        setLoadError({ label: "続きを読み込めませんでした", message: errorMessage(err), retry: loadMore });
+        setLoading(false);
+      },
+    );
+  }
+
+  /** タグ(nullは「すべて」)を選び直し、offset=0 から取り直す。失敗したときは読み込み済みの一覧を残す。 */
+  function selectTag(tag: string | null) {
+    const seq = ++requestSeq.current;
+    loadingRef.current = true;
+    setLoading(true);
+    setLoadError(null);
+    fetchGalleryImagesPageAction(0, tag).then(
+      (first) => {
+        if (seq !== requestSeq.current) return;
+        loadingRef.current = false;
+        setActiveTag(tag);
+        setItems(first);
+        if (tag === null) setKnownImages(first);
+        setFetchedCount(first.length);
+        setHasMore(first.length >= GALLERY_PAGE_SIZE);
+        setLoading(false);
+      },
+      (err) => {
+        if (seq !== requestSeq.current) return;
+        loadingRef.current = false;
+        setLoadError({ label: "絞り込みを読み込めませんでした", message: errorMessage(err), retry: () => selectTag(tag) });
+        setLoading(false);
+      },
+    );
+  }
+
+  // 最新の loadMore を observer から呼ぶ(observer は state が変わるたびに作り直すので古い閉包を掴まない)。
+  const loadMoreRef = useRef(loadMore);
+  useEffect(() => {
+    loadMoreRef.current = loadMore;
+  });
+
+  // 一覧の末尾が画面に近づいたら続きを読む。observer は件数・読み込み状態が変わるたびに作り直すので、
+  // 追加した後も末尾がまだ画面内なら、作り直した直後の通知でさらに続きを読む。
+  useEffect(() => {
+    const target = sentinelRef.current;
+    if (!target || !hasMore || loading || loadError) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreRef.current();
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadError, items.length]);
 
   function openDetail(id: number) {
     setSelectedId(id);
@@ -75,6 +179,11 @@ export function ImageGalleryGrid({
     startDeleteTransition(async () => {
       try {
         await deleteGeneratedImageAction(id);
+        // 一覧はローカルの状態なので、サーバ側で消した画像をここでも取り除く(issue #1472)。
+        // 表示中の一覧から消えた分だけ、次の offset を戻す。
+        if (items.some((image) => image.id === id)) setFetchedCount((count) => count - 1);
+        setItems((current) => current.filter((image) => image.id !== id));
+        setKnownImages((current) => current.filter((image) => image.id !== id));
         closeDetail();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -88,6 +197,11 @@ export function ImageGalleryGrid({
       try {
         const result = await updateGeneratedImageTagsAction(selectedId, tags);
         setDetail(result);
+        // 一覧の画像のタグとチップにも反映する(issue #1472)。
+        const apply = (list: GeneratedImageSummary[]) =>
+          list.map((image) => (image.id === selectedId ? { ...image, tags: result.tags } : image));
+        setItems(apply);
+        setKnownImages(apply);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -144,7 +258,7 @@ export function ImageGalleryGrid({
           <span className="text-neutral-500 dark:text-neutral-400">タグで絞り込み:</span>
           <button
             type="button"
-            onClick={() => setActiveTag(null)}
+            onClick={() => selectTag(null)}
             className={`rounded-full px-2.5 py-1 ${
               activeTag === null
                 ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
@@ -157,7 +271,7 @@ export function ImageGalleryGrid({
             <button
               key={tag}
               type="button"
-              onClick={() => setActiveTag(tag === activeTag ? null : tag)}
+              onClick={() => selectTag(tag === activeTag ? null : tag)}
               className={`rounded-full px-2.5 py-1 ${
                 tag === activeTag
                   ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
@@ -170,11 +284,11 @@ export function ImageGalleryGrid({
         </div>
       )}
 
-      {visibleImages.length === 0 ? (
+      {items.length === 0 ? (
         <p className="text-neutral-500 dark:text-neutral-400">該当する画像がありません。</p>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {visibleImages.map((image) => (
+          {items.map((image) => (
             <button
               key={image.id}
               type="button"
@@ -210,6 +324,19 @@ export function ImageGalleryGrid({
               </div>
             </button>
           ))}
+        </div>
+      )}
+
+      {hasMore && <div ref={sentinelRef} aria-hidden="true" className="h-1" />}
+      {loading && <p className="text-sm text-neutral-500 dark:text-neutral-400">画像を読み込み中…</p>}
+      {loadError && (
+        <div className="flex items-center gap-3 text-sm text-red-600" role="alert">
+          <p>
+            {loadError.label}: {loadError.message}
+          </p>
+          <button type="button" onClick={loadError.retry} className="underline">
+            再試行
+          </button>
         </div>
       )}
 

@@ -10,9 +10,11 @@ import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
+import com.letsblog.media.repository.OffsetLimitPageable;
 import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
+import com.letsblog.media.service.InvalidPagingParameterException;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +42,13 @@ public class GeneratedImageController {
 
     private static final Logger log = LoggerFactory.getLogger(GeneratedImageController.class);
 
+    /**
+     * 一覧の{@code limit}の上限(issue #1472)。ギャラリーのページサイズ(24)の4倍強で、1回の応答を
+     * 数百KBに抑えつつ、画面のページサイズの変更に余裕を残す値。超過は切り詰めず400にする:
+     * 切り詰めると「返った件数がlimit未満なら終端」という呼び出し側の判定が誤るため。
+     */
+    static final int MAX_LIMIT = 100;
+
     private final GeneratedImageRepository generatedImageRepository;
     private final GeneratedImageStorageService generatedImageStorageService;
     private final ObjectMapper objectMapper;
@@ -63,11 +72,18 @@ public class GeneratedImageController {
 
     /**
      * 一覧。tag指定時は、そのタグを持つ画像だけに絞り込む(大文字小文字を区別しない完全一致、issue #281)。
+     *
+     * <p>{@code limit}/{@code offset}は省略可能(issue #1472)。{@code limit}を省略すると従来どおり
+     * 全件を返す({@code offset}だけ指定した場合はその件数を飛ばした残りを返す)。{@code limit}指定時は
+     * createdAt降順・同時刻はid降順の並びで{@code offset}件を飛ばした位置から最大{@code limit}件を返し、
+     * tag指定時は絞り込んだ後の一覧に適用する。レスポンスは常にJSON配列のまま。
      */
     @GetMapping("/api/generated-images")
     public List<GeneratedImageSummaryResponse> list(
             @RequestParam(required = false) Long projectId,
-            @RequestParam(required = false) String tag) {
+            @RequestParam(required = false) String tag,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset) {
         // projectId 指定時はそのプロジェクトのメンバーに限定する(issue #830)。
         // 未指定は「全プロジェクトの生成画像を返す」なので admin に限定する。本来は
         // 「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を
@@ -78,16 +94,45 @@ public class GeneratedImageController {
         } else {
             adminAuthorizationService.requireAdmin();
         }
-        List<GeneratedImage> images = projectId != null
-                ? generatedImageRepository.findAllByProjectIdOrderByCreatedAtDesc(projectId)
-                : generatedImageRepository.findAllByOrderByCreatedAtDesc();
-        return images.stream()
+        validatePaging(limit, offset);
+        long skip = offset == null ? 0 : offset;
+        // tagはtags_json(TEXT列)の中身なのでDBでは絞れない。tag無しでlimit指定のときだけDBで切り、
+        // それ以外は全行を読んで絞り込んだ後にメモリ上で切る(絞り込み → ページングの順を守る)。
+        boolean pagedInDatabase = tag == null && limit != null;
+        List<GeneratedImage> images = findImages(projectId, pagedInDatabase ? new OffsetLimitPageable(skip, limit) : null);
+        var summaries = images.stream()
                 .map(image -> new GeneratedImageSummaryResponse(
                         image.getId(), image.getProjectId(), image.getPrompt(),
                         image.getCheckpoint(), image.getCreatedAt(), parseTags(image.getTagsJson()),
                         image.getProvider()))
-                .filter(response -> tag == null || response.tags().stream().anyMatch(t -> t.equalsIgnoreCase(tag)))
-                .toList();
+                .filter(response -> tag == null || response.tags().stream().anyMatch(t -> t.equalsIgnoreCase(tag)));
+        if (!pagedInDatabase) {
+            summaries = summaries.skip(skip);
+            if (limit != null) {
+                summaries = summaries.limit(limit);
+            }
+        }
+        return summaries.toList();
+    }
+
+    private List<GeneratedImage> findImages(Long projectId, OffsetLimitPageable pageable) {
+        if (projectId != null) {
+            return pageable != null
+                    ? generatedImageRepository.findAllByProjectIdOrderByCreatedAtDescIdDesc(projectId, pageable)
+                    : generatedImageRepository.findAllByProjectIdOrderByCreatedAtDescIdDesc(projectId);
+        }
+        return pageable != null
+                ? generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc(pageable)
+                : generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc();
+    }
+
+    private static void validatePaging(Integer limit, Integer offset) {
+        if (limit != null && (limit < 1 || limit > MAX_LIMIT)) {
+            throw new InvalidPagingParameterException("limitは1以上" + MAX_LIMIT + "以下で指定してください");
+        }
+        if (offset != null && offset < 0) {
+            throw new InvalidPagingParameterException("offsetは0以上で指定してください");
+        }
     }
 
     @GetMapping("/api/generated-images/{id}")

@@ -7,6 +7,7 @@ jest.mock('../actions', () => ({
   getGeneratedImageAction: jest.fn(),
   deleteGeneratedImageAction: jest.fn(),
   updateGeneratedImageTagsAction: jest.fn(),
+  fetchGalleryImagesPageAction: jest.fn(),
 }))
 
 const SUMMARY: GeneratedImageSummary = {
@@ -175,21 +176,21 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     expect(screen.queryByText('タグで絞り込み:')).not.toBeInTheDocument()
   })
 
-  it('タグで絞り込むと一致しない画像が消え、もう一度押すと戻る', () => {
+  it('タグで絞り込むとサーバ側の結果に置き換わり、すべてで取り直して戻る(issue #1472: クライアント側の絞り込みはしない)', async () => {
     const tagged = { ...SUMMARY, id: 1, tags: ['猫'] }
     const other = { ...SUMMARY, id: 2, prompt: 'a dog', tags: ['犬'] }
+    const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
+    fetchPage.mockResolvedValueOnce([tagged])
+    fetchPage.mockResolvedValueOnce([tagged, other])
     render(<ImageGalleryGrid images={[tagged, other]} timezone={null} />)
 
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
-    expect(screen.queryByAltText('a dog')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByAltText('a dog')).not.toBeInTheDocument())
+    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫')
 
-    fireEvent.click(screen.getByRole('button', { name: '猫' }))
-    expect(screen.getByAltText('a dog')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '犬' }))
-    expect(screen.queryByAltText('a cute cat')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'すべて' }))
-    expect(screen.getByAltText('a cute cat')).toBeInTheDocument()
+    expect(await screen.findByAltText('a dog')).toBeInTheDocument()
+    expect(fetchPage).toHaveBeenLastCalledWith(0, null)
   })
 
   it('詳細の取得に失敗したらエラーを表示する', async () => {
@@ -407,16 +408,5 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
     await waitFor(() => {
       expect(screen.getByText('コピーできません')).toBeInTheDocument()
     })
-  })
-
-  it('タグ絞り込み中は、タグを持たない画像も除外される', () => {
-    const tagged = { ...SUMMARY, id: 1, tags: ['猫'] }
-    const untagged = { ...SUMMARY, id: 2, prompt: 'a dog', tags: undefined as unknown as string[] }
-    render(<ImageGalleryGrid images={[tagged, untagged]} timezone={null} />)
-
-    fireEvent.click(screen.getByRole('button', { name: '猫' }))
-
-    expect(screen.queryByAltText('a dog')).not.toBeInTheDocument()
-    expect(screen.getByAltText('a cute cat')).toBeInTheDocument()
   })
 })

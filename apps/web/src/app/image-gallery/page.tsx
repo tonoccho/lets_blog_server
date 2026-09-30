@@ -3,6 +3,7 @@ import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { requireSession, getViewerTimeZone } from "@/lib/session";
 import { ImageGalleryGrid } from "./ImageGalleryGrid";
+import { GALLERY_PAGE_SIZE } from "./pageSize";
 
 export default async function ImageGalleryPage() {
   // セッションが更新不能なときはここで /login へリダイレクトする(issue #1234)。
@@ -10,7 +11,7 @@ export default async function ImageGalleryPage() {
   // catch(() => [])で握り潰すため「生成画像がありません」に見えていた。
   await requireSession();
   const [imagesResult, timezone] = await Promise.all([
-    loadOrReport("image-gallery", "生成画像", listGeneratedImages(), []),
+    loadOrReport("image-gallery", "生成画像", listGeneratedImages(undefined, { limit: GALLERY_PAGE_SIZE, offset: 0 }), []),
     getViewerTimeZone(),
   ]);
   const images = imagesResult.data;

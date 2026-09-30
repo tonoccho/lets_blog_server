@@ -1478,3 +1478,146 @@ Then(
     expect(result.errorType).toBeTruthy();
   }
 );
+
+// ---- ギャラリーのページングと無限スクロール(image-gallery-paging.feature、issue #1472) ----
+
+/** ギャラリーの1ページぶんの件数。`apps/web/src/app/image-gallery/page.tsx` の GALLERY_PAGE_SIZE と一致させる。 */
+const GALLERY_PAGE_SIZE = 24;
+
+/** 一覧のサムネイル(詳細ダイアログの画像ではなくグリッドの画像)。 */
+function galleryThumbnails(page: Page): Locator {
+  return page.locator('button img[src^="/image-gallery/"]');
+}
+
+/** 画面上のサムネイルのIDを、重複を残したまま取り出す。 */
+async function thumbnailIds(page: Page): Promise<number[]> {
+  const sources = await galleryThumbnails(page).evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('src') ?? '')
+  );
+  return sources.map((src) => Number(/\/image-gallery\/(\d+)\/file/.exec(src)?.[1]));
+}
+
+/** 固定画像を古い順に作る。ctx.mediaPagingIds は作成順(先頭が最初に作った画像)。 */
+async function createPagingFixtures(
+  request: APIRequestContext,
+  ctx: Record<string, unknown>,
+  count: number,
+  taggedIndexes: number[],
+  tag?: string
+): Promise<void> {
+  const ids: number[] = [];
+  ctx.mediaPagingIds = ids;
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  for (let i = 0; i < count; i += 1) {
+    const overrides: Record<string, unknown> = {
+      prompt: `E2E paging fixture ${suffix}-${i}`,
+      provider: 'COMFYUI',
+      seed: 1_472_000 + i,
+    };
+    if (tag !== undefined && taggedIndexes.includes(i)) {
+      overrides.tagsJson = JSON.stringify([tag]);
+    }
+    ids.push(await createGeneratedImage(request, overrides));
+  }
+}
+
+Given(
+  /^ギャラリーに固定画像の生成画像を(\d+)件作成する$/,
+  async ({ ctx, request }, count: string) => {
+    await createPagingFixtures(request, ctx, Number(count), []);
+  }
+);
+
+Given(
+  /^ギャラリーに固定画像の生成画像を(\d+)件作成し、最新と最初に作成した1件にだけタグ「([^」]+)」を付ける$/,
+  async ({ ctx, request }, count: string, tag: string) => {
+    const total = Number(count);
+    await createPagingFixtures(request, ctx, total, [0, total - 1], tag);
+  }
+);
+
+Then(/^一覧のサムネイルは(\d+)件ちょうどである$/, async ({ page }, count: string) => {
+  expect(Number(count)).toBe(GALLERY_PAGE_SIZE);
+  await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+  await expect(galleryThumbnails(page)).toHaveCount(GALLERY_PAGE_SIZE);
+});
+
+Then('最初に作成した固定画像はまだ一覧に現れていない', async ({ ctx, page }) => {
+  const oldest = (ctx.mediaPagingIds as number[])[0];
+  await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+  expect(await thumbnailIds(page)).not.toContain(oldest);
+});
+
+When('最初に作成した固定画像が現れるまで一覧の末尾までスクロールする', async ({ ctx, page }) => {
+  const fixtures = ctx.mediaPagingIds as number[];
+  const oldest = fixtures[0];
+  // offset 方式なので、スクロール中に他のシナリオが画像を削除すると境界がずれて1件を飛ばすことがある
+  // (Issue #1472 の Out of Scope で許容した取りこぼし)。共有環境では並列シナリオの後片付けで起こりうるため、
+  // 固定画像が欠けていたら開き直して最初からやり直す(最大3回)。
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+          return (await thumbnailIds(page)).includes(oldest);
+        },
+        { timeout: 60_000, intervals: [300] }
+      )
+      .toBe(true);
+    const shown = await thumbnailIds(page);
+    if (fixtures.every((id) => shown.includes(id)) || attempt === 3) {
+      return;
+    }
+    await page.reload({ waitUntil: 'commit' });
+  }
+});
+
+Then(/^固定画像(\d+)件がすべて一覧にある$/, async ({ ctx, page }, count: string) => {
+  const fixtures = ctx.mediaPagingIds as number[];
+  expect(fixtures).toHaveLength(Number(count));
+  const shown = await thumbnailIds(page);
+  for (const id of fixtures) {
+    expect(shown, `固定画像 ${id} が一覧にありません`).toContain(id);
+  }
+});
+
+Then('同じ画像のサムネイルは1つずつしかない', async ({ page }) => {
+  const shown = await thumbnailIds(page);
+  expect(shown.length).toBe(new Set(shown).size);
+});
+
+When(/^タグ「([^」]+)」で絞り込む$/, async ({ page }, tag: string) => {
+  await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+  const chip = page.getByRole('button', { name: tag, exact: true });
+  // SSR 直後はまだハイドレーション前でクリックが失われる(issue #1236 と同じ事情)ので、
+  // 選択状態(黒地)になるまでクリックし直す。
+  await expect(async () => {
+    await chip.click();
+    await expect(chip).toHaveClass(/bg-neutral-900/, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+Then('一覧に表示される固定画像は最新と最初に作成した2件だけである', async ({ ctx, page }) => {
+  const fixtures = ctx.mediaPagingIds as number[];
+  const expected = [fixtures[0], fixtures[fixtures.length - 1]];
+  await expect
+    .poll(
+      async () => (await thumbnailIds(page)).filter((id) => fixtures.includes(id)).sort((a, b) => a - b),
+      { timeout: 30_000 }
+    )
+    .toEqual(expected.sort((a, b) => a - b));
+});
+
+After({ tags: '@media' }, async ({ ctx, request }) => {
+  const ids = ctx.mediaPagingIds as number[] | undefined;
+  if (ids === undefined) {
+    return;
+  }
+  const token = await adminToken(request);
+  for (const id of ids) {
+    await request.delete(`/api/generated-images/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+});

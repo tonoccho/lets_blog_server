@@ -452,9 +452,22 @@ export function listGenerationJobs(): Promise<GenerationJob[]> {
   return apiFetch<GenerationJob[]>('/api/generation-jobs');
 }
 
-export function listGeneratedImages(projectId?: number): Promise<GeneratedImageSummary[]> {
-  const query = projectId ? `?projectId=${projectId}` : '';
-  return apiFetch<GeneratedImageSummary[]>(`/api/generated-images${query}`);
+/**
+ * 生成画像の一覧。`options` を省略すると従来どおり全件を返す(issue #1472)。
+ * `limit` を指定すると createdAt 降順・同時刻は id 降順の並びで `offset` 件を飛ばした位置から最大 `limit` 件、
+ * `tag` は絞り込んだ後の一覧に対して適用される。
+ */
+export function listGeneratedImages(
+  projectId?: number,
+  options: { limit?: number; offset?: number; tag?: string } = {},
+): Promise<GeneratedImageSummary[]> {
+  const params = new URLSearchParams();
+  if (projectId) params.set('projectId', String(projectId));
+  if (options.tag !== undefined) params.set('tag', options.tag);
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.offset !== undefined) params.set('offset', String(options.offset));
+  const query = params.toString();
+  return apiFetch<GeneratedImageSummary[]>(`/api/generated-images${query ? `?${query}` : ''}`);
 }
 
 export function getGeneratedImage(id: number): Promise<GeneratedImageDetail> {

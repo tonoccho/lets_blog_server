@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/session";
+import { GALLERY_PAGE_SIZE } from "./pageSize";
 import {
   deleteGeneratedImage,
   getGeneratedImage,
+  listGeneratedImages,
   updateGeneratedImageTags,
   type GeneratedImageDetail,
+  type GeneratedImageSummary,
 } from "@/lib/apiClient";
 
 /**
@@ -43,4 +46,22 @@ export async function updateGeneratedImageTagsAction(id: number, tags: string[])
   const result = await updateGeneratedImageTags(id, tags);
   revalidatePath("/image-gallery");
   return result;
+}
+
+/**
+ * ギャラリーの続き(次の1ページ)を取得する(issue #1472)。認可は上記参照。
+ *
+ * ページサイズはここで固定し、クライアントから任意の limit を指定させない。
+ * `tag` を渡すとサーバ側で絞り込んだ後の一覧の `offset` 位置から返る。
+ */
+export async function fetchGalleryImagesPageAction(
+  offset: number,
+  tag: string | null,
+): Promise<GeneratedImageSummary[]> {
+  await requireSession();
+  return listGeneratedImages(undefined, {
+    limit: GALLERY_PAGE_SIZE,
+    offset,
+    tag: tag ?? undefined,
+  });
 }

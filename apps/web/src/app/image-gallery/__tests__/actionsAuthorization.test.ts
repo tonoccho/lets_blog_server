@@ -31,14 +31,17 @@ jest.mock('@/lib/auth', () => ({ authOptions: {} }));
 const getGeneratedImage = jest.fn();
 const deleteGeneratedImage = jest.fn();
 const updateGeneratedImageTags = jest.fn();
+const listGeneratedImages = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getGeneratedImage: (...a: unknown[]) => getGeneratedImage(...a),
   deleteGeneratedImage: (...a: unknown[]) => deleteGeneratedImage(...a),
   updateGeneratedImageTags: (...a: unknown[]) => updateGeneratedImageTags(...a),
+  listGeneratedImages: (...a: unknown[]) => listGeneratedImages(...a),
 }));
 
 import {
   deleteGeneratedImageAction,
+  fetchGalleryImagesPageAction,
   getGeneratedImageAction,
   updateGeneratedImageTagsAction,
 } from '../actions';
@@ -93,5 +96,41 @@ describe('image-gallery の Server Action の認可(issue #824)', () => {
       expect(updateGeneratedImageTags).toHaveBeenCalledWith(1, ['t']);
       expect(redirect).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * issue #1472: 次ページ取得の Server Action はログイン必須(#824 の方針)で、ページサイズは
+ * サーバ側で固定し、クライアントから任意の limit を指定させない。
+ */
+describe('fetchGalleryImagesPageAction(issue #1472)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('未ログインは /login へ送り、取得しない', async () => {
+    getServerSession.mockResolvedValue(null);
+
+    await expect(fetchGalleryImagesPageAction(24, null)).rejects.toThrow('NEXT_REDIRECT:/login');
+    expect(listGeneratedImages).not.toHaveBeenCalled();
+  });
+
+  it('tag なしは絞り込まずに、固定のページサイズと offset で取得する', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    listGeneratedImages.mockResolvedValue([{ id: 1 }]);
+
+    const result = await fetchGalleryImagesPageAction(48, null);
+
+    expect(result).toEqual([{ id: 1 }]);
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 48, tag: undefined });
+  });
+
+  it('tag があればそのまま渡す', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    listGeneratedImages.mockResolvedValue([]);
+
+    await fetchGalleryImagesPageAction(0, '猫');
+
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫' });
   });
 });

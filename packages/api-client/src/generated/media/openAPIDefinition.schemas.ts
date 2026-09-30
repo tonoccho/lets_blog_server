@@ -372,6 +372,8 @@ export type UploadBody = {
 export type ListParams = {
 projectId?: number;
 tag?: string;
+limit?: number;
+offset?: number;
 };
 
 export type List1Params = {

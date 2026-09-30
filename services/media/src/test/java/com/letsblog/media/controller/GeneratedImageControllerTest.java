@@ -71,22 +71,22 @@ class GeneratedImageControllerTest {
 
     @Test
     void list_tag未指定時は全件を返す() {
-        when(generatedImageRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 buildImage(1L, "a cat", "[\"猫\",\"動物\"]"),
                 buildImage(2L, "a dog", "[\"犬\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
 
         assertEquals(2, result.size());
     }
 
     @Test
     void list_tag指定時は大文字小文字を区別せず一致する画像だけ返す() {
-        when(generatedImageRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 buildImage(1L, "a cat", "[\"猫\",\"動物\"]"),
                 buildImage(2L, "a dog", "[\"犬\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, "猫");
+        List<GeneratedImageSummaryResponse> result = controller.list(null, "猫", null, null);
 
         assertEquals(1, result.size());
         assertEquals(1L, result.get(0).id());
@@ -96,10 +96,10 @@ class GeneratedImageControllerTest {
     /** projectId 指定時はそのプロジェクトの画像だけを引き、メンバー判定を通す(issue #830)。 */
     @Test
     void list_projectId指定時はそのプロジェクトの画像だけを返す() {
-        when(generatedImageRepository.findAllByProjectIdOrderByCreatedAtDesc(5L))
+        when(generatedImageRepository.findAllByProjectIdOrderByCreatedAtDescIdDesc(5L))
                 .thenReturn(List.of(buildImage(1L, "a cat", "[\"猫\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(5L, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(5L, null, null, null);
 
         assertEquals(1, result.size());
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
@@ -107,10 +107,10 @@ class GeneratedImageControllerTest {
 
     @Test
     void list_タグが空文字の画像は空リストとして扱う() {
-        when(generatedImageRepository.findAllByOrderByCreatedAtDesc())
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", "   ")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -146,20 +146,20 @@ class GeneratedImageControllerTest {
 
     @Test
     void list_タグ未設定の画像は空リストとして扱う() {
-        when(generatedImageRepository.findAllByOrderByCreatedAtDesc())
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", null)));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
 
     @Test
     void list_不正なJSONは空リストとして扱う() {
-        when(generatedImageRepository.findAllByOrderByCreatedAtDesc())
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", "not json")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }

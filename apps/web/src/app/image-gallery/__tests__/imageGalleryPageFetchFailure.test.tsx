@@ -51,6 +51,12 @@ describe("画像ギャラリーの取得失敗表示(issue #1235)", () => {
     expect(html).toContain("生成画像がありません");
   });
 
+  it("初回は1ページぶん(limit=24, offset=0)だけを取得する(issue #1472)", async () => {
+    api.listGeneratedImages.mockResolvedValue([{ id: 1 }]);
+    await ImageGalleryPage();
+    expect(api.listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0 });
+  });
+
   it("成功して画像があるときはグリッドを描画する", async () => {
     api.listGeneratedImages.mockResolvedValue([{ id: 1 }]);
     expect(renderToStaticMarkup(await ImageGalleryPage())).toContain("GRID");

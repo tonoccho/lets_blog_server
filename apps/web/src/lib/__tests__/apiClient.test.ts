@@ -23,6 +23,7 @@ jest.mock('next-auth/jwt', () => ({ getToken: (...args: unknown[]) => getTokenMo
 
 import {
   getGeneratedImage,
+  listGeneratedImages,
   getSetupStatus,
   downloadGeneratedImageFile,
   deleteGeneratedImage,
@@ -474,5 +475,46 @@ describe('AI接続情報・接続先の上書き(issue #1504)', () => {
     expect(url).toContain('/api/projects/7/ai-models/connections')
     expect(init.method).toBe('PUT')
     expect(JSON.parse(String(init.body))).toEqual({ comfyuiBaseUrl: '' })
+  })
+})
+
+describe('listGeneratedImages のクエリ(issue #1472)', () => {
+  it('引数なしは従来どおり素のパス(全件)を取得する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages()
+
+    expect(calls()[0][0]).toMatch(/\/api\/generated-images$/)
+  })
+
+  it('projectId だけなら従来どおり projectId のみ', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages(7)
+
+    expect(calls()[0][0]).toMatch(/\/api\/generated-images\?projectId=7$/)
+  })
+
+  it('limit・offset・tag を渡すとクエリに載せる(tag は URL エンコードする)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages(undefined, { limit: 24, offset: 48, tag: '猫 & 犬' })
+
+    const url = new URL(calls()[0][0])
+    expect(url.searchParams.get('limit')).toBe('24')
+    expect(url.searchParams.get('offset')).toBe('48')
+    expect(url.searchParams.get('tag')).toBe('猫 & 犬')
+    expect(url.searchParams.has('projectId')).toBe(false)
+  })
+
+  it('offset=0 も省略せず送る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages(3, { limit: 24, offset: 0 })
+
+    const url = new URL(calls()[0][0])
+    expect(url.searchParams.get('projectId')).toBe('3')
+    expect(url.searchParams.get('offset')).toBe('0')
+    expect(url.searchParams.has('tag')).toBe(false)
   })
 })
