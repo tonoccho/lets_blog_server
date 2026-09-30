@@ -8,6 +8,7 @@ import {
   expect,
   fetchAccessToken,
 } from '../support';
+import { measureFirstDisplay, recordResponseTime } from '../support/responseBudget';
 
 /**
  * カスタムタグ・テンプレート・コンテンツ設定の受け入れシナリオを支えるステップ定義
@@ -1063,16 +1064,10 @@ When(/^カスタムタグの検証を同時に「(\d+)」件要求する$/, asyn
       })
     )
   );
-  ctx.tagValidationElapsedMs = Date.now() - startedAt;
+  recordResponseTime(ctx, Date.now() - startedAt, '検証APIの応答');
   ctx.tagValidationResponses = await Promise.all(
     responses.map(async (response) => ({ status: response.status(), body: await response.text() }))
   );
-});
-
-Then(/^すべての応答が「(\d+)」ミリ秒以内に返る$/, async ({ ctx }, limitMs: string) => {
-  const elapsed = ctx.tagValidationElapsedMs as number;
-  console.log(`検証APIの所要時間: ${elapsed}ms`);
-  expect(elapsed, `検証APIの応答が ${limitMs}ms を超えました`).toBeLessThan(Number(limitMs));
 });
 
 Then('すべての応答に検証結果が含まれる', async ({ ctx }) => {
@@ -1086,18 +1081,9 @@ Then('すべての応答に検証結果が含まれる', async ({ ctx }) => {
 });
 
 When('そのプロジェクトのタグ画面を2回目に開く', async ({ ctx, page }) => {
-  const url = `/projects/${ctx.tagProjectId}/tags`;
-  // 1回目は Next.js(devモード)のルートコンパイルを含むので計測しない。
-  await page.goto(url);
-  const startedAt = Date.now();
-  await page.goto(url);
-  ctx.tagPageLoadMs = Date.now() - startedAt;
-});
-
-Then(/^ページロードは「(\d+)」ミリ秒以内に完了する$/, async ({ ctx }, limitMs: string) => {
-  const elapsed = ctx.tagPageLoadMs as number;
-  console.log(`タグ画面のページロード時間: ${elapsed}ms`);
-  expect(elapsed, `ページロードが ${limitMs}ms を超えました`).toBeLessThan(Number(limitMs));
+  // 1回目は Next.js(devモード)のルートコンパイルを含むので計測しない(共通ヘルパーが行う)。
+  const elapsed = await measureFirstDisplay(page, `/projects/${ctx.tagProjectId}/tags`);
+  recordResponseTime(ctx, elapsed, 'タグ画面のページロード');
 });
 
 Then('カスタムタグ管理タブに生成フォームが表示される', async ({ page }) => {

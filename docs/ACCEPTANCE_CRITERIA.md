@@ -526,6 +526,9 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 移行元の `apps/web/e2e/performance.spec.ts` は削除した。
 **両シナリオとも外部LLMを呼ばない**ので、スタブ構成でも実LLM構成でも同じものを測る。
 
+**#1476 で応答時間予算を画面・操作の全体へ広げた。** 対象一覧・分類・計測点は §10(AC-PERF-004)。
+代表例は `e2e/features/response-budget/click-response-budget.feature`。
+
 | 機能ID | 機能 | 対象外の理由 |
 | --- | --- | --- |
 | AC-PERF-002 | AI生成の応答時間 | 外部LLMの応答時間に依存し、受け入れ可否の判定に使えない。移行前の `performance.spec.ts` › `Ollamaレスポンス時間が10秒以内であること` は #938 で移行先を持たせずに削除した — 閾値10秒は当時の Ollama の実測に由来し、受け入れテストがLLMをスタブへ向ける現在の構成では**スタブの往復時間**を測ることにしかならないため。生成が成立すること自体は `e2e/features/custom-tag/generation.feature` が確かめる |
@@ -688,3 +691,132 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 - [AUTHORIZATION_MATRIX.md](AUTHORIZATION_MATRIX.md) — AC-XC-001 の入力
 - [SYNC_SERVICE_CALLS.md](SYNC_SERVICE_CALLS.md) — §3 の入力
 - Epic #925 / AT-1 #927
+
+---
+
+## 10. 応答時間予算(AC-PERF-004) — 3秒予算の対象一覧
+
+利用者の要望(2026-09-29): 「すべてのクリックに対する応答を3秒以内にする」(issue #1476)。
+`AC-PERF-001` / `AC-PERF-003`(`e2e/features/custom-tag/performance.feature`)が先行して実在する
+ハードゲートで、本節はそれを**画面・操作の全体へ広げるための対象一覧**である。
+シナリオを全対象へ広げる作業は #1477、3秒を構造的に満たせない操作の非同期化は #1478 が担う。
+
+- 範囲: **`app/**/page.tsx` の全24ページの初回表示**と、**`export async function *Action` の全100件**。
+  「クリック」単位の粒度は Gherkin 上に存在しない(「クリック」を含むステップは5件)ため、
+  クリックではなく「ページの初回表示」と「Server Action」を単位にした。
+- 一覧は `find apps/web/src/app -name page.tsx` と
+  `grep -rn "export async function [A-Za-z]*Action" apps/web/src/app` から作った。ページ・Action を
+  足したら、この節に行を足す(§8 の 1)。
+
+### 10.1 分類
+
+| 分類 | 意味 |
+| --- | --- |
+| 予算対象 | 3秒(または表の閾値)を超えたらシナリオが落ちる。ハードゲート(`AC-PERF-001/003` と同じ) |
+| 非同期ハンドオフ待ち(#1478) | 構造的に3秒を満たせない。受付応答まで返す非同期ハンドオフを #1478 が実装するまで、予算を課さない |
+| 予算対象外 | 予算を課さない。**理由を必ず添える**(`AC-PERF-002` と同じ) |
+
+利用者の判断(2026-09-29)による6操作の扱い:
+
+| 操作 | 分類 | 根拠 |
+| --- | --- | --- |
+| サイト自動構築 | 非同期ハンドオフ待ち(#1478) | Web画面から起こす長時間の書き込み。gateway 60秒で現に応答が失われる |
+| 環境間同期 | 非同期ハンドオフ待ち(#1478) | 同上 |
+| 一括管理の環境間比較 | 予算対象 | 読み取りで、ページの初回描画を止めている形。#1474(並列化)+ #1475(`loading.tsx`)で3秒を狙う。**達成できなかった場合に非同期化を再判断する** |
+| 記事プレビュー | 予算対象外 | VSCode拡張専用の経路(web からの呼び出し0件)で、対象範囲の外。高速化は #1473 / #1369 が担う |
+| 実WordPressへの記事公開 | 予算対象外 | 同じくVSCode拡張専用。拡張側の進捗表示で対応する |
+| WordPressへの大容量アップロード | 予算対象外 | wp-admin 自身の「メディアの新規追加」画面での操作で、当社のコードを通らない。`AC-SYS-010`(第三者ツールの画面)と同じ分類 |
+
+### 10.2 計測点(共通ステップ `e2e/support/responseBudget.ts` / `responseBudget.steps.ts`)
+
+| 記号 | 計測点 | 使う場面 |
+| --- | --- | --- |
+| ① 画面の初回表示 | **2回目の `page.goto` の開始から完了まで。** 1回目の遷移は Next.js(devモード)のルートコンパイルを含むので捨てる。受け入れテスト環境の web コンテナが `next dev`(`npm run dev`)で動く(`docker-compose.yml:126`)ことが前提。本番ビルドで動かす構成にしたら、このウォームアップの要否を見直すこと | 全ページ |
+| ② Server Action の往復 | **`next-action` ヘッダを持つ POST のリクエスト送出からレスポンス本文の受信完了まで。** 複数回送られたら最も遅い1往復 | 全 Server Action |
+| ③ API の応答 | 要求の送出から全応答の受信完了まで(`AC-PERF-001`) | `@api` シナリオ |
+
+### 10.3 `retryClick` 経由の操作の計測点(②)
+
+`retryClick`(`clickUntilVisible` 等)は、ハイドレーション前の空振りを撃ち直すため、クリックから期待結果までの
+経過時間に「再試行回数 x 可視待ちタイムアウト(既定3秒)」が混入し、応答時間の指標にならない。
+だからといって予算の対象から外さず、**計測点を別に取る**: `page.on('request')` /
+`'requestfinished'` で **サーバへ実際に送られた Server Action の POST だけ**を捉え、その往復を測る。
+空振りしたクリックはサーバへ何も送らないので、再試行分は構造的に含まれない。
+「最後のクリックから期待結果まで」を採らなかったのは、最後のクリックがどれかを知る手段が無く、
+Reactの再描画時間まで含めてしまうため。`measureServerActionRoundTrip` が単体テスト
+(`apps/web/e2e/responseBudget.test.ts`)で「trigger に6秒の空振りがあっても往復400msと測る」ことを確かめている。
+
+**注意(プログレッシブエンハンスメント)**: ハイドレーション前にフォームが送信されると、`next-action` ヘッダを持たない通常のフルページ POST になり、この計測では数えない(Server Action の往復として捕捉されない)。その場合、`measureServerActionRoundTrip` は往復を計測できずに失敗する(サイレントに通らない)。ハイドレーション前の送信は `retryClick` の撃ち直しで次のクリックに委ねる。
+
+### 10.4 画面の初回表示(全24ページ)
+
+計測点: **ウォームアップ後の2回目の `page.goto` の完了まで**(§10.2 の①)。閾値 3,000ms は全行共通。
+
+| 操作 | 計測点 | 閾値 | 閾値の根拠 | 分類 |
+| --- | --- | --- | --- | --- |
+| `/` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/admin/backup` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/admin/roles` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/admin/ssh-keys` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/admin/system-settings` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/admin/tag-design` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/custom-tag-templates` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/image-gallery` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/login` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値。未ログインで到達でき、遷移先(Keycloak / `/login`)へのリダイレクトまでを含む | 予算対象 |
+| `/operation-logs` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/posts` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値。初期表示で環境間比較(実測 11,012ms)を待つため現状は超過。#1474(並列化)+ #1475(`loading.tsx`)で達成する。**達成できなければ非同期化を再判断する** | 予算対象 |
+| `/projects/[id]/dashboard` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]/plan` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]/posts` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]/settings/adsense` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]/settings/google-analytics` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]/tags` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/setup` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値。未ログインで到達でき、遷移先(Keycloak / `/login`)へのリダイレクトまでを含む | 予算対象 |
+| `/sites` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/sites/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+
+### 10.5 Server Action(全100件)
+
+計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
+
+| 操作(Server Action) | 計測点 | 閾値 | 閾値の根拠 | 分類 |
+| --- | --- | --- | --- | --- |
+| `app/admin/backup/actions.ts`<br>`restoreBackupAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
+| `app/admin/roles/actions.ts`<br>`assignRoleAction`<br>`removeRoleAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/admin/ssh-keys/actions.ts`<br>`createSshKeyPairAction`<br>`deleteSshKeyPairAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`<br>`updateCustomTagTemplateAction`<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)に無い提案であり、#1477 が依拠する前に利用者の確認が要る** | 予算対象外 |
+| `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/image-gallery/actions.ts`<br>`getGeneratedImageAction`<br>`deleteGeneratedImageAction`<br>`updateGeneratedImageTagsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/login/actions.ts`<br>`startNoJsLoginAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/operation-logs/actions.ts`<br>`copyOperationTraceAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/projects/[id]/actions.ts`<br>`bindEnvironmentAction`<br>`unbindEnvironmentAction`<br>`updateProjectNameAction`<br>`updateMasterEnvironmentAction`<br>`updateProjectGithubRepositoryAction`<br>`updateImageGenerationPromptDefaultsAction`<br>`updateImageGenerationSizeDefaultsAction`<br>`updateImageContentFilterSettingsAction`<br>`updateArticleImageResizeDefaultAction`<br>`setProjectGithubTokenAction`<br>`clearProjectGithubTokenAction`<br>`setProjectBraveSearchApiKeyAction`<br>`clearProjectBraveSearchApiKeyAction`<br>`setProjectGoogleAnalyticsClientAction`<br>`selectProjectGoogleAnalyticsPropertyAction`<br>`clearProjectGoogleAnalyticsCredentialsAction`<br>`setProjectAdSenseSettingsAction`<br>`selectProjectAdSenseAccountAction`<br>`clearProjectAdSenseCredentialsAction`<br>`addProjectUserAction`<br>`updateProjectUserRoleAction`<br>`removeProjectUserAction`<br>`syncProjectUserAction`<br>`syncTermToMasterAction`<br>`editTermAndSyncAction`<br>`deleteTermEverywhereAction`<br>`deleteSlugEverywhereAction`<br>`fetchLlmModelsAction`<br>`selectLlmModelAction`<br>`fetchLlmProviderAction`<br>`selectLlmProviderAction`<br>`fetchReviewStepSettingsAction`<br>`updateReviewStepSettingAction`<br>`fetchImageProviderAction`<br>`selectImageProviderAction`<br>`fetchComfyUiCheckpointsAction`<br>`selectComfyUiCheckpointAction`<br>`deleteComfyUiCheckpointAction`<br>`fetchGenerationJobAction`<br>`fetchMediaGarbageScanAction`<br>`fetchImageGenerationOptionsAction`<br>`deletePostEverywhereAction`<br>`updatePostStatusEverywhereAction`<br>`fetchGeneratedImagesAction`<br>`uploadProjectAssetImageAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/projects/[id]/actions.ts`<br>`syncEnvironmentAction`(環境間同期) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。gateway 60秒で現に応答が失われる。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
+| `app/projects/[id]/actions.ts`<br>`applyToEnvironmentAction`<br>`applyToAllEnvironmentsAction`<br>`syncAllTermsToMasterAction`<br>`runBulkOperationUploadAction`<br>`fetchTermComparisonAction`<br>`fetchStatusComparisonAction`<br>`reconcileStateAction`<br>`deleteMediaGarbageAction`<br>`fetchPostComparisonAction`<br>`fetchPostStatusesAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
+| `app/projects/[id]/actions.ts`<br>`installComfyUiCheckpointAction`(ComfyUI チェックポイントの導入) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。数GBのモデルを外部から取得し、`media/comfyui-checkpoints.feature` は `@timeout:600000`。サイト自動構築と同じ形で、利用者の判断表には無く、コーディネータのレビュー(#1476)で同じ形と判断した。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
+| `app/projects/[id]/actions.ts`<br>`generateProjectImagesAction`<br>`generateImagePromptAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)に無い提案であり、#1477 が依拠する前に利用者の確認が要る** | 予算対象外 |
+| `app/projects/[id]/custom-tags/actions.ts`<br>`updateProjectCssSelectorPrefixAction`<br>`upsertProjectCustomTagAction`<br>`deleteProjectCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/projects/[id]/tag-design/actions.ts`<br>`saveTagDesignSettingAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/projects/[id]/tag-design/actions.ts`<br>`generateTagDesignAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)に無い提案であり、#1477 が依拠する前に利用者の確認が要る** | 予算対象外 |
+| `app/projects/actions.ts`<br>`createProjectAction`<br>`deleteProjectAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/setup/actions.ts`<br>`setupAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/sites/[id]/edit/actions.ts`<br>`updateSiteAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/sites/actions.ts`<br>`registerSiteAction`<br>`generateSshKeyPairAction`<br>`deleteSiteAction`<br>`checkSiteConnectionAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/sites/actions.ts`<br>`createManagedWordPressSiteAction`(サイト自動構築) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。gateway 60秒で現に応答が失われる。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
+| `app/sites/actions.ts`<br>`installWpCliAction`<br>`generateStaticContentAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
+| `app/users/[id]/edit/actions.ts`<br>`updateUserProfileAction`<br>`uploadAvatarAction`<br>`updatePreferencesAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/users/actions.ts`<br>`createUserAction`<br>`deleteUserAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+
+### 10.6 一覧に載せない操作(予算対象外)
+
+Server Action でも画面でもないため、上の表には行を持たないが、利用者の判断(2026-09-29)で分類を確定した操作:
+記事プレビュー(`/api/preview/skeleton`)・実WordPressへの記事公開(`/api/posts/publish`、実測 4,188ms)は
+VSCode拡張専用で**予算対象外**、WordPressへの大容量アップロードは wp-admin 自身の画面での操作で**予算対象外**
+(理由は §10.1 の表)。一括管理の環境間比較は §10.4 の `/projects/[id]` と、§10.5 の
+`fetch*ComparisonAction` の**予算対象**として扱う。
+
