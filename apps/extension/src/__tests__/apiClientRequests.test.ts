@@ -523,3 +523,54 @@ describe('apiClientが解釈するレスポンス', () => {
     });
   });
 });
+
+describe('listCustomTagsのキャッシュ(issue #1467)', () => {
+  const tag = { tagName: 'warn', description: null, tagFormat: 'BLOCK' };
+  let calls: number;
+
+  function respondSequence(payloads: unknown[]): void {
+    mockedRequest.mockImplementation(async () => {
+      const payload = payloads[Math.min(calls, payloads.length - 1)];
+      calls += 1;
+      return {
+        status: 200,
+        ok: true,
+        statusText: 'OK',
+        header: () => undefined,
+        text: async () => JSON.stringify(payload),
+        json: async () => payload,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    });
+  }
+
+  beforeEach(() => {
+    calls = 0;
+    mockedRequest.mockReset();
+    resetMocks();
+    apiClient.clearResponseCache();
+    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
+    setConfiguration('letsBlog.allowInsecureTls', true);
+  });
+
+  it('空の生の結果はキャッシュせず、次回の呼び出しで再取得して新しいタグが見える', async () => {
+    respondSequence([[], [tag]]);
+
+    const first = await apiClient.listCustomTags('token', undefined, 1);
+    const second = await apiClient.listCustomTags('token', undefined, 1);
+
+    expect(first).toEqual([]);
+    expect(second).toEqual([tag]);
+    expect(calls).toBe(2);
+  });
+
+  it('非空の結果はTTL内なら再取得せずキャッシュを返す', async () => {
+    respondSequence([[tag]]);
+
+    await apiClient.listCustomTags('token', undefined, 1);
+    const second = await apiClient.listCustomTags('token', undefined, 1);
+
+    expect(second).toEqual([tag]);
+    expect(calls).toBe(1);
+  });
+});

@@ -255,10 +255,13 @@ async function cachedRequestJson<S extends ZodType>(
   cacheKey: string,
   path: string,
   spec: RequestSpec,
-  schema: S
+  schema: S,
+  shouldCache?: (value: z.infer<S>) => boolean
 ): Promise<z.infer<S>> {
-  return responseCache.getOrLoad(`${cacheKey}@${gatewayBaseUrl()}`, () =>
-    requestJson(path, spec, schema)
+  return responseCache.getOrLoad(
+    `${cacheKey}@${gatewayBaseUrl()}`,
+    () => requestJson(path, spec, schema),
+    shouldCache as ((value: unknown) => boolean) | undefined
   ) as Promise<z.infer<S>>;
 }
 
@@ -690,7 +693,9 @@ export async function listCustomTags(
     `project:${projectId}:custom-tags`,
     `/api/custom-tags?projectId=${projectId}`,
     { label: 'listCustomTags', headers: buildHeaders(apiKey, actor) },
-    schemas.CustomTagSummaryListSchema
+    schemas.CustomTagSummaryListSchema,
+    // 空の結果は保持しない。直後にWebで登録したタグが、TTLが切れるまで補完に出なくなるのを避ける(issue #1467)。
+    (tags) => tags.length > 0
   );
 }
 

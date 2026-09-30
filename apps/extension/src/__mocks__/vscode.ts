@@ -327,3 +327,22 @@ export const ProgressLocation = { Notification: 15 };
 
 /** vscode.extensions の最小再現(issue #1335)。既定ではGit拡張が無い環境として振る舞う。 */
 export const extensions = { getExtension: jest.fn((): unknown => undefined) };
+
+/** vscode.CompletionItemKind の数値はVS Code APIの定義に合わせる(一部のみ)。 */
+export const CompletionItemKind = { Keyword: 13, Snippet: 14 } as const;
+
+/** vscode.SnippetString の最小再現。 */
+export class SnippetString {
+  constructor(public readonly value: string = '') {}
+}
+
+/** vscode.CompletionItem の最小再現。 */
+export class CompletionItem {
+  detail?: string;
+  range?: unknown;
+  insertText?: string | SnippetString;
+  filterText?: string;
+  sortText?: string;
+  documentation?: unknown;
+  constructor(public readonly label: string, public readonly kind?: number) {}
+}

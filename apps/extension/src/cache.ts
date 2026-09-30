@@ -73,8 +73,14 @@ export class LruCache<V> {
    *
    * 同じキーへの取得が並行して走った場合は、後続の呼び出しが先行のPromiseを共有する
    * (パネルを開いた直後に複数の描画処理が同じ一覧を要求しても、API呼び出しは1回で済む)。
+   *
+   * shouldCacheがfalseを返した結果は保存しない(空の一覧を保持して、直後の登録が見えなくなるのを避ける用途)。
    */
-  public async getOrLoad(key: string, loader: () => Promise<V>): Promise<V> {
+  public async getOrLoad(
+    key: string,
+    loader: () => Promise<V>,
+    shouldCache: (value: V) => boolean = () => true
+  ): Promise<V> {
     const cached = this.get(key);
     if (cached !== undefined) {
       return cached;
@@ -87,7 +93,9 @@ export class LruCache<V> {
 
     const promise = loader()
       .then((value) => {
-        this.set(key, value);
+        if (shouldCache(value)) {
+          this.set(key, value);
+        }
         return value;
       })
       .finally(() => {
