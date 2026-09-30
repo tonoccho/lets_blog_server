@@ -51,6 +51,7 @@ export function EnvironmentSlot({
         </div>
       ) : (
         <form action={formAction} className="space-y-2 text-sm">
+          <p className="font-medium text-neutral-500 dark:text-neutral-400">未設定</p>
           <select
             name="siteId"
             required

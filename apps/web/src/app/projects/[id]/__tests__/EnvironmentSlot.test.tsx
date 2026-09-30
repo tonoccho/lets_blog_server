@@ -46,6 +46,18 @@ describe("EnvironmentSlot", () => {
     expect(screen.queryByRole("button", { name: "切離し" })).not.toBeInTheDocument();
   });
 
+  it("未紐付け(site=null)のとき、空欄ではなく「未設定」と明示する(issue #1500)", () => {
+    render(<EnvironmentSlot projectId={1} environment="test" site={null} candidateSites={[]} />);
+
+    expect(screen.getByText("未設定")).toBeInTheDocument();
+  });
+
+  it("紐付け済みのとき「未設定」は表示しない(issue #1500)", () => {
+    render(<EnvironmentSlot projectId={1} environment="test" site={buildSite()} candidateSites={[]} />);
+
+    expect(screen.queryByText("未設定")).not.toBeInTheDocument();
+  });
+
   it("紐付け済み(siteあり)のとき、サイト情報と切離しボタンを表示する", () => {
     render(
       <EnvironmentSlot

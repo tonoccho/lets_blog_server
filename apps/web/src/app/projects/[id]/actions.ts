@@ -127,6 +127,7 @@ export async function bindEnvironmentAction(
   }
 
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
   return { success: true };
 }
 
@@ -134,6 +135,7 @@ export async function unbindEnvironmentAction(projectId: number, environment: Pr
   await requireAdminSession();
   await unbindProjectEnvironment(projectId, environment);
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}/dashboard`);
 }
 
 export interface UpdateProjectNameState {

@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 import {
   getProject,
+  listSites,
   getProjectGoogleAnalyticsReport,
   getProjectAdSenseReport,
   type GoogleAnalyticsReport,
   type AdSenseReport,
+  type Site,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -12,6 +14,7 @@ import { ProjectSectionNav } from "../ProjectSectionNav";
 import { DashboardWidgetSlot } from "./DashboardWidgetSlot";
 import { GoogleAnalyticsWidget } from "./GoogleAnalyticsWidget";
 import { AdSenseWidget } from "./AdSenseWidget";
+import { EnvironmentWidget } from "./EnvironmentWidget";
 
 const NOT_ELIGIBLE_GA_REPORT: GoogleAnalyticsReport = {
   eligible: false,
@@ -40,8 +43,20 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
   await requireAdminSession();
   const projectId = Number(id);
 
-  const [project, gaReport, adsenseReport] = await Promise.all([
-    getProject(projectId).catch(() => null),
+  function logAndFallback<T>(label: string, fallback: T) {
+    return (err: unknown) => {
+      console.error(`[projects/${projectId}/dashboard] ${label}の取得に失敗しました:`, err);
+      return fallback;
+    };
+  }
+
+  const [project, sitesResult, gaReport, adsenseReport] = await Promise.all([
+    getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
+    // 環境設定ウィジェットの候補サイト。GA/AdSenseの取得失敗とは独立に扱う。
+    listSites().then(
+      (list) => ({ list, failed: false }),
+      (err: unknown) => ({ list: logAndFallback<Site[]>("サイト一覧", [])(err), failed: true }),
+    ),
     getProjectGoogleAnalyticsReport(projectId).catch(() => NOT_ELIGIBLE_GA_REPORT),
     getProjectAdSenseReport(projectId).catch(() => NOT_ELIGIBLE_ADSENSE_REPORT),
   ]);
@@ -64,6 +79,8 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
       </div>
 
       <ProjectSectionNav projectId={projectId} active="dashboard" />
+
+      <EnvironmentWidget project={project} candidateSites={sitesResult.list} sitesError={sitesResult.failed} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <DashboardWidgetSlot
