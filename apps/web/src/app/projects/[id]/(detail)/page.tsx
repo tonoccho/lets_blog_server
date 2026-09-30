@@ -33,10 +33,14 @@ import { AddProjectUserModal } from "../AddProjectUserModal";
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  /** `?tab=members` で初期選択タブを指定できる(ダッシュボードのメンバーウィジェットからの遷移先)。 */
+  searchParams?: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
+  const { tab: initialTabId } = (await searchParams) ?? {};
   await requireAdminSession();
   const projectId = Number(id);
 
@@ -225,7 +229,7 @@ export default async function ProjectDetailPage({
 
       <ProjectSectionNav projectId={project.id} active="detail" />
 
-      <Tabs tabs={tabs} />
+      <Tabs tabs={tabs} defaultTabId={initialTabId} />
     </div>
   );
 }

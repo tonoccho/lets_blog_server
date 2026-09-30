@@ -95,4 +95,18 @@ describe('Tabs', () => {
       expect(screen.getByText('Content 2')).toBeInTheDocument()
     })
   })
+
+  describe('defaultTabId', () => {
+    it('最初に選択されるタブを指定できる(その後は内部状態で切り替わる)', () => {
+      render(<Tabs tabs={mockTabs} defaultTabId="tab3" />)
+      expect(screen.getByText('Content 3')).toBeInTheDocument()
+      fireEvent.click(screen.getByText('Tab 1'))
+      expect(screen.getByText('Content 1')).toBeInTheDocument()
+    })
+
+    it('存在しないidなら先頭タブにする', () => {
+      render(<Tabs tabs={mockTabs} defaultTabId="nope" />)
+      expect(screen.getByText('Content 1')).toBeInTheDocument()
+    })
+  })
 })

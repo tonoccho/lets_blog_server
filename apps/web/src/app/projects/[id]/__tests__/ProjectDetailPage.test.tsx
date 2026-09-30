@@ -23,8 +23,8 @@ jest.mock('@/lib/session', () => ({
 }))
 jest.mock('@/components/Breadcrumb', () => ({ Breadcrumb: () => <nav /> }))
 jest.mock('@/components/Tabs', () => ({
-  Tabs: ({ tabs }: { tabs: { id: string; label: string; content: ReactNode }[] }) => (
-    <div>{tabs.map((t) => <button key={t.id}>{t.label}</button>)}</div>
+  Tabs: ({ tabs, defaultTabId }: { tabs: { id: string; label: string; content: ReactNode }[]; defaultTabId?: string }) => (
+    <div data-default-tab={defaultTabId ?? ''}>{tabs.map((t) => <button key={t.id}>{t.label}</button>)}</div>
   ),
 }))
 // 子コンポーネントは自前のテストがある。ここは page.tsx の組み立てだけを見る。
@@ -68,5 +68,19 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
     jest.spyOn(console, 'error').mockImplementation(() => undefined)
     await expect(ProjectDetailPage({ params: Promise.resolve({ id: '9' }) })).rejects.toThrow('NEXT_NOT_FOUND')
     expect(notFound).toHaveBeenCalledTimes(1)
+  })
+
+  it('?tab=members のとき「メンバー」タブを初期選択にする(ダッシュボードのメンバーウィジェットからの遷移先, issue #1502)', async () => {
+    getProject.mockResolvedValue({ id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null })
+    const { container } = render(
+      await ProjectDetailPage({ params: Promise.resolve({ id: '7' }), searchParams: Promise.resolve({ tab: 'members' }) }),
+    )
+    expect(container.querySelector('[data-default-tab]')).toHaveAttribute('data-default-tab', 'members')
+  })
+
+  it('tab の指定がなければ初期選択を指定しない', async () => {
+    getProject.mockResolvedValue({ id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null })
+    const { container } = render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
+    expect(container.querySelector('[data-default-tab]')).toHaveAttribute('data-default-tab', '')
   })
 })

@@ -16,12 +16,17 @@ export function Tabs({
   tabs,
   activeTabId: controlledTabId,
   onTabChange,
+  defaultTabId,
 }: {
   tabs: TabItem[];
+  /** 非制御モードで最初に選択するタブ。存在しない id なら先頭タブ。 */
+  defaultTabId?: string;
   activeTabId?: string;
   onTabChange?: (id: string) => void;
 }) {
-  const [internalTabId, setInternalTabId] = useState(tabs[0]?.id || "");
+  const [internalTabId, setInternalTabId] = useState(
+    tabs.some((tab) => tab.id === defaultTabId) ? (defaultTabId as string) : tabs[0]?.id || "",
+  );
   const activeTabId = controlledTabId ?? internalTabId;
 
   function selectTab(id: string) {

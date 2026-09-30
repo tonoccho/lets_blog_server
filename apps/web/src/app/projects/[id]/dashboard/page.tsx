@@ -2,11 +2,13 @@ import { notFound } from "next/navigation";
 import {
   getProject,
   listSites,
+  listProjectUsers,
   getProjectGoogleAnalyticsReport,
   getProjectAdSenseReport,
   type GoogleAnalyticsReport,
   type AdSenseReport,
   type Site,
+  type ProjectUser,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -15,6 +17,7 @@ import { DashboardWidgetSlot } from "./DashboardWidgetSlot";
 import { GoogleAnalyticsWidget } from "./GoogleAnalyticsWidget";
 import { AdSenseWidget } from "./AdSenseWidget";
 import { EnvironmentWidget } from "./EnvironmentWidget";
+import { MembersWidget } from "./MembersWidget";
 
 const NOT_ELIGIBLE_GA_REPORT: GoogleAnalyticsReport = {
   eligible: false,
@@ -50,12 +53,17 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
     };
   }
 
-  const [project, sitesResult, gaReport, adsenseReport] = await Promise.all([
+  const [project, sitesResult, membersResult, gaReport, adsenseReport] = await Promise.all([
     getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
     // 環境設定ウィジェットの候補サイト。GA/AdSenseの取得失敗とは独立に扱う。
     listSites().then(
       (list) => ({ list, failed: false }),
       (err: unknown) => ({ list: logAndFallback<Site[]>("サイト一覧", [])(err), failed: true }),
+    ),
+    // メンバーウィジェット。取得失敗を「0人」に見せないよう、失敗は別に持つ。
+    listProjectUsers(projectId).then(
+      (list) => ({ list, failed: false }),
+      (err: unknown) => ({ list: logAndFallback<ProjectUser[]>("メンバー一覧", [])(err), failed: true }),
     ),
     getProjectGoogleAnalyticsReport(projectId).catch(() => NOT_ELIGIBLE_GA_REPORT),
     getProjectAdSenseReport(projectId).catch(() => NOT_ELIGIBLE_ADSENSE_REPORT),
@@ -81,6 +89,8 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
       <ProjectSectionNav projectId={projectId} active="dashboard" />
 
       <EnvironmentWidget project={project} candidateSites={sitesResult.list} sitesError={sitesResult.failed} />
+
+      <MembersWidget projectId={projectId} members={membersResult.list} fetchFailed={membersResult.failed} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <DashboardWidgetSlot

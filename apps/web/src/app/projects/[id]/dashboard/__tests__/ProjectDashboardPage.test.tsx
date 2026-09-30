@@ -9,11 +9,13 @@ const getProject = jest.fn();
 const listSites = jest.fn();
 const getGa = jest.fn();
 const getAdsense = jest.fn();
+const listProjectUsers = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getProject: (...a: unknown[]) => getProject(...a),
   listSites: (...a: unknown[]) => listSites(...a),
   getProjectGoogleAnalyticsReport: (...a: unknown[]) => getGa(...a),
   getProjectAdSenseReport: (...a: unknown[]) => getAdsense(...a),
+  listProjectUsers: (...a: unknown[]) => listProjectUsers(...a),
 }));
 jest.mock('@/lib/session', () => ({ requireAdminSession: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('@/components/Breadcrumb', () => ({ Breadcrumb: () => <nav /> }));
@@ -54,6 +56,7 @@ describe('プロジェクトダッシュボード page.tsx(issue #1500: 環境�
     listSites.mockReset().mockResolvedValue([site(1, 'test-key'), site(2, 'prod-key')]);
     getGa.mockReset().mockResolvedValue({ eligible: false });
     getAdsense.mockReset().mockResolvedValue({ eligible: false });
+    listProjectUsers.mockReset().mockResolvedValue([]);
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
   afterEach(() => errorSpy.mockRestore());
@@ -107,5 +110,50 @@ describe('プロジェクトダッシュボード page.tsx(issue #1500: 環境�
 
     await expect(renderPage()).rejects.toThrow('NEXT_NOT_FOUND');
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('プロジェクト情報'), expect.any(Error));
+  });
+});
+
+describe('プロジェクトダッシュボード page.tsx(issue #1502: メンバーウィジェット)', () => {
+  let errorSpy: jest.SpyInstance;
+  beforeEach(() => {
+    notFound.mockClear();
+    getProject.mockReset().mockResolvedValue({ id: 7, name: '案件', localSite: null, testSite: null, productionSite: null });
+    listSites.mockReset().mockResolvedValue([]);
+    getGa.mockReset().mockResolvedValue({ eligible: false });
+    getAdsense.mockReset().mockResolvedValue({ eligible: false });
+    listProjectUsers.mockReset().mockResolvedValue([
+      { userId: 1, email: null, displayName: '山田太郎', wpRole: 'administrator' },
+    ]);
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => errorSpy.mockRestore());
+
+  const renderPage = async () => render(await ProjectDashboardPage({ params: Promise.resolve({ id: '7' }) }));
+
+  it('listProjectUsersで取得したメンバーをウィジェットに描く', async () => {
+    await renderPage();
+
+    expect(listProjectUsers).toHaveBeenCalledWith(7);
+    expect(screen.getByRole('heading', { name: 'メンバー' })).toBeInTheDocument();
+    expect(screen.getByText('山田太郎')).toBeInTheDocument();
+  });
+
+  it('メンバーが0人なら「0人」と表示する', async () => {
+    listProjectUsers.mockResolvedValue([]);
+
+    await renderPage();
+
+    expect(screen.getByText('0人')).toBeInTheDocument();
+  });
+
+  it('メンバー取得に失敗したら「0人」ではなく取得失敗を示し、ページ自体は表示される', async () => {
+    listProjectUsers.mockRejectedValue(new Error('users down'));
+
+    await renderPage();
+
+    expect(screen.getByRole('alert')).toHaveTextContent('メンバーを取得できませんでした');
+    expect(screen.queryByText('0人')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'メンバー' })).toBeInTheDocument();
+    expect(errorSpy).toHaveBeenCalled();
   });
 });
