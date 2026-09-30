@@ -37,11 +37,28 @@ const SECURITY_HEADERS = [
   { key: "Strict-Transport-Security", value: "max-age=300" },
 ];
 
+/**
+ * リバースプロキシ(nginx)に、この管理画面の応答をバッファさせない(issue #1475)。
+ *
+ * `loading.tsx` は先に骨組みを返し、データ取得の完了後に残りをストリーミングで続ける。
+ * ところが nginx は既定で `proxy_buffering on` のため、上流の応答を溜めてからまとめて
+ * 返し、利用者には loading UI が届かない。`infra/nginx/conf.d/default.conf` の `location /`
+ * は既定のまま(SSE 用の `/api/dashboard/` 以外は `proxy_buffering off` を持たない)。
+ * `X-Accel-Buffering: no` は nginx が応答ごとに読み取り、その応答だけバッファを切る
+ * (Next.js のセルフホスト手順が示す方法)。`location /` 全体を `proxy_buffering off`
+ * にすると、巨大な静的ファイルで遅いクライアントが上流を占有し続けるため採らない。
+ * nginx はこのヘッダをクライアントへは返さない(内部向け)。
+ */
+const STREAMING_HEADERS = [{ key: "X-Accel-Buffering", value: "no" }];
+
 const nextConfig: NextConfig = {
   // `headers()` は proxy.ts(middleware)より先に評価されるため、認証ゲートが返す
   // /login へのリダイレクト応答にもこのヘッダが付く。
   headers() {
-    return Promise.resolve([{ source: "/:path*", headers: SECURITY_HEADERS }]);
+    return Promise.resolve([
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      { source: "/:path*", headers: STREAMING_HEADERS },
+    ]);
   },
   experimental: {
     serverActions: {

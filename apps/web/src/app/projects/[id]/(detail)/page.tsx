@@ -12,24 +12,24 @@ import {
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
-import { ProjectSectionNav } from "./ProjectSectionNav";
-import { EnvironmentSlot } from "./EnvironmentSlot";
-import { MasterEnvironmentSelector } from "./MasterEnvironmentSelector";
-import { ProjectGithubRepositoryForm } from "./ProjectGithubRepositoryForm";
-import { ProjectApiKeysForm } from "./ProjectApiKeysForm";
-import { EnvironmentSyncPanel } from "./EnvironmentSyncPanel";
-import { BulkManagementPanel } from "./BulkManagementPanel";
-import { GarbageCollectionPanel } from "./GarbageCollectionPanel";
-import { ProjectAiModelsPanel } from "./ProjectAiModelsPanel";
-import { ProjectAssetGenerationPanel } from "./ProjectAssetGenerationPanel";
-import { ProjectImageGenerationPromptDefaultsForm } from "./ProjectImageGenerationPromptDefaultsForm";
-import { ProjectImageGenerationSizeDefaultsForm } from "./ProjectImageGenerationSizeDefaultsForm";
-import { ProjectArticleImageResizeDefaultForm } from "./ProjectArticleImageResizeDefaultForm";
-import { ProjectImageContentFilterSettingsForm } from "./ProjectImageContentFilterSettingsForm";
-import { ProjectNameForm } from "./ProjectNameForm";
-import { DeleteProjectButton } from "./DeleteProjectButton";
-import { ProjectUserManager } from "./ProjectUserManager";
-import { AddProjectUserModal } from "./AddProjectUserModal";
+import { ProjectSectionNav } from "../ProjectSectionNav";
+import { EnvironmentSlot } from "../EnvironmentSlot";
+import { MasterEnvironmentSelector } from "../MasterEnvironmentSelector";
+import { ProjectGithubRepositoryForm } from "../ProjectGithubRepositoryForm";
+import { ProjectApiKeysForm } from "../ProjectApiKeysForm";
+import { EnvironmentSyncPanel } from "../EnvironmentSyncPanel";
+import { BulkManagementPanel } from "../BulkManagementPanel";
+import { GarbageCollectionPanel } from "../GarbageCollectionPanel";
+import { ProjectAiModelsPanel } from "../ProjectAiModelsPanel";
+import { ProjectAssetGenerationPanel } from "../ProjectAssetGenerationPanel";
+import { ProjectImageGenerationPromptDefaultsForm } from "../ProjectImageGenerationPromptDefaultsForm";
+import { ProjectImageGenerationSizeDefaultsForm } from "../ProjectImageGenerationSizeDefaultsForm";
+import { ProjectArticleImageResizeDefaultForm } from "../ProjectArticleImageResizeDefaultForm";
+import { ProjectImageContentFilterSettingsForm } from "../ProjectImageContentFilterSettingsForm";
+import { ProjectNameForm } from "../ProjectNameForm";
+import { DeleteProjectButton } from "../DeleteProjectButton";
+import { ProjectUserManager } from "../ProjectUserManager";
+import { AddProjectUserModal } from "../AddProjectUserModal";
 
 export default async function ProjectDetailPage({
   params,

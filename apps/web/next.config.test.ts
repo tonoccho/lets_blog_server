@@ -19,8 +19,18 @@ describe("next.config の headers()", () => {
 
   it("全経路にヘッダを適用する", async () => {
     const rules = await headerRules();
-    expect(rules).toHaveLength(1);
-    expect(rules[0].source).toBe("/:path*");
+    // ヘッダの種類ごとに規則を分けてよい(#1475でストリーミング用を追加)。どの規則も全経路を覆う。
+    expect(rules.length).toBeGreaterThanOrEqual(1);
+    expect(rules.map((rule) => rule.source)).toEqual(rules.map(() => "/:path*"));
+  });
+
+  it("nginx がストリーミング応答をバッファしないようにするヘッダを付ける(issue #1475)", async () => {
+    // loading.tsx が先に描画を返しても、リバースプロキシが応答を溜め込むと利用者へ届かない。
+    // nginx は既定で proxy_buffering on のため、応答ごとに X-Accel-Buffering: no で切る
+    // (Next.js のセルフホスト手順が示す方法)。
+    const rules = await headerRules();
+    const applied = rules.flatMap((rule) => rule.headers.map((h) => [h.key, h.value]));
+    expect(applied).toContainEqual(["X-Accel-Buffering", "no"]);
   });
 
   it("基本のセキュリティヘッダを付ける", async () => {
