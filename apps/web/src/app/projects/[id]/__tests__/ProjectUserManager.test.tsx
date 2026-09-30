@@ -97,3 +97,19 @@ describe("ProjectUserManager(issue #1242: ユーザー情報同期ボタン)", (
     expect(await screen.findByText("テスト環境: 失敗")).toBeInTheDocument();
   });
 });
+
+describe("ProjectUserManager の空状態(issue #1069)", () => {
+  it("メンバーが居ないときは、居ない旨に加えて追加の方法を案内する", () => {
+    render(<ProjectUserManager projectId={1} members={[]} />);
+
+    expect(screen.getByText(/参加ユーザーはいません/)).toBeInTheDocument();
+    expect(screen.getByText(/「ユーザーを追加」から追加してください/)).toBeInTheDocument();
+    expect(screen.getByText(/先に.*サイトを紐付けて/)).toBeInTheDocument();
+  });
+
+  it("メンバーが居るときは空状態の案内を出さない", () => {
+    render(<ProjectUserManager projectId={1} members={[buildMember()]} />);
+
+    expect(screen.queryByText(/参加ユーザーはいません/)).not.toBeInTheDocument();
+  });
+});

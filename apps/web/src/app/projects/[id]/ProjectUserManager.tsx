@@ -119,7 +119,8 @@ export function ProjectUserManager({ projectId, members }: { projectId: number; 
           {members.length === 0 && (
             <tr>
               <td colSpan={4} className="px-4 py-6 text-center text-neutral-600 dark:text-neutral-400">
-                参加ユーザーはいません
+                参加ユーザーはいません。下の「ユーザーを追加」から追加してください。
+                サイトを紐付けていない場合は、先に概要タブの環境設定でサイトを紐付けてください。
               </td>
             </tr>
           )}

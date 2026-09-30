@@ -5,6 +5,7 @@ import com.letsblog.identity.client.PublishingServiceClient;
 import com.letsblog.identity.client.PublishingServiceException;
 import com.letsblog.identity.domain.ProjectUser;
 import com.letsblog.identity.domain.User;
+import com.letsblog.identity.domain.UserSiteAuthor;
 import com.letsblog.identity.dto.ProjectUserSyncSiteResult;
 import com.letsblog.identity.repository.ProjectUserRepository;
 import com.letsblog.identity.repository.UserRepository;
@@ -157,5 +158,60 @@ class ProjectUserSyncServiceTest {
         // 失敗したサイト分のuser_site_authors書き込みは行われない(保存できるcmsAuthorIdが無いため)。
         verify(userSiteAuthorRepository, times(1)).save(any());
         verify(auditLogService).logProjectUserSyncAction(eq(1L), eq(42L), eq(results));
+    }
+
+    // ------------------------------------------------------------------
+    // issue #1069: メンバー追加時のWordPressユーザー作成は、サイトが紐付いている場合にだけ起きる。
+    // ------------------------------------------------------------------
+
+    @Test
+    void サイト紐付け済みのプロジェクトへメンバーを追加すると各サイトへ著者を作成しuser_site_authorsへ保存する() {
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProject());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(buildUser()));
+        when(projectServiceClient.getSite(10L)).thenReturn(Optional.of(
+                new ProjectServiceClient.SiteBridge(10L, "local-key", "ローカル", "https://local.example.com")));
+        when(projectServiceClient.getSite(20L)).thenReturn(Optional.of(
+                new ProjectServiceClient.SiteBridge(20L, "test-key", "テスト", "https://test.example.com")));
+        when(publishingServiceClient.provisionAuthor(eq("local-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("101"));
+        when(publishingServiceClient.provisionAuthor(eq("test-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("202"));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), anyLong())).thenReturn(Optional.empty());
+
+        service().addUserToProject(1L, 42L, "author");
+
+        ArgumentCaptor<PublishingServiceClient.AuthorProvisioningRequest> requestCaptor =
+                ArgumentCaptor.forClass(PublishingServiceClient.AuthorProvisioningRequest.class);
+        verify(publishingServiceClient).provisionAuthor(eq("local-key"), requestCaptor.capture());
+        verify(publishingServiceClient).provisionAuthor(eq("test-key"), any());
+        assertEquals("member@example.com", requestCaptor.getValue().email());
+        assertEquals("author", requestCaptor.getValue().wpRole());
+
+        ArgumentCaptor<UserSiteAuthor> mappingCaptor = ArgumentCaptor.forClass(UserSiteAuthor.class);
+        verify(userSiteAuthorRepository, times(2)).save(mappingCaptor.capture());
+        List<UserSiteAuthor> saved = mappingCaptor.getAllValues();
+        assertTrue(saved.stream().allMatch(m -> m.getUserId().equals(42L)));
+        assertEquals("101", saved.stream().filter(m -> m.getSiteId().equals(10L)).findFirst().orElseThrow().getCmsAuthorId());
+        assertEquals("202", saved.stream().filter(m -> m.getSiteId().equals(20L)).findFirst().orElseThrow().getCmsAuthorId());
+
+        ArgumentCaptor<ProjectUser> memberCaptor = ArgumentCaptor.forClass(ProjectUser.class);
+        verify(projectUserRepository).save(memberCaptor.capture());
+        assertEquals(1L, memberCaptor.getValue().getProjectId());
+        assertEquals(42L, memberCaptor.getValue().getUserId());
+    }
+
+    @Test
+    void サイトが1つも紐付いていないプロジェクトへメンバーを追加してもWordPress著者もuser_site_authorsも作られない() {
+        when(projectServiceClient.getProject(1L)).thenReturn(
+                new ProjectServiceClient.ProjectBridge(1L, "p", "p-slug", "test", null, null, null, null));
+        when(userRepository.findById(42L)).thenReturn(Optional.of(buildUser()));
+
+        service().addUserToProject(1L, 42L, "author");
+
+        // project_users の行だけが残る。後からサイトを紐付けても遡って作られない(補填は #1324)。
+        verify(projectUserRepository).save(any(ProjectUser.class));
+        verify(projectServiceClient, never()).getSite(anyLong());
+        verify(publishingServiceClient, never()).provisionAuthor(any(), any());
+        verify(userSiteAuthorRepository, never()).save(any());
     }
 }

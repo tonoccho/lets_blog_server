@@ -8,6 +8,7 @@ import {
   getProjectGithubTokenStatus,
   getProjectBraveSearchApiKeyStatus,
   getProjectImageSettings,
+  type ProjectUser,
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -74,7 +75,7 @@ export default async function ProjectDetailPage({
   const [
     project,
     sites,
-    members,
+    membersResult,
     allUsers,
     categoryPage,
     timezone,
@@ -84,7 +85,11 @@ export default async function ProjectDetailPage({
   ] = await Promise.all([
     getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
     listSites().catch(logAndFallback("サイト一覧", [])),
-    listProjectUsers(projectId).catch(logAndFallback("プロジェクトメンバー", [])),
+    // 取得失敗を空配列に潰すと「メンバーが居ない」と区別できず、誤った案内を出す(issue #1069)。
+    // 失敗したことを別に持ち、0人の案内を出さないようにする。
+    listProjectUsers(projectId)
+      .then((users) => ({ users, failed: false }))
+      .catch((err: unknown) => ({ users: logAndFallback("プロジェクトメンバー", [] as ProjectUser[])(err), failed: true })),
     listUsers().catch(logAndFallback("ユーザー一覧", [])),
     listCategoryComparison(projectId, 0).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
     getViewerTimeZone(),
@@ -101,6 +106,8 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
+  const { users: members, failed: membersFetchFailed } = membersResult;
+  const hasBoundSite = Boolean(project.localSite || project.testSite || project.productionSite);
   const candidateUsers = allUsers.filter((user) => !members.some((member) => member.userId === user.id));
 
   const tabs: TabItem[] = [
@@ -126,6 +133,24 @@ export default async function ProjectDetailPage({
           </div>
 
           <MasterEnvironmentSelector projectId={project.id} project={project} />
+
+          {membersFetchFailed ? (
+            <p className="text-sm text-red-600">
+              メンバー情報を取得できませんでした。時間をおいて画面を再読み込みしてください。
+            </p>
+          ) : members.length === 0 && !hasBoundSite ? (
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">
+              サイトが紐付いていません。メンバーを追加する前に、先にサイトを紐付けてください
+              (サイトの紐付け前に追加したメンバーには WordPress ユーザーが作られません)。
+            </p>
+          ) : members.length === 0 ? (
+            <div className="space-y-3">
+              <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                このプロジェクトにはメンバーがいません。ユーザーを追加すると、紐付いたサイトの WordPress にも作成されます。
+              </p>
+              <AddProjectUserModal projectId={project.id} candidateUsers={candidateUsers} />
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -202,10 +227,16 @@ export default async function ProjectDetailPage({
       id: "members",
       label: "メンバー",
       content: (
-        <div className="space-y-4">
-          <ProjectUserManager projectId={project.id} members={members} />
-          <AddProjectUserModal projectId={project.id} candidateUsers={candidateUsers} />
-        </div>
+        membersFetchFailed ? (
+          <p className="text-sm text-red-600">
+            メンバー情報を取得できませんでした。時間をおいて画面を再読み込みしてください。
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <ProjectUserManager projectId={project.id} members={members} />
+            <AddProjectUserModal projectId={project.id} candidateUsers={candidateUsers} />
+          </div>
+        )
       ),
     },
   ];
