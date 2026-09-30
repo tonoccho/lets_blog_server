@@ -182,6 +182,14 @@ services:
       # メディアガベージコレクションのrequireAdmin/自分自身のuserId解決のため、呼び出し元の
       # Bearerトークンをそのままidentity-serviceへ転送して問い合わせる(#573 stage3)。
       IDENTITY_SERVICE_URI: http://identity:8080
+      # 同期 POST /api/ai/image は最大256枚(16x16)のBase64をレスポンス完了までオンヒープに保持する。
+      # ヒープを既定(コンテナ上限の25%)に任せず明示する(#1112)。コンテナ上限との差(1GiB)は
+      # 非ヒープ(メタスペース・スレッド・ダイレクトバッファ)と RechartsRenderer の Chromium の余裕。
+      # 根拠と見積もりは docs/DOCKER_COMPOSE_ARCHITECTURE.md「media のメモリ上限」。
+      JAVA_TOOL_OPTIONS: -Xmx1g
+    # deploy.resources.limits ではなく mem_limit を使う: Swarm 専用扱いの deploy 節に頼らず、
+    # 通常の `docker compose up` でも docker inspect の HostConfig.Memory に確実に反映されるため。
+    mem_limit: 2g
     volumes:
       - generated_images:/app/data/generated-images
       - comfyui_models:/comfyui-models

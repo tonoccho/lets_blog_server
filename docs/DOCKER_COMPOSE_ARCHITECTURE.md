@@ -281,6 +281,48 @@ docker run --rm -v /var/lib/docker/containers:/c:ro alpine sh -c 'du -sh /c/* | 
 docker inspect -f '{{.Name}} {{.LogPath}}' $(docker ps -aq)   # id とコンテナ名の対応
 ```
 
+## media のメモリ上限(#1112)
+
+`lbs-media` には `mem_limit: 2g` と `JAVA_TOOL_OPTIONS: -Xmx1g` を `docker-compose.yml` で明示している
+(リポジトリ初のコンテナメモリ上限)。オーバーレイ(e2e-stubs / shared-host)は `media` のこれらのキーに触れない。
+`mem_limit` を選んだのは、Swarm 向けの `deploy` 節に依存せず、通常の `docker compose up` で
+`docker inspect` の `HostConfig.Memory` に確実に反映されるため。
+
+### 方針
+
+- 同期 `POST /api/ai/image` は、`batchSize`(最大16)×`batchCount`(最大16)= 最大256枚の
+  Base64 文字列を、レスポンスを返し終えるまで全件オンヒープに保持する。合計枚数の上限は設けない(#1102 の決定)。
+- **大きなバッチには非同期経路 `POST /api/ai/image/jobs`(#1405)を使う。** 結果は生成画像の ID で記録され、
+  Base64 をヒープに積まない。
+- API 契約は変えない。
+
+### 見積もり
+
+| 項目 | 値 |
+|---|---|
+| 1枚(512×512 PNG)の目安 | 約0.4 MB(Base64 で約0.5 MB) |
+| 1枚(2048×2048 PNG)の目安 | 約8 MB(Base64 で約11 MB)。実画像での実測は GPU の無い環境では取れないため、PNG 圧縮率 約1.5〜2 B/px からの算出 |
+| 最大構成(256枚・2048×2048)のピーク | 約2.7 GiB(Base64 文字列)+ 1枚分の `byte[]` 作業領域 + レスポンスのシリアライズ用バッファ |
+| 512×512 で256枚 | 約128 MiB。`-Xmx1g` に収まる |
+| 2048×2048 で収まる枚数の目安 | 約80枚(`-Xmx1g` ÷ 11 MB、シリアライズの余裕を見て) |
+
+### 上限で足りる理由と、足りない構成
+
+- 通常の用途(〜1024×1024 の数十枚)は `-Xmx1g` に収まる。
+- **足りない構成**: 2048×2048 で概ね80枚超の同期リクエスト。この場合 `OutOfMemoryError` が起きうる。
+  これは**許容したリスク**(利用者の決定、2026-10-01)で、OOM はコンテナの `mem_limit` と `-Xmx` により
+  `lbs-media` 内に閉じ、ホストや他サービスのメモリには及ばない。`restart` ポリシーにより media は再起動される。
+- ヒープ 1 GiB とコンテナ 2 GiB の差 1 GiB は、非ヒープ(メタスペース・スレッドスタック・ダイレクトバッファ、
+  計 約0.3 GiB)と RechartsRenderer の Chromium(約0.5 GiB)を賄う余裕。アイドル時の `lbs-media` は約760 MiB(下表)。
+
+### 確認方法
+
+```bash
+docker inspect lbs-media --format '{{.HostConfig.Memory}}'          # 2147483648
+docker inspect lbs-media --format '{{.State.OOMKilled}}'            # false
+curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # ヒープ上限(-Xmx1g 由来)
+```
+
 ## リソース実測
 
 全29コンテナを `docker compose up -d` で起動した状態で `docker stats --no-stream` を実測した値
