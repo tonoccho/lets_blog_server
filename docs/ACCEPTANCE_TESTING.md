@@ -1344,6 +1344,26 @@ Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一
   両者の一致は `RateLimitUploadBucketSyncTest` が検証する
   (`docs/API_RATE_LIMITING.md`)
 
+### `install-wp-cli` の SSH 経路はサービスレベルテストが正式な検証範囲(#1197)
+
+`POST /api/sites/{id}/install-wp-cli`(AC-SITE-008)は、Gherkin ではなく JUnit のサービスレベル
+テストで検証する。`CLAUDE.md` → Test-First Implementation が認める「Web UI から届かない基準」の
+例外であり、暫定ではなく**恒久的な検証範囲**である(利用者の決定 2026-10-01、#1197)。
+
+- 対象: `services/publishing/src/test/java/com/letsblog/publishing/cms/ssh/WordPressSshOperationsTest.java`
+  の次の4件(`SshCommandExecutor` をモックする)
+  - `installWpCli_未導入なら導入コマンドを実行し成功結果を返す`
+  - `installWpCli_既にインストール済みなら例外を投げ導入コマンドは実行しない`
+  - `installWpCli_導入コマンドが失敗したら例外`
+  - `installWpCli_導入成功後に一括管理操作のプラグイン有効化が実行できる`
+- 届かない理由: `install-wp-cli` は SSH トランスポートのサイトにしか対応しない
+  (`WordPressAdapter.installWpCli`)。managed/AGENT サイトは wp-cli を `wordpress` イメージに
+  ビルド時導入しているため対象外で、ローカルの `wordpress` コンテナも SSH サーバを持たない。
+- 実 SSH サーバのコンテナを `docker-compose*.yml` に足さない理由: 1機能のために常時起動する
+  コンテナを増やす費用、共有ホストの負荷、保守が見合わない。足す案(案A)は採らなかった。
+- したがって `install-wp-cli` の E2E シナリオは書かない。この機能の検証を変えるときは
+  上記4件を直す。
+
 ---
 
 ## 12. ホストの80/443を他プロセスが占有している場合(#1038)
