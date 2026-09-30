@@ -2434,6 +2434,57 @@ export function updateReviewStepSetting(
   );
 }
 
+export type AiConnectionProvider = 'OLLAMA' | 'COMFYUI' | 'OPENAI' | 'CLAUDE';
+export type ConnectionSource = 'PROJECT' | 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+
+/** `GET /api/projects/{id}/ai-connections`(issue #1499)の1件。targetUrlは疎通確認に使ったURL。 */
+export interface AiConnection {
+  provider: AiConnectionProvider;
+  displayName: string;
+  targetUrl: string | null;
+  source: ConnectionSource;
+  status: 'NORMAL' | 'WARNING' | 'ERROR';
+  detail: string | null;
+  configured: boolean;
+}
+
+export function listAiConnections(projectId: number): Promise<AiConnection[]> {
+  return apiFetch<AiConnection[]>(`/api/projects/${projectId}/ai-connections`);
+}
+
+/** overrideBaseUrlはこのプロジェクトの上書き値(無ければnull)、baseUrl/sourceは解決結果。 */
+export interface ProjectConnectionEntry {
+  overrideBaseUrl: string | null;
+  baseUrl: string | null;
+  source: ConnectionSource;
+}
+
+export interface ProjectConnectionsResponse {
+  ollama?: ProjectConnectionEntry;
+  comfyui?: ProjectConnectionEntry;
+}
+
+/** 項目を省略すると変更せず、空文字はその項目の上書きを解除する(issue #1503)。 */
+export interface UpdateProjectConnectionsRequest {
+  ollamaBaseUrl?: string;
+  comfyuiBaseUrl?: string;
+}
+
+export function getProjectConnections(projectId: number): Promise<ProjectConnectionsResponse> {
+  return apiFetch<ProjectConnectionsResponse>(`/api/projects/${projectId}/ai-models/connections`);
+}
+
+export function updateProjectConnections(
+  projectId: number,
+  request: UpdateProjectConnectionsRequest
+): Promise<ProjectConnectionsResponse> {
+  return apiFetch<ProjectConnectionsResponse>(`/api/projects/${projectId}/ai-models/connections`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+}
+
 /** selectedはプロジェクト単位の上書き値(未設定時null)。未設定時はComfyUIとして扱われる。 */
 export interface ImageProviderListResponse {
   availableProviders: string[];

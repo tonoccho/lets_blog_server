@@ -60,6 +60,9 @@ import {
   selectComfyUiCheckpoint,
   installComfyUiCheckpoint,
   deleteComfyUiCheckpoint,
+  listAiConnections,
+  getProjectConnections,
+  updateProjectConnections,
   scanMediaGarbage,
   deleteMediaGarbage,
   getGenerationJob,
@@ -91,6 +94,8 @@ import {
   ReviewStepSettingsResponse,
   ImageProviderListResponse,
   ComfyUiCheckpointListResponse,
+  AiConnection,
+  ProjectConnectionsResponse,
   GenerationJobDetail,
   GeneratedImageSummary,
   MediaGarbageCollectionScanResponse,
@@ -973,6 +978,36 @@ export async function deleteComfyUiCheckpointAction(
   try {
     const job = await deleteComfyUiCheckpoint(projectId, fileName);
     return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Ollama / ComfyUIの接続先と利用可否(#1499)。疎通確認で最大数秒かかるため、呼び出し側は表示時に遅延取得する。 */
+export async function fetchAiConnectionsAction(projectId: number): Promise<AiConnection[]> {
+  await requireAdminSession();
+  return listAiConnections(projectId);
+}
+
+export async function fetchProjectConnectionsAction(projectId: number): Promise<ProjectConnectionsResponse> {
+  await requireAdminSession();
+  return getProjectConnections(projectId);
+}
+
+/** 空文字はそのプロバイダーの上書きを解除する(#1503)。もう一方のプロバイダーの値は送らず変更しない。 */
+export async function updateProjectConnectionAction(
+  projectId: number,
+  provider: "OLLAMA" | "COMFYUI",
+  baseUrl: string
+): Promise<{ data?: ProjectConnectionsResponse; error?: string }> {
+  await requireAdminSession();
+
+  try {
+    const data = await updateProjectConnections(
+      projectId,
+      provider === "OLLAMA" ? { ollamaBaseUrl: baseUrl } : { comfyuiBaseUrl: baseUrl }
+    );
+    return { data };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

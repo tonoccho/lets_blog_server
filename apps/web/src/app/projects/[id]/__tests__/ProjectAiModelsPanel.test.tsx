@@ -7,6 +7,8 @@ import {
   fetchReviewStepSettingsAction,
   fetchImageProviderAction,
   fetchComfyUiCheckpointsAction,
+  fetchAiConnectionsAction,
+  fetchProjectConnectionsAction,
 } from "../actions";
 import type {
   LlmModelListResponse,
@@ -31,6 +33,9 @@ jest.mock("../actions", () => ({
   fetchImageProviderAction: jest.fn(),
   selectImageProviderAction: jest.fn(),
   fetchComfyUiCheckpointsAction: jest.fn(),
+  fetchAiConnectionsAction: jest.fn(),
+  fetchProjectConnectionsAction: jest.fn(),
+  updateProjectConnectionAction: jest.fn(),
 }));
 
 const fetchLlmModelsMock = fetchLlmModelsAction as jest.MockedFunction<typeof fetchLlmModelsAction>;
@@ -41,6 +46,11 @@ const fetchReviewStepSettingsMock = fetchReviewStepSettingsAction as jest.Mocked
 const fetchImageProviderMock = fetchImageProviderAction as jest.MockedFunction<typeof fetchImageProviderAction>;
 const fetchComfyUiCheckpointsMock = fetchComfyUiCheckpointsAction as jest.MockedFunction<
   typeof fetchComfyUiCheckpointsAction
+>;
+
+const fetchAiConnectionsMock = fetchAiConnectionsAction as jest.MockedFunction<typeof fetchAiConnectionsAction>;
+const fetchProjectConnectionsMock = fetchProjectConnectionsAction as jest.MockedFunction<
+  typeof fetchProjectConnectionsAction
 >;
 
 function llmModelData(): LlmModelListResponse {
@@ -80,6 +90,11 @@ describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
     fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
     fetchImageProviderMock.mockReset().mockResolvedValue(imageProviderData());
     fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
+    fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
+    fetchProjectConnectionsMock.mockReset().mockResolvedValue({
+      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+      comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
+    });
   });
 
   it("初回表示のLLMタブに、既存パネルと並んでレビューステップ別設定が表示される", async () => {
@@ -149,5 +164,48 @@ describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
     expect(fetchLlmModelsMock).toHaveBeenCalledTimes(1);
     expect(fetchLlmProviderMock).toHaveBeenCalledTimes(1);
     expect(fetchReviewStepSettingsMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProjectAiModelsPanel の接続情報セクション(issue #1504)", () => {
+  beforeEach(() => {
+    fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
+    fetchImageProviderMock.mockReset().mockResolvedValue(imageProviderData());
+    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
+    fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
+    fetchProjectConnectionsMock.mockReset().mockResolvedValue({
+      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+      comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
+    });
+  });
+
+  it("LLMタブにOllamaの接続情報が表示され、ComfyUIの接続情報は表示されない", async () => {
+    render(<ProjectAiModelsPanel projectId={1} />);
+
+    expect(await screen.findByText("Ollamaの接続情報")).toBeInTheDocument();
+    expect(await screen.findByText("http://ollama.default:11434/v1")).toBeInTheDocument();
+    expect(screen.queryByText("ComfyUIの接続情報")).not.toBeInTheDocument();
+  });
+
+  it("画像生成タブにComfyUIの接続情報が表示される", async () => {
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await screen.findByText("Ollamaの接続情報");
+
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
+
+    expect(await screen.findByText("ComfyUIの接続情報")).toBeInTheDocument();
+    expect(await screen.findByText("http://comfy.default:8188")).toBeInTheDocument();
+    expect(screen.queryByText("Ollamaの接続情報")).not.toBeInTheDocument();
+  });
+
+  it("接続情報の取得は、タブのデータが表示されるまで始まらない(初期表示を待たせない)", async () => {
+    fetchLlmModelsMock.mockReturnValue(new Promise(() => {}));
+    render(<ProjectAiModelsPanel projectId={1} />);
+
+    expect(screen.queryByText("Ollamaの接続情報")).not.toBeInTheDocument();
+    expect(fetchAiConnectionsMock).not.toHaveBeenCalled();
   });
 });

@@ -33,6 +33,9 @@ import {
   listUnifiedOperationLogs,
   selectProjectAdSenseAccount,
   updateReviewStepSetting,
+  listAiConnections,
+  getProjectConnections,
+  updateProjectConnections,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -438,5 +441,38 @@ describe('listArticleReviewPullRequests(issue #1340)', () => {
     fetchMock.mockResolvedValue(textResponse('bad gateway', 502, 'Bad Gateway'))
 
     await expect(listArticleReviewPullRequests(7)).rejects.toThrow('APIエラー (502)')
+  })
+})
+
+describe('AI接続情報・接続先の上書き(issue #1504)', () => {
+  it('listAiConnectionsは #1499 のエンドポイントを取得する', async () => {
+    const body = [{ provider: 'OLLAMA', displayName: 'Ollama', targetUrl: 'http://o/models', source: 'PROJECT', status: 'NORMAL', detail: null, configured: true }]
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await listAiConnections(7)
+
+    expect(result).toEqual(body)
+    expect(calls()[0][0]).toContain('/api/projects/7/ai-connections')
+  })
+
+  it('getProjectConnectionsは #1503 のエンドポイントを取得する', async () => {
+    const body = { ollama: { overrideBaseUrl: null, baseUrl: 'http://o', source: 'ENVIRONMENT' } }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await getProjectConnections(7)
+
+    expect(result).toEqual(body)
+    expect(calls()[0][0]).toContain('/api/projects/7/ai-models/connections')
+  })
+
+  it('updateProjectConnectionsは指定した項目だけをPUTし、空文字はそのまま送る(上書き解除)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}))
+
+    await updateProjectConnections(7, { comfyuiBaseUrl: '' })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/ai-models/connections')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ comfyuiBaseUrl: '' })
   })
 })
