@@ -176,7 +176,7 @@ API: publishing `BulkManagementController`(23エンドポイント)
 | AC-BULK-007 | タグの同期 | 同上(タグ) | 同上 | — | 未着手 |
 | AC-BULK-008 | プラグイン/テーマの調整 | 環境の構成を揃えられる | `plugins/reconcile` `themes/reconcile` 後、比較の差分が解消する | — | 未着手(`@slow`) |
 | AC-BULK-009 | 一括削除 | 検証環境を作り直せる | `categories/delete-all` `tags/delete-all` `posts/delete-all` `plugins/delete-all` `themes/delete-all` の実行後、対象が空になる | — | 未着手(`@destructive`) |
-| AC-BULK-010 | 記事ステータスの一括変更 | 大量の記事をまとめて下書きに戻せる | `posts/status-update` 後、対象記事のステータスが変わる | — | 未着手 |
+| AC-BULK-010 | 記事ステータスの一括変更 | 大量の記事をまとめて下書きに戻せる | `posts/status-update` 後、対象記事のステータスが変わる | `apps/web/e2e/features/bulk/status-update-and-authorization.feature` › 投稿のステータスが一括で変更される(公開の2件が両環境で下書きになり、対象外の投稿は公開のまま。WordPress の実状態を wp-cli で確認)/ › 一般ユーザーは一括削除系を実行できず、対象環境の状態も変わらない(カテゴリ・タグ・投稿・プラグイン・テーマの `delete-all` が403、管理者トークンの比較結果と wp-cli で状態不変を確認。`@api`。#1182) | 検証済(2026-10-01、`--no-deps` で2シナリオとも成功。#1182)(`@slow`) |
 | AC-BULK-011 | 一括適用 | 変更を全環境へ一度に流せる | `bulk-management/apply` / `apply-all` が対象環境へ反映される | — | 未着手 |
 | AC-BULK-012 | ファイルアップロード | 手元のファイルを公開先へ送れる | `bulk-management/upload` 後、公開先にファイルが存在する | — | 未着手 |
 | AC-BULK-013 | 生成画像のアップロード | ギャラリーの画像を記事素材にできる | `POST /api/projects/{id}/asset-images/{generatedImageId}/upload` 後、公開先メディアに現れる | — | 未着手 |
