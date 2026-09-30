@@ -88,6 +88,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/ai-models/llm/review-steps"),
                 new Endpoint("PUT", "/api/projects/1/ai-models/llm/review-steps/JAPANESE"),
 
+                // -- AiConnectionController(issue #1499) --
+                new Endpoint("GET", "/api/projects/1/ai-connections"),
+
                 // -- GenerationJobController --
                 new Endpoint("GET", "/api/generation-jobs"),
                 new Endpoint("GET", "/api/generation-jobs/1"),

@@ -112,4 +112,39 @@ public class PlatformServiceClient {
                     "platform-serviceのllm-config呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
+
+    /** 接続先URL(APIキー方式のプロバイダーはnull)・設定の出所・設定有無。APIキーの値は含まれない。 */
+    public record ProviderConnectionConfig(String baseUrl, String source, boolean configured) {
+    }
+
+    public record AiConnectionsConfig(
+            ProviderConnectionConfig ollama, ProviderConnectionConfig comfyui,
+            ProviderConnectionConfig openai, ProviderConnectionConfig claude) {
+    }
+
+    /**
+     * 4プロバイダーの接続先・設定の出所・設定有無を解決する(issue #1499)。
+     * 失敗は握り潰さず例外にする。接続先が分からなければ判定そのものが行えないため、
+     * {@link #resolveLlmConfig}と同じ方針。
+     */
+    public AiConnectionsConfig resolveAiConnectionsConfig(String bearerToken) {
+        try {
+            AiConnectionsConfig config = restClient.get()
+                    .uri("/api/internal/platform/ai-connections-config")
+                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .retrieve()
+                    .body(AiConnectionsConfig.class);
+            if (config == null) {
+                throw new IllegalStateException("platform-serviceから空の応答を受け取りました");
+            }
+            return config;
+        } catch (RestClientResponseException e) {
+            String body = e.getResponseBodyAsString();
+            throw new IllegalStateException(
+                    (body == null || body.isBlank()) ? e.getMessage() : body, e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException(
+                    "platform-serviceのai-connections-config呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
 }

@@ -180,6 +180,39 @@ public class AppSettingService {
         return result;
     }
 
+    /**
+     * ai-serviceのai-connections API(issue #1499)向けに、設定値の「取得元」(DB/環境変数/未設定)だけを返す。
+     * {@link #getAllSettings()}と異なりadmin権限を要求しない(値そのものは返さず、秘匿値の有無しか
+     * 分からないため。呼び出し元は内部ブリッジ経由の認証済みサービスのみ)。
+     */
+    @Transactional(readOnly = true)
+    public SettingSource ollamaBaseUrlSource() {
+        return sourceOf(LLM_OLLAMA_BASE_URL);
+    }
+
+    @Transactional(readOnly = true)
+    public SettingSource comfyUiBaseUrlSource() {
+        return sourceOf(COMFYUI_BASE_URL);
+    }
+
+    @Transactional(readOnly = true)
+    public SettingSource openAiApiKeySource() {
+        return sourceOf(LLM_API_KEY);
+    }
+
+    @Transactional(readOnly = true)
+    public SettingSource claudeApiKeySource() {
+        return sourceOf(LLM_CLAUDE_API_KEY);
+    }
+
+    private SettingSource sourceOf(String key) {
+        Definition definition = DEFINITIONS.stream()
+                .filter(d -> d.key().equals(key))
+                .findFirst()
+                .orElseThrow();
+        return buildStatus(definition).source();
+    }
+
     private SettingStatus buildStatus(Definition definition) {
         String dbValue = repository.findById(definition.key())
                 .map(setting -> credentialCipher.decrypt(setting.getSettingValueEncrypted()))

@@ -76,6 +76,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/internal/platform/system-settings/brave-search-api-key"),
                 new Endpoint("GET", "/api/internal/platform/llm-config"),
                 new Endpoint("GET", "/api/internal/platform/image-generation-config"),
+                new Endpoint("GET", "/api/internal/platform/ai-connections-config"),
 
                 // -- VscodeExtensionController (1、issue #696) --
                 new Endpoint("GET", "/api/system/vscode-extension"),
@@ -145,7 +146,8 @@ class AuthorizationMatrixIntegrationTest {
     @ValueSource(strings = {
             "/api/internal/platform/system-settings/brave-search-api-key",
             "/api/internal/platform/llm-config",
-            "/api/internal/platform/image-generation-config"
+            "/api/internal/platform/image-generation-config",
+            "/api/internal/platform/ai-connections-config"
     })
     @DisplayName("内部ブリッジ /api/internal/platform/** は未認証なら401(issue #742)")
     void 内部ブリッジは未認証で401(String path) throws Exception {

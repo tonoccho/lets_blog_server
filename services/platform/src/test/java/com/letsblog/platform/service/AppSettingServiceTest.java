@@ -876,4 +876,51 @@ class AppSettingServiceTest {
         assertTrue(keys.contains("llm_ollama_available_models"), "実際のキー一覧: " + keys);
         assertTrue(keys.contains("llm_claude_available_models"), "実際のキー一覧: " + keys);
     }
+
+    // ---- ai-connections向けの取得元(issue #1499) ----
+
+    @Test
+    void 取得元_環境変数のみなら4項目ともENVIRONMENTを返す() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.ollamaBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.comfyUiBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.openAiApiKeySource());
+        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.claudeApiKeySource());
+    }
+
+    @Test
+    void 取得元_DBに設定があればDATABASEを返す() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.of(
+                new SystemSetting("llm_ollama_base_url", credentialCipher.encrypt("http://db-ollama/v1"))));
+        when(repository.findById("llm_api_key")).thenReturn(Optional.of(
+                new SystemSetting("llm_api_key", credentialCipher.encrypt("db-key"))));
+
+        assertEquals(AppSettingService.SettingSource.DATABASE, service.ollamaBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.DATABASE, service.openAiApiKeySource());
+    }
+
+    @Test
+    void 取得元_どちらにも無ければNONEを返す() {
+        AppSettingService service = serviceWithoutEnvDefaults();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        assertEquals(AppSettingService.SettingSource.NONE, service.ollamaBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.NONE, service.comfyUiBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.NONE, service.openAiApiKeySource());
+        assertEquals(AppSettingService.SettingSource.NONE, service.claudeApiKeySource());
+    }
+
+    @Test
+    void 取得元_admin権限を要求しない() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        service.claudeApiKeySource();
+
+        verify(adminAuthorizationService, never()).requireAdmin();
+    }
 }

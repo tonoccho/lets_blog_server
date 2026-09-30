@@ -115,6 +115,7 @@ export type {
 export * from './generated/ai/openAPIDefinition.schemas';
 export * from './generated/ai/ai-controller/ai-controller';
 export * from './generated/ai/article-plan-controller/article-plan-controller';
+export * from './generated/ai/ai-connection-controller/ai-connection-controller';
 export * from './generated/ai/project-llm-model-controller/project-llm-model-controller';
 
 // GenerationJobController(ai)のlist/getは、log-writer/mediaのlist集約と同様に

@@ -124,6 +124,22 @@ class AdminAuthorizationIntegrationTest {
         verify(identityClient).lookupProfile("Bearer admin-jwt");
     }
 
+    /** issue #1499: ai-connectionsもプロジェクトメンバーでなければ403(既存のarticle-planと同じ判定)。 */
+    @Test
+    @DisplayName("ai-connectionsは非member・非adminなら403(issue #1499)")
+    void aiConnectionsは非メンバー非adminなら403() throws Exception {
+        when(jwtDecoder.decode("ai-conn-jwt")).thenReturn(JwtTestFixtures.jwt("sub-9", "user"));
+        when(identityClient.lookupProfile("Bearer ai-conn-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(19L, "user")));
+        when(identityBridgeClient.isProjectMember(42L, 19L, "Bearer ai-conn-jwt")).thenReturn(false);
+
+        mockMvc.perform(get("/api/projects/42/ai-connections")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer ai-conn-jwt"))
+                .andExpect(status().isForbidden());
+
+        verify(identityClient).lookupProfile("Bearer ai-conn-jwt");
+    }
+
     /**
      * 無効化されたユーザー(issue #816)は、identity-service が 401/403 を返すため
      * {@code IdentityClient#lookupProfile} が {@link Optional#empty()} を返す。

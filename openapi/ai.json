@@ -1323,6 +1323,40 @@
         }
       }
     },
+    "/api/projects/{id}/ai-connections": {
+      "get": {
+        "tags": [
+          "ai-connection-controller"
+        ],
+        "operationId": "listAiConnections",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AiConnectionResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{id}/ai-models/llm/models": {
       "get": {
         "tags": [
@@ -2263,6 +2297,49 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "AiConnectionResponse": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "OLLAMA",
+              "COMFYUI",
+              "OPENAI",
+              "CLAUDE"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "targetUrl": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "PROJECT",
+              "DATABASE",
+              "ENVIRONMENT",
+              "NONE"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "WARNING",
+              "ERROR"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "configured": {
+            "type": "boolean"
           }
         }
       }

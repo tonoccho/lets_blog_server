@@ -275,6 +275,14 @@ app:
         uri: ${AI_SERVICE_URI:http://ai:8080}
         paths:
           - /api/projects/*/article-plan/**
+      # AiConnectionController(プロジェクトから見たAIプロバイダー4種の接続情報と利用可否、issue #1499)は
+      # ai-serviceが持つ。パスは/api/projects/**配下のままなので、より広い/api/projects/**(下のprojectルート)
+      # より先にここでマッチさせる(project-article-planと同じパターン。欠けると先勝ちでproject-serviceに
+      # 落ちて404になる)。
+      - id: project-ai-connections
+        uri: ${AI_SERVICE_URI:http://ai:8080}
+        paths:
+          - /api/projects/*/ai-connections
       # ArticleReviewController(レビュー待ちPRの一覧など、Epic #1333)はpublishing-serviceが持つ
       # (issue #1337)。パスは/api/projects/**配下のままなので、より広い/api/projects/**(下のproject
       # ルート)より先にここでマッチさせる。欠けると先勝ちでproject-serviceに落ちて404になる。

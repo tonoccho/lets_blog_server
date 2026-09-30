@@ -317,6 +317,45 @@ export interface GenerationJobDetailResponse {
   updatedAt?: string;
 }
 
+export type AiConnectionResponseProvider = typeof AiConnectionResponseProvider[keyof typeof AiConnectionResponseProvider];
+
+
+export const AiConnectionResponseProvider = {
+  OLLAMA: 'OLLAMA',
+  COMFYUI: 'COMFYUI',
+  OPENAI: 'OPENAI',
+  CLAUDE: 'CLAUDE',
+} as const;
+
+export type AiConnectionResponseSource = typeof AiConnectionResponseSource[keyof typeof AiConnectionResponseSource];
+
+
+export const AiConnectionResponseSource = {
+  PROJECT: 'PROJECT',
+  DATABASE: 'DATABASE',
+  ENVIRONMENT: 'ENVIRONMENT',
+  NONE: 'NONE',
+} as const;
+
+export type AiConnectionResponseStatus = typeof AiConnectionResponseStatus[keyof typeof AiConnectionResponseStatus];
+
+
+export const AiConnectionResponseStatus = {
+  NORMAL: 'NORMAL',
+  WARNING: 'WARNING',
+  ERROR: 'ERROR',
+} as const;
+
+export interface AiConnectionResponse {
+  provider?: AiConnectionResponseProvider;
+  displayName?: string;
+  targetUrl?: string;
+  source?: AiConnectionResponseSource;
+  status?: AiConnectionResponseStatus;
+  detail?: string;
+  configured?: boolean;
+}
+
 export type ListIssuesParams = {
 state?: string;
 };

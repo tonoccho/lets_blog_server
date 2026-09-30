@@ -89,4 +89,37 @@ public class InternalPlatformSettingsController {
                 appSettingService.chatGptApiKey(),
                 appSettingService.chatGptBaseUrl());
     }
+
+    /** 接続先URL(APIキー方式のプロバイダーはnull)・設定の出所・設定有無。APIキーの値は含まない。 */
+    public record ProviderConnectionConfig(String baseUrl, String source, boolean configured) {
+    }
+
+    public record AiConnectionsConfigResponse(
+            ProviderConnectionConfig ollama, ProviderConnectionConfig comfyui,
+            ProviderConnectionConfig openai, ProviderConnectionConfig claude) {
+    }
+
+    /**
+     * ai-serviceのai-connections API(issue #1499)向け。4プロバイダーそれぞれの接続先・設定の出所・
+     * 設定有無を返す。OpenAI/ClaudeのAPIキー、OllamaとComfyUIのURLとも、実際のキー値はレスポンスに
+     * 含めない(ai-serviceは有無しか必要としない)。
+     */
+    @GetMapping("/api/internal/platform/ai-connections-config")
+    public AiConnectionsConfigResponse aiConnectionsConfig() {
+        return new AiConnectionsConfigResponse(
+                urlConfig(appSettingService.getLlmOllamaBaseUrl(), appSettingService.ollamaBaseUrlSource()),
+                urlConfig(appSettingService.getComfyUiBaseUrl(), appSettingService.comfyUiBaseUrlSource()),
+                keyConfig(appSettingService.openAiApiKeySource()),
+                keyConfig(appSettingService.claudeApiKeySource()));
+    }
+
+    private static ProviderConnectionConfig urlConfig(String baseUrl, AppSettingService.SettingSource source) {
+        boolean configured = baseUrl != null && !baseUrl.isBlank();
+        return new ProviderConnectionConfig(configured ? baseUrl : null, source.name(), configured);
+    }
+
+    private static ProviderConnectionConfig keyConfig(AppSettingService.SettingSource source) {
+        return new ProviderConnectionConfig(
+                null, source.name(), source != AppSettingService.SettingSource.NONE);
+    }
 }
