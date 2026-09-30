@@ -20,11 +20,16 @@ jest.mock('../LogoutButton', () => ({ LogoutButton: () => <button data-testid="l
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => <i data-testid="theme" /> }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => <i data-testid="lang" /> }))
 jest.mock('../DownloadMenu', () => ({ DownloadMenu: () => <div data-testid="download-menu" /> }))
-jest.mock('../I18nProvider', () => ({ I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
+// useI18n も返す。子コンポーネントのモックが負荷時に外れても(#1516)、実物の子が useI18n を
+// 呼んで落ちないようにする。
+jest.mock('../I18nProvider', () => ({
+  I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useI18n: () => ({ t: (key: string) => key, locale: 'ja' }),
+}))
 jest.mock('../SessionProvider', () => ({ SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 jest.mock('../globals.css', () => ({}), { virtual: true })
 jest.mock('../ThemeScript', () => ({ ThemeScript: () => null }))
-jest.mock('../Footer', () => ({ Footer: () => <footer /> }), { virtual: true })
+jest.mock('../Footer', () => ({ Footer: () => <footer /> }))
 
 import { getSession } from '@/lib/session'
 import RootLayout from '../layout'

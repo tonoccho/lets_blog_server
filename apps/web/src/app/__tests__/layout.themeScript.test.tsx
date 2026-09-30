@@ -24,7 +24,12 @@ jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => null }))
 jest.mock('../DownloadMenu', () => ({ DownloadMenu: () => null }))
-jest.mock('../I18nProvider', () => ({ I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
+// useI18n も返す。子コンポーネントのモックが負荷時に外れても(#1516)、実物の子が useI18n を
+// 呼んで落ちないようにする。
+jest.mock('../I18nProvider', () => ({
+  I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useI18n: () => ({ t: (key: string) => key, locale: 'ja' }),
+}))
 jest.mock('../SessionProvider', () => ({ SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 jest.mock('../globals.css', () => ({}), { virtual: true })
 jest.mock('../ThemeScript', () => ({ ThemeScript: () => <i data-testid="theme-script" /> }))
