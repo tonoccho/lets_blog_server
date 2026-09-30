@@ -45,6 +45,7 @@ import { logger } from './logger';
 import { CancelledError, messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
+import { publishBlockedMessage } from './publishReviewLogic';
 import { ReviewChecklistPanel } from './reviewChecklistPanel';
 import { ReviewChecklistStore } from './reviewChecklistStore';
 import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
@@ -92,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.login', () => commandLogin(context)),
     vscode.commands.registerCommand('letsBlog.logout', () => commandLogout(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
-    vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context)),
+    vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context, proofreadController)),
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
@@ -629,11 +630,26 @@ function buildEnvironmentOptions(project: api.ProjectDetail): EnvironmentOption[
   return options;
 }
 
-async function commandPublish(context: vscode.ExtensionContext): Promise<void> {
+async function commandPublish(
+  context: vscode.ExtensionContext,
+  proofreadController: ProofreadController
+): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
   try {
+    // issue #1217: 投稿先を選ばせてから止める無駄を避けるため、環境の選択より前にレビューする。
+    // 未対応の指摘が1件でもあれば投稿しない(全件が「修正済み」または「スキップ」になるまで)。
+    const review = await proofreadController.reviewForPublish(editor.document);
+    if (review.blocked) {
+      const openChecklist = '指摘チェックリストを表示';
+      const choice = await vscode.window.showErrorMessage(publishBlockedMessage(review.unresolvedCount), openChecklist);
+      if (choice === openChecklist) {
+        await vscode.commands.executeCommand('letsBlog.reviewChecklist');
+      }
+      return;
+    }
+
     const article = parseArticle(editor.document.getText());
     const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
     if (!projectId) {

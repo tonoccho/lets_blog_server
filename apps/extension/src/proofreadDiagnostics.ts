@@ -16,7 +16,8 @@ import {
   runReviewSteps,
   StepFinding,
 } from './proofreadLogic';
-import { computeBodyHash } from './reviewChecklistLogic';
+import { computeBodyHash, ReviewChecklistDocumentState } from './reviewChecklistLogic';
+import { PublishReviewOutcome, reviewBeforePublish } from './publishReviewLogic';
 import { ReviewChecklistPanel } from './reviewChecklistPanel';
 import { ReviewChecklistStore } from './reviewChecklistStore';
 
@@ -147,6 +148,30 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     );
   }
 
+  /**
+   * Publishの直前(issue #1217)に呼ぶ。本文が直近のレビュー以降変わっていなければ保持した結果を使い
+   * (LLMへは依頼しない)、変わっていれば5ステップのレビューを実行して未対応の件数を判定する。
+   * レビュー結果を保持できない場合は、未対応の有無を判定できないため例外にして投稿を通さない。
+   */
+  async reviewForPublish(document: vscode.TextDocument): Promise<PublishReviewOutcome> {
+    const key = document.uri.toString();
+    const article = parseArticle(document.getText());
+    return reviewBeforePublish({
+      content: article.content,
+      snapshot: this.checklistStore?.get(key),
+      runReview: async () => {
+        const state = await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: 'Publish前のレビュー中…' },
+          (progress) => this.runContentReview(document, (message) => progress.report({ message }))
+        );
+        if (!state) {
+          throw new Error('レビュー結果を保持できなかったため、未対応の指摘を判定できません。もう一度お試しください。');
+        }
+        return state;
+      },
+    });
+  }
+
   /** エディタが(再)表示されたとき、保持しているレビュー結果の装飾をそのエディタへ置き直す。 */
   refreshEditor(editor: vscode.TextEditor): void {
     const ranges = this.findingRanges.get(editor.document.uri.toString());
@@ -243,14 +268,17 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
     this.applyDiagnostics(document);
   }
 
-  private async runContentReview(document: vscode.TextDocument, report: (message: string) => void): Promise<void> {
+  private async runContentReview(
+    document: vscode.TextDocument,
+    report: (message: string) => void
+  ): Promise<ReviewChecklistDocumentState | undefined> {
     const key = document.uri.toString();
     const rawText = document.getText();
     const article = parseArticle(rawText);
 
     if (!article.content.trim()) {
       this.showFindings(document, []);
-      return;
+      return undefined;
     }
 
     this.contentAbortControllers.get(key)?.abort();
@@ -274,16 +302,18 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       });
       // 実行中に別のレビューが始まっていた場合、古い結果で上書きしない。
       if (this.contentAbortControllers.get(key) !== controller) {
-        return;
+        return undefined;
       }
       this.showFindings(document, findings);
-      if (this.checklistStore) {
-        const state = await this.checklistStore.recordReview(key, findings, computeBodyHash(article.content));
-        ReviewChecklistPanel.refreshIfShowing(key, state.items);
+      if (!this.checklistStore) {
+        return undefined;
       }
+      const state = await this.checklistStore.recordReview(key, findings, computeBodyHash(article.content));
+      ReviewChecklistPanel.refreshIfShowing(key, state.items);
+      return state;
     } catch (err) {
       if (this.contentAbortControllers.get(key) !== controller) {
-        return;
+        return undefined;
       }
       throw err;
     } finally {

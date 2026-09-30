@@ -402,3 +402,100 @@ describe('ProofreadController と指摘チェックリスト(issue #1216)', () =
     await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).resolves.toBeUndefined();
   });
 });
+
+describe('ProofreadController.reviewForPublish(issue #1217: Publish直前のレビュー)', () => {
+  function suggestionFor(step: string, message: string): unknown {
+    return { suggestions: [{ stepKey: step, originalText: 'AはB', message, suggestion: null, sources: [] }], skipped: false };
+  }
+
+  function fakeStore(): ReviewChecklistStore {
+    const state = new Map<string, unknown>();
+    return new ReviewChecklistStore({
+      workspaceState: {
+        get: (key: string) => state.get(key),
+        update: async (key: string, value: unknown) => {
+          state.set(key, value);
+        },
+      },
+    } as never);
+  }
+
+  it('未レビューならレビューを実行し、未対応の指摘があればブロックして件数を返す', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false }) as never);
+    const controller = new ProofreadController(context, fakeStore());
+
+    const outcome = await controller.reviewForPublish(makeDocument(ARTICLE) as never);
+
+    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(REVIEW_STEPS.length);
+    expect(outcome).toEqual({ blocked: true, unresolvedCount: 1, reviewed: true });
+  });
+
+  it('本文が変わっていなければ2回目はレビューAPIを呼ばず、保持した結果を使う', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false }) as never);
+    const controller = new ProofreadController(context, fakeStore());
+    const document = makeDocument(ARTICLE);
+    await controller.reviewForPublish(document as never);
+    mocked.reviewStepSuggestions.mockClear();
+
+    const outcome = await controller.reviewForPublish(document as never);
+
+    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ blocked: true, unresolvedCount: 1, reviewed: false });
+  });
+
+  it('front matterだけが変わっても再実行しない(判定は本文だけで行う)', async () => {
+    const controller = new ProofreadController(context, fakeStore());
+    await controller.reviewForPublish(makeDocument(ARTICLE) as never);
+    mocked.reviewStepSuggestions.mockClear();
+
+    await controller.reviewForPublish(makeDocument(ARTICLE.replace('status: draft', 'status: publish')) as never);
+
+    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+  });
+
+  it('本文が変わっていれば再実行する', async () => {
+    const controller = new ProofreadController(context, fakeStore());
+    await controller.reviewForPublish(makeDocument(ARTICLE) as never);
+    mocked.reviewStepSuggestions.mockClear();
+
+    await controller.reviewForPublish(makeDocument(`${ARTICLE}追記です。`) as never);
+
+    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(REVIEW_STEPS.length);
+  });
+
+  it('実行中は進捗通知を出す', async () => {
+    const controller = new ProofreadController(context, fakeStore());
+    await controller.reviewForPublish(makeDocument(ARTICLE) as never);
+    expect(progressRuns.length).toBeGreaterThan(0);
+  });
+
+  it('本文が空ならAPIを呼ばずブロックしない', async () => {
+    const controller = new ProofreadController(context, fakeStore());
+    const outcome = await controller.reviewForPublish(makeDocument('---\ntitle: t\n---\n') as never);
+    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(outcome.blocked).toBe(false);
+  });
+
+  it('チェックリストの保存先が無いとレビュー結果を判定に使えないため失敗する(投稿を通さない)', async () => {
+    await expect(controllerWith().reviewForPublish(makeDocument(ARTICLE) as never)).rejects.toThrow(
+      'レビュー結果'
+    );
+  });
+
+  it('レビュー中に別のレビューが始まって結果が反映されなかった場合も失敗する(投稿を通さない)', async () => {
+    const store = fakeStore();
+    const controller = new ProofreadController(context, store);
+    const document = makeDocument(ARTICLE);
+    let release: () => void = () => undefined;
+    mocked.reviewStepSuggestions.mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ suggestions: [], skipped: false } as never); }) as never
+    );
+    const first = controller.reviewForPublish(document as never);
+    await new Promise((r) => setImmediate(r));
+    await controller.runManual(document as never);
+    release();
+    await expect(first).rejects.toThrow('レビュー結果');
+  });
+});

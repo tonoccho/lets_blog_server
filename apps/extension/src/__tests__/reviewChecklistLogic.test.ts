@@ -3,7 +3,9 @@ import {
   buildChecklistItems,
   computeBodyHash,
   computeFindingId,
+  countUnresolvedItems,
   groupChecklistItemsByStep,
+  isSnapshotCurrent,
   mergeChecklistState,
   ReviewChecklistItem,
   setChecklistItemStatus,
@@ -158,5 +160,40 @@ describe('groupChecklistItemsByStep', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0].stepKey).toBe('STYLE');
+  });
+});
+
+/**
+ * issue #1217: Publish直前のレビューが使う判定。「本文が変わっていないか」は#1226(プレビュー直前)も
+ * 同じものを使うため、スナップショットを持つこのモジュール側に置く。
+ */
+describe('countUnresolvedItems', () => {
+  function item(status: ReviewChecklistItem['status'], message: string): ReviewChecklistItem {
+    return { ...buildChecklistItems([finding({ message })], undefined)[0], status };
+  }
+
+  it('未対応の項目だけを数える(修正済みとスキップは数えない)', () => {
+    const items = [item('unresolved', 'a'), item('fixed', 'b'), item('skipped', 'c'), item('unresolved', 'd')];
+    expect(countUnresolvedItems(items)).toBe(2);
+  });
+
+  it('項目が無ければ0', () => {
+    expect(countUnresolvedItems([])).toBe(0);
+  });
+});
+
+describe('isSnapshotCurrent', () => {
+  it('保持しているスナップショットのハッシュと本文のハッシュが一致すればtrue', () => {
+    const state = { bodyHash: computeBodyHash('本文A'), items: [] };
+    expect(isSnapshotCurrent(state, '本文A')).toBe(true);
+  });
+
+  it('本文が1文字でも変わっていればfalse', () => {
+    const state = { bodyHash: computeBodyHash('本文A'), items: [] };
+    expect(isSnapshotCurrent(state, '本文B')).toBe(false);
+  });
+
+  it('スナップショットが無い(未レビュー)ならfalse', () => {
+    expect(isSnapshotCurrent(undefined, '本文A')).toBe(false);
   });
 });

@@ -37,7 +37,7 @@ export interface ReviewChecklistGroup {
 export interface ReviewChecklistDocumentState {
   /**
    * 判定の基準となった本文のスナップショットのハッシュ。
-   * issue #1217 / #1226が「本文が未変更なら再実行しない」の判定に使う(本Issueは保持のみ)。
+   * issue #1217 / #1226が「本文が未変更なら再実行しない」の判定に使う(判定は`isSnapshotCurrent`)。
    */
   bodyHash: string;
   items: ReviewChecklistItem[];
@@ -120,4 +120,18 @@ export function groupChecklistItemsByStep(items: ReviewChecklistItem[]): ReviewC
     }
   }
   return groups;
+}
+
+/**
+ * 保持しているスナップショットが、いまの本文に対するものか(=本文が直近のレビュー以降変わっていないか)。
+ * Publish直前(issue #1217)とプレビュー直前(issue #1226)が同じ判定を使うため、二重実装にならないよう
+ * スナップショットを持つここに置く。判定は本文(`article.content`)だけで行い、front matterは見ない。
+ */
+export function isSnapshotCurrent(state: ReviewChecklistDocumentState | undefined, content: string): boolean {
+  return state !== undefined && state.bodyHash === computeBodyHash(content);
+}
+
+/** 未対応の項目数。「修正済み」「スキップ」は数えない(issue #1217)。 */
+export function countUnresolvedItems(items: ReviewChecklistItem[]): number {
+  return items.filter((item) => item.status === 'unresolved').length;
 }
