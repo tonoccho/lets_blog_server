@@ -606,10 +606,37 @@ public class AiAssistService {
     }
 
     /**
-     * issue #1213: 多段レビューのステップ別指摘生成。プロンプト・応答形式はステップごとに異なるが、
-     * プロバイダー/モデルの解決は{@link ReviewStepModelService}(issue #1211、ステップ設定 →
-     * プロジェクト既定 → グローバル既定)へ委譲する。generation_jobsのtypeにステップキーを含め、
-     * どのステップが生成したか判別できるようにする。
+     * issue #1213: 多段レビューのステップ別指摘生成。呼び出し元({@link
+     * com.letsblog.ai.controller.AiController#reviewStepSuggestions})はパス変数を生の
+     * {@code String}のまま渡す({@link ReviewStepKeys}のJavadoc参照、issue #1222)。
+     *
+     * <p>未知のステップキーはIssue #1222のRequirements「上記のいずれの場合も、generation_jobsに
+     * 失敗として記録が残る」の対象。検証に失敗した場合だけジョブを開き、即座にfailJob()で
+     * 失敗として記録してから例外を再送出する(レビュー2026-09-28: 検証前にコントローラで
+     * 短絡するとジョブ自体が作られず記録が残らないという指摘への対応)。検証を通過した
+     * 正常系では、このためのジョブは作らない(既存の#1213のジョブ管理をそのまま使う)。
+     */
+    public AiReviewStepSuggestionsResponse generateReviewStepSuggestions(
+            Long projectId, String rawStepKey, String text) {
+        ReviewStepKey stepKey;
+        try {
+            stepKey = ReviewStepKeys.parse(rawStepKey);
+        } catch (RuntimeException e) {
+            GenerationJob job = startJob("llm_review_step_invalid", Map.of(
+                    "projectId", String.valueOf(projectId),
+                    "stepKey", String.valueOf(rawStepKey),
+                    "text", String.valueOf(text)));
+            failJob(job, e);
+            throw e;
+        }
+        return generateReviewStepSuggestions(projectId, stepKey, text);
+    }
+
+    /**
+     * issue #1213: 多段レビューのステップ別指摘生成(ステップキー検証済み)。プロンプト・応答形式は
+     * ステップごとに異なるが、プロバイダー/モデルの解決は{@link ReviewStepModelService}(issue #1211、
+     * ステップ設定 → プロジェクト既定 → グローバル既定)へ委譲する。generation_jobsのtypeに
+     * ステップキーを含め、どのステップが生成したか判別できるようにする。
      */
     public AiReviewStepSuggestionsResponse generateReviewStepSuggestions(
             Long projectId, ReviewStepKey stepKey, String text) {

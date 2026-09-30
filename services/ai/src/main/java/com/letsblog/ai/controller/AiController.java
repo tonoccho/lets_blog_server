@@ -1,6 +1,5 @@
 package com.letsblog.ai.controller;
 
-import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiAskRequest;
 import com.letsblog.ai.dto.AiAskResponse;
 import com.letsblog.ai.dto.AiDraftRequest;
@@ -17,6 +16,8 @@ import com.letsblog.ai.dto.AiTagsRequest;
 import com.letsblog.ai.dto.AiTagsResponse;
 import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.AiAssistService;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -112,11 +113,26 @@ public class AiController {
      * {@link com.letsblog.ai.service.ReviewStepModelService}(issue #1211)経由でプロジェクトの
      * ステップ設定を読むため、{@link #generateImagePrompt}と同じ理由(保存済みのプロジェクト設定を
      * 読む)でプロジェクトメンバー(またはadmin)に限定する(issue #830)。
+     *
+     * <p>stepKeyを{@code @PathVariable ReviewStepKey}のままにせず生の{@code String}で受け取る理由は
+     * {@link ProjectLlmModelController#updateReviewStepSetting}と同じ(issue #1222、
+     * {@link com.letsblog.ai.service.ReviewStepKeys}のJavadoc参照)。ステップキーの検証自体は
+     * {@link AiAssistService#generateReviewStepSuggestions(Long, String, String)}へ委譲する。
+     * ここでコントローラが自ら検証してから委譲すると、検証失敗時にgeneration_jobsへ記録を残す
+     * (issue #1222 Requirements)ためのジョブが一度も開かれないため(レビュー2026-09-28)、
+     * 検証もジョブ管理と合わせてサービス側で行う。
+     *
+     * <p>受け付ける値自体は変わらず{@code ReviewStepKey}の5値のままなので、OpenAPIスキーマから
+     * その制約が失われないよう{@code @Schema(allowableValues=...)}で明示する(レビュー2026-09-28:
+     * 型をStringにしたことでspringdocの型推論からenum制約が消えていたという指摘への対応、
+     * {@link ProjectLlmModelController#updateReviewStepSetting}と同じ対応)。
      */
     @PostMapping("/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions")
     public AiReviewStepSuggestionsResponse reviewStepSuggestions(
             @PathVariable Long projectId,
-            @PathVariable ReviewStepKey stepKey,
+            @Parameter(schema = @Schema(
+                    allowableValues = {"JAPANESE", "PROOFREADING", "FACT_CHECK", "READER_PERSPECTIVE", "STYLE"}))
+            @PathVariable String stepKey,
             @Valid @RequestBody AiReviewStepSuggestionsRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         return aiAssistService.generateReviewStepSuggestions(projectId, stepKey, request.text());

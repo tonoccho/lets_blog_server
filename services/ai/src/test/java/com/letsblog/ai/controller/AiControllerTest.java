@@ -95,13 +95,17 @@ class AiControllerTest {
 
     @Test
     void reviewStepSuggestions_プロジェクトメンバー判定を通してサービスへ委譲する() {
+        // issue #1222レビュー(2026-09-28)対応: ステップキーの検証(未知の値の400化とgeneration_jobs
+        // への失敗記録)をコントローラからAiAssistServiceへ移したため、委譲先はenumではなく
+        // パス変数の生のStringを受け取るオーバーロードになった。
         AiReviewStepSuggestionsRequest request = new AiReviewStepSuggestionsRequest("本文");
         AiReviewStepSuggestionsResponse expected = new AiReviewStepSuggestionsResponse(
                 List.of(new ReviewStepSuggestion("id1", "JAPANESE", "本文", "指摘")));
-        when(aiAssistService.generateReviewStepSuggestions(7L, ReviewStepKey.JAPANESE, "本文")).thenReturn(expected);
+        when(aiAssistService.generateReviewStepSuggestions(7L, ReviewStepKey.JAPANESE.name(), "本文"))
+                .thenReturn(expected);
 
         AiReviewStepSuggestionsResponse response =
-                controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE, request);
+                controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE.name(), request);
 
         assertEquals(expected, response);
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
@@ -114,7 +118,7 @@ class AiControllerTest {
                 .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
 
         assertThrows(ForbiddenException.class,
-                () -> controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE, request));
+                () -> controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE.name(), request));
 
         verifyNoInteractions(aiAssistService);
     }

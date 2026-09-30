@@ -1,6 +1,5 @@
 package com.letsblog.ai.controller;
 
-import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.LlmModelListResponse;
 import com.letsblog.ai.dto.LlmProviderListResponse;
 import com.letsblog.ai.dto.ReviewStepSettingsResponse;
@@ -9,7 +8,10 @@ import com.letsblog.ai.dto.SelectLlmProviderRequest;
 import com.letsblog.ai.dto.SelectReviewStepModelRequest;
 import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.LlmModelService;
+import com.letsblog.ai.service.ReviewStepKeys;
 import com.letsblog.ai.service.ReviewStepModelService;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -82,13 +84,25 @@ public class ProjectLlmModelController {
         return reviewStepModelService.listSettings(id);
     }
 
-    /** provider/modelが空ならそのステップの上書きを解除する(issue #1211)。 */
+    /**
+     * provider/modelが空ならそのステップの上書きを解除する(issue #1211)。
+     *
+     * <p>stepKeyを{@code @PathVariable ReviewStepKey}のままにせず生の{@code String}で受け取るのは、
+     * 未知の値をSpringの型変換に任せると409 CONFLICTになってしまう問題を避けるため
+     * ({@link ReviewStepKeys}のJavadoc参照。issue #1222)。ただし受け付ける値自体は変わらず
+     * {@code ReviewStepKey}の5値のままなので、OpenAPIスキーマからその制約が失われないよう
+     * {@code @Schema(allowableValues=...)}で明示する(レビュー2026-09-28: 型をStringにしたことで
+     * springdocの型推論からenum制約が消えていたという指摘への対応)。
+     */
     @PutMapping("/review-steps/{stepKey}")
     public ReviewStepSettingsResponse updateReviewStepSetting(
             @PathVariable Long id,
-            @PathVariable ReviewStepKey stepKey,
+            @Parameter(schema = @Schema(allowableValues = {
+                    "JAPANESE", "PROOFREADING", "FACT_CHECK", "READER_PERSPECTIVE", "STYLE"}))
+            @PathVariable String stepKey,
             @RequestBody SelectReviewStepModelRequest request) {
         adminAuthorizationService.requireAdmin();
-        return reviewStepModelService.selectSetting(id, stepKey, request.provider(), request.model());
+        return reviewStepModelService.selectSetting(
+                id, ReviewStepKeys.parse(stepKey), request.provider(), request.model());
     }
 }

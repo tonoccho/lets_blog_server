@@ -6,6 +6,7 @@ import com.letsblog.ai.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.ai.service.ForbiddenException;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
 import com.letsblog.ai.service.IdentityServiceUnavailableException;
+import com.letsblog.ai.service.InvalidReviewInputException;
 import com.letsblog.common.web.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -30,6 +31,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * レビュー関連API(issue #1222)の入力検証エラー。{@link InvalidReviewInputException}の
+     * Javadoc参照。IllegalArgumentExceptionではなく専用の例外型にしたことで、上の
+     * {@link #handleIllegalArgument}(409)の原因連鎖探索に巻き込まれず400を返せる。
+     */
+    @ExceptionHandler(InvalidReviewInputException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidReviewInput(InvalidReviewInputException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(IllegalStateException.class)

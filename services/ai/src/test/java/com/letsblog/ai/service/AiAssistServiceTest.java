@@ -751,6 +751,26 @@ class AiAssistServiceTest {
         assertEquals(List.of(), response.suggestions());
     }
 
+    /**
+     * issue #1222 レビュー(2026-09-28)対応: 非JSON応答は既存の{@code parseProofreadResponse}と同じ
+     * 契約(例外を伝播させず空配列で返す)を踏襲するとIssueが明示しているため、このケースを
+     * failJob()に変更することはしない(#1213/#1214が確立した既存挙動を踏襲する意図的な判断)。
+     * ただし「generation_jobsに記録が残る」というRequirementsの文言が実際に満たされている
+     * ことを、思い込みではなく検証で残す。ジョブは"done"として記録される
+     * (=失敗としてではないが、記録自体は残る)。
+     */
+    @Test
+    void generateReviewStepSuggestions_JSON配列でない応答でもgeneration_jobsには完了として記録が残る() {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("{}");
+
+        service.generateReviewStepSuggestions(1L, ReviewStepKey.JAPANESE, "本文");
+
+        ArgumentCaptor<GenerationJob> captor = ArgumentCaptor.forClass(GenerationJob.class);
+        org.mockito.Mockito.verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        GenerationJob lastSaved = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertEquals("done", lastSaved.getStatus());
+    }
+
     @Test
     void generateReviewStepSuggestions_不正なJSON応答は空の指摘一覧にフォールバックする() {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");

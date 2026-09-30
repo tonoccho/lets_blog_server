@@ -64,18 +64,34 @@ public class ReviewStepModelService {
         return new ReviewStepSettingsResponse(steps, availableProviders, llmConfigProvider.availableModels());
     }
 
-    /** provider/modelが空/nullの場合は、そのステップの上書きを解除する。 */
+    /**
+     * provider/modelが空/nullの場合は、そのステップの上書きを解除する。
+     *
+     * <p>未知のprovider名(issue #1222)は{@link AiProvider#fromString}が投げる
+     * {@link IllegalArgumentException}をここで{@link InvalidReviewInputException}(400)へ
+     * 変換する。「解除の意図の空文字/null」(fromStringがnullを返すケース)と区別するのは
+     * fromString自身の役目のままにし、本メソッドは「非空文字なのに解決できなかった」場合だけを
+     * 不正な入力として扱う。
+     */
     @Transactional
     public ReviewStepSettingsResponse selectSetting(Long projectId, ReviewStepKey stepKey, String provider, String model) {
         ProjectReviewStepSetting setting = repository.findByProjectIdAndStepKey(projectId, stepKey)
                 .orElseGet(() -> new ProjectReviewStepSetting(projectId, stepKey));
 
-        AiProvider parsedProvider = AiProvider.fromString(provider);
+        AiProvider parsedProvider = parseProviderOrThrow(provider);
         setting.setLlmProvider(parsedProvider != null ? parsedProvider.name() : null);
         setting.setLlmModel(model == null || model.isBlank() ? null : model);
         repository.save(setting);
 
         return listSettings(projectId);
+    }
+
+    private AiProvider parseProviderOrThrow(String provider) {
+        try {
+            return AiProvider.fromString(provider);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidReviewInputException("不明なAIプロバイダーです: " + provider);
+        }
     }
 
     /**

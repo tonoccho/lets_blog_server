@@ -136,7 +136,7 @@ class ProjectLlmModelControllerTest {
                 .thenReturn(expected);
 
         ReviewStepSettingsResponse response = controller.updateReviewStepSetting(
-                1L, ReviewStepKey.STYLE, new SelectReviewStepModelRequest("CLAUDE", "gpt-4o"));
+                1L, ReviewStepKey.STYLE.name(), new SelectReviewStepModelRequest("CLAUDE", "gpt-4o"));
 
         assertEquals(expected, response);
         verify(adminAuthorizationService).requireAdmin();
@@ -150,6 +150,6 @@ class ProjectLlmModelControllerTest {
         assertThrows(
                 ForbiddenException.class,
                 () -> controller.updateReviewStepSetting(
-                        1L, ReviewStepKey.STYLE, new SelectReviewStepModelRequest("CLAUDE", "gpt-4o")));
+                        1L, ReviewStepKey.STYLE.name(), new SelectReviewStepModelRequest("CLAUDE", "gpt-4o")));
     }
 }
