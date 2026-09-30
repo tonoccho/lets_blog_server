@@ -188,6 +188,33 @@ def cmd_clear(payload):
     sys.exit(0)
 
 
+def slash_command_skill(payload):
+    """プロンプトが `/<skill>` で始まり、`<skill>` が READ_ONLY_SKILLS の要素なら、その要素を返す。
+
+    スラッシュコマンド起動では `Skill` ツールが呼ばれず `cmd_stage` が動かない(#1469)。
+    返すのは常に READ_ONLY_SKILLS の要素そのもので、プロンプトの文字列は書かない。
+    """
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str):
+        return None
+    match = re.match(r"/([A-Za-z0-9_-]+)(?:\s|$)", prompt)
+    if match and match.group(1) in READ_ONLY_SKILLS:
+        return match.group(1)
+    return None
+
+
+def cmd_prompt(payload):
+    """`UserPromptSubmit`: 従来どおりマーカーを消し、読み取り専用スキルのスラッシュコマンドなら立て直す。"""
+    skill = slash_command_skill(payload)
+    if skill:
+        path = marker_path(payload)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(skill)
+        sys.exit(0)
+    cmd_clear(payload)
+
+
 # --------------------------------------------------------------------------- write
 
 
@@ -1818,6 +1845,7 @@ def main():
     {
         "stage": cmd_stage,
         "clear": cmd_clear,
+        "prompt": cmd_prompt,
         "write": cmd_write,
         "bash": cmd_bash,
     }.get(sys.argv[1], lambda _: sys.exit(0))(payload)

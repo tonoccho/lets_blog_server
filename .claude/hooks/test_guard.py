@@ -3861,5 +3861,148 @@ class FrozenMergeBaseAlignmentIsNeverLostByNewDetection(unittest.TestCase):
         )
 
 
+class SlashCommandReadOnlyStage(unittest.TestCase):
+    """#1469: スラッシュコマンド起動では `Skill` ツールが呼ばれないため、
+    `UserPromptSubmit` の `prompt` 先頭からマーカーを立てる。`ReportBugReadOnlyStage` の
+    合成 `Skill` payload 方式と併存する。実サブプロセスを駆動し、スタブは使わない。
+    """
+
+    SESSION = "slash-session"
+
+    def _root(self):
+        root = tempfile.mkdtemp()
+        os.makedirs(os.path.join(root, ".claude"))
+        return root
+
+    def _marker(self, root):
+        return os.path.join(root, ".claude", ".state", "readonly-%s" % self.SESSION)
+
+    def _prompt(self, prompt, root):
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            proc = subprocess.run(
+                [sys.executable, HOOK, "prompt"],
+                input=json.dumps(
+                    {"prompt": prompt, "session_id": self.SESSION, "cwd": root}
+                ),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertEqual(0, proc.returncode, proc.stderr)
+
+    def _read(self, root):
+        with open(self._marker(root), encoding="utf-8") as f:
+            return f.read().strip()
+
+    def _put_marker(self, root, skill):
+        os.makedirs(os.path.dirname(self._marker(root)), exist_ok=True)
+        with open(self._marker(root), "w", encoding="utf-8") as f:
+            f.write(skill)
+
+    def test_each_read_only_skill_writes_its_marker(self):
+        for skill in ("report-bug", "discover-issues", "triage-backlog", "ready-issue"):
+            root = self._root()
+            self._prompt("/%s 何か" % skill, root)
+            self.assertEqual(skill, self._read(root))
+
+    def test_bare_slash_command_writes_marker(self):
+        root = self._root()
+        self._prompt("/ready-issue", root)
+        self.assertEqual("ready-issue", self._read(root))
+
+    def test_report_bug_marker_allows_hotfix_create(self):
+        root = self._root()
+        self._prompt("/report-bug 記事が重複投稿される", root)
+        cmd = "glab issue create --title x --label user-request,bug,priority::P0,hotfix,status::Backlog"
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            reason = run_hook(
+                "bash",
+                {"tool_input": {"command": cmd}, "session_id": self.SESSION, "cwd": root},
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertIsNone(reason)
+
+    def test_ready_issue_marker_still_denies_hotfix_create(self):
+        root = self._root()
+        self._prompt("/ready-issue", root)
+        cmd = "glab issue create --title x --label hotfix,priority::P0,status::Backlog"
+        reason = _run_in_root("bash", {"command": cmd}, root, self.SESSION)
+        self.assertIsNotNone(reason)
+
+    def test_no_marker_still_denies_hotfix_create(self):
+        root = self._root()
+        cmd = "glab issue create --title x --label hotfix,priority::P0,status::Backlog"
+        self.assertIsNotNone(_run_in_root("bash", {"command": cmd}, root, self.SESSION))
+
+    def test_read_only_stage_denies_write_and_bash(self):
+        for skill in ("discover-issues", "triage-backlog", "ready-issue"):
+            root = self._root()
+            self._prompt("/%s" % skill, root)
+            target = os.path.join(root, "docs", "x.md")
+            self.assertIsNotNone(
+                _run_in_root("write", {"file_path": target, "content": "x"}, root, self.SESSION)
+            )
+            for cmd in (
+                "rm -rf apps/web/src",
+                "sed -i s/a/b/ CLAUDE.md",
+                "echo hi > notes.txt",
+            ):
+                self.assertIsNotNone(
+                    _run_in_root("bash", {"command": cmd}, root, self.SESSION), cmd
+                )
+
+    def test_other_prompts_create_no_marker(self):
+        for prompt in (
+            "こんにちは",
+            "/plan-issue 何か",
+            "先に /report-bug を実行して",
+            " 説明 /ready-issue",
+            "",
+        ):
+            root = self._root()
+            self._prompt(prompt, root)
+            self.assertFalse(os.path.exists(self._marker(root)), prompt)
+
+    def test_other_prompts_remove_existing_marker(self):
+        for prompt in ("こんにちは", "/plan-issue", "本文中に /report-bug がある"):
+            root = self._root()
+            self._put_marker(root, "ready-issue")
+            self._prompt(prompt, root)
+            self.assertFalse(os.path.exists(self._marker(root)), prompt)
+
+    def test_slash_command_replaces_existing_marker(self):
+        root = self._root()
+        self._put_marker(root, "ready-issue")
+        self._prompt("/report-bug x", root)
+        self.assertEqual("report-bug", self._read(root))
+
+    def test_marker_content_is_never_taken_from_prompt(self):
+        root = self._root()
+        self._prompt("/report-bug-evil x", root)
+        self.assertFalse(os.path.exists(self._marker(root)))
+
+    def test_clear_subcommand_still_removes_marker(self):
+        root = self._root()
+        self._put_marker(root, "ready-issue")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            subprocess.run(
+                [sys.executable, HOOK, "clear"],
+                input=json.dumps({"prompt": "/report-bug x", "session_id": self.SESSION, "cwd": root}),
+                capture_output=True, text=True, timeout=60,
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+        self.assertFalse(os.path.exists(self._marker(root)))
+
+
 if __name__ == "__main__":
     unittest.main()

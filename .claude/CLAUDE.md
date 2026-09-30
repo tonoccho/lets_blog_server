@@ -768,7 +768,7 @@ Rules that can be checked mechanically are **enforced**: a violation is refused,
 
 | Guard | Fires on | Blocks |
 | --- | --- | --- |
-| Read-only stage tracking | `Skill` | Records that a read-only stage started; cleared by any other skill or the user's next prompt |
+| Read-only stage tracking | `Skill`; `UserPromptSubmit` | Records that a read-only stage started — via the `Skill` tool, or, for a slash command (which never calls `Skill`), from a user prompt that begins with `/<read-only-skill>` (#1469); cleared by any other skill or the user's next prompt |
 | Repository writes | `Write` / `Edit` / `NotebookEdit` | Any write inside the repository while a read-only stage is active |
 | Mutating shell | `Bash` | `sed -i`, `rm` / `mv` / `cp` / `tee` / `patch`, state-changing `git`, dependency installs, and output redirection — while a read-only stage is active |
 | Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/` and `*.md` are exempt) |
