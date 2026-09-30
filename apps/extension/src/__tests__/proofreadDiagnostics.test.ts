@@ -499,3 +499,50 @@ describe('ProofreadController.reviewForPublish(issue #1217: Publish直前のレ�
     await expect(first).rejects.toThrow('レビュー結果');
   });
 });
+
+describe('ProofreadController.reviewForPreview(issue #1226: プレビュー直前のレビュー)', () => {
+  function suggestionFor(step: string, message: string): unknown {
+    return { suggestions: [{ stepKey: step, originalText: 'AはB', message, suggestion: null, sources: [] }], skipped: false };
+  }
+
+  function fakeStore(): ReviewChecklistStore {
+    const state = new Map<string, unknown>();
+    return new ReviewChecklistStore({
+      workspaceState: {
+        get: (key: string) => state.get(key),
+        update: async (key: string, value: unknown) => {
+          state.set(key, value);
+        },
+      },
+    } as never);
+  }
+
+  it('未レビューならレビューを実行し、未対応の件数を返す', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false }) as never);
+    const controller = new ProofreadController(context, fakeStore());
+
+    const outcome = await controller.reviewForPreview(makeDocument(ARTICLE) as never);
+
+    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(REVIEW_STEPS.length);
+    expect(outcome).toEqual({ unresolvedCount: 1, reviewed: true, failed: false });
+    expect(progressRuns.length).toBeGreaterThan(0);
+  });
+
+  it('Publishでレビュー済みで本文が同じなら、プレビューではAPIを呼ばない(判定はPublishと同じ)', async () => {
+    const controller = new ProofreadController(context, fakeStore());
+    const document = makeDocument(ARTICLE);
+    await controller.reviewForPublish(document as never);
+    mocked.reviewStepSuggestions.mockClear();
+
+    const outcome = await controller.reviewForPreview(document as never);
+
+    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(outcome.reviewed).toBe(false);
+  });
+
+  it('レビュー結果を保持できなくても例外にせず失敗として返す(プレビューを止めない)', async () => {
+    const outcome = await controllerWith().reviewForPreview(makeDocument(ARTICLE) as never);
+    expect(outcome.failed).toBe(true);
+  });
+});

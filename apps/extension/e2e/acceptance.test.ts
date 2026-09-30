@@ -22,6 +22,7 @@ import './steps/urlPaste.steps';
 import './steps/ai.steps';
 import './steps/reviewSteps.steps';
 import './steps/publishReview.steps';
+import './steps/previewReview.steps';
 import './steps/media.steps';
 import './steps/diagrams.steps';
 import './steps/failures.steps';

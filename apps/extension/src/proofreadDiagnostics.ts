@@ -17,7 +17,8 @@ import {
   StepFinding,
 } from './proofreadLogic';
 import { computeBodyHash, ReviewChecklistDocumentState } from './reviewChecklistLogic';
-import { PublishReviewOutcome, reviewBeforePublish } from './publishReviewLogic';
+import { PreviewReviewOutcome, reviewBeforePreview } from './previewReviewLogic';
+import { PublishReviewInput, PublishReviewOutcome, reviewBeforePublish } from './publishReviewLogic';
 import { ReviewChecklistPanel } from './reviewChecklistPanel';
 import { ReviewChecklistStore } from './reviewChecklistStore';
 
@@ -154,14 +155,26 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
    * レビュー結果を保持できない場合は、未対応の有無を判定できないため例外にして投稿を通さない。
    */
   async reviewForPublish(document: vscode.TextDocument): Promise<PublishReviewOutcome> {
+    return reviewBeforePublish(this.reviewInput(document, 'Publish前のレビュー中…'));
+  }
+
+  /**
+   * プレビューの直前(issue #1226)に呼ぶ。本文未変更の判定はPublishと同じ。未対応の指摘があっても
+   * 止めず、失敗しても例外にしない(プレビューは常に表示する)。
+   */
+  async reviewForPreview(document: vscode.TextDocument): Promise<PreviewReviewOutcome> {
+    return reviewBeforePreview(this.reviewInput(document, 'プレビュー前のレビュー中…'));
+  }
+
+  private reviewInput(document: vscode.TextDocument, progressTitle: string): PublishReviewInput {
     const key = document.uri.toString();
     const article = parseArticle(document.getText());
-    return reviewBeforePublish({
+    return {
       content: article.content,
       snapshot: this.checklistStore?.get(key),
       runReview: async () => {
         const state = await vscode.window.withProgress(
-          { location: vscode.ProgressLocation.Notification, title: 'Publish前のレビュー中…' },
+          { location: vscode.ProgressLocation.Notification, title: progressTitle },
           (progress) => this.runContentReview(document, (message) => progress.report({ message }))
         );
         if (!state) {
@@ -169,7 +182,7 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
         }
         return state;
       },
-    });
+    };
   }
 
   /** エディタが(再)表示されたとき、保持しているレビュー結果の装飾をそのエディタへ置き直す。 */

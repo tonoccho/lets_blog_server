@@ -46,6 +46,7 @@ import { CancelledError, messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
 import { publishBlockedMessage } from './publishReviewLogic';
+import { previewUnresolvedMessage } from './previewReviewLogic';
 import { ReviewChecklistPanel } from './reviewChecklistPanel';
 import { ReviewChecklistStore } from './reviewChecklistStore';
 import { FrontMatterCompletionProvider } from './frontMatterCompletionProvider';
@@ -107,7 +108,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.askAiSearch', () => commandAskAiSearch(context)),
     vscode.commands.registerCommand('letsBlog.selectProject', () => commandSelectProject(context)),
     vscode.commands.registerCommand('letsBlog.planArticle', () => commandPlanArticle(context)),
-    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context)),
+    vscode.commands.registerCommand('letsBlog.previewArticle', () => commandPreviewArticle(context, proofreadController)),
     vscode.commands.registerCommand('letsBlog.previewDevTools', () => PreviewPanel.openDevTools()),
     vscode.commands.registerCommand('letsBlog.pasteSmartCard', () => commandPasteSmartCard(context)),
     vscode.commands.registerCommand('letsBlog.pasteAsLink', () => commandPasteAsLink(context)),
@@ -1428,11 +1429,41 @@ function appendWarning(base: string | undefined, next: string): string {
 /** サイト未紐付け環境を表す選択肢。プロジェクトに紐づくサイトが1つも無くてもプレビュー自体は可能(CSSなしで表示する)。 */
 const NO_SITE_CHOICE: PreviewSiteChoice = { label: 'サイトなし', siteName: 'サイト未紐付け' };
 
-async function commandPreviewArticle(context: vscode.ExtensionContext): Promise<void> {
+/** プレビュー生成の前にレビューし、未対応の指摘があればメッセージで示す。プレビューは止めない。 */
+async function reviewBeforePreviewRender(
+  document: vscode.TextDocument,
+  proofreadController: ProofreadController
+): Promise<void> {
+  const outcome = await proofreadController.reviewForPreview(document);
+  if (outcome.failed) {
+    // 失敗時の扱いは#1224。ここではプレビューを止めず、事実だけ伝える。
+    void vscode.window.showWarningMessage(`プレビュー前のレビューに失敗しました: ${outcome.error}`);
+    return;
+  }
+  const message = previewUnresolvedMessage(outcome.unresolvedCount);
+  if (!message) return;
+  const openChecklist = '指摘チェックリストを表示';
+  // awaitしない: メッセージを閉じるのを待たせず、プレビューをそのまま表示する。
+  void vscode.window.showWarningMessage(message, openChecklist).then((choice) => {
+    if (choice === openChecklist) {
+      return vscode.commands.executeCommand('letsBlog.reviewChecklist');
+    }
+    return undefined;
+  });
+}
+
+async function commandPreviewArticle(
+  context: vscode.ExtensionContext,
+  proofreadController: ProofreadController
+): Promise<void> {
   const editor = getActiveMarkdownEditor();
   if (!editor) return;
 
   try {
+    // issue #1226: レビューはここ(コマンドの入口)で1回だけ行う。renderForSiteはパネル内の環境切り替えからも
+    // 呼ばれるため、そこに置くと切り替えのたびにレビューが走ってしまう。未対応の指摘があってもプレビューは止めない。
+    await reviewBeforePreviewRender(editor.document, proofreadController);
+
     const article = parseArticle(editor.document.getText());
     const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
     if (!projectId) {

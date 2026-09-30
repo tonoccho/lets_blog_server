@@ -11,7 +11,7 @@ import {
 } from '../../src/reviewChecklistLogic';
 import { PublishReviewOutcome, publishBlockedMessage, reviewBeforePublish } from '../../src/publishReviewLogic';
 
-interface PublishReviewScope {
+export interface PublishReviewScope {
   content: string;
   snapshot?: ReviewChecklistDocumentState;
   /** レビューを実行したときに見つかる指摘の件数。 */
@@ -19,16 +19,18 @@ interface PublishReviewScope {
   /** レビューが実行された回数(=LLMへの依頼が発生した回数)。 */
   reviewRuns: number;
   outcome?: PublishReviewOutcome;
+  /** プレビュー直前のレビュー(issue #1226)の結果。 */
+  previewOutcome?: unknown;
   scheduledError?: string;
 }
 
-function scope(world: unknown): PublishReviewScope {
+export function scope(world: unknown): PublishReviewScope {
   const holder = world as { publishReview?: PublishReviewScope };
   holder.publishReview ??= { content: '', newFindings: 0, reviewRuns: 0 };
   return holder.publishReview;
 }
 
-function findings(count: number, prefix: string): StepFinding[] {
+export function findings(count: number, prefix: string): StepFinding[] {
   return Array.from({ length: count }, (_, i) => ({
     step: REVIEW_STEPS[1],
     suggestion: { originalText: '本文', message: `${prefix}${i}`, suggestion: null, sources: [] },
