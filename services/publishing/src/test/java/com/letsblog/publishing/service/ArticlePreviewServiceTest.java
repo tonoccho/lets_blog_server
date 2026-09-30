@@ -69,7 +69,8 @@ class ArticlePreviewServiceTest {
     @BeforeEach
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
-        server = MockRestServiceServer.bindTo(builder).build();
+        // stylesheet取得は並列のため、リクエスト到着順は不定。順序は検証せず、期待した全リクエストが来たことだけを見る
+        server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
         service = new ArticlePreviewService(
                 projectService, siteService, builder, contentServiceClient,
                 cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations);
@@ -518,7 +519,7 @@ class ArticlePreviewServiceTest {
         return renderSkeletonScrapeWith(bridgeResult, () -> { });
     }
 
-    /** expectStylesheetsは、参照記事のREST取得の期待より後に登録する(MockRestServiceServerは順序を見る)。 */
+    /** expectStylesheetsは、参照記事のREST取得の期待より後に登録する(順序は検証しない設定だが、REST取得の期待を先に置く慣習を保つ)。 */
     private ThemeSkeletonResponse renderSkeletonScrapeWith(
             ContentServiceClient.ThemeSkeletonBridgeResponse bridgeResult, Runnable expectStylesheets) {
         when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
@@ -632,6 +633,396 @@ class ArticlePreviewServiceTest {
         assertTrue(response.css().length() <= 3_000_000);
         assertFalse(response.css().contains("bbbb"));
         assertTrue(response.css().contains("s{}"));
+    }
+
+    // ---- issue #1473: stylesheet取得の並列化 ----
+
+    private static final String POSTS_URL = "http://example.com/wp-json/wp/v2/posts?per_page=1&orderby=date"
+            + "&order=desc&_fields=id,link,title,content";
+    private static final String POSTS_JSON = "[{\"id\":1,\"link\":\"http://example.com/hello-world/\","
+            + "\"title\":{\"rendered\":\"Hello World\"},\"content\":{\"rendered\":\"<p>Hi</p>\"}}]";
+
+    /** 指定URLごとに人為的な遅延(ms)を入れて応答するHTTP。MockRestServiceServerは応答生成を直列化するため使わない。 */
+    private ArticlePreviewService serviceWithDelayedHttp(
+            java.util.Map<String, Long> delayMillis, java.util.Map<String, String> bodies) {
+        return serviceWithDelayedHttp(delayMillis, bodies, java.time.Duration.ofSeconds(20), null);
+    }
+
+    private final java.util.List<String> requestedUrls = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private ArticlePreviewService serviceWithDelayedHttp(
+            java.util.Map<String, Long> delayMillis, java.util.Map<String, String> bodies,
+            java.time.Duration fetchTimeout, String interruptCallerOnUrl) {
+        return serviceWithDelayedHttp(delayMillis, bodies, fetchTimeout, interruptCallerOnUrl,
+                com.letsblog.publishing.config.StylesheetFetchExecutorConfig.newExecutor());
+    }
+
+    private ArticlePreviewService serviceWithDelayedHttp(
+            java.util.Map<String, Long> delayMillis, java.util.Map<String, String> bodies,
+            java.time.Duration fetchTimeout, String interruptCallerOnUrl,
+            java.util.concurrent.ExecutorService executor) {
+        Thread caller = Thread.currentThread();
+        org.springframework.http.client.ClientHttpRequestFactory factory = (uri, method) ->
+                new org.springframework.mock.http.client.MockClientHttpRequest(method, uri) {
+                    @Override
+                    protected org.springframework.http.client.ClientHttpResponse executeInternal() {
+                        String url = uri.toString();
+                        requestedUrls.add(url);
+                        if (url.equals(interruptCallerOnUrl)) {
+                            caller.interrupt();
+                        }
+                        try {
+                            Thread.sleep(delayMillis.getOrDefault(url, 0L));
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        String body = url.equals(POSTS_URL) ? POSTS_JSON : bodies.get(url);
+                        if (body == null) {
+                            return new org.springframework.mock.http.client.MockClientHttpResponse(
+                                    new byte[0], HttpStatus.INTERNAL_SERVER_ERROR);
+                        }
+                        org.springframework.mock.http.client.MockClientHttpResponse response =
+                                new org.springframework.mock.http.client.MockClientHttpResponse(
+                                        body.getBytes(java.nio.charset.StandardCharsets.UTF_8), HttpStatus.OK);
+                        response.getHeaders().setContentType(url.equals(POSTS_URL)
+                                ? MediaType.APPLICATION_JSON : MediaType.valueOf("text/css;charset=UTF-8"));
+                        return response;
+                    }
+                };
+        return new ArticlePreviewService(
+                projectService, siteService, RestClient.builder().requestFactory(factory), contentServiceClient,
+                cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations,
+                executor, fetchTimeout);
+    }
+
+    private ThemeSkeletonResponse skeletonWith(ArticlePreviewService svc, java.util.List<String> unreadable) {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(contentServiceClient.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(bridgedWithUnreadable("body{margin:0}", unreadable));
+        return svc.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+    }
+
+    @Test
+    void renderSkeleton_複数のstylesheetは並列に取得され所要時間が最長1本分に近い() {
+        java.util.List<String> urls = java.util.List.of("http://cdn.example.com/a.css",
+                "http://cdn.example.com/b.css", "http://cdn.example.com/c.css", "http://cdn.example.com/d.css");
+        java.util.Map<String, Long> delays = new java.util.HashMap<>();
+        java.util.Map<String, String> bodies = new java.util.HashMap<>();
+        for (String url : urls) {
+            delays.put(url, 500L);
+            bodies.put(url, "x{}");
+        }
+        ArticlePreviewService svc = serviceWithDelayedHttp(delays, bodies);
+
+        long start = System.nanoTime();
+        ThemeSkeletonResponse response = skeletonWith(svc, urls);
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(response.css().contains("/* http://cdn.example.com/d.css */"));
+        // 直列なら4本x500ms=2000ms以上。並列なら最長1本(500ms)+αに収まる。
+        assertTrue(elapsedMillis < 1200, "elapsed=" + elapsedMillis + "ms は並列取得では説明できない");
+    }
+
+    @Test
+    void renderSkeleton_取得の完了順が入力順と逆でも連結は入力順のまま() {
+        java.util.Map<String, Long> delays = java.util.Map.of(
+                "http://cdn.example.com/a.css", 400L,
+                "http://cdn.example.com/b.css", 200L,
+                "http://cdn.example.com/c.css", 0L);
+        java.util.Map<String, String> bodies = java.util.Map.of(
+                "http://cdn.example.com/a.css", "a{}",
+                "http://cdn.example.com/b.css", "b{}",
+                "http://cdn.example.com/c.css", "c{}");
+        ArticlePreviewService svc = serviceWithDelayedHttp(delays, bodies);
+
+        ThemeSkeletonResponse response = skeletonWith(svc, java.util.List.of(
+                "http://cdn.example.com/a.css", "http://cdn.example.com/b.css", "http://cdn.example.com/c.css"));
+
+        assertEquals("body{margin:0}\n"
+                + "/* http://cdn.example.com/a.css */\na{}\n\n"
+                + "/* http://cdn.example.com/b.css */\nb{}\n\n"
+                + "/* http://cdn.example.com/c.css */\nc{}\n", response.css());
+    }
+
+    @Test
+    void renderSkeleton_並列取得でも一部の失敗は他のstylesheetの連結を妨げない() {
+        java.util.Map<String, String> bodies = java.util.Map.of(
+                "http://cdn.example.com/a.css", "a{}",
+                "http://cdn.example.com/c.css", "c{}");
+        ArticlePreviewService svc = serviceWithDelayedHttp(java.util.Map.of("http://cdn.example.com/a.css", 100L), bodies);
+
+        ThemeSkeletonResponse response = skeletonWith(svc, java.util.List.of(
+                "http://cdn.example.com/a.css", "http://cdn.example.com/broken.css", "http://cdn.example.com/c.css"));
+
+        assertEquals("body{margin:0}\n"
+                + "/* http://cdn.example.com/a.css */\na{}\n\n"
+                + "/* http://cdn.example.com/c.css */\nc{}\n", response.css());
+    }
+
+    @Test
+    void renderSkeleton_並列取得でもMAX_CSS_LENGTH超過の打ち切りは連結順で行われ警告ログは従来と同じ() {
+        String big = "b".repeat(200);
+        java.util.Map<String, String> bodies = java.util.Map.of(
+                "http://cdn.example.com/big.css", big,
+                "http://cdn.example.com/small.css", "s{}");
+        // 先頭(big)を最も遅くして、完了順と連結順を食い違わせる
+        ArticlePreviewService svc = serviceWithDelayedHttp(
+                java.util.Map.of("http://cdn.example.com/big.css", 300L), bodies);
+        String base = "x".repeat(3_000_000 - 50);
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+        when(contentServiceClient.fetchAndSplice(
+                "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                .thenReturn(bridgedWithUnreadable(base, java.util.List.of(
+                        "http://cdn.example.com/big.css", "http://cdn.example.com/small.css")));
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ArticlePreviewService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        ThemeSkeletonResponse response;
+        try {
+            response = svc.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertFalse(response.css().contains("bbbb"));
+        assertTrue(response.css().endsWith("/* http://cdn.example.com/small.css */\ns{}\n"));
+        assertEquals(1, appender.list.stream().filter(e ->
+                e.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && e.getFormattedMessage().contains("MAX_CSS_LENGTH")
+                        && e.getFormattedMessage().contains("http://cdn.example.com/big.css")).count());
+    }
+
+    private ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> captureLogs() {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ArticlePreviewService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private void stopCapturing(ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> a) {
+        ((ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ArticlePreviewService.class))
+                .detachAppender(a);
+    }
+
+    @Test
+    void renderSkeleton_応答しないstylesheetはタイムアウトで読み飛ばし他は連結され全体は待ち続けない() {
+        java.util.Map<String, Long> delays = java.util.Map.of("http://cdn.example.com/hang.css", 5000L);
+        java.util.Map<String, String> bodies = java.util.Map.of(
+                "http://cdn.example.com/a.css", "a{}",
+                "http://cdn.example.com/hang.css", "h{}",
+                "http://cdn.example.com/c.css", "c{}");
+        ArticlePreviewService svc = serviceWithDelayedHttp(
+                delays, bodies, java.time.Duration.ofMillis(300), null);
+        var appender = captureLogs();
+        ThemeSkeletonResponse response;
+        long start = System.nanoTime();
+        try {
+            response = skeletonWith(svc, java.util.List.of(
+                    "http://cdn.example.com/a.css", "http://cdn.example.com/hang.css",
+                    "http://cdn.example.com/c.css"));
+        } finally {
+            stopCapturing(appender);
+        }
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(elapsedMillis < 3000, "elapsed=" + elapsedMillis + "ms");
+        assertEquals("body{margin:0}\n"
+                + "/* http://cdn.example.com/a.css */\na{}\n\n"
+                + "/* http://cdn.example.com/c.css */\nc{}\n", response.css());
+        assertTrue(appender.list.stream().anyMatch(e ->
+                e.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && e.getFormattedMessage().contains("http://cdn.example.com/hang.css")));
+    }
+
+    @Test
+    void renderSkeleton_取得失敗のログには並列実行の包み例外ではなく元の例外が載る() {
+        ArticlePreviewService svc = serviceWithDelayedHttp(java.util.Map.of(), java.util.Map.of());
+        var appender = captureLogs();
+        try {
+            skeletonWith(svc, java.util.List.of("http://cdn.example.com/broken.css"));
+        } finally {
+            stopCapturing(appender);
+        }
+
+        var failure = appender.list.stream()
+                .filter(e -> e.getFormattedMessage().contains("http://cdn.example.com/broken.css"))
+                .findFirst().orElseThrow();
+        assertTrue(failure.getThrowableProxy().getClassName().contains("InternalServerError"),
+                failure.getThrowableProxy().getClassName());
+    }
+
+    @Test
+    void renderSkeleton_待機中に割り込まれても割り込み状態を保ち骨格は返る() {
+        ArticlePreviewService svc = serviceWithDelayedHttp(
+                java.util.Map.of("http://cdn.example.com/a.css", 300L),
+                java.util.Map.of("http://cdn.example.com/a.css", "a{}"),
+                java.time.Duration.ofSeconds(20), "http://cdn.example.com/a.css");
+        boolean stillInterrupted;
+        ThemeSkeletonResponse response;
+        try {
+            response = skeletonWith(svc, java.util.List.of("http://cdn.example.com/a.css"));
+        } finally {
+            stillInterrupted = Thread.interrupted();
+        }
+
+        assertTrue(stillInterrupted);
+        assertEquals("body{margin:0}", response.css());
+    }
+
+    @Test
+    void renderSkeleton_割り込まれたら未着手の残りの取得を取り消して待機をやめる() {
+        java.util.concurrent.ExecutorService single = java.util.concurrent.Executors.newFixedThreadPool(1);
+        try {
+            ArticlePreviewService svc = serviceWithDelayedHttp(
+                    java.util.Map.of("http://cdn.example.com/a.css", 300L),
+                    java.util.Map.of("http://cdn.example.com/a.css", "a{}",
+                            "http://cdn.example.com/b.css", "b{}", "http://cdn.example.com/c.css", "c{}"),
+                    java.time.Duration.ofSeconds(20), "http://cdn.example.com/a.css", single);
+            try {
+                skeletonWith(svc, java.util.List.of("http://cdn.example.com/a.css",
+                        "http://cdn.example.com/b.css", "http://cdn.example.com/c.css"));
+            } finally {
+                Thread.interrupted();
+            }
+            // 1本のワーカーがaを終えた後、取り消されたb/cのloaderは走らない
+            single.submit(() -> { }).get(3, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            single.shutdownNow();
+        }
+
+        assertFalse(requestedUrls.contains("http://cdn.example.com/b.css"), requestedUrls.toString());
+        assertFalse(requestedUrls.contains("http://cdn.example.com/c.css"), requestedUrls.toString());
+    }
+
+    @Test
+    void renderSkeleton_応答しない相手を読み取りタイムアウトで切り共有プールのワーカーを解放する() throws Exception {
+        com.sun.net.httpserver.HttpServer hangServer =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.concurrent.ExecutorService serverThreads = java.util.concurrent.Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r);
+            t.setDaemon(true);
+            return t;
+        });
+        hangServer.setExecutor(serverThreads);
+        hangServer.createContext("/hang.css", exchange -> {
+            try {
+                Thread.sleep(15_000);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        hangServer.start();
+        String hangUrl = "http://127.0.0.1:" + hangServer.getAddress().getPort() + "/hang.css";
+        java.util.concurrent.ExecutorService single = java.util.concurrent.Executors.newFixedThreadPool(1);
+        try {
+            when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+            when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+            when(contentServiceClient.fetchAndSplice(
+                    "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                    .thenReturn(bridgedWithUnreadable("body{margin:0}", java.util.List.of(hangUrl)));
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer.bindTo(builder).build()
+                    .expect(requestTo(POSTS_URL))
+                    .andRespond(withSuccess(POSTS_JSON, MediaType.APPLICATION_JSON));
+            ArticlePreviewService svc = new ArticlePreviewService(
+                    projectService, siteService, builder, contentServiceClient, cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations,
+                    single, java.time.Duration.ofMillis(200),
+                    ArticlePreviewService.stylesheetRequestFactory(
+                            java.time.Duration.ofMillis(200), java.time.Duration.ofMillis(600)));
+
+            ThemeSkeletonResponse response =
+                    svc.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+            assertEquals("body{margin:0}", response.css());
+
+            // 待機は打ち切られたが、読み取りタイムアウトでワーカーが解放され、次の取得を受け付けられる
+            String next = single.submit(() -> "released").get(3, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals("released", next);
+        } finally {
+            single.shutdownNow();
+            hangServer.stop(0);
+            serverThreads.shutdownNow();
+        }
+    }
+
+    @Test
+    void renderSkeleton_stylesheetのhttpからhttpsへのリダイレクトに追従して移動先のCSSを補完する() throws Exception {
+        // 自己署名証明書のhttpsサーバ(移動先)。JDK HttpClientは既定のSSLContextを構築時に取り込むので、
+        // ファクトリを作る前に差し替え、終わったら戻す。
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("PKCS12");
+        try (java.io.InputStream in = getClass().getResourceAsStream("/redirect-test.p12")) {
+            keyStore.load(in, "changeit".toCharArray());
+        }
+        javax.net.ssl.KeyManagerFactory kmf =
+                javax.net.ssl.KeyManagerFactory.getInstance(javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(keyStore, "changeit".toCharArray());
+        javax.net.ssl.TrustManagerFactory tmf =
+                javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(keyStore);
+        javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
+        sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+        javax.net.ssl.SSLContext originalContext = javax.net.ssl.SSLContext.getDefault();
+
+        com.sun.net.httpserver.HttpsServer httpsServer =
+                com.sun.net.httpserver.HttpsServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        httpsServer.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(sslContext));
+        httpsServer.createContext("/new.css", exchange -> {
+            byte[] body = ".moved{color:blue}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "text/css");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        httpsServer.start();
+        String newUrl = "https://127.0.0.1:" + httpsServer.getAddress().getPort() + "/new.css";
+        com.sun.net.httpserver.HttpServer httpServer =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        httpServer.createContext("/old.css", exchange -> {
+            exchange.getResponseHeaders().add("Location", newUrl);
+            exchange.sendResponseHeaders(301, -1);
+            exchange.close();
+        });
+        httpServer.start();
+        String oldUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort() + "/old.css";
+        java.util.concurrent.ExecutorService single = java.util.concurrent.Executors.newFixedThreadPool(1);
+        try {
+            javax.net.ssl.SSLContext.setDefault(sslContext);
+            when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+            when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, "http://example.com")));
+            when(contentServiceClient.fetchAndSplice(
+                    "http://example.com/hello-world/", "Hello World", "<p>Hi</p>", "新タイトル", "<p>新本文</p>", null))
+                    .thenReturn(bridgedWithUnreadable("body{margin:0}", java.util.List.of(oldUrl)));
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer.bindTo(builder).build()
+                    .expect(requestTo(POSTS_URL))
+                    .andRespond(withSuccess(POSTS_JSON, MediaType.APPLICATION_JSON));
+            ArticlePreviewService svc = new ArticlePreviewService(
+                    projectService, siteService, builder, contentServiceClient, cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations,
+                    single, java.time.Duration.ofSeconds(5),
+                    ArticlePreviewService.stylesheetRequestFactory(
+                            java.time.Duration.ofSeconds(2), java.time.Duration.ofSeconds(3)));
+
+            ThemeSkeletonResponse response =
+                    svc.renderSkeleton(1L, null, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+            assertTrue(response.css().contains(".moved{color:blue}"), response.css());
+        } finally {
+            javax.net.ssl.SSLContext.setDefault(originalContext);
+            single.shutdownNow();
+            httpServer.stop(0);
+            httpsServer.stop(0);
+        }
     }
 
     @Test

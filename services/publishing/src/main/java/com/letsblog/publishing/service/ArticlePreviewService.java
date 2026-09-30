@@ -14,6 +14,7 @@ import com.letsblog.publishing.cms.ReferencePost;
 import com.letsblog.publishing.cms.agent.WordPressAgentOperations;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.config.LegacyJacksonRestClientConfig;
+import com.letsblog.publishing.config.StylesheetFetchExecutorConfig;
 import com.letsblog.publishing.domain.Project;
 import com.letsblog.publishing.domain.Site;
 import com.letsblog.publishing.dto.ThemeCssResponse;
@@ -21,7 +22,10 @@ import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -31,6 +35,11 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -85,8 +94,50 @@ public class ArticlePreviewService {
     private final CmsAdapterFactory cmsAdapterFactory;
     private final WordPressAgentOperations wordPressAgentOperations;
     private final WordPressSshOperations wordPressSshOperations;
+    private final ExecutorService stylesheetFetchExecutor;
+    private final java.time.Duration stylesheetFetchTimeout;
+    /** stylesheet取得専用のHTTPリクエストファクトリ(接続/読み取りタイムアウト付き)。nullなら注入されたBuilderのものを使う。 */
+    private final ClientHttpRequestFactory stylesheetRequestFactory;
 
-    public ArticlePreviewService(
+    /**
+     * 1回のstylesheet一括取得(並列)を待つ時間の上限(issue #1473)。httpLoader()のRestClientには接続/読み取り
+     * タイムアウトが無く、応答しない1枚が全体を無期限に待たせうる。並列化しても最遅の1枚が全体を決める
+     * ため、ここで呼び出し側の待機を打ち切る。ただしFuture#cancelはCompletableFutureの実行スレッドを
+     * 中断せず、ブロック中のソケット読み取りは割り込みでも解けないので、共有プール(6本)のワーカーは
+     * これだけでは解放されない。ワーカーの解放は{@link #stylesheetRequestFactory}の接続/読み取り
+     * タイムアウトが担う(stylesheet取得のRestClientにだけ適用し、WP REST等の他用途や注入された
+     * Builderは変えない)。取得開始からの経過で数えるので、枚数が増えても待ち時間の上限は変わらない
+     * (SyncCallProfileのRENDER=30秒より短くし、プレビュー全体の上限に収まる値にした)。
+     */
+    private static final java.time.Duration DEFAULT_STYLESHEET_FETCH_TIMEOUT = java.time.Duration.ofSeconds(20);
+
+    /** 接続の確立に待つ上限。待機上限(20秒)より十分短く、遅い相手にワーカーを長く預けない。 */
+    private static final java.time.Duration STYLESHEET_CONNECT_TIMEOUT = java.time.Duration.ofSeconds(5);
+
+    /** ソケット読み取り1回に待つ上限。待機上限(20秒)より短くし、待機を打ち切った後にワーカーも解放される。 */
+    private static final java.time.Duration STYLESHEET_READ_TIMEOUT = java.time.Duration.ofSeconds(10);
+
+    /**
+     * stylesheet取得用の、接続/読み取りタイムアウトとリダイレクト追従を持つリクエストファクトリ。
+     * リダイレクトはNORMAL(http→httpsは追従、https→httpは追従しない)。HttpURLConnectionベースだと
+     * http→httpsを追従せず、httpで書かれたstylesheetのURLがhttpsへ移るサイトのCSSを取り損ねる。
+     * JDK HttpClientの読み取りタイムアウトは応答ヘッダーまでを対象とし、ヘッダー後に本文が止まると
+     * 効かない。その場合のワーカーは解放されないが、呼び出し側は待機上限(DEFAULT_STYLESHEET_FETCH_TIMEOUT)
+     * で打ち切られるのでプレビューは止まらない。
+     */
+    static ClientHttpRequestFactory stylesheetRequestFactory(
+            java.time.Duration connectTimeout, java.time.Duration readTimeout) {
+        java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(connectTimeout)
+                .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(readTimeout);
+        return factory;
+    }
+
+    /** 単体テスト用: 本番と同じ上限の専用Executorを内部で作る。 */
+    ArticlePreviewService(
             ProjectService projectService,
             SiteService siteService,
             RestClient.Builder restClientBuilder,
@@ -94,6 +145,54 @@ public class ArticlePreviewService {
             CmsAdapterFactory cmsAdapterFactory,
             WordPressAgentOperations wordPressAgentOperations,
             WordPressSshOperations wordPressSshOperations) {
+        this(projectService, siteService, restClientBuilder, contentServiceClient, cmsAdapterFactory,
+                wordPressAgentOperations, wordPressSshOperations, StylesheetFetchExecutorConfig.newExecutor(),
+                DEFAULT_STYLESHEET_FETCH_TIMEOUT, null);
+    }
+
+    @Autowired
+    public ArticlePreviewService(
+            ProjectService projectService,
+            SiteService siteService,
+            RestClient.Builder restClientBuilder,
+            ContentServiceClient contentServiceClient,
+            CmsAdapterFactory cmsAdapterFactory,
+            WordPressAgentOperations wordPressAgentOperations,
+            WordPressSshOperations wordPressSshOperations,
+            ExecutorService stylesheetFetchExecutor) {
+        this(projectService, siteService, restClientBuilder, contentServiceClient, cmsAdapterFactory,
+                wordPressAgentOperations, wordPressSshOperations, stylesheetFetchExecutor,
+                DEFAULT_STYLESHEET_FETCH_TIMEOUT,
+                stylesheetRequestFactory(STYLESHEET_CONNECT_TIMEOUT, STYLESHEET_READ_TIMEOUT));
+    }
+
+    /** 単体テスト用: 注入されたBuilderのHTTP層をそのまま使う(タイムアウトの差し替えなし)。 */
+    ArticlePreviewService(
+            ProjectService projectService,
+            SiteService siteService,
+            RestClient.Builder restClientBuilder,
+            ContentServiceClient contentServiceClient,
+            CmsAdapterFactory cmsAdapterFactory,
+            WordPressAgentOperations wordPressAgentOperations,
+            WordPressSshOperations wordPressSshOperations,
+            ExecutorService stylesheetFetchExecutor,
+            java.time.Duration stylesheetFetchTimeout) {
+        this(projectService, siteService, restClientBuilder, contentServiceClient, cmsAdapterFactory,
+                wordPressAgentOperations, wordPressSshOperations, stylesheetFetchExecutor,
+                stylesheetFetchTimeout, null);
+    }
+
+    ArticlePreviewService(
+            ProjectService projectService,
+            SiteService siteService,
+            RestClient.Builder restClientBuilder,
+            ContentServiceClient contentServiceClient,
+            CmsAdapterFactory cmsAdapterFactory,
+            WordPressAgentOperations wordPressAgentOperations,
+            WordPressSshOperations wordPressSshOperations,
+            ExecutorService stylesheetFetchExecutor,
+            java.time.Duration stylesheetFetchTimeout,
+            ClientHttpRequestFactory stylesheetRequestFactory) {
         this.projectService = projectService;
         this.siteService = siteService;
         this.restClientBuilder = restClientBuilder;
@@ -101,6 +200,9 @@ public class ArticlePreviewService {
         this.cmsAdapterFactory = cmsAdapterFactory;
         this.wordPressAgentOperations = wordPressAgentOperations;
         this.wordPressSshOperations = wordPressSshOperations;
+        this.stylesheetFetchExecutor = stylesheetFetchExecutor;
+        this.stylesheetFetchTimeout = stylesheetFetchTimeout;
+        this.stylesheetRequestFactory = stylesheetRequestFactory;
     }
 
     /**
@@ -648,12 +750,19 @@ public class ArticlePreviewService {
         java.util.function.Function<String, String> loader = stylesheetLoaderFor(site, credentials);
         StringBuilder merged = new StringBuilder(css);
         java.util.Set<String> seen = new java.util.HashSet<>();
+        List<String> toFetch = new ArrayList<>();
         for (String href : hrefs) {
-            if (!seen.add(href) || css.contains("/* " + href + " */")) {
-                continue;
+            if (seen.add(href) && !css.contains("/* " + href + " */")) {
+                toFetch.add(href);
             }
+        }
+        // 取得だけを並列に走らせ、追記とMAX_CSS_LENGTH判定は従来どおり入力順に行う(issue #1473)。
+        long deadline = System.nanoTime() + stylesheetFetchTimeout.toNanos();
+        List<CompletableFuture<String>> fetches = startFetches(toFetch, loader);
+        for (int i = 0; i < toFetch.size(); i++) {
+            String href = toFetch.get(i);
             try {
-                String body = loader.apply(href);
+                String body = awaitFetch(fetches.get(i), deadline);
                 if (body == null || body.isBlank()) {
                     continue;
                 }
@@ -664,9 +773,14 @@ public class ArticlePreviewService {
                     continue;
                 }
                 merged.append(entry);
+            } catch (InterruptedException e) {
+                logger.warn("骨格プレビューの補完取得が割り込まれたため残りを取り消します: {} (site: {})",
+                        href, site.getSiteKey(), failureOf(e));
+                fetches.forEach(f -> f.cancel(true));
+                break;
             } catch (Exception e) {
                 logger.warn("骨格プレビューの読めなかったstylesheetの補完取得に失敗しました: {} (site: {})",
-                        href, site.getSiteKey(), e);
+                        href, site.getSiteKey(), failureOf(e));
             }
         }
         return merged.toString();
@@ -950,7 +1064,15 @@ public class ArticlePreviewService {
      * ブラウザ相当のUser-Agent/Acceptヘッダーを付与したRestClientを返す(Issue #245)。
      */
     private RestClient browserLikeClient() {
-        RestClient.Builder builder = restClientBuilder.clone()
+        return browserLikeClient(null);
+    }
+
+    private RestClient browserLikeClient(ClientHttpRequestFactory requestFactory) {
+        RestClient.Builder builder = restClientBuilder.clone();
+        if (requestFactory != null) {
+            builder.requestFactory(requestFactory);
+        }
+        builder
                 .defaultHeader(HttpHeaders.USER_AGENT, BROWSER_USER_AGENT)
                 .defaultHeader(HttpHeaders.ACCEPT,
                         "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
@@ -966,7 +1088,7 @@ public class ArticlePreviewService {
     }
 
     private java.util.function.Function<String, String> httpLoader() {
-        RestClient client = browserLikeClient();
+        RestClient client = browserLikeClient(stylesheetRequestFactory);
         return url -> client.get().uri(URI.create(url)).retrieve().body(String.class);
     }
 
@@ -974,12 +1096,50 @@ public class ArticlePreviewService {
         return httpLoader().apply(url);
     }
 
-    /** loaderが投げた例外・空の本文はベストエフォートとして読み飛ばす(取得元がHTTPかSFTPかは問わない)。 */
+    /** 取得開始時に決めた締め切りまでの残り時間だけ待つ。超えたらFutureを取り消してTimeoutExceptionを投げる。
+     * 取り消しは未着手の取得を走らせないだけで、実行中のワーカーは中断しない(解放は読み取りタイムアウトが担う)。 */
+    private String awaitFetch(CompletableFuture<String> fetch, long deadlineNanos) throws Exception {
+        try {
+            return fetch.get(Math.max(0, deadlineNanos - System.nanoTime()), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            fetch.cancel(true);
+            throw e;
+        }
+    }
+
+    /** ログには並列実行の包み(ExecutionException。CompletableFuture由来では必ずcauseを持つ)ではなく、従来と同じ元の例外を載せる。割り込みは保つ。 */
+    private Throwable failureOf(Exception e) {
+        if (e instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+        }
+        return e instanceof ExecutionException ? e.getCause() : e;
+    }
+
+    /** 各URLの取得を共有Executorへ投入し、入力と同じ順序のFutureを返す(issue #1473)。 */
+    private List<CompletableFuture<String>> startFetches(
+            List<String> urls, java.util.function.Function<String, String> loader) {
+        return urls.stream()
+                .map(url -> CompletableFuture.supplyAsync(() -> loader.apply(url), stylesheetFetchExecutor))
+                .toList();
+    }
+
+    /**
+     * loaderが投げた例外・空の本文はベストエフォートとして読み飛ばす(取得元がHTTPかSFTPかは問わない)。
+     *
+     * 取得(loader)だけを共有Executorで並列に走らせ(issue #1473。並列度の上限と根拠は
+     * {@link StylesheetFetchExecutorConfig})、連結とMAX_CSS_LENGTHの判定は従来どおり入力順に行う。
+     * 完了順で連結すると、上限に達したときにどのstylesheetが落ちるかが実行ごとに変わってしまうため。
+     * browserLikeClient()が返すRestClientは不変でスレッドセーフ、SFTP経路はホスト単位のロックで
+     * 直列化される(SshjCommandExecutor)ため、並列化しても安全(SFTPは速くならずHTTPだけ速くなる)。
+     */
     private String concatStylesheets(List<String> stylesheetUrls, java.util.function.Function<String, String> loader) {
+        long deadline = System.nanoTime() + stylesheetFetchTimeout.toNanos();
+        List<CompletableFuture<String>> fetches = startFetches(stylesheetUrls, loader);
         StringBuilder css = new StringBuilder();
-        for (String url : stylesheetUrls) {
+        for (int i = 0; i < stylesheetUrls.size(); i++) {
+            String url = stylesheetUrls.get(i);
             try {
-                String body = loader.apply(url);
+                String body = awaitFetch(fetches.get(i), deadline);
                 if (body == null || body.isBlank()) {
                     continue;
                 }
@@ -992,8 +1152,12 @@ public class ArticlePreviewService {
                     continue;
                 }
                 css.append(entry);
+            } catch (InterruptedException e) {
+                logger.debug("Interrupted while fetching stylesheet: {}", url, failureOf(e));
+                fetches.forEach(f -> f.cancel(true));
+                break;
             } catch (Exception e) {
-                logger.debug("Failed to fetch stylesheet: {}", url, e);
+                logger.debug("Failed to fetch stylesheet: {}", url, failureOf(e));
             }
         }
         return css.toString();
