@@ -24,11 +24,14 @@ When(
 Then('本文領域の幅が画面幅から左右のパディングを除いた幅に等しい', async ({ page }) => {
   const m = await page.locator('main').evaluate((el) => {
     const s = getComputedStyle(el);
-    // 左メニュー(#1488)が本文の左に並ぶ。本文+左メニュー=画面幅、を確かめる。
-    const side = document.querySelector('[data-testid="side-nav"]');
-    const sideWidth = side && getComputedStyle(side).display !== 'none' ? side.getBoundingClientRect().width : 0;
+    // 左メニュー(#1488)と右の情報表示レール(#1489)が本文の左右に並ぶ。
+    // 本文+左メニュー+右レール=画面幅、を確かめる。
+    const visibleWidth = (testId: string) => {
+      const node = document.querySelector(`[data-testid="${testId}"]`);
+      return node && getComputedStyle(node).display !== 'none' ? node.getBoundingClientRect().width : 0;
+    };
     return {
-      width: el.getBoundingClientRect().width + sideWidth,
+      width: el.getBoundingClientRect().width + visibleWidth('side-nav') + visibleWidth('info-rail'),
       padding: parseFloat(s.paddingLeft) + parseFloat(s.paddingRight),
       viewport: document.documentElement.clientWidth,
     };

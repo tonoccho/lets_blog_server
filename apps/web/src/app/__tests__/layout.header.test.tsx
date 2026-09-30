@@ -15,6 +15,7 @@ jest.mock('../SideNav', () => ({
   SideNavToggle: () => <i data-testid="side-nav-toggle" />,
   SideNav: () => <aside data-testid="side-nav" />,
 }))
+jest.mock('../InfoRail', () => ({ InfoRail: () => <aside data-testid="info-rail" /> }))
 jest.mock('../LogoutButton', () => ({ LogoutButton: () => <button data-testid="logout">logout</button> }))
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => <i data-testid="theme" /> }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => <i data-testid="lang" /> }))

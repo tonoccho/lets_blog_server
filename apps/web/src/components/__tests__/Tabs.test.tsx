@@ -67,4 +67,32 @@ describe('Tabs', () => {
     const buttons = screen.queryAllByRole('button')
     expect(buttons).toHaveLength(0)
   })
+
+  describe('controlled mode', () => {
+    it('shows the tab named by activeTabId and reports changes without switching itself', () => {
+      const onTabChange = jest.fn()
+      render(<Tabs tabs={mockTabs} activeTabId="tab2" onTabChange={onTabChange} />)
+      expect(screen.getByText('Content 2')).toBeInTheDocument()
+      fireEvent.click(screen.getByText('Tab 3'))
+      expect(onTabChange).toHaveBeenCalledWith('tab3')
+      expect(screen.getByText('Content 2')).toBeInTheDocument()
+    })
+
+    it('marks the active tab with aria-pressed in both modes', () => {
+      const { unmount } = render(<Tabs tabs={mockTabs} />)
+      expect(screen.getByText('Tab 1')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('Tab 2')).toHaveAttribute('aria-pressed', 'false')
+      unmount()
+      render(<Tabs tabs={mockTabs} activeTabId="tab3" onTabChange={() => {}} />)
+      expect(screen.getByText('Tab 3')).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('uncontrolled mode still works when onTabChange is given without activeTabId', () => {
+      const onTabChange = jest.fn()
+      render(<Tabs tabs={mockTabs} onTabChange={onTabChange} />)
+      fireEvent.click(screen.getByText('Tab 2'))
+      expect(onTabChange).toHaveBeenCalledWith('tab2')
+      expect(screen.getByText('Content 2')).toBeInTheDocument()
+    })
+  })
 })

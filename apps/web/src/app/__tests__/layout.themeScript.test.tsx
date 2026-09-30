@@ -19,6 +19,7 @@ jest.mock('../SideNav', () => ({
   SideNav: ({ navItems }: { navItems: unknown[] }) => <nav data-count={navItems.length} />,
 }))
 jest.mock('../Footer', () => ({ Footer: () => <footer /> }))
+jest.mock('../InfoRail', () => ({ InfoRail: () => <aside data-testid="info-rail" /> }))
 jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => null }))

@@ -8,8 +8,26 @@ export type TabItem = {
   content: React.ReactNode;
 };
 
-export function Tabs({ tabs }: { tabs: TabItem[] }) {
-  const [activeTabId, setActiveTabId] = useState(tabs[0]?.id || "");
+/**
+ * `activeTabId` を渡すと選択状態を呼び出し側が持つ(制御モード。永続化したいとき用)。
+ * 渡さなければ従来どおり内部状態で切り替わる。どちらでも `onTabChange` は選択時に呼ばれる。
+ */
+export function Tabs({
+  tabs,
+  activeTabId: controlledTabId,
+  onTabChange,
+}: {
+  tabs: TabItem[];
+  activeTabId?: string;
+  onTabChange?: (id: string) => void;
+}) {
+  const [internalTabId, setInternalTabId] = useState(tabs[0]?.id || "");
+  const activeTabId = controlledTabId ?? internalTabId;
+
+  function selectTab(id: string) {
+    if (controlledTabId === undefined) setInternalTabId(id);
+    onTabChange?.(id);
+  }
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
@@ -20,7 +38,8 @@ export function Tabs({ tabs }: { tabs: TabItem[] }) {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTabId(tab.id)}
+            onClick={() => selectTab(tab.id)}
+            aria-pressed={activeTabId === tab.id}
             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
               activeTabId === tab.id
                 ? "border-neutral-900 dark:border-neutral-50 text-neutral-900 dark:text-neutral-50"

@@ -30,6 +30,19 @@
     "collapse": "メニューを折りたたむ",
     "expand": "メニューを展開する"
   },
+  "infoRail": {
+    "title": "情報表示",
+    "queueTab": "処理キュー",
+    "logsTab": "操作ログ",
+    "collapse": "情報表示を折りたたむ",
+    "expand": "情報表示を展開する",
+    "open": "情報表示を開く",
+    "close": "情報表示を閉じる",
+    "viewAll": "操作ログをすべて見る",
+    "empty": "操作ログはありません",
+    "loadFailed": "操作ログを取得できませんでした",
+    "loading": "読み込み中…"
+  },
   "dashboard": {
     "title": "ダッシュボード",
     "registeredSites": "登録サイト数",

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { getSession } from "@/lib/session";
 import { NAV_ITEMS, ADMIN_NAV_ITEMS } from "@/lib/navigation";
+import { InfoRail } from "./InfoRail";
 import { Footer } from "./Footer";
 import { SideNav, SideNavProvider, SideNavToggle } from "./SideNav";
 import { LogoutButton } from "./LogoutButton";
@@ -70,6 +71,7 @@ export default async function RootLayout({
               <div className="flex min-w-0 flex-1">
                 {session && <SideNav navItems={navItems} />}
                 <main className="min-w-0 w-full flex-1 px-4 py-8">{children}</main>
+                {session && <InfoRail />}
               </div>
               <Footer />
             </SideNavProvider>
