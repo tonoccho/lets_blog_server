@@ -209,6 +209,7 @@ export interface AiSectionRequest {
   history?: PlanChatMessage[];
   message?: string;
   provider?: string;
+  projectId?: number;
 }
 
 export interface AiSectionResponse {
@@ -221,6 +222,7 @@ export interface AiProofreadRequest {
   /** @minLength 1 */
   text: string;
   provider?: string;
+  projectId?: number;
 }
 
 export interface ProofreadIssue {
@@ -240,6 +242,7 @@ export interface AiDraftRequest {
   /** @minLength 1 */
   text: string;
   provider?: string;
+  projectId?: number;
 }
 
 export interface AiDraftResponse {
@@ -252,6 +255,7 @@ export interface AiAskRequest {
   /** @minLength 1 */
   question: string;
   provider?: string;
+  projectId?: number;
 }
 
 export interface AiAskResponse {

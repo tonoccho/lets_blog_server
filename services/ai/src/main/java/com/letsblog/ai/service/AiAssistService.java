@@ -321,6 +321,17 @@ public class AiAssistService {
     }
 
     /**
+     * issue #1495: 執筆支援5機能(ask/draft/section/tags/proofread)向けの生成。
+     * {@link #generateForBridge}と同じ解決順で、projectIdがあればそのプロジェクトの選択中モデルを使い、
+     * providerはリクエストの指定 → プロジェクトの選択中プロバイダー → システム既定の順に決める。
+     * projectId未指定(旧バージョンの拡張など)ではモデル解決を呼ばずnullを渡し、
+     * LlmClient側でプロバイダー別のシステム既定モデルへフォールバックさせる。
+     */
+    private String generateForProject(String prompt, Long projectId, String providerOverride) {
+        return generateForBridge(projectId, prompt, providerOverride);
+    }
+
+    /**
      * チャットメッセージ(と任意の履歴)から、画像生成AI(Stable Diffusion)向けの英語プロンプトを
      * LLMで生成する。issue #583でlegacy-apiの{@code AiAssistService#generateImagePrompt}から移設した。
      *
@@ -370,7 +381,7 @@ public class AiAssistService {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.question()));
             String prompt = WebSearchService.formatForPrompt(searchOutcome)
                     + ASK_PROMPT_TEMPLATE.formatted(request.question());
-            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            String result = generateForProject(prompt, request.projectId(), request.provider());
             completeJob(job, Map.of("result", result));
             return new AiAskResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -391,7 +402,7 @@ public class AiAssistService {
         try {
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(buildSearchQuery(request.text()));
             String prompt = WebSearchService.formatForPrompt(searchOutcome) + template.formatted(request.text());
-            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            String result = generateForProject(prompt, request.projectId(), request.provider());
             completeJob(job, Map.of("result", result));
             return new AiDraftResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -438,7 +449,7 @@ public class AiAssistService {
                     ? buildSectionChatPrompt(basePrompt, request.history(), request.message(), searchOutcome)
                     : WebSearchService.formatForPrompt(searchOutcome) + basePrompt;
 
-            String result = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            String result = generateForProject(prompt, request.projectId(), request.provider());
             completeJob(job, Map.of("result", result));
             return new AiSectionResponse(result, WebSearchService.toSources(searchOutcome),
                     WebSearchService.buildSearchNote(searchOutcome));
@@ -498,7 +509,7 @@ public class AiAssistService {
                     ? articlePlanService.listExistingTags(request.projectId())
                     : List.of();
             String prompt = buildTagsPrompt(request.text(), existingTags);
-            String raw = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            String raw = generateForProject(prompt, request.projectId(), request.provider());
             AiTagsResponse parsed = parseTagsResponse(raw);
             AiTagsResponse prioritized = prioritizeExistingTags(parsed, existingTags);
             completeJob(job, Map.of("result", raw));
@@ -567,7 +578,7 @@ public class AiAssistService {
         GenerationJob job = startJob("llm_proofread_check", Map.of("text", request.text()));
         try {
             String prompt = PROOFREAD_CHECK_PROMPT_TEMPLATE.formatted(request.text());
-            String raw = llmClient.generate(prompt, null, AiProvider.fromString(request.provider()));
+            String raw = generateForProject(prompt, request.projectId(), request.provider());
             List<ProofreadIssue> issues = parseProofreadResponse(raw, request.text());
             completeJob(job, Map.of("result", raw));
             return new AiProofreadResponse(issues);

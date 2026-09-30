@@ -25,6 +25,8 @@ import com.letsblog.ai.repository.GenerationJobRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -154,7 +156,7 @@ class AiAssistServiceTest {
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
         when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
 
-        AiAskResponse response = service.ask(new AiAskRequest("Next.js 16の新機能は?", null));
+        AiAskResponse response = service.ask(new AiAskRequest("Next.js 16の新機能は?", null, null));
 
         assertEquals("回答結果", response.result());
         assertEquals(1, response.sources().size());
@@ -172,7 +174,7 @@ class AiAssistServiceTest {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
         when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
 
-        AiAskResponse response = service.ask(new AiAskRequest("質問", null));
+        AiAskResponse response = service.ask(new AiAskRequest("質問", null, null));
 
         assertEquals(List.of(), response.sources());
         assertEquals("Web検索を利用できなかったため、出典なしで生成しています", response.searchNote());
@@ -183,7 +185,7 @@ class AiAssistServiceTest {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.success(List.of()));
         when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
 
-        AiAskResponse response = service.ask(new AiAskRequest("質問", null));
+        AiAskResponse response = service.ask(new AiAskRequest("質問", null, null));
 
         assertEquals(List.of(), response.sources());
         assertEquals("関連する検索結果が見つかりませんでした", response.searchNote());
@@ -195,7 +197,7 @@ class AiAssistServiceTest {
                 WebSearchOutcome.success(List.of(new BraveSearchResult("Title", "Desc", "https://example.com"))));
         when(llmClient.generate(anyString(), any(), any())).thenReturn("生成結果");
 
-        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null));
+        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null, null));
 
         assertEquals("生成結果", response.result());
         assertEquals(1, response.sources().size());
@@ -212,7 +214,7 @@ class AiAssistServiceTest {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
         when(llmClient.generate(anyString(), any(), any())).thenReturn("生成結果");
 
-        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null));
+        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null, null));
 
         assertEquals(List.of(), response.sources());
         assertEquals("Web検索を利用できなかったため、出典なしで生成しています", response.searchNote());
@@ -223,7 +225,7 @@ class AiAssistServiceTest {
         when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.success(List.of()));
         when(llmClient.generate(anyString(), any(), any())).thenReturn("生成結果");
 
-        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null));
+        AiDraftResponse response = service.draft(new AiDraftRequest("draft", "AIブログについて", null, null));
 
         assertEquals(List.of(), response.sources());
         assertEquals("関連する検索結果が見つかりませんでした", response.searchNote());
@@ -232,7 +234,7 @@ class AiAssistServiceTest {
     @Test
     void draft_不正なmodeは例外() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> service.draft(new AiDraftRequest("invalid", "text", null)));
+                () -> service.draft(new AiDraftRequest("invalid", "text", null, null)));
     }
 
     @Test
@@ -241,7 +243,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null, null, null, null));
+                new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null, null, null, null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -258,7 +260,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("リード文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("lead", null, null, "記事タイトル", List.of("導入", "本編", "まとめ"), null, null, null));
+                new AiSectionRequest("lead", null, null, "記事タイトル", List.of("導入", "本編", "まとめ"), null, null, null, null));
 
         assertEquals("リード文", response.result());
         assertEquals(1, response.sources().size());
@@ -277,7 +279,7 @@ class AiAssistServiceTest {
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("lead-subsections", "第2章 実装編", null, "記事タイトル",
-                        List.of("設計", "実装", "テスト"), null, null, null));
+                        List.of("設計", "実装", "テスト"), null, null, null, null));
 
         assertEquals("セクションリード文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -297,7 +299,7 @@ class AiAssistServiceTest {
 
         AiSectionResponse response = service.generateSection(
                 new AiSectionRequest("body", "導入部", "前の段落の文脈", "記事タイトル", null,
-                        history, "もっと短くして", null));
+                        history, "もっと短くして", null, null));
 
         assertEquals("再生成された本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -313,7 +315,7 @@ class AiAssistServiceTest {
     void generateSection_不正なmodeは例外() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> service.generateSection(
-                        new AiSectionRequest("invalid", "見出し", null, null, null, null, null, null)));
+                        new AiSectionRequest("invalid", "見出し", null, null, null, null, null, null, null)));
     }
 
     @Test
@@ -322,7 +324,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", null, null, null, null, null, null, null));
+                new AiSectionRequest("body", null, null, null, null, null, null, null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -337,7 +339,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("リード文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("lead-subsections", "   ", "   ", "   ", List.of(), null, null, null));
+                new AiSectionRequest("lead-subsections", "   ", "   ", "   ", List.of(), null, null, null, null));
 
         assertEquals("リード文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -352,7 +354,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("セクション本文");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, null, "   ", null));
+                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, null, "   ", null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -366,7 +368,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("再生成結果");
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, null, "もっと短く", null));
+                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, null, "もっと短く", null, null));
 
         assertEquals("再生成結果", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -384,7 +386,7 @@ class AiAssistServiceTest {
         List<PlanChatMessage> history = List.of(new PlanChatMessage("user", "最初の指示"));
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, history, "もっと短く", null));
+                new AiSectionRequest("body", "導入部", "文脈", "記事タイトル", null, history, "もっと短く", null, null));
 
         assertEquals("再生成結果", response.result());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -399,7 +401,7 @@ class AiAssistServiceTest {
         String longHeading = "あ".repeat(250);
 
         AiSectionResponse response = service.generateSection(
-                new AiSectionRequest("body", longHeading, "文脈", "記事タイトル", null, null, null, null));
+                new AiSectionRequest("body", longHeading, "文脈", "記事タイトル", null, null, null, null, null));
 
         assertEquals("セクション本文", response.result());
         ArgumentCaptor<String> searchQueryCaptor = ArgumentCaptor.forClass(String.class);
@@ -486,7 +488,7 @@ class AiAssistServiceTest {
                 "[{\"type\": \"typo\", \"originalText\": \"こんちには\", "
                         + "\"message\": \"誤字です\", \"suggestion\": \"こんにちは\"}]");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんちには世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんちには世界", null, null));
 
         assertEquals(1, response.issues().size());
         assertEquals("typo", response.issues().get(0).type());
@@ -505,7 +507,7 @@ class AiAssistServiceTest {
                 "[{\"type\": \"typo\", \"originalText\": \"本文に無い文字列\", "
                         + "\"message\": \"誤字です\", \"suggestion\": null}]");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(List.of(), response.issues());
     }
@@ -514,7 +516,7 @@ class AiAssistServiceTest {
     void proofreadContent_不正なJSON応答は空の指摘一覧にフォールバックする() {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("これはJSONではありません");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(List.of(), response.issues());
     }
@@ -523,7 +525,7 @@ class AiAssistServiceTest {
     void proofreadContent_JSON配列でない応答は空の指摘一覧にフォールバックする() {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("{}");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(List.of(), response.issues());
     }
@@ -532,7 +534,7 @@ class AiAssistServiceTest {
     void proofreadContent_開き括弧のみで閉じ括弧が無い応答は空にフォールバックする() {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("[{\"originalText\": \"こんにちは\"");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(List.of(), response.issues());
     }
@@ -542,7 +544,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn(
                 "[{\"type\": \"typo\", \"message\": \"originalTextが無い\"}]");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(List.of(), response.issues());
     }
@@ -552,7 +554,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn(
                 "[{\"type\": \"typo\", \"originalText\": \"\", \"message\": \"空文字\"}]");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(List.of(), response.issues());
     }
@@ -562,7 +564,7 @@ class AiAssistServiceTest {
         when(llmClient.generate(anyString(), any(), any())).thenReturn(
                 "[{\"type\": \"readability\", \"originalText\": \"こんにちは\", \"message\": \"読みにくい\"}]");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(1, response.issues().size());
         assertNull(response.issues().get(0).suggestion());
@@ -574,7 +576,7 @@ class AiAssistServiceTest {
                 "[{\"type\": \"readability\", \"originalText\": \"こんにちは\", "
                         + "\"message\": \"読みにくい\", \"suggestion\": null}]");
 
-        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null));
+        AiProofreadResponse response = service.proofreadContent(new AiProofreadRequest("こんにちは世界", null, null));
 
         assertEquals(1, response.issues().size());
         assertNull(response.issues().get(0).suggestion());
@@ -1119,6 +1121,86 @@ class AiAssistServiceTest {
         assertTrue(response.skipReason().contains("検索結果が見つからず"));
         assertEquals(List.of(), response.suggestions());
         org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.times(1)).generate(anyString(), any(), any());
+    }
+
+    // ---- issue #1495: 執筆支援5機能がプロジェクト単位のモデル・プロバイダー選択を使う ----
+
+    private static final String[] PROJECT_SELECTION_FEATURES = {"ask", "draft", "section", "tags", "proofread"};
+
+    /** 5機能のいずれかを、指定のprojectId・providerで実行する(LlmClientは"[]"を返す)。 */
+    private void invokeFeature(String feature, Long projectId, String provider) {
+        lenient().when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.success(List.of()));
+        switch (feature) {
+            case "ask" -> service.ask(new AiAskRequest("質問", provider, projectId));
+            case "draft" -> service.draft(new AiDraftRequest("draft", "本文", provider, projectId));
+            case "section" -> service.generateSection(new AiSectionRequest(
+                    "body", "見出し", "文脈", "タイトル", null, null, null, provider, projectId));
+            case "tags" -> service.suggestTags(new AiTagsRequest("本文", provider, projectId));
+            case "proofread" -> service.proofreadContent(new AiProofreadRequest("本文", provider, projectId));
+            default -> throw new IllegalArgumentException(feature);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
+    void 執筆支援_projectId指定かつprovider未指定ならプロジェクトの選択中モデルとプロバイダーを使う(String feature) {
+        when(llmModelService.getSelectedModel(7L)).thenReturn("project-model");
+        when(llmModelService.getSelectedProvider(7L)).thenReturn(AiProvider.OPENAI);
+        when(llmClient.generate(anyString(), eq("project-model"), eq(AiProvider.OPENAI))).thenReturn("[]");
+
+        invokeFeature(feature, 7L, null);
+
+        org.mockito.Mockito.verify(llmClient).generate(anyString(), eq("project-model"), eq(AiProvider.OPENAI));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
+    void 執筆支援_provider指定はプロジェクトの選択中プロバイダーより優先される(String feature) {
+        when(llmModelService.getSelectedModel(7L)).thenReturn("project-model");
+        when(llmClient.generate(anyString(), eq("project-model"), eq(AiProvider.CLAUDE))).thenReturn("[]");
+
+        invokeFeature(feature, 7L, "CLAUDE");
+
+        org.mockito.Mockito.verify(llmClient).generate(anyString(), eq("project-model"), eq(AiProvider.CLAUDE));
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedProvider(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
+    void 執筆支援_projectId未指定ならモデルとプロバイダーの解決を呼ばずシステム既定へ委ねる(String feature) {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("[]");
+
+        invokeFeature(feature, null, null);
+
+        org.mockito.Mockito.verify(llmClient).generate(anyString(), org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.isNull());
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any());
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedProvider(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
+    void 執筆支援_projectId未指定でprovider指定ならそのproviderとnullモデルを渡す(String feature) {
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("[]");
+
+        invokeFeature(feature, null, "OPENAI");
+
+        org.mockito.Mockito.verify(llmClient).generate(anyString(), org.mockito.ArgumentMatchers.isNull(),
+                eq(AiProvider.OPENAI));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
+    void 執筆支援_プロジェクトで未選択ならプロバイダー解決結果のnullをそのまま渡す(String feature) {
+        when(llmModelService.getSelectedModel(7L)).thenReturn("default-model");
+        when(llmModelService.getSelectedProvider(7L)).thenReturn(null);
+        when(llmClient.generate(anyString(), eq("default-model"), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn("[]");
+
+        invokeFeature(feature, 7L, null);
+
+        org.mockito.Mockito.verify(llmClient).generate(anyString(), eq("default-model"),
+                org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test

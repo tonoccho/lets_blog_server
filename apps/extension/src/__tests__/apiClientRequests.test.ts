@@ -381,6 +381,22 @@ describe('apiClientが解釈するレスポンス', () => {
     expect(recorded[2].body).toEqual({ question: '質問', provider: 'OPENAI' });
   });
 
+  it('projectIdを指定した執筆支援の依頼はprojectIdを本文へ載せ、未指定なら載せない(issue #1495)', async () => {
+    respondWith({ result: '結果', sources: [], issues: [] });
+
+    await apiClient.askAi('token', 'draft', '本文', undefined, 'CLAUDE', 7);
+    await apiClient.askAiSearch('token', undefined, '質問', undefined, undefined, 7);
+    await apiClient.proofreadContent('token', undefined, '本文', undefined, undefined, 7);
+    await apiClient.generateSection('token', undefined, { mode: 'body', heading: '背景', projectId: 7 });
+    await apiClient.generateSection('token', undefined, { mode: 'body', heading: '背景' });
+
+    expect(recorded[0].body).toEqual({ mode: 'draft', text: '本文', provider: 'CLAUDE', projectId: 7 });
+    expect(recorded[1].body).toEqual({ question: '質問', projectId: 7 });
+    expect(recorded[2].body).toEqual({ text: '本文', projectId: 7 });
+    expect(recorded[3].body).toEqual({ mode: 'body', heading: '背景', projectId: 7 });
+    expect(recorded[4].body).toEqual({ mode: 'body', heading: '背景' });
+  });
+
   it('タグ提案は指定されたproviderとprojectIdだけを載せる', async () => {
     respondWith({ categories: [], tags: ['タグ'] });
 

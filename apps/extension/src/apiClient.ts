@@ -349,6 +349,8 @@ export interface AiSectionParams {
   message?: string;
   /** OLLAMA/OPENAI/CLAUDEのいずれか(任意)。未指定時はサーバー側の既定プロバイダーを使う(issue #530)。 */
   provider?: string;
+  /** 任意。指定するとそのプロジェクトで選択したモデル・プロバイダーを使う(issue #1495)。 */
+  projectId?: number;
 }
 
 /** 画像生成のパラメータ。automatic1111相当の項目をそのまま受け渡す。 */
@@ -533,19 +535,21 @@ export async function getRoles(
 /**
  * 下書き生成・校正・要約をAIへ依頼する。
  * @param mode draft(下書き) / proofread(校正) / summarize(要約)
+ * @param projectId 任意。指定するとそのプロジェクトで選択したモデル・プロバイダーを使う(issue #1495)。
  */
 export async function askAi(
   apiKey: string,
   mode: 'draft' | 'proofread' | 'summarize',
   text: string,
   actor?: Actor,
-  provider?: string
+  provider?: string,
+  projectId?: number
 ): Promise<AiDraftResult> {
   return requestJson('/api/ai/draft', {
     label: 'askAi',
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ mode, text, provider: provider || undefined }),
+    createBody: jsonBody({ mode, text, provider: provider || undefined, projectId }),
     // 生成結果を返すだけでサーバー状態を変えないため、再試行して差し支えない。
     retryable: true,
   }, schemas.AiGenerationResultSchema);
@@ -560,14 +564,15 @@ export async function askAiSearch(
   actor: Actor | undefined,
   question: string,
   provider?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projectId?: number
 ): Promise<AiAskResult> {
   return requestJson('/api/ai/ask', {
     label: 'askAiSearch',
     signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ question, provider: provider || undefined }),
+    createBody: jsonBody({ question, provider: provider || undefined, projectId }),
     retryable: true,
   }, schemas.AiGenerationResultSchema);
 }
@@ -622,14 +627,15 @@ export async function proofreadContent(
   actor: Actor | undefined,
   text: string,
   provider?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projectId?: number
 ): Promise<ProofreadResult> {
   return requestJson('/api/ai/proofread', {
     label: 'proofreadContent',
     signal,
     method: 'POST',
     headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ text, provider: provider || undefined }),
+    createBody: jsonBody({ text, provider: provider || undefined, projectId }),
     retryable: true,
   }, schemas.ProofreadResultSchema);
 }

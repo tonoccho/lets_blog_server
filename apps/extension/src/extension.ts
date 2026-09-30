@@ -801,10 +801,11 @@ async function commandAskAi(context: vscode.ExtensionContext): Promise<void> {
     const article = parseArticle(editor.document.getText());
     const selectedText = editor.document.getText(editor.selection);
     const text = selectedText.trim().length > 0 ? selectedText : article.content;
+    const projectId = (article.data.project_id as number | undefined) ?? getProjectId(context);
 
     const result = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'AIに問い合わせています…' },
-      () => api.askAi(apiKey, mode.value, text, undefined, provider)
+      () => api.askAi(apiKey, mode.value, text, undefined, provider, projectId)
     );
 
     const content = result.result + buildSourcesSection(result.sources, result.searchNote);

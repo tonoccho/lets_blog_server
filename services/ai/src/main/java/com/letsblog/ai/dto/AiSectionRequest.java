@@ -18,6 +18,8 @@ public record AiSectionRequest(
         List<PlanChatMessage> history,
         String message,
         /** OLLAMA/OPENAI/CLAUDEのいずれか(任意)。未指定時はシステム設定の既定プロバイダーを使う(issue #530)。 */
-        String provider
+        String provider,
+        /** 任意。指定するとそのプロジェクトの選択中モデル・プロバイダーを使う(issue #1495)。 */
+        Long projectId
 ) {
 }

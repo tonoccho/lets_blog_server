@@ -153,3 +153,72 @@ Then('画像プロンプト生成はAPIキー未設定のエラーになる', as
   const body = (await response.json()) as { error: string };
   expect(body.error, `画像プロンプト生成のエラー: ${body.error}`).toContain('APIキーが設定されていません');
 });
+
+// --------------------------------------------------------------- AI執筆支援5機能(issue #1495)
+
+/** 機能名(feature の例の値)ごとの、gateway 経由のエンドポイントと最小のリクエスト本文。 */
+const WRITING_ASSIST_FEATURES: Record<string, { path: string; body: Record<string, unknown> }> = {
+  下書き: { path: '/api/ai/draft', body: { mode: 'draft', text: 'モデル選択の確認' } },
+  'Ask AI': { path: '/api/ai/ask', body: { question: 'モデル選択の確認' } },
+  セクション生成: {
+    path: '/api/ai/section',
+    body: { mode: 'body', heading: 'モデル選択の確認', articleTitle: 'E2Eスタブのタイトル' },
+  },
+  タグ提案: { path: '/api/ai/tags', body: { text: 'モデル選択の確認' } },
+  校正チェック: { path: '/api/ai/proofread', body: { text: 'モデル選択の確認' } },
+};
+
+async function callWritingAssist(
+  ctx: Record<string, unknown>,
+  request: APIRequestContext,
+  feature: string,
+  options: { withProject: boolean; provider?: string }
+): Promise<void> {
+  const definition = WRITING_ASSIST_FEATURES[feature];
+  expect(definition, `未対応の機能名です: ${feature}`).toBeDefined();
+  const token = await adminToken(request);
+  const data: Record<string, unknown> = { ...definition.body };
+  if (options.withProject) {
+    data.projectId = currentProjectId(ctx);
+  }
+  if (options.provider) {
+    data.provider = options.provider;
+  }
+  ctx.writingAssistAttempt = await request.post(definition.path, {
+    headers: { Authorization: `Bearer ${token}` },
+    data,
+  });
+}
+
+When(/^プロジェクトを指定して「(.+)」を依頼する$/, async ({ ctx, request }, feature: string) => {
+  await callWritingAssist(ctx, request, feature, { withProject: true });
+});
+
+When(/^プロジェクトを指定せずに「(.+)」を依頼する$/, async ({ ctx, request }, feature: string) => {
+  await callWritingAssist(ctx, request, feature, { withProject: false });
+});
+
+When(
+  /^プロバイダー「(.+)」を明示してプロジェクトを指定し「(.+)」を依頼する$/,
+  async ({ ctx, request }, provider: string, feature: string) => {
+    await callWritingAssist(ctx, request, feature, { withProject: true, provider });
+  }
+);
+
+Then(/^「(.+)」の依頼は成功する$/, async ({ ctx }, feature: string) => {
+  const response = ctx.writingAssistAttempt as APIResponse;
+  expect(
+    response.ok(),
+    `${feature}の依頼に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+});
+
+Then(/^「(.+)」の依頼はAPIキー未設定のエラーになる$/, async ({ ctx }, feature: string) => {
+  const response = ctx.writingAssistAttempt as APIResponse;
+  expect(
+    response.status(),
+    `${feature}がAPIキー未設定のプロバイダーで成功してしまう(選択したプロバイダーが使われていない)`
+  ).toBe(502);
+  const body = (await response.json()) as { error: string };
+  expect(body.error, `${feature}のエラー: ${body.error}`).toContain('APIキーが設定されていません');
+});

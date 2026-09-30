@@ -2012,6 +2012,10 @@
           },
           "provider": {
             "type": "string"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
@@ -2044,6 +2048,10 @@
           },
           "provider": {
             "type": "string"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
@@ -2091,6 +2099,10 @@
           },
           "provider": {
             "type": "string"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
@@ -2124,6 +2136,10 @@
           },
           "provider": {
             "type": "string"
+          },
+          "projectId": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [

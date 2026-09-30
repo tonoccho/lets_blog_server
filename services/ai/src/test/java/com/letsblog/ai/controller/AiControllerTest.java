@@ -47,7 +47,7 @@ class AiControllerTest {
     @Test
     void proofread_サービスへ委譲する() {
         AiController controller = controller();
-        AiProofreadRequest request = new AiProofreadRequest("記事本文", null);
+        AiProofreadRequest request = new AiProofreadRequest("記事本文", null, null);
         AiProofreadResponse expected = new AiProofreadResponse(
                 List.of(new ProofreadIssue("typo", "誤字", "指摘内容", "修正案")));
         when(aiAssistService.proofreadContent(request)).thenReturn(expected);
