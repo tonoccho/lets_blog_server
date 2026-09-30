@@ -9,8 +9,10 @@ import com.letsblog.publishing.domain.Project;
 import com.letsblog.publishing.domain.Site;
 import com.letsblog.publishing.dto.ThemeCssResponse;
 import com.letsblog.publishing.dto.ThemeSkeletonResponse;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -21,7 +23,13 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +73,10 @@ class ArticlePreviewServiceTest {
 
     private MockRestServiceServer server;
     private ArticlePreviewService service;
+    private final List<ServerSocket> openSockets = new ArrayList<>();
+    /** 応答しないサーバーが最初に接続を受け付けた時刻(取得の締切計測の起点。初回HTTPの起動遅延を除くため)。 */
+    private final java.util.concurrent.atomic.AtomicLong firstHangingAcceptNanos =
+            new java.util.concurrent.atomic.AtomicLong();
 
     @BeforeEach
     void setUp() {
@@ -74,6 +86,44 @@ class ArticlePreviewServiceTest {
         service = new ArticlePreviewService(
                 projectService, siteService, builder, contentServiceClient,
                 cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations);
+    }
+
+    @AfterEach
+    void closeOpenSockets() throws IOException {
+        for (ServerSocket socket : openSockets) {
+            socket.close();
+        }
+    }
+
+    /** 何もリッスンしていない固定ポートを返す(到達不能な外部ホストの再現、issue #1206)。 */
+    private int unusedPort() throws IOException {
+        try (ServerSocket probe = new ServerSocket(0)) {
+            return probe.getLocalPort();
+        }
+    }
+
+    /**
+     * TCP接続は受け付けるが一切レスポンスを返さないサーバーを起動する。connect自体は成功するため、
+     * read timeout側の境界を検証する(issue #1206)。テスト終了時に{@link #closeOpenSockets}で閉じる。
+     */
+    private int startHangingServer() throws IOException {
+        ServerSocket serverSocket = new ServerSocket(0);
+        openSockets.add(serverSocket);
+        Thread acceptor = new Thread(() -> {
+            while (!serverSocket.isClosed()) {
+                try {
+                    Socket ignored = serverSocket.accept();
+                    firstHangingAcceptNanos.compareAndSet(0, System.nanoTime());
+                    // 接続は受け付けるが、意図的に何も書き込まない(読み込み待ちのままにする)。
+                } catch (IOException e) {
+                    // サーバーソケットのクローズに伴う例外は無視してループを終える。
+                    break;
+                }
+            }
+        }, "test-hanging-server");
+        acceptor.setDaemon(true);
+        acceptor.start();
+        return serverSocket.getLocalPort();
     }
 
     private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
@@ -258,6 +308,221 @@ class ArticlePreviewServiceTest {
 
         assertTrue(response.available());
         assertTrue(response.css().contains("url(http://example.com/theme/fonts/foo.woff2)"));
+    }
+
+    /**
+     * MockRestServiceServerは実際のTCP接続を一切行わず、URLに関わらず宛先文字列だけを検証キューと
+     * 突き合わせるため({@link MockRestServiceServer}参照)、到達不能な外部ホストへの本当の接続失敗・
+     * タイムアウトは検証できない。そのため以下の3テストに限り、MockRestServiceServerを使わず、
+     * 実際のローカルHTTPサーバー(JDK標準の{@link HttpServer}、ContentServiceClientTestと同じ手法)へ
+     * 本物のTCP接続をさせて検証する。
+     */
+    private com.sun.net.httpserver.HttpServer siteServer;
+
+    @AfterEach
+    void stopSiteServer() {
+        if (siteServer != null) {
+            siteServer.stop(0);
+        }
+    }
+
+    /** 実際のTCP接続を行うArticlePreviewService(MockRestServiceServerを介さない)。 */
+    private ArticlePreviewService serviceWithRealHttp() {
+        RestClient.Builder builder = RestClient.builder();
+        return new ArticlePreviewService(
+                projectService, siteService, builder, contentServiceClient,
+                cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations);
+    }
+
+    /** stylesheet取得の締切(1回のtheme-css取得の共有締切もこれで頭打ちになる)を差し替えた、実TCP接続のサービス。 */
+    private ArticlePreviewService serviceWithRealHttp(java.time.Duration fetchTimeout) {
+        return new ArticlePreviewService(
+                projectService, siteService, RestClient.builder(), contentServiceClient,
+                cmsAdapterFactory, wordPressAgentOperations, wordPressSshOperations,
+                com.letsblog.publishing.config.StylesheetFetchExecutorConfig.newExecutor(), fetchTimeout);
+    }
+
+    /**
+     * トップページ(html)・reachableな/style.css・投稿ページ限定CSS取得を早期終了させるための
+     * 空のwp-jsonレスポンスを返す、実際にlistenするローカルHTTPサーバーを起動する。
+     */
+    private String startSiteServer(String html) throws IOException {
+        siteServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        siteServer.createContext("/", exchange -> respondText(exchange, 200, html, "text/html"));
+        siteServer.createContext("/style.css",
+                exchange -> respondText(exchange, 200, "body { color: red; }", "text/css"));
+        siteServer.createContext("/wp-json/wp/v2/posts",
+                exchange -> respondText(exchange, 200, "[]", "application/json"));
+        siteServer.setExecutor(null);
+        siteServer.start();
+        return "http://127.0.0.1:" + siteServer.getAddress().getPort();
+    }
+
+    private void respondText(com.sun.net.httpserver.HttpExchange exchange, int status, String body, String contentType)
+            throws IOException {
+        byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", contentType);
+        exchange.sendResponseHeaders(status, bytes.length);
+        try (java.io.OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+
+    /**
+     * 到達不能な外部stylesheet(未リッスンの固定ポート)が混ざっていても、取得できたstylesheetは
+     * 返しつつ、失敗した件数/URLをreasonへ載せてavailable=trueのまま返す(issue #1206 要件3・4)。
+     */
+    @Test
+    void fetchMasterThemeCss_到達不能なstylesheetがあっても取得できたものは返し失敗を報告する() throws IOException {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        int unreachablePort = unusedPort();
+        String unreachableUrl = "http://127.0.0.1:" + unreachablePort + "/unreachable.css";
+        String siteBaseUrl = startSiteServer(
+                "<html><head>"
+                + "<link rel=\"stylesheet\" href=\"/style.css\">"
+                + "<link rel=\"stylesheet\" href=\"" + unreachableUrl + "\">"
+                + "</head></html>");
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, siteBaseUrl)));
+
+        ThemeCssResponse response = serviceWithRealHttp().fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertTrue(response.reason() != null && response.reason().contains(unreachableUrl),
+                "到達不能だったURLがreasonに含まれること。実際: " + response.reason());
+        assertTrue(response.reason().contains("1"), "失敗件数が分かること。実際: " + response.reason());
+    }
+
+    /**
+     * 応答しない(readが詰まる)外部stylesheetがあっても、設定した読み込みタイムアウト内に
+     * レスポンスが返る(issue #1206 要件1・2)。@Timeoutは、タイムアウト設定前の実装では
+     * このテスト自体がハングして無期限に待ち続けてしまうことに対するRED証跡を確実に
+     * 失敗として観測するための保険。
+     */
+    @Test
+    @Timeout(value = 25, unit = TimeUnit.SECONDS)
+    void fetchMasterThemeCss_stylesheet取得が応答しなくても一定時間内にレスポンスを返す() throws IOException {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        int hangingPort = startHangingServer();
+        String hangingUrl = "http://127.0.0.1:" + hangingPort + "/hanging.css";
+        String siteBaseUrl = startSiteServer(
+                "<html><head>"
+                + "<link rel=\"stylesheet\" href=\"/style.css\">"
+                + "<link rel=\"stylesheet\" href=\"" + hangingUrl + "\">"
+                + "</head></html>");
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, siteBaseUrl)));
+
+        long start = System.nanoTime();
+        ThemeCssResponse response = serviceWithRealHttp(java.time.Duration.ofMillis(500)).fetchMasterThemeCss(1L);
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertTrue(elapsedMillis < 3000, "応答しないstylesheetがあっても締切内で返ること。実際: " + elapsedMillis + "ms");
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertTrue(response.reason() != null && response.reason().contains(hangingUrl),
+                "応答しなかったURLがreasonに含まれること。実際: " + response.reason());
+    }
+
+    /** すべてのstylesheetが取得できない場合は、部分欠落(available=true)と区別してavailable=falseで返す(要件4)。 */
+    @Test
+    @Timeout(value = 25, unit = TimeUnit.SECONDS)
+    void fetchMasterThemeCss_すべてのstylesheetが取得できない場合はavailableがfalseで全滅を示す() throws IOException {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        String hangingUrl1 = "http://127.0.0.1:" + startHangingServer() + "/a.css";
+        String hangingUrl2 = "http://127.0.0.1:" + startHangingServer() + "/b.css";
+        String unreachableUrl = "http://127.0.0.1:" + unusedPort() + "/c.css";
+        String siteBaseUrl = startSiteServer(
+                "<html><head>"
+                + "<link rel=\"stylesheet\" href=\"" + hangingUrl1 + "\">"
+                + "<link rel=\"stylesheet\" href=\"" + hangingUrl2 + "\">"
+                + "<link rel=\"stylesheet\" href=\"" + unreachableUrl + "\">"
+                + "</head></html>");
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, siteBaseUrl)));
+
+        long start = System.nanoTime();
+        ThemeCssResponse response = serviceWithRealHttp(java.time.Duration.ofMillis(500)).fetchMasterThemeCss(1L);
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertTrue(elapsedMillis < 3000, "1件ずつの積み上げにならないこと。実際: " + elapsedMillis + "ms");
+        assertFalse(response.available());
+        assertTrue(response.reason() != null && response.reason().contains("すべて"),
+                "全滅を示すこと。実際: " + response.reason());
+        assertTrue(response.reason().contains(hangingUrl1) && response.reason().contains(unreachableUrl),
+                "失敗したURLを含むこと。実際: " + response.reason());
+    }
+
+    /**
+     * トップページ分と投稿ページ分のconcatStylesheetsの両方に応答しないstylesheetがあっても、1回のtheme-css
+     * 取得は呼び出しごとの締切を2回分積み上げず、共有した1つの予算内で終わる(issue #1206 要件2)。
+     * 予算は注入したstylesheet取得の締切(2秒)で頭打ちになるので、積み上げれば約4秒、共有なら約2秒。
+     */
+    @Test
+    @Timeout(value = 25, unit = TimeUnit.SECONDS)
+    void fetchMasterThemeCss_トップと投稿ページの両方で応答しなくても1つの共有予算内に収まる() throws IOException {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        String topHangingUrl = "http://127.0.0.1:" + startHangingServer() + "/top.css";
+        String postHangingUrl = "http://127.0.0.1:" + startHangingServer() + "/post.css";
+        siteServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        String base = "http://127.0.0.1:" + siteServer.getAddress().getPort();
+        siteServer.createContext("/", exchange -> respondText(exchange, 200,
+                "<html><head><link rel=\"stylesheet\" href=\"/style.css\">"
+                + "<link rel=\"stylesheet\" href=\"" + topHangingUrl + "\"></head></html>", "text/html"));
+        siteServer.createContext("/style.css",
+                exchange -> respondText(exchange, 200, "body { color: red; }", "text/css"));
+        siteServer.createContext("/wp-json/wp/v2/posts", exchange -> respondText(exchange, 200,
+                "[{\"id\":1,\"link\":\"" + base + "/post/\"}]", "application/json"));
+        siteServer.createContext("/post/", exchange -> respondText(exchange, 200,
+                "<html><head><link rel=\"stylesheet\" href=\"" + postHangingUrl + "\"></head></html>",
+                "text/html"));
+        siteServer.setExecutor(null);
+        siteServer.start();
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, base)));
+
+        ThemeCssResponse response = serviceWithRealHttp(java.time.Duration.ofSeconds(2)).fetchMasterThemeCss(1L);
+        // 初回のHTTPクライアント起動は遅いことがあるため、最初のstylesheet取得(トップの応答しないサーバーへの
+        // 接続)から数える。
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - firstHangingAcceptNanos.get());
+
+        assertTrue(elapsedMillis < 3000, "共有した1つの予算内に収まること。実際: " + elapsedMillis + "ms");
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertTrue(response.reason() != null && response.reason().contains(topHangingUrl)
+                        && response.reason().contains(postHangingUrl),
+                "トップと投稿ページ双方の失敗が集約されること。実際: " + response.reason());
+        assertTrue(response.reason().contains("2件"), "失敗件数が合算されること。実際: " + response.reason());
+    }
+
+    /** 全stylesheetが失敗してもインラインstyleのCSSがあれば、それを捨てずavailable=trueで全滅をreasonで知らせる。 */
+    @Test
+    void fetchMasterThemeCss_全stylesheetが失敗してもインラインstyleがあればavailableのままCSSを返す() throws IOException {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        String unreachableUrl = "http://127.0.0.1:" + unusedPort() + "/u.css";
+        String siteBaseUrl = startSiteServer(
+                "<html><head><link rel=\"stylesheet\" href=\"" + unreachableUrl + "\">"
+                + "<style>.inline-top{color:blue}</style></head></html>");
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, siteBaseUrl)));
+
+        ThemeCssResponse response = serviceWithRealHttp().fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains(".inline-top{color:blue}"));
+        assertTrue(response.reason() != null && response.reason().contains("すべて")
+                && response.reason().contains(unreachableUrl), "実際: " + response.reason());
+    }
+
+    /** すべて取得できた通常ケースは変わらない: available=true、reasonはnull。 */
+    @Test
+    void fetchMasterThemeCss_すべて取得できた場合はreasonがnullのまま() throws IOException {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 10L, null));
+        String siteBaseUrl = startSiteServer(
+                "<html><head><link rel=\"stylesheet\" href=\"/style.css\"></head></html>");
+        when(siteService.getById(10L)).thenReturn(Optional.of(wordPressSite(10L, siteBaseUrl)));
+
+        ThemeCssResponse response = serviceWithRealHttp().fetchMasterThemeCss(1L);
+
+        assertTrue(response.available());
+        assertTrue(response.css().contains("body { color: red; }"));
+        assertEquals(null, response.reason());
     }
 
     @Test
@@ -1930,6 +2195,65 @@ class ArticlePreviewServiceTest {
         assertTrue(response.css().contains(".theme{color:red}"));
         assertFalse(response.css().contains("fonts.googleapis.com"));
         server.verify();
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトで外部ホストstylesheetの取得に失敗したらavailableのままreasonで失敗を報告する() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(
+                "<html><head><link rel=\"stylesheet\" href=\"/wp-content/themes/t/style.css\">"
+                + "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css?family=Roboto\">"
+                + "</head></html>");
+        when(wordPressSshOperations.readStylesheetFile(
+                creds, sshLayout(), SSH_SITE_URL + "/wp-content/themes/t/style.css"))
+                .thenReturn(Optional.of(".theme{color:red}"));
+        server.expect(requestTo("https://fonts.googleapis.com/css?family=Roboto")).andRespond(withServerError());
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("SSH", response.source());
+        assertTrue(response.reason() != null
+                && response.reason().contains("https://fonts.googleapis.com/css?family=Roboto")
+                && response.reason().contains("1件"), "実際: " + response.reason());
+        assertFalse(response.reason().contains("すべて"));
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトですべてのstylesheetが取得できなければavailableがfalseで全滅を示す() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(
+                "<html><head><link rel=\"stylesheet\" href=\"https://cdn.example.net/a.css\"></head></html>");
+        server.expect(requestTo("https://cdn.example.net/a.css")).andRespond(withServerError());
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertFalse(response.available());
+        assertTrue(response.reason() != null && response.reason().contains("すべて")
+                && response.reason().contains("https://cdn.example.net/a.css"), "実際: " + response.reason());
+    }
+
+    @Test
+    void fetchThemeCss_SSHサイトで全stylesheetが失敗してもインラインstyleがあればavailableのままCSSを返す() {
+        var creds = givenSshSite();
+        when(wordPressSshOperations.fetchSiteFileLayout(creds)).thenReturn(sshLayout());
+        when(wordPressSshOperations.fetchPageHtml(creds, sshLayout(), SSH_SITE_URL + "/")).thenReturn(
+                "<html><head><link rel=\"stylesheet\" href=\"https://cdn.example.net/a.css\">"
+                + "<style>.inline-top{color:blue}</style></head></html>");
+        server.expect(requestTo("https://cdn.example.net/a.css")).andRespond(withServerError());
+        when(wordPressSshOperations.getLatestPost(creds)).thenReturn(Optional.empty());
+
+        ThemeCssResponse response = service.fetchThemeCss(1L, 10L);
+
+        assertTrue(response.available());
+        assertEquals("SSH", response.source());
+        assertTrue(response.css().contains(".inline-top{color:blue}"));
+        assertTrue(response.reason() != null && response.reason().contains("すべて")
+                && response.reason().contains("https://cdn.example.net/a.css"), "実際: " + response.reason());
     }
 
     @Test

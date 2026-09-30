@@ -111,6 +111,16 @@ public class ArticlePreviewService {
      */
     private static final java.time.Duration DEFAULT_STYLESHEET_FETCH_TIMEOUT = java.time.Duration.ofSeconds(20);
 
+    /**
+     * 1回のテーマCSS取得におけるstylesheet取得フェーズ(トップページ分と投稿ページ分を合わせたもの)の
+     * 締切(issue #1206)。ページHTML自体の取得は対象外(別Issue #1273)。
+     * concatStylesheetsの締切は呼び出しごとに数え直されるため、トップと投稿ページで2回呼ばれると
+     * 最悪でDEFAULT_STYLESHEET_FETCH_TIMEOUT(20秒)の2倍かかる。VSCode拡張・gatewayの待機に収まる
+     * 「十数秒」にするため、stylesheet取得フェーズで1つの締切を共有する。stylesheet取得の締切が短く注入された場合は
+     * そちらを上限にする({@link #themeCssFetchBudget()})。
+     */
+    private static final java.time.Duration THEME_CSS_FETCH_BUDGET = java.time.Duration.ofSeconds(15);
+
     /** 接続の確立に待つ上限。待機上限(20秒)より十分短く、遅い相手にワーカーを長く預けない。 */
     private static final java.time.Duration STYLESHEET_CONNECT_TIMEOUT = java.time.Duration.ofSeconds(5);
 
@@ -203,6 +213,53 @@ public class ArticlePreviewService {
         this.stylesheetFetchExecutor = stylesheetFetchExecutor;
         this.stylesheetFetchTimeout = stylesheetFetchTimeout;
         this.stylesheetRequestFactory = stylesheetRequestFactory;
+    }
+
+    private java.time.Duration themeCssFetchBudget() {
+        return stylesheetFetchTimeout.compareTo(THEME_CSS_FETCH_BUDGET) < 0
+                ? stylesheetFetchTimeout : THEME_CSS_FETCH_BUDGET;
+    }
+
+    /**
+     * 1回のテーマCSS取得のstylesheet取得フェーズで、複数のconcatStylesheets呼び出しが共有する締切と、取得できなかった
+     * stylesheetの記録(issue #1206)。
+     */
+    private static final class StylesheetFetchReport {
+        private static final int MAX_REPORTED_URLS = 5;
+
+        private final long deadlineNanos;
+        private final List<String> failedUrls = new ArrayList<>();
+        private int attempted;
+
+        StylesheetFetchReport(java.time.Duration budget) {
+            this.deadlineNanos = System.nanoTime() + budget.toNanos();
+        }
+
+        /** 1件も取得を試みていない、または全件成功ならnull(reasonなし)。 */
+        String reasonOrNull() {
+            if (failedUrls.isEmpty()) {
+                return null;
+            }
+            String shown = String.join(", ", failedUrls.subList(0, Math.min(failedUrls.size(), MAX_REPORTED_URLS)));
+            String more = failedUrls.size() > MAX_REPORTED_URLS
+                    ? " ほか" + (failedUrls.size() - MAX_REPORTED_URLS) + "件" : "";
+            String subject = allFailed() ? "すべてのstylesheet(" + attempted + "件)" : "一部のstylesheet("
+                    + failedUrls.size() + "件/" + attempted + "件中)";
+            return subject + "を取得できませんでした: " + shown + more;
+        }
+
+        boolean allFailed() {
+            return attempted > 0 && failedUrls.size() >= attempted;
+        }
+    }
+
+    /** 取得結果へ失敗の報告を添える。全滅ならavailable=false、一部欠落ならavailable=trueのままreasonで知らせる。 */
+    private ThemeCssResponse withFetchReport(String css, StylesheetFetchReport report, String source) {
+        // 全滅でも、インラインstyle等で得られたCSSが1文字でもあれば捨てず、available=trueのままreasonで知らせる
+        if (report.allFailed() && css.isEmpty()) {
+            return new ThemeCssResponse("", false, report.reasonOrNull());
+        }
+        return new ThemeCssResponse(css, true, report.reasonOrNull(), source);
     }
 
     /**
@@ -306,7 +363,8 @@ public class ArticlePreviewService {
             stylesheetUrls = rewriteToInternalOrigin(stylesheetUrls, originOf(site.getBaseUrl()), internalOrigin);
         }
 
-        StringBuilder css = new StringBuilder(fetchAndConcatStylesheets(stylesheetUrls));
+        StylesheetFetchReport report = new StylesheetFetchReport(themeCssFetchBudget());
+        StringBuilder css = new StringBuilder(concatStylesheets(stylesheetUrls, httpLoader(), report));
         for (String inlineStyle : inlineStyles) {
             if (css.length() >= MAX_CSS_LENGTH) {
                 break;
@@ -317,9 +375,9 @@ public class ArticlePreviewService {
             // 先行参照が失敗(またはnull)だった場合は、従来どおりここで改めて取得する
             credentials = siteService.getCredentials(site.getSiteKey());
         }
-        appendPostPageCss(css, fetchUrl, site, internalOrigin, credentials, sshFallback);
+        appendPostPageCss(css, fetchUrl, site, internalOrigin, credentials, sshFallback, report);
         String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
-        return new ThemeCssResponse(result, true, null, ThemeCssResponse.SOURCE_HTTP);
+        return withFetchReport(result, report, ThemeCssResponse.SOURCE_HTTP);
     }
 
     /**
@@ -346,7 +404,8 @@ public class ArticlePreviewService {
             logger.warn("No stylesheet links or inline <style> blocks found via SSH for site: {}", site.getSiteKey());
             return null;
         }
-        StringBuilder css = new StringBuilder(concatStylesheets(stylesheetUrls, source::load));
+        StylesheetFetchReport report = new StylesheetFetchReport(themeCssFetchBudget());
+        StringBuilder css = new StringBuilder(concatStylesheets(stylesheetUrls, source::load, report));
         for (String inlineStyle : inlineStyles) {
             if (css.length() >= MAX_CSS_LENGTH) {
                 break;
@@ -355,13 +414,13 @@ public class ArticlePreviewService {
         }
         // 投稿ページ分はベストエフォート: 失敗してもトップページ分のCSSは活かす
         try {
-            appendPostPageCss(css, home, site, null, creds, false, source);
+            appendPostPageCss(css, home, site, null, creds, false, source, report);
         } catch (Exception e) {
             logger.warn("SSH経由の投稿ページCSS取得に失敗しました(トップページ分のみ返します): {}",
                     site.getSiteKey(), e);
         }
         String result = css.length() > MAX_CSS_LENGTH ? css.substring(0, MAX_CSS_LENGTH) : css.toString();
-        return new ThemeCssResponse(result, true, null, ThemeCssResponse.SOURCE_SSH);
+        return withFetchReport(result, report, ThemeCssResponse.SOURCE_SSH);
     }
 
     /**
@@ -407,8 +466,8 @@ public class ArticlePreviewService {
      */
     private void appendPostPageCss(
             StringBuilder css, String fetchOrigin, Site site, String internalOrigin, CmsCredentials credentials,
-            boolean sshFallback) {
-        appendPostPageCss(css, fetchOrigin, site, internalOrigin, credentials, sshFallback, null);
+            boolean sshFallback, StylesheetFetchReport report) {
+        appendPostPageCss(css, fetchOrigin, site, internalOrigin, credentials, sshFallback, null, report);
     }
 
     /**
@@ -418,7 +477,7 @@ public class ArticlePreviewService {
      */
     private void appendPostPageCss(
             StringBuilder css, String fetchOrigin, Site site, String internalOrigin, CmsCredentials credentials,
-            boolean sshFallback, SshPageSource sshSource) {
+            boolean sshFallback, SshPageSource sshSource, StylesheetFetchReport report) {
         if (css.length() >= MAX_CSS_LENGTH) {
             return;
         }
@@ -488,8 +547,8 @@ public class ArticlePreviewService {
         }
 
         String postCss = sshSource != null
-                ? concatStylesheets(postStylesheetUrls, sshSource::load)
-                : fetchAndConcatStylesheets(postStylesheetUrls);
+                ? concatStylesheets(postStylesheetUrls, sshSource::load, report)
+                : concatStylesheets(postStylesheetUrls, httpLoader(), report);
         if (!postCss.isEmpty() && css.length() + postCss.length() <= MAX_CSS_LENGTH) {
             css.append(postCss);
         }
@@ -1084,7 +1143,7 @@ public class ArticlePreviewService {
     }
 
     private String fetchAndConcatStylesheets(List<String> stylesheetUrls) {
-        return concatStylesheets(stylesheetUrls, httpLoader());
+        return concatStylesheets(stylesheetUrls, httpLoader(), new StylesheetFetchReport(stylesheetFetchTimeout));
     }
 
     private java.util.function.Function<String, String> httpLoader() {
@@ -1132,8 +1191,11 @@ public class ArticlePreviewService {
      * browserLikeClient()が返すRestClientは不変でスレッドセーフ、SFTP経路はホスト単位のロックで
      * 直列化される(SshjCommandExecutor)ため、並列化しても安全(SFTPは速くならずHTTPだけ速くなる)。
      */
-    private String concatStylesheets(List<String> stylesheetUrls, java.util.function.Function<String, String> loader) {
-        long deadline = System.nanoTime() + stylesheetFetchTimeout.toNanos();
+    private String concatStylesheets(
+            List<String> stylesheetUrls, java.util.function.Function<String, String> loader,
+            StylesheetFetchReport report) {
+        long deadline = report.deadlineNanos;
+        report.attempted += stylesheetUrls.size();
         List<CompletableFuture<String>> fetches = startFetches(stylesheetUrls, loader);
         StringBuilder css = new StringBuilder();
         for (int i = 0; i < stylesheetUrls.size(); i++) {
@@ -1153,11 +1215,14 @@ public class ArticlePreviewService {
                 }
                 css.append(entry);
             } catch (InterruptedException e) {
-                logger.debug("Interrupted while fetching stylesheet: {}", url, failureOf(e));
+                logger.warn("Interrupted while fetching stylesheet: {}", url, failureOf(e));
                 fetches.forEach(f -> f.cancel(true));
+                // 取り消した残りも取得できなかったものとして報告する
+                report.failedUrls.addAll(stylesheetUrls.subList(i, stylesheetUrls.size()));
                 break;
             } catch (Exception e) {
-                logger.debug("Failed to fetch stylesheet: {}", url, failureOf(e));
+                logger.warn("Failed to fetch stylesheet: {}", url, failureOf(e));
+                report.failedUrls.add(url);
             }
         }
         return css.toString();

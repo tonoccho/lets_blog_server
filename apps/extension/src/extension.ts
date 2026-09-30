@@ -1526,6 +1526,12 @@ async function commandPreviewArticle(
           const themeCss = await api.getThemeCss(apiKey, actor, projectId, targetSite.siteId);
           if (themeCss.available) {
             css = themeCss.css;
+            // available=trueでも、到達不能な外部stylesheetが一部あった等の非致命的な警告が
+            // reasonに付随している場合がある(サーバー側は全滅していない限りavailableをtrueのまま
+            // 返す。issue #1206)。skeleton.warningと同様、利用者が気付けるようプレビューへ表示する。
+            if (themeCss.reason) {
+              warning = appendWarning(warning, `${targetSite.siteName}: ${themeCss.reason}`);
+            }
           } else {
             warning = appendWarning(
               warning,
