@@ -77,20 +77,25 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
 
     @Override
     public String apiKeyFor(AiProvider provider) {
-        String projectKey = provider == AiProvider.OPENAI ? openAiKeyOfCurrentProject() : null;
+        String projectKey = projectKeyOfCurrentProject(provider);
         return projectKey != null ? projectKey : resolveFor(provider).apiKey();
     }
 
     /**
-     * {@link #useProject}で宣言されたプロジェクトのChatGPT(OpenAI) APIキー(復号済み)。無ければnullで、
-     * 呼び出し側はシステム設定のキーへフォールバックする(issue #1506)。
+     * {@link #useProject}で宣言されたプロジェクトのChatGPT(OpenAI) / Claude(Anthropic) APIキー(復号済み)。
+     * 無ければ(またはOllamaなどキーを持たないプロバイダーなら)nullで、呼び出し側はシステム設定のキーへ
+     * フォールバックする(issue #1506, #1507)。
      */
-    private String openAiKeyOfCurrentProject() {
+    private String projectKeyOfCurrentProject(AiProvider provider) {
         Long projectId = (Long) request.getAttribute(PROJECT_ATTR);
         if (projectId == null) {
             return null;
         }
-        byte[] encrypted = projectAiSettingsService.getOpenAiApiKeyEncrypted(projectId);
+        byte[] encrypted = switch (provider) {
+            case OPENAI -> projectAiSettingsService.getOpenAiApiKeyEncrypted(projectId);
+            case CLAUDE -> projectAiSettingsService.getClaudeApiKeyEncrypted(projectId);
+            case OLLAMA -> null;
+        };
         return encrypted == null || encrypted.length == 0 ? null : credentialCipher.decrypt(encrypted);
     }
 

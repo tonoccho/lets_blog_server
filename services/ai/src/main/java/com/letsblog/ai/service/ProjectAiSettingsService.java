@@ -96,6 +96,24 @@ public class ProjectAiSettingsService {
     }
 
     @Transactional(readOnly = true)
+    public boolean hasClaudeApiKey(Long projectId) {
+        return findByProjectId(projectId).map(ProjectAiSettings::hasClaudeApiKey).orElse(false);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] getClaudeApiKeyEncrypted(Long projectId) {
+        return findByProjectId(projectId).map(ProjectAiSettings::getClaudeApiKeyEncrypted).orElse(null);
+    }
+
+    /** プロジェクト単位のClaude(Anthropic)APIキー(暗号化済み)を保存する。nullで削除(issue #1507)。 */
+    @Transactional
+    public void setClaudeApiKeyEncrypted(Long projectId, byte[] claudeApiKeyEncrypted) {
+        ProjectAiSettings settings = getOrCreate(projectId);
+        settings.setClaudeApiKeyEncrypted(claudeApiKeyEncrypted);
+        repository.save(settings);
+    }
+
+    @Transactional(readOnly = true)
     public String getOllamaBaseUrl(Long projectId) {
         return findByProjectId(projectId).map(ProjectAiSettings::getOllamaBaseUrl).orElse(null);
     }

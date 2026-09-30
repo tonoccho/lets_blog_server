@@ -96,6 +96,91 @@
         }
       }
     },
+    "/api/projects/{projectId}/api-keys/claude-api-key": {
+      "get": {
+        "tags": [
+          "project-claude-api-key-controller"
+        ],
+        "operationId": "getProjectClaudeApiKeyStatus",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectApiKeyStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "project-claude-api-key-controller"
+        ],
+        "operationId": "setProjectClaudeApiKey",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProjectClaudeApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "project-claude-api-key-controller"
+        ],
+        "operationId": "clearProjectClaudeApiKey",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/projects/{projectId}/api-keys/brave-search-api-key": {
       "get": {
         "tags": [
@@ -1632,6 +1717,18 @@
   "components": {
     "schemas": {
       "SetProjectOpenAiApiKeyRequest": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "apiKey"
+        ]
+      },
+      "SetProjectClaudeApiKeyRequest": {
         "type": "object",
         "properties": {
           "apiKey": {

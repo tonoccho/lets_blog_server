@@ -9,6 +9,11 @@ export interface SetProjectOpenAiApiKeyRequest {
   apiKey: string;
 }
 
+export interface SetProjectClaudeApiKeyRequest {
+  /** @minLength 1 */
+  apiKey: string;
+}
+
 export interface SetProjectBraveSearchApiKeyRequest {
   /** @minLength 1 */
   apiKey: string;

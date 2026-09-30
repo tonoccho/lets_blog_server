@@ -122,6 +122,12 @@ app:
         uri: ${AI_SERVICE_URI:http://ai:8080}
         paths:
           - /api/projects/*/api-keys/openai-api-key
+      # プロジェクト単位のClaude(Anthropic) APIキー(ProjectClaudeApiKeyController、issue #1507)も
+      # ai-serviceが持つ。欠けると下のanalytics向け /api/projects/*/api-keys/** に落ちて404になる。
+      - id: project-api-keys-claude
+        uri: ${AI_SERVICE_URI:http://ai:8080}
+        paths:
+          - /api/projects/*/api-keys/claude-api-key
       - id: project-api-keys-analytics
         uri: ${ANALYTICS_SERVICE_URI:http://analytics:8080}
         paths:

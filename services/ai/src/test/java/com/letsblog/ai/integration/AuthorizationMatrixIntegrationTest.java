@@ -119,6 +119,10 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/api-keys/openai-api-key"),
                 new Endpoint("PUT", "/api/projects/1/api-keys/openai-api-key"),
                 new Endpoint("DELETE", "/api/projects/1/api-keys/openai-api-key"),
+                // -- ProjectClaudeApiKeyController(issue #1507) --
+                new Endpoint("GET", "/api/projects/1/api-keys/claude-api-key"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/claude-api-key"),
+                new Endpoint("DELETE", "/api/projects/1/api-keys/claude-api-key"),
 
                 // -- ArticlePlanController --
                 new Endpoint("POST", "/api/projects/1/article-plan/chat"),

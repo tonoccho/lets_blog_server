@@ -190,4 +190,43 @@ class ProjectConnectionServiceTest {
         assertEquals("PROJECT", merged.openai().source());
         assertEquals(true, merged.openai().configured());
     }
+
+    @Test
+    void applyOverrides_claudeキーがあればClaudeだけPROJECTかつ設定済みになる() {
+        AiConnectionsConfig base = new AiConnectionsConfig(
+                new ProviderConnectionConfig(SYSTEM_OLLAMA, "ENVIRONMENT", true),
+                new ProviderConnectionConfig(SYSTEM_COMFY, "ENVIRONMENT", true),
+                new ProviderConnectionConfig(null, "DATABASE", true),
+                new ProviderConnectionConfig(null, "NONE", false));
+
+        AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(base, null, null, false, true);
+
+        assertEquals("PROJECT", merged.claude().source());
+        assertEquals(true, merged.claude().configured());
+        assertEquals(base.ollama(), merged.ollama());
+        assertEquals(base.openai(), merged.openai());
+    }
+
+    @Test
+    void applyOverrides_claudeキーが無ければClaudeは素通しでplatform設定が無くてもキーがあれば設定済み() {
+        AiConnectionsConfig base = new AiConnectionsConfig(
+                null, null, null, new ProviderConnectionConfig("https://api.anthropic.com/v1", "DATABASE", true));
+
+        assertEquals(base.claude(), ProjectConnectionService.applyOverrides(base, null, null, false, false).claude());
+
+        AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(
+                new AiConnectionsConfig(null, null, null, null), null, null, false, true);
+        assertEquals("PROJECT", merged.claude().source());
+        assertEquals(true, merged.claude().configured());
+    }
+
+    @Test
+    void applyOverrides_openaiとclaudeの両方のキーがあれば両方PROJECTになる() {
+        AiConnectionsConfig base = new AiConnectionsConfig(null, null, null, null);
+
+        AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(base, null, null, true, true);
+
+        assertEquals("PROJECT", merged.openai().source());
+        assertEquals("PROJECT", merged.claude().source());
+    }
 }

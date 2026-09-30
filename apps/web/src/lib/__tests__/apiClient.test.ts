@@ -39,6 +39,8 @@ import {
   updateProjectConnections,
   setProjectOpenAiApiKey,
   clearProjectOpenAiApiKey,
+  setProjectClaudeApiKey,
+  clearProjectClaudeApiKey,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -499,6 +501,29 @@ describe('ChatGPT(OpenAI)のプロジェクト単位APIキー(issue #1506)', () 
 
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/api-keys/openai-api-key')
+    expect(init.method).toBe('DELETE')
+  })
+})
+
+describe('Claude(Anthropic)のプロジェクト単位APIキー(issue #1507)', () => {
+  it('setProjectClaudeApiKeyはキーをJSONでPUTする', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await setProjectClaudeApiKey(7, 'sk-ant-x')
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/api-keys/claude-api-key')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ apiKey: 'sk-ant-x' })
+  })
+
+  it('clearProjectClaudeApiKeyはDELETEする', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await clearProjectClaudeApiKey(7)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/api-keys/claude-api-key')
     expect(init.method).toBe('DELETE')
   })
 })

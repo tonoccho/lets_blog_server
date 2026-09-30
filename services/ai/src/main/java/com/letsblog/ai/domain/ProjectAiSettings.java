@@ -51,6 +51,10 @@ public class ProjectAiSettings {
     @Column(name = "openai_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] openAiApiKeyEncrypted;
 
+    /** プロジェクト単位のClaude(Anthropic)APIキー(CredentialCipherで暗号化、issue #1507)。null/空はシステム設定へフォールバックする。 */
+    @Column(name = "claude_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] claudeApiKeyEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -67,6 +71,10 @@ public class ProjectAiSettings {
 
     public boolean hasOpenAiApiKey() {
         return openAiApiKeyEncrypted != null && openAiApiKeyEncrypted.length > 0;
+    }
+
+    public boolean hasClaudeApiKey() {
+        return claudeApiKeyEncrypted != null && claudeApiKeyEncrypted.length > 0;
     }
 
     @PrePersist

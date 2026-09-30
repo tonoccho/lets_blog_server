@@ -1485,6 +1485,19 @@ export function clearProjectOpenAiApiKey(projectId: number): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/openai-api-key`, { method: 'DELETE' });
 }
 
+/** プロジェクト単位のClaude(Anthropic) APIキーを保存する(issue #1507)。状態の取得はlistAiConnectionsのCLAUDE行で行う。 */
+export function setProjectClaudeApiKey(projectId: number, apiKey: string): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/claude-api-key`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey }),
+  });
+}
+
+export function clearProjectClaudeApiKey(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/claude-api-key`, { method: 'DELETE' });
+}
+
 export interface ProjectGoogleAnalyticsStatus {
   /** 連携済みかつプロパティ選択済み(ダッシュボードに表示できる)。 */
   configured: boolean;

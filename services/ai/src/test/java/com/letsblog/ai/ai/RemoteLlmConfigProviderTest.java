@@ -161,4 +161,70 @@ class RemoteLlmConfigProviderTest {
 
         verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
     }
+
+    // ---- Claude(CLAUDE)のAPIキーのプロジェクト単位上書き(issue #1507) ----
+
+    private void stubSystemClaudeKey(String systemKey) {
+        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
+        when(client.resolveLlmConfig("CLAUDE", "Bearer t")).thenReturn(new PlatformServiceClient.LlmConfig(
+                "CLAUDE", "https://api.anthropic.com/v1", systemKey, "claude", List.of("claude"), 10L));
+    }
+
+    @Test
+    void apiKeyFor_CLAUDEでプロジェクトのキーがあればシステム設定より優先して復号した値を使う() {
+        stubSystemClaudeKey("sk-ant-system");
+        byte[] encrypted = {7, 8, 9};
+        when(projectSettings.getClaudeApiKeyEncrypted(7L)).thenReturn(encrypted);
+        when(cipher.decrypt(encrypted)).thenReturn("sk-ant-project");
+
+        provider.useProject(7L);
+
+        assertEquals("sk-ant-project", provider.apiKeyFor(AiProvider.CLAUDE));
+    }
+
+    @Test
+    void apiKeyFor_CLAUDEでキーを保存していないプロジェクトはシステム設定のキーを使う() {
+        stubSystemClaudeKey("sk-ant-system");
+        provider.useProject(8L);
+
+        when(projectSettings.getClaudeApiKeyEncrypted(8L)).thenReturn(null);
+        assertEquals("sk-ant-system", provider.apiKeyFor(AiProvider.CLAUDE));
+
+        when(projectSettings.getClaudeApiKeyEncrypted(8L)).thenReturn(new byte[0]);
+        assertEquals("sk-ant-system", provider.apiKeyFor(AiProvider.CLAUDE));
+
+        verify(cipher, never()).decrypt(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void apiKeyFor_CLAUDEでもプロジェクト未指定ならシステム設定のキーを使い上書きを引かない() {
+        stubSystemClaudeKey("sk-ant-system");
+
+        assertEquals("sk-ant-system", provider.apiKeyFor(AiProvider.CLAUDE));
+
+        verify(projectSettings, never()).getClaudeApiKeyEncrypted(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void apiKeyFor_CLAUDEのプロジェクトのキーはOPENAIには適用されない() {
+        stubSystemOpenAiKey("sk-system");
+        provider.useProject(7L);
+
+        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+
+        verify(projectSettings, never()).getClaudeApiKeyEncrypted(7L);
+    }
+
+    @Test
+    void apiKeyFor_OLLAMAはプロジェクトが指定されてもキーの上書きを引かずシステム設定の値を使う() {
+        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
+        when(client.resolveLlmConfig("OLLAMA", "Bearer t")).thenReturn(
+                new PlatformServiceClient.LlmConfig("OLLAMA", "http://o", "ollama-key", "m", List.of("m"), 10L));
+        provider.useProject(7L);
+
+        assertEquals("ollama-key", provider.apiKeyFor(AiProvider.OLLAMA));
+
+        verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
+        verify(projectSettings, never()).getClaudeApiKeyEncrypted(7L);
+    }
 }

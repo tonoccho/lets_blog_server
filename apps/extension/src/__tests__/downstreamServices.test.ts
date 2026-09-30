@@ -84,6 +84,8 @@ describe('downstreamServiceFor', () => {
     ['/api/projects/3/api-keys/brave-search-api-key', 'ai'],
     // ChatGPT(OpenAI)のプロジェクト単位APIキーも ai-service(issue #1506)
     ['/api/projects/3/api-keys/openai-api-key', 'ai'],
+    // Claude(Anthropic)のプロジェクト単位APIキーも ai-service(issue #1507)
+    ['/api/projects/3/api-keys/claude-api-key', 'ai'],
     ['/api/projects/3/api-keys/google-analytics', 'analytics'],
     ['/api/projects/3/api-keys/adsense', 'analytics'],
   ];

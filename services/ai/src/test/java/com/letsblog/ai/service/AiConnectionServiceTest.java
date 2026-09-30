@@ -380,4 +380,32 @@ class AiConnectionServiceTest {
 
         assertEquals(Source.DATABASE, row(rows, Provider.OPENAI).source());
     }
+
+    @Test
+    void ClaudeはプロジェクトにキーがあればsourceがPROJECTで設定済みになりキー値は応答に含まれない() {
+        platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
+                cfg(null, "NONE", false), cfg(null, "NONE", false));
+        when(projectAiSettingsService.hasClaudeApiKey(7L)).thenReturn(true);
+
+        List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
+                .listConnections(7L);
+
+        AiConnectionResponse claude = row(rows, Provider.CLAUDE);
+        assertEquals(Source.PROJECT, claude.source());
+        assertTrue(claude.configured());
+        assertEquals(Status.NORMAL, claude.status());
+        assertEquals(Source.NONE, row(rows, Provider.OPENAI).source());
+    }
+
+    @Test
+    void Claudeはプロジェクトにキーが無ければシステム設定の出所のまま() {
+        platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
+                cfg(null, "NONE", false), cfg(null, "DATABASE", true));
+        when(projectAiSettingsService.hasClaudeApiKey(7L)).thenReturn(false);
+
+        List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
+                .listConnections(7L);
+
+        assertEquals(Source.DATABASE, row(rows, Provider.CLAUDE).source());
+    }
 }

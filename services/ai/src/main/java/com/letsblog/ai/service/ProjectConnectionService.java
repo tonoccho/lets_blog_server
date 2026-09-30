@@ -51,16 +51,24 @@ public class ProjectConnectionService {
         return applyOverrides(base, ollamaOverride, comfyuiOverride, false);
     }
 
-    /** 上に加え、プロジェクトにChatGPT(OpenAI)のAPIキーがあればChatGPTを設定済み・PROJECTにする(issue #1506)。Claudeは素通し。 */
+    /** 上に加え、プロジェクトにChatGPT(OpenAI)のAPIキーがあればChatGPTを設定済み・PROJECTにする(issue #1506)。 */
     static AiConnectionsConfig applyOverrides(
             AiConnectionsConfig base, String ollamaOverride, String comfyuiOverride, boolean hasOpenAiApiKey) {
-        return new AiConnectionsConfig(
-                override(base.ollama(), ollamaOverride), override(base.comfyui(), comfyuiOverride),
-                hasOpenAiApiKey ? openAiProjectKey(base.openai()) : base.openai(), base.claude());
+        return applyOverrides(base, ollamaOverride, comfyuiOverride, hasOpenAiApiKey, false);
     }
 
-    /** キーの値は持たない。接続先(baseUrl)はシステム側の解決結果をそのまま残す。 */
-    private static ProviderConnectionConfig openAiProjectKey(ProviderConnectionConfig system) {
+    /** 上に加え、プロジェクトにClaude(Anthropic)のAPIキーがあればClaudeを設定済み・PROJECTにする(issue #1507)。 */
+    static AiConnectionsConfig applyOverrides(
+            AiConnectionsConfig base, String ollamaOverride, String comfyuiOverride,
+            boolean hasOpenAiApiKey, boolean hasClaudeApiKey) {
+        return new AiConnectionsConfig(
+                override(base.ollama(), ollamaOverride), override(base.comfyui(), comfyuiOverride),
+                hasOpenAiApiKey ? projectKey(base.openai()) : base.openai(),
+                hasClaudeApiKey ? projectKey(base.claude()) : base.claude());
+    }
+
+    /** ChatGPT / Claude共通。キーの値は持たない。接続先(baseUrl)はシステム側の解決結果をそのまま残す。 */
+    private static ProviderConnectionConfig projectKey(ProviderConnectionConfig system) {
         return new ProviderConnectionConfig(system == null ? null : system.baseUrl(), PROJECT_SOURCE, true);
     }
 

@@ -17,6 +17,8 @@ import {
   clearProjectBraveSearchApiKey,
   setProjectOpenAiApiKey,
   clearProjectOpenAiApiKey,
+  setProjectClaudeApiKey,
+  clearProjectClaudeApiKey,
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
@@ -410,6 +412,38 @@ export async function clearOpenAiApiKeyAction(projectId: number): Promise<{ erro
 
   try {
     await clearProjectOpenAiApiKey(projectId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+/** プロジェクト単位のClaude(Anthropic) APIキーを保存する(issue #1507)。空は保存せずエラーを返し、値はトリムする。 */
+export async function setClaudeApiKeyAction(projectId: number, apiKey: string): Promise<{ error?: string }> {
+  await requireAdminSession();
+
+  const trimmed = apiKey.trim();
+  if (!trimmed) {
+    return { error: "APIキーを入力してください。" };
+  }
+
+  try {
+    await setProjectClaudeApiKey(projectId, trimmed);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function clearClaudeApiKeyAction(projectId: number): Promise<{ error?: string }> {
+  await requireAdminSession();
+
+  try {
+    await clearProjectClaudeApiKey(projectId);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
