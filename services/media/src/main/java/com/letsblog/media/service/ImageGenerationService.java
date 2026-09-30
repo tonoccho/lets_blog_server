@@ -349,11 +349,11 @@ public class ImageGenerationService {
 
     public ImageGenerationOptionsResponse getImageOptions(Long projectId) {
         return new ImageGenerationOptionsResponse(
-                comfyUiClient.listCheckpoints(),
+                comfyUiClient.listCheckpoints(projectId),
                 comfyUiModelService.getSelectedCheckpointOrGlobalDefault(projectId),
-                comfyUiClient.listSamplers(),
-                comfyUiClient.listSchedulers(),
-                comfyUiClient.listLoras(),
+                comfyUiClient.listSamplers(projectId),
+                comfyUiClient.listSchedulers(projectId),
+                comfyUiClient.listLoras(projectId),
                 defaultsResolver.resolveDefaultGeneratedImageWidth(projectId),
                 defaultsResolver.resolveDefaultGeneratedImageHeight(projectId),
                 defaultsResolver.resolveDefaultNegativePrompt(projectId),
@@ -433,7 +433,8 @@ public class ImageGenerationService {
                 imageRequest.batchSize() != null ? imageRequest.batchSize() : 1,
                 checkpoint,
                 imageRequest.loraName(),
-                imageRequest.loraWeight()
+                imageRequest.loraWeight(),
+                imageRequest.projectId()
         );
     }
 
@@ -470,7 +471,8 @@ public class ImageGenerationService {
                 baseParams.batchSize(),
                 baseParams.checkpoint(),
                 baseParams.loraName(),
-                baseParams.loraWeight());
+                baseParams.loraWeight(),
+                baseParams.projectId());
     }
 
     /**

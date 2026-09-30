@@ -96,7 +96,7 @@ class ComfyUiModelServiceTest {
 
     @Test
     void listCheckpointsForProject_ComfyUiの一覧と選択中を返す() {
-        when(comfyUiClient.listCheckpoints()).thenReturn(List.of("a.safetensors", "b.safetensors"));
+        when(comfyUiClient.listCheckpoints(1L)).thenReturn(List.of("a.safetensors", "b.safetensors"));
         when(projectImageSettingsService.getComfyuiCheckpoint(1L)).thenReturn("a.safetensors");
 
         ComfyUiCheckpointListResponse response = service.listCheckpointsForProject(1L);
@@ -107,7 +107,7 @@ class ComfyUiModelServiceTest {
 
     @Test
     void selectCheckpoint_存在するチェックポイントなら選択して保存する() {
-        when(comfyUiClient.listCheckpoints()).thenReturn(List.of("a.safetensors"));
+        when(comfyUiClient.listCheckpoints(1L)).thenReturn(List.of("a.safetensors"));
         when(projectImageSettingsService.getComfyuiCheckpoint(1L)).thenReturn("a.safetensors");
 
         service.selectCheckpoint(1L, "a.safetensors");
@@ -117,7 +117,7 @@ class ComfyUiModelServiceTest {
 
     @Test
     void selectCheckpoint_存在しなければ例外() {
-        when(comfyUiClient.listCheckpoints()).thenReturn(List.of("a.safetensors"));
+        when(comfyUiClient.listCheckpoints(1L)).thenReturn(List.of("a.safetensors"));
 
         assertThatThrownBy(() -> service.selectCheckpoint(1L, "missing.safetensors"))
                 .isInstanceOf(IllegalArgumentException.class)

@@ -36,6 +36,14 @@ public class ProjectAiSettings {
     @Column(name = "llm_provider", length = 20)
     private String llmProvider;
 
+    /** プロジェクト単位のOllama接続先の上書き(issue #1503)。null/空はシステム設定へフォールバックする。 */
+    @Column(name = "ollama_base_url", length = 500)
+    private String ollamaBaseUrl;
+
+    /** プロジェクト単位のComfyUI接続先の上書き(issue #1503)。null/空はシステム設定へフォールバックする。 */
+    @Column(name = "comfyui_base_url", length = 500)
+    private String comfyuiBaseUrl;
+
     @Column(name = "brave_search_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] braveSearchApiKeyEncrypted;
 

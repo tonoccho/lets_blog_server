@@ -51,6 +51,8 @@ class AiConnectionServiceTest {
     private PlatformServiceClient platformServiceClient;
     @Mock
     private CurrentActorService currentActorService;
+    @Mock
+    private ProjectAiSettingsService projectAiSettingsService;
 
     /** 疎通確認のために組み立てたbaseUrlの記録。OpenAI/Anthropicへの実リクエストが無いことの確認に使う。 */
     private final List<String> builtBaseUrls = Collections.synchronizedList(new ArrayList<>());
@@ -68,7 +70,8 @@ class AiConnectionServiceTest {
     }
 
     private AiConnectionService service(Function<String, RestClient.Builder> factory, Duration timeout) {
-        return new AiConnectionService(platformServiceClient, currentActorService, factory, timeout);
+        return new AiConnectionService(
+                platformServiceClient, currentActorService, projectAiSettingsService, factory, timeout);
     }
 
     private AiConnectionService service() {
@@ -131,6 +134,30 @@ class AiConnectionServiceTest {
         assertEquals("ComfyUI", row(rows, Provider.COMFYUI).displayName());
         assertEquals("ChatGPT", row(rows, Provider.OPENAI).displayName());
         assertEquals("Claude", row(rows, Provider.CLAUDE).displayName());
+    }
+
+    @Test
+    void プロジェクトの上書きがあればその接続先をPROJECTとして疎通確認する() {
+        allConfigured();
+        when(projectAiSettingsService.getOllamaBaseUrl(1L)).thenReturn("http://gpu:11434/v1");
+        when(projectAiSettingsService.getComfyuiBaseUrl(1L)).thenReturn("http://gpu:8188");
+        Function<String, RestClient.Builder> factory = baseUrl -> {
+            builtBaseUrls.add(baseUrl);
+            RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+            String path = baseUrl.contains("11434") ? "/models" : "/system_stats";
+            server.expect(requestTo(baseUrl + path)).andRespond(withStatus(HttpStatus.OK));
+            return builder;
+        };
+
+        List<AiConnectionResponse> rows = service(factory, Duration.ofSeconds(3)).listConnections(1L);
+
+        assertEquals(Source.PROJECT, row(rows, Provider.OLLAMA).source());
+        assertEquals("http://gpu:11434/v1/models", row(rows, Provider.OLLAMA).targetUrl());
+        assertEquals(Source.PROJECT, row(rows, Provider.COMFYUI).source());
+        assertEquals("http://gpu:8188/system_stats", row(rows, Provider.COMFYUI).targetUrl());
+        assertTrue(builtBaseUrls.containsAll(List.of("http://gpu:11434/v1", "http://gpu:8188")));
+        assertFalse(builtBaseUrls.contains(OLLAMA));
     }
 
     @Test

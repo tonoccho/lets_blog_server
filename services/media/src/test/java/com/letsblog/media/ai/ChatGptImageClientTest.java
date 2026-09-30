@@ -98,7 +98,7 @@ class ChatGptImageClientTest {
 
     private static final class StubConfigProvider implements ImageGenerationConfigProvider {
         @Override
-        public String comfyUiBaseUrl() {
+        public String comfyUiBaseUrl(Long projectId) {
             return BASE_URL;
         }
 

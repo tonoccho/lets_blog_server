@@ -117,6 +117,7 @@ export * from './generated/ai/ai-controller/ai-controller';
 export * from './generated/ai/article-plan-controller/article-plan-controller';
 export * from './generated/ai/ai-connection-controller/ai-connection-controller';
 export * from './generated/ai/project-llm-model-controller/project-llm-model-controller';
+export * from './generated/ai/project-connection-controller/project-connection-controller';
 
 // GenerationJobController(ai)のlist/getは、log-writer/mediaのlist集約と同様に
 // 汎用的な関数名がAuditLogController/OperationLogController/GeneratedImageController等と衝突しうる

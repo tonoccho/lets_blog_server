@@ -360,6 +360,37 @@ export interface AiConnectionResponse {
   configured?: boolean;
 }
 
+export interface UpdateProjectConnectionsRequest {
+  ollamaBaseUrl?: string;
+  comfyuiBaseUrl?: string;
+}
+
+export type ProjectConnectionEntrySource = typeof ProjectConnectionEntrySource[keyof typeof ProjectConnectionEntrySource];
+
+
+export const ProjectConnectionEntrySource = {
+  PROJECT: 'PROJECT',
+  DATABASE: 'DATABASE',
+  ENVIRONMENT: 'ENVIRONMENT',
+  NONE: 'NONE',
+} as const;
+
+export interface ProjectConnectionEntry {
+  overrideBaseUrl?: string;
+  baseUrl?: string;
+  source?: ProjectConnectionEntrySource;
+}
+
+export interface ProjectConnectionsResponse {
+  ollama?: ProjectConnectionEntry;
+  comfyui?: ProjectConnectionEntry;
+}
+
+export interface ProjectConnectionUrlsResponse {
+  ollamaBaseUrl?: string;
+  comfyuiBaseUrl?: string;
+}
+
 export type ListIssuesParams = {
 state?: string;
 };

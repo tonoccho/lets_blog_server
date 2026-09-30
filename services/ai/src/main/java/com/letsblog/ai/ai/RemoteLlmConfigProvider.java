@@ -2,6 +2,7 @@ package com.letsblog.ai.ai;
 
 import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.service.CurrentActorService;
+import com.letsblog.ai.service.ProjectAiSettingsService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.List;
@@ -22,18 +23,27 @@ import org.springframework.stereotype.Component;
 public class RemoteLlmConfigProvider implements LlmConfigProvider {
 
     private static final String CACHE_ATTR = RemoteLlmConfigProvider.class.getName() + ".cache";
+    private static final String PROJECT_ATTR = RemoteLlmConfigProvider.class.getName() + ".project";
     private static final String DEFAULT_KEY = "__default__";
 
     private final PlatformServiceClient platformServiceClient;
     private final CurrentActorService currentActorService;
     private final HttpServletRequest request;
+    private final ProjectAiSettingsService projectAiSettingsService;
 
     public RemoteLlmConfigProvider(
             PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
-            HttpServletRequest request) {
+            HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService) {
         this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
         this.request = request;
+        this.projectAiSettingsService = projectAiSettingsService;
+    }
+
+    /** リクエスト単位で対象プロジェクトを覚える(キャッシュと同じくリクエスト属性に持つ)。 */
+    @Override
+    public void useProject(Long projectId) {
+        request.setAttribute(PROJECT_ATTR, projectId);
     }
 
     @Override
@@ -73,7 +83,21 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
 
     @Override
     public String baseUrlFor(AiProvider provider) {
-        return provider == AiProvider.CLAUDE ? LlmClient.ANTHROPIC_BASE_URL : resolveFor(provider).baseUrl();
+        if (provider == AiProvider.CLAUDE) {
+            return LlmClient.ANTHROPIC_BASE_URL;
+        }
+        String projectOverride = provider == AiProvider.OLLAMA ? ollamaOverrideOfCurrentProject() : null;
+        return projectOverride != null ? projectOverride : resolveFor(provider).baseUrl();
+    }
+
+    /** {@link #useProject}で宣言されたプロジェクトのOllama接続先の上書き。無い(null/空)ならnull(issue #1503)。 */
+    private String ollamaOverrideOfCurrentProject() {
+        Long projectId = (Long) request.getAttribute(PROJECT_ATTR);
+        if (projectId == null) {
+            return null;
+        }
+        String override = projectAiSettingsService.getOllamaBaseUrl(projectId);
+        return override == null || override.isBlank() ? null : override;
     }
 
     @Override

@@ -126,6 +126,7 @@ public class ArticlePlanService {
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            llmClient.useProject(projectId);
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(message, projectId);
             String prompt = buildChatPrompt(history, message, searchOutcome);
             String reply = llmClient.generate(prompt, model);
@@ -321,6 +322,7 @@ public class ArticlePlanService {
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            llmClient.useProject(projectId);
             String raw = llmClient.generate(buildTitleSuggestionPrompt(history), model);
             List<String> titles = parseTitles(raw);
             completeJob(job, Map.of("titlesCount", String.valueOf(titles.size()), "raw", raw));
@@ -341,6 +343,7 @@ public class ArticlePlanService {
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            llmClient.useProject(projectId);
             String structure = llmClient.generate(buildStructureSuggestionPrompt(history), model).strip();
             completeJob(job, Map.of("structureLength", String.valueOf(structure.length())));
             return new SuggestStructureResponse(structure);
@@ -374,6 +377,7 @@ public class ArticlePlanService {
         try {
             List<String> existingCategories = listExistingCategories(projectId);
             String model = llmModelService.getSelectedModel(projectId);
+            llmClient.useProject(projectId);
             String prompt = buildMetadataSuggestionPrompt(history, existingCategories);
 
             String raw = "";

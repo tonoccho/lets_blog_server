@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * プロジェクト単位のAI(LLM)関連設定(project_ai_settings)の読み書きを扱う(issue #571)。
@@ -14,6 +15,9 @@ import java.util.Optional;
  */
 @Service
 public class ProjectAiSettingsService {
+
+    /** platform-serviceのAppSettingServiceと同じ規約(空白・制御文字を含まない)。 */
+    private static final Pattern WHITESPACE_OR_CONTROL = Pattern.compile(".*[\\s\\p{Cntrl}].*", Pattern.DOTALL);
 
     private final ProjectAiSettingsRepository repository;
 
@@ -71,5 +75,48 @@ public class ProjectAiSettingsService {
         ProjectAiSettings settings = getOrCreate(projectId);
         settings.setBraveSearchApiKeyEncrypted(braveSearchApiKeyEncrypted);
         repository.save(settings);
+    }
+
+    @Transactional(readOnly = true)
+    public String getOllamaBaseUrl(Long projectId) {
+        return findByProjectId(projectId).map(ProjectAiSettings::getOllamaBaseUrl).orElse(null);
+    }
+
+    @Transactional(readOnly = true)
+    public String getComfyuiBaseUrl(Long projectId) {
+        return findByProjectId(projectId).map(ProjectAiSettings::getComfyuiBaseUrl).orElse(null);
+    }
+
+    /**
+     * Ollama / ComfyUI接続先の上書きを保存する(issue #1503)。引数がnullの項目は変更せず、
+     * 空文字(空白のみ含む)の項目は上書きを解除する。値はhttp://またはhttps://で始まり、
+     * 空白・制御文字を含まないこと。いずれかが不正なら何も保存せず{@link InvalidConnectionUrlException}を投げる。
+     */
+    @Transactional
+    public void setConnectionUrls(Long projectId, String ollamaBaseUrl, String comfyuiBaseUrl) {
+        String ollama = normalizeUrl("ollamaBaseUrl", ollamaBaseUrl);
+        String comfyui = normalizeUrl("comfyuiBaseUrl", comfyuiBaseUrl);
+        ProjectAiSettings settings = getOrCreate(projectId);
+        if (ollamaBaseUrl != null) {
+            settings.setOllamaBaseUrl(ollama);
+        }
+        if (comfyuiBaseUrl != null) {
+            settings.setComfyuiBaseUrl(comfyui);
+        }
+        repository.save(settings);
+    }
+
+    /** null(変更しない)とnull(解除)を混同しないよう、呼び出し側は元の引数のnullで区別する。 */
+    private static String normalizeUrl(String field, String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            throw new InvalidConnectionUrlException(field + " はhttp://またはhttps://から始まるURLを指定してください");
+        }
+        if (WHITESPACE_OR_CONTROL.matcher(value).matches()) {
+            throw new InvalidConnectionUrlException(field + " に空白文字・制御文字は使用できません");
+        }
+        return value;
     }
 }

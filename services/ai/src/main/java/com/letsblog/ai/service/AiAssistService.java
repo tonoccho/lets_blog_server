@@ -312,6 +312,7 @@ public class AiAssistService {
      * 呼び出し元がプロジェクト非依存の解決を望む場合(suggestImageTagsJson等)はprojectIdにnullを渡す。
      */
     public String generateForBridge(Long projectId, String prompt, String providerOverride) {
+        llmClient.useProject(projectId);
         String model = projectId != null ? llmModelService.getSelectedModel(projectId) : null;
         AiProvider provider = AiProvider.fromString(providerOverride);
         if (provider == null && projectId != null) {
@@ -663,6 +664,7 @@ public class AiAssistService {
         GenerationJob job = startJob("llm_review_step_" + stepKey.name().toLowerCase(), Map.of(
                 "projectId", String.valueOf(projectId), "stepKey", stepKey.name(), "text", text));
         try {
+            llmClient.useProject(projectId);
             String model = reviewStepModelService.resolveModel(projectId, stepKey);
             AiProvider provider = reviewStepModelService.resolveProvider(projectId, stepKey);
             String prompt = template.formatted(text);
@@ -693,6 +695,7 @@ public class AiAssistService {
         GenerationJob job = startJob("llm_review_step_fact_check", Map.of(
                 "projectId", String.valueOf(projectId), "stepKey", stepKey.name(), "text", text));
         try {
+            llmClient.useProject(projectId);
             String model = reviewStepModelService.resolveModel(projectId, stepKey);
             AiProvider provider = reviewStepModelService.resolveProvider(projectId, stepKey);
 

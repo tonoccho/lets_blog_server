@@ -155,6 +155,29 @@ class ImageGenerationServiceTest {
                 "a cat", null, null, null, null, null, seed, null, null, null, null, null, null, null, 1L);
     }
 
+    // --- issue #1503: ComfyUI接続先のプロジェクト単位上書きのため、生成パラメータにprojectIdが載る ---
+
+    @Test
+    void ComfyUIへ渡す生成パラメータにリクエストのprojectIdが載る() {
+        comfyReturns(1);
+
+        service.generateImage(requestWithSeed(1L));
+
+        assertEquals(1L, capturedComfyParams().projectId());
+    }
+
+    @Test
+    void 画像生成オプションの一覧取得はプロジェクトの接続先を引く() {
+        when(comfyUiClient.listCheckpoints(42L)).thenReturn(List.of("p42.safetensors"));
+        when(comfyUiClient.listSamplers(42L)).thenReturn(List.of("euler"));
+        when(comfyUiClient.listSchedulers(42L)).thenReturn(List.of("normal"));
+        when(comfyUiClient.listLoras(42L)).thenReturn(List.of());
+
+        ImageGenerationOptionsResponse options = service.getImageOptions(42L);
+
+        assertEquals(List.of("p42.safetensors"), options.checkpoints());
+    }
+
     // --- AC1 / AC2: seed未指定でも実値が返り、保存される ---
 
     @Test
@@ -551,10 +574,10 @@ class ImageGenerationServiceTest {
 
     @Test
     void 画像生成オプションを組み立てて返す() {
-        when(comfyUiClient.listCheckpoints()).thenReturn(List.of("a.safetensors"));
-        when(comfyUiClient.listSamplers()).thenReturn(List.of("euler"));
-        when(comfyUiClient.listSchedulers()).thenReturn(List.of("normal"));
-        when(comfyUiClient.listLoras()).thenReturn(List.of("anime.safetensors"));
+        when(comfyUiClient.listCheckpoints(1L)).thenReturn(List.of("a.safetensors"));
+        when(comfyUiClient.listSamplers(1L)).thenReturn(List.of("euler"));
+        when(comfyUiClient.listSchedulers(1L)).thenReturn(List.of("normal"));
+        when(comfyUiClient.listLoras(1L)).thenReturn(List.of("anime.safetensors"));
 
         ImageGenerationOptionsResponse options = service.getImageOptions(1L);
 

@@ -97,6 +97,24 @@ class AiAssistServiceTest {
     }
 
     @Test
+    void generateForBridge_生成前にプロジェクトをLLM接続設定の範囲として渡す() {
+        when(llmClient.generate("プロンプト", null, null)).thenReturn("結果");
+
+        service.generateForBridge(null, "プロンプト", null);
+        org.mockito.Mockito.verify(llmClient).useProject(null);
+
+        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OLLAMA);
+        when(llmClient.generate("プロンプト", "llama3", AiProvider.OLLAMA)).thenReturn("結果");
+
+        service.generateForBridge(1L, "プロンプト", null);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(1L);
+        order.verify(llmClient).generate("プロンプト", "llama3", AiProvider.OLLAMA);
+    }
+
+    @Test
     void generateForBridge_projectId未指定時はモデル解決を呼ばずシステム既定を使う() {
         when(llmClient.generate("プロンプト", null, null)).thenReturn("結果");
 
@@ -598,6 +616,35 @@ class AiAssistServiceTest {
         assertEquals("JAPANESE", response.suggestions().get(0).stepKey());
         assertEquals("ら抜き言葉の例", response.suggestions().get(0).originalText());
         assertEquals("ら抜き言葉です", response.suggestions().get(0).message());
+    }
+
+    @Test
+    void generateReviewStepSuggestions_生成前にプロジェクトをLLM接続設定の範囲として渡す() {
+        when(reviewStepModelService.resolveModel(3L, ReviewStepKey.JAPANESE)).thenReturn("model-a");
+        when(reviewStepModelService.resolveProvider(3L, ReviewStepKey.JAPANESE)).thenReturn(AiProvider.OLLAMA);
+        when(llmClient.generate(anyString(), eq("model-a"), eq(AiProvider.OLLAMA))).thenReturn("[]");
+
+        service.generateReviewStepSuggestions(3L, ReviewStepKey.JAPANESE, "本文");
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(3L);
+        order.verify(llmClient).generate(anyString(), eq("model-a"), eq(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void factCheck_抽出と判定の前にプロジェクトをLLM接続設定の範囲として渡す() {
+        when(reviewStepModelService.resolveModel(4L, ReviewStepKey.FACT_CHECK)).thenReturn("model-f");
+        when(reviewStepModelService.resolveProvider(4L, ReviewStepKey.FACT_CHECK)).thenReturn(AiProvider.OLLAMA);
+        when(webSearchService.searchSafely(anyString(), eq(4L)))
+                .thenReturn(WebSearchOutcome.success(List.of(searchResult(1))));
+        when(llmClient.generate(anyString(), eq("model-f"), eq(AiProvider.OLLAMA))).thenReturn(FACT_EXTRACTION, "[]");
+
+        service.generateReviewStepSuggestions(4L, ReviewStepKey.FACT_CHECK, FACT_TEXT);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(4L);
+        order.verify(llmClient, org.mockito.Mockito.atLeastOnce())
+                .generate(anyString(), eq("model-f"), eq(AiProvider.OLLAMA));
     }
 
     @Test

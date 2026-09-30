@@ -1,0 +1,46 @@
+# language: ja
+@api @ai
+機能: プロジェクト単位のOllama / ComfyUI接続先の上書き
+
+  Ollama と ComfyUI の接続先URLを、プロジェクトごとに上書きできることを固定する
+  (issue #1503。API は `GET` / `PUT /api/projects/{id}/ai-models/connections`)。
+  解決順は「プロジェクト設定 → システム設定(DB) → 環境変数既定」で、上書きが無い(未設定・空文字)
+  プロジェクトは従来どおりの解決結果になる。
+
+  ## 何を、どの層で確かめるか
+
+  このAPIが返す `baseUrl` と `source` は、LLM生成(ai-service の RemoteLlmConfigProvider)と
+  画像生成(media-service の ComfyUiClient)が実際に使う解決結果と同じ規則で計算される。
+  受け入れ基準1の「生成が設定したURLの側へ向かう」うち、HTTP で観測できるのは解決結果までで、
+  実際の送信先(Ollama の `/chat/completions`、ComfyUI の `/prompt` 等)がプロジェクト別になることは
+  サービス単体のテスト(`RemoteLlmConfigProviderTest` / `ComfyUiClientProjectUrlTest` /
+  `PlatformServiceClientProjectUrlTest` / `AiServiceConnectionClientTest`)で固定している。
+  画面は本Issueの範囲外(#1504)。
+
+  背景:
+    前提 接続先の上書きを確かめるプロジェクトが2つあり、一般利用者は片方だけのメンバーである
+
+  シナリオ: 接続先を上書きしたプロジェクトの解決結果は設定したURLになり、上書きしていないプロジェクトは影響を受けない
+    もし 管理者が1つ目のプロジェクトのOllama接続先を「http://at-1503-ollama.invalid:11434/v1」に、ComfyUI接続先を「http://at-1503-comfy.invalid:8188」に設定する
+    ならば 1つ目のプロジェクトのOllamaとComfyUIの解決結果が設定したURLで出所がPROJECTである
+    かつ 2つ目のプロジェクトのOllamaとComfyUIの解決結果は上書きを持たず出所がPROJECTではない
+
+  シナリオ: 上書きを空文字で保存すると解除され、解決結果が既定値に戻る
+    前提 管理者が1つ目のプロジェクトのOllama接続先を「http://at-1503-ollama.invalid:11434/v1」に設定してある
+    もし 管理者が1つ目のプロジェクトのOllama接続先を空文字で保存する
+    ならば 1つ目のプロジェクトのOllamaの解決結果は上書きを持たず出所がPROJECTではない
+
+  シナリオ: スキームがhttp/httpsでないURLや空白を含むURLは400で拒否され、保存済みの値は変わらない
+    前提 管理者が1つ目のプロジェクトのOllama接続先を「http://at-1503-ollama.invalid:11434/v1」に設定してある
+    もし 管理者が1つ目のプロジェクトのOllama接続先を「ftp://at-1503.invalid/」に保存しようとする
+    ならば 保存は400で拒否される
+    もし 管理者が1つ目のプロジェクトのComfyUI接続先を「http://at-1503 comfy.invalid:8188」に保存しようとする
+    ならば 保存は400で拒否される
+    かつ 1つ目のプロジェクトのOllama接続先の上書きは「http://at-1503-ollama.invalid:11434/v1」のままである
+
+  シナリオ: プロジェクトのメンバーでない一般利用者は接続先の参照も更新も403になる
+    もし 一般利用者が2つ目のプロジェクトの接続先を参照しようとする
+    ならば 接続先の操作は403で拒否される
+    もし 一般利用者が2つ目のプロジェクトのOllama接続先を「http://at-1503-ollama.invalid:11434/v1」に更新しようとする
+    ならば 接続先の操作は403で拒否される
+    かつ 2つ目のプロジェクトのOllamaの解決結果は上書きを持たず出所がPROJECTではない

@@ -18,8 +18,19 @@ public record ComfyUiGenerationParams(
         Integer batchSize,
         String checkpoint,
         String loraName,
-        Double loraWeight
+        Double loraWeight,
+        /** 接続先(ComfyUI)をプロジェクト単位で解決するためのプロジェクト。nullならシステム設定(issue #1503)。 */
+        Long projectId
 ) {
+    /** projectIdを持たない呼び出し(システム設定の接続先を使う)向け。 */
+    public ComfyUiGenerationParams(
+            String prompt, String negativePrompt, Integer steps, Double cfgScale, String samplerName,
+            String scheduler, Long seed, Integer width, Integer height, Integer batchSize, String checkpoint,
+            String loraName, Double loraWeight) {
+        this(prompt, negativePrompt, steps, cfgScale, samplerName, scheduler, seed, width, height, batchSize,
+                checkpoint, loraName, loraWeight, null);
+    }
+
     public static ComfyUiGenerationParams withDefaults(String prompt) {
         return new ComfyUiGenerationParams(
                 prompt,

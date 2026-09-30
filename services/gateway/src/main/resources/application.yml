@@ -78,6 +78,13 @@ app:
         uri: ${AI_SERVICE_URI:http://ai:8080}
         paths:
           - /api/projects/*/ai-models/llm/**
+      # プロジェクト単位のOllama / ComfyUI接続先の上書き(ProjectConnectionController、issue #1503)は
+      # ai-serviceが持つ(project_ai_settingsの所有者)。パスは/api/projects/*/ai-models/**配下なので、
+      # 下のmedia向けproject-ai-models-imageより先にマッチさせる(欠けるとmediaに落ちて404になる)。
+      - id: project-ai-models-connections
+        uri: ${AI_SERVICE_URI:http://ai:8080}
+        paths:
+          - /api/projects/*/ai-models/connections
       # ProjectDashboardController(プロジェクトダッシュボードのGA/AdSenseレポート取得)は
       # analytics-serviceへ移設した(#578)。パス自体は/api/projects/**配下のまま(既存フロントのURLを
       # 変えないため)。より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる

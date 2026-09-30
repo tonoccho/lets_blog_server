@@ -92,4 +92,106 @@ class ProjectAiSettingsServiceTest {
 
         assertEquals("OPENAI", service().getLlmProvider(1L));
     }
+
+    // ---- 接続先URLのプロジェクト単位上書き(issue #1503) ----
+
+    private void stubNewRow() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+        when(repository.save(any(ProjectAiSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private ProjectAiSettings savedRow() {
+        ArgumentCaptor<ProjectAiSettings> captor = ArgumentCaptor.forClass(ProjectAiSettings.class);
+        verify(repository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void getOllamaBaseUrl_行が無ければnull() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+
+        assertNull(service().getOllamaBaseUrl(1L));
+        assertNull(service().getComfyuiBaseUrl(1L));
+    }
+
+    @Test
+    void getBaseUrl_設定済みならその値を返す() {
+        ProjectAiSettings existing = new ProjectAiSettings(1L);
+        existing.setOllamaBaseUrl("http://gpu:11434/v1");
+        existing.setComfyuiBaseUrl("https://comfy.example:8188");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+
+        assertEquals("http://gpu:11434/v1", service().getOllamaBaseUrl(1L));
+        assertEquals("https://comfy.example:8188", service().getComfyuiBaseUrl(1L));
+    }
+
+    @Test
+    void setConnectionUrls_http_httpsのURLを保存する() {
+        stubNewRow();
+
+        service().setConnectionUrls(1L, "http://gpu:11434/v1", "https://comfy.example:8188");
+
+        assertEquals("http://gpu:11434/v1", savedRow().getOllamaBaseUrl());
+        assertEquals("https://comfy.example:8188", savedRow().getComfyuiBaseUrl());
+    }
+
+    @Test
+    void setConnectionUrls_空文字は上書きを解除する() {
+        ProjectAiSettings existing = new ProjectAiSettings(1L);
+        existing.setOllamaBaseUrl("http://gpu:11434/v1");
+        existing.setComfyuiBaseUrl("http://comfy:8188");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        when(repository.save(any(ProjectAiSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().setConnectionUrls(1L, "", "   ");
+
+        assertNull(existing.getOllamaBaseUrl());
+        assertNull(existing.getComfyuiBaseUrl());
+    }
+
+    @Test
+    void setConnectionUrls_nullの項目は変更しない() {
+        ProjectAiSettings existing = new ProjectAiSettings(1L);
+        existing.setOllamaBaseUrl("http://gpu:11434/v1");
+        existing.setComfyuiBaseUrl("http://comfy:8188");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        when(repository.save(any(ProjectAiSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().setConnectionUrls(1L, null, "http://other:8188");
+
+        assertEquals("http://gpu:11434/v1", existing.getOllamaBaseUrl());
+        assertEquals("http://other:8188", existing.getComfyuiBaseUrl());
+    }
+
+    @Test
+    void setConnectionUrls_http_https以外のスキームは拒否して保存しない() {
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, "ftp://gpu:11434", null));
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, null, "javascript:alert(1)"));
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, null, "gpu:11434"));
+
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void setConnectionUrls_空白や制御文字を含むURLは拒否して保存しない() {
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, "http://gpu :11434", null));
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, null, "http://comfy:8188\n"));
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, null, "http://comfy\u0000:8188"));
+
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void setConnectionUrls_片方が不正なら他方も保存されない() {
+        org.junit.jupiter.api.Assertions.assertThrows(InvalidConnectionUrlException.class,
+                () -> service().setConnectionUrls(1L, "http://ok:11434/v1", "ftp://bad"));
+
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(any());
+    }
 }

@@ -44,17 +44,20 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
 
     private final RestClient restClient;
     private final ServiceTokenClient serviceTokenClient;
+    private final AiServiceConnectionClient aiServiceConnectionClient;
     private volatile CachedImageGenerationConfig cachedImageGenerationConfig;
 
     public PlatformServiceClient(
             RestClient.Builder builder,
             @Value("${app.platform-service-uri}") String platformServiceUri,
-            ServiceTokenClient serviceTokenClient) {
+            ServiceTokenClient serviceTokenClient,
+            AiServiceConnectionClient aiServiceConnectionClient) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.clone().baseUrl(platformServiceUri).requestFactory(requestFactory).build();
         this.serviceTokenClient = serviceTokenClient;
+        this.aiServiceConnectionClient = aiServiceConnectionClient;
     }
 
     private record ImageGenerationConfigResponse(
@@ -67,9 +70,14 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
         }
     }
 
+    /**
+     * プロジェクトの上書き(ai-service所有、issue #1503)があればそれ、無ければ(または{@code projectId}が
+     * nullなら)システム設定の値。
+     */
     @Override
-    public String comfyUiBaseUrl() {
-        return imageGenerationConfig().comfyUiBaseUrl();
+    public String comfyUiBaseUrl(Long projectId) {
+        String override = projectId == null ? null : aiServiceConnectionClient.comfyUiBaseUrlOverride(projectId);
+        return override != null ? override : imageGenerationConfig().comfyUiBaseUrl();
     }
 
     @Override

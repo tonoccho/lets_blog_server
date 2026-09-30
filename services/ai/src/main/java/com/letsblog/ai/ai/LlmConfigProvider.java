@@ -29,6 +29,13 @@ public interface LlmConfigProvider {
 
     String baseUrlFor(AiProvider provider);
 
+    /**
+     * 以降のbaseUrl解決の対象プロジェクトを宣言する(issue #1503)。OLLAMAはプロジェクト単位で接続先を
+     * 上書きできるため、生成の前に呼ぶ。nullはプロジェクト非依存(システム設定のみ)。既定は何もしない。
+     */
+    default void useProject(Long projectId) {
+    }
+
     /** プロジェクト画面のモデル選択ドロップダウンに表示する、選択可能なモデル名の一覧。 */
     List<String> availableModels();
 

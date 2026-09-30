@@ -1441,6 +1441,107 @@
           }
         }
       }
+    },
+    "/api/projects/{id}/ai-models/connections": {
+      "get": {
+        "tags": [
+          "project-connection-controller"
+        ],
+        "operationId": "getProjectConnections",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConnectionsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "project-connection-controller"
+        ],
+        "operationId": "putProjectConnections",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectConnectionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConnectionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/internal/ai/projects/{projectId}/connections": {
+      "get": {
+        "tags": [
+          "internal-project-ai-settings-controller"
+        ],
+        "operationId": "connections",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConnectionUrlsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2356,6 +2457,59 @@
           },
           "configured": {
             "type": "boolean"
+          }
+        }
+      },
+      "UpdateProjectConnectionsRequest": {
+        "type": "object",
+        "properties": {
+          "ollamaBaseUrl": {
+            "type": "string"
+          },
+          "comfyuiBaseUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectConnectionEntry": {
+        "type": "object",
+        "properties": {
+          "overrideBaseUrl": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "PROJECT",
+              "DATABASE",
+              "ENVIRONMENT",
+              "NONE"
+            ]
+          }
+        }
+      },
+      "ProjectConnectionsResponse": {
+        "type": "object",
+        "properties": {
+          "ollama": {
+            "$ref": "#/components/schemas/ProjectConnectionEntry"
+          },
+          "comfyui": {
+            "$ref": "#/components/schemas/ProjectConnectionEntry"
+          }
+        }
+      },
+      "ProjectConnectionUrlsResponse": {
+        "type": "object",
+        "properties": {
+          "ollamaBaseUrl": {
+            "type": "string"
+          },
+          "comfyuiBaseUrl": {
+            "type": "string"
           }
         }
       }

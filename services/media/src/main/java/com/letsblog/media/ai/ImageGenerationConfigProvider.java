@@ -7,7 +7,12 @@ package com.letsblog.media.ai;
  * serviceパッケージへ依存しないようにするため、インターフェースはこちら側で定義しservice側が実装する。
  */
 public interface ImageGenerationConfigProvider {
-    String comfyUiBaseUrl();
+    /**
+     * ComfyUIの接続先。プロジェクトが上書きしていればそのURL、無ければ(または{@code projectId}がnullなら)
+     * システム設定(DB優先・環境変数フォールバック)。解決順: プロジェクト設定 → システム設定(DB) → 環境変数既定
+     * (issue #1503)。
+     */
+    String comfyUiBaseUrl(Long projectId);
 
     String chatGptApiKey();
 

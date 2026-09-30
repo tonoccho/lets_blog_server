@@ -6,6 +6,7 @@
  */
 import type {
   BraveSearchApiKeyStatusResponse,
+  ProjectConnectionUrlsResponse,
   SetBraveSearchApiKeyRequest
 } from '../openAPIDefinition.schemas';
 
@@ -131,6 +132,45 @@ export const clear1 = async (projectId: number, options?: RequestInit): Promise<
 
   const data: clear1Response['data'] = body ? JSON.parse(body) : undefined
   return { data, status: res.status, headers: res.headers } as clear1Response
+}
+
+
+export type connectionsResponse200 = {
+  data: ProjectConnectionUrlsResponse
+  status: 200
+}
+
+export type connectionsResponseSuccess = (connectionsResponse200) & {
+  headers: Headers;
+};
+;
+
+export type connectionsResponse = (connectionsResponseSuccess)
+
+export const getConnectionsUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/ai/projects/${projectId}/connections`
+}
+
+export const connections = async (projectId: number, options?: RequestInit): Promise<connectionsResponse> => {
+
+  const res = await fetch(getConnectionsUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: connectionsResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as connectionsResponse
 }
 
 

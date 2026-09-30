@@ -46,7 +46,7 @@ class ComfyUiClientUnreachableTest {
     private static ComfyUiClient clientFor(String baseUrl) {
         return new ComfyUiClient(RestClient.builder(), new ImageGenerationConfigProvider() {
             @Override
-            public String comfyUiBaseUrl() {
+            public String comfyUiBaseUrl(Long projectId) {
                 return baseUrl;
             }
 
@@ -76,27 +76,27 @@ class ComfyUiClientUnreachableTest {
     @ParameterizedTest
     @ValueSource(strings = {REFUSED_URL, UNRESOLVABLE_URL})
     void チェックポイント一覧は到達不可を理由と接続先つきで返す(String baseUrl) {
-        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(baseUrl).listCheckpoints());
+        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(baseUrl).listCheckpoints(5L));
         assertUnreachableMessage(e, baseUrl);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {REFUSED_URL, UNRESOLVABLE_URL})
     void サンプラー一覧は到達不可を理由と接続先つきで返す(String baseUrl) {
-        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(baseUrl).listSamplers());
+        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(baseUrl).listSamplers(5L));
         assertUnreachableMessage(e, baseUrl);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {REFUSED_URL, UNRESOLVABLE_URL})
     void スケジューラー一覧は到達不可を理由と接続先つきで返す(String baseUrl) {
-        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(baseUrl).listSchedulers());
+        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(baseUrl).listSchedulers(5L));
         assertUnreachableMessage(e, baseUrl);
     }
 
     @Test
     void LoRA一覧も到達不可を空リストへ丸めず理由つきで返す() {
-        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(REFUSED_URL).listLoras());
+        AiServiceException e = assertThrows(AiServiceException.class, () -> clientFor(REFUSED_URL).listLoras(5L));
         assertUnreachableMessage(e, REFUSED_URL);
     }
 
@@ -109,7 +109,7 @@ class ComfyUiClientUnreachableTest {
 
     @Test
     void 到達不可はサーバーログにWARNが1件残る() {
-        assertThrows(AiServiceException.class, () -> clientFor(REFUSED_URL).listCheckpoints());
+        assertThrows(AiServiceException.class, () -> clientFor(REFUSED_URL).listCheckpoints(5L));
 
         List<ILoggingEvent> warns = appender.list.stream().filter(ev -> ev.getLevel() == Level.WARN).toList();
         assertEquals(1, warns.size());
@@ -118,7 +118,7 @@ class ComfyUiClientUnreachableTest {
 
     @Test
     void 不到達は型で判別できるComfyUiUnreachableExceptionになる() {
-        assertThrows(ComfyUiUnreachableException.class, () -> clientFor(REFUSED_URL).listCheckpoints());
+        assertThrows(ComfyUiUnreachableException.class, () -> clientFor(REFUSED_URL).listCheckpoints(5L));
         assertThrows(ComfyUiUnreachableException.class, () -> clientFor(REFUSED_URL).generateImage(params()));
     }
 }

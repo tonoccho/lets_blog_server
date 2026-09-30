@@ -693,4 +693,54 @@ class ArticlePlanServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service.assignIssueToActor(1L, 10L, 42));
     }
+
+    // ---- issue #1503: 生成前にプロジェクトをLLM接続設定の範囲として渡す(Ollama接続先の上書き) ----
+
+    @Test
+    void chat_生成前にプロジェクトをLLM接続設定の範囲として渡す() {
+        ArticlePlanService service = service();
+        when(llmClient.generate(anyString(), anyString())).thenReturn("返答");
+
+        service.chat(5L, List.of(), "こんにちは", null, null);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(5L);
+        order.verify(llmClient, atLeastOnce()).generate(anyString(), anyString());
+    }
+
+    @Test
+    void suggestTitles_生成前にプロジェクトをLLM接続設定の範囲として渡す() {
+        ArticlePlanService service = service();
+        when(llmClient.generate(anyString(), anyString())).thenReturn("[]");
+
+        service.suggestTitles(5L, List.of());
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(5L);
+        order.verify(llmClient).generate(anyString(), anyString());
+    }
+
+    @Test
+    void suggestStructure_生成前にプロジェクトをLLM接続設定の範囲として渡す() {
+        ArticlePlanService service = service();
+        when(llmClient.generate(anyString(), anyString())).thenReturn("## 見出し");
+
+        service.suggestStructure(5L, List.of());
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(5L);
+        order.verify(llmClient).generate(anyString(), anyString());
+    }
+
+    @Test
+    void suggestMetadata_生成前にプロジェクトをLLM接続設定の範囲として渡す() {
+        ArticlePlanService service = service();
+        when(llmClient.generate(anyString(), anyString())).thenReturn("{\"titles\":[\"a\"]}");
+
+        service.suggestMetadata(5L, List.of());
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(llmClient);
+        order.verify(llmClient).useProject(5L);
+        order.verify(llmClient, atLeastOnce()).generate(anyString(), anyString());
+    }
 }

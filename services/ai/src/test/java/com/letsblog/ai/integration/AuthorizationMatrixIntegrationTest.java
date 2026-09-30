@@ -91,6 +91,10 @@ class AuthorizationMatrixIntegrationTest {
                 // -- AiConnectionController(issue #1499) --
                 new Endpoint("GET", "/api/projects/1/ai-connections"),
 
+                // -- ProjectConnectionController(issue #1503) --
+                new Endpoint("GET", "/api/projects/1/ai-models/connections"),
+                new Endpoint("PUT", "/api/projects/1/ai-models/connections"),
+
                 // -- GenerationJobController --
                 new Endpoint("GET", "/api/generation-jobs"),
                 new Endpoint("GET", "/api/generation-jobs/1"),
@@ -134,6 +138,7 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- 内部ブリッジ(InternalProjectAiSettingsController) --
                 new Endpoint("GET", "/api/internal/ai/projects/1/brave-search-api-key"),
+                new Endpoint("GET", "/api/internal/ai/projects/1/connections"),
                 new Endpoint("PUT", "/api/internal/ai/projects/1/brave-search-api-key"),
                 new Endpoint("DELETE", "/api/internal/ai/projects/1/brave-search-api-key"));
     }

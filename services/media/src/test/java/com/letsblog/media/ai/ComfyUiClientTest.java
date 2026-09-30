@@ -251,7 +251,7 @@ class ComfyUiClientTest {
                         "{\"CheckpointLoaderSimple\":{\"input\":{\"required\":{\"ckpt_name\":[[\"a.safetensors\","
                                 + "\"b.safetensors\"]]}}}}", MediaType.APPLICATION_JSON));
 
-        assertEquals(List.of("a.safetensors", "b.safetensors"), client.listCheckpoints());
+        assertEquals(List.of("a.safetensors", "b.safetensors"), client.listCheckpoints(5L));
     }
 
     @Test
@@ -259,7 +259,7 @@ class ComfyUiClientTest {
         server.expect(requestTo(BASE_URL + "/object_info/CheckpointLoaderSimple"))
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY).body("ng"));
 
-        assertThrows(AiServiceException.class, () -> client.listCheckpoints());
+        assertThrows(AiServiceException.class, () -> client.listCheckpoints(5L));
     }
 
     @Test
@@ -267,7 +267,7 @@ class ComfyUiClientTest {
         server.expect(requestTo(BASE_URL + "/object_info/CheckpointLoaderSimple"))
                 .andRespond(withSuccess());
 
-        assertTrue(client.listCheckpoints().isEmpty());
+        assertTrue(client.listCheckpoints(5L).isEmpty());
     }
 
     @Test
@@ -277,8 +277,8 @@ class ComfyUiClientTest {
                         "{\"KSampler\":{\"input\":{\"required\":{\"sampler_name\":[[\"euler\"]],"
                                 + "\"scheduler\":[[\"normal\",\"karras\"]]}}}}", MediaType.APPLICATION_JSON));
 
-        assertEquals(List.of("euler"), client.listSamplers());
-        assertEquals(List.of("normal", "karras"), client.listSchedulers());
+        assertEquals(List.of("euler"), client.listSamplers(5L));
+        assertEquals(List.of("normal", "karras"), client.listSchedulers(5L));
     }
 
     @Test
@@ -286,7 +286,7 @@ class ComfyUiClientTest {
         server.expect(requestTo(BASE_URL + "/object_info/KSampler"))
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY).body("ng"));
 
-        assertThrows(AiServiceException.class, () -> client.listSamplers());
+        assertThrows(AiServiceException.class, () -> client.listSamplers(5L));
     }
 
     @Test
@@ -294,7 +294,7 @@ class ComfyUiClientTest {
         server.expect(requestTo(BASE_URL + "/object_info/KSampler"))
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY).body("ng"));
 
-        assertThrows(AiServiceException.class, () -> client.listSchedulers());
+        assertThrows(AiServiceException.class, () -> client.listSchedulers(5L));
     }
 
     @Test
@@ -302,8 +302,8 @@ class ComfyUiClientTest {
         server.expect(manyTimes(), requestTo(BASE_URL + "/object_info/KSampler"))
                 .andRespond(withSuccess());
 
-        assertTrue(client.listSamplers().isEmpty());
-        assertTrue(client.listSchedulers().isEmpty());
+        assertTrue(client.listSamplers(5L).isEmpty());
+        assertTrue(client.listSchedulers(5L).isEmpty());
     }
 
     @Test
@@ -313,7 +313,7 @@ class ComfyUiClientTest {
                         "{\"LoraLoader\":{\"input\":{\"required\":{\"lora_name\":[[\"anime.safetensors\"]]}}}}",
                         MediaType.APPLICATION_JSON));
 
-        assertEquals(List.of("anime.safetensors"), client.listLoras());
+        assertEquals(List.of("anime.safetensors"), client.listLoras(5L));
     }
 
     @Test
@@ -321,7 +321,7 @@ class ComfyUiClientTest {
         server.expect(requestTo(BASE_URL + "/object_info/LoraLoader"))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND).body("no node"));
 
-        assertTrue(client.listLoras().isEmpty());
+        assertTrue(client.listLoras(5L).isEmpty());
     }
 
     @Test
@@ -329,7 +329,7 @@ class ComfyUiClientTest {
         server.expect(requestTo(BASE_URL + "/object_info/LoraLoader"))
                 .andRespond(withSuccess());
 
-        assertTrue(client.listLoras().isEmpty());
+        assertTrue(client.listLoras(5L).isEmpty());
     }
 
     @Test
@@ -348,7 +348,7 @@ class ComfyUiClientTest {
 
     private static final class StubConfigProvider implements ImageGenerationConfigProvider {
         @Override
-        public String comfyUiBaseUrl() {
+        public String comfyUiBaseUrl(Long projectId) {
             return BASE_URL;
         }
 

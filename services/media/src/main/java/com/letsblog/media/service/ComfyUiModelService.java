@@ -60,7 +60,7 @@ public class ComfyUiModelService {
     }
 
     public ComfyUiCheckpointListResponse listCheckpointsForProject(Long projectId) {
-        return new ComfyUiCheckpointListResponse(comfyUiClient.listCheckpoints(), getSelectedCheckpoint(projectId));
+        return new ComfyUiCheckpointListResponse(comfyUiClient.listCheckpoints(projectId), getSelectedCheckpoint(projectId));
     }
 
     /** プロジェクトの選択中チェックポイント。未選択(null)ならグローバルデフォルトへフォールバックする。 */
@@ -80,7 +80,7 @@ public class ComfyUiModelService {
 
     public ComfyUiCheckpointListResponse selectCheckpoint(Long projectId, String checkpointName) {
         projectServiceClient.requireProjectExists(projectId);
-        boolean exists = comfyUiClient.listCheckpoints().contains(checkpointName);
+        boolean exists = comfyUiClient.listCheckpoints(projectId).contains(checkpointName);
         if (!exists) {
             throw new IllegalArgumentException("チェックポイント '" + checkpointName + "' は見つかりません");
         }

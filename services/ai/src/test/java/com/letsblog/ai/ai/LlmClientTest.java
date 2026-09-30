@@ -332,4 +332,19 @@ class LlmClientTest {
             return List.of(model);
         }
     }
+
+    @Test
+    void useProject_接続設定プロバイダーへ委譲する() {
+        LlmConfigProvider provider = org.mockito.Mockito.mock(LlmConfigProvider.class);
+
+        new LlmClient(provider).useProject(9L);
+
+        org.mockito.Mockito.verify(provider).useProject(9L);
+    }
+
+    @Test
+    void useProject_既定実装は何もしない() {
+        // テスト専用コンストラクタが作る匿名のLlmConfigProviderはuseProjectを実装しない(defaultの空実装)。
+        new LlmClient("https://api.openai.com/v1", "k", "m", 1L).useProject(9L);
+    }
 }

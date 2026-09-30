@@ -45,22 +45,28 @@ public class AiConnectionService {
 
     private final PlatformServiceClient platformServiceClient;
     private final CurrentActorService currentActorService;
+    private final ProjectAiSettingsService projectAiSettingsService;
     private final Function<String, RestClient.Builder> clientBuilderFactory;
     private final Duration timeout;
 
     @Autowired
-    public AiConnectionService(PlatformServiceClient platformServiceClient, CurrentActorService currentActorService) {
-        this(platformServiceClient, currentActorService, AiConnectionService::builderWithTimeout, DEFAULT_TIMEOUT);
+    public AiConnectionService(
+            PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
+            ProjectAiSettingsService projectAiSettingsService) {
+        this(platformServiceClient, currentActorService, projectAiSettingsService,
+                AiConnectionService::builderWithTimeout, DEFAULT_TIMEOUT);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderの生成とタイムアウトを差し替える。 */
     AiConnectionService(
             PlatformServiceClient platformServiceClient,
             CurrentActorService currentActorService,
+            ProjectAiSettingsService projectAiSettingsService,
             Function<String, RestClient.Builder> clientBuilderFactory,
             Duration timeout) {
         this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
+        this.projectAiSettingsService = projectAiSettingsService;
         this.clientBuilderFactory = clientBuilderFactory;
         this.timeout = timeout;
     }
@@ -73,12 +79,14 @@ public class AiConnectionService {
     }
 
     /**
-     * @param projectId 現状は使わない。プロジェクト単位の接続先上書き(#1503)が入ったとき、
-     *                  {@code source}に{@code PROJECT}を返すための入口として引数に残している
+     * @param projectId プロジェクト単位の接続先上書き(#1503)があれば、Ollama / ComfyUIはその接続先を疎通確認し
+     *                  {@code source}に{@code PROJECT}を返す
      */
     public List<AiConnectionResponse> listConnections(Long projectId) {
-        AiConnectionsConfig config = platformServiceClient.resolveAiConnectionsConfig(
-                currentActorService.getAuthorizationHeader());
+        AiConnectionsConfig config = ProjectConnectionService.applyOverrides(
+                platformServiceClient.resolveAiConnectionsConfig(currentActorService.getAuthorizationHeader()),
+                projectAiSettingsService.getOllamaBaseUrl(projectId),
+                projectAiSettingsService.getComfyuiBaseUrl(projectId));
 
         CompletableFuture<AiConnectionResponse> ollama = async(
                 Provider.OLLAMA, "Ollama", () -> checkHttp(Provider.OLLAMA, "Ollama", config.ollama(), "/models"));
@@ -133,7 +141,7 @@ public class AiConnectionService {
         return new AiConnectionResponse(provider, displayName, null, source, Status.WARNING, NOT_CONFIGURED_KEY, false);
     }
 
-    private static Source sourceOf(ProviderConnectionConfig config) {
+    static Source sourceOf(ProviderConnectionConfig config) {
         if (config == null || config.source() == null) {
             return Source.NONE;
         }

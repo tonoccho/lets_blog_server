@@ -158,7 +158,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
             throw new AiServiceException(
                     "ComfyUIの画像生成にはseedの実値が必要です(呼び出し側で解決してください)", null);
         }
-        String baseUrl = configProvider.comfyUiBaseUrl();
+        String baseUrl = configProvider.comfyUiBaseUrl(params.projectId());
         try {
             return submitAndCollect(baseUrl, params);
         } catch (ResourceAccessException e) {
@@ -242,8 +242,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
     /**
      * ComfyUIに現在配置されているチェックポイント一覧を取得する(GET /object_info/CheckpointLoaderSimple)。
      */
-    public List<String> listCheckpoints() {
-        String baseUrl = configProvider.comfyUiBaseUrl();
+    public List<String> listCheckpoints(Long projectId) {
+        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
         try {
             JsonNode response = client.get()
                     .uri(baseUrl + "/object_info/CheckpointLoaderSimple")
@@ -268,8 +268,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
     /**
      * ComfyUIが対応しているサンプラー名の一覧を取得する(GET /object_info/KSampler)。
      */
-    public List<String> listSamplers() {
-        String baseUrl = configProvider.comfyUiBaseUrl();
+    public List<String> listSamplers(Long projectId) {
+        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
         try {
             JsonNode response = client.get()
                     .uri(baseUrl + "/object_info/KSampler")
@@ -294,8 +294,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
     /**
      * ComfyUIが対応しているスケジューラー名の一覧を取得する(GET /object_info/KSampler)。
      */
-    public List<String> listSchedulers() {
-        String baseUrl = configProvider.comfyUiBaseUrl();
+    public List<String> listSchedulers(Long projectId) {
+        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
         try {
             JsonNode response = client.get()
                     .uri(baseUrl + "/object_info/KSampler")
@@ -321,8 +321,8 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIに配置されているLoRAモデルの一覧を取得する(GET /object_info/LoraLoader)。
      * LoraLoaderノードが未実装のComfyUI環境(HTTPエラー)では空リストを返す。到達できない場合は空リストへ丸めず{@link AiServiceException}(#1126)。
      */
-    public List<String> listLoras() {
-        String baseUrl = configProvider.comfyUiBaseUrl();
+    public List<String> listLoras(Long projectId) {
+        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
         try {
             JsonNode response = client.get()
                     .uri(baseUrl + "/object_info/LoraLoader")

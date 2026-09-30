@@ -102,6 +102,14 @@ public class LlmClient {
         };
     }
 
+    /**
+     * 以降の{@code generate}で接続先を解決するプロジェクトを宣言する(issue #1503)。
+     * プロジェクトがOllamaの接続先を上書きしていれば、OLLAMAの呼び出しはそちらへ向かう。
+     */
+    public void useProject(Long projectId) {
+        configProvider.useProject(projectId);
+    }
+
     public String generate(String prompt) {
         return generate(prompt, null, null);
     }

@@ -51,4 +51,19 @@ public class InternalProjectAiSettingsController {
     public void clear(@PathVariable Long projectId) {
         projectAiSettingsService.setBraveSearchApiKeyEncrypted(projectId, null);
     }
+
+    /** プロジェクトの接続先上書き。上書きが無い項目はnull(空文字は保存されない)。 */
+    public record ProjectConnectionUrlsResponse(String ollamaBaseUrl, String comfyuiBaseUrl) {
+    }
+
+    /**
+     * media-serviceがComfyUIの接続先を解決するための内部ブリッジ(issue #1503)。システム設定へのフォール
+     * バックは呼び出し側が行う(値の所有者はplatform-service)。認可はサービス間認証のみ(他の内部ブリッジと同じ)。
+     */
+    @GetMapping("/api/internal/ai/projects/{projectId}/connections")
+    public ProjectConnectionUrlsResponse connections(@PathVariable Long projectId) {
+        return new ProjectConnectionUrlsResponse(
+                projectAiSettingsService.getOllamaBaseUrl(projectId),
+                projectAiSettingsService.getComfyuiBaseUrl(projectId));
+    }
 }

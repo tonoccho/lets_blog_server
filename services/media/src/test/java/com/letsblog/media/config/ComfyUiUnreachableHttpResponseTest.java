@@ -30,7 +30,7 @@ class ComfyUiUnreachableHttpResponseTest {
     static class Probe {
         private final ComfyUiClient client = new ComfyUiClient(new ImageGenerationConfigProvider() {
             @Override
-            public String comfyUiBaseUrl() {
+            public String comfyUiBaseUrl(Long projectId) {
                 return BASE_URL;
             }
 
@@ -47,7 +47,7 @@ class ComfyUiUnreachableHttpResponseTest {
 
         @GetMapping("/probe")
         List<String> probe() {
-            return client.listCheckpoints();
+            return client.listCheckpoints(5L);
         }
     }
 
