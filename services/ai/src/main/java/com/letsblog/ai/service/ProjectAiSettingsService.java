@@ -78,6 +78,24 @@ public class ProjectAiSettingsService {
     }
 
     @Transactional(readOnly = true)
+    public boolean hasOpenAiApiKey(Long projectId) {
+        return findByProjectId(projectId).map(ProjectAiSettings::hasOpenAiApiKey).orElse(false);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] getOpenAiApiKeyEncrypted(Long projectId) {
+        return findByProjectId(projectId).map(ProjectAiSettings::getOpenAiApiKeyEncrypted).orElse(null);
+    }
+
+    /** プロジェクト単位のChatGPT(OpenAI)APIキー(暗号化済み)を保存する。nullで削除(issue #1506)。 */
+    @Transactional
+    public void setOpenAiApiKeyEncrypted(Long projectId, byte[] openAiApiKeyEncrypted) {
+        ProjectAiSettings settings = getOrCreate(projectId);
+        settings.setOpenAiApiKeyEncrypted(openAiApiKeyEncrypted);
+        repository.save(settings);
+    }
+
+    @Transactional(readOnly = true)
     public String getOllamaBaseUrl(Long projectId) {
         return findByProjectId(projectId).map(ProjectAiSettings::getOllamaBaseUrl).orElse(null);
     }

@@ -3,6 +3,7 @@ package com.letsblog.ai.ai;
 import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.ProjectAiSettingsService;
+import com.letsblog.common.crypto.CredentialCipher;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.List;
@@ -30,14 +31,17 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
     private final CurrentActorService currentActorService;
     private final HttpServletRequest request;
     private final ProjectAiSettingsService projectAiSettingsService;
+    private final CredentialCipher credentialCipher;
 
     public RemoteLlmConfigProvider(
             PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
-            HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService) {
+            HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
+            CredentialCipher credentialCipher) {
         this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
         this.request = request;
         this.projectAiSettingsService = projectAiSettingsService;
+        this.credentialCipher = credentialCipher;
     }
 
     /** リクエスト単位で対象プロジェクトを覚える(キャッシュと同じくリクエスト属性に持つ)。 */
@@ -73,7 +77,21 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
 
     @Override
     public String apiKeyFor(AiProvider provider) {
-        return resolveFor(provider).apiKey();
+        String projectKey = provider == AiProvider.OPENAI ? openAiKeyOfCurrentProject() : null;
+        return projectKey != null ? projectKey : resolveFor(provider).apiKey();
+    }
+
+    /**
+     * {@link #useProject}で宣言されたプロジェクトのChatGPT(OpenAI) APIキー(復号済み)。無ければnullで、
+     * 呼び出し側はシステム設定のキーへフォールバックする(issue #1506)。
+     */
+    private String openAiKeyOfCurrentProject() {
+        Long projectId = (Long) request.getAttribute(PROJECT_ATTR);
+        if (projectId == null) {
+            return null;
+        }
+        byte[] encrypted = projectAiSettingsService.getOpenAiApiKeyEncrypted(projectId);
+        return encrypted == null || encrypted.length == 0 ? null : credentialCipher.decrypt(encrypted);
     }
 
     @Override

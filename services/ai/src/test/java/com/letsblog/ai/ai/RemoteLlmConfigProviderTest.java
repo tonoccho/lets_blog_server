@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.service.ProjectAiSettingsService;
 import com.letsblog.ai.service.CurrentActorService;
+import com.letsblog.common.crypto.CredentialCipher;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -21,8 +22,9 @@ class RemoteLlmConfigProviderTest {
     private final CurrentActorService actor = mock(CurrentActorService.class);
     private final MockHttpServletRequest request = new MockHttpServletRequest();
     private final ProjectAiSettingsService projectSettings = mock(ProjectAiSettingsService.class);
+    private final CredentialCipher cipher = mock(CredentialCipher.class);
     private final RemoteLlmConfigProvider provider =
-            new RemoteLlmConfigProvider(client, actor, request, projectSettings);
+            new RemoteLlmConfigProvider(client, actor, request, projectSettings, cipher);
 
     private void stubSystemConfig(String provider, String baseUrl) {
         when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
@@ -103,5 +105,60 @@ class RemoteLlmConfigProviderTest {
         assertEquals(LlmClient.ANTHROPIC_BASE_URL, provider.baseUrlFor(AiProvider.CLAUDE));
 
         verify(projectSettings, never()).getOllamaBaseUrl(7L);
+    }
+
+    // ---- ChatGPT(OPENAI)のAPIキーのプロジェクト単位上書き(issue #1506) ----
+
+    private void stubSystemOpenAiKey(String systemKey) {
+        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
+        when(client.resolveLlmConfig("OPENAI", "Bearer t")).thenReturn(new PlatformServiceClient.LlmConfig(
+                "OPENAI", "https://api.openai.com/v1", systemKey, "gpt", List.of("gpt"), 10L));
+    }
+
+    @Test
+    void apiKeyFor_OPENAIでプロジェクトのキーがあればシステム設定より優先して復号した値を使う() {
+        stubSystemOpenAiKey("sk-system");
+        byte[] encrypted = {1, 2, 3};
+        when(projectSettings.getOpenAiApiKeyEncrypted(7L)).thenReturn(encrypted);
+        when(cipher.decrypt(encrypted)).thenReturn("sk-project");
+
+        provider.useProject(7L);
+
+        assertEquals("sk-project", provider.apiKeyFor(AiProvider.OPENAI));
+    }
+
+    @Test
+    void apiKeyFor_OPENAIでキーを保存していないプロジェクトはシステム設定のキーを使う() {
+        stubSystemOpenAiKey("sk-system");
+        provider.useProject(8L);
+
+        when(projectSettings.getOpenAiApiKeyEncrypted(8L)).thenReturn(null);
+        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+
+        when(projectSettings.getOpenAiApiKeyEncrypted(8L)).thenReturn(new byte[0]);
+        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+
+        verify(cipher, never()).decrypt(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void apiKeyFor_OPENAIでもプロジェクト未指定ならシステム設定のキーを使い上書きを引かない() {
+        stubSystemOpenAiKey("sk-system");
+
+        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+
+        verify(projectSettings, never()).getOpenAiApiKeyEncrypted(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void apiKeyFor_OPENAI以外のプロバイダーにはプロジェクトのキーを適用しない() {
+        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
+        when(client.resolveLlmConfig("CLAUDE", "Bearer t")).thenReturn(
+                new PlatformServiceClient.LlmConfig("CLAUDE", "u", "sk-claude", "c", List.of("c"), 10L));
+        provider.useProject(7L);
+
+        assertEquals("sk-claude", provider.apiKeyFor(AiProvider.CLAUDE));
+
+        verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
     }
 }

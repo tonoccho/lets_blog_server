@@ -352,4 +352,32 @@ class AiConnectionServiceTest {
 
         assertThrows(IllegalStateException.class, () -> service().listConnections(1L));
     }
+
+    @Test
+    void ChatGPTはプロジェクトにキーがあればsourceがPROJECTで設定済みになりキー値は応答に含まれない() {
+        platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
+                cfg(null, "NONE", false), cfg(null, "NONE", false));
+        when(projectAiSettingsService.hasOpenAiApiKey(7L)).thenReturn(true);
+
+        List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
+                .listConnections(7L);
+
+        AiConnectionResponse openai = row(rows, Provider.OPENAI);
+        assertEquals(Source.PROJECT, openai.source());
+        assertTrue(openai.configured());
+        assertEquals(Status.NORMAL, openai.status());
+        assertEquals(Source.NONE, row(rows, Provider.CLAUDE).source());
+    }
+
+    @Test
+    void ChatGPTはプロジェクトにキーが無ければシステム設定の出所のまま() {
+        platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
+                cfg(null, "DATABASE", true), cfg(null, "NONE", false));
+        when(projectAiSettingsService.hasOpenAiApiKey(7L)).thenReturn(false);
+
+        List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
+                .listConnections(7L);
+
+        assertEquals(Source.DATABASE, row(rows, Provider.OPENAI).source());
+    }
 }

@@ -47,6 +47,10 @@ public class ProjectAiSettings {
     @Column(name = "brave_search_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
     private byte[] braveSearchApiKeyEncrypted;
 
+    /** プロジェクト単位のChatGPT(OpenAI)APIキー(CredentialCipherで暗号化、issue #1506)。null/空はシステム設定へフォールバックする。 */
+    @Column(name = "openai_api_key_encrypted", columnDefinition = "VARBINARY(1024)")
+    private byte[] openAiApiKeyEncrypted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -59,6 +63,10 @@ public class ProjectAiSettings {
 
     public boolean hasBraveSearchApiKey() {
         return braveSearchApiKeyEncrypted != null && braveSearchApiKeyEncrypted.length > 0;
+    }
+
+    public boolean hasOpenAiApiKey() {
+        return openAiApiKeyEncrypted != null && openAiApiKeyEncrypted.length > 0;
     }
 
     @PrePersist

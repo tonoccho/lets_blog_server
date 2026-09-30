@@ -66,6 +66,7 @@ const ROUTES: Route[] = [
   // プロジェクト単位のAPIキーは所有サービスへ分割した(issue #583)。
   { pattern: '/api/projects/*/api-keys/github-token', service: PROJECT },
   { pattern: '/api/projects/*/api-keys/brave-search-api-key', service: AI },
+  { pattern: '/api/projects/*/api-keys/openai-api-key', service: AI },
   { pattern: '/api/projects/*/api-keys/**', service: ANALYTICS },
   // 画像生成AI/ComfyUIのモデル選択と画像設定は media-service(issue #583)。
   { pattern: '/api/projects/*/ai-models/llm/**', service: AI },

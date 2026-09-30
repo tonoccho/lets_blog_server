@@ -189,6 +189,17 @@ describe("ProjectAiModelsPanel の接続情報セクション(issue #1504)", () 
     expect(screen.queryByText("ComfyUIの接続情報")).not.toBeInTheDocument();
   });
 
+  it("LLMタブにChatGPTの接続情報が表示され、画像生成タブには表示されない(issue #1506)", async () => {
+    render(<ProjectAiModelsPanel projectId={1} />);
+
+    expect(await screen.findByText("ChatGPTの接続情報")).toBeInTheDocument();
+
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
+    await screen.findByText("ComfyUIの接続情報");
+    expect(screen.queryByText("ChatGPTの接続情報")).not.toBeInTheDocument();
+  });
+
   it("画像生成タブにComfyUIの接続情報が表示される", async () => {
     render(<ProjectAiModelsPanel projectId={1} />);
     await screen.findByText("Ollamaの接続情報");

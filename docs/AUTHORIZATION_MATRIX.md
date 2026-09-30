@@ -1089,7 +1089,7 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | GET .../connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1503 で追加**。プロジェクト単位のOllama / ComfyUI接続先の上書き値と解決結果(`ProjectConnectionController.java`)。他行のrequireAdminと違いプロジェクトメンバー判定 |
 | PUT .../connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1503 で追加**。空文字で上書きを解除、http/https以外・空白/制御文字を含むURLは400で保存しない |
 
-## ProjectApiKeyController (19エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
+## ProjectApiKeyController (22エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1099,6 +1099,9 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | GET .../brave-search-api-key | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | PUT .../brave-search-api-key | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | DELETE .../brave-search-api-key | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
+| GET .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。プロジェクト単位のChatGPT(OpenAI) APIキーの設定有無のみ(値は返さない)(`ProjectOpenAiApiKeyController.java`) |
+| PUT .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。CredentialCipherで暗号化して保存。空キーは400 |
+| DELETE .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。削除後はシステム設定の`llm_api_key`へフォールバック |
 | GET .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | PUT .../google-analytics/client | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。GA用OAuthクライアントID/シークレットの保存(旧`PUT .../google-analytics`のサービスアカウントJSON保存は廃止) |
 | POST .../google-analytics/oauth-callback | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。Next.js側OAuthコールバックからのサーバー間呼び出し(AdSenseと同じ) |

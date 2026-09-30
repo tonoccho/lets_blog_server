@@ -115,6 +115,10 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/projects/1/api-keys/brave-search-api-key"),
                 new Endpoint("PUT", "/api/projects/1/api-keys/brave-search-api-key"),
                 new Endpoint("DELETE", "/api/projects/1/api-keys/brave-search-api-key"),
+                // -- ProjectOpenAiApiKeyController(issue #1506) --
+                new Endpoint("GET", "/api/projects/1/api-keys/openai-api-key"),
+                new Endpoint("PUT", "/api/projects/1/api-keys/openai-api-key"),
+                new Endpoint("DELETE", "/api/projects/1/api-keys/openai-api-key"),
 
                 // -- ArticlePlanController --
                 new Endpoint("POST", "/api/projects/1/article-plan/chat"),

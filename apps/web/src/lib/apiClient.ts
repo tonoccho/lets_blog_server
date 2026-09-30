@@ -1472,6 +1472,19 @@ export function clearProjectBraveSearchApiKey(projectId: number): Promise<void> 
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/brave-search-api-key`, { method: 'DELETE' });
 }
 
+/** プロジェクト単位のChatGPT(OpenAI) APIキーを保存する(issue #1506)。状態の取得はlistAiConnectionsのOPENAI行で行う。 */
+export function setProjectOpenAiApiKey(projectId: number, apiKey: string): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/openai-api-key`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey }),
+  });
+}
+
+export function clearProjectOpenAiApiKey(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/api-keys/openai-api-key`, { method: 'DELETE' });
+}
+
 export interface ProjectGoogleAnalyticsStatus {
   /** 連携済みかつプロパティ選択済み(ダッシュボードに表示できる)。 */
   configured: boolean;

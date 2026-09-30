@@ -161,4 +161,33 @@ class ProjectConnectionServiceTest {
         assertEquals(Source.NONE, response.ollama().source());
         assertNull(response.comfyui().baseUrl());
     }
+
+    @Test
+    void applyOverrides_openaiキーがあればChatGPTだけPROJECTかつ設定済みになる() {
+        AiConnectionsConfig base = new AiConnectionsConfig(
+                new ProviderConnectionConfig(SYSTEM_OLLAMA, "ENVIRONMENT", true),
+                new ProviderConnectionConfig(SYSTEM_COMFY, "ENVIRONMENT", true),
+                new ProviderConnectionConfig(null, "NONE", false),
+                new ProviderConnectionConfig(null, "DATABASE", true));
+
+        AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(base, null, null, true);
+
+        assertEquals("PROJECT", merged.openai().source());
+        assertEquals(true, merged.openai().configured());
+        assertEquals(base.ollama(), merged.ollama());
+        assertEquals(base.claude(), merged.claude());
+    }
+
+    @Test
+    void applyOverrides_openaiキーが無ければChatGPTは素通しでplatform設定が無くてもキーがあれば設定済み() {
+        AiConnectionsConfig base = new AiConnectionsConfig(
+                null, null, new ProviderConnectionConfig("https://api.openai.com/v1", "DATABASE", true), null);
+
+        assertEquals(base.openai(), ProjectConnectionService.applyOverrides(base, null, null, false).openai());
+
+        AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(
+                new AiConnectionsConfig(null, null, null, null), null, null, true);
+        assertEquals("PROJECT", merged.openai().source());
+        assertEquals(true, merged.openai().configured());
+    }
 }

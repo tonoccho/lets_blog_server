@@ -15,6 +15,8 @@ import {
   clearProjectGithubToken,
   setProjectBraveSearchApiKey,
   clearProjectBraveSearchApiKey,
+  setProjectOpenAiApiKey,
+  clearProjectOpenAiApiKey,
   addProjectUser,
   updateProjectUserRole,
   removeProjectUser,
@@ -382,6 +384,38 @@ export async function clearProjectBraveSearchApiKeyAction(projectId: number): Pr
   await requireAdminSession();
   await clearProjectBraveSearchApiKey(projectId);
   revalidatePath(`/projects/${projectId}`);
+}
+
+/** プロジェクト単位のChatGPT(OpenAI) APIキーを保存する(issue #1506)。空は保存せずエラーを返し、値はトリムする。 */
+export async function setOpenAiApiKeyAction(projectId: number, apiKey: string): Promise<{ error?: string }> {
+  await requireAdminSession();
+
+  const trimmed = apiKey.trim();
+  if (!trimmed) {
+    return { error: "APIキーを入力してください。" };
+  }
+
+  try {
+    await setProjectOpenAiApiKey(projectId, trimmed);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return {};
+}
+
+export async function clearOpenAiApiKeyAction(projectId: number): Promise<{ error?: string }> {
+  await requireAdminSession();
+
+  try {
+    await clearProjectOpenAiApiKey(projectId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+
+  revalidatePath(`/projects/${projectId}`);
+  return {};
 }
 
 /** GA用のGoogle OAuthクライアント(ID/シークレット)を保存する。シークレット欄が空なら保存済みの値を変更しない。 */

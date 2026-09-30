@@ -4,6 +4,11 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
+export interface SetProjectOpenAiApiKeyRequest {
+  /** @minLength 1 */
+  apiKey: string;
+}
+
 export interface SetProjectBraveSearchApiKeyRequest {
   /** @minLength 1 */
   apiKey: string;
@@ -43,6 +48,32 @@ export interface SelectLlmModelRequest {
 export interface LlmModelListResponse {
   availableModels?: string[];
   selected?: string;
+}
+
+export interface UpdateProjectConnectionsRequest {
+  ollamaBaseUrl?: string;
+  comfyuiBaseUrl?: string;
+}
+
+export type ProjectConnectionEntrySource = typeof ProjectConnectionEntrySource[keyof typeof ProjectConnectionEntrySource];
+
+
+export const ProjectConnectionEntrySource = {
+  PROJECT: 'PROJECT',
+  DATABASE: 'DATABASE',
+  ENVIRONMENT: 'ENVIRONMENT',
+  NONE: 'NONE',
+} as const;
+
+export interface ProjectConnectionEntry {
+  overrideBaseUrl?: string;
+  baseUrl?: string;
+  source?: ProjectConnectionEntrySource;
+}
+
+export interface ProjectConnectionsResponse {
+  ollama?: ProjectConnectionEntry;
+  comfyui?: ProjectConnectionEntry;
 }
 
 export interface SetBraveSearchApiKeyRequest {
@@ -307,20 +338,6 @@ export interface ProjectApiKeyStatusResponse {
   configured?: boolean;
 }
 
-export interface BraveSearchApiKeyStatusResponse {
-  configured?: boolean;
-}
-
-export interface GenerationJobDetailResponse {
-  id?: number;
-  type?: string;
-  status?: string;
-  requestPayload?: string;
-  resultPayload?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
 export type AiConnectionResponseProvider = typeof AiConnectionResponseProvider[keyof typeof AiConnectionResponseProvider];
 
 
@@ -360,35 +377,23 @@ export interface AiConnectionResponse {
   configured?: boolean;
 }
 
-export interface UpdateProjectConnectionsRequest {
-  ollamaBaseUrl?: string;
-  comfyuiBaseUrl?: string;
-}
-
-export type ProjectConnectionEntrySource = typeof ProjectConnectionEntrySource[keyof typeof ProjectConnectionEntrySource];
-
-
-export const ProjectConnectionEntrySource = {
-  PROJECT: 'PROJECT',
-  DATABASE: 'DATABASE',
-  ENVIRONMENT: 'ENVIRONMENT',
-  NONE: 'NONE',
-} as const;
-
-export interface ProjectConnectionEntry {
-  overrideBaseUrl?: string;
-  baseUrl?: string;
-  source?: ProjectConnectionEntrySource;
-}
-
-export interface ProjectConnectionsResponse {
-  ollama?: ProjectConnectionEntry;
-  comfyui?: ProjectConnectionEntry;
-}
-
 export interface ProjectConnectionUrlsResponse {
   ollamaBaseUrl?: string;
   comfyuiBaseUrl?: string;
+}
+
+export interface BraveSearchApiKeyStatusResponse {
+  configured?: boolean;
+}
+
+export interface GenerationJobDetailResponse {
+  id?: number;
+  type?: string;
+  status?: string;
+  requestPayload?: string;
+  resultPayload?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type ListIssuesParams = {

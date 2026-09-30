@@ -37,6 +37,8 @@ import {
   listAiConnections,
   getProjectConnections,
   updateProjectConnections,
+  setProjectOpenAiApiKey,
+  clearProjectOpenAiApiKey,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -475,6 +477,29 @@ describe('AI接続情報・接続先の上書き(issue #1504)', () => {
     expect(url).toContain('/api/projects/7/ai-models/connections')
     expect(init.method).toBe('PUT')
     expect(JSON.parse(String(init.body))).toEqual({ comfyuiBaseUrl: '' })
+  })
+})
+
+describe('ChatGPT(OpenAI)のプロジェクト単位APIキー(issue #1506)', () => {
+  it('setProjectOpenAiApiKeyはキーをJSONでPUTする', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await setProjectOpenAiApiKey(7, 'sk-x')
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/api-keys/openai-api-key')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ apiKey: 'sk-x' })
+  })
+
+  it('clearProjectOpenAiApiKeyはDELETEする', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await clearProjectOpenAiApiKey(7)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/api-keys/openai-api-key')
+    expect(init.method).toBe('DELETE')
   })
 })
 

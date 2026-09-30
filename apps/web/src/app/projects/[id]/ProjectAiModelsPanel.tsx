@@ -21,6 +21,7 @@ import { ReviewStepSettingsPanel } from "./ReviewStepSettingsPanel";
 import { ImageProviderPanel } from "./ImageProviderPanel";
 import { ComfyUiCheckpointTable } from "./ComfyUiCheckpointTable";
 import { AiConnectionSection } from "./AiConnectionSection";
+import { ChatGptConnectionSection } from "./ChatGptConnectionSection";
 
 type Tab = "LLM" | "COMFYUI";
 
@@ -101,6 +102,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
         (llmData ? (
           <div className="space-y-4">
             <AiConnectionSection projectId={projectId} provider="OLLAMA" />
+            <ChatGptConnectionSection projectId={projectId} />
             {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} />}
             <LlmModelPanel projectId={projectId} initialData={llmData} />
             {reviewStepData && <ReviewStepSettingsPanel projectId={projectId} initialData={reviewStepData} />}

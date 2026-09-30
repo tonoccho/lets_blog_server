@@ -86,7 +86,8 @@ public class AiConnectionService {
         AiConnectionsConfig config = ProjectConnectionService.applyOverrides(
                 platformServiceClient.resolveAiConnectionsConfig(currentActorService.getAuthorizationHeader()),
                 projectAiSettingsService.getOllamaBaseUrl(projectId),
-                projectAiSettingsService.getComfyuiBaseUrl(projectId));
+                projectAiSettingsService.getComfyuiBaseUrl(projectId),
+                projectAiSettingsService.hasOpenAiApiKey(projectId));
 
         CompletableFuture<AiConnectionResponse> ollama = async(
                 Provider.OLLAMA, "Ollama", () -> checkHttp(Provider.OLLAMA, "Ollama", config.ollama(), "/models"));

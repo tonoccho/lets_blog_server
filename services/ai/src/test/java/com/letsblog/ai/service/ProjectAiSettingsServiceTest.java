@@ -194,4 +194,54 @@ class ProjectAiSettingsServiceTest {
 
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(any());
     }
+
+    // ---- ChatGPT(OPENAI)のプロジェクト単位APIキー(issue #1506) ----
+
+    @Test
+    void hasOpenAiApiKey_未設定行ならfalse() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+
+        assertFalse(service().hasOpenAiApiKey(1L));
+    }
+
+    @Test
+    void hasOpenAiApiKey_空バイト列ならfalseで値があればtrue() {
+        ProjectAiSettings settings = new ProjectAiSettings(1L);
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(settings));
+
+        assertFalse(service().hasOpenAiApiKey(1L));
+        settings.setOpenAiApiKeyEncrypted(new byte[0]);
+        assertFalse(service().hasOpenAiApiKey(1L));
+        settings.setOpenAiApiKeyEncrypted(new byte[]{1});
+        assertTrue(service().hasOpenAiApiKey(1L));
+    }
+
+    @Test
+    void getOpenAiApiKeyEncrypted_未設定行ならnullで設定済みなら保存値を返す() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+        assertNull(service().getOpenAiApiKeyEncrypted(1L));
+
+        ProjectAiSettings settings = new ProjectAiSettings(2L);
+        settings.setOpenAiApiKeyEncrypted(new byte[]{9});
+        when(repository.findByProjectId(2L)).thenReturn(Optional.of(settings));
+        assertEquals(1, service().getOpenAiApiKeyEncrypted(2L).length);
+    }
+
+    @Test
+    void setOpenAiApiKeyEncrypted_行が無ければ作成して保存しnullで削除できる() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+        when(repository.save(any(ProjectAiSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().setOpenAiApiKeyEncrypted(1L, new byte[]{1, 2, 3});
+
+        ArgumentCaptor<ProjectAiSettings> captor = ArgumentCaptor.forClass(ProjectAiSettings.class);
+        verify(repository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        ProjectAiSettings saved = captor.getValue();
+        assertEquals(1L, saved.getProjectId());
+        assertTrue(saved.hasOpenAiApiKey());
+
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(saved));
+        service().setOpenAiApiKeyEncrypted(1L, null);
+        assertFalse(saved.hasOpenAiApiKey());
+    }
 }

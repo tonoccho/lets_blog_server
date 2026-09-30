@@ -48,9 +48,20 @@ public class ProjectConnectionService {
 
     /** Ollama / ComfyUIにプロジェクトの上書き(null/空は無し)を重ねる。ChatGPT / Claudeは素通し。 */
     static AiConnectionsConfig applyOverrides(AiConnectionsConfig base, String ollamaOverride, String comfyuiOverride) {
+        return applyOverrides(base, ollamaOverride, comfyuiOverride, false);
+    }
+
+    /** 上に加え、プロジェクトにChatGPT(OpenAI)のAPIキーがあればChatGPTを設定済み・PROJECTにする(issue #1506)。Claudeは素通し。 */
+    static AiConnectionsConfig applyOverrides(
+            AiConnectionsConfig base, String ollamaOverride, String comfyuiOverride, boolean hasOpenAiApiKey) {
         return new AiConnectionsConfig(
                 override(base.ollama(), ollamaOverride), override(base.comfyui(), comfyuiOverride),
-                base.openai(), base.claude());
+                hasOpenAiApiKey ? openAiProjectKey(base.openai()) : base.openai(), base.claude());
+    }
+
+    /** キーの値は持たない。接続先(baseUrl)はシステム側の解決結果をそのまま残す。 */
+    private static ProviderConnectionConfig openAiProjectKey(ProviderConnectionConfig system) {
+        return new ProviderConnectionConfig(system == null ? null : system.baseUrl(), PROJECT_SOURCE, true);
     }
 
     private static ProviderConnectionConfig override(ProviderConnectionConfig system, String override) {

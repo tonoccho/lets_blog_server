@@ -82,6 +82,8 @@ describe('downstreamServiceFor', () => {
     // プロジェクト単位のAPIキーは #583 で所有サービスへ分割した
     ['/api/projects/3/api-keys/github-token', 'project'],
     ['/api/projects/3/api-keys/brave-search-api-key', 'ai'],
+    // ChatGPT(OpenAI)のプロジェクト単位APIキーも ai-service(issue #1506)
+    ['/api/projects/3/api-keys/openai-api-key', 'ai'],
     ['/api/projects/3/api-keys/google-analytics', 'analytics'],
     ['/api/projects/3/api-keys/adsense', 'analytics'],
   ];
