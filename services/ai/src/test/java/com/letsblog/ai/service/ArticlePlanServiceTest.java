@@ -184,6 +184,21 @@ class ArticlePlanServiceTest {
     }
 
     @Test
+    void chat_生成ジョブに呼び出し元の利用者を所有者として記録する() {
+        ArticlePlanService service = service();
+        when(currentActorService.getCurrentActorId()).thenReturn(42L);
+        when(articlePlanSessionRepository.findById(99L))
+                .thenReturn(Optional.of(existingSession(99L, 1L, List.of())));
+        when(llmClient.generate(anyString(), anyString())).thenReturn("応答");
+
+        service.chat(1L, List.of(), "テーマ", 99L, null);
+
+        ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
+        verify(generationJobRepository, atLeastOnce()).save(jobCaptor.capture());
+        assertEquals(42L, jobCaptor.getAllValues().get(0).getOwnerUserId());
+    }
+
+    @Test
     void chat_LLM呼び出しが失敗した場合ジョブがfailedになり例外を再送出する() {
         ArticlePlanService service = service();
         when(llmClient.generate(anyString(), anyString())).thenThrow(new RuntimeException("接続できません"));

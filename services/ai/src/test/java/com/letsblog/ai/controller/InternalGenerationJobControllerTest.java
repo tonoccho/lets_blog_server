@@ -5,6 +5,7 @@ import com.letsblog.ai.dto.CreateGenerationJobRequest;
 import com.letsblog.ai.dto.GenerationJobResponse;
 import com.letsblog.ai.dto.UpdateGenerationJobRequest;
 import com.letsblog.ai.repository.GenerationJobRepository;
+import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -39,11 +41,14 @@ class InternalGenerationJobControllerTest {
     @Mock
     private GenerationJobRepository generationJobRepository;
 
+    @Mock
+    private CurrentActorService currentActorService;
+
     private InternalGenerationJobController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new InternalGenerationJobController(generationJobRepository);
+        controller = new InternalGenerationJobController(generationJobRepository, currentActorService);
     }
 
     @Test
@@ -97,5 +102,47 @@ class InternalGenerationJobControllerTest {
         assertEquals("media_garbage_collection_delete", savedJob.getValue().getType());
         assertEquals("running", savedJob.getValue().getStatus());
         assertEquals("{\"mediaIds\":[\"1\"]}", savedJob.getValue().getRequestPayload());
+    }
+
+    @Test
+    void create_転送されたBearerの利用者を所有者として記録する() {
+        when(currentActorService.getCurrentActorId()).thenReturn(42L);
+        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.create(new CreateGenerationJobRequest("media_garbage_collection_delete", "{}"));
+
+        ArgumentCaptor<GenerationJob> savedJob = ArgumentCaptor.forClass(GenerationJob.class);
+        verify(generationJobRepository).save(savedJob.capture());
+        assertEquals(42L, savedJob.getValue().getOwnerUserId());
+    }
+
+    @Test
+    void create_操作者を解決できない場合は所有者不明で記録する() {
+        when(currentActorService.getCurrentActorId()).thenReturn(null);
+        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.create(new CreateGenerationJobRequest("media_garbage_collection_delete", "{}"));
+
+        ArgumentCaptor<GenerationJob> savedJob = ArgumentCaptor.forClass(GenerationJob.class);
+        verify(generationJobRepository).save(savedJob.capture());
+        assertNull(savedJob.getValue().getOwnerUserId());
+    }
+
+    @Test
+    void update_client_credentialsによる更新は所有者を上書きしない() {
+        GenerationJob job = new GenerationJob();
+        job.setId(5L);
+        job.setType("comfyui_checkpoint_download");
+        job.setStatus("running");
+        job.setOwnerUserId(42L);
+        job.setCreatedAt(LocalDateTime.now());
+        job.setUpdatedAt(LocalDateTime.now());
+        when(generationJobRepository.findById(5L)).thenReturn(Optional.of(job));
+        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        controller.update(5L, new UpdateGenerationJobRequest("done", "{}"));
+
+        assertEquals(42L, job.getOwnerUserId());
+        org.mockito.Mockito.verifyNoInteractions(currentActorService);
     }
 }

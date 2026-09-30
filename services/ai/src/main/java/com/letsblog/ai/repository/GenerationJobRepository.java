@@ -10,6 +10,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface GenerationJobRepository extends JpaRepository<GenerationJob, Long> {
     Page<GenerationJob> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
+    /** 指定した利用者が起こしたジョブ(所有者不明の行は含まない)。 */
+    List<GenerationJob> findByOwnerUserId(Long ownerUserId);
+
     /**
      * 指定した状態のまま、指定時刻より前から更新されていないジョブ(issue #1083要件4、
      * {@link com.letsblog.ai.service.StaleGenerationJobSweepService}参照)。

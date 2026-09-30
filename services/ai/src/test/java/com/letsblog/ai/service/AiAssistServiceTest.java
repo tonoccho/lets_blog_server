@@ -68,6 +68,8 @@ class AiAssistServiceTest {
     private ArticlePlanService articlePlanService;
     @Mock
     private ReviewStepModelService reviewStepModelService;
+    @Mock
+    private CurrentActorService currentActorService;
 
     private AiAssistService service;
 
@@ -75,7 +77,7 @@ class AiAssistServiceTest {
     void setUp() {
         service = new AiAssistService(
                 llmClient, llmModelService, generationJobRepository, webSearchService, new ObjectMapper(),
-                articlePlanService, reviewStepModelService);
+                articlePlanService, reviewStepModelService, currentActorService);
 
         lenient().when(generationJobRepository.save(any())).thenAnswer(inv -> {
             GenerationJob job = inv.getArgument(0);
@@ -166,6 +168,32 @@ class AiAssistServiceTest {
         assertTrue(prompt.contains("User: 猫を追加して"));
         assertTrue(prompt.contains("Assistant: 前回の生成結果"));
         assertTrue(prompt.contains("もっと明るく"));
+    }
+
+    @Test
+    void ask_生成ジョブに呼び出し元の利用者を所有者として記録する() {
+        when(currentActorService.getCurrentActorId()).thenReturn(42L);
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
+
+        service.ask(new AiAskRequest("所有者は?", null, null));
+
+        ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
+        org.mockito.Mockito.verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(jobCaptor.capture());
+        assertEquals(42L, jobCaptor.getAllValues().get(0).getOwnerUserId());
+    }
+
+    @Test
+    void ask_操作者を解決できない場合は所有者不明のままジョブを記録する() {
+        when(currentActorService.getCurrentActorId()).thenReturn(null);
+        when(webSearchService.searchSafely(anyString())).thenReturn(WebSearchOutcome.failure("APIキー未設定"));
+        when(llmClient.generate(anyString(), any(), any())).thenReturn("回答結果");
+
+        service.ask(new AiAskRequest("所有者は?", null, null));
+
+        ArgumentCaptor<GenerationJob> jobCaptor = ArgumentCaptor.forClass(GenerationJob.class);
+        org.mockito.Mockito.verify(generationJobRepository, org.mockito.Mockito.atLeastOnce()).save(jobCaptor.capture());
+        assertNull(jobCaptor.getAllValues().get(0).getOwnerUserId());
     }
 
     @Test

@@ -283,13 +283,15 @@ public class AiAssistService {
     private final ObjectMapper objectMapper;
     private final ArticlePlanService articlePlanService;
     private final ReviewStepModelService reviewStepModelService;
+    private final CurrentActorService currentActorService;
 
     public AiAssistService(LlmClient llmClient,
                            LlmModelService llmModelService,
                            GenerationJobRepository generationJobRepository,
                            WebSearchService webSearchService, ObjectMapper objectMapper,
                            ArticlePlanService articlePlanService,
-                           ReviewStepModelService reviewStepModelService) {
+                           ReviewStepModelService reviewStepModelService,
+                           CurrentActorService currentActorService) {
         this.llmClient = llmClient;
         this.llmModelService = llmModelService;
         this.generationJobRepository = generationJobRepository;
@@ -297,6 +299,7 @@ public class AiAssistService {
         this.objectMapper = objectMapper;
         this.articlePlanService = articlePlanService;
         this.reviewStepModelService = reviewStepModelService;
+        this.currentActorService = currentActorService;
     }
 
     /**
@@ -873,6 +876,7 @@ public class AiAssistService {
         job.setType(type);
         job.setStatus("running");
         job.setRequestPayload(toJson(requestPayload));
+        job.setOwnerUserId(currentActorService.getCurrentActorId());
         return generationJobRepository.save(job);
     }
 

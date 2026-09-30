@@ -565,6 +565,7 @@ public class ArticlePlanService {
         job.setType(type);
         job.setStatus("running");
         job.setRequestPayload(toJson(requestPayload));
+        job.setOwnerUserId(currentActorService.getCurrentActorId());
         return generationJobRepository.save(job);
     }
 

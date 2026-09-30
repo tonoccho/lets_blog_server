@@ -34,6 +34,14 @@ public class GenerationJob {
     @Column(name = "result_payload")
     private String resultPayload;
 
+    /**
+     * ジョブを起こした利用者(identity-serviceのユーザーID。ADR-0004によりFKは持たない)。
+     * NULLは所有者不明(#1406より前に作られた行など)で、管理者にだけ見える。
+     * 作成時にだけ設定し、進捗・完了の更新では書き換えない。
+     */
+    @Column(name = "owner_user_id", updatable = false)
+    private Long ownerUserId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

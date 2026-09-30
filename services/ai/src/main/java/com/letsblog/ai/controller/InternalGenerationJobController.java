@@ -5,6 +5,7 @@ import com.letsblog.ai.dto.CreateGenerationJobRequest;
 import com.letsblog.ai.dto.GenerationJobResponse;
 import com.letsblog.ai.dto.UpdateGenerationJobRequest;
 import com.letsblog.ai.repository.GenerationJobRepository;
+import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -34,14 +35,24 @@ public class InternalGenerationJobController {
 
     private final GenerationJobRepository generationJobRepository;
 
-    public InternalGenerationJobController(GenerationJobRepository generationJobRepository) {
+    private final CurrentActorService currentActorService;
+
+    public InternalGenerationJobController(
+            GenerationJobRepository generationJobRepository, CurrentActorService currentActorService) {
         this.generationJobRepository = generationJobRepository;
+        this.currentActorService = currentActorService;
     }
 
     /**
      * media-service側で、legacy-apiに残らなくなったコントローラ(ProjectMediaGarbageCollectionController
      * 等)からジョブを起動するために呼ぶ(#573 stage3)。作成直後のstatusは常に"running"
      * (既存のComfyUiModelService/MediaGarbageCollectionServiceの挙動を踏襲)。
+     *
+     * <p>所有者(issue #1406)は、呼び出し元(media-service の {@code GenerationJobClient#create})が
+     * 転送してきたユーザーのBearerトークンから {@link CurrentActorService#getCurrentActorId()} で解決して
+     * 記録する。リクエスト本文では受け取らない(呼び出し元が他人を名乗れないようにするため)。
+     * ユーザーを解決できない場合(client credentials等)は所有者不明(NULL)で作る。
+     * {@link #update}は所有者に触れない。
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -50,6 +61,7 @@ public class InternalGenerationJobController {
         job.setType(request.type());
         job.setStatus("running");
         job.setRequestPayload(request.requestPayload());
+        job.setOwnerUserId(currentActorService.getCurrentActorId());
         GenerationJob saved = generationJobRepository.save(job);
         return new GenerationJobResponse(
                 saved.getId(), saved.getType(), saved.getStatus(), saved.getCreatedAt(), saved.getUpdatedAt());

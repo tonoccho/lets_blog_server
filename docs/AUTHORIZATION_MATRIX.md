@@ -1004,8 +1004,8 @@ media-service所有。ComfyUIで生成した画像とパラメータの一覧・
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/generation-jobs | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 全プロジェクト横断のジョブ履歴一覧 |
-| GET /api/generation-jobs/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | |
+| GET /api/generation-jobs | なし(所有者による絞り込み) | 401 | 該当なし | 認可OK | 現状維持 | #1406: 呼び出し元が起こしたジョブ(`generation_jobs.owner_user_id`)だけを返す。管理者は全件(所有者不明の既存行を含む)。所有者不明の行は一般利用者には見えない |
+| GET /api/generation-jobs/{id} | なし(所有者による絞り込み) | 401 | 該当なし | 認可OK | 現状維持 | #1406: 他人のジョブ・一般利用者から見た所有者不明の行は、存在しないものと同じ404(IDの存在を漏らさない)。管理者はどれも取得できる |
 | PATCH /api/generation-jobs/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | #573 stage2で追加。media-service側の非同期ジョブランナーがBearerトークンを転送して呼ぶ内部向け更新API |
 
 ## GlobalTagDesignSettingController (3エンドポイント、ベースパス `/api/tag-design-settings`)
