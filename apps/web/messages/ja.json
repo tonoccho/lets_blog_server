@@ -18,6 +18,7 @@
   },
   "header": {
     "logout": "ログアウト",
+    "downloadMenu": "ダウンロード",
     "downloadVscodeExtension": "VSCode拡張機能をダウンロード (.vsix)",
     "downloadVscodeExtensionPending": "VSCode拡張機能をビルド中…"
   },

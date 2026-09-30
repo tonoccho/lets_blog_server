@@ -18,7 +18,7 @@ jest.mock('../SideNav', () => ({
 jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
 jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))
 jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => null }))
-jest.mock('../VscodeExtensionDownloadIconButton', () => ({ VscodeExtensionDownloadIconButton: () => null }))
+jest.mock('../DownloadMenu', () => ({ DownloadMenu: () => null }))
 jest.mock('../I18nProvider', () => ({ I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 jest.mock('../SessionProvider', () => ({ SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 jest.mock('../globals.css', () => ({}), { virtual: true })

@@ -18,6 +18,7 @@
   },
   "header": {
     "logout": "Logout",
+    "downloadMenu": "Downloads",
     "downloadVscodeExtension": "Download VSCode extension (.vsix)",
     "downloadVscodeExtensionPending": "Building VSCode extension…"
   },

@@ -8,7 +8,7 @@ import { LogoutButton } from "./LogoutButton";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { ThemeScript } from "./ThemeScript";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { VscodeExtensionDownloadIconButton } from "./VscodeExtensionDownloadIconButton";
+import { DownloadMenu } from "./DownloadMenu";
 import { I18nProvider } from "./I18nProvider";
 import { SessionProvider } from "./SessionProvider";
 import "./globals.css";
@@ -49,18 +49,20 @@ export default async function RootLayout({
           <I18nProvider>
             <SideNavProvider>
               <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-                <div className="px-4">
-                  <div className="flex items-center gap-6 py-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                  <div data-testid="header-logo" className="flex items-center gap-3">
                     {session && <SideNavToggle />}
                     <span className="shrink-0 font-semibold">Let&apos;s Blog Server</span>
                   </div>
                   {session && (
-                    <div className="flex items-center justify-end gap-4 border-t border-neutral-200 px-0 py-3 text-sm dark:border-neutral-800">
-                      <span className="text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
-                      <LanguageSwitcher />
-                      <ThemeSwitcher />
-                      <LogoutButton />
-                      <VscodeExtensionDownloadIconButton />
+                    <div className="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-sm">
+                      <div data-testid="language-switcher"><LanguageSwitcher /></div>
+                      <div data-testid="theme-switcher"><ThemeSwitcher /></div>
+                      <div data-testid="header-download"><DownloadMenu /></div>
+                      <div data-testid="header-account" className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate text-neutral-500 dark:text-neutral-400">{session.user.email}</span>
+                        <LogoutButton />
+                      </div>
                     </div>
                   )}
                 </div>
