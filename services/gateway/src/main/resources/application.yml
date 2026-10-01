@@ -314,6 +314,18 @@ app:
       # project-serviceへ移設した(issue #577 stage2)。上記の、project-serviceへ移設していない
       # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys/
       # article-plan)はより先に評価されるため、ここへは落ちてこない。
+      # マネージドWordPressサイトの自動構築(POST /api/sites/managed-wordpress、issue #1480)。
+      # 実測で最大240秒かかる(site-provisioning.feature の「@slow な理由」)ため、既定の60秒
+      # (default-response-timeout)だと応答だけが504で切れ、構築は裏で完走してしまう
+      # (再試行すると siteKey 重複で本当に失敗する)。実測240秒に余裕を見て300秒にする。
+      # nginx の location /api/ は proxy_read_timeout 1200s なので、律速はこのgatewayで、
+      # 300秒は nginx の範囲内(#1110 の再発なし)。一覧・疎通確認など短い /api/sites/** の
+      # 操作を巻き込まないよう構築のパスだけに絞り、下のprojectルートより先に評価させる。
+      - id: project-site-managed-wordpress
+        uri: ${PROJECT_SERVICE_URI:http://project:8080}
+        paths:
+          - /api/sites/managed-wordpress
+        response-timeout: 300s
       - id: project
         uri: ${PROJECT_SERVICE_URI:http://project:8080}
         paths:
