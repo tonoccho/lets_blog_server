@@ -59,11 +59,41 @@ async function selectAiTab(page: Page): Promise<void> {
   await clickUntilVisible(aiTab, claudeHeading(page), { timeoutMs: 30_000 });
 }
 
+/**
+ * 接続情報の取得がすべて終わるまで待つ: Ollama の利用可否(fetchAiConnectionsAction)が「確認中…」でなくなり、
+ * ChatGPT・Claude の接続状態が表示される。これで mount 時の直列の取得が trigger の内側で完了する。
+ */
+async function waitForConnectionsLoaded(page: Page): Promise<void> {
+  const ollama = section(page, 'Ollamaの接続情報').locator('dt:has-text("利用可否") + dd');
+  await expect(ollama).toBeVisible({ timeout: 30_000 });
+  await expect(ollama).not.toHaveText('確認中…', { timeout: 30_000 });
+  for (const title of ['ChatGPTの接続情報', 'Claudeの接続情報']) {
+    await expect(section(page, title).locator('dt:has-text("接続状態") + dd')).toBeVisible({ timeout: 30_000 });
+  }
+}
+
 When(
   /^「(.+)」を開いて AI・アセットタブを選び Server Action の往復を計測する$/,
   async ({ page, ctx }, path: string) => {
     await page.goto(resolve(ctx, path), { waitUntil: 'commit' });
-    const timing = await measureServerActionRoundTrip(page, () => selectAiTab(page));
+    const timing = await measureServerActionRoundTrip(page, async () => {
+      await selectAiTab(page);
+      await waitForConnectionsLoaded(page);
+    });
+    // タブを開くと、LLM タブは次の Server Action を送る(ProjectAiModelsPanel / AiConnectionSection /
+    // ChatGptConnectionSection / ClaudeConnectionSection の mount 時の取得):
+    //   fetchLlmModelsAction・fetchLlmProviderAction・fetchReviewStepSettingsAction ... 3
+    //   fetchProjectConnectionsAction(Ollama)                                         ... 1
+    //   fetchAiConnectionsAction(Ollama の checkStatus・ChatGPT・Claude)              ... 3
+    // 計3+1+3=7本。宣言した2種類(計4本)を取りこぼしたまま通さないため、7本に届かなければ失敗させる。
+    // 共通の計測は最遅の往復しか返さないので、本数はこのステップで確かめる。
+    // (ComfyUI の接続情報は「画像生成」サブタブで初めて mount されるので、ここには含まれない。)
+    expect(
+      timing.requestCount,
+      `捕捉した Server Action の往復が少なすぎます(${timing.roundTripsMs.join(', ')}ms)。` +
+        'fetchProjectConnectionsAction / fetchAiConnectionsAction を測り損ねている可能性があります'
+    ).toBeGreaterThanOrEqual(7);
+    console.log(`AI接続情報の取得: 捕捉 ${timing.requestCount} 本 [${timing.roundTripsMs.join(', ')}]ms`);
     record(ctx, timing.roundTripMs, 'AI接続情報の取得');
   }
 );

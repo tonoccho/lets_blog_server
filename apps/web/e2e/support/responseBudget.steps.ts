@@ -16,6 +16,7 @@ import {
   measureServerActionRoundTrip,
   recordResponseTime,
 } from './responseBudget';
+import { cleanupPageFixtures, getOrBuildPageFixtures } from './pageInventory';
 import { clickUntilVisible } from './retryClick';
 
 /**
@@ -61,9 +62,22 @@ Given('応答時間予算の検証のために管理者としてログインし�
   await loginAsAdmin(page);
 });
 
-/** `{projectId}` は検証用プロジェクトの id に置き換える。 */
+/**
+ * `{siteId}` / `{userId}` を埋めるための検証用のサイトと一般利用者(issue #1477)。
+ * 全ページの巡回(AT-18)が使う {@link getOrBuildPageFixtures} を再利用する。
+ * プロジェクトも一緒に作られるが、シナリオ内で1回だけで、After で後始末する。
+ */
+Given('応答時間予算の検証用のサイトと利用者がある', async ({ request, ctx }) => {
+  await getOrBuildPageFixtures(ctx, request);
+});
+
+/** `{projectId}` は検証用プロジェクト、`{siteId}` `{userId}` は検証用のサイト・一般利用者の id に置き換える。 */
 When(/^ウォームアップ後に「(.+)」を開く$/, async ({ page, ctx }, path: string) => {
-  const url = path.replace('{projectId}', String(ctx.responseBudgetProjectId));
+  const fixtures = ctx.at18PageFixtures as { siteId: number; userId: number } | undefined;
+  const url = path
+    .replace('{projectId}', String(ctx.responseBudgetProjectId))
+    .replace('{siteId}', String(fixtures?.siteId))
+    .replace('{userId}', String(fixtures?.userId));
   recordResponseTime(ctx, await measureFirstDisplay(page, url), `${path} の初回表示`);
 });
 
@@ -82,6 +96,8 @@ Then('保存できたことが画面に表示される', async ({ page }) => {
 });
 
 After({ tags: '@response-budget' }, async ({ ctx, request }) => {
+  const pageFixtures = ctx.at18PageFixtures as Parameters<typeof cleanupPageFixtures>[1] | undefined;
+  if (pageFixtures !== undefined) await cleanupPageFixtures(request, pageFixtures);
   const projectId = ctx.responseBudgetProjectId as number | undefined;
   if (projectId === undefined) return;
   const token = await fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);

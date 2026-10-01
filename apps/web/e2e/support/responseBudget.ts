@@ -53,6 +53,11 @@ export async function measureFirstDisplay(page: Page, url: string, now: Clock = 
 export interface ServerActionTiming {
   /** 最も遅かった Server Action の往復(ms)。 */
   roundTripMs: number;
+  /**
+   * 完了した往復の全部(ms)。完了した順。1つの操作が Server Action を続けて送る(例: 生成のあとに
+   * 自動で検証が走る)とき、末尾の1つだけを予算の対象にしたい呼び出し側が選ぶために返す。
+   */
+  roundTripsMs: number[];
   /** 完了した Server Action の数。 */
   requestCount: number;
 }
@@ -117,7 +122,7 @@ export async function measureServerActionRoundTrip(
   if (roundTrips.length === 0) {
     throw new Error('Server Action の往復を計測できませんでした(操作が Server Action を送っていません)');
   }
-  return { roundTripMs: Math.max(...roundTrips), requestCount: roundTrips.length };
+  return { roundTripMs: Math.max(...roundTrips), roundTripsMs: [...roundTrips], requestCount: roundTrips.length };
 }
 
 export const RESPONSE_ELAPSED_KEY = 'responseBudgetElapsedMs';

@@ -115,6 +115,26 @@ describe('measureServerActionRoundTrip(retryClick の再試行時間を含めな
     expect(result.requestCount).toBe(2);
   });
 
+  it('完了した往復を、完了した順にすべて返す(連続する Server Action の後ろの1つを選べるように)', async () => {
+    const { page, clock, asPage } = setup();
+    const first = fakeRequest('POST', { [SERVER_ACTION_HEADER]: '1' });
+    const second = fakeRequest('POST', { [SERVER_ACTION_HEADER]: '2' });
+    const result = await measureServerActionRoundTrip(
+      asPage,
+      async () => {
+        page.emit('request', first);
+        clock.advance(900);
+        page.emit('requestfinished', first);
+        page.emit('request', second);
+        clock.advance(120);
+        page.emit('requestfinished', second);
+      },
+      { now: clock.now, timeoutMs: 1_000 }
+    );
+    expect(result.roundTripsMs).toEqual([900, 120]);
+    expect(result.roundTripMs).toBe(900);
+  });
+
   it('Server Action でないリクエスト(GET・ヘッダ無しのPOST)は数えない', async () => {
     const { page, clock, asPage } = setup();
     const get = fakeRequest('GET', { [SERVER_ACTION_HEADER]: 'x' });

@@ -7,6 +7,13 @@
   全対象への展開は #1477、対象の一覧と分類は `docs/ACCEPTANCE_CRITERIA.md` の
   「応答時間予算」(AC-PERF-004)にある。
 
+  ## 何を検証しているかの宣言(`@budget-page:` / `@budget-action:`、#1477)
+
+  各シナリオの直前のタグが、対象一覧(§10.4 / §10.5)のどの行を検証するかを宣言する。
+  `scripts/check-response-budget-coverage.py` が一覧とこの宣言を突き合わせ、予算対象の行に
+  シナリオが無い・一覧に無いものを宣言している・予算対象でない行を宣言している、のどれかで失敗する。
+  書式と全画面分の置き場所は `page-first-display.feature` の冒頭を読むこと。
+
   ## 計り方(`e2e/support/responseBudget.ts`)
 
   - **画面の初回表示**: 1回目の遷移は Next.js(devモード)のルートコンパイルを含むので
@@ -22,14 +29,17 @@
     前提 応答時間予算の検証用のプロジェクトがある
     かつ 応答時間予算の検証のために管理者としてログインしている
 
+  @budget-page:/projects
   シナリオ: プロジェクト一覧画面の初回表示が3秒以内に完了する
     もし ウォームアップ後に「/projects」を開く
     ならば ページロードは「3000」ミリ秒以内に完了する
 
+  @budget-page:/users
   シナリオ: 利用者一覧画面の初回表示が3秒以内に完了する
     もし ウォームアップ後に「/users」を開く
     ならば ページロードは「3000」ミリ秒以内に完了する
 
+  @budget-action:updateProjectNameAction
   シナリオ: プロジェクト名の保存(Server Action)のサーバ往復が3秒以内に返る
     もし ウォームアップ後に「/projects/{projectId}」を開く
     かつ プロジェクト名を保存して Server Action の往復を計測する
