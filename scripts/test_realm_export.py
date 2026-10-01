@@ -72,5 +72,33 @@ class RealmExportDescriptionLengthTest(unittest.TestCase):
         )
 
 
+class RealmExportOfflineSessionPolicyTest(unittest.TestCase):
+    """offline session の寿命方針(#1100)。Web UI から到達できない realm 設定のため、
+    Gherkin ではなくここで表現する(上記 docstring の文書化された例外)。
+    """
+
+    OFFLINE_MAX_LIFESPAN = 14 * 24 * 60 * 60  # 14日
+
+    def setUp(self):
+        with open(REALM_EXPORT, encoding="utf-8") as f:
+            self.realm = json.load(f)
+
+    def test_offline_session_has_a_14_day_cap(self):
+        self.assertIs(self.realm["offlineSessionMaxLifespanEnabled"], True)
+        self.assertEqual(self.realm["offlineSessionMaxLifespan"], self.OFFLINE_MAX_LIFESPAN)
+
+    def test_idle_timeout_does_not_exceed_the_cap(self):
+        # 上限より長い idle は効かない値であり、設定の意図を読み違えさせる。
+        self.assertLessEqual(self.realm["offlineSessionIdleTimeout"], self.OFFLINE_MAX_LIFESPAN)
+
+    def test_idle_timeout_still_outlasts_a_working_session(self):
+        # #1098: 30分の無操作で切れない利用感を再発させない。
+        self.assertGreater(self.realm["offlineSessionIdleTimeout"], self.realm["ssoSessionIdleTimeout"])
+
+    def test_refresh_token_rotation_stays_disabled(self):
+        # 複数ウィンドウからの同時リフレッシュで正規端末が弾かれうるため無効のまま(ユーザー判断、#1100)。
+        self.assertIs(self.realm["revokeRefreshToken"], False)
+
+
 if __name__ == "__main__":
     unittest.main()

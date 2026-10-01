@@ -33,9 +33,12 @@ OSの資格情報ストア(macOS: Keychain、Windows: 資格情報マネージ�
 - 拡張はデバイス認可要求時に `scope=offline_access` を要求します(issue #1098、`deviceAuth.ts` の
   `DEVICE_SCOPE`)。発行されるリフレッシュトークンは **offline token** となり、KeycloakのSSOセッション
   (realm `letsblog` の `ssoSessionIdleTimeout` = 30分 / `ssoSessionMaxLifespan` = 10時間)ではなく
-  offline session(`offlineSessionIdleTimeout` = 30日、`offlineSessionMaxLifespanEnabled` = false のため
-  上限なし)の寿命に従います。使うたびにidle期限が延長されるため、通常の執筆作業の中では
-  再ログインを求められません。device_code交換とrefresh_token交換には `scope` を送りません
+  offline session(`offlineSessionIdleTimeout` = 14日、`offlineSessionMaxLifespanEnabled` = true /
+  `offlineSessionMaxLifespan` = 14日。issue #1100)の寿命に従います。使うたびにidle期限が延長されるため、
+  通常の執筆作業の中では再ログインを求められませんが、最後のログインから14日で必ず再ログインが
+  必要になります(上限到達時のリフレッシュは `invalid_grant` で拒否され、確定的な失効として
+  保存済みトークンを破棄し再ログインを案内します。`src/__tests__/deviceAuth.test.ts` で検証)。
+  device_code交換とrefresh_token交換には `scope` を送りません
   (RFC 8628 §3.4 / RFC 6749 §6。refresh時の `scope` は元の許諾の絞り込みを意味するため)。
 - アクセストークンは有効期限が近い/切れている場合、`config.ts` の `requireAccessToken` が
   リフレッシュトークンを使って自動的に更新します。**保存済みトークンを破棄するのは、リフレッシュトークン
@@ -139,12 +142,34 @@ issue #565(Device Authorization Grantへの移行)以降、拡張はパスワー
 - **メモリ上のトークンを消去できない**: JavaScriptの文字列は不変のため、アクセストークン/
   リフレッシュトークンをメモリからゼロ埋めで消すことはできません(issue #565以降、拡張はパスワードを
   一切扱わないため、この制約の影響範囲はトークンに限定されます)。
-- **offline tokenの寿命が長い**: `offline_access` を要求する設計(issue #1098)のため、端末の
-  Secret Storage には既定で30日間(使うたびに延長され、realmの設定上は上限なし)有効な
-  リフレッシュトークンが載ります。issue #1099で`Let's Blog: Logout`コマンドを追加したため、
-  利用者自身が管理者を介さず端末紛失時などに失効させられます(1.2節参照)。管理者による
-  ユーザー無効化 / Keycloak管理コンソールからのoffline session削除も引き続き有効な失効手段です。
-  寿命方針(上限の有無、リフレッシュトークンの回転)自体の見直しはissue #1100で扱います。
+- **offline tokenの寿命と失効手段**(issue #1098 / #1099 / #1100): `offline_access` を要求する設計の
+  ため、端末のSecret Storageには最長14日有効なリフレッシュトークンが載ります。方針は次のとおりです
+  (2026-09-16のユーザー判断)。
+
+  | 設定(`infra/keycloak/realm-export.json`) | 値 | 採否と理由 |
+  | --- | --- | --- |
+  | `offlineSessionMaxLifespanEnabled` / `offlineSessionMaxLifespan` | `true` / 1209600(14日) | **上限を設ける**。使い続ける限り無期限に延命する状態をやめ、複製されたトークンの有効期間を最長14日に限る。 |
+  | `offlineSessionIdleTimeout` | 1209600(14日) | 上限に揃える。上限より長いidle値は効かず、設定の意図を読み違えさせるため。30分の無操作で切れない利用感(#1098)は保たれる。 |
+  | `revokeRefreshToken` | `false`(回転しない) | **有効化しない**。複数ウィンドウ/プロセスが同時にリフレッシュすると、先に回転されたトークンで正規の端末が弾かれうる(同時リフレッシュの有無は未調査)。上限14日により、複製トークンが使える期間は既に限られる。 |
+
+  `scripts/test_realm_export.py` がこの値を検査します。既存の `keycloak_postgres` ボリュームがある環境へは
+  realm定義の変更が反映されない(`--import-realm` は初回のみ)ため、反映には再構築
+  (`scripts/rebuild-acceptance-env.sh`)か管理コンソールでの手動変更が必要です。
+
+  **端末を操作できない場合(紛失・盗難・故障)の失効手段は「管理者への依頼のみ」とします**。
+  Account Consoleへの導線やWebの端末一覧画面は設けません。端末を操作できる場合は
+  `Let's Blog: Logout`(1.2節、issue #1099)で利用者自身が失効できます。
+
+  管理者の運用手順(Keycloak管理コンソール、realm `letsblog`):
+  1. 利用者を特定し、**Users → 対象ユーザー → Sessions** で `letsblog-vscode` の offline session を
+     削除する(最優先。これでリフレッシュトークンが失効する)。
+  2. 加えて、必要に応じて **Users → 対象ユーザー → Enabled を Off** にする。無効化したユーザーは
+     リフレッシュできず、アクセストークンも最大5分(`accessTokenLifespan`)で `CurrentActorService`
+     (`user.isEnabled()`)により拒否される。
+  3. 再有効化する場合: **無効化の解除後に古いoffline tokenが復活するかは未検証**です
+     (稼働中Keycloakの変更を伴うため本Issueでは確認していない)。無効化だけを失効とみなさず、
+     必ず手順1でoffline sessionを削除してから再有効化し、利用者には再ログインしてもらってください。
+  4. Account Consoleでoffline sessionを一覧・削除できるかも未検証です。管理者は管理コンソールを使います。
 - **`allowInsecureTls: true` 時の中間者攻撃**: 利用者が明示的に有効化した場合、
   証明書検証を行わないため中間者攻撃を検出できません。ローカル環境専用の設定です。
 - **Webviewの `style-src 'unsafe-inline'`**: 3章に記載の理由により許容しています。

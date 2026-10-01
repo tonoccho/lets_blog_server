@@ -25,7 +25,7 @@ export const DEVICE_CLIENT_ID = 'letsblog-vscode';
  * ssoSessionMaxLifespan = 10時間)に紐づくため、IDE拡張の使い方——エディタを開いたまま、
  * 執筆の合間に断続的に呼ぶ——では30分の無操作や10時間の連続利用で強制ログアウトになる。
  * offline_accessを要求するとoffline tokenが発行され、SSOセッションの寿命から独立する
- * (offlineSessionIdleTimeout = 30日、上限なし)。
+ * (offlineSessionIdleTimeout = 14日、offlineSessionMaxLifespan = 14日。#1100)。
  *
  * 要求するのはデバイス認可要求のときだけでよい。RFC 8628 §3.4のアクセストークン要求は
  * grant_type/device_code/client_idのみを取り、スコープはデバイス認可要求時に束縛される。
