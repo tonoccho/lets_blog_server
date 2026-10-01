@@ -56,6 +56,21 @@ bash scripts/wait-for-stack-healthy.sh --all
 - 外部LLMサービス(既定: OpenAI)のAPIキー(下書き/校正/要約支援・タグ提案・記事プランニングに使用)
 - ホストの 80番・443番ポートが空いていること(リバースプロキシが使用)
 
+### Docker のデーモン設定とクライアント設定ディレクトリ
+
+- docker デーモンの `data-root` は既定値(`/var/lib/docker`)のままにする。容量対策で変える場合も
+  `~/.docker` 配下には置かない。`~/.docker` は docker **クライアント**の設定ディレクトリ
+  (`DOCKER_CONFIG` の既定値)で、CLI がユーザー権限で `buildx/` などを作るため、デーモンが
+  data-root 作成の過程でここを root 所有にすると CLI が書けなくなる。
+- `~/.docker` はビルドを実行するユーザーの所有でなければならない。root 所有だと
+  `mkdir /home/<user>/.docker/buildx: permission denied` で**ビルドだけが失敗する**
+  (`docker ps` などの読み取り系は成功するので気づきにくい)。確認: `stat -c '%U' ~/.docker`
+- 暫定回避策として、書き込み可能な別ディレクトリを `DOCKER_CONFIG` に指定できる。
+
+  ```bash
+  mkdir -p ~/.config/docker-cli && DOCKER_CONFIG=~/.config/docker-cli docker compose build <service>
+  ```
+
 ## 1. `.env` の設定
 
 `.env.example` をコピーして `.env` を作成し、以下を変更する。
