@@ -32,7 +32,7 @@ The system is built on Docker and includes all necessary services (API server, d
 
 | Component | Requirement | Notes |
 |-----------|-------------|-------|
-| **GPU** | NVIDIA GPU with 16GB+ VRAM | Required for AI features (Ollama, ComfyUI) |
+| **GPU** | Optional (NVIDIA GPU with 16GB+ VRAM recommended) | Not required. Ollama runs on GPU with `GPU_RUNTIME=nvidia` (default) or on CPU with `GPU_RUNTIME=` (empty); ComfyUI is opt-in via `COMPOSE_PROFILES=gpu` or `cpu`. See [Docker Compose Architecture](DOCKER_COMPOSE_ARCHITECTURE.md) ("Ollama を CPU で動かす") and the comments in `.env.example` |
 | **CPU** | Dual-core or better | Recommended 4+ cores |
 | **RAM** | 8GB minimum, 16GB+ recommended | Multiple services run concurrently |
 | **Storage** | 50GB+ available space | For Docker images and AI model files |
@@ -42,7 +42,7 @@ The system is built on Docker and includes all necessary services (API server, d
 
 - **Git** - For cloning the repository
 - **Docker Engine + Docker Compose v2** - Container orchestration
-- **NVIDIA Container Toolkit** - GPU support in Docker (if using NVIDIA GPU)
+- **NVIDIA Container Toolkit** - GPU support in Docker (only if running Ollama/ComfyUI on an NVIDIA GPU)
 - **openssl** - For generating TLS certificates (included on Linux/macOS)
 - **Visual Studio Code** - For using the VSCode extension
 
@@ -94,9 +94,6 @@ Edit `.env` with your favorite text editor and change these critical values:
 MYSQL_ROOT_PASSWORD=your_secure_password_here
 MYSQL_PASSWORD=your_secure_password_here
 
-# API authentication key (used by VSCode extension and Web UI)
-SERVER_API_KEY=your_unique_api_key_here
-
 # Encryption key for WordPress credentials (generate with: openssl rand -base64 32)
 APP_ENCRYPTION_KEY=base64_encoded_32_byte_key_here
 
@@ -113,10 +110,10 @@ MAIL_PASSWORD=your_smtp_password_here
 # Authentication secret (generate with: openssl rand -hex 32)
 NEXTAUTH_SECRET=your_nextauth_secret_here
 
-# GPU/AI Model configuration (optional customization)
-COMFYUI_IMAGE=nvidia/cuda:12.1.0-runtime-ubuntu22.04
-OLLAMA_MODEL=qwen2.5:7b-instruct
-COMFYUI_CHECKPOINT=sd-v1-5-fp16.safetensors
+# GPU/AI Model configuration (optional customization; see .env.example for GPU_RUNTIME / COMPOSE_PROFILES)
+COMFYUI_IMAGE=yanwk/comfyui-boot:cu130-slim
+LLM_OLLAMA_MODEL=qwen2.5:7b-instruct
+COMFYUI_CHECKPOINT=v1-5-pruned-emaonly.safetensors
 ```
 
 After editing, verify that `.env` covers everything `.env.example` declares:

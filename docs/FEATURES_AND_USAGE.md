@@ -160,14 +160,19 @@ Each site shows:
 
 ### Understanding AI Capabilities
 
-Let's Blog Server uses **Ollama** for local AI processing. Choose your model based on your hardware:
+The default AI provider is the bundled **Ollama** container (`LLM_PROVIDER=OLLAMA`), so AI writing
+assistance works locally without an external API key. You can switch to `OPENAI` or `CLAUDE` with
+`LLM_PROVIDER` in `.env` (a value saved on the system settings screen takes precedence).
+
+With Ollama, choose your model based on your hardware by setting `LLM_OLLAMA_MODEL` in `.env`
+(the default model is pulled automatically at startup by `ollama-model-init`):
 
 | Model | Size | Speed | Quality | Use Case |
 |-------|------|-------|---------|----------|
-| `qwen2.5:3b` | 3.1B params | Very Fast | Basic | Quick drafts, summaries |
-| `qwen2.5:7b` (Default) | 7.6B params | Fast | Good | General writing, balanced |
-| `qwen2.5:14b` | 14.8B params | Moderate | Excellent | Complex topics, precision |
-| `qwen2.5:32b` | 32.2B params | Slow | Expert | Deep technical content |
+| `qwen2.5:3b-instruct` | 3.1B params | Very Fast | Basic | Quick drafts, summaries |
+| `qwen2.5:7b-instruct` (Default) | 7.6B params | Fast | Good | General writing, balanced |
+| `qwen2.5:14b-instruct` | 14.8B params | Moderate | Excellent | Complex topics, precision |
+| `qwen2.5:32b-instruct` | 32.2B params | Slow | Expert | Deep technical content |
 
 ### Using AI Features Effectively
 
@@ -221,7 +226,7 @@ turning a rough idea into a usable ComfyUI prompt before generating.
 ### Chat-to-Image Workflow
 
 Instead of hand-writing a ComfyUI-style prompt, you can describe what you want in plain language
-and let Ollama turn it into an English prompt:
+and let the selected AI provider (Ollama by default) turn it into an English prompt:
 
 1. Open the image generation UI (VSCode: see below; Web Admin: the **AI・アセット** tab on a
    project's detail page → **アセット画像生成** → **チャットでプロンプトを作成**).
@@ -233,7 +238,7 @@ and let Ollama turn it into an English prompt:
 
 This calls `POST /api/projects/{projectId}/ai/generate-image-prompt` with the chat history and
 your latest message, and returns `{ "prompt": "<generated prompt>" }`. Each call is recorded as a
-`generation_jobs` entry (type `ollama_image_prompt`) for auditing.
+`generation_jobs` entry (type `llm_image_prompt`) for auditing.
 
 ### Generating Images (VSCode Extension)
 

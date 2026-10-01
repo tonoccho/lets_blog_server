@@ -54,7 +54,7 @@ fatal: unable to access 'https://github.com/tonoccho/lets_blog_server.git/': Cou
 
 ### Environment File (.env) Issues
 
-**Problem:** Cannot edit `.env` file or missing `SERVER_API_KEY`
+**Problem:** Cannot edit `.env` file or missing required keys
 
 **Symptoms:**
 ```
@@ -89,10 +89,10 @@ Permission denied when editing .env
 
 4. **Verify critical fields are set**
    ```bash
-   grep -E "^(MYSQL_ROOT_PASSWORD|SERVER_API_KEY|NEXTAUTH_SECRET|APP_ENCRYPTION_KEY)" .env
+   grep -E "^(MYSQL_ROOT_PASSWORD|NEXTAUTH_SECRET|APP_ENCRYPTION_KEY)" .env
    ```
    
-   All four should have values (not empty).
+   All three should have values (not empty).
 
 ---
 
@@ -982,25 +982,37 @@ Model qwen2.5:7b-instruct not found
 
 **Solution:**
 
-1. **Check if model is pulled**
+The default model (`LLM_OLLAMA_MODEL`, `qwen2.5:7b-instruct` unless changed in `.env`) is pulled
+automatically at startup by the `ollama-model-init` service, so a manual `ollama pull` is normally
+not needed. A manual pull is for a model other than the default, or for recovery.
+
+1. **Check whether the automatic pull finished or failed**
+   ```bash
+   docker compose logs ollama-model-init
+   ```
+   The first start can take several minutes. If the pull failed, re-run it with
+   `docker compose up -d --force-recreate ollama-model-init`.
+
+2. **Check which models are present**
    ```bash
    docker exec lbs-ollama ollama list
    ```
 
-2. **If model missing, pull it**
+3. **If the model is still missing (non-default model, or recovery), pull it manually**
    ```bash
    docker exec lbs-ollama ollama pull qwen2.5:7b-instruct
    ```
-   
-   This may take several minutes depending on internet speed and model size.
 
-3. **Verify after pull**
+   This may take several minutes depending on internet speed and model size.
+   Make sure `LLM_OLLAMA_MODEL` in `.env` matches the model you pulled.
+
+4. **Verify after pull**
    ```bash
    docker exec lbs-ollama ollama list
    # Should show qwen2.5:7b-instruct
    ```
 
-4. **Restart API service**
+5. **Restart API service**
    ```bash
    docker compose restart api
    ```
@@ -1035,6 +1047,9 @@ Model qwen2.5:7b-instruct not found
    ```
    
    If GPU not showing ~90%+ usage, GPU might not be properly configured.
+   (This applies only with `GPU_RUNTIME=nvidia`. With `GPU_RUNTIME=` (empty) Ollama runs on CPU;
+   `docker exec lbs-ollama ollama ps` shows `100% CPU` in that case. See
+   [Docker Compose Architecture](DOCKER_COMPOSE_ARCHITECTURE.md).)
 
 3. **Check system resources**
    - Running other processes?
@@ -1044,7 +1059,7 @@ Model qwen2.5:7b-instruct not found
 4. **Switch to smaller model**
    Edit `.env`:
    ```env
-   OLLAMA_MODEL=qwen2.5:3b-instruct
+   LLM_OLLAMA_MODEL=qwen2.5:3b-instruct
    ```
    
    Then restart:
@@ -1145,6 +1160,9 @@ Model running on CPU
    docker exec lbs-ollama nvidia-smi
    docker exec lbs-comfyui nvidia-smi
    ```
+   
+   Note: `docker exec lbs-ollama nvidia-smi` only applies with `GPU_RUNTIME=nvidia` (the default);
+   with `GPU_RUNTIME=` (empty) Ollama runs on CPU and has no GPU to show.
 
 6. **Restart services after GPU is available**
    ```bash
