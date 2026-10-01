@@ -341,6 +341,22 @@ class UnchangedGuards(unittest.TestCase):
     def test_no_verify_on_push_is_denied(self):
         self.assertIsNotNone(run_hook("bash", bash_payload("git push --no-verify")))
 
+    def test_no_verify_on_merge_is_denied(self):
+        """#1465: git merge も --no-verify で pre-merge-commit を外せる。"""
+        for cmd in (
+            "git merge --no-verify origin/develop",
+            "timeout 60 env FOO=1 git merge --no-verify origin/develop",
+            "git pull --no-verify",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(run_hook("bash", bash_payload(cmd)))
+
+    def test_merge_short_n_and_no_stat_are_allowed(self):
+        """`git merge -n` は --no-stat の短縮で、フック回避ではない。"""
+        for cmd in ("git merge -n origin/develop", "git merge --no-stat origin/develop"):
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(run_hook("bash", bash_payload(cmd)))
+
     def test_plain_commit_is_allowed(self):
         root = tempfile.mkdtemp()
         env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)

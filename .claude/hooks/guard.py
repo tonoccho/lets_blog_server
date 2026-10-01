@@ -1596,7 +1596,10 @@ def check_unknown_wrapper_flag(command):
 
 
 def check_no_verify(command):
-    for sub in ("commit", "push"):
+    # merge は pre-merge-commit(#1452)を、pull は内部で merge を呼ぶので同じフックを外せる
+    # (#1465)。`-n` は commit だけが --no-verify の短縮で、merge / pull では --no-stat
+    # (pull では --no-stat 相当)の短縮なので対象にしない。
+    for sub in ("commit", "merge", "pull", "push"):
         for args in invokes(command, "git", (sub,)):
             if "--no-verify" in args or (sub == "commit" and "-n" in args):
                 emit_deny(

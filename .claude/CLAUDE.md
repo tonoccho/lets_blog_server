@@ -773,7 +773,7 @@ Rules that can be checked mechanically are **enforced**: a violation is refused,
 | Mutating shell | `Bash` | `sed -i`, `rm` / `mv` / `cp` / `tee` / `patch`, state-changing `git`, dependency installs, and output redirection — while a read-only stage is active |
 | Test silencing | `Write` / `Edit` | Adding `@Disabled`, `@Ignore`, `test.skip`, `it.skip`, `xit`, `test.fixme`, or `testPathIgnorePatterns` to a test or production file (`.claude/`, `docs/`, `scripts/` and `*.md` are exempt) |
 | Phase separation | `Bash` (`git commit`) | A commit whose staged paths mix test code and production code |
-| Hook bypass | `Bash` | `git commit` / `git push` with `--no-verify` — the git hook is not optional |
+| Hook bypass | `Bash` | `git commit` / `git merge` / `git pull` / `git push` with `--no-verify` (and `git commit -n`) — the git hook is not optional |
 | Merge method | `Bash` (`glab mr merge`) | `--rebase`, and **any invocation without `--squash`** |
 | Coverage | `Bash` (`glab mr create`) | Opening a Merge Request while changed-code C1/C2 coverage is under 90% |
 

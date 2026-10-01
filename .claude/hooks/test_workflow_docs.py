@@ -858,5 +858,17 @@ class NoStaleEntryPointEnumerations(unittest.TestCase):
         self.assertEqual([], offenders, "古い件数表記が残っている: %s" % offenders)
 
 
+class HookBypassRowListsEverySubcommand(unittest.TestCase):
+    """CLAUDE.md → Enforcement の Hook bypass 行が guard.py の対象と一致する(#1465)。"""
+
+    def test_row_names_every_guarded_subcommand(self):
+        row = next(
+            l for l in read(".claude/CLAUDE.md").splitlines() if l.startswith("| Hook bypass")
+        )
+        for sub in ("commit", "merge", "pull", "push"):
+            self.assertIn("git %s" % sub, row)
+
+
 if __name__ == "__main__":
     unittest.main()
+
