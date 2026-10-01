@@ -834,6 +834,53 @@ issue #1374 のスコープでは解消していない。ファイル冒頭に�
 `at-timezone-exclusive` へ、残りは元のプロジェクト(`at-main` / `at-destructive`)に
 留まる。
 
+### 内部APIへの故障注入(#1519)
+
+§9 の「エラー注入」(`POST /__control/force`)は**外部依存スタブ**に対するものである。
+内部サービス間の経路は、スタブを経由しないのでそれでは失敗させられない。
+サービス停止(`@destructive` の縮退シナリオ)は広すぎる: たとえば identity-service を止めると、
+project-service が admin 認可のために identity を直接呼ぶので、プロジェクト詳細ごと 404 になり、
+「メンバー取得だけが失敗した画面」に到達できない。また、プロジェクト詳細はサーバーコンポーネントで、
+Next.js サーバーから gateway へ直接出るため、Playwright の `page.route` も効かない。
+
+そこで gateway に、**特定の内部 API だけをプロジェクトID単位で失敗させる**故障注入を持たせた。
+
+| 項目 | 内容 |
+| --- | --- |
+| 対象 | `GET /api/projects/{id}/users`(identity-service へ転送されるメンバー一覧)。注入中は 503 を返す |
+| 注入 | `PUT /api/__fault-injection/project-users/{projectId}` → 204 |
+| 解除 | `DELETE /api/__fault-injection/project-users/{projectId}` → 204(注入していなくても 204) |
+| 実装 | `services/gateway/.../config/FaultInjectionWebFilter.java`。注入状態は gateway プロセスのメモリ内で、再起動で消える |
+
+**有効になる構成**: `docker-compose.yml` に `docker-compose.e2e-stubs.yml` を重ねた構成だけ。
+重ねたファイルが `gateway.environment` に `APP_FAULT_INJECTION_ENABLED=true` を足したときに限り、
+フィルタの Bean が作られる。重ねない構成(本番相当)ではフィルタ自体が存在せず、制御パスは
+ルート表に当たって 404 になる。外部から注入を操作できる経路は本番構成に無い。
+有効な構成でも注入できるのは上の1エンドポイントだけで、同じプロジェクトの
+`GET /api/projects/{id}` や project-service の admin 認可、別プロジェクトのメンバー一覧には影響しない。
+
+**制御エンドポイントに認証は無い**: `PUT/DELETE /api/__fault-injection/...` は意図的に無認証である
+(受け入れテストのステップから Keycloak トークン無しで呼べるようにするため)。許容できる理由は、
+このエンドポイントが `docker-compose.e2e-stubs.yml` を重ねた構成にしか存在しないこと(上記)、
+できることが「プロジェクトIDを指定したメンバー一覧の503化」だけでデータを読み書きできないこと、
+状態が再起動で消えることの3点。ただし**この e2e-stubs 構成のスタックは公開ネットワークに晒さない**
+こと。晒すと誰でも任意のプロジェクトのメンバー一覧を落とせる。
+
+**使い方**(ステップ定義の例は `apps/web/e2e/steps/projectMemberPrompt.steps.ts`):
+
+1. そのシナリオ専用に作ったプロジェクトのIDで `PUT` する(204 でなければ、スタックが
+   `docker-compose.e2e-stubs.yml` 付きで起動していないので失敗させる)。
+2. `After` フックで**必ず** `DELETE` する。シナリオが失敗しても `After` は走るので、
+   注入したプロジェクトIDを `ctx` に控えておき、控えがあれば解除する。
+
+**並列実行時の注意**: 注入はプロジェクトIDで絞られるので、**必ずそのシナリオ専用のプロジェクトに
+対して**掛けること。既存の共有プロジェクトや他シナリオと共有するプロジェクトに掛けると、
+同じエンドポイントを使う他シナリオ(ダッシュボードのメンバー一覧ウィジェット等)が並列実行中に
+落ちる(#1372 と同型の衝突)。専用プロジェクトなら `@mode:serial` は要らず、`@destructive` も要らない。
+
+テストは `services/gateway/src/test/java/.../FaultInjectionWebFilterTest.java`
+(対象のみ 503、他API・別プロジェクトは素通し、解除で復帰、設定なしでは Bean が無いこと)が持つ。
+
 ### 資格情報の不正を再現する
 
 制御エンドポイントを使わず、**特定の値を登録するだけ**で認証失敗を起こせる。

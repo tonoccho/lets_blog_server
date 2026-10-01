@@ -23,7 +23,14 @@ const NOTICE_BIND_SITE_FIRST = '先にサイトを紐付けてください';
 type PromptCtx = {
   mpProjectId?: number;
   mpSiteId?: number;
+  /** 故障注入(#1519)を掛けたプロジェクトID。After で必ず解除する。 */
+  mpFaultProjectId?: number;
 };
+
+const NOTICE_MEMBERS_UNAVAILABLE = 'メンバー情報を取得できませんでした';
+
+/** gateway の故障注入の制御パス(docker-compose.e2e-stubs.yml でだけ有効。docs/ACCEPTANCE_TESTING.md 参照)。 */
+const faultInjectionPath = (projectId: number): string => `/api/__fault-injection/project-users/${projectId}`;
 
 async function adminToken(request: APIRequestContext): Promise<string> {
   return fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
@@ -103,6 +110,20 @@ Given('メンバーが1人以上居るプロジェクトがある', async ({ req
   ).toBe(true);
 });
 
+Given('メンバー一覧の取得が失敗する状態にする', async ({ request, ctx }) => {
+  // 対象はこのシナリオ専用のプロジェクトだけ。プロジェクトID単位の注入なので、
+  // 並列に走る他シナリオ(ダッシュボードのメンバー一覧など)は巻き込まない。
+  const projectId = await createProject(request, ctx);
+  const injected = await request.put(faultInjectionPath(projectId), {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+  });
+  expect(
+    injected.status(),
+    `故障注入に失敗しました。gateway が docker-compose.e2e-stubs.yml を重ねた構成で起動していません (status=${injected.status()})`
+  ).toBe(204);
+  (ctx as PromptCtx).mpFaultProjectId = projectId;
+});
+
 When(/^(?:その)?プロジェクトの詳細を開く$/, async ({ page, ctx }) => {
   await page.goto(`/projects/${(ctx as PromptCtx).mpProjectId}`);
 });
@@ -142,9 +163,17 @@ Then('メンバーが居ない旨と、追加方法の案内が表示される',
   await expect(page.getByText('「ユーザーを追加」から追加してください')).toBeVisible();
 });
 
+Then('メンバー情報を取得できなかったことが表示される', async ({ page }) => {
+  await expect(page.getByText(NOTICE_MEMBERS_UNAVAILABLE).first()).toBeVisible();
+});
+
 After({ tags: '@project-member-prompt' }, async ({ request, ctx }) => {
-  const { mpProjectId, mpSiteId } = ctx as PromptCtx;
+  const { mpProjectId, mpSiteId, mpFaultProjectId } = ctx as PromptCtx;
   const token = await adminToken(request);
+  if (mpFaultProjectId !== undefined) {
+    // 失敗したシナリオでも必ず解除する。解除し損ねると、そのプロジェクトのメンバー一覧が5xxのまま残る。
+    await request.delete(faultInjectionPath(mpFaultProjectId), { headers: { Authorization: `Bearer ${token}` } });
+  }
   if (mpProjectId !== undefined) {
     await deleteFixtureProject(request, token, mpProjectId);
   }

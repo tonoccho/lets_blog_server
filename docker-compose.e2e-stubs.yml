@@ -90,6 +90,11 @@ services:
     environment:
       API_RATE_LIMIT_REQUESTS: "1000"
       UPLOAD_RATE_LIMIT_REQUESTS: "40"
+      # 内部APIへの故障注入(#1519)を有効にする。GET /api/projects/{id}/users をプロジェクトID
+      # 単位で503にできる制御パス(/api/__fault-injection/...)がこの構成にだけ現れる。
+      # 本番構成(このファイルを重ねない)ではこの変数が無く、フィルタ自体が作られない。
+      # 使い方は docs/ACCEPTANCE_TESTING.md「内部APIへの故障注入」を参照。
+      APP_FAULT_INJECTION_ENABLED: "true"
 
   llm-stub:
     <<: *stub-base
