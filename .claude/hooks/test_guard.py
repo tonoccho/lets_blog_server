@@ -104,6 +104,48 @@ class MergeMethodGuard(unittest.TestCase):
             run_hook("bash", bash_payload("glab mr merge 42 --squash-message 'x'"))
         )
 
+    def test_squash_consumed_as_message_value_is_denied(self):
+        """#1463 AC1: `-m --squash` の `--squash` は -m の値であり方式指定ではない。"""
+        for cmd in (
+            "glab mr merge -m --squash",
+            "glab mr merge --message --squash",
+            "glab mr merge -R --squash",
+            "glab mr merge --sha --squash",
+            "glab mr merge --squash-message --squash",
+            "glab mr merge -dm --squash",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(run_hook("bash", bash_payload(cmd)))
+
+    def test_squash_after_message_value_is_allowed(self):
+        """#1463 AC1: 値を取るフラグに値が渡されていれば、その後の --squash は有効。"""
+        for cmd in (
+            "glab mr merge -m msg --squash",
+            "glab mr merge --squash -m msg",
+            "glab mr merge --remove-source-branch --squash",
+            "glab mr merge --yes -d --squash 42",
+            "glab mr merge -m=msg --squash",
+            "glab mr merge -mmsg -s",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertIsNone(run_hook("bash", bash_payload(cmd)))
+
+    def test_squash_as_value_of_unknown_flag_is_denied(self):
+        """#1463 AC2: 未知のフラグの次の --squash は値かもしれないので fail-closed。"""
+        for cmd in ("glab mr merge --zz --squash", "glab mr merge -z --squash"):
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(run_hook("bash", bash_payload(cmd)))
+
+    def test_squash_message_before_rebase_still_denied(self):
+        """#1463 AC3。"""
+        for cmd in (
+            "glab mr merge --squash -m --rebase",
+            "glab mr merge",
+            "glab mr merge 42 -m x",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertIsNotNone(run_hook("bash", bash_payload(cmd)))
+
     def test_remove_source_branch_is_not_mistaken_for_rebase(self):
         """`--remove-source-branch` に含まれる r を短縮フラグと誤検知しないこと。"""
         self.assertIsNone(

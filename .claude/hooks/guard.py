@@ -1216,10 +1216,45 @@ def _is_help_invocation(residual):
 # マージ方式のフラグ。長いフラグと、cobra が受け付ける短縮フラグの結合(`-sd`)の両方。
 # `--squash-message` はコミットメッセージの指定であって方式の指定ではないので、
 # `--squash` の前方一致で拾ってはいけない。`-R`(--repo)は `-r`(--rebase)ではない。
-def _has_flag(args, long_name, short, value_shorts=frozenset()):
+# `glab mr merge` の既知のブール型フラグ(glab 1.116.0 の `glab mr merge --help` で確認、#1463)。
+# 値を取るのは `-m/--message`、`-R/--repo`、`--sha`、`--squash-message`。ここに無い
+# フラグは「値を取るかもしれない」とみなし、次のトークンを値として消費する(fail-closed)。
+MR_MERGE_BOOL_FLAGS = {
+    "--auto-merge", "--help", "--rebase", "--remove-source-branch", "--squash", "--yes",
+    "-h", "-r", "-d", "-s", "-y",
+}
+
+
+def _consumes_next(arg, value_shorts, bool_flags):
+    """`arg`(`-` 始まり)が、次のトークンを自身の値として消費しうるか。
+
+    `=` 直結・短縮直結(`-mmsg`)は1トークンで完結するので消費しない。既知のブールで
+    なければ消費する側に倒す(未知フラグの網羅性に安全性を依存させない)。
+    """
+    if arg.startswith("--"):
+        return "=" not in arg and arg not in bool_flags
+    cluster = arg[1:]
+    for i, ch in enumerate(cluster):
+        if ch in value_shorts or f"-{ch}" not in bool_flags:
+            return i == len(cluster) - 1
+    return False
+
+
+def _has_flag(args, long_name, short, value_shorts=frozenset(), bool_flags=None):
+    """`bool_flags` を渡すと、値として消費されうるトークンはフラグと数えない(fail-closed)。
+
+    `--squash` の「明示要求」のように、見逃しが許可側に倒れる判定で使う。`--rebase` の
+    ような禁止フラグの検出では渡さない(値の中身でも拒否するほうが安全側)。
+    """
+    skip = False
     for arg in args:
+        if skip:
+            skip = False
+            continue
         if arg == long_name or arg.startswith(long_name + "="):
             return True
+        if bool_flags is not None and arg.startswith("-") and len(arg) > 1:
+            skip = _consumes_next(arg, value_shorts, bool_flags)
         if arg.startswith("--"):
             continue
         if arg.startswith("-") and len(arg) > 1 and _cluster_has_flag(arg[1:], short, value_shorts):
@@ -1260,7 +1295,7 @@ def check_merge_flags(command):
                 "(CLAUDE.md → Completion Definition)。`--rebase` は使えません。"
                 "`glab mr merge --squash --remove-source-branch` を使ってください。"
             )
-        if not _has_flag(args, "--squash", "s", value_shorts):
+        if not _has_flag(args, "--squash", "s", value_shorts, MR_MERGE_BOOL_FLAGS):
             emit_deny(
                 "`glab mr merge` にマージ方式が指定されていません。設定は変わりうる"
                 "ため、プロジェクト設定だけに頼らず常に `--squash` を明示してください"
