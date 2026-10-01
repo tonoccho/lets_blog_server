@@ -258,6 +258,19 @@ def check_web_coverage_floor(files):
         text=True,
     )
     if result.returncode != 0:
+        output = (result.stdout + result.stderr).strip()
+        # 依存未導入(新規 linked worktree 等)は npm も非0で終了するが、カバレッジは
+        # 1行も測っていない。「床割れ」と誤診断せず、通さないまま原因を正しく伝える(#1320)。
+        if not os.path.isdir(os.path.join(web_dir, "node_modules")) or any(
+            sig in output for sig in ("jest: not found", "command not found")
+        ):
+            fail(
+                "apps/web の依存パッケージが未導入のため、カバレッジ床を検査できません",
+                "cd apps/web && npm run test:coverage が非0で終了しました:\n\n%s\n\n"
+                "カバレッジは測定されていません(床割れではありません)。このworktreeの "
+                "apps/web で `npm install`(または `npm ci`)を実行してから、"
+                "再度コミットしてください。" % output[-4000:],
+            )
         fail(
             "apps/web のリポジトリ全体カバレッジ床(jest.config.ts の coverageThreshold)を"
             "下回っています",

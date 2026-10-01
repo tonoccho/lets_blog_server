@@ -39,6 +39,7 @@ PRE_MERGE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-merge-commit")
 FAKE_NPM = """#!/bin/bash
 echo "$@" >> "$FAKE_NPM_LOG"
 echo "$PWD" >> "$FAKE_NPM_LOG"
+[ -n "$FAKE_NPM_OUTPUT" ] && echo "$FAKE_NPM_OUTPUT"
 exit "$FAKE_NPM_EXIT_CODE"
 """
 
@@ -67,6 +68,9 @@ class TempRepo(unittest.TestCase):
         # package.jsonが無く、そこでは黙ってスキップさせたい — 本テストでは実際に
         # 検査が走ることを確かめたいので、ここでは用意する。
         self.write("apps/web/package.json", '{"name": "web", "scripts": {}}\n')
+        # 依存が導入済みの apps/web を既定にする。未導入(#1320)の再現は個別のテストで
+        # このディレクトリを消して行う。git は空ディレクトリを追跡しない。
+        os.makedirs(os.path.join(self.tmp, "apps", "web", "node_modules"))
         shutil.copy(SETUP_SCRIPT, os.path.join(self.tmp, "scripts", "setup-git-hooks.sh"))
         shutil.copy(PRE_COMMIT, os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"))
         os.chmod(os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"), 0o755)
@@ -118,11 +122,12 @@ class TempRepo(unittest.TestCase):
             f.write(text)
         return rel_path
 
-    def commit(self, message, npm_exit_code=0):
+    def commit(self, message, npm_exit_code=0, npm_output=""):
         env = {
             "PATH": self.bin + os.pathsep + os.environ.get("PATH", ""),
             "FAKE_NPM_LOG": self.npm_log,
             "FAKE_NPM_EXIT_CODE": str(npm_exit_code),
+            "FAKE_NPM_OUTPUT": npm_output,
         }
         return git(["commit", "-m", message], cwd=self.tmp, env=env)
 
@@ -174,6 +179,51 @@ class WebCoverageFloor(TempRepo):
         self.assertIsNone(self.npm_invocations(), "apps/web を触っていないのに npm が呼ばれた")
 
 
+class WebCoverageFloorEnvironmentNotSetUp(TempRepo):
+    """#1320: node_modules 未導入の worktree での失敗を「床割れ」と誤診断しない。
+
+    どちらの失敗も npm は非0で終了するので、終了コードでは区別できない。
+    環境未導入は拒否したまま(通さない)、メッセージだけが `npm install` を指す。
+    """
+
+    JEST_NOT_FOUND = "sh: 1: jest: not found"
+
+    def stage_web_change(self):
+        git(["add", self.write("apps/web/src/foo.ts", "export const foo = 1\n")], cwd=self.tmp)
+
+    def test_missing_node_modules_is_rejected_with_install_guidance(self):
+        shutil.rmtree(os.path.join(self.tmp, "apps", "web", "node_modules"))
+        self.stage_web_change()
+        r = self.commit("feat: touch web", npm_exit_code=127, npm_output=self.JEST_NOT_FOUND)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(0, r.returncode, "環境未導入のコミットが通ってしまった: " + out)
+        self.assertIn("npm install", out)
+        self.assertNotIn("テストを追加", out)
+        self.assertNotIn("下回っています", out)
+
+    def test_command_not_found_output_is_rejected_with_install_guidance(self):
+        """node_modules はあるが jest が実行できない(壊れた導入)場合も同じ診断にする。"""
+        self.stage_web_change()
+        r = self.commit("feat: touch web", npm_exit_code=127, npm_output=self.JEST_NOT_FOUND)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertIn("npm install", out)
+        self.assertNotIn("テストを追加", out)
+
+    def test_genuine_coverage_failure_still_reports_the_coverage_message(self):
+        self.stage_web_change()
+        r = self.commit(
+            "feat: touch web",
+            npm_exit_code=1,
+            npm_output="Jest: Coverage for branches (30%) does not meet global threshold (40%)",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertIn("下回っています", out)
+        self.assertIn("テストを追加", out)
+        self.assertNotIn("npm install", out)
+
+
 class WebCoverageFloorLinkedWorktree(TempRepo):
     """#1040 の QA FAIL: linked worktree からのコミットが誤ってメイン作業ツリーの
     apps/web を検査してしまう(#1319 と同じ欠陥、修正はこの Issue #1040 の側で行う)。
@@ -214,6 +264,7 @@ class WebCoverageFloorLinkedWorktree(TempRepo):
             "PATH": self.bin + os.pathsep + os.environ.get("PATH", ""),
             "FAKE_NPM_LOG": self.npm_log,
             "FAKE_NPM_EXIT_CODE": str(npm_exit_code),
+            "FAKE_NPM_OUTPUT": "",
         }
         return git(["commit", "-m", message], cwd=self.worktree, env=env)
 
