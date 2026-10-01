@@ -132,9 +132,9 @@ class PreMergeCommitUnclassified(unittest.TestCase):
         paths_py = os.path.join(self.tmp, ".claude", "hooks", "paths.py")
         with open(paths_py, encoding="utf-8") as f:
             content = f.read()
-        anchor = 'r"^update\\.sh$",\n]'
+        anchor = 'r"^startup\\.sh$",\n]'
         self.assertIn(anchor, content, "paths.py の NEUTRAL_PATTERNS の構造が前提と異なる")
-        content = content.replace(anchor, 'r"^update\\.sh$",\n    r"^%s$",\n]' % UNCLASSIFIED, 1)
+        content = content.replace(anchor, 'r"^startup\\.sh$",\n    r"^%s$",\n]' % UNCLASSIFIED, 1)
         with open(paths_py, "w", encoding="utf-8") as f:
             f.write(content)
         git(["add", ".claude/hooks/paths.py"], self.tmp)

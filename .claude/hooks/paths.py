@@ -157,6 +157,10 @@ PRODUCTION_PATTERNS = [
 #         → 0件
 #       よって #1208 の根拠は当てはまらず、`^scripts/` を中立とする根拠に当てはまる。
 #       ワイルドカードにせず個別指定にする理由は setup.sh と同じ。
+#   startup.sh(リポジトリ直下、個別指定。#961)
+#       setup.sh / update.sh と同型: 利用者がホストで直接実行する運用スクリプトで、
+#       中立の scripts/wait-for-stack-healthy.sh へ委譲する。Dockerfile /
+#       docker-compose*.yml の ENTRYPOINT/CMD からは呼ばれない。
 #
 #       代償: 直下にスクリプトが増えるたびに、この個別指定のリストへ追記しない限り
 #       「黙って中立」に落ち、develop 上で test_every_tracked_file_is_classified が
@@ -191,6 +195,7 @@ NEUTRAL_PATTERNS = [
     r"(^|/)\.node-version$",
     r"^setup\.sh$",
     r"^update\.sh$",
+    r"^startup\.sh$",
 ]
 
 # Claude Code のサブエージェントが作る git worktree(#1036)。

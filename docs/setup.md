@@ -48,6 +48,13 @@ bash scripts/wait-for-stack-healthy.sh --all
 # 5. ブラウザで https://localhost にアクセス(自己署名証明書の警告は例外承認する)
 ```
 
+セットアップ済みの環境を起動し直すときは、上の手順 3〜4 をまとめた `./startup.sh` を使う
+(必要ならビルドし、全サービスが healthy になるまで待つ。`--build` で明示的に再ビルド。冪等)。
+
+```bash
+./startup.sh
+```
+
 ## システム要件
 
 - Docker / Docker Compose(Compose v2 系。`docker compose version` で確認)

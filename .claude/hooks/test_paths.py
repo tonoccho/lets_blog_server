@@ -195,6 +195,9 @@ class NeutralClassification(unittest.TestCase):
         # (update.sh:119 で既に中立の scripts/wait-for-stack-healthy.sh へ委譲、
         # ENTRYPOINT/CMD からは呼ばれない)。
         "update.sh",
+        # #961: リポジトリ直下の startup.sh。setup.sh / update.sh と同型(既に中立の
+        # scripts/wait-for-stack-healthy.sh へ委譲、ENTRYPOINT/CMD からは呼ばれない)。
+        "startup.sh",
     ]
 
     def test_neutral_is_neither(self):
