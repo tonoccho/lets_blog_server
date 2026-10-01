@@ -1713,6 +1713,15 @@ export function listAppSettings(): Promise<AppSetting[]> {
   return apiFetch<AppSetting[]>('/api/system-settings/app-settings');
 }
 
+export interface SiteAdminPathResponse {
+  path: string;
+}
+
+/** サイトの管理画面パスのグローバル既定値(ログイン済みなら非 admin でも読める)。 */
+export function getSiteAdminPath(): Promise<SiteAdminPathResponse> {
+  return apiFetch<SiteAdminPathResponse>('/api/system-settings/site-admin-path');
+}
+
 export function updateAppSettings(settings: Record<string, string>): Promise<void> {
   return apiFetch<void>('/api/system-settings/app-settings', {
     method: 'PUT',

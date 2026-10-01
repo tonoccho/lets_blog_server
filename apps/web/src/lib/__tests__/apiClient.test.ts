@@ -23,6 +23,7 @@ jest.mock('next-auth/jwt', () => ({ getToken: (...args: unknown[]) => getTokenMo
 
 import {
   getGeneratedImage,
+  getSiteAdminPath,
   listGeneratedImages,
   getSetupStatus,
   downloadGeneratedImageFile,
@@ -566,5 +567,16 @@ describe('listGeneratedImages のクエリ(issue #1472)', () => {
     expect(url.searchParams.get('projectId')).toBe('3')
     expect(url.searchParams.get('offset')).toBe('0')
     expect(url.searchParams.has('tag')).toBe(false)
+  })
+})
+
+describe('getSiteAdminPath', () => {
+  it('GET /api/system-settings/site-admin-path を呼び、path を返す', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ path: 'wp-admin' }))
+
+    const res = await getSiteAdminPath()
+
+    expect(res).toEqual({ path: 'wp-admin' })
+    expect(calls()[0][0]).toContain('/api/system-settings/site-admin-path')
   })
 })
