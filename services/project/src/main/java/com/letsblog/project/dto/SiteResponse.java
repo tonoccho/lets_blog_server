@@ -14,7 +14,8 @@ public record SiteResponse(
         LocalDateTime updatedAt,
         String connectionCheckStatus,
         boolean managedWordpress,
-        boolean sshConfigured
+        boolean sshConfigured,
+        String adminPath
 ) {
     public static SiteResponse from(Site site) {
         return from(site, null, false);
@@ -35,7 +36,8 @@ public record SiteResponse(
                 site.getUpdatedAt(),
                 connectionOk == null ? null : (connectionOk ? "SUCCESS" : "FAILED"),
                 site.isManagedWordpress(),
-                sshConfigured
+                sshConfigured,
+                site.getAdminPath()
         );
     }
 }

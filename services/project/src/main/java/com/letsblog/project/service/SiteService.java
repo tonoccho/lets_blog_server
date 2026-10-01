@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +44,10 @@ import org.springframework.util.StringUtils;
 @Service
 @Slf4j
 public class SiteService {
+
+    private static final int ADMIN_PATH_MAX_LENGTH = 200;
+    private static final Pattern URL_SCHEME_PREFIX = Pattern.compile("^[A-Za-z][A-Za-z0-9+.\\-]*:.*", Pattern.DOTALL);
+    private static final Pattern WHITESPACE_OR_CONTROL = Pattern.compile(".*[\\s\\p{Cntrl}].*", Pattern.DOTALL);
 
     private final SiteRepository siteRepository;
     private final CredentialCipher credentialCipher;
@@ -247,8 +252,15 @@ public class SiteService {
         if (request.name() != null && !StringUtils.hasText(request.name())) {
             throw new InvalidSiteNameException("サイト名は空にできません");
         }
+        // adminPathも変更前に検証する。null=変更しない、""=解除(NULL)、それ以外=検証して設定。
+        if (request.adminPath() != null && !request.adminPath().isEmpty()) {
+            requireRelativePath(request.adminPath());
+        }
         if (request.name() != null) {
             site.setName(request.name());
+        }
+        if (request.adminPath() != null) {
+            site.setAdminPath(request.adminPath().isEmpty() ? null : request.adminPath());
         }
 
         Boolean connectionOk = null;
@@ -271,6 +283,30 @@ public class SiteService {
 
         Site saved = siteRepository.save(site);
         return connectionOk != null ? SiteResponse.from(saved, connectionOk) : SiteResponse.from(saved);
+    }
+
+    /**
+     * 管理画面パスは非adminにも見えるリンクhrefになるため、同一オリジン内の相対パスに限定する。
+     * 規則はplatform-serviceの{@code AppSettingService#requireRelativePath}(issue #1079)と同一に保つ。
+     */
+    private void requireRelativePath(String value) {
+        if (value.length() > ADMIN_PATH_MAX_LENGTH) {
+            throw new InvalidSiteAdminPathException("adminPath は" + ADMIN_PATH_MAX_LENGTH + "文字以内で指定してください");
+        }
+        if (URL_SCHEME_PREFIX.matcher(value).matches() || value.startsWith("//")) {
+            throw new InvalidSiteAdminPathException("adminPath にはURL(スキーム付き・//始まり)ではなく相対パスを指定してください");
+        }
+        if (WHITESPACE_OR_CONTROL.matcher(value).matches()) {
+            throw new InvalidSiteAdminPathException("adminPath に空白文字・制御文字は使用できません");
+        }
+        if (value.indexOf('\\') >= 0) {
+            throw new InvalidSiteAdminPathException("adminPath にバックスラッシュ(\\)は使用できません");
+        }
+        for (String segment : value.split("/")) {
+            if (segment.equals("..")) {
+                throw new InvalidSiteAdminPathException("adminPath に「..」のパスセグメントは使用できません");
+            }
+        }
     }
 
     /**

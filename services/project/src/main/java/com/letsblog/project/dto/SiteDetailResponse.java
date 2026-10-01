@@ -17,7 +17,8 @@ public record SiteDetailResponse(
         boolean managedWordpress,
         boolean sshConfigured,
         Map<String, String> credentials,
-        List<String> configuredSecretFields
+        List<String> configuredSecretFields,
+        String adminPath
 ) {
     public static SiteDetailResponse from(
             Site site, boolean sshConfigured, Map<String, String> credentials, List<String> configuredSecretFields) {
@@ -32,7 +33,8 @@ public record SiteDetailResponse(
                 site.isManagedWordpress(),
                 sshConfigured,
                 credentials,
-                configuredSecretFields
+                configuredSecretFields,
+                site.getAdminPath()
         );
     }
 }

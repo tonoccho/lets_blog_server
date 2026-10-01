@@ -67,6 +67,10 @@ public class Site {
     @Column(name = "wp_db_name", length = 100)
     private String wpDbName;
 
+    // 管理画面パスのサイト個別の上書き。NULLはグローバル既定を使う(issue #1081)。
+    @Column(name = "admin_path", length = 200)
+    private String adminPath;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

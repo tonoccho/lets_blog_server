@@ -172,7 +172,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.empty());
 
         assertThrows(SiteNotFoundException.class,
-                () -> service().update(1L, new SiteUpdateRequest("name", null)));
+                () -> service().update(1L, new SiteUpdateRequest("name", null, null)));
     }
 
     @Test
@@ -183,7 +183,7 @@ class SiteServiceTest {
         site.setCmsType(CmsType.WORDPRESS);
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
 
-        SiteUpdateRequest request = new SiteUpdateRequest("name", Map.of("baseUrl", "https://x.example.com"));
+        SiteUpdateRequest request = new SiteUpdateRequest("name", Map.of("baseUrl", "https://x.example.com"), null);
 
         assertThrows(IllegalArgumentException.class, () -> service().update(1L, request));
     }
@@ -196,7 +196,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
 
         RuntimeException e = assertThrows(RuntimeException.class,
-                () -> service().update(1L, new SiteUpdateRequest("", null)));
+                () -> service().update(1L, new SiteUpdateRequest("", null, null)));
 
         assertEquals("サイト名は空にできません", e.getMessage());
         assertEquals("InvalidSiteNameException", e.getClass().getSimpleName());
@@ -212,7 +212,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
 
         RuntimeException e = assertThrows(RuntimeException.class,
-                () -> service().update(1L, new SiteUpdateRequest("   ", null)));
+                () -> service().update(1L, new SiteUpdateRequest("   ", null, null)));
 
         assertEquals("InvalidSiteNameException", e.getClass().getSimpleName());
         verify(siteRepository, never()).save(any());
@@ -226,7 +226,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service().update(1L, new SiteUpdateRequest(null, null));
+        service().update(1L, new SiteUpdateRequest(null, null, null));
 
         assertEquals("元の名前", site.getName());
     }
@@ -239,9 +239,137 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        service().update(1L, new SiteUpdateRequest("新しい名前", null));
+        service().update(1L, new SiteUpdateRequest("新しい名前", null, null));
 
         assertEquals("新しい名前", site.getName());
+    }
+
+    private Site siteWithAdminPath(String adminPath) {
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setAdminPath(adminPath);
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        return site;
+    }
+
+    @Test
+    void list_未設定のadminPathはnullで返る() {
+        Site site = new Site();
+        site.setId(1L);
+        when(siteRepository.findAll()).thenReturn(java.util.List.of(site));
+
+        assertEquals(null, service().list(null, null).get(0).adminPath());
+    }
+
+    @Test
+    void list_設定済みのadminPathを返す() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setAdminPath("secret-login");
+        when(siteRepository.findAll()).thenReturn(java.util.List.of(site));
+
+        assertEquals("secret-login", service().list(null, null).get(0).adminPath());
+    }
+
+    @Test
+    void getDetail_adminPathを返す() {
+        siteWithAdminPath("secret-login");
+
+        assertEquals("secret-login", service().getDetail(1L).adminPath());
+    }
+
+    @Test
+    void getDetail_未設定ならadminPathはnull() {
+        siteWithAdminPath(null);
+
+        assertEquals(null, service().getDetail(1L).adminPath());
+    }
+
+    @Test
+    void update_adminPathを設定して保存しレスポンスに反映する() {
+        Site site = siteWithAdminPath(null);
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SiteResponse response = service().update(1L, new SiteUpdateRequest(null, null, "secret-login"));
+
+        assertEquals("secret-login", site.getAdminPath());
+        assertEquals("secret-login", response.adminPath());
+    }
+
+    @Test
+    void update_先頭スラッシュ付きも許容し保存値はそのまま() {
+        Site site = siteWithAdminPath(null);
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service().update(1L, new SiteUpdateRequest(null, null, "/wp/login"));
+
+        assertEquals("/wp/login", site.getAdminPath());
+    }
+
+    @Test
+    void update_adminPathが無ければ保存済みの値を変えない() {
+        Site site = siteWithAdminPath("secret-login");
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service().update(1L, new SiteUpdateRequest("新しい名前", null, null));
+
+        assertEquals("secret-login", site.getAdminPath());
+        assertEquals("新しい名前", site.getName());
+    }
+
+    @Test
+    void update_空文字のadminPathは上書きを解除してnullにする() {
+        Site site = siteWithAdminPath("secret-login");
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SiteResponse response = service().update(1L, new SiteUpdateRequest(null, null, ""));
+
+        assertEquals(null, site.getAdminPath());
+        assertEquals(null, response.adminPath());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "javascript:alert(1)", "//evil.example.com", "https://evil.example.com/x", "../../etc",
+            "a/../b", "has space", "tab\there", "back\\slash", "a\u0000b"})
+    void update_不正なadminPathは拒否し保存済みの値も名前も変えない(String invalid) {
+        Site site = siteWithAdminPath("keep-me");
+
+        RuntimeException e = assertThrows(RuntimeException.class,
+                () -> service().update(1L, new SiteUpdateRequest("別の名前", null, invalid)));
+
+        assertEquals("InvalidSiteAdminPathException", e.getClass().getSimpleName());
+        assertEquals("keep-me", site.getAdminPath());
+        assertEquals("元の名前", site.getName());
+        verify(siteRepository, never()).save(any());
+    }
+
+    @Test
+    void update_201文字のadminPathは拒否し200文字は許容する() {
+        Site site = siteWithAdminPath("keep-me");
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        RuntimeException e = assertThrows(RuntimeException.class,
+                () -> service().update(1L, new SiteUpdateRequest(null, null, "a".repeat(201))));
+        assertEquals("InvalidSiteAdminPathException", e.getClass().getSimpleName());
+        assertEquals("keep-me", site.getAdminPath());
+
+        service().update(1L, new SiteUpdateRequest(null, null, "a".repeat(200)));
+        assertEquals("a".repeat(200), site.getAdminPath());
+    }
+
+    @Test
+    void update_不正なadminPathがあればcredentialsの更新も行わない() {
+        Site site = siteWithAdminPath("keep-me");
+        site.setManagedWordpress(false);
+
+        assertThrows(RuntimeException.class, () -> service().update(1L,
+                new SiteUpdateRequest(null, Map.of("baseUrl", "https://x.example.com"), "//evil")));
+
+        verify(bridgeClient, never()).testConnection(anyString(), any());
+        verify(siteRepository, never()).save(any());
     }
 
     @Test

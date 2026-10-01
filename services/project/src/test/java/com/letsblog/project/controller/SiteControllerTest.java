@@ -69,7 +69,7 @@ class SiteControllerTest {
 
     private SiteResponse buildResponse() {
         return new SiteResponse(1L, "Name", "my-site", CmsType.WORDPRESS, "https://example.com",
-                LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false);
+                LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null);
     }
 
     @Test
@@ -233,5 +233,39 @@ class SiteControllerTest {
                         .content("{\"name\":\"新しい名前\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("新しい名前"));
+    }
+    @Test
+    void update_adminPathを送ると200で設定され応答に含まれる() throws Exception {
+        SiteRepository siteRepository = mock(SiteRepository.class);
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        site.setCmsType(CmsType.WORDPRESS);
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        mockMvcWithRealService(siteRepository)
+                .perform(put("/api/sites/1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"adminPath\":\"secret-login\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.adminPath").value("secret-login"));
+    }
+
+    @Test
+    void update_不正なadminPathは400で保存済みの値は変わらない() throws Exception {
+        SiteRepository siteRepository = mock(SiteRepository.class);
+        Site site = new Site();
+        site.setId(1L);
+        site.setName("元の名前");
+        site.setAdminPath("keep-me");
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
+
+        mockMvcWithRealService(siteRepository)
+                .perform(put("/api/sites/1").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"adminPath\":\"javascript:alert(1)\"}"))
+                .andExpect(status().isBadRequest());
+
+        assertEquals("keep-me", site.getAdminPath());
+        verify(siteRepository, never()).save(any());
     }
 }

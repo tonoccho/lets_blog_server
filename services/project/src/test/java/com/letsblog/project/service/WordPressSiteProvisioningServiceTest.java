@@ -68,7 +68,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false));
+                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -115,7 +115,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false));
+                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -135,7 +135,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false));
+                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -163,7 +163,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false));
+                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -261,7 +261,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.adopt(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false));
+                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
 
         Site site = new Site();
         site.setId(1L);
@@ -301,7 +301,7 @@ class WordPressSiteProvisioningServiceTest {
                 new WordPressProvisioningClient.ProvisionResult(
                         "https://localhost/sites/target-key", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                2L, "Name", "target_key", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false));
+                2L, "Name", "target_key", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
 
         Site newSite = new Site();
         newSite.setId(2L);
