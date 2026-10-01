@@ -1,0 +1,85 @@
+package com.letsblog.publishing.domain;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import java.time.LocalDateTime;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+/**
+ * 記事提出1件(Pull Request 1本)のレビュー進行状態(issue #1339、Epic #1333)。
+ *
+ * <p>{@code projectId}と{@code submittedByUserId}は他サービスが所有する行のIDで、FKは持たない(ADR-0004)。
+ * {@code submittedByUserId}は提出APIを呼んだLet's Blogユーザーであり、GitHubのloginではない
+ * (共通トークン設定時はPR作成者が全員同じになるため、GitHub側は担当者の根拠にならない)。
+ */
+@Entity
+@Table(name = "article_reviews",
+        uniqueConstraints = @UniqueConstraint(name = "uk_article_reviews_project_pr",
+                columnNames = {"project_id", "github_pr_number"}))
+@Getter
+@Setter
+@NoArgsConstructor
+public class ArticleReview {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "project_id", nullable = false)
+    private Long projectId;
+
+    @Column(name = "github_pr_number", nullable = false)
+    private Integer githubPrNumber;
+
+    @Column(name = "github_issue_number", nullable = false)
+    private Integer githubIssueNumber;
+
+    @Column(name = "article_slug", nullable = false, length = 255)
+    private String articleSlug;
+
+    @Column(name = "submitted_by_user_id", nullable = false)
+    private Long submittedByUserId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "state", nullable = false, length = 32)
+    private ArticleReviewState state;
+
+    @Column(name = "submitted_at", nullable = false)
+    private LocalDateTime submittedAt;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    void onCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        createdAt = now;
+        updatedAt = now;
+        submittedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
+
+    /** 提出済みへ戻す(再提出)。提出日時も更新する。 */
+    public void markSubmitted() {
+        state = ArticleReviewState.SUBMITTED;
+        submittedAt = LocalDateTime.now();
+    }
+}

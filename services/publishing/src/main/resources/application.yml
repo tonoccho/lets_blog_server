@@ -84,6 +84,10 @@ spring:
   # 属する」と事前決定されていたが、issue #708の実装時点で永続化コードパス自体が既に存在しない
   # ことを確認したため、物理テーブルはlegacy-api側でFlyway migrationにより削除し、本スキーマへの
   # 再作成は行わない判断とした(BulkOperationLog.javaのJavadoc参照)。
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
   flyway:
     enabled: true
     locations: classpath:db/migration

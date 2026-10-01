@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -103,6 +104,72 @@ public class GithubPullRequestClient {
             throw new GithubApiException("GitHubの応答からdefault_branchを読み取れませんでした: " + slug(access));
         }
         return branch;
+    }
+
+    /**
+     * headブランチがリポジトリに在るかを返す(issue #1339)。404は「無い」として偽を返す(GitHubはリポジトリ不在も
+     * 404で返すため区別できないが、リポジトリの存在はこの前に解決済みのアクセス情報が保証する)。
+     * 認証失敗・権限不足・通信失敗は偽にせず{@link GithubApiException}にする。
+     */
+    public boolean branchExists(GithubAccess access, String branch) {
+        List<Object> vars = new ArrayList<>();
+        vars.add(access.owner());
+        vars.add(access.repo());
+        StringBuilder template = new StringBuilder("/repos/{owner}/{repo}/branches");
+        int index = 0;
+        for (String segment : branch.split("/")) {
+            template.append("/{s").append(index++).append('}');
+            vars.add(segment);
+        }
+        try {
+            client.get()
+                    .uri(template.toString(), vars.toArray())
+                    .header("Authorization", "Bearer " + access.token())
+                    .accept(MediaType.parseMediaType(GITHUB_JSON))
+                    .retrieve()
+                    .toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;
+            }
+            throw new GithubApiException(errorMessage(e, "ブランチの確認", "ブランチが見つかりません: " + branch), e);
+        } catch (RestClientException e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Pull Requestを作成して返す(issue #1339)。{@code head}は既にプッシュ済みのブランチ名、{@code base}は
+     * 呼び出し側が解決したリポジトリの{@code default_branch}。
+     */
+    public GithubPullRequestSummary createPullRequest(
+            GithubAccess access, String title, String body, String head, String base) {
+        JsonNode response;
+        try {
+            response = client.post()
+                    .uri("/repos/{owner}/{repo}/pulls", access.owner(), access.repo())
+                    .header("Authorization", "Bearer " + access.token())
+                    .accept(MediaType.parseMediaType(GITHUB_JSON))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("title", title, "body", body, "head", head, "base", base))
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(
+                    errorMessage(e, "Pull Requestの作成", "リポジトリが見つかりません: " + slug(access)), e);
+        } catch (RestClientException e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new GithubApiException("GitHubから空の応答を受け取りました(Pull Requestの作成: " + head + ")");
+        }
+        return new GithubPullRequestSummary(
+                response.path("number").asInt(),
+                response.path("title").asText(""),
+                response.path("head").path("ref").asText(""),
+                response.path("created_at").asText(""),
+                response.path("html_url").asText(""));
     }
 
     /**

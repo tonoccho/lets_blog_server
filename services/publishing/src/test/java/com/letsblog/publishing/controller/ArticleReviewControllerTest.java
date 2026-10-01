@@ -9,7 +9,11 @@ import static org.mockito.Mockito.when;
 
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
+import com.letsblog.publishing.domain.ArticleReviewState;
+import com.letsblog.publishing.dto.ArticleSubmissionRequest;
+import com.letsblog.publishing.dto.ArticleSubmissionResponse;
 import com.letsblog.publishing.github.GithubPullRequestClient;
+import com.letsblog.publishing.service.ArticleSubmissionService;
 import com.letsblog.publishing.dto.PullRequestArticleResponse;
 import com.letsblog.publishing.github.GithubPullRequestSummary;
 import com.letsblog.publishing.service.PullRequestArticleService;
@@ -42,10 +46,13 @@ class ArticleReviewControllerTest {
     @Mock
     private PullRequestArticleService pullRequestArticleService;
 
+    @Mock
+    private ArticleSubmissionService articleSubmissionService;
+
     private ArticleReviewController controller() {
         return new ArticleReviewController(
                 adminAuthorizationService, currentActorService, projectServiceClient, githubPullRequestClient,
-                pullRequestArticleService);
+                pullRequestArticleService, articleSubmissionService);
     }
 
     @Test
@@ -116,5 +123,41 @@ class ArticleReviewControllerTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessageContaining("ログイン");
         verifyNoInteractions(projectServiceClient, pullRequestArticleService);
+    }
+
+    @Test
+    @DisplayName("提出は認可後に操作者でGitHubアクセス情報を解決し、操作者のIDを添えて提出サービスへ渡す")
+    void submit() {
+        GithubAccess access = new GithubAccess("t", "octo", "blog");
+        ArticleSubmissionRequest request = new ArticleSubmissionRequest("article/a", 12, "a");
+        ArticleSubmissionResponse expected = new ArticleSubmissionResponse(
+                9, "https://github.com/octo/blog/pull/9", ArticleReviewState.SUBMITTED, 3L, true);
+        when(currentActorService.getCurrentActorId()).thenReturn(3L);
+        when(projectServiceClient.resolveGithubAccess(7L, 3L)).thenReturn(access);
+        when(articleSubmissionService.submit(7L, 3L, access, request)).thenReturn(expected);
+
+        assertThat(controller().submit(7L, request)).isEqualTo(expected);
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+    }
+
+    @Test
+    @DisplayName("提出もメンバーでも管理者でもなければ拒否され、何にも触れない")
+    void submitForbidden() {
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+
+        assertThatThrownBy(() -> controller().submit(7L, new ArticleSubmissionRequest("article/a", 12, "a")))
+                .isInstanceOf(ForbiddenException.class);
+        verifyNoInteractions(projectServiceClient, articleSubmissionService);
+    }
+
+    @Test
+    @DisplayName("提出も操作者を解決できなければログインが必要として拒否する")
+    void submitUnresolvedActor() {
+        when(currentActorService.getCurrentActorId()).thenReturn(null);
+
+        assertThatThrownBy(() -> controller().submit(7L, new ArticleSubmissionRequest("article/a", 12, "a")))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("ログイン");
+        verifyNoInteractions(projectServiceClient, articleSubmissionService);
     }
 }

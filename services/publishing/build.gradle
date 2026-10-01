@@ -27,6 +27,8 @@ dependencies {
     // 現時点では自身が所有するドメインテーブルは無い(posts/user_site_authors等はいずれも他サービス
     // 所有)が、Flyway基盤自体は他サービスと同じ構成で用意しておく(issue #707要件1、将来分割2の
     // bulk_operation_logs移管(#572で事前決定)等が乗る前提)。
+    // article_reviews(記事提出・レビューの進行状態、issue #1339)をJPAで持つ。他サービスと同じ構成。
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-mysql'
     implementation 'com.mysql:mysql-connector-j'

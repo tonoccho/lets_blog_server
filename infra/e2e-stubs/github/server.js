@@ -14,6 +14,7 @@
  *   GET    /repos/{owner}/{repo}/pulls?state=
  *   POST   /repos/{owner}/{repo}/pulls
  *   GET    /repos/{owner}/{repo}/pulls/{number}
+ *   GET    /repos/{owner}/{repo}/branches/{branch}         (ブランチが在れば200、無ければ404。#1339)
  *   GET    /repos/{owner}/{repo}/pulls/{number}/files
  *   PUT    /repos/{owner}/{repo}/pulls/{number}/merge
  *   DELETE /repos/{owner}/{repo}/git/refs/heads/{branch}
@@ -240,6 +241,17 @@ createStub({
       sendJson(res, 200, {
         name: 'acceptance', full_name: 'e2e-stub/acceptance', private: false, default_branch: DEFAULT_BRANCH,
       });
+      return true;
+    }
+
+    const branchMatch = /^\/repos\/[^/]+\/[^/]+\/branches\/(.+)$/.exec(pathname);
+    if (branchMatch && method === 'GET') {
+      const branch = decodeURIComponent(branchMatch[1]);
+      if (!repo.branches.has(branch)) {
+        sendJson(res, 404, { message: 'Branch not found', documentation_url: 'stub' });
+        return true;
+      }
+      sendJson(res, 200, { name: branch, protected: branch === DEFAULT_BRANCH });
       return true;
     }
 

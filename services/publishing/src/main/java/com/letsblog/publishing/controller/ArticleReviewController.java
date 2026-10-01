@@ -2,16 +2,22 @@ package com.letsblog.publishing.controller;
 
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
+import com.letsblog.publishing.dto.ArticleSubmissionRequest;
+import com.letsblog.publishing.dto.ArticleSubmissionResponse;
 import com.letsblog.publishing.dto.PullRequestArticleResponse;
 import com.letsblog.publishing.github.GithubPullRequestClient;
 import com.letsblog.publishing.github.GithubPullRequestSummary;
 import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.ArticleSubmissionService;
 import com.letsblog.publishing.service.CurrentActorService;
 import com.letsblog.publishing.service.ForbiddenException;
 import com.letsblog.publishing.service.PullRequestArticleService;
+import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,18 +34,21 @@ public class ArticleReviewController {
     private final ProjectServiceClient projectServiceClient;
     private final GithubPullRequestClient githubPullRequestClient;
     private final PullRequestArticleService pullRequestArticleService;
+    private final ArticleSubmissionService articleSubmissionService;
 
     public ArticleReviewController(
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService,
             ProjectServiceClient projectServiceClient,
             GithubPullRequestClient githubPullRequestClient,
-            PullRequestArticleService pullRequestArticleService) {
+            PullRequestArticleService pullRequestArticleService,
+            ArticleSubmissionService articleSubmissionService) {
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
         this.projectServiceClient = projectServiceClient;
         this.githubPullRequestClient = githubPullRequestClient;
         this.pullRequestArticleService = pullRequestArticleService;
+        this.articleSubmissionService = articleSubmissionService;
     }
 
     /**
@@ -62,11 +71,29 @@ public class ArticleReviewController {
         return pullRequestArticleService.fetch(resolveAccess(projectId), prNumber);
     }
 
+    /**
+     * プッシュ済みのheadブランチを提出する(issue #1339)。サーバがPull Requestを作り(拡張はGitHubへ直接
+     * アクセスしない)、API を呼んだLet's Blogユーザーを提出者として記録する。同じheadに開いているPRが
+     * あれば新規作成せずそのPRを返し、状態を提出済みへ戻す。ブランチが無ければ404。
+     */
+    @PostMapping("/submissions")
+    public ArticleSubmissionResponse submit(
+            @PathVariable Long projectId, @Valid @RequestBody ArticleSubmissionRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Long actorId = requireActorId();
+        return articleSubmissionService.submit(
+                projectId, actorId, projectServiceClient.resolveGithubAccess(projectId, actorId), request);
+    }
+
     private GithubAccess resolveAccess(Long projectId) {
+        return projectServiceClient.resolveGithubAccess(projectId, requireActorId());
+    }
+
+    private Long requireActorId() {
         Long actorId = currentActorService.getCurrentActorId();
         if (actorId == null) {
             throw new ForbiddenException("この操作にはログインが必要です");
         }
-        return projectServiceClient.resolveGithubAccess(projectId, actorId);
+        return actorId;
     }
 }
