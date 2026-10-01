@@ -80,6 +80,7 @@ public class UserService {
     private final CredentialCipher credentialCipher;
     private final KeycloakAdminClient keycloakAdminClient;
     private final DomainEventPublisher domainEventPublisher;
+    private final AuditLogService auditLogService;
     private final UserMigrationPersister userMigrationPersister;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -89,12 +90,14 @@ public class UserService {
             CredentialCipher credentialCipher,
             KeycloakAdminClient keycloakAdminClient,
             DomainEventPublisher domainEventPublisher,
+            AuditLogService auditLogService,
             UserMigrationPersister userMigrationPersister) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.credentialCipher = credentialCipher;
         this.keycloakAdminClient = keycloakAdminClient;
         this.domainEventPublisher = domainEventPublisher;
+        this.auditLogService = auditLogService;
         this.userMigrationPersister = userMigrationPersister;
     }
 
@@ -306,6 +309,7 @@ public class UserService {
             syncKeycloakAdminRole(user.getKeycloakSub(), isAdminRole(request.role()));
         }
 
+        String oldRole = user.getRole();
         if (request.role() != null) {
             user.setRole(request.role());
         }
@@ -313,14 +317,24 @@ public class UserService {
             user.setPasswordHash(passwordEncoder.encode(request.password()));
         }
 
+        UserResponse response;
         try {
-            return UserResponse.from(userRepository.saveAndFlush(user));
+            response = UserResponse.from(userRepository.saveAndFlush(user));
         } catch (RuntimeException e) {
             if (syncedKeycloak) {
                 compensateKeycloakAdminRole(user.getKeycloakSub(), wasAdmin);
             }
             throw e;
         }
+
+        // issue #1137: role指定を伴う更新を監査ログに記録する(admin昇格を含む)。
+        // #955のsyncKeycloakAdminRoleと同様、変化の有無を問わず記録する
+        // (「role=adminにrole=adminを指定し直す」ような整合の確認操作も認可に関わる)。
+        if (request.role() != null) {
+            auditLogService.logUserRoleUpdated(id, oldRole, request.role());
+        }
+
+        return response;
     }
 
     /**
@@ -452,6 +466,7 @@ public class UserService {
             keycloakAdminClient.deleteUser(user.getKeycloakSub());
         }
         userRepository.deleteById(id);
+        auditLogService.logUserDeleted(id);
     }
 
     /**
@@ -499,6 +514,7 @@ public class UserService {
         UserResponse response = UserResponse.from(userRepository.save(user));
         // user.deactivatedイベント(letsblog.events、issue #580)。各サービスの権限キャッシュ破棄用。
         domainEventPublisher.publishUserDeactivated(user.getId(), user.getKeycloakSub());
+        auditLogService.logUserDeactivated(user.getId());
         return response;
     }
 
@@ -512,7 +528,9 @@ public class UserService {
             keycloakAdminClient.setEnabled(user.getKeycloakSub(), true);
         }
         user.setEnabled(true);
-        return UserResponse.from(userRepository.save(user));
+        UserResponse response = UserResponse.from(userRepository.save(user));
+        auditLogService.logUserReactivated(user.getId());
+        return response;
     }
 
     /**

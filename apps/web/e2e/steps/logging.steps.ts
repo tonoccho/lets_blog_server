@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
 import { parseApiDateTime } from '../support/apiDateTime';
 import { After, Given, Step, Then, When } from './fixtures';
@@ -244,6 +245,11 @@ function listUnifiedLogs(
 /** シナリオが作ったプロジェクトを後始末の対象として覚えておく。 */
 function rememberProject(ctx: Record<string, unknown>, projectId: number): void {
   ctx.at15ProjectIds = [...((ctx.at15ProjectIds as number[] | undefined) ?? []), projectId];
+}
+
+/** シナリオが作ったmanaged WordPressサイトを後始末の対象として覚えておく。 */
+function rememberSite(ctx: Record<string, unknown>, siteId: number): void {
+  ctx.at15SiteIds = [...((ctx.at15SiteIds as number[] | undefined) ?? []), siteId];
 }
 
 function uniqueSuffix(): string {
@@ -548,9 +554,17 @@ Then('ロールの付与・変更・剥奪の3件が監査ログに現れるま�
   ctx.at15AuditEntries = found;
 });
 
+/**
+ * issue #1137: プロジェクトメンバー操作(resourceType=PROJECT_USER)とユーザー操作
+ * (resourceType=USER)の両方から使う共通の検証ステップ。`ctx.at15AuditExpectedResourceType`/
+ * `ctx.at15AuditExpectedResourceId` が設定されていればそちらを使い、無ければ
+ * 従来どおりプロジェクトメンバーのシナリオ(PROJECT_USER / at15AuditProjectId)とみなす。
+ */
 Then('監査ログの各件には操作者・日時・対象・操作種別が揃っている', async ({ ctx, request }) => {
   const entries = ctx.at15AuditEntries as AuditLogEntry[];
-  const projectId = ctx.at15AuditProjectId as number;
+  const expectedResourceType = (ctx.at15AuditExpectedResourceType as string | undefined) ?? 'PROJECT_USER';
+  const expectedResourceId = (ctx.at15AuditExpectedResourceId as number | undefined)
+    ?? (ctx.at15AuditProjectId as number);
   const sub = keycloakSubOf(await adminToken(request));
 
   for (const entry of entries) {
@@ -561,8 +575,8 @@ Then('監査ログの各件には操作者・日時・対象・操作種別が�
       Number.isNaN(parseApiDateTime(entry.createdAt)),
       `監査ログ ${entry.action} の日時を解釈できません: ${entry.createdAt}`
     ).toBe(false);
-    expect(entry.resourceType, `監査ログ ${entry.action} に対象種別がありません`).toBe('PROJECT_USER');
-    expect(entry.resourceId, `監査ログ ${entry.action} の対象が違います`).toBe(projectId);
+    expect(entry.resourceType, `監査ログ ${entry.action} に対象種別がありません`).toBe(expectedResourceType);
+    expect(entry.resourceId, `監査ログ ${entry.action} の対象が違います`).toBe(expectedResourceId);
   }
 });
 
@@ -625,6 +639,247 @@ Then('その監査ログは元のまま残っている', async ({ ctx, request }
 
   expect(after, `監査ログ ${before.id} が消えています`).toBeTruthy();
   expect(after, '監査ログの内容が書き換わっています').toEqual(before);
+});
+
+// --------------------------------------- 一括削除(bulk-management delete-all、issue #1137)
+
+/**
+ * `articlePlan.steps.ts`の`createTaxonomySite`(issue #935/AT-9)と同じ手順
+ * (managed WordPressサイトをProjectの`test`環境へ紐付け、wp-cliで実カテゴリ・実タグを作る)を
+ * このfeature専用に再現したもの。各stepファイルは自己完結という既存の慣習
+ * (`environmentSync.steps.ts`も同様にwp-cli呼び出しを自前で持つ)に倣い、ここでも別ファイルの
+ * 非公開ヘルパーを import せず独立に持つ。
+ *
+ * スラッグは固定値でよい。フィクスチャはシナリオごとに新しいサイトを作るため、
+ * 同一サイト内での重複を心配する必要が無い。
+ */
+const WORDPRESS_CONTAINER = 'lbs-wordpress';
+const BULK_DELETE_CATEGORY_SLUG = 'at15-bulk-category';
+const BULK_DELETE_TAG_SLUG = 'at15-bulk-tag';
+
+function wpCli(siteKey: string, args: string[]): string {
+  return execFileSync(
+    'docker',
+    ['exec', WORDPRESS_CONTAINER, 'wp', '--allow-root', `--path=/var/www/html/sites/${siteKey}`, ...args],
+    { encoding: 'utf8', timeout: 120_000 }
+  ).trim();
+}
+
+async function createBulkDeleteTaxonomySite(
+  request: APIRequestContext, token: string, projectId: number
+): Promise<number> {
+  const siteKey = `at15bd${uniqueSuffix()}`.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32);
+  const created = await sendWithRateLimitRetry(() => request.post('/api/sites/managed-wordpress', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      name: `E2E AT15 bulk-delete ${siteKey}`,
+      siteKey,
+      title: 'E2E AT15 bulk-delete',
+      adminUser: 'at15admin',
+      adminEmail: 'at15@letsblog.local',
+      adminPassword: 'At15Fixture!Pass123',
+      locale: 'ja',
+    },
+    timeout: 120_000,
+  }));
+  expect(
+    created.ok(),
+    `一括削除検証用の公開先サイト作成に失敗しました (status=${created.status()}): ${await created.text()}`
+  ).toBe(true);
+  const siteId = ((await created.json()) as { id: number }).id;
+
+  const bound = await sendWithRateLimitRetry(() => request.post(`/api/projects/${projectId}/environments`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { environment: 'test', siteId },
+  }));
+  expect(
+    bound.ok(),
+    `一括削除検証用の公開先サイト紐付けに失敗しました (status=${bound.status()}): ${await bound.text()}`
+  ).toBe(true);
+
+  wpCli(siteKey, [
+    'term', 'create', 'category', 'AT15 一括削除カテゴリ', `--slug=${BULK_DELETE_CATEGORY_SLUG}`, '--porcelain',
+  ]);
+  wpCli(siteKey, [
+    'term', 'create', 'post_tag', 'AT15 一括削除タグ', `--slug=${BULK_DELETE_TAG_SLUG}`, '--porcelain',
+  ]);
+
+  return siteId;
+}
+
+Given('監査ログ検証用の、公開先に実カテゴリと実タグを持つプロジェクトがある', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const unique = uniqueSuffix();
+  const response = await sendWithRateLimitRetry(() => request.post('/api/projects', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { name: `AT15 一括削除 ${unique}`, slug: `at15-bulkdelete-${unique}` },
+  }));
+  expect(
+    response.ok(),
+    `一括削除検証用プロジェクトの作成に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  const projectId = ((await response.json()) as { id: number }).id;
+  ctx.at15AuditProjectId = projectId;
+  rememberProject(ctx, projectId);
+
+  const siteId = await createBulkDeleteTaxonomySite(request, token, projectId);
+  rememberSite(ctx, siteId);
+});
+
+When('そのカテゴリを一括削除する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const projectId = ctx.at15AuditProjectId as number;
+  const response = await sendWithRateLimitRetry(() => request.post(
+    `/api/projects/${projectId}/bulk-management/categories/delete-all`,
+    { headers: { Authorization: `Bearer ${token}` }, data: { slug: BULK_DELETE_CATEGORY_SLUG }, timeout: 120_000 }
+  ));
+  expect(
+    response.ok(),
+    `カテゴリの一括削除に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+});
+
+When('そのタグを一括削除する', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const projectId = ctx.at15AuditProjectId as number;
+  const response = await sendWithRateLimitRetry(() => request.post(
+    `/api/projects/${projectId}/bulk-management/tags/delete-all`,
+    { headers: { Authorization: `Bearer ${token}` }, data: { slug: BULK_DELETE_TAG_SLUG }, timeout: 120_000 }
+  ));
+  expect(
+    response.ok(),
+    `タグの一括削除に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+});
+
+Then('カテゴリの一括削除が監査ログに現れるまで待つ', async ({ ctx, request, $testInfo }) => {
+  $testInfo.setTimeout($testInfo.timeout + LOG_POLL_TIMEOUT_MS);
+  const token = await adminToken(request);
+  const projectId = ctx.at15AuditProjectId as number;
+  const known = ctx.at15KnownAuditIds as Set<number>;
+
+  const entry = await pollFor('カテゴリ一括削除の監査ログ', async () => {
+    const logs = (await listAuditLogs(request, token)).content;
+    return findNewAuditLog(logs, known, projectId, 'CATEGORY_BULK_DELETED');
+  });
+
+  ctx.at15AuditEntries = [entry];
+  ctx.at15AuditExpectedResourceType = 'CATEGORY';
+  ctx.at15AuditExpectedResourceId = projectId;
+});
+
+Then('タグの一括削除が監査ログに現れるまで待つ', async ({ ctx, request, $testInfo }) => {
+  $testInfo.setTimeout($testInfo.timeout + LOG_POLL_TIMEOUT_MS);
+  const token = await adminToken(request);
+  const projectId = ctx.at15AuditProjectId as number;
+  const known = ctx.at15KnownAuditIds as Set<number>;
+
+  const entry = await pollFor('タグ一括削除の監査ログ', async () => {
+    const logs = (await listAuditLogs(request, token)).content;
+    return findNewAuditLog(logs, known, projectId, 'TAG_BULK_DELETED');
+  });
+
+  ctx.at15AuditEntries = [entry];
+  ctx.at15AuditExpectedResourceType = 'TAG';
+  ctx.at15AuditExpectedResourceId = projectId;
+});
+
+// --------------------------------------- ユーザーの無効化・role変更・削除(issue #1137)
+
+/**
+ * 検証用に使い捨てるユーザーを作る。共有アカウント({@link E2E_TEST_EMAIL})を
+ * 無効化・削除すると他シナリオを巻き込むため、この一連のシナリオ専用に1人作る。
+ */
+Given('監査ログ検証用の使い捨てユーザーがいる', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const unique = uniqueSuffix();
+  const response = await sendWithRateLimitRetry(() => request.post('/api/users', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      email: `at15-disposable-${unique}@letsblog.local`,
+      password: `At15Disposable-${unique}`,
+      role: 'user',
+    },
+  }));
+  expect(
+    response.ok(),
+    `使い捨てユーザーの作成に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  ctx.at15DisposableUserId = ((await response.json()) as { id: number }).id;
+});
+
+When(
+  'そのユーザーを無効化し、再有効化し、roleをadminへ変更し、削除する',
+  async ({ ctx, request }) => {
+    const token = await adminToken(request);
+    const userId = ctx.at15DisposableUserId as number;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const deactivated = await sendWithRateLimitRetry(() =>
+      request.post(`/api/users/${userId}/deactivate`, { headers })
+    );
+    expect(
+      deactivated.ok(),
+      `無効化に失敗しました (status=${deactivated.status()}): ${await deactivated.text()}`
+    ).toBe(true);
+
+    const reactivated = await sendWithRateLimitRetry(() =>
+      request.post(`/api/users/${userId}/reactivate`, { headers })
+    );
+    expect(
+      reactivated.ok(),
+      `再有効化に失敗しました (status=${reactivated.status()}): ${await reactivated.text()}`
+    ).toBe(true);
+
+    const roleUpdated = await sendWithRateLimitRetry(() =>
+      request.patch(`/api/users/${userId}`, { headers, data: { role: 'admin' } })
+    );
+    expect(
+      roleUpdated.ok(),
+      `role変更に失敗しました (status=${roleUpdated.status()}): ${await roleUpdated.text()}`
+    ).toBe(true);
+
+    const deleted = await sendWithRateLimitRetry(() =>
+      request.delete(`/api/users/${userId}`, { headers })
+    );
+    expect(
+      deleted.ok(),
+      `削除に失敗しました (status=${deleted.status()}): ${await deleted.text()}`
+    ).toBe(true);
+  }
+);
+
+Then('無効化・再有効化・role変更・削除の4件が監査ログに現れるまで待つ', async ({ ctx, request, $testInfo }) => {
+  $testInfo.setTimeout($testInfo.timeout + LOG_POLL_TIMEOUT_MS);
+  const token = await adminToken(request);
+  const userId = ctx.at15DisposableUserId as number;
+  const known = ctx.at15KnownAuditIds as Set<number>;
+
+  const found = await pollFor('ユーザー無効化・再有効化・role変更・削除の監査ログ4件', async () => {
+    const logs = (await listAuditLogs(request, token)).content;
+    const entries = [
+      findNewAuditLog(logs, known, userId, 'USER_DEACTIVATED'),
+      findNewAuditLog(logs, known, userId, 'USER_REACTIVATED'),
+      findNewAuditLog(logs, known, userId, 'USER_ROLE_UPDATED'),
+      findNewAuditLog(logs, known, userId, 'USER_DELETED'),
+    ];
+    return entries.every((entry) => entry !== null) ? (entries as AuditLogEntry[]) : null;
+  });
+
+  ctx.at15AuditEntries = found;
+  ctx.at15AuditExpectedResourceType = 'USER';
+  ctx.at15AuditExpectedResourceId = userId;
+});
+
+Then('role変更の監査ログのchangesから変更前後のroleが読み取れる', async ({ ctx }) => {
+  const entries = ctx.at15AuditEntries as AuditLogEntry[];
+  const roleUpdated = entries.find((entry) => entry.action === 'USER_ROLE_UPDATED');
+  expect(roleUpdated, 'USER_ROLE_UPDATEDの監査ログが見つかりません').toBeTruthy();
+  expect(roleUpdated?.changes, 'role変更の監査ログにchangesがありません').toBeTruthy();
+
+  const changes = JSON.parse(roleUpdated?.changes as string) as { role?: { from?: string; to?: string } };
+  expect(changes.role?.from, 'changesに変更前のroleがありません').toBe('user');
+  expect(changes.role?.to, 'changesに変更後のroleがありません').toBe('admin');
 });
 
 // ------------------------------------------- フロントエンドエラーログ(frontend-error-log.feature)
@@ -1139,7 +1394,8 @@ Then('停止中の監査ログは記録されていない', async ({ ctx, reques
 
 After({ tags: '@logging' }, async ({ ctx, request }) => {
   const projectIds = (ctx.at15ProjectIds as number[] | undefined) ?? [];
-  if (projectIds.length === 0) {
+  const siteIds = (ctx.at15SiteIds as number[] | undefined) ?? [];
+  if (projectIds.length === 0 && siteIds.length === 0) {
     return;
   }
   // 停止したサービスの復旧は degradation.steps.ts の @destructive フックが行う。
@@ -1166,4 +1422,21 @@ After({ tags: '@logging' }, async ({ ctx, request }) => {
     }
   }
   ctx.at15ProjectIds = [];
+  // プロジェクトを先に消す(articlePlan.steps.ts の後始末と同じ順序)。managed WordPress
+  // サイト自体はプロジェクト削除に連動しないため、別に消す必要がある。
+  for (const siteId of siteIds) {
+    const response = await sendWithRateLimitRetry(() =>
+      request.delete(`/api/sites/${siteId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 120_000,
+      })
+    ).catch(() => null);
+    if (response === null || !response.ok()) {
+      console.warn(
+        `[AT-15] 検証用サイト ${siteId} を削除できませんでした`
+        + `${response ? ` (status=${response.status()})` : ''}`
+      );
+    }
+  }
+  ctx.at15SiteIds = [];
 });

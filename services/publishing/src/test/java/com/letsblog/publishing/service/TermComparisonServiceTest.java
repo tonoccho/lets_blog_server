@@ -209,6 +209,33 @@ class TermComparisonServiceTest {
                 eq(1L), eq("test"), any(), any(), any(), any(), any(), any(), eq(9L));
     }
 
+    /** issue #1137レビュー対応: toValue()のerror()分岐(L179)のカバレッジを補う。 */
+    @Test
+    void listCategoryComparison_一部環境がエラーでも他環境のslugはerror値として表示される() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildExternalSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, null)));
+        when(siteService.resolveDataSource(testSite))
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
+        when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(
+                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
+                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
+                        java.util.Map.of("test", "stacktrace")));
+
+        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        assertTrue(page.items().get(0).local().available());
+        assertFalse(page.items().get(0).test().available());
+        assertEquals("Connection refused", page.items().get(0).test().errorMessage());
+    }
+
     // ---- deleteCategoryEverywhere ----
 
     @Test
@@ -245,6 +272,29 @@ class TermComparisonServiceTest {
         when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
 
         assertThrows(IllegalArgumentException.class, () -> service.deleteCategoryEverywhere(1L, "oshirase", 9L));
+    }
+
+    /** issue #1137レビュー対応: deleteTagEverywhereでのdeleteType三項演算子(L317)のカバレッジを補う。 */
+    @Test
+    void deleteTagEverywhere_存在する環境のみ削除される() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listTags("local-site")).thenReturn(List.of());
+        when(bulkManagementClient.listTags("test-site"))
+                .thenReturn(List.of(new CategoryInfo("新着", "shinchaku", null, null)));
+        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
+                .thenReturn(new BulkOperationLog());
+
+        List<BulkOperationLog> results = service.deleteTagEverywhere(1L, "shinchaku", 9L);
+
+        assertEquals(1, results.size());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "test", BulkOperationType.TAG_DELETE, null, null, null, null, "shinchaku", 9L);
     }
 
     // ---- editCategoryAndSync ----
@@ -308,6 +358,28 @@ class TermComparisonServiceTest {
                 "新説明", null, 9L);
     }
 
+    /** issue #1137レビュー対応: editTagAndSyncのBulkOperationType三項演算子(L242/L243)のカバレッジを補う。 */
+    @Test
+    void editTagAndSync_タグ用のBulkOperationTypeで呼ばれる() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listTags(any())).thenReturn(List.of());
+        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
+                .thenReturn(new BulkOperationLog());
+
+        List<BulkOperationLog> results = service.editTagAndSync(
+                1L, "shinchaku", "新着", "shinchaku-new", null, null, 9L);
+
+        assertEquals(2, results.size());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "test", BulkOperationType.TAG_CREATE, "新着", "shinchaku-new", null, null, null, 9L);
+    }
+
     // ---- syncAllCategoriesToMaster ----
 
     @Test
@@ -354,6 +426,99 @@ class TermComparisonServiceTest {
         assertTrue(results.isEmpty());
         verify(bulkManagementService, never()).applyToEnvironment(
                 eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L));
+    }
+
+    /**
+     * issue #1137レビュー対応: マスター環境に項目自体が存在しない(missing()、available=true・slug=null)
+     * 行は同期対象から除外される分岐(L285のmasterValue.slug()==null側)のカバレッジを補う。
+     */
+    @Test
+    void syncAllCategoriesToMaster_マスターに存在しない項目は同期対象外() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("ローカル限定", "local-only", null, null)));
+        when(bulkManagementClient.listCategories("test-site")).thenReturn(List.of());
+
+        List<BulkOperationLog> results = service.syncAllCategoriesToMaster(1L, 9L);
+
+        assertTrue(results.isEmpty());
+        verify(bulkManagementService, never()).applyToEnvironment(
+                eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L));
+    }
+
+    /**
+     * issue #1137レビュー対応: マスター環境自体が未紐付け(unavailable()、available=false)の場合は
+     * 全行が同期対象外になる分岐(L285のmasterValue.available()==false側)のカバレッジを補う。
+     */
+    @Test
+    void syncAllCategoriesToMaster_マスター環境が未紐付けなら全行が対象外() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, null, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("ローカル限定", "local-only", null, null)));
+
+        List<BulkOperationLog> results = service.syncAllCategoriesToMaster(1L, 9L);
+
+        assertTrue(results.isEmpty());
+        verify(bulkManagementService, never()).applyToEnvironment(
+                eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L));
+    }
+
+    /** issue #1137レビュー対応: needsSyncのslug差分分岐(L305)のカバレッジを補う(大文字小文字違い)。 */
+    @Test
+    void syncAllCategoriesToMaster_slugの大文字小文字が異なれば同期対象になる() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listCategories("test-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, null)));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "Oshirase", null, null)));
+        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
+                .thenReturn(new BulkOperationLog());
+
+        List<BulkOperationLog> results = service.syncAllCategoriesToMaster(1L, 9L);
+
+        assertEquals(1, results.size());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_EDIT, "お知らせ", "oshirase", null, null, "Oshirase", 9L);
+    }
+
+    /** issue #1137レビュー対応: needsSyncのparentSlug差分分岐(L306)のカバレッジを補う。 */
+    @Test
+    void syncAllCategoriesToMaster_parentSlugのみ異なれば同期対象になる() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        Site localSite = buildManagedSite(10L, "local-site");
+        Site testSite = buildManagedSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(bulkManagementClient.listCategories("test-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", "oya", null)));
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", "chigau-oya", null)));
+        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
+                .thenReturn(new BulkOperationLog());
+
+        List<BulkOperationLog> results = service.syncAllCategoriesToMaster(1L, 9L);
+
+        assertEquals(1, results.size());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_EDIT, "お知らせ", "oshirase", "oya", null, "oshirase", 9L);
     }
 
     // ---- タグ(カテゴリと同じロジックを共有していることの確認) ----
@@ -448,6 +613,81 @@ class TermComparisonServiceTest {
         verify(bulkManagementService).logFetchFailure(
                 eq(1L), eq(BulkOperationType.CATEGORY_FETCH), eq("test"), eq("Connection refused"),
                 eq("java.io.IOException: Connection refused\n\tat ..."));
+    }
+
+    /**
+     * issue #1137レビュー対応: タグ側のSSH取得(L390の"post_tag"分岐/L424/L426のタグ側ログ)の
+     * カバレッジを補う。
+     */
+    @Test
+    void listTagComparison_SSH取得失敗時はerror値になり作業ログに記録する() {
+        TermComparisonService service = service();
+        Project project = buildProject(null, 20L, null, "test");
+        Site testSite = buildExternalSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.resolveDataSource(testSite))
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
+        when(sshOperations.fetchTermsForEnvironments(eq("post_tag"), any())).thenReturn(
+                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
+                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
+                        java.util.Map.of("test", "stacktrace")));
+
+        TermComparisonPage page = service.listTagComparison(1L, 0, 20);
+
+        assertEquals(0, page.items().size());
+        verify(sshOperations).fetchTermsForEnvironments(eq("post_tag"), any());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.TAG_FETCH), eq("test"), eq("Connection refused"), eq("stacktrace"));
+    }
+
+    /**
+     * issue #1137レビュー対応: 非managedかつSSHも使えないサイトはunavailableになる分岐(L379)の
+     * カバレッジを補う。
+     */
+    @Test
+    void listCategoryComparison_SSHも使えない非managedサイトはunavailableになる() {
+        TermComparisonService service = service();
+        Project project = buildProject(10L, null, null, "test");
+        Site externalSite = buildExternalSite(10L, "local-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
+        when(siteService.resolveDataSource(externalSite))
+                .thenReturn(new SiteService.SiteDataSource(false, null));
+
+        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
+
+        assertEquals(0, page.items().size());
+        verify(sshOperations, never()).fetchTermsForEnvironments(any(), any());
+    }
+
+    /** issue #1137レビュー対応: sshPort未設定時は既定の22番ポートでホストキーをまとめる分岐(L418)のカバレッジを補う。 */
+    @Test
+    void listCategoryComparison_sshPort未設定なら既定の22番でホストをまとめる() {
+        TermComparisonService service = service();
+        Project project = buildProject(null, 20L, 30L, "test");
+        Site testSite = buildExternalSite(20L, "test-site");
+        Site productionSite = buildExternalSite(30L, "production-site");
+        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials credsWithoutPort =
+                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
+                        "https://example.com", null, "SSH", "203.0.113.5", null, "deploy",
+                        "/var/www/html/test", "PEM", null, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
+        when(siteService.resolveDataSource(testSite))
+                .thenReturn(new SiteService.SiteDataSource(false, credsWithoutPort));
+        when(siteService.resolveDataSource(productionSite))
+                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/production")));
+        when(sshOperations.fetchTermsForEnvironments(eq("category"), any())).thenReturn(
+                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
+                        java.util.Map.of(), java.util.Map.of(), java.util.Map.of()));
+
+        service.listCategoryComparison(1L, 0, 20);
+
+        // 双方とも同一ホスト(203.0.113.5)かつポート未設定=既定22番なので、production側の
+        // 明示的な22番指定と同一ホストキーになり1回のfetchにまとまる。
+        verify(sshOperations, org.mockito.Mockito.times(1)).fetchTermsForEnvironments(eq("category"), any());
     }
 
     // ---- issue #1474: agent経路の環境別取得の並列化 ----

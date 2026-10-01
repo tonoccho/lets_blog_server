@@ -1,7 +1,9 @@
 package com.letsblog.publishing.service;
 
+import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
+import com.letsblog.publishing.domain.AuditLogAction;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
 import com.letsblog.publishing.domain.Project;
@@ -84,10 +86,12 @@ public class PluginThemeComparisonService {
         return reconcile(projectId, slug, changes, actorId, true);
     }
 
+    @AuditLog(action = AuditLogAction.PLUGIN_BULK_DELETED, resourceType = "PLUGIN")
     public List<BulkOperationLog> deletePluginEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, false);
     }
 
+    @AuditLog(action = AuditLogAction.THEME_BULK_DELETED, resourceType = "THEME")
     public List<BulkOperationLog> deleteThemeEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, true);
     }

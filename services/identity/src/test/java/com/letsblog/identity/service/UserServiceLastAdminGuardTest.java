@@ -38,6 +38,8 @@ class UserServiceLastAdminGuardTest {
     @Mock
     private DomainEventPublisher domainEventPublisher;
     @Mock
+    private AuditLogService auditLogService;
+    @Mock
     private UserMigrationPersister userMigrationPersister;
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
@@ -46,7 +48,7 @@ class UserServiceLastAdminGuardTest {
     private UserService service() {
         return new UserService(
                 userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher,
-                userMigrationPersister);
+                auditLogService, userMigrationPersister);
     }
 
     private User user(long id, String role) {

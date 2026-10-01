@@ -27,6 +27,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-jackson2'
     implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    // issue #1137: AuditLogService(role変更のchanges組み立て)がcom.fasterxml.jackson.databind.
+    // ObjectMapperを直接使うため明示的に追加する(Boot 4の既定ObjectMapperはJackson3系
+    // (tools.jackson)に変わったため。publishing-service等と同じ構成)。
+    implementation 'org.springframework.boot:spring-boot-jackson2'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
     implementation 'com.mysql:mysql-connector-j'
     // issue #786で専用スキーマlbs_identityをFlywayで管理するようにしたが、依存の追加が漏れていた。

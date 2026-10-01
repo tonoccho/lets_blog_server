@@ -53,6 +53,9 @@ class UserServiceTest {
     private DomainEventPublisher domainEventPublisher;
 
     @Mock
+    private AuditLogService auditLogService;
+
+    @Mock
     private UserMigrationPersister userMigrationPersister;
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
@@ -61,7 +64,7 @@ class UserServiceTest {
     private UserService service() {
         return new UserService(
                 userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher,
-                userMigrationPersister);
+                auditLogService, userMigrationPersister);
     }
 
     @Test
@@ -236,6 +239,62 @@ class UserServiceTest {
         verify(keycloakAdminClient).deleteUser("kc-sub-955-5");
     }
 
+    /** issue #1137レビュー対応: role検証の異常系分岐(#642)のカバレッジを補う。 */
+    @Test
+    void create_不正なroleは例外() {
+        UserService service = service();
+
+        InvalidRoleException thrown = assertThrows(InvalidRoleException.class,
+                () -> service.create(new UserCreateRequest("bad-role@example.com", "password123", "superadmin")));
+
+        assertTrue(thrown.getMessage().contains("admin"));
+        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+    }
+
+    /** issue #1137レビュー対応: setupInitialAdmin の二重セットアップ拒否(L159/L179)のカバレッジを補う。 */
+    @Test
+    void setupInitialAdmin_利用者が既にいれば例外() {
+        UserService service = service();
+        when(userRepository.count()).thenReturn(1L);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.setupInitialAdmin("second@example.com", "password123"));
+
+        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+    }
+
+    /** issue #1137レビュー対応: setupInitialAdmin のメール重複拒否(L182)のカバレッジを補う。 */
+    @Test
+    void setupInitialAdmin_メールが既に登録済みなら例外() {
+        UserService service = service();
+        when(userRepository.count()).thenReturn(0L);
+        when(userRepository.existsByEmail("dup-first@example.com")).thenReturn(true);
+
+        assertThrows(EmailAlreadyExistsException.class,
+                () -> service.setupInitialAdmin("dup-first@example.com", "password123"));
+
+        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+    }
+
+    /**
+     * issue #1137レビュー対応: {@code resolveDefaultRole}の「未知のroleにはRBACロールを付けない」
+     * 分岐(L239)のカバレッジを補う。現行の公開APIはすべて{@code validateRole}で
+     * "admin"/"user"以外を先に拒否するため、この分岐に公開経路からは到達できない
+     * (private呼び出しでのみ再現できる、意図された防御的分岐)。
+     */
+    @Test
+    void resolveDefaultRole_未知のroleはnullを返す() throws Exception {
+        UserService service = service();
+        java.lang.reflect.Method method =
+                UserService.class.getDeclaredMethod("resolveDefaultRole", String.class);
+        method.setAccessible(true);
+
+        Object result = method.invoke(service, "unknown-legacy-role");
+
+        assertNull(result);
+        verify(roleRepository, never()).findByRoleName(any());
+    }
+
     @Test
     void update_admin昇格でrealmロールを付与する_issue955() {
         UserService service = service();
@@ -249,6 +308,8 @@ class UserServiceTest {
         assertEquals("admin", response.role());
         verify(keycloakAdminClient).grantRealmRole("kc-sub-955-6", "admin");
         verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        // issue #1137: role変更が監査ログを記録し、変更前後のroleを渡す。
+        verify(auditLogService).logUserRoleUpdated(1L, "user", "admin");
     }
 
     @Test
@@ -279,6 +340,8 @@ class UserServiceTest {
 
         verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
         verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        // issue #1137: role指定が無い更新(パスワードのみ等)は監査ログを記録しない。
+        verify(auditLogService, never()).logUserRoleUpdated(any(), any(), any());
     }
 
     /**
@@ -313,6 +376,39 @@ class UserServiceTest {
         verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
     }
 
+    /** issue #1137レビュー対応: password が空文字の場合は更新しない分岐(L313)のカバレッジを補う。 */
+    @Test
+    void update_passwordが空文字なら更新しない() {
+        UserService service = service();
+        User user = buildUser();
+        String originalHash = user.getPasswordHash();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.update(1L, new UserUpdateRequest(null, ""));
+
+        assertEquals(originalHash, user.getPasswordHash());
+    }
+
+    /**
+     * issue #1137レビュー対応: ローカル保存失敗時、role未指定(syncedKeycloak=false)なら
+     * Keycloakの補償を行わない分岐(L321)のカバレッジを補う。
+     */
+    @Test
+    void update_role未指定でローカル保存に失敗してもKeycloak補償は行わない() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-955-16");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(new RuntimeException("DB書き込み失敗"));
+
+        assertThrows(RuntimeException.class,
+                () -> service.update(1L, new UserUpdateRequest(null, "newpassword123")));
+
+        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
+        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+    }
+
     @Test
     void update_realmロール付与に失敗したらローカルのroleも変えない_issue955() {
         UserService service = service();
@@ -329,6 +425,8 @@ class UserServiceTest {
         // (実際のトランザクションでも例外の伝播でロールバックされる)。
         assertEquals("user", user.getRole());
         verify(userRepository, never()).saveAndFlush(any(User.class));
+        // issue #1137: 保存まで到達していないので監査ログも記録しない。
+        verify(auditLogService, never()).logUserRoleUpdated(any(), any(), any());
     }
 
     /**
@@ -508,6 +606,26 @@ class UserServiceTest {
         verify(userRepository, never()).existsByEmail(any());
     }
 
+    /** issue #1137レビュー対応: keycloakSub設定済みならKeycloak側も同期する分岐(L401)のカバレッジを補う。 */
+    @Test
+    void updateUserProfile_keycloakSub設定済みならKeycloak側も同期する() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-profile-1");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserProfileUpdateRequest request = new UserProfileUpdateRequest(
+                "太郎", "山田", "山田太郎", "taro",
+                "https://example.com", "自己紹介", "ja_JP",
+                "https://gravatar.com/avatar/xxx", "開発部", "エンジニア",
+                null, null, null);
+
+        service.updateUserProfile(1L, request);
+
+        verify(keycloakAdminClient).updateProfile("kc-sub-profile-1", "太郎", "山田");
+    }
+
     @Test
     void updateGithubToken_暗号化して保存される() {
         UserService service = service();
@@ -553,6 +671,18 @@ class UserServiceTest {
         verify(userRepository).deleteById(1L);
     }
 
+    /** issue #1137: ユーザー削除が監査ログを記録する。 */
+    @Test
+    void delete_監査ログを記録する_issue1137() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        service.delete(1L);
+
+        verify(auditLogService).logUserDeleted(1L);
+    }
+
     @Test
     void delete_Keycloak削除に失敗したらローカルも削除しない() {
         UserService service = service();
@@ -565,6 +695,15 @@ class UserServiceTest {
         assertThrows(KeycloakUserSyncException.class, () -> service.delete(1L));
 
         verify(userRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void deactivate_存在しないユーザーは例外() {
+        UserService service = service();
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(UserNotFoundException.class, () -> service.deactivate(99L));
+        verify(auditLogService, never()).logUserDeactivated(any());
     }
 
     @Test
@@ -582,6 +721,42 @@ class UserServiceTest {
         verify(domainEventPublisher).publishUserDeactivated(1L, "kc-sub-5");
     }
 
+    /** issue #1137: ユーザー無効化が監査ログを記録する。 */
+    @Test
+    void deactivate_監査ログを記録する_issue1137() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-5b");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.deactivate(1L);
+
+        verify(auditLogService).logUserDeactivated(1L);
+    }
+
+    @Test
+    void deactivate_keycloakSub未設定ならKeycloakを呼ばないが監査ログは記録する_issue1137() {
+        UserService service = service();
+        User user = buildUser();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.deactivate(1L);
+
+        verify(keycloakAdminClient, never()).setEnabled(any(), anyBoolean());
+        verify(auditLogService).logUserDeactivated(1L);
+    }
+
+    @Test
+    void reactivate_存在しないユーザーは例外() {
+        UserService service = service();
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThrows(UserNotFoundException.class, () -> service.reactivate(99L));
+        verify(auditLogService, never()).logUserReactivated(any());
+    }
+
     @Test
     void reactivate_ローカルとKeycloak双方を有効化する() {
         UserService service = service();
@@ -595,6 +770,35 @@ class UserServiceTest {
 
         assertTrue(response.enabled());
         verify(keycloakAdminClient).setEnabled("kc-sub-6", true);
+    }
+
+    /** issue #1137: ユーザー再有効化が監査ログを記録する。 */
+    @Test
+    void reactivate_監査ログを記録する_issue1137() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-6b");
+        user.setEnabled(false);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.reactivate(1L);
+
+        verify(auditLogService).logUserReactivated(1L);
+    }
+
+    @Test
+    void reactivate_keycloakSub未設定ならKeycloakを呼ばないが監査ログは記録する_issue1137() {
+        UserService service = service();
+        User user = buildUser();
+        user.setEnabled(false);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.reactivate(1L);
+
+        verify(keycloakAdminClient, never()).setEnabled(any(), anyBoolean());
+        verify(auditLogService).logUserReactivated(1L);
     }
 
     @Test
@@ -613,6 +817,48 @@ class UserServiceTest {
         assertTrue(summary.failedUserIds().isEmpty());
         assertEquals("kc-sub-7", user.getKeycloakSub());
         verify(keycloakAdminClient).sendPasswordResetEmail("kc-sub-7");
+    }
+
+    /**
+     * issue #1137レビュー対応: userIds を明示指定した場合の対象絞り込み分岐(L501/L504)の
+     * カバレッジを補う。既にkeycloak_sub設定済みのユーザーは(userIdsに含まれていても)
+     * 対象から除外される。
+     */
+    @Test
+    void migrateToKeycloak_userIds指定時は未移行のみ対象にする() {
+        UserService service = service();
+        User notMigrated = buildUser();
+        notMigrated.setId(1L);
+        User alreadyMigrated = buildUser();
+        alreadyMigrated.setId(2L);
+        alreadyMigrated.setEmail("already@example.com");
+        alreadyMigrated.setKeycloakSub("kc-sub-already");
+        when(userRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(notMigrated, alreadyMigrated));
+        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-migrated");
+        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(List.of(1L, 2L));
+
+        assertEquals(List.of(1L), summary.migratedUserIds());
+        verify(keycloakAdminClient, never()).createUser("already@example.com", null, null, true);
+    }
+
+    /**
+     * issue #1137レビュー対応: userIds に空リストを渡した場合の分岐(L501)のカバレッジを補う。
+     * {@code userIds == null || userIds.isEmpty()} は空リストでも真になるため、
+     * 全件対象({@code findByKeycloakSubIsNull()})と同じ経路を辿る。
+     */
+    @Test
+    void migrateToKeycloak_userIdsが空リストなら全件対象と同じ経路になる() {
+        UserService service = service();
+        when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of());
+
+        MigrationSummaryResponse summary = service.migrateToKeycloak(List.of());
+
+        assertTrue(summary.migratedUserIds().isEmpty());
+        assertTrue(summary.failedUserIds().isEmpty());
+        verify(userRepository).findByKeycloakSubIsNull();
+        verify(userRepository, never()).findAllById(any());
     }
 
     /**
@@ -858,6 +1104,25 @@ class UserServiceTest {
 
         assertEquals(List.of(1L), summary.deactivatedUserIds());
         assertFalse(user.isEnabled());
+    }
+
+    /**
+     * issue #1137レビュー対応: 既に無効化済みのユーザーはKeycloakへの存在確認自体を
+     * スキップする短絡評価の分岐(L550)のカバレッジを補う。
+     */
+    @Test
+    void reconcileWithKeycloak_既に無効化済みならKeycloakへ問い合わせない() {
+        UserService service = service();
+        User user = buildUser();
+        user.setKeycloakSub("kc-sub-disabled");
+        user.setEnabled(false);
+        when(userRepository.findByKeycloakSubIsNotNull()).thenReturn(List.of(user));
+
+        ReconciliationSummaryResponse summary = service.reconcileWithKeycloak();
+
+        assertTrue(summary.deactivatedUserIds().isEmpty());
+        verify(keycloakAdminClient, never()).exists(any());
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test

@@ -122,6 +122,35 @@ class PostComparisonServiceTest {
                 .logFetchFailure(eq(1L), eq(BulkOperationType.POST_FETCH), eq("local"), eq("接続エラー"), any());
     }
 
+    /** issue #1137レビュー対応: toValue()のerror()分岐(L156)のカバレッジを補う。 */
+    @Test
+    void listComparison_一部環境がエラーでも他環境のslugはerror値として表示される() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildSite(10L, "local-site");
+        Site testSite = buildSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
+        CmsCredentials.WordPressCredentials testCreds = creds("https://test.test");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+        when(siteService.getCredentials("test-site")).thenReturn(testCreds);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.listPosts(localCreds, "post")).thenReturn(
+                List.of(new CmsPostSummary("101", "こんにちは", "hello", "publish", "post")));
+        when(cmsAdapter.listPosts(testCreds, "post")).thenThrow(new RuntimeException("接続エラー"));
+
+        PostComparisonPage page = service.listComparison(1L, "post", 0, 20);
+
+        assertEquals(1, page.items().size());
+        PostEnvironmentValue local = page.items().get(0).local();
+        assertTrue(local.available());
+        PostEnvironmentValue test = page.items().get(0).test();
+        assertTrue(test.error());
+        assertEquals("接続エラー", test.errorMessage());
+    }
+
     @Test
     void deleteEverywhere_見つかった環境のみ削除しログを返す() {
         PostComparisonService service = service();
@@ -185,6 +214,53 @@ class PostComparisonServiceTest {
         List<BulkOperationLog> results = service.updateStatusEverywhere(1L, "post", "hello", "publish", 9L);
 
         assertEquals(1, results.size());
+    }
+
+    /** issue #1137レビュー対応: updateStatusEverywhereでslugが見つからない環境の分岐(L130)のカバレッジを補う。 */
+    @Test
+    void updateStatusEverywhere_一致するslugが無い環境はスキップする() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildSite(10L, "local-site");
+        Site testSite = buildSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
+        CmsCredentials.WordPressCredentials testCreds = creds("https://test.test");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+        when(siteService.getCredentials("test-site")).thenReturn(testCreds);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.listPosts(localCreds, "post")).thenReturn(
+                List.of(new CmsPostSummary("101", "こんにちは", "hello", "draft", "post")));
+        when(cmsAdapter.listPosts(testCreds, "post")).thenReturn(
+                List.of(new CmsPostSummary("202", "別の投稿", "other-slug", "draft", "post")));
+
+        BulkOperationLog log = buildLog();
+        when(bulkManagementService.updatePostStatusAtEnvironment(
+                1L, "local", localSite, "101", "post", "hello", "publish", 9L)).thenReturn(log);
+
+        List<BulkOperationLog> results = service.updateStatusEverywhere(1L, "post", "hello", "publish", 9L);
+
+        assertEquals(1, results.size());
+        org.mockito.Mockito.verify(bulkManagementService, org.mockito.Mockito.never())
+                .updatePostStatusAtEnvironment(eq(1L), eq("test"), any(), any(), any(), any(), any(), any());
+    }
+
+    /** issue #1137レビュー対応: updateStatusEverywhereで対象が1件も無い場合の分岐(L137)のカバレッジを補う。 */
+    @Test
+    void updateStatusEverywhere_どの環境にも見つからなければ例外() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, null, null);
+        Site localSite = buildSite(10L, "local-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getCredentials("local-site")).thenReturn(creds("https://local.test"));
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.listPosts(any(), eq("post"))).thenReturn(List.of());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateStatusEverywhere(1L, "post", "missing", "publish", 9L));
     }
 
     private BulkOperationLog buildLog() {

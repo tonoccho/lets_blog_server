@@ -1,8 +1,10 @@
 package com.letsblog.publishing.service;
 
+import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.config.EnvironmentFetchExecutorConfig;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
+import com.letsblog.publishing.domain.AuditLogAction;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
 import com.letsblog.publishing.domain.Project;
@@ -108,10 +110,12 @@ public class TermComparisonService {
         return sync(projectId, slug, actorId, false);
     }
 
+    @AuditLog(action = AuditLogAction.CATEGORY_BULK_DELETED, resourceType = "CATEGORY")
     public List<BulkOperationLog> deleteCategoryEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, true);
     }
 
+    @AuditLog(action = AuditLogAction.TAG_BULK_DELETED, resourceType = "TAG")
     public List<BulkOperationLog> deleteTagEverywhere(Long projectId, String slug, Long actorId) {
         return deleteEverywhere(projectId, slug, actorId, false);
     }

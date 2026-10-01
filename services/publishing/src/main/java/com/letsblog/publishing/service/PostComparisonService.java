@@ -1,9 +1,11 @@
 package com.letsblog.publishing.service;
 
+import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsPostSummary;
+import com.letsblog.publishing.domain.AuditLogAction;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
 import com.letsblog.publishing.domain.Project;
@@ -84,6 +86,7 @@ public class PostComparisonService {
         return new PostComparisonPage(pageItems, page, size, totalCount, postType);
     }
 
+    @AuditLog(action = AuditLogAction.POST_BULK_DELETED, resourceType = "POST")
     public List<BulkOperationLog> deleteEverywhere(Long projectId, String postType, String slug, Long actorId) {
         Project project = getProject(projectId);
         Map<String, EnvironmentPosts> byEnvironment = resolvePostsByEnvironment(project, postType);
