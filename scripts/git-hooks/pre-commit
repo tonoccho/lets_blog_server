@@ -8,7 +8,8 @@ Claude Code のフック(.claude/hooks/guard.py)はエージェントの操作�
   1. フェーズ分離 — テストコードとプロダクションコードを同じコミットに入れない
   2. テストの黙殺 — @Disabled / test.skip などを追加しない
      (マージコミットでは、1 は免除、2 は MERGE_HEAD 側に既にある記述に限り免除、
-     5 は免除しない — #1125、#1452)
+     5 は免除しない — #1125、#1452。コンフリクトなしの `git merge` 経路では、マージ前の
+     HEAD 側に無い黙殺だけを拒否する — #1460)
   3. テストファースト — プロダクションコードのコミットより前に、
      このブランチにテストコードの変更が存在すること
   4. `apps/web` のリポジトリ全体カバレッジ床 — apps/web に触れるコミットに限り
@@ -167,7 +168,25 @@ def present_in_merge_head(path, pattern):
     return re.search(pattern, content) is not None
 
 
-def check_silencers(files):
+def present_in_head(path, pattern):
+    """マージ前の `HEAD` 側の同じパスに既に黙殺パターンがあれば True(新規パスは空扱い)。"""
+    content = run(["git", "show", "HEAD:%s" % path]) or ""
+    return re.search(pattern, content) is not None
+
+
+def check_silencers(files, head_baseline=False):
+    """追加行にテストの黙殺があれば拒否する(検査2)。
+
+    既定(`git commit` 経路): マージコミット中は `MERGE_HEAD` 側に既にある記述に限り免除する
+    (#1125)。
+
+    `head_baseline=True`(`scripts/git-hooks/pre-merge-commit` が渡す、#1460): コンフリクトなしの
+    マージ経路。この時点では `MERGE_HEAD` がまだ無く、しかも追加行はすべて取り込み側由来なので
+    「`MERGE_HEAD` 側にあれば許す」では何も拒否できない。代わりに**マージ前の `HEAD` 側**に
+    同じパターンが無い場合だけ拒否する — 取り込み側が新たに持ち込んだ黙殺だけを止め、
+    HEAD 側に既にある記述を含む行の編集(正当な `git merge origin/develop`)は通す。
+    実体をここ1箇所に保つため、`pre-merge-commit` は引数でこの基準を切り替える。
+    """
     merging = merge_in_progress()
     for path in files:
         if not (is_test(path) or is_production(path)):
@@ -176,13 +195,23 @@ def check_silencers(files):
         added = "\n".join(l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
         for pattern, label in SILENCERS:
             if re.search(pattern, added):
-                if merging and present_in_merge_head(path, pattern):
+                if head_baseline:
+                    if present_in_head(path, pattern):
+                        continue
+                elif merging and present_in_merge_head(path, pattern):
                     continue
+                hint = ""
+                if head_baseline:
+                    hint = (
+                        "\n\nマージは中断されました(コミットは作られていません)が、マージ結果は"
+                        "index に残っています。取り込み側のブランチで黙殺を取り除いてから"
+                        "取り込み直してください。マージ前に戻すなら `git merge --abort`。"
+                    )
                 fail(
                     "テストを黙らせる変更が含まれています: %s (%s)" % (label, path),
                     "失敗しているテストは直すものであって、skip / ignore / 削除するものではありません。\n"
                     "まずプロダクションコードを修正してください。テストケース自体が不適切だと\n"
-                    "示せる場合に限りテストを修正し、その理由を報告すること。",
+                    "示せる場合に限りテストを修正し、その理由を報告すること。%s" % hint,
                 )
 
 

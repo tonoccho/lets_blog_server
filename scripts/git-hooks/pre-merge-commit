@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""コンフリクトなしの `git merge` が未分類パスを持ち込むコミットを拒否する git フック(#1452)。
+"""コンフリクトなしの `git merge` が未分類パスとテストの黙殺を持ち込むコミットを拒否する git フック(#1452、#1460)。
 
 ## なぜこのファイルが要る — `pre-commit` だけでは経路が1本足りない
 
@@ -14,7 +14,7 @@ git はコミットの経路ごとに**別のフック**を起動する(`man git
 そのもの(他ブランチで追加された未分類パスが `develop` の取り込みで気づかれず入り込む)
 が通る道であり、しかも検査が発火しないので気づく手段がそもそも無い、という形で現れた。
 
-## `pre-commit` を丸ごと委譲しない — `check_unclassified` だけを走らせる理由
+## `pre-commit` を丸ごと委譲しない — 検査2と5だけを走らせる理由
 
 `man githooks` は「既定の `pre-merge-commit` は、有効なら `pre-commit` を走らせる」と
 述べているが、本リポジトリはそれに倣わない。`pre-commit` の5つの検査をこの経路でも
@@ -30,13 +30,24 @@ git はコミットの経路ごとに**別のフック**を起動する(`man git
     直す Issue のブランチ(このリポジトリで最も普通の Issue の形)には `is_test` が
     1件も無い。委譲すると、そのブランチで `develop` を取り込む**正当な**
     `git merge origin/develop` が拒否されてしまう。
-  - 検査2(テストの黙殺)・検査4(`apps/web` カバレッジ床)は、免除するかバイパスを
-    許容するかの判断自体が #1460 の範囲であり、本フックでは扱わない。
+  - 検査4(`apps/web` カバレッジ床)は、利用者の判断(#1460、2026-10-01)により
+    マージ経路では走らせない。`npm run test:coverage` はマージのたびに実測20秒超かかり、
+    床の保証は別の層に任せる。
 
-したがって、この経路で走らせるのは検査5(未分類パスの拒否)だけにする。マージで
-未分類パスが取り込まれることは正常な事象ではなく、まさに #1208 → #1321 → #1452 が
-繰り返し踏んできた欠陥そのものなので、免除しない(`pre-commit` の `check_unclassified`
-と同じ判断)。
+したがって、この経路で走らせるのは検査5(未分類パスの拒否)と検査2(テストの黙殺、#1460)
+だけにする。
+
+  - 検査5: マージで未分類パスが取り込まれることは正常な事象ではなく、まさに
+    #1208 → #1321 → #1452 が繰り返し踏んできた欠陥そのものなので、免除しない
+    (`pre-commit` の `check_unclassified` と同じ判断)。
+  - 検査2: `pre-commit` のコンフリクト経路は #1125 により「`MERGE_HEAD` 側に既に同じ
+    パターンがあれば許す」。だがコンフリクトなしのマージでは追加行がすべて取り込み側
+    (= `MERGE_HEAD` 側)由来で、しかもこの時点では `MERGE_HEAD` がまだ無いので、
+    その免除をそのまま使うと何も拒否できない。かといって免除なしでは、HEAD 側に既にある
+    黙殺記述(例: `security.spec.ts` の `test.skip(!E2E_ADMIN_PASSWORD, …)`)を含む行を
+    取り込み側が編集しただけの正当な `git merge origin/develop` が止まる。そこで
+    **マージ前の HEAD 側の同じパスに同じパターンが無い場合だけ**拒否する
+    (`check_silencers(files, head_baseline=True)`)。
 
 ## 詰みにならない理由
 
@@ -73,7 +84,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ハイフンを含み `.py` 拡張子も無いファイル名は `import` 文で読めず、
 # `importlib.util.spec_from_file_location` も拡張子からローダーを推測できないため、
-# `SourceFileLoader` を明示する。こうすることで `check_unclassified` / `staged_files` の
+# `SourceFileLoader` を明示する。こうすることで `check_unclassified` / `check_silencers` / `staged_files` の
 # 実体を1箇所(`pre-commit`)に保ち、ここではコピーしない。
 _LOADER = importlib.machinery.SourceFileLoader("pre_commit_hook", os.path.join(HERE, "pre-commit"))
 _SPEC = importlib.util.spec_from_loader(_LOADER.name, _LOADER)
@@ -86,6 +97,7 @@ def main():
     if not files:
         return 0
     _pre_commit.check_unclassified(files, merging=True)
+    _pre_commit.check_silencers(files, head_baseline=True)
     return 0
 
 

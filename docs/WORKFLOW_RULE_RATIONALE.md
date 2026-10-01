@@ -320,8 +320,8 @@ develop の取り込みで気づかれず入り込む)が通る道であり、�
   `.claude/` と `docs/` は中立分類なので、ワークフローや文書だけを直す Issue のブランチ
   (このリポジトリで最も普通の Issue の形)には `is_test` が1件も無い。委譲すると、
   そのブランチで `develop` を取り込む**正当な** `git merge origin/develop` が拒否されてしまう。
-- 検査2(テストの黙殺)・検査4(`apps/web` カバレッジ床)は、この経路で免除するかどうかの
-  判断自体が **#1460** の範囲であり、本 Issue では扱わない。
+- 検査2(テストの黙殺)・検査4(`apps/web` カバレッジ床)は #1452 では扱わず #1460 に
+  回した。#1460 の結論(利用者の判断、2026-10-01)は本節末尾の「#1460 の追補」を参照。
 
 したがって `pre-merge-commit` はこの検査(検査5)だけを走らせる。実装は
 `scripts/git-hooks/pre-commit` を `importlib` でモジュールとして読み込み、
@@ -363,6 +363,18 @@ develop の取り込みで気づかれず入り込む)が通る道であり、�
 `pre-commit` が起動して解決する。実測:
 `scripts/test_pre_merge_commit_unclassified.py` →
 `test_paths_py_classification_added_after_aborted_merge_lets_commit_succeed`。
+
+### #1460 の追補 — `pre-merge-commit` に検査2だけを足し、検査4は足さない
+
+利用者の判断(2026-10-01): `pre-merge-commit` に走らせるのは検査2(テストの黙殺)を足すところまで。
+検査4(`apps/web` カバレッジ床)はマージ経路では走らせない(`npm run test:coverage` は実測20秒超で、
+マージのたびに課さない)。検査2の免除は `pre-commit` の #1125(「`MERGE_HEAD` 側にあれば許す」)を
+流用できない: コンフリクトなしのマージでは追加行がすべて取り込み側由来で、しかも `pre-merge-commit`
+の時点では `MERGE_HEAD` が無いため、何も拒否できなくなる。そこで**マージ前の `HEAD:<path>` に
+同じパターンが無いときだけ拒否**する。この結果、同じ黙殺の取り込みが「コンフリクトなしなら拒否、
+コンフリクトありなら #1125 により許可」と経路で異なる。揃えるかは #1460 の Open Question で、
+本変更はコンフリクトあり経路を変えていない。`cherry-pick` / `revert` / `rebase` には git にフックが
+無く、塞げない限界として CLAUDE.md に明記した。
 
 ## Coverage check が測定不能なコードを失敗にしない理由 (#942, #935)
 

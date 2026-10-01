@@ -150,5 +150,6 @@ echo "  あらゆるコミッタ(エージェント・人間を問わず)のコ�
 echo "  $HOOK の検査を受けます: フェーズ分離 / テストの黙殺 / テストファースト /"
 echo "  apps/web カバレッジ床 / 未分類パスの拒否。"
 echo "  コンフリクトなしの git merge(pre-commit を通らない経路)は"
-echo "  $HOOKS_DIR/pre-merge-commit が未分類パスの拒否だけを別途検査します(#1452)。"
+echo "  $HOOKS_DIR/pre-merge-commit が未分類パスの拒否と、マージ前の HEAD 側に無い"
+echo "  テストの黙殺の拒否だけを別途検査します(#1452、#1460)。"
 echo "  点検: bash scripts/setup-git-hooks.sh --check"

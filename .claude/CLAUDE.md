@@ -824,17 +824,35 @@ enforce the same set of checks:
      landing at the repository root only turned `develop` red once it merged (#1208 → #1321 →
      #1452). Not exempted on a merge commit.
 
-- **`pre-merge-commit`** (#1452) — invoked only by a **conflict-free** `git merge`'s automatic
-  commit (the most common outcome of `git merge origin/develop`, and the route `pre-commit`
-  never sees). Runs **only check 5 above**, not 1–4. `git`'s own default `pre-merge-commit`
-  sample runs `pre-commit` wholesale, but this repository deliberately does not: check 3
-  (test-first) has no merge exemption, and would reject a legitimate `git merge origin/develop`
-  on a branch that only touches neutral paths (`.claude/`, `docs/` — the most common shape of an
-  Issue in this repository) because such a branch has no test-classified change of its own.
-  Checks 2 and 4 are unaddressed on this route by design — see #1460. Not exempted on this route
-  either: see `scripts/git-hooks/pre-merge-commit`'s own docstring for why, and for why this is
-  not a dead end (the merge result stays in the index after the hook rejects it, so the same
-  commit can add the missing classification and complete the merge through `pre-commit`).
+- **`pre-merge-commit`** (#1452, #1460) — invoked only by a **conflict-free** `git merge`'s
+  automatic commit (the most common outcome of `git merge origin/develop`, and the route
+  `pre-commit` never sees). Runs **checks 2 and 5 only**, not 1, 3 or 4. `git`'s own default
+  `pre-merge-commit` sample runs `pre-commit` wholesale, but this repository deliberately does
+  not: check 3 (test-first) has no merge exemption, and would reject a legitimate
+  `git merge origin/develop` on a branch that only touches neutral paths (`.claude/`, `docs/` —
+  the most common shape of an Issue in this repository) because such a branch has no
+  test-classified change of its own. Check 5 is not exempted on this route either. Check 2 uses
+  a different exemption than `pre-commit`'s: `MERGE_HEAD` does not exist yet when this hook runs,
+  and every added line comes from the incoming side, so "allow it if `MERGE_HEAD` has it" would
+  reject nothing. It rejects an added silencer only when `HEAD:<path>` (the pre-merge side) lacks
+  that pattern; editing a line whose silencer already exists on the HEAD side is allowed.
+  **Check 4 is deliberately not run here** (user's decision, #1460, 2026-10-01): the
+  `apps/web` coverage floor is not enforced on a conflict-free merge. The layers that still
+  cover it are `pre-commit` on every ordinary commit that touches `apps/web`, and
+  `npm run test:coverage` run by hand; there is no `pre-push` hook (#1514 is not in
+  the repository yet), and the `glab mr create` coverage guard checks changed-line C1/C2, not
+  this floor. See `scripts/git-hooks/pre-merge-commit`'s own docstring for the reasons, and for
+  why a rejection is not a dead end (the merge result stays in the index, so the same commit can
+  fix the problem and complete the merge through `pre-commit`).
+
+Which checks run on which route:
+
+| Route | Hook | Checks |
+| --- | --- | --- |
+| `git commit` | `pre-commit` | 1–5 |
+| Explicit commit concluding a **conflicted** merge | `pre-commit` | 1–5 (1 exempt; 2 exempt for patterns already on `MERGE_HEAD`, #1125) |
+| **Conflict-free** `git merge` | `pre-merge-commit` | 2 (HEAD-side baseline) and 5 |
+| `git cherry-pick`, `git revert`, `git rebase` (no conflict) | none — git has no hook for these | none |
 
   Rationale for both: `docs/WORKFLOW_RULE_RATIONALE.md` → Unclassified path rejection.
 
@@ -876,6 +894,12 @@ The guards stop **mistakes**, not **circumvention**: a shell can always defeat c
 They parse the command (splitting on separators, stripping env assignments and wrappers like
 `timeout` / `env` / `nice` / `sudo`, respecting quotes) rather than matching a regex anchored to
 its start. Rationale: `docs/WORKFLOW_RULE_RATIONALE.md` → ガード.
+
+**`cherry-pick`, `revert` and a conflict-free `rebase` cannot be blocked**: git offers no hook on
+those routes, so no git hook check runs on the commits they create (#1460). Silencers, unclassified
+paths or a broken `apps/web` coverage floor brought in that way are not caught at commit time;
+review and the post-hoc unit tests (`.claude/hooks/test_paths.py` → `RepositoryExhaustiveness`)
+are the remaining layers. Prefer `git merge` for bringing in `develop`.
 
 Defence against deliberate circumvention lives elsewhere:
 
