@@ -3535,6 +3535,59 @@ class SubcommandDetectionTruncatesAtBareDashDash(unittest.TestCase):
         )
 
 
+class BareDashDashPositionHasSingleImplementation(unittest.TestCase):
+    """#1466: 裸の `--` の位置を決める規則は `_rest_limit_before_bare_dashdash()` の
+    1箇所だけにある。`p_raw` が自前のループを持つと、片方だけを変異させても
+    もう片方が残り、打ち切りの非空虚性の根拠を誤らせる(#1454)。
+    """
+
+    def test_limit_helper_direct_asserts(self):
+        guard = _import_guard_module()
+        f = guard._rest_limit_before_bare_dashdash
+        self.assertEqual(f(["a", "--", "b"]), 1)
+        self.assertEqual(f(["a", "b"]), 2)
+        self.assertEqual(f(["--"]), 0)
+        self.assertEqual(f([]), 0)
+
+    def test_only_the_helper_scans_for_bare_dashdash(self):
+        import re
+
+        with open(HOOK, encoding="utf-8") as fh:
+            src = fh.read()
+        scans = re.findall(r'^\s*(?:if|elif)\s+\w+\s*==\s*"--"\s*:', src, re.M)
+        self.assertEqual(
+            len(scans),
+            1,
+            "裸の `--` の位置を決める走査が %d 箇所ある(1箇所のはず)" % len(scans),
+        )
+
+    def test_proj_docstring_uses_example_where_truncation_matters(self):
+        guard = _import_guard_module()
+        doc = guard._subcommand_match_position_proj.__doc__
+        self.assertIn("glab -- x mr merge --rebase", doc)
+        self.assertNotIn("glab -z 1 -- mr merge --rebase", doc)
+
+    def test_proj_truncation_is_effective_for_dashdash_then_unknown_token(self):
+        guard = _import_guard_module()
+        reason = run_hook("bash", bash_payload("glab -- x mr merge --rebase"))
+        self.assertIsNone(reason, reason)
+        self.assertIsNone(
+            guard._subcommand_match_position_proj(
+                ["--", "x", "mr", "merge", "--rebase"], ("mr", "merge")
+            )
+        )
+
+    def test_raw_stops_at_bare_dashdash(self):
+        guard = _import_guard_module()
+        self.assertIsNone(
+            guard._subcommand_match_position(["--", "mr", "merge"], ("mr", "merge"))
+        )
+        self.assertEqual(
+            guard._subcommand_match_position(["mr", "merge", "--"], ("mr", "merge")),
+            0,
+        )
+
+
 class MatchEndUsesLastMatchedTokenNotFirst(unittest.TestCase):
     """#1454 AC3(c)(2026-09-27 の本文訂正で新設。レビュー2回目 IMPORTANT への対応)。
 

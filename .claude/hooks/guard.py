@@ -886,11 +886,7 @@ def _subcommand_match_position(rest, subcommands):
         return None
     target = list(subcommands)
     n = len(target)
-    limit = len(rest)
-    for idx, a in enumerate(rest):
-        if a == "--":
-            limit = idx
-            break
+    limit = _rest_limit_before_bare_dashdash(rest)
     for i in range(max(0, limit - n + 1)):
         if rest[i : i + n] == target:
             return i
@@ -952,9 +948,15 @@ def _subcommand_match_position_proj(rest, subcommands):
     任意のフラグ(`-z`/`--zz`)がサブコマンドの**あいだ**に置かれても、cobra が
     実際に次を消費する形とだけ一致するように振る舞う。
 
-    探索は最初の裸の `--` で打ち切る(打ち切り無しだと `glab -z 1 -- mr merge
-    --rebase` のような実行されない形まで検出してしまい、AC3(b) が守る性質が
-    崩れる)。
+    探索は最初の裸の `--` で打ち切る(規則は `_rest_limit_before_bare_dashdash()`
+    の1箇所、#1466)。この打ち切りが**実際に効く**のは次の形で、打ち切りを外すと
+    allow から DENY(fail-closed 方向)に動く:
+
+        glab -- x mr merge --rebase
+
+    `--` の直後が `mr` のとき(`-z 1` 前置など)は、打ち切りを外しても許可のまま
+    である(`--` 自身が長形フラグとして次の `mr` を食うため)。その形はこの打ち切りの
+    根拠にならない。
     """
     if not subcommands:
         return None
