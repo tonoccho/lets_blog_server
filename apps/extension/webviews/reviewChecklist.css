@@ -69,6 +69,7 @@
 
 .jump-status:empty,
 .empty:empty,
+.skipped-steps:empty,
 .summary:empty {
   display: none;
 }
@@ -97,4 +98,19 @@
   height: 1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
+}
+
+.skipped-steps {
+  margin: 12px 0;
+  padding: 8px;
+  border: 1px dashed var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.skipped-heading {
+  font-size: 1em;
+  margin: 0 0 4px;
+}
+
+.skipped-step {
+  color: var(--vscode-editorWarning-foreground, #cca700);
 }

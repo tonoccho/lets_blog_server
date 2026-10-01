@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { StepFinding } from './proofreadLogic';
+import { StepFinding, StepSkip } from './proofreadLogic';
 import {
   mergeChecklistState,
   ReviewChecklistDocumentState,
@@ -36,9 +36,10 @@ export class ReviewChecklistStore {
   async recordReview(
     documentKey: string,
     findings: StepFinding[],
-    bodyHash: string
+    bodyHash: string,
+    skipped: StepSkip[] = []
   ): Promise<ReviewChecklistDocumentState> {
-    const merged = mergeChecklistState(this.get(documentKey), findings, bodyHash);
+    const merged = mergeChecklistState(this.get(documentKey), findings, bodyHash, skipped);
     await this.context.workspaceState.update(stateKey(documentKey), merged);
     return merged;
   }

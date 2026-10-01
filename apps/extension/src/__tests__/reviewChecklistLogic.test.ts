@@ -119,6 +119,30 @@ describe('mergeChecklistState', () => {
     expect(state.bodyHash).toBe('hash-1');
     expect(state.items).toHaveLength(1);
   });
+
+  it('スキップされたステップを、ステップ名と理由つきで記録する(issue #1545 AC1)', () => {
+    const state = mergeChecklistState(undefined, [], 'h', [
+      { step: step('PROOFREADING'), reason: '本文が短いため' },
+    ]);
+    expect(state.skippedSteps).toEqual([
+      { stepKey: 'PROOFREADING', stepLabel: step('PROOFREADING').label, reason: '本文が短いため' },
+    ]);
+  });
+
+  it('スキップが無ければ空配列を記録し、前回のスキップは持ち越さない(issue #1545 AC3)', () => {
+    const first = mergeChecklistState(undefined, [], 'h1', [{ step: step('PROOFREADING'), reason: 'r' }]);
+    const second = mergeChecklistState(first, [], 'h2');
+    expect(second.skippedSteps).toEqual([]);
+  });
+
+  it('スキップ情報を持たない既存の状態から再実行しても、対応状態は引き継がれる(issue #1545 AC4)', () => {
+    const legacyItems = buildChecklistItems([finding({ originalText: 'X' })], undefined);
+    legacyItems[0].status = 'fixed';
+    const legacy = { bodyHash: 'old', items: legacyItems };
+    const state = mergeChecklistState(legacy, [finding({ originalText: 'X' })], 'new');
+    expect(state.items[0].status).toBe('fixed');
+    expect(state.skippedSteps).toEqual([]);
+  });
 });
 
 describe('setChecklistItemStatus', () => {
@@ -273,11 +297,19 @@ describe('buildChecklistView (issue #1225)', () => {
 
   it('レビュー結果が記録済みで指摘0件なら、空である(AC5)', () => {
     const view = buildChecklistView([]);
-    expect(view).toEqual({ groups: [], recorded: true, unresolvedCount: 0, isEmpty: true });
+    expect(view).toEqual({ groups: [], recorded: true, unresolvedCount: 0, isEmpty: true, skippedSteps: [] });
   });
 
   it('永続化状態が無い(レビュー未実行)なら、空表示にも件数表示にもしない', () => {
     const view = buildChecklistView(undefined);
-    expect(view).toEqual({ groups: [], recorded: false, unresolvedCount: 0, isEmpty: false });
+    expect(view).toEqual({ groups: [], recorded: false, unresolvedCount: 0, isEmpty: false, skippedSteps: [] });
+  });
+
+  it('スキップされたステップはビューへそのまま渡り、指摘0件(isEmpty)とは別に保持される(issue #1545 AC1/AC2)', () => {
+    const skippedSteps = [{ stepKey: 'PROOFREADING' as const, stepLabel: '校正チェック', reason: '本文が短いため' }];
+    const view = buildChecklistView([], skippedSteps);
+    expect(view.skippedSteps).toEqual(skippedSteps);
+    expect(view.isEmpty).toBe(true);
+    expect(buildChecklistView([], undefined).skippedSteps).toEqual([]);
   });
 });

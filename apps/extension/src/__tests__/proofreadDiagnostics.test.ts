@@ -572,10 +572,26 @@ describe('ProofreadController と指摘チェックリスト(issue #1216)', () =
 
     await new ProofreadController(context, store).runManual(document as never);
 
-    expect(recordReview).toHaveBeenCalledWith(document.uri.toString(), expect.any(Array), expect.any(String));
+    expect(recordReview).toHaveBeenCalledWith(document.uri.toString(), expect.any(Array), expect.any(String), []);
     const findings = recordReview.mock.calls[0][1] as { suggestion: { originalText: string } }[];
     expect(findings).toHaveLength(1);
     expect(findings[0].suggestion.originalText).toBe('AはB');
+  });
+
+  it('スキップされたステップを、理由つきでrecordReviewへ渡す(issue #1545 AC1)', async () => {
+    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+      step === 'PROOFREADING'
+        ? { suggestions: [], skipped: true, skipReason: '本文が短いため' }
+        : { suggestions: [], skipped: false }) as never);
+    const store = new ReviewChecklistStore({} as never);
+    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+
+    await new ProofreadController(context, store).runManual(makeDocument(ARTICLE) as never);
+
+    const skipped = recordReview.mock.calls[0][3] as { step: { key: string }; reason: string }[];
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].step.key).toBe('PROOFREADING');
+    expect(skipped[0].reason).toBe('本文が短いため');
   });
 
   it('checklistStoreを渡さない場合も、従来どおり動作する(後方互換)', async () => {

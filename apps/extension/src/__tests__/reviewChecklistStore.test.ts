@@ -89,4 +89,31 @@ describe('ReviewChecklistStore', () => {
     expect(second.items[0].status).toBe('skipped');
     expect(second.bodyHash).toBe('hash-2');
   });
+
+  it('スキップされたステップを記録し、別インスタンス(再起動相当)からも読める(issue #1545 AC3)', async () => {
+    const context = createContext();
+    await new ReviewChecklistStore(context).recordReview('doc-1', [], 'h', [
+      { step: REVIEW_STEPS[1], reason: '本文が短いため' },
+    ]);
+
+    const restored = new ReviewChecklistStore(context).get('doc-1');
+    expect(restored?.skippedSteps).toEqual([
+      { stepKey: REVIEW_STEPS[1].key, stepLabel: REVIEW_STEPS[1].label, reason: '本文が短いため' },
+    ]);
+  });
+
+  it('スキップの無いレビューを再実行すると、前回のスキップ表示は消える(issue #1545 AC3)', async () => {
+    const store = new ReviewChecklistStore(createContext());
+    await store.recordReview('doc-1', [], 'h1', [{ step: REVIEW_STEPS[1], reason: 'r' }]);
+    await store.recordReview('doc-1', [], 'h2');
+    expect(store.get('doc-1')?.skippedSteps).toEqual([]);
+  });
+
+  it('setStatusはスキップ情報を保ったまま対応状態だけを更新する(issue #1545)', async () => {
+    const store = new ReviewChecklistStore(createContext());
+    const state = await store.recordReview('doc-1', [finding('AはBです')], 'h', [{ step: REVIEW_STEPS[2], reason: 'r' }]);
+    const updated = await store.setStatus('doc-1', state.items[0].id, 'fixed');
+    expect(updated?.skippedSteps).toHaveLength(1);
+    expect(updated?.items[0].status).toBe('fixed');
+  });
 });

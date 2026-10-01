@@ -17,7 +17,28 @@
     document.getElementById('jump-status').textContent = '';
     document.getElementById('summary').textContent = view.recorded ? '未対応: ' + view.unresolvedCount + '件' : '';
     document.getElementById('empty').textContent = view.isEmpty ? '指摘はありません' : '';
+    renderSkippedSteps(view.skippedSteps);
     renderGroups(view.groups);
+  }
+
+  // issue #1545: 校閲でスキップされたステップ。理由はサーバ由来のためtextContent経由でのみ描画する。
+  // 利用者が付ける対応状態の「スキップ」とは別物なので、文言もクラスも分ける。
+  function renderSkippedSteps(skippedSteps) {
+    const container = document.getElementById('skipped');
+    container.innerHTML = '';
+    if (!skippedSteps || skippedSteps.length === 0) {
+      return;
+    }
+    const heading = document.createElement('h2');
+    heading.className = 'skipped-heading';
+    heading.textContent = '校閲が実行されなかったステップ';
+    container.appendChild(heading);
+    skippedSteps.forEach((skipped) => {
+      const row = document.createElement('div');
+      row.className = 'skipped-step';
+      row.textContent = skipped.stepLabel + ': ' + skipped.reason;
+      container.appendChild(row);
+    });
   }
 
   function renderGroups(groups) {

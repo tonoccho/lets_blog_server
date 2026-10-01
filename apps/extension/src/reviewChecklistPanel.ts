@@ -3,6 +3,7 @@ import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
 import {
   buildChecklistView,
   findOriginalTextOffset,
+  ChecklistSkippedStep,
   JUMP_NOT_FOUND_MESSAGE,
   ReviewChecklistItem,
 } from './reviewChecklistLogic';
@@ -31,9 +32,13 @@ export class ReviewChecklistPanel extends WebviewPanelBase<ReviewChecklistInboun
    * 表示中のパネルが指定した記事(documentKey)を表示している場合だけ、最新の項目で描画し直す。
    * レビュー実行はパネルを開いていなくても行えるため、開いていない/別記事を見ている場合は何もしない。
    */
-  public static refreshIfShowing(documentKey: string, items: ReviewChecklistItem[]): void {
+  public static refreshIfShowing(
+    documentKey: string,
+    items: ReviewChecklistItem[],
+    skippedSteps?: ChecklistSkippedStep[]
+  ): void {
     if (ReviewChecklistPanel.current?.documentKey === documentKey) {
-      ReviewChecklistPanel.current.render(items);
+      ReviewChecklistPanel.current.render(items, skippedSteps);
     }
   }
 
@@ -45,12 +50,13 @@ export class ReviewChecklistPanel extends WebviewPanelBase<ReviewChecklistInboun
   /** 指定した記事の永続化済みチェックリストを表示する。 */
   public show(documentKey: string): void {
     this.documentKey = documentKey;
-    this.render(this.store.get(documentKey)?.items);
+    const state = this.store.get(documentKey);
+    this.render(state?.items, state?.skippedSteps);
   }
 
   /** itemsがundefinedなら、レビュー未実行(永続化状態なし)として描画する。 */
-  private render(items: ReviewChecklistItem[] | undefined): void {
-    this.postMessage('checklist', buildChecklistView(items));
+  private render(items: ReviewChecklistItem[] | undefined, skippedSteps?: ChecklistSkippedStep[]): void {
+    this.postMessage('checklist', buildChecklistView(items, skippedSteps));
   }
 
   /**
@@ -82,7 +88,7 @@ export class ReviewChecklistPanel extends WebviewPanelBase<ReviewChecklistInboun
       case 'setStatus': {
         if (!this.documentKey) return;
         const updated = await this.store.setStatus(this.documentKey, message.id, message.status);
-        if (updated) this.render(updated.items);
+        if (updated) this.render(updated.items, updated.skippedSteps);
         return;
       }
       case 'jump': {

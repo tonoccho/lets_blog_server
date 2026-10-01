@@ -1,5 +1,12 @@
 import * as crypto from 'crypto';
-import { computeBodyOffset, REVIEW_STEPS, ReviewStepDefinition, ReviewStepKey, StepFinding } from './proofreadLogic';
+import {
+  computeBodyOffset,
+  REVIEW_STEPS,
+  ReviewStepDefinition,
+  ReviewStepKey,
+  StepFinding,
+  StepSkip,
+} from './proofreadLogic';
 
 /**
  * 指摘チェックリスト(issue #1216)のうち、vscode APIに依存しない純粋なロジック。
@@ -33,6 +40,16 @@ export interface ReviewChecklistGroup {
   items: ReviewChecklistItem[];
 }
 
+/**
+ * 直近のレビューでスキップされた校閲ステップ(issue #1545)。サーバが理由つきで実行を見送ったもので、
+ * 利用者が付ける対応状態`ReviewChecklistStatus`の`'skipped'`とは別の概念。
+ */
+export interface ChecklistSkippedStep {
+  stepKey: ReviewStepKey;
+  stepLabel: string;
+  reason: string;
+}
+
 /** 記事1件分の、永続化するチェックリスト状態。 */
 export interface ReviewChecklistDocumentState {
   /**
@@ -41,6 +58,11 @@ export interface ReviewChecklistDocumentState {
    */
   bodyHash: string;
   items: ReviewChecklistItem[];
+  /**
+   * 直近のレビューでスキップされたステップ(issue #1545)。#1216以降に保存された既存の状態には
+   * 存在しないため省略可能で、無ければ「スキップなし」として扱う(キーはv1のまま後方互換)。
+   */
+  skippedSteps?: ChecklistSkippedStep[];
 }
 
 /**
@@ -92,9 +114,15 @@ export function buildChecklistItems(
 export function mergeChecklistState(
   previous: ReviewChecklistDocumentState | undefined,
   findings: StepFinding[],
-  bodyHash: string
+  bodyHash: string,
+  skipped: StepSkip[] = []
 ): ReviewChecklistDocumentState {
-  return { bodyHash, items: buildChecklistItems(findings, previous?.items) };
+  return {
+    bodyHash,
+    items: buildChecklistItems(findings, previous?.items),
+    // スキップはその回の結果で置き換える(前回のスキップを持ち越さない)。
+    skippedSteps: skipped.map((s) => ({ stepKey: s.step.key, stepLabel: s.step.label, reason: s.reason })),
+  };
 }
 
 /** 対応状態を1件だけ更新した新しい配列を返す(不変更新)。該当IDが無ければ変更しない。 */
@@ -160,15 +188,21 @@ export interface ReviewChecklistView {
   unresolvedCount: number;
   /** 記録済みで指摘が0件。 */
   isEmpty: boolean;
+  /** 直近のレビューでスキップされたステップ。指摘0件(isEmpty・グループ無し)とは別に持つ(issue #1545)。 */
+  skippedSteps: ChecklistSkippedStep[];
 }
 
 /** 項目(永続化状態が無ければundefined)から、グループ・未対応件数・空状態をまとめる。 */
-export function buildChecklistView(items: ReviewChecklistItem[] | undefined): ReviewChecklistView {
+export function buildChecklistView(
+  items: ReviewChecklistItem[] | undefined,
+  skippedSteps?: ChecklistSkippedStep[]
+): ReviewChecklistView {
   const list = items ?? [];
   return {
     groups: groupChecklistItemsByStep(list),
     recorded: items !== undefined,
     unresolvedCount: countUnresolvedItems(list),
     isEmpty: items !== undefined && items.length === 0,
+    skippedSteps: skippedSteps ?? [],
   };
 }

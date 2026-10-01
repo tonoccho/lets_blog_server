@@ -128,6 +128,49 @@ describe('reviewChecklist.js', () => {
     harness.postToWebview({ command: 'checklist', payload: view });
   }
 
+  const skippedStep = { stepKey: 'PROOFREADING', stepLabel: '校正チェック', reason: '本文が短いため' };
+
+  it('スキップされたステップを、ステップ名と理由つきで専用の領域に描画する(issue #1545 AC1)', () => {
+    sendView({ groups: [], recorded: true, unresolvedCount: 0, isEmpty: true, skippedSteps: [skippedStep] });
+
+    const skipped = harness.element('skipped');
+    expect(skipped.children.length).toBeGreaterThan(0);
+    const text = skipped.children.map((c) => c.textContent).join('\n');
+    expect(text).toContain('校正チェック');
+    expect(text).toContain('本文が短いため');
+    expect(harness.element('empty').textContent).toBe('指摘はありません');
+  });
+
+  it('スキップされたステップの行は、指摘グループとは別のクラスで区別できる(issue #1545 AC2/AC4)', () => {
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false, skippedSteps: [skippedStep] });
+
+    const rows = harness.element('skipped').children.filter((c) => c.className.includes('skipped-step'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].className).not.toContain('status-');
+    expect(harness.element('groups').children).toHaveLength(1);
+  });
+
+  it('スキップ理由はtextContent経由でのみ描画する(issue #1545 AC5)', () => {
+    sendView({
+      groups: [],
+      recorded: true,
+      unresolvedCount: 0,
+      isEmpty: true,
+      skippedSteps: [{ ...skippedStep, reason: '<img src=x onerror=alert(1)>' }],
+    });
+
+    const row = harness.element('skipped').children.find((c) => c.className.includes('skipped-step'))!;
+    expect(row.textContent).toContain('<img src=x onerror=alert(1)>');
+    expect(row.children.every((c) => c.children.length === 0)).toBe(true);
+  });
+
+  it('スキップが無い・skippedStepsを持たないビューでは、前回のスキップ表示を消す(issue #1545 AC3/AC4)', () => {
+    sendView({ groups: [], recorded: true, unresolvedCount: 0, isEmpty: true, skippedSteps: [skippedStep] });
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
+
+    expect(harness.element('skipped').children).toHaveLength(0);
+  });
+
   it('項目の引用文をクリックすると、拡張ホストへjumpを送る(issue #1225 AC1)', () => {
     sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
 

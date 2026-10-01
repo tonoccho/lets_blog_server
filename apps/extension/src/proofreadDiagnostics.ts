@@ -334,8 +334,13 @@ export class ProofreadController implements vscode.Disposable, vscode.CodeAction
       if (!this.checklistStore || result.failures.length > 0) {
         return undefined;
       }
-      const state = await this.checklistStore.recordReview(key, findings, computeBodyHash(article.content));
-      ReviewChecklistPanel.refreshIfShowing(key, state.items);
+      const state = await this.checklistStore.recordReview(
+        key,
+        findings,
+        computeBodyHash(article.content),
+        result.skipped
+      );
+      ReviewChecklistPanel.refreshIfShowing(key, state.items, state.skippedSteps);
       return state;
     } catch (err) {
       if (this.contentAbortControllers.get(key) !== controller) {
