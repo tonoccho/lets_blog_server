@@ -556,6 +556,22 @@ def strip_heredoc_bodies(command):
     return "\n".join(out)
 
 
+# 引用符つき文字列(そのまま残す)か、語頭に置かれリダイレクト演算子に**接した**数字。
+# シェルは `2>x` の `2` を fd として読み、`2 >x` の `2` は引数として読む。
+_FD_NUMBER = re.compile(
+    r"""('[^']*'|"(?:\\.|[^"\\])*"|\\.)|(?<![^\s;&|(])\d+(?=[<>])"""
+)
+
+
+def strip_fd_numbers(command):
+    """リダイレクトの fd 番号(`2>&1` の `2`)を取り除く(#1455)。
+
+    shlex は空白の有無を捨てるため、トークン化の後では `2>&1` と `2 > x` を区別できない。
+    引数として数えられた `2` は `invokes()` の前方一致と `--help` 判定を崩す。
+    """
+    return _FD_NUMBER.sub(lambda m: m.group(1) or "", command)
+
+
 PROCESS_SUBSTITUTION_OPENERS = {"<(", ">("}
 
 
@@ -575,7 +591,8 @@ def split_commands(command):
     コマンドとして取り出すことはしない(完全性は主張しない。CLAUDE.md →
     Enforcement → What the guards are, and are not)。
     """
-    lexer = shlex.shlex(strip_heredoc_bodies(command), posix=True, punctuation_chars=True)
+    lexer = shlex.shlex(strip_fd_numbers(strip_heredoc_bodies(command)),
+                        posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)

@@ -4020,5 +4020,66 @@ class SlashCommandReadOnlyStage(unittest.TestCase):
         self.assertFalse(os.path.exists(self._marker(root)))
 
 
+class FdNumberIsNotAnArgvToken(unittest.TestCase):
+    """#1455: リダイレクト演算子に接した fd 番号(`2>&1` の `2`)は argv に残らない。
+
+    残ると位置引数として数えられ、`glab 2>&1 mr merge --rebase` の前方一致が崩れ、
+    `glab mr merge --help 2>&1` の `--help` 判定が残余引数 `2` で外れる。
+    """
+
+    def _explain(self, command):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", command],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        return proc.stdout
+
+    def _in_stage(self, command):
+        root = tempfile.mkdtemp()
+        state = os.path.join(root, ".claude", ".state")
+        os.makedirs(state)
+        with open(os.path.join(state, "readonly-test-session"), "w") as f:
+            f.write("ready-issue")
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook("bash", bash_payload(command, cwd=root))
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    def test_leading_fd_duplication_does_not_hide_rebase_merge(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload("glab 2>&1 mr merge --rebase")))
+
+    def test_trailing_fd_duplication_keeps_help_detection(self):
+        self.assertIsNone(run_hook("bash", bash_payload("glab mr merge --help 2>&1")))
+
+    def test_help_with_devnull_then_fd_duplication_is_allowed(self):
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab --repo x/y mr merge --help >/dev/null 2>&1")))
+
+    def test_explain_argv_has_no_fd_number(self):
+        for command in ("glab 2>&1 mr merge", "glab mr merge 2>/dev/null",
+                        "glab mr merge 1>&2", "glab mr merge 2>&-"):
+            with self.subTest(command=command):
+                out = self._explain(command)
+                self.assertNotIn("'2'", out)
+                self.assertNotIn("'1'", out)
+
+    def test_detached_digit_is_a_positional(self):
+        out = self._explain("glab mr merge 2 > out.txt")
+        self.assertIn("'2'", out)
+
+    def test_quoted_digit_before_operator_is_kept(self):
+        out = self._explain("echo '2>x' 3")
+        self.assertIn("2>x", out)
+
+    def test_fd_duplication_is_not_a_write_in_read_only_stage(self):
+        self.assertIsNone(self._in_stage("glab issue view 1 2>&1"))
+
+    def test_fd_redirect_to_a_file_is_still_denied_in_read_only_stage(self):
+        self.assertIsNotNone(self._in_stage("glab issue view 1 2>out.txt"))
+
+
 if __name__ == "__main__":
     unittest.main()
