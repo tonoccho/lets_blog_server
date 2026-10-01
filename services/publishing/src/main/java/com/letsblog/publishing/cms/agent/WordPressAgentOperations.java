@@ -17,10 +17,12 @@ import com.letsblog.publishing.cms.ReferencePost;
 import com.letsblog.publishing.cms.WpCliInstallResult;
 import com.letsblog.publishing.config.LegacyJacksonRestClientConfig;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -28,6 +30,10 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.net.SocketTimeoutException;
+import java.net.http.HttpClient;
+import java.net.http.HttpTimeoutException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -45,14 +51,57 @@ public class WordPressAgentOperations {
     private final RestClient client;
     private final String provisionToken;
 
+    @Autowired
     public WordPressAgentOperations(
             RestClient.Builder restClientBuilder,
             @Value("${app.wordpress-provision-base-url}") String baseUrl,
-            @Value("${app.wordpress-provision-token}") String provisionToken) {
+            @Value("${app.wordpress-provision-token}") String provisionToken,
+            @Value("${app.wordpress-agent-connect-timeout-seconds}") long connectTimeoutSeconds,
+            @Value("${app.wordpress-agent-read-timeout-seconds}") long readTimeoutSeconds) {
+        this(restClientBuilder, baseUrl, provisionToken,
+                Duration.ofSeconds(connectTimeoutSeconds), Duration.ofSeconds(readTimeoutSeconds));
+    }
+
+    /**
+     * テスト専用: タイムアウト値を{@link Duration}で直接指定して検証するためのコンストラクタ
+     * (WordPressBulkManagementClientの同種のテスト専用コンストラクタと同じ位置付け)。
+     */
+    WordPressAgentOperations(
+            RestClient.Builder restClientBuilder, String baseUrl, String provisionToken,
+            Duration connectTimeout, Duration readTimeout) {
+        this(restClientBuilder.clone().requestFactory(timeoutRequestFactory(connectTimeout, readTimeout)),
+                baseUrl, provisionToken);
+    }
+
+    /**
+     * テスト専用: リクエストファクトリ(MockRestServiceServer等)をビルダー側で差し込み済みの場合に使う。
+     * タイムアウトは設定しない。
+     */
+    WordPressAgentOperations(RestClient.Builder restClientBuilder, String baseUrl, String provisionToken) {
         RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl);
         LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
         this.client = clonedBuilder.build();
         this.provisionToken = provisionToken;
+    }
+
+    private static JdkClientHttpRequestFactory timeoutRequestFactory(Duration connectTimeout, Duration readTimeout) {
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(readTimeout);
+        return requestFactory;
+    }
+
+    private static boolean isTimeout(ResourceAccessException e) {
+        return e.getCause() instanceof HttpTimeoutException || e.getCause() instanceof SocketTimeoutException;
+    }
+
+    /** タイムアウトと、接続拒否などその他の接続失敗とで文言を分ける(エラー応答はRestClientResponseException側)。 */
+    private static String accessFailureLabel(ResourceAccessException e) {
+        return isTimeout(e) ? "エージェントへの接続がタイムアウトしました" : "エージェントへの接続に失敗しました";
+    }
+
+    private static String accessFailureMessage(ResourceAccessException e) {
+        return accessFailureLabel(e) + ": " + e.getMessage();
     }
 
     /**
@@ -69,8 +118,8 @@ public class WordPressAgentOperations {
             }
             return ConnectionCheckResult.failure("wp core versionの実行に失敗しました: " + agentErrorDetail(e));
         } catch (ResourceAccessException e) {
-            log.warn("エージェントへの接続に失敗しました (wpSlug={}): {}", creds.wpSlug(), e.getMessage());
-            return ConnectionCheckResult.failure("エージェントへの接続に失敗しました: " + e.getMessage());
+            log.warn("{} (wpSlug={}): {}", accessFailureLabel(e), creds.wpSlug(), e.getMessage());
+            return ConnectionCheckResult.failure(accessFailureMessage(e));
         }
     }
 
@@ -103,7 +152,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("カテゴリ/タグの解決に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -124,7 +173,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException(authorErrorMessage(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -179,7 +228,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPress投稿の作成/更新に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -226,7 +275,7 @@ public class WordPressAgentOperations {
             }
             throw new AgentOperationException("WordPress投稿の削除に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -248,7 +297,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("参照記事の取得に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -262,7 +311,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("認証Cookieの発行に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -277,7 +326,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("投稿/ページ一覧の取得に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -300,7 +349,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("スラッグによる既存投稿の照会に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -310,7 +359,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("投稿/ページのステータス変更に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -329,7 +378,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("メディア一覧の取得に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -355,7 +404,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("メディア参照スキャンに失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -376,7 +425,7 @@ public class WordPressAgentOperations {
             }
             throw new AgentOperationException("メディアの削除に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -404,7 +453,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("WordPressメディアのアップロードに失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 
@@ -428,7 +477,7 @@ public class WordPressAgentOperations {
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("内容ハッシュによるメディアの照会に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
-            throw new AgentOperationException("エージェントへの接続に失敗しました: " + e.getMessage(), e);
+            throw new AgentOperationException(accessFailureMessage(e), e);
         }
     }
 

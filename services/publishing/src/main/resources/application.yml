@@ -140,6 +140,10 @@ app:
   # 一括適用/zipアップロード(apply)は長時間処理になりうるため別値にできるようにする(要件1)。
   wordpress-provision-listing-timeout-seconds: ${WORDPRESS_PROVISION_LISTING_TIMEOUT_SECONDS:5}
   wordpress-provision-apply-timeout-seconds: ${WORDPRESS_PROVISION_APPLY_TIMEOUT_SECONDS:120}
+  # issue #1264: 同じprovision-agentを叩くWordPressAgentOperations(cms/agent)のRestClient向けの
+  # 接続/リードタイムアウト。wp-cliの実行やメディアのアップロードを含むため、リードは長めにする。
+  wordpress-agent-connect-timeout-seconds: ${WORDPRESS_AGENT_CONNECT_TIMEOUT_SECONDS:5}
+  wordpress-agent-read-timeout-seconds: ${WORDPRESS_AGENT_READ_TIMEOUT_SECONDS:120}
   # 一括管理(プラグイン/テーマのzipアップロード)のロールフォワード用永続ボリューム
   # (BulkUploadStorageService)。legacy-apiのapp.bulk-upload-storage-pathと同じ既定値(issue #708)。
   bulk-upload-storage-path: ${BULK_UPLOAD_STORAGE_PATH:/app/data/bulk-uploads}
