@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import {
   getProject,
@@ -18,6 +19,7 @@ import { GoogleAnalyticsWidget } from "./GoogleAnalyticsWidget";
 import { AdSenseWidget } from "./AdSenseWidget";
 import { EnvironmentWidget } from "./EnvironmentWidget";
 import { MembersWidget } from "./MembersWidget";
+import { AiConnectionWidget, AiConnectionWidgetFallback } from "./AiConnectionWidget";
 
 const NOT_ELIGIBLE_GA_REPORT: GoogleAnalyticsReport = {
   eligible: false,
@@ -91,6 +93,11 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
       <EnvironmentWidget project={project} candidateSites={sitesResult.list} sitesError={sitesResult.failed} />
 
       <MembersWidget projectId={projectId} members={membersResult.list} fetchFailed={membersResult.failed} />
+
+      {/* 疎通確認で数秒かかりうるため、Promise.all に入れず Suspense の内側で取得する。 */}
+      <Suspense fallback={<AiConnectionWidgetFallback />}>
+        <AiConnectionWidget projectId={projectId} />
+      </Suspense>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <DashboardWidgetSlot

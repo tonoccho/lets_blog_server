@@ -10,12 +10,14 @@ const listSites = jest.fn();
 const getGa = jest.fn();
 const getAdsense = jest.fn();
 const listProjectUsers = jest.fn();
+const listAiConnections = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getProject: (...a: unknown[]) => getProject(...a),
   listSites: (...a: unknown[]) => listSites(...a),
   getProjectGoogleAnalyticsReport: (...a: unknown[]) => getGa(...a),
   getProjectAdSenseReport: (...a: unknown[]) => getAdsense(...a),
   listProjectUsers: (...a: unknown[]) => listProjectUsers(...a),
+  listAiConnections: (...a: unknown[]) => listAiConnections(...a),
 }));
 jest.mock('@/lib/session', () => ({ requireAdminSession: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('@/components/Breadcrumb', () => ({ Breadcrumb: () => <nav /> }));
@@ -57,6 +59,7 @@ describe('プロジェクトダッシュボード page.tsx(issue #1500: 環境�
     getGa.mockReset().mockResolvedValue({ eligible: false });
     getAdsense.mockReset().mockResolvedValue({ eligible: false });
     listProjectUsers.mockReset().mockResolvedValue([]);
+    listAiConnections.mockReset().mockResolvedValue([]);
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
   afterEach(() => errorSpy.mockRestore());
@@ -121,6 +124,7 @@ describe('プロジェクトダッシュボード page.tsx(issue #1502: メン�
     listSites.mockReset().mockResolvedValue([]);
     getGa.mockReset().mockResolvedValue({ eligible: false });
     getAdsense.mockReset().mockResolvedValue({ eligible: false });
+    listAiConnections.mockReset().mockResolvedValue([]);
     listProjectUsers.mockReset().mockResolvedValue([
       { userId: 1, email: null, displayName: '山田太郎', wpRole: 'administrator' },
     ]);
@@ -155,5 +159,35 @@ describe('プロジェクトダッシュボード page.tsx(issue #1502: メン�
     expect(screen.queryByText('0人')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'メンバー' })).toBeInTheDocument();
     expect(errorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('プロジェクトダッシュボード page.tsx(issue #1501: AI接続状況ウィジェット)', () => {
+  let errorSpy: jest.SpyInstance;
+  beforeEach(() => {
+    notFound.mockClear();
+    getProject.mockReset().mockResolvedValue({ id: 7, name: '案件', localSite: null, testSite: null, productionSite: null });
+    listSites.mockReset().mockResolvedValue([]);
+    getGa.mockReset().mockResolvedValue({ eligible: true });
+    getAdsense.mockReset().mockResolvedValue({ eligible: true });
+    listProjectUsers.mockReset().mockResolvedValue([]);
+    listAiConnections.mockReset();
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => errorSpy.mockRestore());
+
+  const renderPage = async () => render(await ProjectDashboardPage({ params: Promise.resolve({ id: '7' }) }));
+
+  it('listAiConnectionsが終わらなくても、GA/AdSense/環境設定ウィジェットは表示され、AI接続状況は読み込み中になる', async () => {
+    listAiConnections.mockReturnValue(new Promise(() => undefined));
+
+    await renderPage();
+
+    expect(listAiConnections).toHaveBeenCalledWith(7);
+    expect(screen.getByRole('heading', { name: '環境設定' })).toBeInTheDocument();
+    expect(screen.getByText('GAレポート')).toBeInTheDocument();
+    expect(screen.getByText('AdSenseレポート')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI接続状況' })).toBeInTheDocument();
+    expect(screen.getByText('読み込み中…')).toBeInTheDocument();
   });
 });
