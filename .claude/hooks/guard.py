@@ -1748,6 +1748,14 @@ def check_commit_phase(payload, command):
                 break
         if staged is None:
             continue
+        # マージ結果を確定するコミット(MERGE_HEAD あり)は、2つの履歴の機械的な
+        # 突き合わせなのでフェーズ分離の対象外(CLAUDE.md → Merge Conflicts, #1546)。
+        merge_head = git(
+            prefix + ["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"],
+            root,
+        )
+        if merge_head and os.path.exists(merge_head.strip()):
+            continue
         files = [p for p in staged.splitlines() if p.strip()]
         if _has_flag(args, "--all", "a", commit_value_shorts):
             tracked = git(prefix + ["diff", "--name-only"], root) or ""

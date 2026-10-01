@@ -1949,6 +1949,47 @@ class GitDashCPhaseSeparation(unittest.TestCase):
         )
 
 
+class MergeCommitPhaseExemption(unittest.TestCase):
+    """#1546: MERGE_HEAD があるリポジトリの `git commit` は競合解消コミットなので、
+
+    フェーズ分離検査(`check_commit_phase`)の対象外にする。
+    """
+
+    MIXED = ("apps/web/e2e/features/a.feature", "services/foo/src/Bar.java")
+
+    def _mark_merging(self, repo):
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+        ).stdout.strip() or "0" * 40
+        with open(os.path.join(repo, ".git", "MERGE_HEAD"), "w") as f:
+            f.write(head + "\n")
+
+    def test_mixed_stage_with_merge_head_is_allowed(self):
+        repo = _git_phase_project(*self.MIXED)
+        self._mark_merging(repo)
+        reason = _run_in_git_phase_project("git commit --no-edit", repo)
+        self.assertIsNone(reason, "MERGE_HEAD があるのに混在を拒否している: %s" % reason)
+
+    def test_mixed_stage_without_merge_head_is_denied(self):
+        repo = _git_phase_project(*self.MIXED)
+        reason = _run_in_git_phase_project("git commit -m x", repo)
+        self.assertIsNotNone(reason)
+
+    def test_dash_C_target_merge_head_decides(self):
+        cwd_repo = _git_phase_project(*self.MIXED)  # cwd 側: MERGE_HEAD なし
+        target = _git_phase_project(*self.MIXED)
+        self._mark_merging(target)
+        reason = _run_in_git_phase_project("git -C %s commit --no-edit" % target, cwd_repo)
+        self.assertIsNone(reason, "-C 対象の MERGE_HEAD を見ていない: %s" % reason)
+
+    def test_dash_C_target_without_merge_head_denied_even_if_cwd_merging(self):
+        cwd_repo = _git_phase_project(*self.MIXED)
+        self._mark_merging(cwd_repo)
+        target = _git_phase_project(*self.MIXED)
+        reason = _run_in_git_phase_project("git -C %s commit -m x" % target, cwd_repo)
+        self.assertIsNotNone(reason)
+
+
 class GitDashCCrossRepoPhaseSeparation(unittest.TestCase):
     """#1443: `check_commit_phase` は `-C`/`--git-dir`/`--work-tree` が指す実際の対象
 
