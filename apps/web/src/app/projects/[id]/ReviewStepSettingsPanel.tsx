@@ -25,14 +25,18 @@ const PROVIDER_LABEL: Record<string, string> = {
 };
 
 const UNSET_OPTION_LABEL = "(プロジェクト既定を使用)";
+const SAVE_FAILED_MESSAGE = "保存に失敗しました";
 
 /**
  * ステップ別LLM設定(issue #1211のAPI)を、プロジェクト詳細画面のAIモデル管理カード
  * (LLMタブ)から確認・変更するパネル(issue #1212)。
  *
- * 設定を空へ戻す操作と保存失敗時のエラー表示は対象外(issue #1223へ切り出し)。保存は
- * provider/modelの現在値をまとめて1回のPUTで送る(APIが全体上書きのため、issue #1211の
+ * 保存は provider/modelの現在値をまとめて1回のPUTで送る(APIが全体上書きのため、issue #1211の
  * `ReviewStepModelService#selectSetting`参照)。
+ *
+ * issue #1223: 空選択肢(「(プロジェクト既定を使用)」)を保存すると設定が解除される。保存に
+ * 失敗した場合は、LlmProviderPanelと同じ形のエラーメッセージを出し、その行のselectを保存前
+ * (最後に保存済みの値)へ戻して「保存された」ように見えないようにする。
  */
 export function ReviewStepSettingsPanel({
   projectId,
@@ -92,15 +96,27 @@ function ReviewStepRow({
   const [provider, setProvider] = useState(step.provider ?? "");
   const [model, setModel] = useState(step.model ?? "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const label = STEP_LABEL[step.stepKey];
 
   async function handleSave() {
     setSaving(true);
-    const result = await updateReviewStepSettingAction(projectId, step.stepKey, provider, model);
-    setSaving(false);
-    if (!result.error) {
-      onSaved({ stepKey: step.stepKey, provider: provider || null, model: model || null });
+    setError(null);
+    let failure: string | null = null;
+    try {
+      const result = await updateReviewStepSettingAction(projectId, step.stepKey, provider, model);
+      failure = result.error ?? null;
+    } catch {
+      failure = SAVE_FAILED_MESSAGE;
     }
+    setSaving(false);
+    if (failure) {
+      setError(failure);
+      setProvider(step.provider ?? "");
+      setModel(step.model ?? "");
+      return;
+    }
+    onSaved({ stepKey: step.stepKey, provider: provider || null, model: model || null });
   }
 
   return (
@@ -147,6 +163,7 @@ function ReviewStepRow({
         >
           {saving ? "保存中…" : "保存"}
         </button>
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </td>
     </tr>
   );

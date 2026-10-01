@@ -132,6 +132,53 @@ Then(/^「(.+)」の行の表示が保存した値のままである$/, async ({
     .toBe(ctx.reviewStepSavedModelLabel);
 });
 
+// issue #1223: 設定を空へ戻す操作と保存失敗時のエラー表示。
+When(/^「(.+)」の行のプロバイダーを空へ戻して保存する$/, async ({ page }, stepLabel: string) => {
+  const row = reviewStepRow(page, stepLabel);
+  await row.getByLabel(`${stepLabel}のプロバイダー`).selectOption('');
+  await row.getByRole('button', { name: '保存' }).click();
+});
+
+When(/^「(.+)」の行のモデルを空へ戻して保存する$/, async ({ page }, stepLabel: string) => {
+  const row = reviewStepRow(page, stepLabel);
+  await row.getByLabel(`${stepLabel}のモデル`).selectOption('');
+  await row.getByRole('button', { name: '保存' }).click();
+});
+
+Then(/^「(.+)」の行のプロバイダーが「\(プロジェクト既定を使用\)」と表示されている$/, async ({ page }, stepLabel: string) => {
+  await expect
+    .poll(async () => selectedOptionText(page, `${stepLabel}のプロバイダー`))
+    .toBe('(プロジェクト既定を使用)');
+});
+
+Then(/^「(.+)」の行のモデルが「\(プロジェクト既定を使用\)」と表示されている$/, async ({ page }, stepLabel: string) => {
+  await expect
+    .poll(async () => selectedOptionText(page, `${stepLabel}のモデル`))
+    .toBe('(プロジェクト既定を使用)');
+});
+
+// Server Actionは画面と同じURLへのPOST(Next-Actionヘッダ付き)として送られる。それを中断して
+// 保存の失敗を再現する(バックエンドを壊さずに済む)。
+When('レビューステップ設定の保存リクエストが失敗するようにする', async ({ page }) => {
+  await page.route('**/projects/**', (route) => {
+    const request = route.request();
+    if (request.method() === 'POST' && request.headers()['next-action']) {
+      return route.abort('failed');
+    }
+    return route.continue();
+  });
+});
+
+When(/^「(.+)」の行でプロバイダーを「(.+)」に選んで保存する$/, async ({ page }, stepLabel: string, provider: string) => {
+  const row = reviewStepRow(page, stepLabel);
+  await row.getByLabel(`${stepLabel}のプロバイダー`).selectOption(provider);
+  await row.getByRole('button', { name: '保存' }).click();
+});
+
+Then(/^「(.+)」の行にエラーメッセージが表示される$/, async ({ page }, stepLabel: string) => {
+  await expect(reviewStepRow(page, stepLabel).locator('.text-red-600')).toBeVisible({ timeout: 15_000 });
+});
+
 /** ReviewStepSettingsPanel.tsxのPROVIDER_LABELと同じ対応表。 */
 function providerLabelOf(provider: string): string {
   const labels: Record<string, string> = {
