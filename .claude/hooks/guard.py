@@ -836,6 +836,20 @@ GLOBAL_VALUE_FLAGS = {
 }
 
 
+def _is_attached_global_value_flag(arg, value_flags):
+    """`arg` が `value_flags` のグローバル値フラグの値直結形(`-Ro/r` / `-R=o/r` /
+    `--repo=o/r`)なら True(#1449)。値は同じトークンの中にあるので、次トークンは
+    読み飛ばさない。`residual` 組み立て(`match_end` より前)専用で、検出には使わない。
+    """
+    for flag in value_flags:
+        if flag.startswith("--"):
+            if arg.startswith(flag + "="):
+                return True
+        elif len(flag) == 2 and _short_flag_attached_value(arg, flag[1]) is not None:
+            return True
+    return False
+
+
 def _subcommand_match_position(rest, subcommands):
     """`rest` の中で `subcommands` と完全一致する連続トークン列が現れる最初の位置を
     返す。無ければ `None`。これが3候補のうちの **`p_raw`**(#1454)。
@@ -1116,6 +1130,8 @@ def invokes(command, program, subcommands=()):
                     continue
                 if idx < match_end and a in value_flags:
                     skip_next = True
+                    continue
+                if idx < match_end and _is_attached_global_value_flag(a, value_flags):
                     continue
                 residual.append(a)
             if _is_help_invocation(residual):

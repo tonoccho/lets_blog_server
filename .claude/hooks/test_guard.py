@@ -4123,5 +4123,32 @@ class FdNumberIsNotAnArgvToken(unittest.TestCase):
         self.assertIsNotNone(self._in_stage("glab issue view 1 2>out.txt"))
 
 
+class AttachedGlobalValueFlagHelpTest(unittest.TestCase):
+    """#1449: 値直結形のグローバル値フラグが前置されても、`--help` だけの呼び出しは
+    ヘルプとして扱われる(空白区切りの `--repo o/r` と判定が一致する)。"""
+
+    def test_attached_short_repo_help_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("glab -Ro/r mr merge --help")))
+
+    def test_equals_short_repo_help_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload("glab -R=o/r mr merge --help")))
+
+    def test_equals_long_repo_help_is_allowed(self):
+        self.assertIsNone(
+            run_hook("bash", bash_payload("glab --repo=o/r mr merge --help"))
+        )
+
+    def test_attached_repo_without_help_is_still_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload("glab -Ro/r mr merge")))
+
+    def test_attached_repo_with_extra_token_is_not_help(self):
+        self.assertIsNotNone(
+            run_hook("bash", bash_payload("glab -Ro/r mr merge --auto-merge --help x"))
+        )
+
+    def test_clustered_repo_short_flag_without_help_is_still_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload("glab -Rsss mr merge")))
+
+
 if __name__ == "__main__":
     unittest.main()
