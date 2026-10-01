@@ -296,7 +296,7 @@ class RepositoryExhaustiveness(unittest.TestCase):
 
 
 class AgentWorktree(unittest.TestCase):
-    """エージェントの git worktree 配下を、実体のパスとして分類すること(#1036)。
+    r"""エージェントの git worktree 配下を、実体のパスとして分類すること(#1036)。
 
     Claude Code のサブエージェントは `.claude/worktrees/agent-<id>/` に
     **リポジトリ全体のコピー**を作る。パスの前方一致だけで判定すると、

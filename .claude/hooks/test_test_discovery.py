@@ -10,7 +10,9 @@ red/green を確認する。リポジトリ走査はその薄い呼び出しで�
 
 import ast
 import os
+import subprocess
 import unittest
+import warnings
 
 HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HOOKS_DIR))
@@ -151,6 +153,43 @@ class RepositoryTestFilesRunAllTestsWhenExecutedDirectly(unittest.TestCase):
                         "after unittest.main(); move the __main__ block to the end of the file"
                     )
         self.assertGreater(scanned, 0)
+        self.assertEqual(violations, [], "\n" + "\n".join(violations))
+
+
+def invalid_escape_warnings(source: str, filename: str) -> list[str]:
+    """`source` をコンパイルして出る SyntaxWarning(無効なエスケープ等)のメッセージを返す。"""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ast.parse(source, filename=filename)
+    return [
+        f"{filename}:{w.lineno}: {w.message}"
+        for w in caught
+        if issubclass(w.category, SyntaxWarning)
+    ]
+
+
+class InvalidEscapeWarnings(unittest.TestCase):
+    def test_invalid_escape_is_reported_with_file_and_line(self):
+        found = invalid_escape_warnings('x = "\\."\n', "sample.py")
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].startswith("sample.py:1:"))
+
+    def test_raw_string_is_clean(self):
+        self.assertEqual(invalid_escape_warnings('x = r"\\."\n', "sample.py"), [])
+
+    def test_no_tracked_python_file_has_an_invalid_escape(self):
+        tracked = subprocess.run(
+            ["git", "ls-files", "*.py"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        self.assertGreater(len(tracked), 0)
+        violations = []
+        for rel in tracked:
+            with open(os.path.join(REPO_ROOT, rel), encoding="utf-8") as f:
+                violations.extend(invalid_escape_warnings(f.read(), rel))
         self.assertEqual(violations, [], "\n" + "\n".join(violations))
 
 
