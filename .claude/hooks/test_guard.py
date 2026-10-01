@@ -2575,7 +2575,7 @@ class HelpInvocationIsNotAnOperation(unittest.TestCase):
         `hotfix` ラベルの付与が検出されて拒否される)。
 
         当初(#1446 初回対応時点)は「ヘルプ表示は実際には hotfix を付け外ししない
-        はずなので許可を期待値として固定する」としていたが、レビュー2回目が
+        はずなので許可を期待値として固定する」としていたが、#1446 レビュー2回目が
         `glab mr merge 42 --help` について明示的に受け入れた「位置引数が残る形は
         意図的に誤拒否する(fail-closed)」というトレードオフは、この呼び出しにも
         同じ理由で一様に適用される。個々の呼び出し文脈ごとに例外を設けると、結局
@@ -2598,7 +2598,7 @@ class HelpInvocationIsNotAnOperation(unittest.TestCase):
 
 
 class HelpDetectionDoesNotFailOpenOnAttachedShortFlagValues(unittest.TestCase):
-    """レビュー(2026-09-27、1回目、BLOCKING)への対応。
+    """#1446 レビュー(2026-09-27、1回目、BLOCKING)への対応。
 
     curated な `SHORT_VALUE_FLAGS` を土台にした `_is_help_invocation` のクラスタ判定は、
     値直結の短縮フラグ(`-l<label>`/`-m<message>`/`-t<template>` 等)がリストに無い
@@ -2742,9 +2742,9 @@ class HelpDetectionDoesNotFailOpenOnAttachedShortFlagValues(unittest.TestCase):
 
 
 class HelpDetectionDoesNotMistakeAValueTokenForARealHelpFlag(unittest.TestCase):
-    """レビュー(2026-09-27、2回目、BLOCKING)への対応。
+    """#1446 レビュー(2026-09-27、2回目、BLOCKING)への対応。
 
-    1回目の対応で `_is_help_invocation` は「クラスタ内の文字一致」から「独立したトークン
+    #1446 レビュー1回目の対応で `_is_help_invocation` は「クラスタ内の文字一致」から「独立したトークン
     としての完全一致」に切り替わったが、それでもなお `"--help" in rest or "-h" in rest`
     という **いずれか1つ含まれていれば真** の判定だったため、`-h` が「直前の値取り
     フラグの値」として独立トークンで渡された形(`git commit -m -h`、`--title -h` 等)を、
@@ -2873,7 +2873,7 @@ class HelpDetectionDoesNotMistakeAValueTokenForARealHelpFlag(unittest.TestCase):
         実際の cobra の挙動では `--help` があればヘルプだけを表示し `42` の
         マージは実行されないはずなので、これは無害な過拒否(fail-closed)である。
         値を取る短縮フラグを curated に列挙したリストの網羅性に依存する設計へ
-        戻らないためのトレードオフとして、呼び出し元(2026-09-27 レビュー2回目)が
+        戻らないためのトレードオフとして、呼び出し元(2026-09-27 #1446 レビュー2回目)が
         明示的に受け入れた。fail-open ではなく、実害はない。
         """
         reason = run_hook("bash", bash_payload("glab mr merge 42 --help"))
@@ -3260,8 +3260,8 @@ class OrderIndependentSubcommandDetection(unittest.TestCase):
                 self.assertIsNotNone(
                     reason,
                     "%r が許可された(サブコマンド語のあいだのフラグで連続一致が"
-                    "破れ、invokes() が空を返した可能性がある。#1454 レビュー"
-                    "1回目 BLOCKING1)" % command,
+                    "破れ、invokes() が空を返した可能性がある。"
+                    "#1454 レビュー1回目 BLOCKING1)" % command,
                 )
                 self.assertIn(expected_substring, reason)
 
@@ -3763,7 +3763,7 @@ class LeadingGlobalGitFlagsCandidateRetry(unittest.TestCase):
     def test_leading_global_git_flags_candidates_are_deduped_and_shortest_first(self):
         """`_leading_global_git_flags()` が返す候補列が重複排除済みかつ短い順で
         あることを、この2 witness に対する直接の単体 assert で固定する(#1454
-        AC5、レビュー2回目 IMPORTANT: 候補を逆順にする変異は274件の多候補ケースの
+        AC5、#1454 レビュー2回目 IMPORTANT: 候補を逆順にする変異は274件の多候補ケースの
         end-to-end テストでは差0で捕まらなかった)。
 
         `--no-advice commit foo commit` は**最短の候補が正しい**唯一の witness、
@@ -3852,7 +3852,7 @@ _AC4_BASELINES = [
 # 単一トークンで挿入するフラグ。curated な集合の内外、定義すら無いもの
 # (`-z`/`--zz`/`-Q`)を混ぜる。裸の `--`(打ち切り)、`=` 結合形(`--repo=o/r`)、
 # 2文字を超える短縮形(`-Ro/r`)も含める(#1454 レビュー2回目 SUGGESTION:
-# 1回目の回帰 family(あいだフラグ)がこの3形の変種で再発していないことを
+# #1454 レビュー1回目の回帰 family(あいだフラグ)がこの3形の変種で再発していないことを
 # 性質テストとしても押さえる。正しさそのものは `p_prev` が merge-base を厳密に
 # 再現することで構造的に成り立つため、ここは多様性を広げるための追加)。
 _AC4_SINGLE_INSERTS = [
