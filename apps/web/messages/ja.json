@@ -41,7 +41,17 @@
     "viewAll": "操作ログをすべて見る",
     "empty": "操作ログはありません",
     "loadFailed": "操作ログを取得できませんでした",
-    "loading": "読み込み中…"
+    "loading": "読み込み中…",
+    "queueEmpty": "まだ処理はありません",
+    "queueLoadFailed": "処理キューを取得できませんでした",
+    "queueViewLogs": "過去の処理を操作ログで見る",
+    "queueViewResult": "結果を見る",
+    "queueStatusPending": "待機中",
+    "queueStatusRunning": "実行中",
+    "queueStatusDone": "完了",
+    "queueStatusFailed": "失敗",
+    "queueTypeCheckpointDownload": "チェックポイントのダウンロード",
+    "queueTypeGarbageCollection": "メディアの整理"
   },
   "dashboard": {
     "title": "ダッシュボード",

@@ -16,8 +16,10 @@ jest.mock('next/link', () => {
 })
 
 const mockFetch = jest.fn()
+const mockFetchQueue = jest.fn()
 jest.mock('../infoRailActions', () => ({
   fetchRecentOperationLogsAction: (...args: unknown[]) => mockFetch(...args),
+  fetchQueueJobsAction: (...args: unknown[]) => mockFetchQueue(...args),
 }))
 
 const entries = [
@@ -37,16 +39,20 @@ beforeEach(() => {
   mockPathname = '/'
   window.localStorage.clear()
   mockFetch.mockReset()
+  mockFetchQueue.mockReset()
+  mockFetchQueue.mockResolvedValue({ jobs: [], timeZone: 'UTC' })
   mockFetch.mockResolvedValue({ entries, timeZone: 'UTC' })
 })
 
 describe('InfoRail (#1489)', () => {
-  it('shows the queue and operation-log tabs, with an empty queue frame selected by default', () => {
+  it('shows the queue and operation-log tabs, with the queue selected by default', async () => {
     setup()
     const rail = screen.getByTestId('info-rail')
     expect(within(rail).getByRole('button', { name: '処理キュー' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(rail).getByRole('button', { name: '操作ログ' })).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('info-rail-queue-panel')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('info-rail-queue-panel')).toBeInTheDocument()
+    expect(await screen.findByText('まだ処理はありません')).toBeInTheDocument()
+    expect(mockFetchQueue).toHaveBeenCalledTimes(1)
     expect(mockFetch).not.toHaveBeenCalled()
   })
 

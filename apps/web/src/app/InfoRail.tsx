@@ -5,6 +5,7 @@ import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { Tabs } from "@/components/Tabs";
 import { useI18n } from "./I18nProvider";
 import { InfoRailOperationLogs } from "./InfoRailOperationLogs";
+import { InfoRailQueue } from "./InfoRailQueue";
 
 const COLLAPSED_KEY = "infoRailCollapsed";
 const TAB_KEY = "infoRailTab";
@@ -55,7 +56,7 @@ const collapsedStore = createPersistedValue(COLLAPSED_KEY, "false");
 const tabStore = createPersistedValue(TAB_KEY, "queue");
 
 /**
- * 本文の右に常設する情報表示レール。タブで「処理キュー」(中身は #1407)と「操作ログ」を切り替える。
+ * 本文の右に常設する情報表示レール。タブで「処理キュー」と「操作ログ」を切り替える。
  * 広い画面では折りたたみ可能な列、狭い画面では既定で閉じ、開くとドロワーとして本文に重なる。
  */
 export function InfoRail() {
@@ -139,8 +140,7 @@ export function InfoRail() {
               {
                 id: "queue",
                 label: t("infoRail", "queueTab"),
-                // 中身は #1407 が入れる。ここでは空の枠。
-                content: <div data-testid="info-rail-queue-panel" />,
+                content: <InfoRailQueue />,
               },
               { id: "logs", label: t("infoRail", "logsTab"), content: <InfoRailOperationLogs /> },
             ]}

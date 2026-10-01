@@ -41,7 +41,17 @@
     "viewAll": "View all operation logs",
     "empty": "No operation logs",
     "loadFailed": "Could not load operation logs",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "queueEmpty": "No jobs yet",
+    "queueLoadFailed": "Could not load the queue",
+    "queueViewLogs": "See past jobs in the operation log",
+    "queueViewResult": "View result",
+    "queueStatusPending": "Pending",
+    "queueStatusRunning": "Running",
+    "queueStatusDone": "Done",
+    "queueStatusFailed": "Failed",
+    "queueTypeCheckpointDownload": "Checkpoint download",
+    "queueTypeGarbageCollection": "Media cleanup"
   },
   "dashboard": {
     "title": "Dashboard",

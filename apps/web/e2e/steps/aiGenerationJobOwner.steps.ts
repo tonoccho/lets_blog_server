@@ -60,7 +60,7 @@ async function requestDraft(request: APIRequestContext, actor: Actor): Promise<s
 }
 
 /** 管理者は全件を見られるので、印を持つ下書きジョブをここから特定する。 */
-async function findJobIdByMarker(request: APIRequestContext, marker: string): Promise<number> {
+export async function findJobIdByMarker(request: APIRequestContext, marker: string): Promise<number> {
   const adminJobs = (await listJobs(request, 'admin')).filter((job) => job.type === 'llm_draft');
   const token = await tokenFor(request, 'admin');
   for (const job of adminJobs.slice(0, 20)) {
