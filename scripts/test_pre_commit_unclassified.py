@@ -135,6 +135,34 @@ class PreCommitUnclassified(unittest.TestCase):
         self.assertNotEqual(0, r.returncode, r.stdout)
         self.assertIn(OTHER_UNCLASSIFIED, r.stdout)
 
+    # #1457: git は既定で非ASCIIパスを引用符つきの8進エスケープで出力する。
+    # フックが実パスを受け取らないと、分類規則に合致するパスが未分類と誤判定される。
+    def test_non_ascii_neutral_path_is_not_rejected(self):
+        self.write("docs/設計メモ.md", "メモ\n")
+        r = self.commit()
+        self.assertEqual(0, r.returncode, r.stdout)
+
+    def test_non_ascii_test_path_is_recognised_as_test_in_phase_separation(self):
+        self.write("apps/web/e2e/features/記事作成.feature", "機能: x\n")
+        self.write(PROD, "class A {}\n")
+        r = self.commit()
+        self.assertNotEqual(0, r.returncode, r.stdout)
+        self.assertIn("混在", r.stdout)
+        self.assertIn("記事作成.feature", r.stdout)
+
+    def test_non_ascii_unclassified_path_is_named_unquoted(self):
+        self.write("設計.sh", "echo hi\n")
+        r = self.commit()
+        self.assertNotEqual(0, r.returncode, r.stdout)
+        self.assertIn("設計.sh", r.stdout)
+        self.assertNotIn("\\350", r.stdout)
+
+    def test_silencer_in_non_ascii_production_path_is_detected(self):
+        self.write("services/project-service/src/main/java/設計.java", "@" + "Disabled\nclass A {}\n")
+        r = self.commit()
+        self.assertNotEqual(0, r.returncode, r.stdout)
+        self.assertIn("設計.java", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

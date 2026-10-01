@@ -63,9 +63,18 @@ def fail(title, body):
     sys.exit(1)
 
 
+def git_paths(args):
+    """パスを出力する git コマンドの結果を、パス引用(core.quotePath)なしの実パスで返す(#1457)。
+
+    git は既定で非ASCIIパスを `"docs/\\350..."` の形で出力し、分類規則に合致しなくなる。
+    `-z` の NUL 区切りで読めば、引用も改行を含む名前も問題にならない。
+    """
+    out = run(["git", "-c", "core.quotePath=false"] + args + ["-z"]) or ""
+    return [p for p in out.split("\0") if p]
+
+
 def staged_files():
-    out = run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"]) or ""
-    return [p for p in out.splitlines() if p.strip()]
+    return git_paths(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
 
 
 def merge_in_progress():
@@ -194,8 +203,8 @@ def check_test_first(files):
     merge_base = (run(["git", "merge-base", base, "HEAD"]) or "").strip()
     if not merge_base:
         return
-    branch_files = run(["git", "diff", "--name-only", merge_base, "HEAD"]) or ""
-    if any(is_test(p) for p in branch_files.splitlines() if p.strip()):
+    branch_files = git_paths(["diff", "--name-only", merge_base, "HEAD"])
+    if any(is_test(p) for p in branch_files):
         return
     fail(
         "テストより先にプロダクションコードをコミットしようとしています",

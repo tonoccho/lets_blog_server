@@ -22,6 +22,23 @@ sys.path.insert(0, HERE)
 import paths  # noqa: E402
 
 
+def git_ls_files(cwd):
+    """追跡パスを、git のパス引用(core.quotePath)の影響を受けずに読む(#1457)。
+
+    既定では非ASCIIパスが `"docs/\\350..."` の形で出力され、分類規則に合致しなくなる。
+    """
+    out = subprocess.run(
+        ["git", "-c", "core.quotePath=false", "ls-files", "-z"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    return [p for p in out.split("\0") if p]
+
+
+
 class TestCodeClassification(unittest.TestCase):
     """テストコードとして扱うパス。"""
 
@@ -222,17 +239,11 @@ class TrackedDotfileEnumeration(unittest.TestCase):
     """追跡中の dotfile が、名前ごとに列挙されて中立になっていること。"""
 
     def test_tracked_dotfiles_are_declared_neutral(self):
-        out = subprocess.run(
-            ["git", "ls-files"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
+        tracked_all = git_ls_files(REPO_ROOT)
         dotfiles = [
             p
-            for p in out.splitlines()
-            if p.strip() and os.path.basename(p).startswith(".")
+            for p in tracked_all
+            if os.path.basename(p).startswith(".")
         ]
         self.assertTrue(dotfiles)
         not_declared = [p for p in dotfiles if not paths.is_declared_neutral(p)]
@@ -278,14 +289,8 @@ class RepositoryExhaustiveness(unittest.TestCase):
     """
 
     def test_every_tracked_file_is_classified(self):
-        out = subprocess.run(
-            ["git", "ls-files"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        tracked = [p for p in out.splitlines() if p.strip()]
+        tracked_all = git_ls_files(REPO_ROOT)
+        tracked = tracked_all
         self.assertTrue(tracked)
         unclassified = [
             p
@@ -293,6 +298,37 @@ class RepositoryExhaustiveness(unittest.TestCase):
             if not (paths.is_test(p) or paths.is_production(p) or paths.is_declared_neutral(p))
         ]
         self.assertEqual(unclassified, [])
+
+
+class NonAsciiPaths(unittest.TestCase):
+    """非ASCII名のパスが実パスのまま分類されること(#1457)。"""
+
+    def test_non_ascii_test_path_is_a_test(self):
+        self.assertTrue(paths.is_test("apps/web/e2e/features/記事作成.feature"))
+
+    def test_non_ascii_neutral_path_is_classified(self):
+        p = "docs/設計メモ.md"
+        self.assertTrue(paths.is_test(p) or paths.is_production(p) or paths.is_declared_neutral(p))
+
+    def test_git_ls_files_reads_non_ascii_tracked_path_unquoted(self):
+        import shutil
+        import tempfile
+
+        tmp = tempfile.mkdtemp()
+        try:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True, env=env)
+            os.makedirs(os.path.join(tmp, "docs"))
+            with open(os.path.join(tmp, "docs", "設計メモ.md"), "w", encoding="utf-8") as f:
+                f.write("x\n")
+            subprocess.run(["git", "add", "."], cwd=tmp, check=True, env=env)
+            tracked = git_ls_files(tmp)
+            self.assertEqual(["docs/設計メモ.md"], tracked)
+            self.assertTrue(
+                all(paths.is_test(p) or paths.is_production(p) or paths.is_declared_neutral(p) for p in tracked)
+            )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class AgentWorktree(unittest.TestCase):
