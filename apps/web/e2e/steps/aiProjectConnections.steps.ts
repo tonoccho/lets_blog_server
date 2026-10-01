@@ -166,6 +166,24 @@ Then('保存は400で拒否される', async ({ ctx }) => {
   expect(ctx.conn1503Status).toBe(400);
 });
 
+Then('保存は200で受け付けられる', async ({ ctx }) => {
+  expect(ctx.conn1503Status).toBe(200);
+});
+
+Then(
+  /^1つ目のプロジェクトのOllama接続先の解決結果は「(.+)」である$/,
+  async ({ ctx, request }, value: string) => {
+    expect((await readConnections(request, first(ctx))).ollama.baseUrl).toBe(value);
+  }
+);
+
+Then(
+  /^1つ目のプロジェクトのComfyUI接続先の解決結果は「(.+)」である$/,
+  async ({ ctx, request }, value: string) => {
+    expect((await readConnections(request, first(ctx))).comfyui.baseUrl).toBe(value);
+  }
+);
+
 Then('接続先の操作は403で拒否される', async ({ ctx }) => {
   expect(ctx.conn1503Status).toBe(403);
 });

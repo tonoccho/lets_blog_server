@@ -5,7 +5,11 @@ import com.letsblog.ai.repository.ProjectAiSettingsRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -18,6 +22,30 @@ public class ProjectAiSettingsService {
 
     /** platform-serviceのAppSettingServiceと同じ規約(空白・制御文字を含まない)。 */
     private static final Pattern WHITESPACE_OR_CONTROL = Pattern.compile(".*[\\s\\p{Cntrl}].*", Pattern.DOTALL);
+
+    /**
+     * 拒否するホスト名(小文字、末尾のドットなし。issue #1518)。クラウドメタデータと、docker-compose.ymlの
+     * サービス名・container_nameのうちOllama / ComfyUI(ollama / comfyui / comfyui-cpu とその lbs- 付き)以外。
+     * docker-compose.ymlとの食い違いはProjectConnectionUrlDenylistTestが検出する。
+     */
+    private static final Set<String> DENIED_HOSTS = Set.of(
+            "metadata.google.internal",
+            "localhost",
+            "reverse-proxy", "web", "media", "ai", "content", "analytics", "platform", "project", "publishing",
+            "log-writer", "gateway", "identity", "rabbitmq", "docker-socket-proxy", "mysql", "phpmyadmin",
+            "keycloak-postgres", "keycloak", "penpot-frontend", "penpot-backend", "penpot-mcp",
+            "penpot-exporter", "penpot-postgres", "penpot-valkey", "penpot-mailcatch", "ollama-model-init",
+            "plantuml", "drawio", "wordpress",
+            "lbs-reverse-proxy", "lbs-web", "lbs-media", "lbs-ai", "lbs-content", "lbs-analytics",
+            "lbs-platform", "lbs-project", "lbs-publishing", "lbs-log-writer", "lbs-gateway", "lbs-identity",
+            "lbs-rabbitmq", "lbs-docker-socket-proxy", "lbs-mysql", "lbs-phpmyadmin", "lbs-keycloak-postgres",
+            "lbs-keycloak", "lbs-penpot-frontend", "lbs-penpot-backend", "lbs-penpot-mcp",
+            "lbs-penpot-exporter", "lbs-penpot-postgres", "lbs-penpot-valkey", "lbs-penpot-mailcatch",
+            "lbs-ollama-model-init", "lbs-plantuml", "lbs-drawio", "lbs-wordpress");
+
+    /** 10進・16進(0x)・8進(先頭0)のいずれかの数値表記(IPv4の1要素)。 */
+    private static final Pattern IPV4_PART = Pattern.compile("0[xX][0-9a-fA-F]+|[0-9]+");
+    private static final Pattern IPV6_LITERAL = Pattern.compile("[0-9a-fA-F:.]+");
 
     private final ProjectAiSettingsRepository repository;
 
@@ -153,6 +181,148 @@ public class ProjectAiSettingsService {
         if (WHITESPACE_OR_CONTROL.matcher(value).matches()) {
             throw new InvalidConnectionUrlException(field + " に空白文字・制御文字は使用できません");
         }
+        String host = extractHost(value);
+        if (host == null) {
+            throw new InvalidConnectionUrlException(field + " のホストを解釈できません");
+        }
+        if (isDeniedHost(host)) {
+            throw new InvalidConnectionUrlException(field + " に指定できない接続先です(メタデータ・loopback・内部サービス)");
+        }
         return value;
+    }
+
+    /**
+     * URLからホスト(小文字、末尾のドットなし、IPv6は角括弧なし)を取り出す。取り出せなければnull。
+     * java.net.URIは「256.1.1.1」のような表記でhostをnullにするため使わず、authorityを自前で分解する。
+     */
+    private static String extractHost(String url) {
+        String rest = url.substring(url.indexOf("://") + 3);
+        int end = rest.length();
+        for (char c : new char[] {'/', '?', '#'}) {
+            int i = rest.indexOf(c);
+            if (i >= 0 && i < end) {
+                end = i;
+            }
+        }
+        String authority = rest.substring(0, end);
+        authority = authority.substring(authority.lastIndexOf('@') + 1);
+        String host;
+        if (authority.startsWith("[")) {
+            int close = authority.indexOf(']');
+            if (close < 0) {
+                return null;
+            }
+            host = authority.substring(1, close);
+        } else {
+            int colon = authority.indexOf(':');
+            host = colon >= 0 ? authority.substring(0, colon) : authority;
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        if (host.endsWith(".") && !host.contains(":")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        return host.isEmpty() ? null : host;
+    }
+
+    /** ホスト名は文字列だけで判定し、DNS解決はしない。IPリテラルと判定できた場合のみアドレスとして解釈する。 */
+    private static boolean isDeniedHost(String host) {
+        if (host.contains(":")) {
+            return isDeniedAddress(parseIpv6Literal(host));
+        }
+        byte[] ipv4 = parseLegacyIpv4(host);
+        if (ipv4 != null) {
+            return isDeniedAddress(ipv4);
+        }
+        return DENIED_HOSTS.contains(host) || host.endsWith(".localhost");
+    }
+
+    /** IPv6リテラルをバイト列にする。解釈できなければ拒否側に倒すため全0(未指定アドレス)を返す。 */
+    private static byte[] parseIpv6Literal(String host) {
+        if (!IPV6_LITERAL.matcher(host).matches()) {
+            return new byte[16];
+        }
+        try {
+            // ':' を含み16進・'.'だけの文字列はリテラルとして解釈され、DNS解決は走らない。
+            // IPv4射影(::ffff:a.b.c.d)はInet4Addressになる。
+            return InetAddress.getByName(host).getAddress();
+        } catch (UnknownHostException e) {
+            return new byte[16];
+        }
+    }
+
+    /**
+     * 10進(2130706433)・16進(0x7f000001)・8進(0177.0.0.1)・省略形(127.1)のIPv4表記を解釈する。
+     * 数値表記として成立しなければ(ホスト名とみなすため)nullを返す。
+     */
+    private static byte[] parseLegacyIpv4(String host) {
+        String[] parts = host.split("\\.", -1);
+        if (parts.length > 4) {
+            return null;
+        }
+        long[] values = new long[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            Long value = parseIpv4Part(parts[i]);
+            if (value == null) {
+                return null;
+            }
+            values[i] = value;
+        }
+        long last = values[values.length - 1];
+        long limit = 1L << (8 * (5 - values.length));
+        if (last >= limit) {
+            return null;
+        }
+        long address = last;
+        for (int i = 0; i < values.length - 1; i++) {
+            if (values[i] > 255) {
+                return null;
+            }
+            address |= values[i] << (8 * (3 - i));
+        }
+        return new byte[] {(byte) (address >> 24), (byte) (address >> 16), (byte) (address >> 8), (byte) address};
+    }
+
+    private static Long parseIpv4Part(String part) {
+        if (!IPV4_PART.matcher(part).matches()) {
+            return null;
+        }
+        try {
+            if (part.regionMatches(true, 0, "0x", 0, 2)) {
+                return Long.parseLong(part.substring(2), 16);
+            }
+            if (part.length() > 1 && part.charAt(0) == '0') {
+                return Long.parseLong(part, 8);
+            }
+            return Long.parseLong(part);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 4バイト(IPv4)または16バイト(IPv6)のアドレスが拒否対象か。 */
+    private static boolean isDeniedAddress(byte[] a) {
+        if (a.length == 4) {
+            int first = a[0] & 0xff;
+            boolean unspecified = a[0] == 0 && a[1] == 0 && a[2] == 0 && a[3] == 0;
+            return first == 127 || unspecified || (first == 169 && (a[1] & 0xff) == 254);
+        }
+        boolean allZeroButLast = true;
+        for (int i = 0; i < 15; i++) {
+            allZeroButLast &= a[i] == 0;
+        }
+        boolean unspecifiedOrLoopback = allZeroButLast && (a[15] == 0 || a[15] == 1);
+        boolean linkLocal = (a[0] & 0xff) == 0xfe && (a[1] & 0xc0) == 0x80;
+        boolean ec2Metadata = (a[0] & 0xff) == 0xfd && a[1] == 0x00 && a[2] == 0x0e && (a[3] & 0xff) == 0xc2
+                && isZero(a, 4, 14) && a[14] == 0x02 && (a[15] & 0xff) == 0x54;
+        return unspecifiedOrLoopback || linkLocal || ec2Metadata;
+    }
+
+    private static boolean isZero(byte[] a, int from, int toExclusive) {
+        for (int i = from; i < toExclusive; i++) {
+            if (a[i] != 0) {
+                return false;
+            }
+        }
+        return true;
     }
 }
