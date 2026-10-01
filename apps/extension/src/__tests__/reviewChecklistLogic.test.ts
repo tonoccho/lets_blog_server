@@ -1,8 +1,11 @@
 import { REVIEW_STEPS, ReviewStepDefinition, StepFinding } from '../proofreadLogic';
 import {
   buildChecklistItems,
+  buildChecklistView,
   computeBodyHash,
   computeFindingId,
+  findOriginalTextOffset,
+  JUMP_NOT_FOUND_MESSAGE,
   countUnresolvedItems,
   groupChecklistItemsByStep,
   isSnapshotCurrent,
@@ -195,5 +198,86 @@ describe('isSnapshotCurrent', () => {
 
   it('スナップショットが無い(未レビュー)ならfalse', () => {
     expect(isSnapshotCurrent(undefined, '本文A')).toBe(false);
+  });
+});
+
+/**
+ * 指摘箇所へのジャンプ(issue #1225)。クリック時に現在の本文(front matterを除く)から
+ * originalTextを再探索する。オフセットは永続化しない。
+ */
+describe('findOriginalTextOffset (issue #1225)', () => {
+  it('本文中の最初の一致位置(rawText全体に対するオフセット)を返す', () => {
+    const raw = 'AはBです。CはDです。';
+    expect(findOriginalTextOffset(raw, 'CはD')).toBe(raw.indexOf('CはD'));
+  });
+
+  it('同じ文字列が複数あっても最初の一致を返す', () => {
+    const raw = '赤い。青い。赤い。';
+    expect(findOriginalTextOffset(raw, '赤い')).toBe(0);
+  });
+
+  it('front matterに同じ文字列があっても、本文側の一致を返す', () => {
+    const raw = '---\ntitle: 重複語\n---\n本文に重複語があります';
+    expect(findOriginalTextOffset(raw, '重複語')).toBe(raw.lastIndexOf('重複語'));
+  });
+
+  it('front matterにしか無い文字列は見つからない(undefined)', () => {
+    const raw = '---\ntitle: 題名だけ\n---\n本文です';
+    expect(findOriginalTextOffset(raw, '題名だけ')).toBeUndefined();
+  });
+
+  it('レビュー後に指摘箇所より前へ加筆されても、ずれた後の位置を返す', () => {
+    const before = '前文。対象の一文。';
+    const after = '加筆した段落です。\n' + before;
+    expect(findOriginalTextOffset(after, '対象の一文')).toBe(after.indexOf('対象の一文'));
+    expect(findOriginalTextOffset(after, '対象の一文')).not.toBe(findOriginalTextOffset(before, '対象の一文'));
+  });
+
+  it('本文に無ければundefined', () => {
+    expect(findOriginalTextOffset('本文です', '存在しない')).toBeUndefined();
+  });
+
+  it('空の引用文は一致として扱わない(undefined)', () => {
+    expect(findOriginalTextOffset('本文です', '')).toBeUndefined();
+  });
+
+  it('見つからない場合の表示文言は「本文に見つかりません」', () => {
+    expect(JUMP_NOT_FOUND_MESSAGE).toBe('本文に見つかりません');
+  });
+});
+
+describe('buildChecklistView (issue #1225)', () => {
+  const item = (id: string, status: ReviewChecklistItem['status']): ReviewChecklistItem => ({
+    id,
+    stepKey: 'PROOFREADING',
+    stepLabel: '校正チェック',
+    originalText: id,
+    message: 'm',
+    suggestion: null,
+    status,
+  });
+
+  it('未対応の件数を数え、修正済み・スキップは数えない(AC3)', () => {
+    const view = buildChecklistView([item('a', 'unresolved'), item('b', 'fixed'), item('c', 'skipped'), item('d', 'unresolved')]);
+    expect(view.unresolvedCount).toBe(2);
+    expect(view.recorded).toBe(true);
+    expect(view.isEmpty).toBe(false);
+    expect(view.groups).toHaveLength(1);
+  });
+
+  it('対応状態を変えると、件数が追随する(AC4)', () => {
+    const items = [item('a', 'unresolved'), item('b', 'unresolved')];
+    expect(buildChecklistView(items).unresolvedCount).toBe(2);
+    expect(buildChecklistView(setChecklistItemStatus(items, 'a', 'fixed')).unresolvedCount).toBe(1);
+  });
+
+  it('レビュー結果が記録済みで指摘0件なら、空である(AC5)', () => {
+    const view = buildChecklistView([]);
+    expect(view).toEqual({ groups: [], recorded: true, unresolvedCount: 0, isEmpty: true });
+  });
+
+  it('永続化状態が無い(レビュー未実行)なら、空表示にも件数表示にもしない', () => {
+    const view = buildChecklistView(undefined);
+    expect(view).toEqual({ groups: [], recorded: false, unresolvedCount: 0, isEmpty: false });
   });
 });

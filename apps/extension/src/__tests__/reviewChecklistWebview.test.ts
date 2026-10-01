@@ -115,4 +115,72 @@ describe('reviewChecklist.js', () => {
 
     expect(harness.element('groups').children).toHaveLength(0);
   });
+
+  const oneItem = {
+    stepKey: 'PROOFREADING',
+    stepLabel: '校正チェック',
+    items: [
+      { id: 'i1', stepKey: 'PROOFREADING', stepLabel: '校正チェック', originalText: 'AはBです', message: 'm', suggestion: null, status: 'unresolved' },
+    ],
+  };
+
+  function sendView(view: Record<string, unknown>): void {
+    harness.postToWebview({ command: 'checklist', payload: view });
+  }
+
+  it('項目の引用文をクリックすると、拡張ホストへjumpを送る(issue #1225 AC1)', () => {
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
+
+    const item = harness.element('groups').children[0].children[1];
+    const jump = item.children.find((c) => c.className.includes('jump-target'))!;
+    expect(jump.textContent).toBe('AはBです');
+    jump.click();
+
+    expect(harness.posted).toEqual([{ command: 'jump', id: 'i1' }]);
+  });
+
+  it('jumpNotFoundを受けると「本文に見つかりません」を表示し、次のchecklist受信で消す(AC2)', () => {
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
+
+    harness.postToWebview({ command: 'jumpNotFound', payload: { message: '本文に見つかりません' } });
+    expect(harness.element('jump-status').textContent).toBe('本文に見つかりません');
+
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
+    expect(harness.element('jump-status').textContent).toBe('');
+  });
+
+  it('クリックのたびに前回の「見つかりません」表示を消す', () => {
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
+    harness.postToWebview({ command: 'jumpNotFound', payload: { message: '本文に見つかりません' } });
+
+    const item = harness.element('groups').children[0].children[1];
+    item.children.find((c) => c.className.includes('jump-target'))!.click();
+
+    expect(harness.element('jump-status').textContent).toBe('');
+  });
+
+  it('未対応の件数を一覧上に表示し、新しい件数を受けると追随する(AC3, AC4)', () => {
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 3, isEmpty: false });
+    expect(harness.element('summary').textContent).toContain('3');
+    expect(harness.element('summary').textContent).toContain('未対応');
+
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 2, isEmpty: false });
+    expect(harness.element('summary').textContent).toContain('2');
+    expect(harness.element('summary').textContent).not.toContain('3');
+  });
+
+  it('記録済みで指摘0件のときは、空であることを表示する(AC5)', () => {
+    sendView({ groups: [], recorded: true, unresolvedCount: 0, isEmpty: true });
+
+    expect(harness.element('empty').textContent).toContain('指摘はありません');
+  });
+
+  it('指摘があるとき・レビュー未実行のときは、空表示も件数表示も出さない', () => {
+    sendView({ groups: [oneItem], recorded: true, unresolvedCount: 1, isEmpty: false });
+    expect(harness.element('empty').textContent).toBe('');
+
+    sendView({ groups: [], recorded: false, unresolvedCount: 0, isEmpty: false });
+    expect(harness.element('empty').textContent).toBe('');
+    expect(harness.element('summary').textContent).toBe('');
+  });
 });

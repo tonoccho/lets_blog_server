@@ -12,6 +12,14 @@
     vscode.postMessage(Object.assign({ command }, payload || {}));
   }
 
+  // issue #1225: 件数・空状態・ジャンプ失敗の表示。view.recordedがfalse(レビュー未実行)のときは何も出さない。
+  function renderView(view) {
+    document.getElementById('jump-status').textContent = '';
+    document.getElementById('summary').textContent = view.recorded ? '未対応: ' + view.unresolvedCount + '件' : '';
+    document.getElementById('empty').textContent = view.isEmpty ? '指摘はありません' : '';
+    renderGroups(view.groups);
+  }
+
   function renderGroups(groups) {
     const container = document.getElementById('groups');
     container.innerHTML = '';
@@ -41,9 +49,15 @@
     row.className = 'checklist-item status-' + item.status;
 
     // AI由来の文字列(originalText/message/suggestion)はtextContent経由でのみ描画する(innerHTMLは使わない)。
-    const quote = document.createElement('div');
-    quote.className = 'original-text';
+    // クリックで本文中の該当箇所へジャンプする(issue #1225)。位置は渡さず、拡張側が探し直す。
+    const quote = document.createElement('button');
+    quote.type = 'button';
+    quote.className = 'original-text jump-target';
     quote.textContent = item.originalText;
+    quote.addEventListener('click', () => {
+      document.getElementById('jump-status').textContent = '';
+      post('jump', { id: item.id });
+    });
     row.appendChild(quote);
 
     const message = document.createElement('div');
@@ -87,7 +101,9 @@
   window.addEventListener('message', (event) => {
     const { command, payload } = event.data;
     if (command === 'checklist') {
-      renderGroups(payload.groups);
+      renderView(payload);
+    } else if (command === 'jumpNotFound') {
+      document.getElementById('jump-status').textContent = payload.message;
     }
   });
 }());

@@ -4,6 +4,7 @@ import { lastCreatedWebviewPanel, resetMocks } from '../__mocks__/vscode';
 import { ReviewChecklistPanel } from '../reviewChecklistPanel';
 import { ReviewChecklistStore } from '../reviewChecklistStore';
 import { REVIEW_STEPS, StepFinding } from '../proofreadLogic';
+const JUMP_NOT_FOUND_MESSAGE = '本文に見つかりません';
 
 /**
  * 指摘チェックリストパネル(issue #1216)。AC1(別タブへステップ別に表示)・AC2(状態変更をWebviewへ反映)を、
@@ -158,5 +159,123 @@ describe('ReviewChecklistPanel', () => {
     expect(() =>
       ReviewChecklistPanel.refreshIfShowing('doc-1', [])
     ).not.toThrow();
+  });
+
+  describe('件数と空状態(issue #1225)', () => {
+    function lastView(): { unresolvedCount: number; recorded: boolean; isEmpty: boolean } {
+      return lastChecklistPayload() as never;
+    }
+
+    it('未対応の件数を送り、対応状態を変えると件数が追随する(AC3, AC4)', async () => {
+      const context = createContextWithWorkspaceState();
+      const store = new ReviewChecklistStore(context);
+      const state = await store.recordReview('doc-1', [finding('A'), finding('B')], 'h');
+      const panel = ReviewChecklistPanel.createOrShow(context, store);
+      panel.show('doc-1');
+      expect(lastView().unresolvedCount).toBe(2);
+
+      await send({ command: 'setStatus', id: state.items[0].id, status: 'fixed' });
+      expect(lastView().unresolvedCount).toBe(1);
+    });
+
+    it('記録済みで0件なら isEmpty(AC5)、未実行の記事なら recorded=false', async () => {
+      const context = createContextWithWorkspaceState();
+      const store = new ReviewChecklistStore(context);
+      await store.recordReview('doc-empty', [], 'h');
+      const panel = ReviewChecklistPanel.createOrShow(context, store);
+
+      panel.show('doc-empty');
+      expect(lastView()).toMatchObject({ recorded: true, isEmpty: true, unresolvedCount: 0 });
+
+      panel.show('doc-never-reviewed');
+      expect(lastView()).toMatchObject({ recorded: false, isEmpty: false });
+    });
+  });
+
+  describe('指摘箇所へのジャンプ(issue #1225)', () => {
+    interface FakeEditor {
+      selection?: { start: { offset: number }; end: { offset: number } };
+      revealed?: { start: { offset: number } };
+    }
+
+    function stubDocument(text: string): { editor: FakeEditor; opened: string[]; shown: number } {
+      const editor: FakeEditor = {};
+      const opened: string[] = [];
+      const result = { editor, opened, shown: 0 };
+      const document = {
+        getText: () => text,
+        positionAt: (offset: number) => new vscode.Position(offset, 0),
+      };
+      jest.spyOn(vscode.workspace, 'openTextDocument').mockImplementation(((uri: { toString(): string }) => {
+        opened.push(uri.toString());
+        return Promise.resolve(document);
+      }) as never);
+      jest.spyOn(vscode.window, 'showTextDocument').mockImplementation((() => {
+        result.shown += 1;
+        return Promise.resolve({
+          get selection() { return editor.selection; },
+          set selection(value) { editor.selection = value as never; },
+          revealRange: (range: { start: { offset: number } }) => { editor.revealed = range; },
+        });
+      }) as never);
+      return result;
+    }
+
+    async function setup(text: string, quote: string): Promise<{ id: string; stub: ReturnType<typeof stubDocument> }> {
+      const context = createContextWithWorkspaceState();
+      const store = new ReviewChecklistStore(context);
+      const state = await store.recordReview('file:///a.md', [finding(quote)], 'h');
+      const stub = stubDocument(text);
+      ReviewChecklistPanel.createOrShow(context, store).show('file:///a.md');
+      return { id: state.items[0].id, stub };
+    }
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('jumpを受けると、表示中の記事を開き、最初の一致へカーソルを移動して可視にする(AC1)', async () => {
+      const text = '---\ntitle: 赤い\n---\n前文。赤い花。赤い実。';
+      const { id, stub } = await setup(text, '赤い');
+
+      await send({ command: 'jump', id });
+
+      expect(stub.opened).toEqual(['file:///a.md']);
+      expect(stub.editor.selection?.start.offset).toBe(text.indexOf('赤い花'));
+      expect(stub.editor.selection?.end.offset).toBe(text.indexOf('赤い花') + '赤い'.length);
+      expect(stub.editor.revealed?.start.offset).toBe(text.indexOf('赤い花'));
+    });
+
+    it('見つからなければ「本文に見つかりません」を送り、エディタを開かずカーソルも動かさない(AC2)', async () => {
+      const { id, stub } = await setup('別の本文です', '消えた引用文');
+
+      await send({ command: 'jump', id });
+
+      const notFound = posted().filter((m) => m.command === 'jumpNotFound');
+      expect(notFound).toHaveLength(1);
+      expect(notFound[0].payload).toEqual({ message: JUMP_NOT_FOUND_MESSAGE });
+      expect(stub.shown).toBe(0);
+      expect(stub.editor.selection).toBeUndefined();
+    });
+
+    it('未知のIDのjumpは何もしない', async () => {
+      const { stub } = await setup('本文', '本文');
+
+      await send({ command: 'jump', id: 'no-such-id' });
+
+      expect(stub.opened).toEqual([]);
+      expect(posted().filter((m) => m.command === 'jumpNotFound')).toEqual([]);
+    });
+
+    it('showを呼ぶ前のjumpは何もしない(documentKey未設定)', async () => {
+      const context = createContextWithWorkspaceState();
+      const store = new ReviewChecklistStore(context);
+      const stub = stubDocument('本文');
+      ReviewChecklistPanel.createOrShow(context, store);
+
+      await send({ command: 'jump', id: 'x' });
+
+      expect(stub.opened).toEqual([]);
+    });
   });
 });

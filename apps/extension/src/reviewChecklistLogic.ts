@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { REVIEW_STEPS, ReviewStepDefinition, ReviewStepKey, StepFinding } from './proofreadLogic';
+import { computeBodyOffset, REVIEW_STEPS, ReviewStepDefinition, ReviewStepKey, StepFinding } from './proofreadLogic';
 
 /**
  * 指摘チェックリスト(issue #1216)のうち、vscode APIに依存しない純粋なロジック。
@@ -134,4 +134,41 @@ export function isSnapshotCurrent(state: ReviewChecklistDocumentState | undefine
 /** 未対応の項目数。「修正済み」「スキップ」は数えない(issue #1217)。 */
 export function countUnresolvedItems(items: ReviewChecklistItem[]): number {
   return items.filter((item) => item.status === 'unresolved').length;
+}
+
+/** 引用文が本文から見つからないときにチェックリストへ表示する文言(issue #1225)。 */
+export const JUMP_NOT_FOUND_MESSAGE = '本文に見つかりません';
+
+/**
+ * クリック時の現在の本文(rawText。front matter込み)から、引用文の最初の一致位置を探す(issue #1225)。
+ * 探索は本文(front matterを除く部分)に限り、返すオフセットはrawText全体に対するもの。
+ * オフセットは永続化しない(本文の編集でずれるため、クリックのたびに探し直す)。
+ * 見つからない・引用文が空のときはundefined。
+ */
+export function findOriginalTextOffset(rawText: string, originalText: string): number | undefined {
+  if (originalText === '') return undefined;
+  const bodyOffset = computeBodyOffset(rawText);
+  const found = rawText.indexOf(originalText, bodyOffset);
+  return found === -1 ? undefined : found;
+}
+
+/** Webviewへ送る表示用の状態(issue #1225)。 */
+export interface ReviewChecklistView {
+  groups: ReviewChecklistGroup[];
+  /** レビュー結果が永続化されているか。未実行の記事はfalse(件数も空表示も出さない)。 */
+  recorded: boolean;
+  unresolvedCount: number;
+  /** 記録済みで指摘が0件。 */
+  isEmpty: boolean;
+}
+
+/** 項目(永続化状態が無ければundefined)から、グループ・未対応件数・空状態をまとめる。 */
+export function buildChecklistView(items: ReviewChecklistItem[] | undefined): ReviewChecklistView {
+  const list = items ?? [];
+  return {
+    groups: groupChecklistItemsByStep(list),
+    recorded: items !== undefined,
+    unresolvedCount: countUnresolvedItems(list),
+    isEmpty: items !== undefined && items.length === 0,
+  };
 }

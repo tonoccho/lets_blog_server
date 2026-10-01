@@ -41,6 +41,43 @@
   margin-bottom: 4px;
 }
 
+/* issue #1225: 引用文はクリックで該当箇所へジャンプするボタン。見た目は引用文のまま。 */
+.jump-target {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+}
+
+.jump-target:hover {
+  text-decoration: underline;
+}
+
+.summary {
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+
+.jump-status {
+  color: var(--vscode-errorForeground, #f48771);
+  margin-bottom: 8px;
+}
+
+.jump-status:empty,
+.empty:empty,
+.summary:empty {
+  display: none;
+}
+
+.empty {
+  color: var(--vscode-descriptionForeground, #999999);
+  margin: 12px 0;
+}
+
 .message {
   margin-bottom: 4px;
 }

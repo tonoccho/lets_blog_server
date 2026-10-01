@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { showSingletonPanel, WebviewPanelBase } from './webviewPanelBase';
-import { groupChecklistItemsByStep, ReviewChecklistItem } from './reviewChecklistLogic';
+import {
+  buildChecklistView,
+  findOriginalTextOffset,
+  JUMP_NOT_FOUND_MESSAGE,
+  ReviewChecklistItem,
+} from './reviewChecklistLogic';
 import { ReviewChecklistInboundMessage, ReviewChecklistOutboundCommand } from './webviewMessages';
 import { ReviewChecklistStore } from './reviewChecklistStore';
 
@@ -40,11 +45,29 @@ export class ReviewChecklistPanel extends WebviewPanelBase<ReviewChecklistInboun
   /** 指定した記事の永続化済みチェックリストを表示する。 */
   public show(documentKey: string): void {
     this.documentKey = documentKey;
-    this.render(this.store.get(documentKey)?.items ?? []);
+    this.render(this.store.get(documentKey)?.items);
   }
 
-  private render(items: ReviewChecklistItem[]): void {
-    this.postMessage('checklist', { groups: groupChecklistItemsByStep(items) });
+  /** itemsがundefinedなら、レビュー未実行(永続化状態なし)として描画する。 */
+  private render(items: ReviewChecklistItem[] | undefined): void {
+    this.postMessage('checklist', buildChecklistView(items));
+  }
+
+  /**
+   * issue #1225: 項目の引用文を、現在の本文から探してカーソルを移動する。
+   * 記事が開かれていなければ開く。見つからなければエディタには触れず、その旨をWebviewへ返す。
+   */
+  private async jumpTo(documentKey: string, item: ReviewChecklistItem): Promise<void> {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(documentKey));
+    const offset = findOriginalTextOffset(document.getText(), item.originalText);
+    if (offset === undefined) {
+      this.postMessage('jumpNotFound', { message: JUMP_NOT_FOUND_MESSAGE });
+      return;
+    }
+    const range = new vscode.Range(document.positionAt(offset), document.positionAt(offset + item.originalText.length));
+    const editor = await vscode.window.showTextDocument(document);
+    editor.selection = new vscode.Selection(range.start, range.end);
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
   }
 
   protected dispose(): void {
@@ -60,6 +83,12 @@ export class ReviewChecklistPanel extends WebviewPanelBase<ReviewChecklistInboun
         if (!this.documentKey) return;
         const updated = await this.store.setStatus(this.documentKey, message.id, message.status);
         if (updated) this.render(updated.items);
+        return;
+      }
+      case 'jump': {
+        if (!this.documentKey) return;
+        const item = this.store.get(this.documentKey)?.items.find((candidate) => candidate.id === message.id);
+        if (item) await this.jumpTo(this.documentKey, item);
         return;
       }
     }

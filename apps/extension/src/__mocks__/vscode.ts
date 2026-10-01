@@ -107,6 +107,18 @@ export class Position {
   }
 }
 
+/** vscode.Selection の最小再現(anchor/active と、範囲としての start/end)。 */
+export class Selection {
+  public readonly start: unknown;
+  public readonly end: unknown;
+  constructor(public readonly anchor: unknown, public readonly active: unknown) {
+    this.start = anchor;
+    this.end = active;
+  }
+}
+
+export const TextEditorRevealType = { Default: 0, InCenter: 1, InCenterIfOutsideViewport: 2, AtTop: 3 } as const;
+
 export class Range {
   constructor(public readonly start: unknown, public readonly end: unknown) {}
 
@@ -315,6 +327,7 @@ export const window = {
  * 文字列ではなく fsPath / toString を持つオブジェクトを返す。
  */
 export const Uri = {
+  parse: (value: string) => ({ fsPath: value.replace(/^file:\/\//, ''), toString: () => value }),
   file: (fsPath: string) => ({ fsPath, toString: () => `file://${fsPath}` }),
   joinPath: (...segments: unknown[]) => {
     const joined = segments.join('/');

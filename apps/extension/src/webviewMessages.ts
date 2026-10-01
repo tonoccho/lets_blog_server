@@ -211,9 +211,12 @@ export type DiagramGalleryOutboundCommand =
 
 // --- 指摘チェックリスト パネル(issue #1216) ---
 
-export type ReviewChecklistInboundMessage = WebviewMessageBase<'setStatus'> & {
-  id: string;
-  status: ReviewChecklistStatus;
-};
+export type ReviewChecklistInboundMessage =
+  | (WebviewMessageBase<'setStatus'> & {
+      id: string;
+      status: ReviewChecklistStatus;
+    })
+  // issue #1225: 項目のクリック。本文中の位置は渡さず、拡張側がidから引用文を引いて探し直す。
+  | (WebviewMessageBase<'jump'> & { id: string });
 
-export type ReviewChecklistOutboundCommand = 'checklist' | 'error';
+export type ReviewChecklistOutboundCommand = 'checklist' | 'jumpNotFound' | 'error';
