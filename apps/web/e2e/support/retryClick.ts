@@ -144,6 +144,55 @@ export async function clickUntilVisible(
   }, options);
 }
 
+/** {@link clickUntilDone}が「操作が完了したか」を判定するための2つの手段。 */
+export interface DoneProbe {
+  /** 今この瞬間に完了済みか。例外(要素が既に無いなど)は呼び出し側で未完了扱いにされる。 */
+  isDone: () => Promise<boolean>;
+  /** 完了するまで最大`timeoutMs`待つ。時間内に完了しなければ例外を投げる。 */
+  waitDone: (timeoutMs: number) => Promise<void>;
+}
+
+/**
+ * `trigger`をクリックし、操作が完了するまでクリックをやり直す(#1386)。
+ *
+ * {@link clickUntilVisible}は`expected`に「操作後にはじめて現れる要素」を要求するが、
+ * 削除のように**対象の行が消える / ページが遷移する**操作には、現れる要素が無い。
+ * 本ヘルパーは完了判定を{@link DoneProbe}で受け取る(行なら`count() === 0`と
+ * `waitFor({ state: 'detached' })`、遷移なら`waitForURL`)。
+ *
+ * ## 非べき等な削除に使ってよい根拠(#1385の例外と同型)
+ *
+ * - `trigger`は完了と排他的に入れ替わる(行ごと消える、ページを離れる)。
+ * - 2回目以降の試行は、クリックの直前に`isDone()`を確認し、完了済みならクリックしない。
+ *   1回目が効いていて完了待ちだけが時間切れになったケースで、削除を二重に送らない。
+ *   1回目には効かせない(壊れたボタンを見逃さないため。#1360と同じ)。
+ * - 1回目の削除が処理中の間、ボタンは`disabled`(または文言が「削除中…」へ変わり
+ *   セレクタから外れる)になるため、再クリックは物理的に届かない。
+ * - クリック自体にも`visibleTimeoutMs`を渡す。処理中に`trigger`が消えて、既定のactionTimeout
+ *   (無制限のことがある)で1試行がハングするのを防ぐ。
+ *
+ * `window.confirm()`を伴う場合は{@link withDialogAccepted}と併用すること。
+ */
+export async function clickUntilDone(
+  trigger: Locator,
+  probe: DoneProbe,
+  options?: ClickUntilVisibleOptions
+): Promise<void> {
+  const visibleTimeoutMs = options?.visibleTimeoutMs ?? DEFAULT_VISIBLE_TIMEOUT_MS;
+  let attempts = 0;
+  await retryUntilPass(async () => {
+    const isRetry = attempts > 0;
+    attempts += 1;
+
+    if (isRetry && (await probe.isDone().catch(() => false))) {
+      return;
+    }
+
+    await trigger.click({ timeout: visibleTimeoutMs });
+    await probe.waitDone(visibleTimeoutMs);
+  }, options);
+}
+
 /**
  * `action`の実行中、ネイティブダイアログ(`window.confirm()`など)を毎回自動でacceptする(#1385)。
  *

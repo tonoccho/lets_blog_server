@@ -37,7 +37,7 @@
  */
 
 import type { Dialog, Locator, Page } from '@playwright/test';
-import { clickUntilVisible, retryUntilPass, withDialogAccepted } from './support/retryClick';
+import { clickUntilDone, clickUntilVisible, retryUntilPass, withDialogAccepted } from './support/retryClick';
 
 /** 呼ばれた回数を記録しつつ、指定回数だけ拒否してからresolveする関数を作る。 */
 function rejectNTimesThenResolve(times: number): jest.Mock<Promise<void>, []> {
@@ -310,4 +310,90 @@ describe('withDialogAccepted(issue #1385: window.confirm()を伴う操作を再�
 
     expect(result).toBe('ok');
   });
+});
+
+describe('clickUntilDone(issue #1386: 削除のように行/ページが消える・遷移する非べき等操作の再試行)', () => {
+  /**
+   * `trigger`が「完了」と排他的に入れ替わる操作(行が消える、ページ遷移する)向け。
+   * `expected`となる可視要素が無いため、完了判定を`isDone` / `waitDone`で受け取る。
+   * 2回目以降は`isDone`が真ならクリックしない(state-aware)ので、1回目が効いていた場合に
+   * 削除を二重に送らない。
+   */
+  function fakeTrigger(click: jest.Mock): Locator {
+    return { click } as unknown as Locator;
+  }
+
+  test('1回目のクリックが空振りしても、再試行して完了すれば成功する', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = rejectNTimesThenResolve(1);
+    const isDone = jest.fn(async () => false);
+
+    await clickUntilDone(fakeTrigger(click), { isDone, waitDone });
+
+    expect(click).toHaveBeenCalledTimes(2);
+    expect(waitDone).toHaveBeenCalledTimes(2);
+  });
+
+  test('1回目は完了状態に見えるかを問い合わせずに必ずクリックし、完了すればクリックは1回だけ', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = jest.fn(async () => {});
+    const isDone = jest.fn(async () => true);
+
+    await clickUntilDone(fakeTrigger(click), { isDone, waitDone });
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(isDone).not.toHaveBeenCalled();
+  });
+
+  test('1回目は効いたが完了待ちが時間切れだった場合、再試行時に既に完了していればクリックを撃たない', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = rejectNTimesThenResolve(1);
+    const isDone = jest.fn(async () => true);
+
+    await clickUntilDone(fakeTrigger(click), { isDone, waitDone });
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(isDone).toHaveBeenCalledTimes(1);
+  });
+
+  test('isDoneが例外を投げた場合は未完了扱いでクリックする', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = rejectNTimesThenResolve(1);
+    const isDone = jest.fn(async () => {
+      throw new Error('detached');
+    });
+
+    await clickUntilDone(fakeTrigger(click), { isDone, waitDone });
+
+    expect(click).toHaveBeenCalledTimes(2);
+  });
+
+  test('クリックが1回の試行内で無限に待たないよう、timeoutを渡す', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = jest.fn(async () => {});
+
+    await clickUntilDone(fakeTrigger(click), { isDone: async () => false, waitDone }, { visibleTimeoutMs: 1234 });
+
+    expect(click).toHaveBeenCalledWith({ timeout: 1234 });
+    expect(waitDone).toHaveBeenCalledWith(1234);
+  });
+
+  test('既定のvisibleTimeoutMsを使う', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = jest.fn(async () => {});
+
+    await clickUntilDone(fakeTrigger(click), { isDone: async () => false, waitDone });
+
+    expect(click).toHaveBeenCalledWith({ timeout: 3_000 });
+  });
+
+  test('完了しなければ制限時間で失敗する', async () => {
+    const click = jest.fn(async () => {});
+    const waitDone = alwaysReject();
+
+    await expect(
+      clickUntilDone(fakeTrigger(click), { isDone: async () => false, waitDone }, { timeoutMs: 300 })
+    ).rejects.toThrow();
+    expect(click.mock.calls.length).toBeGreaterThan(1);
+  }, 10_000);
 });

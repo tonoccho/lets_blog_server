@@ -9,6 +9,7 @@ import {
   fetchAccessToken,
   loginAsAdmin,
 } from '../support';
+import { clickUntilDone, withDialogAccepted } from '../support/retryClick';
 
 /**
  * プロジェクトの作成・設定表示・削除のステップ定義(issue #1165 / AT-5-1、
@@ -204,9 +205,16 @@ When('そのプロジェクトを削除する', async ({ page, ctx }) => {
   await loginAsAdmin(page);
   await page.goto(`/projects/${projectId}`);
   await expect(page.locator('button:has-text("プロジェクトを削除")')).toBeVisible();
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.locator('button:has-text("プロジェクトを削除")').click();
-  await expect(page).toHaveURL(/\/projects$/, { timeout: 10000 });
+  // issue #1386: goto直後はハイドレーション未完了でクリックが空振りしうるため、一覧へ遷移するまで
+  // クリックし直す。確認ダイアログは再試行のたびに出るので毎回acceptする。
+  const projectsListUrl = /\/projects$/;
+  await withDialogAccepted(page, () =>
+    clickUntilDone(page.locator('button:has-text("プロジェクトを削除")'), {
+      isDone: async () => projectsListUrl.test(new URL(page.url()).pathname),
+      waitDone: (timeout) => page.waitForURL(projectsListUrl, { timeout }),
+    })
+  );
+  await expect(page).toHaveURL(projectsListUrl, { timeout: 10000 });
   ctx.pmgProjectDeleted = true;
 });
 

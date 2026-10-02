@@ -1,6 +1,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { clickUntilDone, withDialogAccepted } from '../support/retryClick';
 
 /**
  * サイトの登録・編集・登録解除と疎通失敗時の表示のステップ定義(issue #1168 / AT-5-4)。
@@ -169,8 +170,14 @@ When('サイト一覧からそのサイトを削除する', async ({ ctx, page }
   await page.reload();
   const row = page.locator(`tr:has-text("${ctx.deleteSiteKey}")`);
   await expect(row).toBeVisible();
-  page.once('dialog', (dialog) => dialog.accept());
-  await row.locator('button:has-text("削除")').click();
+  // issue #1386: reload直後はハイドレーション未完了でクリックが空振りしうるため、行が消えるまで
+  // クリックし直す。確認ダイアログは再試行のたびに出るので毎回acceptする。
+  await withDialogAccepted(page, () =>
+    clickUntilDone(row.locator('button:has-text("削除")'), {
+      isDone: async () => (await row.count()) === 0,
+      waitDone: (timeout) => row.waitFor({ state: 'detached', timeout }),
+    })
+  );
   await expect(row).toHaveCount(0, { timeout: 10000 });
   ctx.deleteSiteAlreadyDeleted = true;
 });

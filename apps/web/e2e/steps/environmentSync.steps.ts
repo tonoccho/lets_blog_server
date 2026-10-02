@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
+import { clickUntilVisible } from '../support/retryClick';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -280,11 +281,14 @@ async function performSync(page: Page, ctx: Record<string, unknown>, projectId: 
     ctx.esLoggedIn = true;
   }
   await page.goto(`/projects/${projectId}`);
-  await page.locator('button:has-text("設定")').click();
-
   const panel = page
     .locator('div.rounded-lg', { has: page.getByRole('heading', { name: '環境同期' }) })
     .first();
+  // issue #1386: goto直後はハイドレーション未完了で「設定」タブのクリックが空振りしうる。タブは
+  // 活性タブの内容だけを描画するので、環境同期パネルの出現を期待値に、べき等なタブ切り替えを
+  // 再試行する。「同期する」は非べき等なので再試行せず、パネル(クライアント描画)の出現後に1回だけ押す。
+  await clickUntilVisible(page.locator('button:has-text("設定")'), panel);
+
   await panel.locator('select[name="from"]').selectOption('test');
   await panel.locator('select[name="to"]').selectOption('local');
   await panel.locator('input[name="targets"][value="db"]').check();
