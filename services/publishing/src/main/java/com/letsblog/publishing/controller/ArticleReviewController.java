@@ -2,12 +2,14 @@ package com.letsblog.publishing.controller;
 
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
+import com.letsblog.publishing.dto.ArticleReviewResponse;
 import com.letsblog.publishing.dto.ArticleSubmissionRequest;
 import com.letsblog.publishing.dto.ArticleSubmissionResponse;
 import com.letsblog.publishing.dto.PullRequestArticleResponse;
 import com.letsblog.publishing.github.GithubPullRequestClient;
 import com.letsblog.publishing.github.GithubPullRequestSummary;
 import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.ArticleReviewPublishService;
 import com.letsblog.publishing.service.ArticleSubmissionService;
 import com.letsblog.publishing.service.CurrentActorService;
 import com.letsblog.publishing.service.ForbiddenException;
@@ -23,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 記事レビュー(GitHubのPull Request経由で記事を確認・投稿する流れ、Epic #1333)のAPI。
- * レビュー待ちPRの一覧(#1337)とPRのheadからの記事取得(#1338)を提供し、投稿・マージは後続Issueが足す。
+ * レビュー待ちPRの一覧(#1337)・PRのheadからの記事取得(#1338)・提出(#1339)・テスト環境への投稿(#1341)を提供し、
+ * マージ・差し戻しは後続Issueが足す。
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/article-review")
@@ -35,6 +38,7 @@ public class ArticleReviewController {
     private final GithubPullRequestClient githubPullRequestClient;
     private final PullRequestArticleService pullRequestArticleService;
     private final ArticleSubmissionService articleSubmissionService;
+    private final ArticleReviewPublishService articleReviewPublishService;
 
     public ArticleReviewController(
             AdminAuthorizationService adminAuthorizationService,
@@ -42,13 +46,15 @@ public class ArticleReviewController {
             ProjectServiceClient projectServiceClient,
             GithubPullRequestClient githubPullRequestClient,
             PullRequestArticleService pullRequestArticleService,
-            ArticleSubmissionService articleSubmissionService) {
+            ArticleSubmissionService articleSubmissionService,
+            ArticleReviewPublishService articleReviewPublishService) {
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
         this.projectServiceClient = projectServiceClient;
         this.githubPullRequestClient = githubPullRequestClient;
         this.pullRequestArticleService = pullRequestArticleService;
         this.articleSubmissionService = articleSubmissionService;
+        this.articleReviewPublishService = articleReviewPublishService;
     }
 
     /**
@@ -83,6 +89,20 @@ public class ArticleReviewController {
         Long actorId = requireActorId();
         return articleSubmissionService.submit(
                 projectId, actorId, projectServiceClient.resolveGithubAccess(projectId, actorId), request);
+    }
+
+    /**
+     * PRの記事をプロジェクトのテスト環境のサイトへ即公開で投稿し、レビュー中へ遷移させる(issue #1341)。
+     * 同じスラッグの投稿が既にあれば更新するので、再レビューで記事は重複しない。応答にテスト環境の投稿URLを
+     * 含める。テスト環境のサイトが紐づいていなければ409、PRが提出されていなければ404で、どちらも状態は進まない。
+     * 投稿が失敗しても状態は進まない(アップロード済みの画像は巻き戻さず残す)。
+     */
+    @PostMapping("/pull-requests/{prNumber}/review")
+    public ArticleReviewResponse review(@PathVariable Long projectId, @PathVariable int prNumber) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        Long actorId = requireActorId();
+        return articleReviewPublishService.review(
+                projectId, actorId, projectServiceClient.resolveGithubAccess(projectId, actorId), prNumber);
     }
 
     private GithubAccess resolveAccess(Long projectId) {

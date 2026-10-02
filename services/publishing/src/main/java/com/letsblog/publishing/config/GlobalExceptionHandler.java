@@ -7,6 +7,7 @@ import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import com.letsblog.publishing.cms.ssh.SshOperationException;
 import com.letsblog.publishing.github.GithubApiException;
 import com.letsblog.publishing.render.MediaRenderException;
+import com.letsblog.publishing.service.ArticleReviewNotFoundException;
 import com.letsblog.publishing.service.BranchNotFoundException;
 import com.letsblog.publishing.service.ForbiddenException;
 import com.letsblog.publishing.service.IdentityServiceUnavailableException;
@@ -194,6 +195,12 @@ public class GlobalExceptionHandler {
     /** 提出対象のheadブランチがGitHubに無い(issue #1339)。 */
     @ExceptionHandler(BranchNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleBranchNotFound(BranchNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** レビュー対象のPRが提出されていない(issue #1341)。 */
+    @ExceptionHandler(ArticleReviewNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleArticleReviewNotFound(ArticleReviewNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
     }
 

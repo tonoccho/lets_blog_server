@@ -192,6 +192,61 @@ class ContentServiceClientTest {
         assertEquals(List.of("Bearer service-token-1"), receivedAuth.get());
     }
 
+    @Test
+    void findPostBySlug_siteキーとスラッグで既存投稿を引き当て_呼び出し元のBearerを転送する() throws IOException {
+        AtomicReference<String> receivedPath = new AtomicReference<>();
+        AtomicReference<List<String>> receivedAuth = new AtomicReference<>();
+        httpServer = startHttpServer(exchange -> {
+            receivedPath.set(exchange.getRequestURI().getRawPath());
+            receivedAuth.set(exchange.getRequestHeaders().get("Authorization"));
+            respond(exchange, 200, "{\"wpPostId\":\"55\",\"status\":\"publish\"}");
+        });
+
+        var found = newClient().findPostBySlug("test-site", "my-slug");
+
+        assertTrue(found.isPresent());
+        assertEquals("55", found.get().wpPostId());
+        assertEquals("publish", found.get().status());
+        assertEquals("/api/posts/test-site/by-slug/my-slug", receivedPath.get());
+        assertEquals(List.of("Bearer test-token"), receivedAuth.get());
+    }
+
+    @Test
+    void findPostBySlug_404は該当なしとして空を返す() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 404, "not found"));
+
+        assertTrue(newClient().findPostBySlug("test-site", "my-slug").isEmpty());
+    }
+
+    @Test
+    void findPostBySlug_404以外のHTTPエラーはIllegalStateExceptionにして本文を含める() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 500, "内部エラー"));
+
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> newClient().findPostBySlug("test-site", "my-slug"));
+
+        assertTrue(e.getMessage().contains("内部エラー"), e.getMessage());
+    }
+
+    @Test
+    void findPostBySlug_本文が空の応答は該当なしとして空を返す() throws IOException {
+        httpServer = startHttpServer(exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+
+        assertTrue(newClient().findPostBySlug("test-site", "my-slug").isEmpty());
+    }
+
+    @Test
+    void findPostBySlug_接続できなければIllegalStateExceptionにする() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 200, "{}"));
+        ContentServiceClient client = newClient();
+        httpServer.stop(0);
+
+        assertThrows(IllegalStateException.class, () -> client.findPostBySlug("test-site", "my-slug"));
+    }
+
     private ContentServiceClient newClient() {
         MockHttpServletRequest servletRequest = new MockHttpServletRequest();
         servletRequest.addHeader("Authorization", "Bearer test-token");

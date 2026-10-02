@@ -9,8 +9,9 @@ import com.letsblog.publishing.github.GithubPullRequestClient;
 import com.letsblog.publishing.github.GithubPullRequestDetail;
 import com.letsblog.publishing.service.PullRequestArticleException.Kind;
 import java.nio.charset.StandardCharsets;
-import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
@@ -35,7 +36,19 @@ public class PullRequestArticleService {
         this.githubPullRequestClient = githubPullRequestClient;
     }
 
+    /**
+     * 投稿用に取得した記事。{@code assetBytes}は{@code assets/}からの相対パス(応答の{@code Asset#name}と同じ)
+     * をキーにしたバイト列で、{@code article.assets()}と同じ順序。
+     */
+    public record PublishableArticle(PullRequestArticleResponse article, Map<String, byte[]> assetBytes) {
+    }
+
     public PullRequestArticleResponse fetch(GithubAccess access, int prNumber) {
+        return fetchForPublish(access, prNumber).article();
+    }
+
+    /** {@link #fetch}と同じ記事に、assetsの中身(headの時点のバイト列)を添えて返す(issue #1341、投稿用)。 */
+    public PublishableArticle fetchForPublish(GithubAccess access, int prNumber) {
         GithubPullRequestDetail detail = githubPullRequestClient.getPullRequest(access, prNumber);
         List<GithubChangedFile> files = githubPullRequestClient.listPullRequestFiles(access, prNumber).stream()
                 .filter(file -> !file.removed())
@@ -58,15 +71,18 @@ public class PullRequestArticleService {
         ArticleFrontMatterParser.ParsedArticle parsed = ArticleFrontMatterParser.parse(markdown);
 
         String assetsPrefix = directory + "assets/";
-        List<Asset> assets = files.stream()
+        Map<String, byte[]> assetBytes = new TreeMap<>();
+        files.stream()
                 .map(GithubChangedFile::path)
                 .filter(path -> path.startsWith(assetsPrefix) && path.length() > assetsPrefix.length())
-                .map(path -> new Asset(path.substring(assetsPrefix.length()),
-                        githubPullRequestClient.getFileContent(access, path, ref).length))
-                .sorted(Comparator.comparing(Asset::name))
+                .forEach(path -> assetBytes.put(path.substring(assetsPrefix.length()),
+                        githubPullRequestClient.getFileContent(access, path, ref)));
+        List<Asset> assets = assetBytes.entrySet().stream()
+                .map(entry -> new Asset(entry.getKey(), entry.getValue().length))
                 .toList();
 
-        return new PullRequestArticleResponse(slug, parsed.frontMatter(), parsed.content(), assets);
+        return new PublishableArticle(
+                new PullRequestArticleResponse(slug, parsed.frontMatter(), parsed.content(), assets), assetBytes);
     }
 
     /** 変更ファイルの{@code articles/<slug>/...}から記事ディレクトリを1つに特定する。 */

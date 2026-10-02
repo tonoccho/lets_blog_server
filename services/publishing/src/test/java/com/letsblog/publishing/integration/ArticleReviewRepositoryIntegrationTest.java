@@ -89,4 +89,38 @@ class ArticleReviewRepositoryIntegrationTest {
         assertThat(repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, 9).orElseThrow().getState())
                 .isEqualTo(ArticleReviewState.SUBMITTED);
     }
+
+    @Test
+    @DisplayName("レビュー中へ遷移させるとテスト環境の投稿URLとレビュー実施者が保存され、提出者は変わらない(issue #1341)")
+    void persistsInReviewWithUrlAndReviewer() {
+        ArticleReview saved = repository.saveAndFlush(review(9));
+        assertThat(saved.getTestPostUrl()).isNull();
+        assertThat(saved.getReviewedByUserId()).isNull();
+
+        saved.markInReview("http://test.example/sample/", 8L);
+        repository.saveAndFlush(saved);
+
+        ArticleReview found = repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, 9).orElseThrow();
+        assertThat(found.getState()).isEqualTo(ArticleReviewState.IN_REVIEW);
+        assertThat(found.getTestPostUrl()).isEqualTo("http://test.example/sample/");
+        assertThat(found.getReviewedByUserId()).isEqualTo(8L);
+        assertThat(found.getSubmittedByUserId()).isEqualTo(3L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT state FROM article_reviews WHERE project_id = ? AND github_pr_number = 9",
+                String.class, PROJECT_ID)).isEqualTo("IN_REVIEW");
+    }
+
+    @Test
+    @DisplayName("再提出(提出済みへ戻す)しても、記録したテスト環境URLとレビュー実施者は消えない(後続Issueが扱う)")
+    void resubmissionKeepsLastReviewRecord() {
+        ArticleReview saved = repository.saveAndFlush(review(9));
+        saved.markInReview("http://test.example/sample/", 8L);
+        repository.saveAndFlush(saved);
+        saved.markSubmitted();
+        repository.saveAndFlush(saved);
+
+        ArticleReview found = repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, 9).orElseThrow();
+        assertThat(found.getState()).isEqualTo(ArticleReviewState.SUBMITTED);
+        assertThat(found.getTestPostUrl()).isEqualTo("http://test.example/sample/");
+    }
 }

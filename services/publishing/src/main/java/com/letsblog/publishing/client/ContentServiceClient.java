@@ -153,6 +153,33 @@ public class ContentServiceClient {
         }
     }
 
+    /** content-serviceの{@code PostLookupResponse}に対応する、サイト+スラッグでの既存投稿の照会結果。 */
+    public record PostSlugLookup(String wpPostId, String status) {
+    }
+
+    /**
+     * サイトキー+スラッグに対応する既存投稿を引き当てる(issue #1341)。content-serviceの
+     * {@code GET /api/posts/{site}/by-slug/{slug}}は拡張の{@code letsBlog.publish}が使う
+     * {@code lookupExistingPost}と同じ識別規則で、レビューの再実行で記事を重複させないために使う。
+     * 該当が無ければ空。
+     */
+    public Optional<PostSlugLookup> findPostBySlug(String siteKey, String slug) {
+        try {
+            PostSlugLookup result = authorized(restClient.get()
+                    .uri("/api/posts/{site}/by-slug/{slug}", siteKey, slug))
+                    .retrieve()
+                    .body(PostSlugLookup.class);
+            return Optional.ofNullable(result);
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return Optional.empty();
+            }
+            throw new IllegalStateException("content-serviceのスラッグ照会呼び出しに失敗しました: " + bodyOrMessage(e), e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException("content-serviceのスラッグ照会呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     /** PostPublishService#upsertPostRecordが使う。 */
     public void upsertPost(
             Long siteId, String wpPostId, String slug, String status, String uploadedImagesJson,

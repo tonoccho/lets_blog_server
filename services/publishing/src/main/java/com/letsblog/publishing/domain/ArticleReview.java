@@ -55,6 +55,14 @@ public class ArticleReview {
     @Column(name = "state", nullable = false, length = 32)
     private ArticleReviewState state;
 
+    /** テスト環境へ投稿した記事のURL(issue #1341)。レビュー開始までnull。 */
+    @Column(name = "test_post_url", length = 2048)
+    private String testPostUrl;
+
+    /** レビュー開始APIを呼んだLet's Blogユーザー(issue #1341)。{@code submittedByUserId}と同じくFKは持たない。 */
+    @Column(name = "reviewed_by_user_id")
+    private Long reviewedByUserId;
+
     @Column(name = "submitted_at", nullable = false)
     private LocalDateTime submittedAt;
 
@@ -81,5 +89,12 @@ public class ArticleReview {
     public void markSubmitted() {
         state = ArticleReviewState.SUBMITTED;
         submittedAt = LocalDateTime.now();
+    }
+
+    /** レビュー中へ遷移させ、テスト環境の投稿URLとレビュー実施者を記録する(issue #1341)。再レビューでも呼ぶ。 */
+    public void markInReview(String testPostUrl, Long reviewerUserId) {
+        state = ArticleReviewState.IN_REVIEW;
+        this.testPostUrl = testPostUrl;
+        this.reviewedByUserId = reviewerUserId;
     }
 }

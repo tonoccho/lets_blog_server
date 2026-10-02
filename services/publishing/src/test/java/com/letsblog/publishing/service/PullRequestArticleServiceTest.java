@@ -183,4 +183,28 @@ class PullRequestArticleServiceTest {
         assertThat(response.slug()).isEqualTo("sample");
         assertThat(response.assets()).isEmpty();
     }
+
+    @Test
+    @DisplayName("投稿用の取得は、記事の応答に加えてassetsの中身(assets/からの相対パス → バイト列)をheadから返す")
+    void fetchForPublishReturnsAssetBytes() {
+        prWithFiles(
+                added("articles/sample/article.md"),
+                added("articles/sample/assets/cover.png"),
+                added("articles/sample/assets/sub/x.png"));
+        when(client.getFileContent(ACCESS, "articles/sample/article.md", HEAD))
+                .thenReturn("---\ntitle: T\n---\n本文\n".getBytes(StandardCharsets.UTF_8));
+        when(client.getFileContent(ACCESS, "articles/sample/assets/cover.png", HEAD)).thenReturn(new byte[] {1, 2});
+        when(client.getFileContent(ACCESS, "articles/sample/assets/sub/x.png", HEAD)).thenReturn(new byte[] {3});
+
+        PullRequestArticleService.PublishableArticle result = service().fetchForPublish(ACCESS, 7);
+
+        assertThat(result.article().slug()).isEqualTo("sample");
+        assertThat(result.article().body()).isEqualTo("本文\n");
+        assertThat(result.article().assets()).containsExactly(
+                new PullRequestArticleResponse.Asset("cover.png", 2),
+                new PullRequestArticleResponse.Asset("sub/x.png", 1));
+        assertThat(result.assetBytes().keySet()).containsExactly("cover.png", "sub/x.png");
+        assertThat(result.assetBytes().get("cover.png")).containsExactly(1, 2);
+        assertThat(result.assetBytes().get("sub/x.png")).containsExactly(3);
+    }
 }

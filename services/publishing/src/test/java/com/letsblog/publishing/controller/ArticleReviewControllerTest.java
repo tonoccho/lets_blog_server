@@ -10,9 +10,11 @@ import static org.mockito.Mockito.when;
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
 import com.letsblog.publishing.domain.ArticleReviewState;
+import com.letsblog.publishing.dto.ArticleReviewResponse;
 import com.letsblog.publishing.dto.ArticleSubmissionRequest;
 import com.letsblog.publishing.dto.ArticleSubmissionResponse;
 import com.letsblog.publishing.github.GithubPullRequestClient;
+import com.letsblog.publishing.service.ArticleReviewPublishService;
 import com.letsblog.publishing.service.ArticleSubmissionService;
 import com.letsblog.publishing.dto.PullRequestArticleResponse;
 import com.letsblog.publishing.github.GithubPullRequestSummary;
@@ -49,10 +51,13 @@ class ArticleReviewControllerTest {
     @Mock
     private ArticleSubmissionService articleSubmissionService;
 
+    @Mock
+    private ArticleReviewPublishService articleReviewPublishService;
+
     private ArticleReviewController controller() {
         return new ArticleReviewController(
                 adminAuthorizationService, currentActorService, projectServiceClient, githubPullRequestClient,
-                pullRequestArticleService, articleSubmissionService);
+                pullRequestArticleService, articleSubmissionService, articleReviewPublishService);
     }
 
     @Test
@@ -159,5 +164,39 @@ class ArticleReviewControllerTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessageContaining("ログイン");
         verifyNoInteractions(projectServiceClient, articleSubmissionService);
+    }
+
+    @Test
+    @DisplayName("レビュー開始は認可後に操作者でGitHubアクセス情報を解決し、操作者のIDを添えてレビューサービスへ渡す(issue #1341)")
+    void review() {
+        GithubAccess access = new GithubAccess("t", "octo", "blog");
+        ArticleReviewResponse expected = new ArticleReviewResponse(
+                201, ArticleReviewState.IN_REVIEW, "http://test.example/sample/", 3L, "55");
+        when(currentActorService.getCurrentActorId()).thenReturn(3L);
+        when(projectServiceClient.resolveGithubAccess(7L, 3L)).thenReturn(access);
+        when(articleReviewPublishService.review(7L, 3L, access, 201)).thenReturn(expected);
+
+        assertThat(controller().review(7L, 201)).isEqualTo(expected);
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+    }
+
+    @Test
+    @DisplayName("レビュー開始もメンバーでも管理者でもなければ拒否され、何にも触れない")
+    void reviewForbidden() {
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+
+        assertThatThrownBy(() -> controller().review(7L, 201)).isInstanceOf(ForbiddenException.class);
+        verifyNoInteractions(projectServiceClient, articleReviewPublishService);
+    }
+
+    @Test
+    @DisplayName("レビュー開始も操作者を解決できなければログインが必要として拒否する")
+    void reviewUnresolvedActor() {
+        when(currentActorService.getCurrentActorId()).thenReturn(null);
+
+        assertThatThrownBy(() -> controller().review(7L, 201))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("ログイン");
+        verifyNoInteractions(projectServiceClient, articleReviewPublishService);
     }
 }
