@@ -5,18 +5,21 @@
 #   ./update.sh                  # develop の最新を取り込む(既定)
 #   ./update.sh --main           # main を更新元にする
 #   ./update.sh --branch <name>  # 任意のブランチを更新元にする
+#   ./update.sh --skip-backup    # 更新前バックアップを省略する
 #
 # 行うこと(冪等。何度実行しても壊れない):
 #   1. 更新元ブランチの表示(何かを変更する前に必ず表示する)
 #   2. 安全確認(未コミットの変更がある、または現在のブランチが更新元と異なる場合は
 #      何も変更せず中断する。stash や上書きはしない)
-#   3. git fetch + fast-forward のみの取り込み(分岐していれば中断する)
-#   4. docker compose up -d --build で全サービスを再ビルド・反映
-#   5. scripts/wait-for-stack-healthy.sh --all で全サービスが healthy になるまで待つ
-#      (setup.sh と同じ判定を再利用。失敗・タイムアウト時は非0で終了する)
+#   3. 更新前バックアップ(scripts/db-backup.sh)。失敗したら git pull せず中断する
+#   4. git fetch + fast-forward のみの取り込み(分岐していれば中断する)
+#   5. docker compose up -d --build で全サービスを再ビルド・反映
+#   6. scripts/wait-for-stack-healthy.sh --all で全サービスが healthy になるまで待つ
+#      (setup.sh と同じ判定を再利用。失敗・タイムアウト時は非0で終了し、
+#       更新前バックアップがあれば scripts/db-restore.sh での復旧手順を案内する)
 #
 # データボリュームには触れない(コンテナ・ボリュームを破棄する操作は一切使わない)。
-# 更新前バックアップ・選択的再ビルド・.env 追随チェックは対象外(#1252/#1253/#1254)。
+# 選択的再ビルド・.env 追随チェックは対象外(#1253/#1254)。
 #
 # `source update.sh` で関数だけを読み込める(直接実行時のみ main を呼ぶ)。
 set -euo pipefail
@@ -25,16 +28,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
 
 TARGET_BRANCH="develop"
+SKIP_BACKUP=0
+BACKUP_PATH=""
 
 log() { echo "==> $*"; }
 err() { echo "エラー: $*" >&2; }
 
 usage() {
   cat <<'USAGE'
-使い方: ./update.sh [--main | --branch <name>]
+使い方: ./update.sh [--main | --branch <name>] [--skip-backup]
 
   (指定なし)        develop の最新を取り込んで再ビルド・再起動する(既定)
   --main            main を更新元にする
+  --skip-backup     更新前のDBバックアップを省略する
   --branch <name>   任意のブランチを更新元にする
   -h, --help        このヘルプを表示する
 USAGE
@@ -53,6 +59,10 @@ parse_args() {
         ;;
       --main)
         TARGET_BRANCH="main"
+        shift
+        ;;
+      --skip-backup)
+        SKIP_BACKUP=1
         shift
         ;;
       -h|--help)
@@ -85,6 +95,33 @@ check_clean_and_branch() {
   log "安全確認OK: ブランチ $current / 未コミットの変更なし"
 }
 
+# ---- 更新前バックアップ(#1252) ----
+backup_before_update() {
+  if [ "$SKIP_BACKUP" = "1" ]; then
+    log "--skip-backup が指定されたため、更新前バックアップを省略します"
+    return 0
+  fi
+  local path="$REPO_ROOT/backups/pre-update-$(date +%Y%m%d-%H%M%S).sql"
+  log "更新前にDBをバックアップします"
+  if ! bash "$REPO_ROOT/scripts/db-backup.sh" "$path"; then
+    err "バックアップに失敗したため、更新を中断します(git pull は実行していません)。"
+    err "  バックアップを省略して更新する場合は --skip-backup を付けて再実行してください。"
+    exit 1
+  fi
+  BACKUP_PATH="$path"
+  log "バックアップ先: $BACKUP_PATH"
+  log "注意: 生成画像ファイルはバックアップ対象外です(generated_images ボリュームは含まれません)。完全バックアップは Web 管理画面の /admin/backup を使ってください。"
+}
+
+# 更新後に失敗したとき、直前のバックアップからの復旧手順を案内する
+guide_restore() {
+  if [ -n "$BACKUP_PATH" ]; then
+    err "直前のバックアップから復旧する場合: bash scripts/db-restore.sh $BACKUP_PATH"
+  else
+    err "更新前バックアップを取っていない(--skip-backup)ため、このスクリプトからは復旧できません。"
+  fi
+}
+
 # ---- 取り込み(fast-forwardのみ) ----
 pull_latest() {
   log "origin から取得します"
@@ -113,11 +150,13 @@ rebuild_and_wait() {
   log "docker compose で全サービスを再ビルド・反映します"
   if ! (cd "$REPO_ROOT" && docker compose up -d --build); then
     err "docker compose up -d --build に失敗しました。上記の出力を確認してください。"
+    guide_restore
     exit 1
   fi
   log "全サービスが healthy になるまで待機します"
   if ! bash "$REPO_ROOT/scripts/wait-for-stack-healthy.sh" --all; then
     err "healthy にならないサービスがあります(上記に該当サービス名が出ています)。更新は完了していません。"
+    guide_restore
     exit 1
   fi
 }
@@ -126,6 +165,7 @@ main() {
   parse_args "$@"
   log "更新元ブランチ: $TARGET_BRANCH"
   check_clean_and_branch
+  backup_before_update
   pull_latest
   rebuild_and_wait
   log "アップデートが完了しました。"

@@ -50,6 +50,18 @@ fi
 exit 0
 """
 
+FAKE_BACKUP = """#!/bin/bash
+echo "backup $*" >> "$FAKE_LOG"
+if [ -n "${FAKE_BACKUP_FAIL:-}" ]; then
+  echo "エラー: コンテナ lbs-mysql が見つかりません" >&2
+  exit 1
+fi
+mkdir -p "$(dirname "$1")"
+echo "-- dump" > "$1"
+echo "バックアップを作成しました: $1"
+exit 0
+"""
+
 
 def run(cmd, cwd, env=None, check=True):
     return subprocess.run(cmd, cwd=cwd, env=env, check=check, text=True,
@@ -78,6 +90,7 @@ class UpdateShTest(unittest.TestCase):
         run(["git", "init", "-b", "develop", self.repo], self.tmp)
         os.makedirs(os.path.join(self.repo, "scripts"))
         self._write(os.path.join(self.repo, "scripts", "wait-for-stack-healthy.sh"), FAKE_WAIT)
+        self._write(os.path.join(self.repo, "scripts", "db-backup.sh"), FAKE_BACKUP)
         self._write(os.path.join(self.bin, "docker"), FAKE_DOCKER)
         shutil.copy(UPDATE_SCRIPT, os.path.join(self.repo, "update.sh")) \
             if os.path.exists(UPDATE_SCRIPT) else None
@@ -220,13 +233,13 @@ class UpdateShTest(unittest.TestCase):
         self.push_upstream()
         r = self.update()
         self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(self.logged(), "")
+        self.assertNotIn("docker", self.logged())
 
     def test_fetch_failure_fails(self):
         git(self.repo, "remote", "set-url", "origin", os.path.join(self.tmp, "nope.git"))
         r = self.update()
         self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(self.logged(), "")
+        self.assertNotIn("docker", self.logged())
 
     def test_docker_failure_propagates_and_skips_wait(self):
         r = self.update(extra_env={"FAKE_DOCKER_FAIL": "1"})
@@ -237,6 +250,65 @@ class UpdateShTest(unittest.TestCase):
         r = self.update(extra_env={"FAKE_WAIT_FAIL": "1"})
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("web", r.stderr)
+
+    # ---- 更新前バックアップ(#1252) ----
+    def backup_files(self):
+        d = os.path.join(self.repo, "backups")
+        return os.listdir(d) if os.path.isdir(d) else []
+
+    def test_backup_created_under_backups_and_path_printed(self):
+        r = self.update()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        files = self.backup_files()
+        self.assertEqual(len(files), 1)
+        self.assertIn(os.path.join("backups", files[0]), r.stdout)
+
+    def test_backup_runs_before_pull_and_rebuild(self):
+        self.push_upstream()
+        self.update()
+        log = self.logged()
+        self.assertIn("backup ", log)
+        self.assertLess(log.index("backup "), log.index("docker compose up"))
+
+    def test_backup_failure_aborts_before_pull(self):
+        self.push_upstream()
+        r = self.update(extra_env={"FAKE_BACKUP_FAIL": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.a_txt(), "v1\n")
+        self.assertNotIn("docker", self.logged())
+        self.assertIn("--skip-backup", r.stderr)
+
+    def test_skip_backup_flag_skips_backup_and_updates(self):
+        self.push_upstream()
+        r = self.update("--skip-backup", extra_env={"FAKE_BACKUP_FAIL": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("backup ", self.logged())
+        self.assertEqual(self.backup_files(), [])
+        self.assertEqual(self.a_txt(), "v2\n")
+
+    def test_help_mentions_skip_backup(self):
+        self.assertIn("--skip-backup", self.update("--help").stdout)
+
+    def test_output_states_generated_images_not_backed_up(self):
+        r = self.update()
+        self.assertIn("生成画像ファイルはバックアップ対象外", r.stdout)
+
+    def test_unhealthy_guides_restore_with_service_and_backup_path(self):
+        r = self.update(extra_env={"FAKE_WAIT_FAIL": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("web", r.stderr)
+        self.assertIn("scripts/db-restore.sh", r.stderr)
+        self.assertIn(self.backup_files()[0], r.stderr)
+
+    def test_unhealthy_with_skip_backup_has_no_restore_path(self):
+        r = self.update("--skip-backup", extra_env={"FAKE_WAIT_FAIL": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("db-restore.sh", r.stderr)
+
+    def test_docker_build_failure_also_guides_restore(self):
+        r = self.update(extra_env={"FAKE_DOCKER_FAIL": "1"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("scripts/db-restore.sh", r.stderr)
 
     # ---- データを消さない ----
     def test_never_destroys_volumes(self):
