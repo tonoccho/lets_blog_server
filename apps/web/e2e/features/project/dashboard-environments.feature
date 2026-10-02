@@ -1,5 +1,5 @@
 # language: ja
-@project @api
+@project
 機能: プロジェクトダッシュボードの環境設定ウィジェット
 
   ダッシュボードだけで local / test / production の環境の紐づけ状況を把握・変更できる

@@ -1,5 +1,5 @@
 # language: ja
-@project @api
+@project
 機能: 既存WordPressの取り込みと再プロビジョニング
 
   「取り込んだ既存WordPressを普通のサイトとして扱える」ことと「再プロビジョニングが
@@ -40,7 +40,7 @@
   (`post-new.php`)が公開するREST APIノンス(`wpApiSettings.nonce`)を使って
   `wp-json/wp/v2/posts`へ直接投稿する。外部サイトも実サイトのモックも使わない。
 
-  @slow
+  @api @slow
   シナリオ: 既存のWordPressをadoptで取り込むと、通常のサイトとして操作できる
     前提 provision-agent上に構築済みだが未取り込みのWordPressがある
     もし そのWordPressをadoptで取り込む

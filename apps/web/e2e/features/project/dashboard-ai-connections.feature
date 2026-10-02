@@ -1,5 +1,5 @@
 # language: ja
-@project @api @ai
+@project @ai
 機能: プロジェクトダッシュボードのAI接続状況ウィジェット
 
   ダッシュボードを見るだけで、Ollama / ComfyUI / ChatGPT / Claude の4つのAIの利用可否と、
