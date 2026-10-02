@@ -123,6 +123,13 @@ Observable conditions that can be verified.
 than fitting it into five. See `CLAUDE.md` → **At most five Acceptance Criteria** for the single
 definition, including when a split is not allowed.
 
+**Before writing a C1/C2 coverage criterion**, confirm that every changed file is production
+(`paths.is_production()` is True in `.claude/hooks/paths.py`) and that a runner from `CLAUDE.md` →
+**Coverage** (JaCoCo or jest) reaches it. If not, omit the numeric target. `^scripts/`, `^\.claude/`
+and `^docs/` are neutral with no Python coverage runner, so a change confined to them gets
+behavior criteria (e.g. "the unit tests in `scripts/test_*.py` pass"), never "C1/C2 ≥ 90%" —
+the criterion would be unsatisfiable (#1380, from #1379).
+
 Use concrete criteria.
 
 Bad:

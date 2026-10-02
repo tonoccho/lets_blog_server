@@ -442,6 +442,13 @@ Tests must cover the production code this Issue adds or changes to at least **90
 - **Production code no coverage runner reaches** (`apps/*/webviews/`, `infra/e2e-stubs/**`,
   `next.config.ts`) carries no numeric target; acceptance tests verify it. See **Enforcement** →
   Coverage check; phase separation and test-first still apply.
+- **Neutral paths carry no numeric target** (#1380). `.claude/hooks/paths.py` →
+  `NEUTRAL_PATTERNS` (`^scripts/`, `^\.claude/`, `^docs/`, …) is not production code, and no
+  runner measures Python branch coverage here (only JaCoCo and jest exist). Never write
+  "C1/C2 ≥ 90%" as an Acceptance Criterion for a change confined to those paths — for example,
+  a fix to `scripts/check-changed-coverage.py` (#1379) is verified by its own unit tests
+  (`python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'`), not by a number.
+  `project-planner` checks this before writing the criterion (see its Acceptance Criteria section).
 
 If a branch cannot be reached from a test, name it and say why in the report. Do not pad the
 number with tests that assert nothing.
