@@ -304,7 +304,8 @@ class ImportsTheSharedClassifier(unittest.TestCase):
     """分類規則を書き写さず `.claude/hooks/paths.py` の `classify()` を import している(要件3)。"""
 
     def test_imports_classify_from_paths_module(self):
-        source = open(SCRIPT, encoding="utf-8").read()
+        with open(SCRIPT, encoding="utf-8") as f:
+            source = f.read()
         self.assertIn("from paths import classify", source)
         self.assertNotIn("PRODUCTION_PATTERNS", source, "分類規則を書き写している")
 
