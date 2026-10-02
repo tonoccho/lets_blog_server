@@ -10,9 +10,14 @@ import com.letsblog.identity.dto.ProjectUserSyncSiteResult;
 import com.letsblog.identity.repository.ProjectUserRepository;
 import com.letsblog.identity.repository.UserRepository;
 import com.letsblog.identity.repository.UserSiteAuthorRepository;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -280,5 +285,155 @@ class ProjectUserSyncServiceTest {
 
         assertEquals(1, results.size());
         assertEquals("接続に失敗しました", results.get(0).errorMessage());
+    }
+
+    // ------------------------------------------------------------------
+    // issue #1324: サイト(環境)を後から紐付けたとき、その時点のメンバー全員のWordPressユーザーを補填する。
+    // ------------------------------------------------------------------
+
+    private static final ProjectServiceClient.SiteBridge BOUND_SITE =
+            new ProjectServiceClient.SiteBridge(30L, "bound-key", "本番環境", "https://prod.example.com");
+
+    private User userWithId(Long id, String email) {
+        User user = buildUser();
+        user.setId(id);
+        user.setEmail(email);
+        return user;
+    }
+
+    private ListAppender<ILoggingEvent> captureLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(ProjectUserSyncService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private void detach(ListAppender<ILoggingEvent> appender) {
+        ((Logger) LoggerFactory.getLogger(ProjectUserSyncService.class)).detachAppender(appender);
+    }
+
+    @Test
+    void サイト紐付け時の補填で既存メンバー全員の著者が紐付けたサイトに作られuser_site_authorsへ保存される() {
+        when(projectServiceClient.getSite(30L)).thenReturn(Optional.of(BOUND_SITE));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(
+                new ProjectUser(1L, 42L, "author"), new ProjectUser(1L, 43L, "editor")));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), eq(30L))).thenReturn(Optional.empty());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(userWithId(42L, "a@example.com")));
+        when(userRepository.findById(43L)).thenReturn(Optional.of(userWithId(43L, "b@example.com")));
+        when(publishingServiceClient.provisionAuthor(eq("bound-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("901"))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("902"));
+
+        service().backfillMembersToSite(1L, 30L);
+
+        ArgumentCaptor<PublishingServiceClient.AuthorProvisioningRequest> requests =
+                ArgumentCaptor.forClass(PublishingServiceClient.AuthorProvisioningRequest.class);
+        verify(publishingServiceClient, times(2)).provisionAuthor(eq("bound-key"), requests.capture());
+        assertEquals("a@example.com", requests.getAllValues().get(0).email());
+        assertEquals("author", requests.getAllValues().get(0).wpRole());
+        assertEquals("b@example.com", requests.getAllValues().get(1).email());
+        assertEquals("editor", requests.getAllValues().get(1).wpRole());
+
+        ArgumentCaptor<UserSiteAuthor> saved = ArgumentCaptor.forClass(UserSiteAuthor.class);
+        verify(userSiteAuthorRepository, times(2)).save(saved.capture());
+        assertTrue(saved.getAllValues().stream().allMatch(m -> m.getSiteId().equals(30L)));
+        assertEquals("901", saved.getAllValues().get(0).getCmsAuthorId());
+        assertEquals("902", saved.getAllValues().get(1).getCmsAuthorId());
+    }
+
+    @Test
+    void すでにそのサイトの対応表があるメンバーは補填で重複して作られない() {
+        when(projectServiceClient.getSite(30L)).thenReturn(Optional.of(BOUND_SITE));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(
+                new ProjectUser(1L, 42L, "author"), new ProjectUser(1L, 43L, "author")));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(42L, 30L))
+                .thenReturn(Optional.of(new UserSiteAuthor(42L, 30L, "700")));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(43L, 30L)).thenReturn(Optional.empty());
+        when(userRepository.findById(43L)).thenReturn(Optional.of(userWithId(43L, "b@example.com")));
+        when(publishingServiceClient.provisionAuthor(eq("bound-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("902"));
+
+        service().backfillMembersToSite(1L, 30L);
+
+        verify(publishingServiceClient, times(1)).provisionAuthor(eq("bound-key"), any());
+        verify(userRepository, never()).findById(42L);
+        verify(userSiteAuthorRepository, times(1)).save(any(UserSiteAuthor.class));
+    }
+
+    @Test
+    void 補填で一部のメンバーが失敗しても例外を投げず残りを処理し失敗したメンバーと理由をログに残す() {
+        when(projectServiceClient.getSite(30L)).thenReturn(Optional.of(BOUND_SITE));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(
+                new ProjectUser(1L, 42L, "author"), new ProjectUser(1L, 43L, "author")));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), eq(30L))).thenReturn(Optional.empty());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(userWithId(42L, "a@example.com")));
+        when(userRepository.findById(43L)).thenReturn(Optional.of(userWithId(43L, "b@example.com")));
+        when(publishingServiceClient.provisionAuthor(eq("bound-key"), any()))
+                .thenThrow(new PublishingServiceException("connect timed out", null))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("902"));
+
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            service().backfillMembersToSite(1L, 30L);
+        } finally {
+            detach(logs);
+        }
+
+        ArgumentCaptor<UserSiteAuthor> saved = ArgumentCaptor.forClass(UserSiteAuthor.class);
+        verify(userSiteAuthorRepository, times(1)).save(saved.capture());
+        assertEquals(43L, saved.getValue().getUserId());
+        List<String> errors = logs.list.stream()
+                .filter(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+        assertEquals(1, errors.size(), errors.toString());
+        assertTrue(errors.get(0).contains("42"), errors.get(0));
+        assertTrue(errors.get(0).contains("connect timed out"), errors.get(0));
+        assertTrue(errors.get(0).contains("本番環境"), errors.get(0));
+    }
+
+    @Test
+    void 補填でユーザー自体が見つからないメンバーも失敗としてログに残し他のメンバーは処理する() {
+        when(projectServiceClient.getSite(30L)).thenReturn(Optional.of(BOUND_SITE));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of(
+                new ProjectUser(1L, 42L, "author"), new ProjectUser(1L, 43L, "author")));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), eq(30L))).thenReturn(Optional.empty());
+        when(userRepository.findById(42L)).thenReturn(Optional.empty());
+        when(userRepository.findById(43L)).thenReturn(Optional.of(userWithId(43L, "b@example.com")));
+        when(publishingServiceClient.provisionAuthor(eq("bound-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("902"));
+
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            service().backfillMembersToSite(1L, 30L);
+        } finally {
+            detach(logs);
+        }
+
+        verify(publishingServiceClient, times(1)).provisionAuthor(eq("bound-key"), any());
+        assertTrue(logs.list.stream().anyMatch(e -> e.getLevel().isGreaterOrEqual(Level.WARN)
+                && e.getFormattedMessage().contains("42")));
+    }
+
+    @Test
+    void 補填の対象サイトが存在しなければ何も作らず例外も投げない() {
+        when(projectServiceClient.getSite(30L)).thenReturn(Optional.empty());
+
+        service().backfillMembersToSite(1L, 30L);
+
+        verify(projectUserRepository, never()).findByProjectId(anyLong());
+        verify(publishingServiceClient, never()).provisionAuthor(any(), any());
+    }
+
+    @Test
+    void 補填の対象プロジェクトにメンバーが居なければ何も作らない() {
+        when(projectServiceClient.getSite(30L)).thenReturn(Optional.of(BOUND_SITE));
+        when(projectUserRepository.findByProjectId(1L)).thenReturn(List.of());
+
+        service().backfillMembersToSite(1L, 30L);
+
+        verify(publishingServiceClient, never()).provisionAuthor(any(), any());
+        verify(userSiteAuthorRepository, never()).save(any());
     }
 }

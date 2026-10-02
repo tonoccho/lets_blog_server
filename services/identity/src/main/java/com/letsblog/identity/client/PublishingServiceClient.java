@@ -1,10 +1,8 @@
 package com.letsblog.identity.client;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -19,6 +17,7 @@ import org.springframework.web.client.RestClientException;
  * {@code user_site_authors}への永続化だけを担う。
  *
  * <p>認証は他サービスの内部ブリッジクライアントと同じく、呼び出し元のBearerトークンを転送する。
+ * リクエストの無いスレッド(Rabbitリスナー、issue #1324)ではサービス自身のトークンを使う({@link OutboundAuthHeaders})。
  */
 @Component
 public class PublishingServiceClient {
@@ -27,17 +26,17 @@ public class PublishingServiceClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(60);
 
     private final RestClient restClient;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders authHeaders;
 
     public PublishingServiceClient(
             RestClient.Builder builder,
             @Value("${app.publishing-service-uri}") String publishingServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders authHeaders) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.baseUrl(publishingServiceUri).requestFactory(requestFactory).build();
-        this.request = request;
+        this.authHeaders = authHeaders;
     }
 
     public record AuthorProvisioningRequest(
@@ -70,10 +69,6 @@ public class PublishingServiceClient {
     }
 
     private RestClient.RequestBodySpec authorized(RestClient.RequestBodySpec spec) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            spec.header(HttpHeaders.AUTHORIZATION, bearerToken);
-        }
-        return spec;
+        return spec.headers(authHeaders.current());
     }
 }

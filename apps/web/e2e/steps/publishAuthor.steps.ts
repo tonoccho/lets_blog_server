@@ -39,7 +39,7 @@ const AUTHOR_SITE_ADMIN_USER = 'at66authoradmin';
 /** WordPress自動構築の待ち上限。分単位でかかりうる。 */
 const PROVISION_TIMEOUT_MS = 600_000;
 
-interface SiteFixture {
+export interface SiteFixture {
   id: number;
   siteKey: string;
 }
@@ -51,7 +51,7 @@ interface PostPublishResponse {
 }
 
 /** `WordPressSiteProvisioningService#normalizeSlug` と同じ正規化。 */
-function wpSlug(siteKey: string): string {
+export function wpSlug(siteKey: string): string {
   return siteKey.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 }
 
@@ -62,7 +62,7 @@ function wpSlug(siteKey: string): string {
  * サイトディレクトリへは `sh -c 'cd ... && ...'` で自分で移動する
  * (docs/ACCEPTANCE_TESTING.md §9「`working_dir` はマウント先にしない」)。
  */
-function wpCli(slug: string, command: string): string {
+export function wpCli(slug: string, command: string): string {
   return execFileSync(
     'docker',
     ['compose', 'exec', '-T', 'wordpress', 'sh', '-c', `cd /var/www/html/sites/${slug} && wp --allow-root ${command}`],
@@ -86,7 +86,7 @@ interface WpUser {
  * (文字列)と比較できるよう、ここで文字列へ揃える(`publishTaxonomy.steps.ts`の
  * `findTermsByName`と同じ理由)。
  */
-function findWpUserByEmail(slug: string, email: string): WpUser[] {
+export function findWpUserByEmail(slug: string, email: string): WpUser[] {
   const output = wpCli(slug, `user list --search=${shellQuote(email)} --fields=ID,user_email --format=json`);
   const users = (JSON.parse(output || '[]') as { ID: number | string; user_email: string }[]) ?? [];
   return users
@@ -99,28 +99,31 @@ function postAuthor(slug: string, postId: string): string {
   return wpCli(slug, `post get ${postId} --field=post_author`);
 }
 
-async function adminToken(request: APIRequestContext): Promise<string> {
+export async function adminToken(request: APIRequestContext): Promise<string> {
   return fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
 }
 
-async function adminHeaders(request: APIRequestContext): Promise<Record<string, string>> {
+export async function adminHeaders(request: APIRequestContext): Promise<Record<string, string>> {
   const token = await adminToken(request);
   return { Authorization: `Bearer ${token}` };
 }
 
 /** issue #765と同じ理由(並列実行時の衝突対策)でユニークな名前を作る。 */
-function uniqueSuffix(): string {
+export function uniqueSuffix(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function ensureManagedSite(request: APIRequestContext): Promise<SiteFixture> {
+export async function ensureManagedSite(
+  request: APIRequestContext,
+  siteKey: string = AUTHOR_SITE_KEY
+): Promise<SiteFixture> {
   const headers = await adminHeaders(request);
   const list = await request.get('/api/sites', { headers });
   expect(
     list.ok(),
     `サイト一覧の取得に失敗しました (status=${list.status()}): ${await list.text()}`
   ).toBe(true);
-  const existing = ((await list.json()) as SiteFixture[]).find((site) => site.siteKey === AUTHOR_SITE_KEY);
+  const existing = ((await list.json()) as SiteFixture[]).find((site) => site.siteKey === siteKey);
   if (existing) {
     return existing;
   }
@@ -128,7 +131,7 @@ async function ensureManagedSite(request: APIRequestContext): Promise<SiteFixtur
     headers,
     data: {
       name: 'AT6-6 author probe site',
-      siteKey: AUTHOR_SITE_KEY,
+      siteKey,
       title: 'AT6-6 Author Probe',
       adminUser: AUTHOR_SITE_ADMIN_USER,
       adminEmail: 'at66-author-probe@letsblog.local',
@@ -140,7 +143,7 @@ async function ensureManagedSite(request: APIRequestContext): Promise<SiteFixtur
     // provision-agent側には既に実体があるがDBには未登録(中断した前回実行の取り残し、または
     // このシナリオ自体を@mode:serialなしで並列実行してしまった場合)。
     // site-adoption.steps.tsと同じ「取り込み」で救う(site-adoption.feature参照)。
-    return adoptExistingManagedSite(request, headers);
+    return adoptExistingManagedSite(request, headers, siteKey);
   }
   expect(
     created.ok(),
@@ -151,13 +154,14 @@ async function ensureManagedSite(request: APIRequestContext): Promise<SiteFixtur
 
 async function adoptExistingManagedSite(
   request: APIRequestContext,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  siteKey: string
 ): Promise<SiteFixture> {
   const adopted = await request.post('/api/sites/managed-wordpress/adopt', {
     headers,
     data: {
       name: 'AT6-6 author probe site',
-      siteKey: AUTHOR_SITE_KEY,
+      siteKey,
       adminUser: AUTHOR_SITE_ADMIN_USER,
     },
   });
@@ -172,7 +176,7 @@ async function adoptExistingManagedSite(
  * 検証用アカウントに実際にログインできるだけのKeycloak資格情報を整える
  * (`scripts/seed-acceptance-env.sh` 2/3手順と同じ内容。`projectMember.steps.ts`と同型)。
  */
-function provisionLoginableKeycloakCredential(email: string, password: string): void {
+export function provisionLoginableKeycloakCredential(email: string, password: string): void {
   kcadmLogin();
   const usersJson = kcadm(['get', 'users', '-r', KEYCLOAK_REALM, '-q', `email=${email}`, '--fields', 'id']);
   const users = JSON.parse(usersJson) as { id: string }[];

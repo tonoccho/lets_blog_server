@@ -134,7 +134,11 @@ public class ProjectService {
             case "production" -> project.setProductionSiteId(siteId);
             default -> throw new IllegalArgumentException("environment は local/test/production のいずれかを指定してください");
         }
-        return toResponse(projectRepository.save(project));
+        ProjectResponse response = toResponse(projectRepository.save(project));
+        // issue #1324: サイト紐付け前に追加されたメンバーのWordPressユーザーを、identity-serviceが
+        // 紐付けたサイトへ補填する(ADR-0004によりproject_usersはidentityの所有で、ここからは触れない)。
+        domainEventPublisher.publishProjectEnvironmentBound(projectId, siteId);
+        return response;
     }
 
     @AuditLog(action = AuditLogAction.PROJECT_ENVIRONMENT_UNBOUND, resourceType = "PROJECT")

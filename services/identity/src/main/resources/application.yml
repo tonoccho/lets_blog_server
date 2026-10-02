@@ -64,8 +64,9 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
-  # user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを
-  # 担うため、リトライ/DLQ設定は不要(コンシューマー側の設定はcontent-service等を参照)。
+  # user.deactivatedドメインイベント発行(letsblog.events、issue #580)。発行側にはリトライ/DLQ設定は
+  # 不要(コンシューマー側の設定はcontent-service等を参照)。購読するproject.environment-bound
+  # (issue #1324)のリトライ設定はlistener.simple.retry。
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -80,6 +81,15 @@ spring:
     # より十分短く諦めさせればよい。本サービスの内部クライアント(PublishingServiceClient/
     # ProjectServiceClient、いずれもCONNECT_TIMEOUT = Duration.ofSeconds(3))と同じ3秒の慣例に合わせる。
     connection-timeout: 3s
+    # project.environment-boundコンシューマー(EventMessageListener、issue #1324)のリトライ→DLQ
+    # ポリシー。analytics/content-serviceと同じ設定(docs/EVENT_DRIVEN_ARCHITECTURE.md参照)。
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-retries: 3
+          initial-interval: 1000
+          multiplier: 2.0
 
 # GitHubトークンの暗号化(user.githubTokenEncrypted)に使う。legacy-apiと同じ物理カラムを
 # 参照するため、legacy-apiと同一のAPP_ENCRYPTION_KEYを共有する必要がある。

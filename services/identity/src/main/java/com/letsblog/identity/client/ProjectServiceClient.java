@@ -1,12 +1,10 @@
 package com.letsblog.identity.client;
 
 import com.letsblog.identity.service.ProjectNotFoundException;
-import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -26,6 +24,7 @@ import org.springframework.web.client.RestClientResponseException;
  * 資格情報・GitHubトークン・タグデザインの照会は移していない(それぞれ所有サービスが直接扱う)。
  *
  * <p>認証は他サービスの内部ブリッジクライアントと同じく、呼び出し元のBearerトークンを転送する。
+ * リクエストの無いスレッド(Rabbitリスナー、issue #1324)ではサービス自身のトークンを使う({@link OutboundAuthHeaders})。
  */
 @Component
 public class ProjectServiceClient {
@@ -34,17 +33,17 @@ public class ProjectServiceClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final RestClient restClient;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders authHeaders;
 
     public ProjectServiceClient(
             RestClient.Builder builder,
             @Value("${app.project-service-uri}") String projectServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders authHeaders) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.baseUrl(projectServiceUri).requestFactory(requestFactory).build();
-        this.request = request;
+        this.authHeaders = authHeaders;
     }
 
     /**
@@ -104,11 +103,7 @@ public class ProjectServiceClient {
     }
 
     private RestClient.RequestHeadersSpec<?> authorized(RestClient.RequestHeadersSpec<?> spec) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            spec.header(HttpHeaders.AUTHORIZATION, bearerToken);
-        }
-        return spec;
+        return spec.headers(authHeaders.current());
     }
 
     private String bodyOrMessage(RestClientResponseException e) {

@@ -50,6 +50,12 @@ public final class EventExchanges {
     /** ユーザー無効化に伴う権限キャッシュの破棄。発行元: identity。購読: 全サービス。 */
     public static final String USER_DEACTIVATED_ROUTING_KEY = "user.deactivated";
 
+    /**
+     * プロジェクトへのサイト(環境)紐付けに伴う、既存メンバーのWordPressユーザー補填(issue #1324)。
+     * 発行元: project。購読: identity。
+     */
+    public static final String PROJECT_ENVIRONMENT_BOUND_ROUTING_KEY = "project.environment-bound";
+
     private EventExchanges() {
     }
 }

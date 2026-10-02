@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
  * {@link PublishingServiceClient}という内部ブリッジ経由になる。
  */
 @Service
+@Slf4j
 public class ProjectUserSyncService {
 
     private final ProjectServiceClient projectServiceClient;
@@ -177,6 +179,38 @@ public class ProjectUserSyncService {
         }
         auditLogService.logProjectUserSyncAction(projectId, userId, results);
         return results;
+    }
+
+    /**
+     * issue #1324: サイト(環境)を後から紐付けたとき、その時点のメンバー全員のWordPressユーザーを
+     * 紐付けたサイトに作り、{@code user_site_authors}へ保存する。project-serviceが発行する
+     * {@code project.environment-bound}イベントの購読側から呼ばれる。
+     *
+     * <p>すでにそのサイトの対応表があるメンバーは作らない(重複防止、イベントの再配信にも冪等)。
+     * {@code @Transactional}を持たず、メンバーごとに独立して実行する(#1242と同じ方針): 一部の
+     * メンバーで失敗しても環境の紐付け(project-service側で確定済み)は取り消さず、他のメンバーの
+     * 補填も続ける。失敗したメンバーと理由は警告ログに残す(例外は呼び出し元へ伝播させない)。
+     */
+    public void backfillMembersToSite(Long projectId, Long siteId) {
+        Optional<ProjectServiceClient.SiteBridge> found = projectServiceClient.getSite(siteId);
+        if (found.isEmpty()) {
+            log.warn("環境紐付け後のメンバー補填をスキップしました(サイトが見つかりません): projectId={}, siteId={}",
+                    projectId, siteId);
+            return;
+        }
+        ProjectServiceClient.SiteBridge site = found.get();
+        for (ProjectUser projectUser : projectUserRepository.findByProjectId(projectId)) {
+            Long userId = projectUser.getUserId();
+            if (userSiteAuthorRepository.findByUserIdAndSiteId(userId, siteId).isPresent()) {
+                continue;
+            }
+            try {
+                provisionUserOnSite(site, getUser(userId), projectUser.getWpRole());
+            } catch (RuntimeException e) {
+                log.warn("環境紐付け後のメンバー補填に失敗しました: projectId={}, userId={}, siteId={}, site={}, reason={}",
+                        projectId, userId, siteId, site.name(), e.getMessage(), e);
+            }
+        }
     }
 
     private void syncToProjectSites(ProjectServiceClient.ProjectBridge project, User user, String wpRole) {

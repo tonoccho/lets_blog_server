@@ -2,11 +2,14 @@ package com.letsblog.project.messaging;
 
 import com.letsblog.common.messaging.EventExchanges;
 import com.letsblog.common.messaging.ProjectDeletedEvent;
+import com.letsblog.common.messaging.ProjectEnvironmentBoundEvent;
 import com.letsblog.common.messaging.SiteDeletedEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -40,6 +43,28 @@ public class DomainEventPublisher {
     public void publishSiteDeleted(Long siteId) {
         publish(EventExchanges.SITE_DELETED_ROUTING_KEY,
                 new SiteDeletedEvent(newEventId(), Instant.now(), siteId));
+    }
+
+    /**
+     * {@code ProjectService#bindEnvironment}が使う(issue #1324)。identity-serviceが既存メンバーを補填する。
+     *
+     * <p>トランザクション内で呼ばれたときは、コミット後にだけ発行する。コミット前に発行すると、
+     * identity-serviceが補填のためにproject-serviceへ問い合わせたとき紐付け前の状態を読んだり、
+     * ロールバックされた紐付けを通知してしまったりする。トランザクションが無ければ即時に発行する。
+     */
+    public void publishProjectEnvironmentBound(Long projectId, Long siteId) {
+        ProjectEnvironmentBoundEvent event =
+                new ProjectEnvironmentBoundEvent(newEventId(), Instant.now(), projectId, siteId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish(EventExchanges.PROJECT_ENVIRONMENT_BOUND_ROUTING_KEY, event);
+                }
+            });
+        } else {
+            publish(EventExchanges.PROJECT_ENVIRONMENT_BOUND_ROUTING_KEY, event);
+        }
     }
 
     private void publish(String routingKey, Object event) {

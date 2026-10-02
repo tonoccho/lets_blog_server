@@ -18,9 +18,12 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-restclient'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    // user.deactivatedドメインイベント発行(letsblog.events、issue #580)。プロデューサー側のみを
-    // 担うため、コンシューマー側(spring-retry等)は不要。
+    // user.deactivatedドメインイベント発行(letsblog.events、issue #580)と、issue #1324で追加した
+    // project.environment-bound購読(既存メンバーのWordPressユーザー補填)。
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
+    // リトライ→DLQ(spring.rabbitmq.listener.simple.retry)。Spring BootのBOMがバージョンを
+    // 管理しないため明示指定する(analytics/content-serviceと同じ)。
+    implementation 'org.springframework.retry:spring-retry:2.0.11'
     // issue #1242: AuditLogServiceがcom.fasterxml.jackson.databind.ObjectMapperを直接使うため
     // 明示的に追加する(Boot 4の既定JSONコンバータ・既定ObjectMapperはJackson3系(tools.jackson)に
     // 変わったため。project/media/ai/content-serviceと同じ構成。services/project/build.gradle参照)。
