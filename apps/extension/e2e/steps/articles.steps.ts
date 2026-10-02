@@ -8,6 +8,7 @@ import { attempt, capturedError, w } from './common.steps';
 import * as apiClient from '../../src/apiClient';
 import { httpRequest } from '../../src/httpClient';
 import { LocalImageReference, parseArticle, stringifyArticle } from '../../src/frontMatter';
+import { wordpressPostStatus } from '../support/wordpress';
 import { deleteUnreferencedMedia, MediaDeletionOutcome, scanUnreferencedMedia } from '../support/api';
 
 /** 公開シナリオが使う記事本文。front matter付きのMarkdownを拡張の実装で組み立てる。 */
@@ -275,31 +276,28 @@ Then('削除は対象なしとして区別される', (world) => {
 });
 
 /**
- * 2回目の削除要求が content-service 側の記録を壊していないことを確かめる(issue #1326)。
+ * 2回目の削除要求が記事を破壊していないことを、WordPress の実体と content-service の記録の
+ * 両方で確かめる(issue #1326 / #1412)。
  *
- * <p><b>このステップが見ているのは WordPress の実体ではない。</b>
- * `lookupExistingPost` が叩く `GET /api/posts/{site}/by-slug/{slug}` は content-service の
- * 自前DBを返すだけで、WordPress へ問い合わせていない。その `status` は
- * `PostDeleteService#delete` が `cmsAdapter.deletePost()` の成功後に呼ぶ
- * `contentServiceClient.markTrashed(...)` が無条件に `"trash"` を書いた値である
- * (`InternalPostBridgeController#markTrashed` は既存値を見ずに `setStatus("trash")` する)。
- *
- * したがって**「WordPress の行が恒久削除されたが content-service の記録だけ trash のまま」
- * という状態をこのステップは検知できない。**修正前のコード(2回目が恒久削除に成功する)でも
- * このステップは通ってしまう。レビューでこの点を指摘され、当初の
- * 「記事がゴミ箱に残り続けることを固定する」という説明は過大だったので改めた。
- *
- * <p>それでも残す価値はある。2回目の削除要求が content-service の記録そのものを消す、
- * あるいは別のステータスへ書き換えるという回帰は、これで検知できる。
- *
- * <p>WordPress 側の行が保全されていることは、この受け入れテスト層からは確認できない
- * (拡張の API クライアントに WordPress の実体を問い合わせる経路が無い)。
- * 実測としては wp-cli で直接確認してあり(1回目 `Trashed` → 修正後は
- * `post_status=trash` のまま 404、行は残存)、自動テストとしての確認は **#1412** で追う。
+ * <p>content-service 側の `lookupExistingPost` は自前DBを返すだけで WordPress へ問い合わせない。
+ * その `status` は 1回目の削除成功後に `markTrashed` が書いた値のままなので、
+ * 「WordPress の行は恒久削除されたが記録だけ trash」という #1326 の欠陥はそちらでは検知できない。
+ * そこで WordPress の `post_status` は `support/wordpress.ts` が wp-cli で直接読む
+ * (行が無ければ `null`、ゴミ箱なら `trash`)。
  */
 Then('記事の記録は削除されずゴミ箱のまま残る', async (world) => {
   const scope = w(world);
   const slug = (scope as unknown as { slug: string }).slug;
+  const published = (scope as unknown as { published: { wpPostId: string } }).published;
+
+  const wpStatus = wordpressPostStatus(scope.site.siteKey, published.wpPostId);
+  if (wpStatus !== 'trash') {
+    throw new Error(
+      `WordPress の投稿がゴミ箱に残っていません: post_status=${String(wpStatus)}` +
+        '(null は行が恒久削除されたことを表す)'
+    );
+  }
+
   const lookup = await apiClient.lookupExistingPost(scope.token, scope.site.siteKey, slug, scope.actor);
   if (!lookup) {
     throw new Error('再削除で content-service の記事記録が消えています');
