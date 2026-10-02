@@ -1,5 +1,5 @@
 # language: ja
-@project @api @ai
+@project @ai
 機能: AI・アセットタブでのClaude接続情報の表示とAPIキーによる接続
 
   プロジェクト詳細画面の「AI・アセット」タブ(LLMタブ)で、Claude(Anthropic)の接続状態と設定の出所を

@@ -1,5 +1,5 @@
 # language: ja
-@project @api @ai
+@project @ai
 機能: AI・アセットタブでのOllama / ComfyUI接続情報の表示と接続先の設定
 
   プロジェクト詳細画面の「AI・アセット」タブで、Ollama(LLMタブ)と ComfyUI(画像生成タブ)の
