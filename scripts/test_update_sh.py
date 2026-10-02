@@ -62,6 +62,28 @@ echo "バックアップを作成しました: $1"
 exit 0
 """
 
+JAVA_SERVICES = ["gateway", "identity", "project", "content", "media", "ai",
+                 "publishing", "analytics", "platform", "log-writer"]
+ALL_BUILD_SERVICES = ["web"] + JAVA_SERVICES + ["wordpress"]
+
+
+def compose_yaml():
+    """実物の docker-compose.yml と同じ build: の形(12個)だけを持つ縮小版。"""
+    out = ["services:"]
+    for n in ALL_BUILD_SERVICES:
+        out.append("  %s:" % n)
+        out.append("    image: x/%s" % n)
+        out.append("    build:")
+        if n == "web":
+            out += ["      context: ./apps/web", "      dockerfile: Dockerfile"]
+        elif n == "wordpress":
+            out += ["      context: ./infra/wordpress", "      dockerfile: Dockerfile"]
+        else:
+            out += ["      context: .", "      dockerfile: services/%s/Dockerfile" % n]
+        out.append("    restart: always")
+    out += ["  mysql:", "    image: mysql:8", "volumes:", "  data:"]
+    return "\n".join(out) + "\n"
+
 
 def run(cmd, cwd, env=None, check=True):
     return subprocess.run(cmd, cwd=cwd, env=env, check=check, text=True,
@@ -96,6 +118,8 @@ class UpdateShTest(unittest.TestCase):
             if os.path.exists(UPDATE_SCRIPT) else None
         with open(os.path.join(self.repo, "a.txt"), "w") as f:
             f.write("v1\n")
+        with open(os.path.join(self.repo, "docker-compose.yml"), "w") as f:
+            f.write(compose_yaml())
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-m", "init")
         git(self.repo, "remote", "add", "origin", self.origin)
@@ -116,6 +140,28 @@ class UpdateShTest(unittest.TestCase):
             f.write(text)
         git(self.other, "commit", "-am", "upstream")
         git(self.other, "push", "origin", branch)
+
+    def push_files(self, files):
+        """upstream(develop)に、パス→内容のファイル群を1コミットで積む。"""
+        git(self.other, "checkout", "develop")
+        git(self.other, "pull", "-q", "--rebase", "origin", "develop")
+        for rel, text in files.items():
+            path = os.path.join(self.other, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(text)
+        git(self.other, "add", "-A")
+        git(self.other, "commit", "-m", "upstream files")
+        git(self.other, "push", "origin", "develop")
+
+    def up_lines(self):
+        return [re.sub(r" \[DOCKER_CONFIG=.*$", "", l)
+                for l in self.logged().splitlines() if l.startswith("docker compose up")]
+
+    def rebuild_targets_line(self, r):
+        m = re.search(r"再ビルド対象[^\n]*", r.stdout)
+        self.assertIsNotNone(m, r.stdout)
+        return m.group(0)
 
     def update(self, *args, extra_env=None):
         env = dict(os.environ)
@@ -212,6 +258,7 @@ class UpdateShTest(unittest.TestCase):
     # ---- 取り込みと反映 ----
     def test_success_pulls_rebuilds_and_waits(self):
         self.push_upstream()
+        self.push_files({"services/media/src/A.java": "x\n"})
         r = self.update()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.a_txt(), "v2\n")
@@ -309,6 +356,84 @@ class UpdateShTest(unittest.TestCase):
         r = self.update(extra_env={"FAKE_DOCKER_FAIL": "1"})
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("scripts/db-restore.sh", r.stderr)
+
+    # ---- 差分ベースの選択的再ビルド(#1253) ----
+    def test_single_service_change_rebuilds_only_that_service(self):
+        self.push_files({"services/media/src/A.java": "x\n"})
+        r = self.update()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build media"])
+        line = self.rebuild_targets_line(r)
+        self.assertIn("media", line)
+        self.assertNotIn("gateway", line)
+
+    def test_web_and_wordpress_contexts_are_matched(self):
+        self.push_files({"apps/web/src/p.ts": "x\n", "infra/wordpress/Dockerfile": "x\n"})
+        r = self.update()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build web wordpress"])
+
+    def test_two_java_services_changed(self):
+        self.push_files({"services/ai/a": "x\n", "services/gateway/b": "x\n"})
+        self.update()
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build gateway ai"])
+
+    def test_rebuild_all_flag_rebuilds_all_twelve(self):
+        r = self.update("--rebuild-all")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build"])
+        line = self.rebuild_targets_line(r)
+        for n in ALL_BUILD_SERVICES:
+            self.assertIn(n, line)
+
+    def test_compose_file_change_rebuilds_all(self):
+        self.push_files({"docker-compose.yml": compose_yaml() + "# changed\n"})
+        r = self.update()
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build"])
+        line = self.rebuild_targets_line(r)
+        for n in ALL_BUILD_SERVICES:
+            self.assertIn(n, line)
+
+    def test_shared_build_inputs_rebuild_all(self):
+        for rel in ("build.gradle", "settings.gradle", "packages/x/Y.java",
+                    "gradle/wrapper/w.properties", "config/c.xml",
+                    "services/media/build.gradle"):
+            with self.subTest(rel=rel):
+                self.setUp()
+                self.push_files({rel: "x\n"})
+                self.update()
+                self.assertEqual(self.up_lines(), ["docker compose up -d --build"])
+
+    def test_no_diff_reports_zero_targets_and_does_not_rebuild(self):
+        r = self.update()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("0件", self.rebuild_targets_line(r))
+        self.assertNotIn("--build", self.logged())
+        self.assertIn("wait --all", self.logged())
+
+    def test_unrelated_change_reports_zero_targets(self):
+        self.push_files({"docs/x.md": "x\n", "README.md": "x\n"})
+        r = self.update()
+        self.assertIn("0件", self.rebuild_targets_line(r))
+        self.assertNotIn("--build", self.logged())
+
+    def test_java_service_only_its_own_directory_triggers_it(self):
+        self.push_files({"services/media/src/A.java": "x\n"})
+        self.update()
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build media"])
+        self.assertNotIn("gateway", self.up_lines()[0])
+
+    def test_missing_compose_file_falls_back_to_rebuild_all(self):
+        git(self.repo, "rm", "-q", "docker-compose.yml")
+        git(self.repo, "commit", "-m", "rm compose")
+        git(self.repo, "push", "origin", "develop")
+        self.push_files({"services/media/a": "x\n"})
+        r = self.update()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.up_lines(), ["docker compose up -d --build"])
+
+    def test_help_mentions_rebuild_all(self):
+        self.assertIn("--rebuild-all", self.update("--help").stdout)
 
     # ---- データを消さない ----
     def test_never_destroys_volumes(self):

@@ -6,6 +6,7 @@
 #   ./update.sh --main           # main を更新元にする
 #   ./update.sh --branch <name>  # 任意のブランチを更新元にする
 #   ./update.sh --skip-backup    # 更新前バックアップを省略する
+#   ./update.sh --rebuild-all    # 差分に関係なく全サービスを再ビルドする
 #
 # 行うこと(冪等。何度実行しても壊れない):
 #   1. 更新元ブランチの表示(何かを変更する前に必ず表示する)
@@ -13,13 +14,16 @@
 #      何も変更せず中断する。stash や上書きはしない)
 #   3. 更新前バックアップ(scripts/db-backup.sh)。失敗したら git pull せず中断する
 #   4. git fetch + fast-forward のみの取り込み(分岐していれば中断する)
-#   5. docker compose up -d --build で全サービスを再ビルド・反映
+#   5. 取り込んだ差分から再ビルド対象のサービスだけを判定し(実行前に一覧表示)、
+#      docker compose up -d --build <対象> で再ビルド・反映する。
+#      判定が難しい変更(docker-compose.yml / build.gradle / settings.gradle / gradlew /
+#      packages/ / gradle/ / config/ / services/*/build.gradle)は全サービス再ビルドに倒す
 #   6. scripts/wait-for-stack-healthy.sh --all で全サービスが healthy になるまで待つ
 #      (setup.sh と同じ判定を再利用。失敗・タイムアウト時は非0で終了し、
 #       更新前バックアップがあれば scripts/db-restore.sh での復旧手順を案内する)
 #
 # データボリュームには触れない(コンテナ・ボリュームを破棄する操作は一切使わない)。
-# 選択的再ビルド・.env 追随チェックは対象外(#1253/#1254)。
+# .env 追随チェックは対象外(#1254)。
 #
 # `source update.sh` で関数だけを読み込める(直接実行時のみ main を呼ぶ)。
 set -euo pipefail
@@ -29,6 +33,11 @@ REPO_ROOT="$SCRIPT_DIR"
 
 TARGET_BRANCH="develop"
 SKIP_BACKUP=0
+REBUILD_ALL=0
+OLD_HEAD=""
+NEW_HEAD=""
+REBUILD_MODE="all"     # all = 全サービス / selected = REBUILD_TARGETS のみ
+REBUILD_TARGETS=()
 BACKUP_PATH=""
 
 log() { echo "==> $*"; }
@@ -36,11 +45,12 @@ err() { echo "エラー: $*" >&2; }
 
 usage() {
   cat <<'USAGE'
-使い方: ./update.sh [--main | --branch <name>] [--skip-backup]
+使い方: ./update.sh [--main | --branch <name>] [--skip-backup] [--rebuild-all]
 
   (指定なし)        develop の最新を取り込んで再ビルド・再起動する(既定)
   --main            main を更新元にする
   --skip-backup     更新前のDBバックアップを省略する
+  --rebuild-all     差分に関係なく全サービスを再ビルドする
   --branch <name>   任意のブランチを更新元にする
   -h, --help        このヘルプを表示する
 USAGE
@@ -63,6 +73,10 @@ parse_args() {
         ;;
       --skip-backup)
         SKIP_BACKUP=1
+        shift
+        ;;
+      --rebuild-all)
+        REBUILD_ALL=1
         shift
         ;;
       -h|--help)
@@ -125,6 +139,7 @@ guide_restore() {
 # ---- 取り込み(fast-forwardのみ) ----
 pull_latest() {
   log "origin から取得します"
+  OLD_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
   if ! git -C "$REPO_ROOT" fetch origin "$TARGET_BRANCH"; then
     err "git fetch に失敗しました。"
     exit 1
@@ -133,6 +148,78 @@ pull_latest() {
     err "fast-forward で取り込めません(ローカルが origin/$TARGET_BRANCH と分岐しています)。"
     err "  ローカルのコミットを確認してください。自動では解決しません。"
     exit 1
+  fi
+  NEW_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+}
+
+# ---- 再ビルド対象の判定(#1253) ----
+# docker-compose.yml の build: から「サービス名|context|dockerfile」を1行ずつ出す。
+list_build_services() {
+  awk '
+    /^services:/ { s = 1; next }
+    /^[^ #]/ { s = 0 }
+    s && /^  [A-Za-z0-9_-]+:[ ]*$/ { name = $1; sub(/:$/, "", name); ctx = "."; inb = 0; next }
+    s && /^    build:[ ]*$/ { inb = 1; next }
+    s && /^    [^ ]/ { inb = 0 }
+    s && inb && /^      context:/ { ctx = $2 }
+    s && inb && /^      dockerfile:/ { print name "|" ctx "|" $2 }
+  ' "$REPO_ROOT/docker-compose.yml"
+}
+
+# 全サービスの再ビルドに倒す(判定が難しい)共有ファイルか
+is_shared_build_input() {
+  case "$1" in
+    docker-compose.yml|build.gradle|settings.gradle|gradlew) return 0 ;;
+    packages/*|gradle/*|config/*) return 0 ;;
+    services/*/build.gradle) return 0 ;;
+  esac
+  return 1
+}
+
+# サービスが専有するディレクトリ(context: . の Java サービスは Dockerfile の置き場)
+service_dir() {
+  local ctx="$1" dockerfile="$2"
+  if [ "$ctx" = "." ]; then
+    dirname "$dockerfile"
+  else
+    ctx="${ctx#./}"
+    echo "${ctx%/}"
+  fi
+}
+
+decide_rebuild_targets() {
+  REBUILD_MODE="selected"
+  REBUILD_TARGETS=()
+  local services
+  if [ ! -f "$REPO_ROOT/docker-compose.yml" ] || ! services="$(list_build_services)" || [ -z "$services" ]; then
+    log "build 対象を判定できないため、全サービスを再ビルドします"
+    REBUILD_MODE="all"
+    return 0
+  fi
+  if [ "$REBUILD_ALL" = "1" ]; then
+    REBUILD_MODE="all"
+  elif [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+    local f name ctx dockerfile dir
+    while IFS= read -r f; do
+      if is_shared_build_input "$f"; then
+        REBUILD_MODE="all"
+        break
+      fi
+    done < <(git -C "$REPO_ROOT" diff --name-only "$OLD_HEAD" "$NEW_HEAD")
+    if [ "$REBUILD_MODE" = "selected" ]; then
+      while IFS='|' read -r name ctx dockerfile; do
+        dir="$(service_dir "$ctx" "$dockerfile")"
+        if git -C "$REPO_ROOT" diff --name-only "$OLD_HEAD" "$NEW_HEAD" -- "$dir/" | grep -q .; then
+          REBUILD_TARGETS+=("$name")
+        fi
+      done <<< "$services"
+    fi
+  fi
+  if [ "$REBUILD_MODE" = "all" ]; then
+    REBUILD_TARGETS=()
+    while IFS='|' read -r name ctx dockerfile; do
+      REBUILD_TARGETS+=("$name")
+    done <<< "$services"
   fi
 }
 
@@ -147,9 +234,19 @@ setup_docker_config() {
 # ---- 再ビルド・反映とヘルス確認 ----
 rebuild_and_wait() {
   setup_docker_config
-  log "docker compose で全サービスを再ビルド・反映します"
-  if ! (cd "$REPO_ROOT" && docker compose up -d --build); then
-    err "docker compose up -d --build に失敗しました。上記の出力を確認してください。"
+  decide_rebuild_targets
+  local up_args=(up -d)
+  if [ "$REBUILD_MODE" = "all" ]; then
+    log "再ビルド対象(全サービス ${#REBUILD_TARGETS[@]}件): ${REBUILD_TARGETS[*]:-なし}"
+    up_args+=(--build)
+  elif [ "${#REBUILD_TARGETS[@]}" -eq 0 ]; then
+    log "再ビルド対象: 0件(再ビルドは行いません)"
+  else
+    log "再ビルド対象(${#REBUILD_TARGETS[@]}件): ${REBUILD_TARGETS[*]}"
+    up_args+=(--build "${REBUILD_TARGETS[@]}")
+  fi
+  if ! (cd "$REPO_ROOT" && docker compose "${up_args[@]}"); then
+    err "docker compose ${up_args[*]} に失敗しました。上記の出力を確認してください。"
     guide_restore
     exit 1
   fi

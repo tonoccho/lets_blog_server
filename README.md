@@ -384,6 +384,7 @@ healthy にならないサービスがあれば、そのサービス名を表示
 ./update.sh                  # develop の最新を取り込む(既定)
 ./update.sh --main           # main を更新元にする
 ./update.sh --branch <name>  # 任意のブランチを更新元にする
+./update.sh --rebuild-all    # 差分に関係なく全サービスを再ビルドする(通常は変更のあったサービスだけ再ビルドする)
 ```
 
 - **既定の更新元は `develop`**。現状、修正は `develop` に先に入るため、通常はフラグなしでよい。
