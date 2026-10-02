@@ -11,6 +11,8 @@ import {
   type ProjectUser,
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
 import { ProjectSectionNav } from "../ProjectSectionNav";
@@ -68,50 +70,58 @@ export default async function ProjectDetailPage({
     blockDiscriminatoryContent: null,
   };
 
-  function logAndFallback<T>(label: string, fallback: T) {
-    return (err: unknown) => {
-      console.error(`[projects/${projectId}] ${label}の取得に失敗しました:`, err);
-      return fallback;
-    };
-  }
+  const scope = `projects/${projectId}`;
 
   // タグ・プラグイン・テーマは一括管理パネルでタブを開いたときにクライアント側から遅延取得する
   // (初期表示で4種類すべて並行取得すると、同一ホストのSSH接続が集中しやすいため)。
   const [
-    project,
-    sites,
+    projectResult,
+    sitesResult,
     membersResult,
-    allUsers,
-    categoryPage,
+    allUsersResult,
+    categoryPageResult,
     timezone,
-    githubTokenStatus,
-    braveSearchApiKeyStatus,
-    imageSettings,
+    githubTokenStatusResult,
+    braveSearchApiKeyStatusResult,
+    imageSettingsResult,
   ] = await Promise.all([
-    getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
-    listSites().catch(logAndFallback("サイト一覧", [])),
+    loadOrReport(scope, "プロジェクト情報", getProject(projectId), null),
+    loadOrReport(scope, "サイト一覧", listSites(), []),
     // 取得失敗を空配列に潰すと「メンバーが居ない」と区別できず、誤った案内を出す(issue #1069)。
     // 失敗したことを別に持ち、0人の案内を出さないようにする。
-    listProjectUsers(projectId)
-      .then((users) => ({ users, failed: false }))
-      .catch((err: unknown) => ({ users: logAndFallback("プロジェクトメンバー", [] as ProjectUser[])(err), failed: true })),
-    listUsers().catch(logAndFallback("ユーザー一覧", [])),
-    listCategoryComparison(projectId, 0).catch(logAndFallback("カテゴリ比較", emptyComparisonPage)),
+    loadOrReport(scope, "プロジェクトメンバー", listProjectUsers(projectId), [] as ProjectUser[]),
+    loadOrReport(scope, "ユーザー一覧", listUsers(), []),
+    loadOrReport(scope, "カテゴリ比較", listCategoryComparison(projectId, 0), emptyComparisonPage),
     getViewerTimeZone(),
-    getProjectGithubTokenStatus(projectId).catch(logAndFallback("GitHubトークン設定状況", { configured: false })),
-    getProjectBraveSearchApiKeyStatus(projectId)
-      .catch(logAndFallback("Brave APIキー設定状況", { configured: false })),
+    loadOrReport(scope, "GitHubトークン設定状況", getProjectGithubTokenStatus(projectId), { configured: false }),
+    loadOrReport(scope, "Brave APIキー設定状況", getProjectBraveSearchApiKeyStatus(projectId), { configured: false }),
     // 画像生成設定は media-service が所有する(issue #583)。GET /api/projects/{id} には含まれない
     // ため個別に取得する。以前はここを取得しておらず、保存できるのに画面には常に空が
     // 表示されていた(issue #913)。取得に失敗しても画面全体は落とさない。
-    getProjectImageSettings(projectId).catch(logAndFallback("画像生成設定", EMPTY_IMAGE_SETTINGS)),
+    loadOrReport(scope, "画像生成設定", getProjectImageSettings(projectId), EMPTY_IMAGE_SETTINGS),
   ]);
+  const project = projectResult.data;
+  const sites = sitesResult.data;
+  const allUsers = allUsersResult.data;
+  const categoryPage = categoryPageResult.data;
+  const githubTokenStatus = githubTokenStatusResult.data;
+  const braveSearchApiKeyStatus = braveSearchApiKeyStatusResult.data;
+  const imageSettings = imageSettingsResult.data;
+  // メンバーの取得失敗は専用の文言で示すので、共通の通知からは外す(重複させない)。
+  const failedFetchLabels = failedLabels(
+    sitesResult,
+    allUsersResult,
+    categoryPageResult,
+    githubTokenStatusResult,
+    braveSearchApiKeyStatusResult,
+    imageSettingsResult,
+  );
 
   if (!project) {
     notFound();
   }
 
-  const { users: members, failed: membersFetchFailed } = membersResult;
+  const { data: members, failed: membersFetchFailed } = membersResult;
   const hasBoundSite = Boolean(project.localSite || project.testSite || project.productionSite);
   const candidateUsers = allUsers.filter((user) => !members.some((member) => member.userId === user.id));
 
@@ -267,6 +277,8 @@ export default async function ProjectDetailPage({
       <p className="font-mono text-sm text-neutral-500 dark:text-neutral-400">{project.slug}</p>
 
       <ProjectSectionNav projectId={project.id} active="detail" />
+
+      <FetchErrorNotice labels={failedFetchLabels} />
 
       <Tabs tabs={tabs} defaultTabId={initialTabId} />
     </div>

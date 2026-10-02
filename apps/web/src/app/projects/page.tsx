@@ -1,18 +1,29 @@
 import Link from "next/link";
 import { listProjects } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { ProjectForm } from "./ProjectForm";
 import { ProjectsTable } from "./ProjectsTable";
 
 export default async function ProjectsPage() {
   await requireAdminSession();
-  const [projects, timezone] = await Promise.all([listProjects().catch(() => []), getViewerTimeZone()]);
+  const [projectsResult, timezone] = await Promise.all([
+    loadOrReport("projects", "プロジェクト一覧", listProjects(), []),
+    getViewerTimeZone(),
+  ]);
+  const projects = projectsResult.data;
+  const failed = projectsResult.failed;
 
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">プロジェクト</h1>
 
+      <FetchErrorNotice labels={failedLabels(projectsResult)} />
+
+      {!failed && (
+        <>
       <div className="text-sm text-neutral-600 dark:text-neutral-400">
         全{projects.length}件を表示
       </div>
@@ -88,6 +99,8 @@ export default async function ProjectsPage() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
 
       <div id="project-form">
         <ProjectForm />

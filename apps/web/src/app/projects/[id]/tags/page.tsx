@@ -6,6 +6,8 @@ import {
   listProjectCustomTags,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Tabs, type TabItem } from "@/components/Tabs";
 import { ProjectSectionNav } from "../ProjectSectionNav";
@@ -18,19 +20,22 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
   await requireAdminSession();
   const projectId = Number(id);
 
-  const project = await getProject(projectId).catch(() => null);
+  const scope = `projects/${projectId}/tags`;
+  const { data: project } = await loadOrReport(scope, "プロジェクト情報", getProject(projectId), null);
   if (!project) {
     notFound();
   }
 
-  const [overview, tags, contentSettings] = await Promise.all([
+  const [overview, tagsResult, contentSettingsResult] = await Promise.all([
     getTagDesignSettings(projectId),
-    listProjectCustomTags(projectId).catch(() => []),
+    loadOrReport(scope, "カスタムタグ一覧", listProjectCustomTags(projectId), []),
     // cssSelectorPrefix は content-service が所有する(issue #576)。GET /api/projects/{id} には
     // 含まれないため個別に取得する。以前は project.cssSelectorPrefix を渡しており、
     // 常に undefined だった(issue #913)。
-    getProjectContentSettings(projectId).catch(() => ({ cssSelectorPrefix: null })),
+    loadOrReport(scope, "CSSセレクタ接頭辞", getProjectContentSettings(projectId), { cssSelectorPrefix: null }),
   ]);
+  // 取得に失敗した値を「0件」「未設定」に見せたまま編集させない。通知を出し、管理パネルは描画しない。
+  const customTagsFailed = tagsResult.failed || contentSettingsResult.failed;
 
   const tabs: TabItem[] = [
     {
@@ -50,13 +55,17 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
     {
       id: "custom-tags",
       label: "カスタムタグ管理",
-      content: (
+      content: customTagsFailed ? (
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          取得に失敗したため、カスタムタグを表示できません。
+        </p>
+      ) : (
         <ProjectCustomTagManager
           projectId={projectId}
           projectName={project.name}
           projectSlug={project.slug}
-          cssSelectorPrefix={contentSettings.cssSelectorPrefix}
-          tags={tags}
+          cssSelectorPrefix={contentSettingsResult.data.cssSelectorPrefix}
+          tags={tagsResult.data}
         />
       ),
     },
@@ -91,6 +100,8 @@ export default async function ProjectTagsPage({ params }: { params: Promise<{ id
       </div>
 
       <ProjectSectionNav projectId={projectId} active="tags" />
+
+      <FetchErrorNotice labels={failedLabels(tagsResult, contentSettingsResult)} />
 
       <Tabs tabs={tabs} />
     </div>

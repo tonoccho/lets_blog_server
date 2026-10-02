@@ -1,11 +1,13 @@
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
 import { listSshKeyPairs } from "@/lib/apiClient";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { SshKeyPairsPanel } from "./SshKeyPairsPanel";
 
 export default async function AdminSshKeysPage() {
   await requireAdminSession();
-  const [keyPairs, personalTimeZone] = await Promise.all([
-    listSshKeyPairs().catch(() => []),
+  const [keyPairsResult, personalTimeZone] = await Promise.all([
+    loadOrReport("admin/ssh-keys", "SSH鍵一覧", listSshKeyPairs(), []),
     getViewerTimeZone(),
   ]);
 
@@ -19,7 +21,10 @@ export default async function AdminSshKeysPage() {
           へ手動で追記してください。
         </p>
       </div>
-      <SshKeyPairsPanel keyPairs={keyPairs} personalTimeZone={personalTimeZone} />
+      <FetchErrorNotice labels={failedLabels(keyPairsResult)} />
+      {!keyPairsResult.failed && (
+        <SshKeyPairsPanel keyPairs={keyPairsResult.data} personalTimeZone={personalTimeZone} />
+      )}
     </div>
   );
 }

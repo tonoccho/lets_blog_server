@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { listUsers, listProjects, listAllProjectUsers } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone, getViewerProfile } from "@/lib/session";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { UserForm } from "./UserForm";
 import { DeleteUserButton } from "./DeleteUserButton";
@@ -9,13 +11,16 @@ export default async function UsersPage() {
   await requireAdminSession();
   // viewerはログイン中ユーザー自身のローカルプロフィール(issue #784)。session.user.idは
   // Keycloakのsub(UUID)なので、自分の行かどうかの判定にはこちらの数値idを使う。
-  const [users, projects, projectUsers, timezone, viewer] = await Promise.all([
-    listUsers().catch(() => []),
-    listProjects().catch(() => []),
-    listAllProjectUsers().catch(() => []),
+  const [usersResult, projectsResult, projectUsersResult, timezone, viewer] = await Promise.all([
+    loadOrReport("users", "ユーザー一覧", listUsers(), []),
+    loadOrReport("users", "プロジェクト一覧", listProjects(), []),
+    loadOrReport("users", "プロジェクトメンバー一覧", listAllProjectUsers(), []),
     getViewerTimeZone(),
     getViewerProfile(),
   ]);
+  const users = usersResult.data;
+  const projects = projectsResult.data;
+  const projectUsers = projectUsersResult.data;
 
   const userToProjects = new Map<number, string[]>();
   for (const pu of projectUsers) {
@@ -29,6 +34,10 @@ export default async function UsersPage() {
     <div className="space-y-8">
       <h1 className="text-xl font-semibold">ユーザー管理</h1>
 
+      <FetchErrorNotice labels={failedLabels(usersResult, projectsResult, projectUsersResult)} />
+
+      {!usersResult.failed && (
+        <>
       <div className="text-sm text-neutral-600 dark:text-neutral-400">
         全{users.length}件を表示
       </div>
@@ -86,6 +95,8 @@ export default async function UsersPage() {
           </tbody>
         </table>
       </div>
+        </>
+      )}
 
       <div id="user-form">
         <UserForm />

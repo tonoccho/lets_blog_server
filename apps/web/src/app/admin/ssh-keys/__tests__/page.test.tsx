@@ -68,14 +68,11 @@ describe('/admin/ssh-keys の一覧取得失敗時のフォールバックとTZ�
     expect(panel.props.personalTimeZone).toBe('Asia/Tokyo');
   });
 
-  it('一覧取得に失敗したとき、catch(() => [])で空配列にフォールバックしてパネルへ渡す', async () => {
+  it('一覧取得に失敗してもページ自体は例外にならず描画できる(失敗の表示は sshKeysPageFetchFailure.test.tsx, issue #1458)', async () => {
     listSshKeyPairs.mockRejectedValue(new Error('一覧取得に失敗しました(テスト用)'));
     getViewerTimeZone.mockResolvedValue(null);
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const result = (await AdminSshKeysPage()) as unknown as ReactElementLike;
-
-    const panel = findSshKeyPairsPanelElement(result);
-    expect(panel.props.keyPairs).toEqual([]);
-    expect(panel.props.personalTimeZone).toBeNull();
+    await expect(AdminSshKeysPage()).resolves.toBeDefined();
   });
 });

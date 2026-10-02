@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { getProject, listPosts } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
+import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ProjectSectionNav } from "../ProjectSectionNav";
 import { PostsTable } from "../../../posts/PostsTable";
@@ -10,11 +12,13 @@ export default async function ProjectPostsPage({ params }: { params: Promise<{ i
   await requireAdminSession();
   const projectId = Number(id);
 
-  const [project, allPosts, timezone] = await Promise.all([
-    getProject(projectId).catch(() => null),
-    listPosts().catch(() => []),
+  const [projectResult, postsResult, timezone] = await Promise.all([
+    loadOrReport(`projects/${projectId}/posts`, "プロジェクト情報", getProject(projectId), null),
+    loadOrReport(`projects/${projectId}/posts`, "投稿一覧", listPosts(), []),
     getViewerTimeZone(),
   ]);
+  const project = projectResult.data;
+  const allPosts = postsResult.data;
 
   if (!project) {
     notFound();
@@ -43,11 +47,17 @@ export default async function ProjectPostsPage({ params }: { params: Promise<{ i
 
       <ProjectSectionNav projectId={projectId} active="posts" />
 
-      <div className="text-sm text-neutral-600 dark:text-neutral-400">
-        全{posts.length}件を表示
-      </div>
+      <FetchErrorNotice labels={failedLabels(postsResult)} />
 
-      <PostsTable posts={posts} timezone={timezone} />
+      {!postsResult.failed && (
+        <>
+          <div className="text-sm text-neutral-600 dark:text-neutral-400">
+            全{posts.length}件を表示
+          </div>
+
+          <PostsTable posts={posts} timezone={timezone} />
+        </>
+      )}
     </div>
   );
 }
