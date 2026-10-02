@@ -201,7 +201,6 @@ services:
       # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
       # したがって ChatGPT 画像生成の向き先はここで決まる。
       IMAGE_LLM_BASE_URL: http://image-stub:8080
-      IMAGE_LLM_API_KEY: e2e-stub-image-key
       # ComfyUI の向き先も同じ経路で決まる(issue #1106)。media-service は
       # ComfyUiClient が呼ぶ都度 platform の image-generation-config から baseUrl を取るので、
       # **ここを向けないと media 側だけ差し替えてもスタブへは届かない**。

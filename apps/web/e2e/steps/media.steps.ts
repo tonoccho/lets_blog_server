@@ -269,8 +269,30 @@ Given('画像生成にChatGPTを使うプロジェクトがある', async ({ ctx
     selected.ok(),
     `画像生成AIの選択に失敗しました (status=${selected.status()}): ${await selected.text()}`
   ).toBe(true);
+  // issue #1521: ChatGPTの画像生成はプロジェクトに設定したキーだけを使う(システム設定へは落ちない)。
+  await setProjectChatGptApiKey(request, token, projectId, 'sk-at-1521-image-stub');
   ctx.mediaProjectId = projectId;
 });
+
+Given('ChatGPTを選んだがAPIキーを設定していないプロジェクトがある', async ({ ctx, request }) => {
+  await createProjectWithImageProvider(request, ctx, 'CHATGPT', '1521-nokey');
+});
+
+async function setProjectChatGptApiKey(
+  request: APIRequestContext,
+  token: string,
+  projectId: number,
+  apiKey: string
+): Promise<void> {
+  const response = await request.put(`/api/projects/${projectId}/api-keys/openai-api-key`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { apiKey },
+  });
+  expect(
+    response.ok(),
+    `プロジェクトのChatGPT APIキー設定に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+}
 
 When(
   /^そのプロジェクトで1回に「(\d+)」枚を「(\d+)」回繰り返す画像生成を要求する$/,
@@ -859,6 +881,21 @@ Then('ChatGPTの画像生成が呼ばれている', async ({ ctx }) => {
     after,
     `ChatGPTの画像生成が呼ばれていません(要求前 ${result.chatGptStubCallsBefore} 件 / 要求後 ${after} 件)`
   ).toBeGreaterThan(result.chatGptStubCallsBefore as number);
+});
+
+Then('ChatGPTの画像生成は呼ばれていない', async ({ ctx }) => {
+  const result = outcome(ctx);
+  expect(
+    result.chatGptStubCallsBefore,
+    'ChatGPT画像生成スタブの受信件数を取得できませんでした(スタブが起動していません)'
+  ).not.toBeNull();
+  expect(await stubRequestCount('openai-image')).toBe(result.chatGptStubCallsBefore);
+});
+
+Then('拒否の理由にこのプロジェクトでAPIキーを設定するよう示される', async ({ ctx }) => {
+  const result = outcome(ctx);
+  expect(result.body).toContain('このプロジェクト');
+  expect(result.body).toContain('APIキー');
 });
 
 Then(

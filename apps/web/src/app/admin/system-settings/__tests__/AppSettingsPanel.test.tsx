@@ -48,7 +48,6 @@ function allSettings(): AppSetting[] {
     setting({ key: 'llm_claude_api_key', label: 'Claude APIキー', secret: true, configured: false, value: null }),
     setting({ key: 'llm_claude_model', label: 'Claude 既定モデル', value: 'claude-3-5-haiku-20241022' }),
     setting({ key: 'comfyui_base_url', label: 'ComfyUI ベースURL', value: 'http://comfyui:8188' }),
-    setting({ key: 'image_llm_api_key', label: '画像生成 APIキー', secret: true, value: null }),
     setting({ key: 'image_llm_base_url', label: '画像生成 ベースURL', value: 'https://api.openai.com/v1' }),
     setting({ key: 'mail_host', label: 'メール送信ホスト', value: 'smtp.example.com' }),
     setting({ key: 'mail_port', label: 'メール送信ポート', value: '587' }),
@@ -74,6 +73,20 @@ function field(name: string): HTMLElement | null {
 describe('AppSettingsPanel', () => {
   beforeEach(() => {
     updateAppSettingsActionMock.mockReset()
+  })
+
+  it('画像生成用のAPIキー入力欄は表示せず、ベースURLだけを画像生成AI連携グループに描画する(issue #1521)', () => {
+    // サーバーが旧バージョンの行を返しても入力欄は出ない
+    const settings = [
+      ...allSettings(),
+      setting({ key: 'image_llm_api_key', label: '画像生成 APIキー', secret: true, value: null }),
+    ]
+    render(<AppSettingsPanel settings={settings} />)
+
+    expect(field('image_llm_api_key')).toBeNull()
+    const section = field('comfyui_base_url')!.closest('section')
+    expect(section).toContainElement(field('image_llm_base_url'))
+    expect(section!.querySelector('p')!.textContent ?? '').not.toContain('APIキー')
   })
 
   it('OLLAMA専用の接続設定キーを外部LLMサービス連携グループに描画する', () => {

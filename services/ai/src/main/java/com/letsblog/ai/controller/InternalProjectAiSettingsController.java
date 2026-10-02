@@ -66,4 +66,27 @@ public class InternalProjectAiSettingsController {
                 projectAiSettingsService.getOllamaBaseUrl(projectId),
                 projectAiSettingsService.getComfyuiBaseUrl(projectId));
     }
+
+    /**
+     * プロジェクトのChatGPT(OpenAI) APIキー(復号済み)。キーを持たない呼び出し側のログ・例外に
+     * 値が漏れないよう、{@link #toString()}では値を伏せる。
+     */
+    public record OpenAiApiKeyResponse(String apiKey) {
+        @Override
+        public String toString() {
+            return "OpenAiApiKeyResponse[apiKey=" + (apiKey == null ? "null" : "****") + "]";
+        }
+    }
+
+    /**
+     * media-serviceがChatGPT画像生成のAPIキーをプロジェクト単位で解決するための内部ブリッジ(issue #1521)。
+     * 未設定ならapiKey=null。システム設定へのフォールバックは行わない(呼び出し側も行わない)。認可は
+     * サービス間認証のみ(他の内部ブリッジと同じ)で、外部(gateway)からは到達できない。
+     */
+    @GetMapping("/api/internal/ai/projects/{projectId}/openai-api-key")
+    public OpenAiApiKeyResponse openAiApiKey(@PathVariable Long projectId) {
+        byte[] encrypted = projectAiSettingsService.getOpenAiApiKeyEncrypted(projectId);
+        return new OpenAiApiKeyResponse(
+                encrypted == null || encrypted.length == 0 ? null : credentialCipher.decrypt(encrypted));
+    }
 }

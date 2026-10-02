@@ -500,9 +500,6 @@
           "comfyUiBaseUrl": {
             "type": "string"
           },
-          "chatGptApiKey": {
-            "type": "string"
-          },
           "chatGptBaseUrl": {
             "type": "string"
           }

@@ -14,7 +14,11 @@ public interface ImageGenerationConfigProvider {
      */
     String comfyUiBaseUrl(Long projectId);
 
-    String chatGptApiKey();
+    /**
+     * ChatGPT画像生成のAPIキー。そのプロジェクトに設定されたキーだけを返し、無ければ(または
+     * {@code projectId}がnullなら)null。システム設定・環境変数へはフォールバックしない(issue #1521)。
+     */
+    String chatGptApiKey(Long projectId);
 
     String chatGptBaseUrl();
 }

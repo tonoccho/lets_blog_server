@@ -16,7 +16,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /**
- * 画像生成の接続設定(ComfyUIのbaseUrl・ChatGPTのAPIキー/baseUrl)をplatform-serviceから取得する
+ * 画像生成の接続設定(ComfyUIのbaseUrl・ChatGPTのbaseUrl)をplatform-serviceから取得する
  * 内部ブリッジ。{@code system_settings}の所有権はplatform-service(issue #693)にある。
  *
  * <p>issue #583で画像生成本体がmedia-serviceへ移ったのに伴い、legacy-apiの同名クラスのうち
@@ -36,7 +36,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
 
     /**
      * ComfyUiClient/ChatGptImageClientは1回の画像生成処理の中で
-     * {@code comfyUiBaseUrl()}/{@code chatGptApiKey()}/{@code chatGptBaseUrl()}を複数回
+     * {@code comfyUiBaseUrl()}/{@code chatGptBaseUrl()}を複数回
      * (ComfyUiClientは最大4回)独立に呼び出す。都度platform-serviceへHTTP往復すると
      * 画像生成という既に低速な処理をさらに遅くするため、短いTTLで使い回す。
      */
@@ -61,7 +61,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
     }
 
     private record ImageGenerationConfigResponse(
-            String comfyUiBaseUrl, String chatGptApiKey, String chatGptBaseUrl) {
+            String comfyUiBaseUrl, String chatGptBaseUrl) {
     }
 
     private record CachedImageGenerationConfig(ImageGenerationConfigResponse value, Instant expiresAt) {
@@ -80,9 +80,10 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
         return override != null ? override : imageGenerationConfig().comfyUiBaseUrl();
     }
 
+    /** プロジェクトのキー(ai-service所有、issue #1521)だけ。無い・projectId未指定ならnullで、システム設定へは落とさない。 */
     @Override
-    public String chatGptApiKey() {
-        return imageGenerationConfig().chatGptApiKey();
+    public String chatGptApiKey(Long projectId) {
+        return projectId == null ? null : aiServiceConnectionClient.openAiApiKey(projectId);
     }
 
     @Override

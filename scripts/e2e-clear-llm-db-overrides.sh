@@ -69,7 +69,7 @@ KEYS="'llm_api_key','llm_base_url','llm_model','llm_available_models',\
 'llm_request_timeout_seconds','llm_provider','llm_claude_api_key','llm_claude_model',\
 'llm_ollama_base_url','llm_ollama_model',\
 'llm_ollama_available_models','llm_claude_available_models',\
-'image_llm_api_key','image_llm_base_url',\
+'image_llm_base_url',\
 'comfyui_base_url','upload_rate_limit_requests'"
 
 run_sql() {

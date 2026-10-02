@@ -48,7 +48,7 @@ class AppSettingServiceTest {
                 "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
                 "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
-                "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
+                "http://localhost:8188", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
     }
@@ -136,13 +136,12 @@ class AppSettingServiceTest {
     }
 
     @Test
-    void chatGptApiKey_画像生成設定として委譲する() {
+    void 画像生成用のAPIキーはシステム設定の項目として存在しない_issue1521() {
         AppSettingService service = service();
-        when(repository.findById("image_llm_api_key")).thenReturn(Optional.of(
-                new SystemSetting("image_llm_api_key", credentialCipher.encrypt("db-image-key"))));
 
-        assertEquals("db-image-key", service.chatGptApiKey());
-        assertEquals("db-image-key", service.getImageLlmApiKey());
+        assertTrue(service.getAllSettings().stream().noneMatch(s -> s.key().equals("image_llm_api_key")));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("image_llm_api_key", "sk-system")));
     }
 
     @Test
@@ -588,7 +587,7 @@ class AppSettingServiceTest {
                 "", "", "", "", "120",
                 "", "", "",
                 "", "",
-                "", "", "",
+                "", "",
                 "", "587", "", "", "",
                 "", "10", "");
     }
@@ -842,7 +841,7 @@ class AppSettingServiceTest {
                 "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "", "120",
                 "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
-                "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
+                "http://localhost:8188", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
@@ -857,7 +856,7 @@ class AppSettingServiceTest {
                 "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o", "120",
                 "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "",
-                "http://localhost:8188", "env-image-key", "https://api.openai.com/v1",
+                "http://localhost:8188", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());

@@ -139,7 +139,6 @@ app:
   llm-ollama-base-url: ${LLM_OLLAMA_BASE_URL:http://ollama:11434/v1}
   llm-ollama-model: ${LLM_OLLAMA_MODEL:qwen2.5:7b-instruct}
   comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
-  image-llm-api-key: ${IMAGE_LLM_API_KEY:}
   image-llm-base-url: ${IMAGE_LLM_BASE_URL:https://api.openai.com/v1}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
   # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。

@@ -387,6 +387,10 @@ export interface ProjectConnectionUrlsResponse {
   comfyuiBaseUrl?: string;
 }
 
+export interface OpenAiApiKeyResponse {
+  apiKey?: string;
+}
+
 export interface BraveSearchApiKeyStatusResponse {
   configured?: boolean;
 }

@@ -1659,6 +1659,37 @@
         }
       }
     },
+    "/api/internal/ai/projects/{projectId}/openai-api-key": {
+      "get": {
+        "tags": [
+          "internal-project-ai-settings-controller"
+        ],
+        "operationId": "openAiApiKey",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAiApiKeyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/generation-jobs": {
       "get": {
         "tags": [
@@ -2656,6 +2687,14 @@
           },
           "configured": {
             "type": "boolean"
+          }
+        }
+      },
+      "OpenAiApiKeyResponse": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string"
           }
         }
       },

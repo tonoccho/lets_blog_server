@@ -87,4 +87,31 @@ public class AiServiceConnectionClient {
                     "ai-serviceのプロジェクト接続先取得呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
+
+    private record OpenAiApiKeyResponse(String apiKey) {
+        @Override
+        public String toString() {
+            return "OpenAiApiKeyResponse[apiKey=****]";
+        }
+    }
+
+    /**
+     * プロジェクトのChatGPT(OpenAI) APIキー(issue #1521)。未設定(null/空白)ならnull。
+     * キーはキャッシュせず毎回取得する(秘密値をメモリに留めず、変更・解除の直後から反映させるため。
+     * 呼び出しは1回の生成リクエストにつき1回)。値はログ・例外メッセージに含めない。
+     */
+    public String openAiApiKey(Long projectId) {
+        try {
+            OpenAiApiKeyResponse response = restClient.get()
+                    .uri("/api/internal/ai/projects/{projectId}/openai-api-key", projectId)
+                    .headers(ServiceAuthHeaders.clientCredentials(serviceTokenClient))
+                    .retrieve()
+                    .body(OpenAiApiKeyResponse.class);
+            return response == null || response.apiKey() == null || response.apiKey().isBlank()
+                    ? null : response.apiKey();
+        } catch (RestClientException | ServiceTokenUnavailableException e) {
+            throw new IllegalStateException(
+                    "ai-serviceのプロジェクトAPIキー取得呼び出しに失敗しました: " + e.getClass().getSimpleName(), e);
+        }
+    }
 }

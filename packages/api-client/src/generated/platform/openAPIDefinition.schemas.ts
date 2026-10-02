@@ -42,7 +42,6 @@ export interface LlmConfigResponse {
 
 export interface ImageGenerationConfigResponse {
   comfyUiBaseUrl?: string;
-  chatGptApiKey?: string;
   chatGptBaseUrl?: string;
 }
 

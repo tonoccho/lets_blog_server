@@ -161,4 +161,53 @@ class AiServiceConnectionClientTest {
 
         assertThat(client.comfyUiBaseUrlOverride(9L)).isNull();
     }
+
+    @Test
+    void プロジェクトのChatGPTキーをサービストークンで取得する() {
+        bodies.put("/api/internal/ai/projects/7/openai-api-key", "{\"apiKey\":\"sk-project-7\"}");
+
+        assertThat(client.openAiApiKey(7L)).isEqualTo("sk-project-7");
+        assertThat(requestPaths).containsExactly("/api/internal/ai/projects/7/openai-api-key");
+        assertThat(authHeaders).containsExactly("Bearer svc-token");
+    }
+
+    @Test
+    void キーがnullまたは空白なら未設定としてnullを返す() {
+        bodies.put("/api/internal/ai/projects/7/openai-api-key", "{\"apiKey\":null}");
+        bodies.put("/api/internal/ai/projects/8/openai-api-key", "{\"apiKey\":\"  \"}");
+        bodies.put("/api/internal/ai/projects/9/openai-api-key", "");
+
+        assertThat(client.openAiApiKey(7L)).isNull();
+        assertThat(client.openAiApiKey(8L)).isNull();
+        assertThat(client.openAiApiKey(9L)).isNull();
+    }
+
+    @Test
+    void キーはキャッシュせず毎回取り直す() {
+        bodies.put("/api/internal/ai/projects/7/openai-api-key", "{\"apiKey\":\"old\"}");
+        client.openAiApiKey(7L);
+        bodies.put("/api/internal/ai/projects/7/openai-api-key", "{\"apiKey\":\"new\"}");
+
+        assertThat(client.openAiApiKey(7L)).isEqualTo("new");
+    }
+
+    @Test
+    void キー取得の失敗は例外にしキーの値や本文を含めない() {
+        status = 500;
+
+        assertThatThrownBy(() -> client.openAiApiKey(7L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ai-service");
+    }
+
+    @Test
+    void キー取得でサービストークンを得られない場合も例外にする() {
+        ServiceTokenClient broken = org.mockito.Mockito.mock(ServiceTokenClient.class);
+        org.mockito.Mockito.when(broken.getAccessToken())
+                .thenThrow(new com.letsblog.common.auth.ServiceTokenUnavailableException("down", null));
+        AiServiceConnectionClient c = new AiServiceConnectionClient(
+                RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort(), broken, clock);
+
+        assertThatThrownBy(() -> c.openAiApiKey(7L)).isInstanceOf(IllegalStateException.class);
+    }
 }

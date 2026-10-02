@@ -27,8 +27,8 @@ import java.util.regex.Pattern;
  * <p>legacy-api側では、実効LLM接続設定(provider/apiKeyFor/defaultModelFor/baseUrlFor/
  * requestTimeoutSeconds)はAiBridgeController#llmConfig経由でPlatformServiceClientが本サービスの
  * 内部エンドポイント({@link com.letsblog.platform.controller.InternalPlatformSettingsController}）
- * を呼び出す形でai-serviceへ公開され続ける。画像生成設定(comfyUiBaseUrl/chatGptApiKey/
- * chatGptBaseUrl)も同様に、legacy-apiに残るChatGptImageClient/ComfyUiClientがPlatformServiceClient
+ * を呼び出す形でai-serviceへ公開され続ける。画像生成設定(comfyUiBaseUrl/chatGptBaseUrl。
+ * ChatGPTのAPIキーはプロジェクト単位だけで、システム設定には持たない(issue #1521))も同様に、legacy-apiに残るChatGptImageClient/ComfyUiClientがPlatformServiceClient
  * (legacy-api側でImageGenerationConfigProviderを実装)経由で取得する。本サービス自体はlegacy-apiの
  * ImageGenerationConfigProviderインターフェースを実装しない(モジュールを跨がないため)。
  */
@@ -48,7 +48,6 @@ public class AppSettingService {
     static final String LLM_OLLAMA_AVAILABLE_MODELS = "llm_ollama_available_models";
     static final String LLM_CLAUDE_AVAILABLE_MODELS = "llm_claude_available_models";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
-    static final String IMAGE_LLM_API_KEY = "image_llm_api_key";
     static final String IMAGE_LLM_BASE_URL = "image_llm_base_url";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
@@ -97,7 +96,6 @@ public class AppSettingService {
             new Definition(LLM_CLAUDE_AVAILABLE_MODELS,
                     "Claude 選択可能モデル(カンマ区切り、CLAUDE用。未設定なら既定モデルのみ)", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
-            new Definition(IMAGE_LLM_API_KEY, "画像生成 APIキー(ChatGPT用)", true),
             new Definition(IMAGE_LLM_BASE_URL, "画像生成 ベースURL(ChatGPT用)", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
@@ -128,7 +126,6 @@ public class AppSettingService {
             @Value("${app.llm-ollama-base-url:http://ollama:11434/v1}") String llmOllamaBaseUrlEnvDefault,
             @Value("${app.llm-ollama-model:qwen2.5:7b-instruct}") String llmOllamaModelEnvDefault,
             @Value("${app.comfyui-base-url}") String comfyUiBaseUrlEnvDefault,
-            @Value("${app.image-llm-api-key:}") String imageLlmApiKeyEnvDefault,
             @Value("${app.image-llm-base-url:https://api.openai.com/v1}") String imageLlmBaseUrlEnvDefault,
             @Value("${spring.mail.host}") String mailHostEnvDefault,
             @Value("${spring.mail.port}") String mailPortEnvDefault,
@@ -155,7 +152,6 @@ public class AppSettingService {
         defaults.put(LLM_OLLAMA_AVAILABLE_MODELS, "");
         defaults.put(LLM_CLAUDE_AVAILABLE_MODELS, "");
         defaults.put(COMFYUI_BASE_URL, comfyUiBaseUrlEnvDefault);
-        defaults.put(IMAGE_LLM_API_KEY, imageLlmApiKeyEnvDefault);
         defaults.put(IMAGE_LLM_BASE_URL, imageLlmBaseUrlEnvDefault);
         defaults.put(MAIL_HOST, mailHostEnvDefault);
         defaults.put(MAIL_PORT, mailPortEnvDefault);
@@ -436,11 +432,6 @@ public class AppSettingService {
     }
 
     @Transactional(readOnly = true)
-    public String getImageLlmApiKey() {
-        return resolve(IMAGE_LLM_API_KEY);
-    }
-
-    @Transactional(readOnly = true)
     public String getImageLlmBaseUrl() {
         return resolve(IMAGE_LLM_BASE_URL);
     }
@@ -592,10 +583,6 @@ public class AppSettingService {
      */
     public String comfyUiBaseUrl() {
         return getComfyUiBaseUrl();
-    }
-
-    public String chatGptApiKey() {
-        return getImageLlmApiKey();
     }
 
     public String chatGptBaseUrl() {

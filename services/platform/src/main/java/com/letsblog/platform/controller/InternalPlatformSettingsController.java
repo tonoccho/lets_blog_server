@@ -75,7 +75,7 @@ public class InternalPlatformSettingsController {
                 appSettingService.requestTimeoutSeconds());
     }
 
-    public record ImageGenerationConfigResponse(String comfyUiBaseUrl, String chatGptApiKey, String chatGptBaseUrl) {
+    public record ImageGenerationConfigResponse(String comfyUiBaseUrl, String chatGptBaseUrl) {
     }
 
     /**
@@ -86,7 +86,6 @@ public class InternalPlatformSettingsController {
     public ImageGenerationConfigResponse imageGenerationConfig() {
         return new ImageGenerationConfigResponse(
                 appSettingService.comfyUiBaseUrl(),
-                appSettingService.chatGptApiKey(),
                 appSettingService.chatGptBaseUrl());
     }
 

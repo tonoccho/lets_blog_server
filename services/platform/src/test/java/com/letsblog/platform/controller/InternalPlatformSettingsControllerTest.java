@@ -101,4 +101,16 @@ class InternalPlatformSettingsControllerTest {
         assertFalse(response.ollama().configured());
         assertFalse(response.comfyui().configured());
     }
+
+    @Test
+    void imageGenerationConfig_APIキーを応答に含めない_issue1521() throws Exception {
+        when(appSettingService.comfyUiBaseUrl()).thenReturn("http://comfy:8188");
+        when(appSettingService.chatGptBaseUrl()).thenReturn("https://api.openai.com/v1");
+
+        String json = new ObjectMapper().writeValueAsString(controller().imageGenerationConfig());
+
+        assertTrue(json.contains("http://comfy:8188"), json);
+        assertTrue(json.contains("https://api.openai.com/v1"), json);
+        assertFalse(json.toLowerCase().contains("apikey"), json);
+    }
 }

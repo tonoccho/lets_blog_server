@@ -35,7 +35,7 @@ class ComfyUiUnreachableHttpResponseTest {
             }
 
             @Override
-            public String chatGptApiKey() {
+            public String chatGptApiKey(Long projectId) {
                 return "unused";
             }
 

@@ -34,9 +34,9 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
   {
     title: "画像生成AI連携",
     description:
-      "ComfyUI/ChatGPTのベースURLと、ChatGPT画像生成用のAPIキーの接続設定です。" +
+      "ComfyUI/ChatGPTのベースURLの接続設定です。" +
       "どちらのプロバイダーを使うかはプロジェクト単位の設定(プロジェクト画面のAIモデル管理)で切り替えます。",
-    keys: ["comfyui_base_url", "image_llm_api_key", "image_llm_base_url"],
+    keys: ["comfyui_base_url", "image_llm_base_url"],
   },
   {
     title: "メール送信",

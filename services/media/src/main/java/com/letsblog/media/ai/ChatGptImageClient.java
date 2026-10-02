@@ -42,10 +42,10 @@ public class ChatGptImageClient implements ImageGenerationProvider {
 
     @Override
     public List<ComfyUiImage> generateImage(ComfyUiGenerationParams params) {
-        String apiKey = configProvider.chatGptApiKey();
+        String apiKey = configProvider.chatGptApiKey(params.projectId());
         if (apiKey == null || apiKey.isBlank()) {
             throw new AiServiceException(
-                    "ChatGPTの画像生成APIキーが設定されていません。Web管理画面のシステム設定で設定してください。", null);
+                    "ChatGPTのAPIキーが設定されていません。このプロジェクトでAPIキーを設定してください。", null);
         }
 
         int batchSize = params.batchSize() != null ? params.batchSize() : 1;

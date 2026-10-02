@@ -48,7 +48,7 @@ class PlatformServiceClientProjectUrlTest {
     }
 
     private void respond(HttpExchange exchange) throws IOException {
-        byte[] bytes = ("{\"comfyUiBaseUrl\":\"" + SYSTEM + "\",\"chatGptApiKey\":\"k\",\"chatGptBaseUrl\":\"u\"}")
+        byte[] bytes = ("{\"comfyUiBaseUrl\":\"" + SYSTEM + "\",\"chatGptBaseUrl\":\"u\"}")
                 .getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, bytes.length);
@@ -78,8 +78,23 @@ class PlatformServiceClientProjectUrlTest {
     }
 
     @Test
-    void ChatGPT設定は従来どおりシステム設定から取得する() {
-        assertThat(client.chatGptApiKey()).isEqualTo("k");
+    void ChatGPTのベースURLはシステム設定から取得する() {
         assertThat(client.chatGptBaseUrl()).isEqualTo("u");
+    }
+
+    @Test
+    void ChatGPTのAPIキーはプロジェクトのキーだけを使いシステム設定へは落とさない() {
+        when(aiConnections.openAiApiKey(7L)).thenReturn("sk-project-7");
+        when(aiConnections.openAiApiKey(8L)).thenReturn(null);
+
+        assertThat(client.chatGptApiKey(7L)).isEqualTo("sk-project-7");
+        assertThat(client.chatGptApiKey(8L)).isNull();
+    }
+
+    @Test
+    void projectIdが無ければai_serviceへ問い合わせずキーはnull() {
+        assertThat(client.chatGptApiKey(null)).isNull();
+
+        verify(aiConnections, never()).openAiApiKey(org.mockito.ArgumentMatchers.any());
     }
 }

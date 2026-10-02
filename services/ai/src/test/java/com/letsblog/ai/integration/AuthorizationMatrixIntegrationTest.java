@@ -147,6 +147,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- 内部ブリッジ(InternalProjectAiSettingsController) --
                 new Endpoint("GET", "/api/internal/ai/projects/1/brave-search-api-key"),
                 new Endpoint("GET", "/api/internal/ai/projects/1/connections"),
+                new Endpoint("GET", "/api/internal/ai/projects/1/openai-api-key"),
                 new Endpoint("PUT", "/api/internal/ai/projects/1/brave-search-api-key"),
                 new Endpoint("DELETE", "/api/internal/ai/projects/1/brave-search-api-key"));
     }

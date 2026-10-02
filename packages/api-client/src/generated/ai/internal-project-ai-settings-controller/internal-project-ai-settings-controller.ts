@@ -6,6 +6,7 @@
  */
 import type {
   BraveSearchApiKeyStatusResponse,
+  OpenAiApiKeyResponse,
   ProjectConnectionUrlsResponse,
   SetBraveSearchApiKeyRequest
 } from '../openAPIDefinition.schemas';
@@ -174,3 +175,40 @@ export const connections = async (projectId: number, options?: RequestInit): Pro
 }
 
 
+export type openAiApiKeyResponse200 = {
+  data: OpenAiApiKeyResponse
+  status: 200
+}
+
+export type openAiApiKeyResponseSuccess = (openAiApiKeyResponse200) & {
+  headers: Headers;
+};
+;
+
+export type openAiApiKeyResponse = (openAiApiKeyResponseSuccess)
+
+export const getOpenAiApiKeyUrl = (projectId: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/internal/ai/projects/${projectId}/openai-api-key`
+}
+
+export const openAiApiKey = async (projectId: number, options?: RequestInit): Promise<openAiApiKeyResponse> => {
+
+  const res = await fetch(getOpenAiApiKeyUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: openAiApiKeyResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as openAiApiKeyResponse
+}
