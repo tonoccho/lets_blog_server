@@ -17,6 +17,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       headers: {
         "Content-Type": "text/css",
         "Content-Disposition": 'attachment; filename="integrated-css.css"',
+        "Cache-Control": "no-store",
       },
     });
   } catch (err) {
