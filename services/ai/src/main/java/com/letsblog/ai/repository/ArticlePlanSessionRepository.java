@@ -7,8 +7,9 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ArticlePlanSessionRepository extends JpaRepository<ArticlePlanSession, Long> {
-    List<ArticlePlanSession> findByProjectIdOrderByUpdatedAtDesc(Long projectId);
+    // updated_atは秒精度のため、同一秒の更新ではIDの降順を第2キーにして順序を一意にする(issue #1375)。
+    List<ArticlePlanSession> findByProjectIdOrderByUpdatedAtDescIdDesc(Long projectId);
 
-    Optional<ArticlePlanSession> findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(
+    Optional<ArticlePlanSession> findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDescIdDesc(
             Long projectId, Integer githubIssueNumber);
 }

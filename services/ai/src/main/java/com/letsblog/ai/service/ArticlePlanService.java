@@ -210,7 +210,7 @@ public class ArticlePlanService {
      * プロジェクトの壁打ちセッション一覧を、更新日時の新しい順に返す。
      */
     public List<ArticlePlanSessionSummaryResponse> listSessions(Long projectId) {
-        return articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
+        return articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDescIdDesc(projectId).stream()
                 .map(s -> new ArticlePlanSessionSummaryResponse(
                         s.getId(), s.getTitle(), s.getGithubIssueNumber(), s.getCreatedAt(), s.getUpdatedAt()))
                 .toList();
@@ -229,7 +229,7 @@ public class ArticlePlanService {
      */
     public ArticlePlanSessionDetailResponse getSessionByIssue(Long projectId, Integer githubIssueNumber) {
         ArticlePlanSession session = articlePlanSessionRepository
-                .findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(projectId, githubIssueNumber)
+                .findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDescIdDesc(projectId, githubIssueNumber)
                 .orElseThrow(() -> new ArticlePlanSessionNotFoundException(
                         "issue #" + githubIssueNumber + " に紐づく壁打ちセッションは見つかりません"));
         return toDetailResponse(session);

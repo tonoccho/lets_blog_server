@@ -295,7 +295,7 @@ class ArticlePlanServiceTest {
         ArticlePlanService service = service();
         ArticlePlanSession session = existingSession(7L, 1L, List.of(new PlanChatMessage("user", "こんにちは")));
         session.setGithubIssueNumber(42);
-        when(articlePlanSessionRepository.findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(1L, 42))
+        when(articlePlanSessionRepository.findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDescIdDesc(1L, 42))
                 .thenReturn(Optional.of(session));
 
         ArticlePlanSessionDetailResponse response = service.getSessionByIssue(1L, 42);
@@ -308,7 +308,7 @@ class ArticlePlanServiceTest {
     @Test
     void getSessionByIssue_見つからない場合は例外() {
         ArticlePlanService service = service();
-        when(articlePlanSessionRepository.findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDesc(1L, 42))
+        when(articlePlanSessionRepository.findFirstByProjectIdAndGithubIssueNumberOrderByUpdatedAtDescIdDesc(1L, 42))
                 .thenReturn(Optional.empty());
 
         assertThrows(ArticlePlanSessionNotFoundException.class, () -> service.getSessionByIssue(1L, 42));
@@ -318,7 +318,7 @@ class ArticlePlanServiceTest {
     void listSessions_更新日時降順のサマリー一覧を返す() {
         ArticlePlanService service = service();
         ArticlePlanSession session = existingSession(1L, 1L, List.of());
-        when(articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDesc(1L)).thenReturn(List.of(session));
+        when(articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDescIdDesc(1L)).thenReturn(List.of(session));
 
         List<ArticlePlanSessionSummaryResponse> result = service.listSessions(1L);
 
