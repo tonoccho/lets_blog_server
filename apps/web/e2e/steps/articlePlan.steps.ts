@@ -343,6 +343,61 @@ Then(/^チャットに「(.+)」が表示される$/, async ({ page }, message: 
   await expect(chatCard(page)).toContainText(message, { timeout: 30_000 });
 });
 
+/** 最後のAI吹き出し(ラベル `AI:` の strong を含む親要素)。 */
+const latestAiBubble = (page: Page): Locator => aiMessages(page).last().locator('..');
+
+Then(
+  'AIの最新の応答に見出し要素とリスト要素と強調要素とコードブロック要素が表示される',
+  async ({ page }) => {
+    const bubble = latestAiBubble(page);
+    await expect(bubble.locator('h1, h2, h3').first()).toBeVisible({ timeout: 30_000 });
+    await expect(bubble.locator('ul > li').first()).toBeVisible();
+    await expect(bubble.locator('strong', { hasText: 'E2E強調' })).toBeVisible();
+    await expect(bubble.locator('pre code')).toContainText('E2E_CODE_LINE');
+  },
+);
+
+Then('AIの最新の応答に表が表示される', async ({ page }) => {
+  const table = latestAiBubble(page).locator('table');
+  await expect(table).toBeVisible();
+  await expect(table.locator('th')).toHaveCount(2);
+  await expect(table.locator('td').first()).toBeVisible();
+});
+
+Then('AIの最新の応答に Markdown の記号が表示されない', async ({ page }) => {
+  const text = (await latestAiBubble(page).innerText()) ?? '';
+  expect(text).not.toContain('##');
+  expect(text).not.toContain('**');
+  expect(text).not.toContain('```');
+});
+
+Then(
+  'AIの最新の応答に script 要素とイベントハンドラ付きの要素が挿入されていない',
+  async ({ page }) => {
+    const bubble = latestAiBubble(page);
+    await expect(bubble.locator('h1, h2, h3, p').first()).toBeVisible({ timeout: 30_000 });
+    await expect(bubble.locator('script')).toHaveCount(0);
+    await expect(bubble.locator('[onerror], img')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __e2eXss?: number }).__e2eXss)).toBeUndefined();
+  },
+);
+
+Then(
+  /^AIの最新の応答のリンク「(.+)」が別タブで noopener noreferrer 付きで開く$/,
+  async ({ page }, name: string) => {
+    const link = latestAiBubble(page).getByRole('link', { name });
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    await expect(link).toHaveAttribute('href', /^https:\/\//);
+  },
+);
+
+Then('AIの最新の応答に javascript スキームのリンクが無い', async ({ page }) => {
+  const bubble = latestAiBubble(page);
+  await expect(bubble.getByText('危険なリンク')).toBeVisible();
+  await expect(bubble.locator('a[href^="javascript:" i]')).toHaveCount(0);
+});
+
 Then('チャットにエラーが表示される', async ({ page }) => {
   await expect(chatCard(page).locator('p.text-red-600')).toBeVisible();
 });

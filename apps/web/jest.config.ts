@@ -62,4 +62,57 @@ const config: Config = {
   },
 }
 
-export default createJestConfig(config)
+// react-markdown / remark-gfm と、その推移的依存(unified, mdast-*, micromark-*, …)は ESM のみで
+// 配布される(#1566)。next/jest は `/node_modules/` 全体を transformIgnorePatterns に積み、
+// こちらの設定を後ろへ足すだけなので、設定オブジェクトに書いても ESM が変換されない。
+// 生成された設定を取り出し、変換を除外するパターンを ESM パッケージだけ抜いたものへ差し替える。
+const ESM_PACKAGES = [
+  'react-markdown',
+  'remark-.*',
+  'rehype-.*',
+  'unified',
+  'bail',
+  'devlop',
+  'trough',
+  'vfile',
+  'vfile-.*',
+  'unist-.*',
+  'mdast-.*',
+  'hast-.*',
+  'micromark',
+  'micromark-.*',
+  'decode-named-character-reference',
+  'character-entities',
+  'character-entities-.*',
+  'property-information',
+  'space-separated-tokens',
+  'comma-separated-tokens',
+  'estree-util-.*',
+  'html-url-attributes',
+  'is-plain-obj',
+  'ccount',
+  'escape-string-regexp',
+  'markdown-table',
+  'longest-streak',
+  'zwitch',
+  'stringify-entities',
+  'trim-lines',
+  'html-void-elements',
+  'inline-style-parser',
+  'style-to-.*',
+].join('|')
+
+const jestConfig = createJestConfig(config)
+
+export default async () => {
+  const resolved = await jestConfig()
+  return {
+    ...resolved,
+    transformIgnorePatterns: [
+      // next/jest が積む `/node_modules/(?!.pnpm)(?!(geist|next/dist/…)/)` は ESM を除外しないため、
+      // 同じ例外(geist と next 内部)を引き継いだ上で ESM_PACKAGES を足して置き換える。
+      `/node_modules/(?!\\.pnpm)(?!(?:geist|next/dist/client|next/dist/shared/lib|next/src/client|next/src/shared/lib|${ESM_PACKAGES})/)`,
+      ...(resolved.transformIgnorePatterns ?? []).filter((p) => !p.startsWith('/node_modules/(?!.pnpm)')),
+    ],
+  }
+}

@@ -339,7 +339,45 @@ function planUserTurnCount(prompt) {
   return prompt.split('\n').filter((line) => line.startsWith('User: ')).length;
 }
 
+/** 壁打ちの Markdown 描画(#1566)を確かめる応答。利用者の**最後の**発言のキーワードで返す。 */
+const PLAN_MARKDOWN_REPLY = [
+  '## E2Eスタブの見出し',
+  '',
+  '- 項目A',
+  '- 項目B',
+  '',
+  'これは **E2E強調** のテキストです。',
+  '',
+  '```',
+  'E2E_CODE_LINE = 1',
+  '```',
+  '',
+  '| 列1 | 列2 |',
+  '| --- | --- |',
+  '| セルa | セルb |',
+].join('\n');
+
+const PLAN_HTML_INJECTION_REPLY = [
+  '## E2Eスタブの HTML 注入',
+  '',
+  '<script>window.__e2eXss = 1</script>',
+  '',
+  '<img src="x" onerror="window.__e2eXss = 2">',
+  '',
+  '[危険なリンク](javascript:window.__e2eXss=3)',
+  '',
+  '[安全なリンク](https://example.com/e2e)',
+].join('\n');
+
+function planLastUserLine(prompt) {
+  const lines = prompt.split('\n').filter((line) => line.startsWith('User: '));
+  return lines.length === 0 ? '' : lines[lines.length - 1];
+}
+
 function planChatCompletion(prompt) {
+  const lastUser = planLastUserLine(prompt);
+  if (lastUser.includes('E2E_MARKDOWN_REPLY')) return PLAN_MARKDOWN_REPLY;
+  if (lastUser.includes('E2E_HTML_INJECTION_REPLY')) return PLAN_HTML_INJECTION_REPLY;
   return `E2Eスタブの壁打ち応答です(あなたの発言 ${planUserTurnCount(prompt)} 件目)。`
     + 'テーマをもう少し具体的に教えてください。';
 }
