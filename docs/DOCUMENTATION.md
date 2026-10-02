@@ -907,8 +907,8 @@ docker compose up -d
 
 ### バグ報告
 
-GitHub Issues で報告してください：
-https://github.com/tonoccho/lets-blog-server/issues
+GitLab の Issue で報告してください(`bug` ラベル)：
+https://server.tonoccho.local/gitlab/seiji/lets_blog_server/-/issues
 
 テンプレート：
 ```
@@ -927,8 +927,8 @@ https://github.com/tonoccho/lets-blog-server/issues
 
 ### 機能リクエスト
 
-Discussion で提案してください：
-https://github.com/tonoccho/lets-blog-server/discussions
+GitLab の Issue で提案してください(`enhancement` ラベル。質問は `question` ラベル)：
+https://server.tonoccho.local/gitlab/seiji/lets_blog_server/-/issues
 
 ---
 

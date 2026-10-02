@@ -335,8 +335,8 @@ Accessibility is an ongoing process. We commit to:
 ## Contact and Questions
 
 For questions about accessibility or to report issues, please:
-1. Open an issue on GitHub with the `accessibility` label
-2. Contact the team via the discussion board
+1. Open an issue on GitLab (https://server.tonoccho.local/gitlab/seiji/lets_blog_server/-/issues) and describe it as an accessibility problem in the title (e.g. `[Accessibility] ...`); use the `bug` or `question` label
+2. Ask a question as a GitLab issue with the `question` label
 3. Reach out to the project maintainers
 
 ---

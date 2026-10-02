@@ -1382,7 +1382,7 @@ env | grep -i lets_blog || env | grep -i docker
 
 ### Reporting Issues
 
-When creating GitHub issue:
+When creating a GitLab issue:
 
 1. **Describe the problem clearly**
 2. **Include steps to reproduce**
@@ -1390,13 +1390,13 @@ When creating GitHub issue:
 4. **List system specs** (OS, Docker version, GPU)
 5. **Include error messages** (full output, not summary)
 
-GitHub Issues: https://github.com/tonoccho/lets_blog_server/issues
+GitLab Issues: https://server.tonoccho.local/gitlab/seiji/lets_blog_server/-/issues
 
 ---
 
 **Still stuck?** Please don't hesitate to:
-- Check recent issues in GitHub
-- Ask in discussions
+- Check recent issues in GitLab
+- Ask in a GitLab issue with the `question` label
 - Create detailed bug report with logs and steps to reproduce
 
 We're here to help! 🙌

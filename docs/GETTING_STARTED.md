@@ -353,6 +353,6 @@ If you encounter issues:
 
 1. Check **[Troubleshooting Guide](COMPREHENSIVE_TROUBLESHOOTING.md)**
 2. Review service logs: `docker compose logs <service-name>`
-3. Check project GitHub Issues: https://github.com/tonoccho/lets_blog_server/issues
+3. Check project GitLab Issues: https://server.tonoccho.local/gitlab/seiji/lets_blog_server/-/issues
 
 Welcome to Let's Blog! 🎉
