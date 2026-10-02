@@ -56,6 +56,7 @@ function detail(overrides: Partial<ConnectedServiceStatusDetail> = {}): Connecte
     httpStatus: 200,
     errorMessage: null,
     impact: null,
+    computeDevice: null,
     targetUrl: "https://example.test/health",
     checkedAt: "2026-09-08T20:03:35",
     ...overrides,
@@ -121,5 +122,58 @@ describe("ConnectedServiceStatusPanel", () => {
     });
 
     expect(spy).toHaveBeenCalledWith("ja-JP", { timeZone: undefined });
+  });
+
+  // issue #1397: 管理者向け詳細診断(initialDetail)に載る演算デバイスを、サービスの行に表示する。
+  describe("演算デバイスの表示(issue #1397)", () => {
+    const statuses = [
+      { id: "comfyui", name: "ComfyUI", status: "NORMAL" as const },
+      { id: "llm", name: "LLM", status: "NORMAL" as const },
+      { id: "plantuml", name: "PlantUML", status: "NORMAL" as const },
+    ];
+
+    it("詳細診断にcomputeDeviceがあるサービスの行に「演算デバイス: <値>」を表示する", () => {
+      render(
+        <ConnectedServiceStatusPanel
+          initialStatuses={statuses}
+          initialDetail={[detail({ id: "comfyui", computeDevice: "cuda" })]}
+          personalTimeZone="Asia/Tokyo"
+        />
+      );
+
+      expect(screen.getByText("演算デバイス: cuda")).toBeInTheDocument();
+    });
+
+    it("computeDeviceが unknown のときは「不明」と表示する", () => {
+      render(
+        <ConnectedServiceStatusPanel
+          initialStatuses={statuses}
+          initialDetail={[detail({ id: "llm", computeDevice: "unknown" })]}
+          personalTimeZone="Asia/Tokyo"
+        />
+      );
+
+      expect(screen.getByText("演算デバイス: 不明")).toBeInTheDocument();
+    });
+
+    it("computeDeviceがnullのサービスには演算デバイスを表示しない", () => {
+      render(
+        <ConnectedServiceStatusPanel
+          initialStatuses={statuses}
+          initialDetail={[detail({ id: "comfyui", computeDevice: null })]}
+          personalTimeZone="Asia/Tokyo"
+        />
+      );
+
+      expect(screen.queryByText(/演算デバイス/)).not.toBeInTheDocument();
+    });
+
+    it("詳細診断(initialDetail)がnull(非admin)なら演算デバイスは表示されない", () => {
+      render(
+        <ConnectedServiceStatusPanel initialStatuses={statuses} initialDetail={null} personalTimeZone="Asia/Tokyo" />
+      );
+
+      expect(screen.queryByText(/演算デバイス/)).not.toBeInTheDocument();
+    });
   });
 });

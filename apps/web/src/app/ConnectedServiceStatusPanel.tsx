@@ -19,6 +19,11 @@ const STATUS_STYLE: Record<ConnectedServiceStatus["status"], string> = {
   ERROR: "text-red-700 dark:text-red-400",
 };
 
+/** 演算デバイスの表示名。unknown(Ollamaでモデル未ロード)だけは「不明」と明示する(issue #1397)。 */
+function computeDeviceLabel(device: string): string {
+  return device === "unknown" ? "不明" : device;
+}
+
 function StatusIcon({ status }: { status: ConnectedServiceStatus["status"] }) {
   const className = `h-4 w-4 ${STATUS_STYLE[status]}`;
   if (status === "NORMAL") return <CheckCircle2 className={className} aria-hidden="true" />;
@@ -126,6 +131,12 @@ export function ConnectedServiceStatusPanel({
     };
   }, []);
 
+  // 演算デバイスは管理者向け詳細診断(initialDetail)にしか載らない。非adminではnullで何も表示しない。
+  const computeDevices = new Map<string, string>();
+  for (const d of initialDetail ?? []) {
+    if (d.computeDevice) computeDevices.set(d.id, d.computeDevice);
+  }
+
   return (
     <section className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
       <div className="flex items-center justify-between">
@@ -155,7 +166,14 @@ export function ConnectedServiceStatusPanel({
             key={service.id}
             className="flex items-center justify-between gap-2 rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-2"
           >
-            <span className="text-sm text-neutral-700 dark:text-neutral-300">{service.name}</span>
+            <span className="flex flex-col text-sm text-neutral-700 dark:text-neutral-300">
+              <span>{service.name}</span>
+              {computeDevices.has(service.id) && (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                  演算デバイス: {computeDeviceLabel(computeDevices.get(service.id)!)}
+                </span>
+              )}
+            </span>
             <span className={`flex items-center gap-1 text-xs font-medium ${STATUS_STYLE[service.status]}`}>
               <StatusIcon status={service.status} />
               {STATUS_LABEL[service.status]}

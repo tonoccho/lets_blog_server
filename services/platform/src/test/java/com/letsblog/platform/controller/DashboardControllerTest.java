@@ -69,7 +69,7 @@ class DashboardControllerTest {
     void getServiceStatusDetail_admin権限があれば詳細診断情報を返す() {
         List<ConnectedServiceStatusDetailResponse> details = List.of(
                 new ConnectedServiceStatusDetailResponse(
-                        "database", "データベース", Status.NORMAL, 5L, null, null, null, Instant.now(), null));
+                        "database", "データベース", Status.NORMAL, 5L, null, null, null, Instant.now(), null, null));
         when(connectedServiceStatusService.checkAllDetailed()).thenReturn(details);
 
         List<ConnectedServiceStatusDetailResponse> result = controller().getServiceStatusDetail();

@@ -41,6 +41,7 @@ function detail(overrides: Partial<ConnectedServiceStatusDetail> = {}): Connecte
     httpStatus: 200,
     errorMessage: null,
     impact: null,
+    computeDevice: null,
     targetUrl: "https://example.test/health",
     checkedAt: "2026-09-08T20:03:35",
     ...overrides,

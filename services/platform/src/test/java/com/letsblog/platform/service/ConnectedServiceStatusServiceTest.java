@@ -80,6 +80,8 @@ class ConnectedServiceStatusServiceTest {
     private MockRestServiceServer penpotServer;
     private MockRestServiceServer ollamaServer;
     private ConnectedServiceStatusService service;
+    /** Ollamaクライアント生成関数へ渡されたbaseUrlの履歴(/v1除去の検証用)。 */
+    private final List<String> ollamaFactoryBaseUrls = new java.util.ArrayList<>();
 
     private ConnectedServiceStatusService buildService() {
         RestClient.Builder comfyUiBuilder = RestClient.builder().baseUrl(COMFYUI_URL);
@@ -104,7 +106,10 @@ class ConnectedServiceStatusServiceTest {
                 appSettingService,
                 letsBlogServiceStatusService,
                 rabbitMqQueueStatusService,
-                ignoredBaseUrl -> ollamaBuilder);
+                baseUrl -> {
+                    ollamaFactoryBaseUrls.add(baseUrl);
+                    return ollamaBuilder;
+                });
     }
 
     @BeforeEach
@@ -240,6 +245,7 @@ class ConnectedServiceStatusServiceTest {
         when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
         when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps")).andRespond(withSuccess());
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
@@ -529,6 +535,317 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.ERROR, toMapById(statuses).get("plantuml"));
+    }
+
+    // ---------------- issue #1397: 演算デバイス ----------------
+
+    private static final String COMFYUI_STATS_CPU =
+            "{\"system\":{\"os\":\"linux\"},\"devices\":[{\"name\":\"e2e-stub\",\"type\":\"cpu\"}]}";
+    private static final String COMFYUI_STATS_CUDA =
+            "{\"devices\":[{\"name\":\"cuda:0 NVIDIA GeForce RTX 5070 Ti\",\"type\":\"cuda\"}]}";
+
+    private void respondToAllExceptComfyUi() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
+        mockBraveSearchConfigured(true);
+    }
+
+    private ConnectedServiceStatusDetailResponse detailOf(String id) {
+        return service.checkAllDetailed().stream()
+                .filter(d -> d.id().equals(id))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private void comfyUiRespondsWith(String body) {
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats"))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIはsystem_statsのdevices先頭のtypeを演算デバイスとして返す() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CUDA);
+
+        ConnectedServiceStatusDetailResponse comfyui = detailOf("comfyui");
+
+        assertEquals("cuda", comfyui.computeDevice());
+        assertEquals(Status.NORMAL, comfyui.status());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIがcpuを返せばcpuを演算デバイスとして返す() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        assertEquals("cpu", detailOf("comfyui").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIの疎通確認は演算デバイス取得のために追加のHTTPリクエストを発行しない() throws SQLException {
+        respondToAllExceptComfyUi();
+        // 期待は1件(既定のExpectedCount.once())だけ。2件目を発行すればMockRestServiceServerが失敗する。
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        detailOf("comfyui");
+
+        comfyUiServer.verify();
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIの本文が空なら演算デバイスはnullでも状態はNORMAL() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+
+        ConnectedServiceStatusDetailResponse comfyui = detailOf("comfyui");
+
+        assertNull(comfyui.computeDevice());
+        assertEquals(Status.NORMAL, comfyui.status());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIの本文がJSONでなければ演算デバイスはnullでも状態はNORMAL() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith("not json {");
+
+        ConnectedServiceStatusDetailResponse comfyui = detailOf("comfyui");
+
+        assertNull(comfyui.computeDevice());
+        assertEquals(Status.NORMAL, comfyui.status());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIのdevicesが空配列なら演算デバイスはnull() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith("{\"devices\":[]}");
+
+        assertNull(detailOf("comfyui").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIのdevicesが無ければ演算デバイスはnull() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith("{\"system\":{}}");
+
+        assertNull(detailOf("comfyui").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIのdevices先頭にtypeが無ければ演算デバイスはnull() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith("{\"devices\":[{\"name\":\"x\"}]}");
+
+        assertNull(detailOf("comfyui").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIのtypeが空文字なら演算デバイスはnull() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith("{\"devices\":[{\"type\":\" \"}]}");
+
+        assertNull(detailOf("comfyui").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIが5xxなら演算デバイスはnullで従来どおりWARNING() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withServerError());
+
+        ConnectedServiceStatusDetailResponse comfyui = detailOf("comfyui");
+
+        assertNull(comfyui.computeDevice());
+        assertEquals(Status.WARNING, comfyui.status());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUIに接続できなければ演算デバイスはnullで従来どおりERROR() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+
+        ConnectedServiceStatusDetailResponse comfyui = detailOf("comfyui");
+
+        assertNull(comfyui.computeDevice());
+        assertEquals(Status.ERROR, comfyui.status());
+    }
+
+    @Test
+    void checkAllDetailed_ComfyUI以外のサービスには演算デバイスが付かない() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        for (ConnectedServiceStatusDetailResponse d : service.checkAllDetailed()) {
+            if (!d.id().equals("comfyui")) {
+                assertNull(d.computeDevice(), d.id());
+            }
+        }
+    }
+
+    @Test
+    void checkAll_一般向けの応答には演算デバイスのフィールドを含めない() throws Exception {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(service.checkAll());
+
+        assertTrue(!json.contains("computeDevice"), json);
+        assertTrue(!json.contains("cpu"), json);
+    }
+
+    private void ollamaWithPsBody(String psBody) throws SQLException {
+        ollamaWithPsBody(OLLAMA_URL, psBody);
+    }
+
+    private void ollamaWithPsBody(String configuredBaseUrl, String psBody) throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
+        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(configuredBaseUrl);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps"))
+                .andRespond(withSuccess(psBody, MediaType.APPLICATION_JSON));
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaはsize_vramが0のモデルがあればcpuを返す() throws SQLException {
+        ollamaWithPsBody("{\"models\":[{\"name\":\"m\",\"size\":1000,\"size_vram\":0}]}");
+
+        assertEquals("cpu", detailOf("llm").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaはsize_vramがsize以上ならgpuを返す() throws SQLException {
+        ollamaWithPsBody("{\"models\":[{\"name\":\"m\",\"size\":1000,\"size_vram\":1000}]}");
+
+        assertEquals("gpu", detailOf("llm").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaはsize_vramがsizeより小さく0より大きければgpu_cpuを返す() throws SQLException {
+        ollamaWithPsBody("{\"models\":[{\"name\":\"m\",\"size\":1000,\"size_vram\":400}]}");
+
+        assertEquals("gpu+cpu", detailOf("llm").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaは複数モデルのsizeとsize_vramを合算して判定する() throws SQLException {
+        ollamaWithPsBody("{\"models\":[{\"size\":1000,\"size_vram\":1000},{\"size\":1000,\"size_vram\":0}]}");
+
+        assertEquals("gpu+cpu", detailOf("llm").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaはモデル未ロードならunknownを返し状態はNORMAL() throws SQLException {
+        ollamaWithPsBody("{\"models\":[]}");
+
+        ConnectedServiceStatusDetailResponse llm = detailOf("llm");
+
+        assertEquals("unknown", llm.computeDevice());
+        assertEquals(Status.NORMAL, llm.status());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaはmodelsキーが無ければunknownを返す() throws SQLException {
+        ollamaWithPsBody("{}");
+
+        assertEquals("unknown", detailOf("llm").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのsizeが0のモデルしか無ければunknownを返す() throws SQLException {
+        ollamaWithPsBody("{\"models\":[{\"size\":0,\"size_vram\":0}]}");
+
+        assertEquals("unknown", detailOf("llm").computeDevice());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのps本文がJSONでなければnullでも状態はNORMAL() throws SQLException {
+        ollamaWithPsBody("not json {");
+
+        ConnectedServiceStatusDetailResponse llm = detailOf("llm");
+
+        assertNull(llm.computeDevice());
+        assertEquals(Status.NORMAL, llm.status());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのps取得が5xxなら演算デバイスはnullで状態はNORMALのまま() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
+        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps")).andRespond(withServerError());
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        ConnectedServiceStatusDetailResponse llm = detailOf("llm");
+
+        assertNull(llm.computeDevice());
+        assertEquals(Status.NORMAL, llm.status());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのps取得で接続エラーでも演算デバイスはnullで状態はNORMALのまま() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
+        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps")).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        ConnectedServiceStatusDetailResponse llm = detailOf("llm");
+
+        assertNull(llm.computeDevice());
+        assertEquals(Status.NORMAL, llm.status());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaが疎通不可ならpsを呼ばず演算デバイスはnullで従来どおりERROR() throws SQLException {
+        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
+        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        // /api/ps の期待は置かない。呼べばMockRestServiceServerが失敗する。
+        ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(request -> {
+            throw new java.io.IOException("connection refused");
+        });
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        ConnectedServiceStatusDetailResponse llm = detailOf("llm");
+
+        assertNull(llm.computeDevice());
+        assertEquals(Status.ERROR, llm.status());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのpsはベースurlから末尾の_v1を除いたurlで呼ぶ() throws SQLException {
+        ollamaWithPsBody("http://ollama:11434/v1/", "{\"models\":[]}");
+
+        detailOf("llm");
+
+        assertEquals(List.of("http://ollama:11434/v1/", "http://ollama:11434"), ollamaFactoryBaseUrls);
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのベースurlが_v1で終わらなければそのままpsを呼ぶ() throws SQLException {
+        ollamaWithPsBody("http://ollama:11434", "{\"models\":[]}");
+
+        detailOf("llm");
+
+        assertEquals(List.of("http://ollama:11434", "http://ollama:11434"), ollamaFactoryBaseUrls);
+    }
+
+    @Test
+    void checkAllDetailed_LLMがOLLAMA以外なら演算デバイスはnull() throws SQLException {
+        respondToAllExceptComfyUi();
+        comfyUiRespondsWith(COMFYUI_STATS_CPU);
+
+        assertNull(detailOf("llm").computeDevice());
     }
 
     private static Map<String, Status> toMapById(List<ConnectedServiceStatusResponse> statuses) {

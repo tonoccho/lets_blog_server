@@ -2722,6 +2722,12 @@ export interface ConnectedServiceStatusDetail {
    * 外部依存など、影響を定義していないものは null。
    */
   impact: string | null;
+  /**
+   * そのサービスが実際に使っている演算デバイス(issue #1397)。ComfyUIは cpu / cuda など、
+   * Ollama は cpu / gpu / gpu+cpu、モデル未ロードで判別できなければ unknown。
+   * 取得できない・対象外のサービスは null。admin向け詳細診断にのみ含まれる。
+   */
+  computeDevice: string | null;
 }
 
 /** 応答時間・エラー内容・チェック対象URLなどの詳細診断情報(issue #199)。admin限定、非adminが呼ぶと403になる。 */

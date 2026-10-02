@@ -1,5 +1,5 @@
 import type { APIRequestContext } from '@playwright/test';
-import { Given, Then, When } from './fixtures';
+import { After, Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -134,6 +134,27 @@ When('システム全体のLLM接続設定を元に戻す', async ({ ctx, reques
     llm_provider: (ctx.systemSettingsLlmOriginalProvider as string) ?? '',
     llm_base_url: (ctx.systemSettingsLlmOriginalBaseUrl as string) ?? '',
   });
+});
+
+// ---- LLMプロバイダーの一時切替(issue #1397: 連携サービスの状況のOllama行) ----
+
+/**
+ * システム全体のLLMプロバイダーをOLLAMAへ切り替える。ATスタックは環境変数でOPENAIに固定されているが、
+ * DB設定は環境変数より優先される(AppSettingService)ため、これでplatform-serviceの
+ * ConnectedServiceStatusService#checkLlm がOllama経路(LLM_OLLAMA_BASE_URL=llm-stub)を通る。
+ * 復元値はPUTより前にctxへ記録し、PUTが失敗しても After で戻せるようにする。
+ */
+Given('システム全体のLLMプロバイダーをOllamaへ変更する', async ({ ctx, request }) => {
+  const provider = (await fetchAppSettings(request)).find((s) => s.key === 'llm_provider');
+  expect(provider, 'llm_providerの設定項目が見つかりません').toBeDefined();
+  // DB由来でなければ空文字を送ってDB設定を削除し、環境変数へのフォールバックへ戻す。
+  ctx.systemSettingsOllamaSwitchOriginal = provider!.source === 'DATABASE' ? provider!.value ?? '' : '';
+  await putAppSettings(request, { llm_provider: 'OLLAMA' });
+});
+
+After(async ({ ctx, request }) => {
+  if (ctx.systemSettingsOllamaSwitchOriginal === undefined) return;
+  await putAppSettings(request, { llm_provider: ctx.systemSettingsOllamaSwitchOriginal as string });
 });
 
 Then('タグ提案の呼び出しは失敗する', async ({ request }) => {

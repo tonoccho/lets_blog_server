@@ -529,6 +529,16 @@ createStub({
   },
   extraState: () => ({ recentModels: [...recentModels] }),
   async handle({ method, pathname, body, res, sendJson }) {
+    // Ollama固有の GET /api/ps(issue #1397)。platform-service の「連携サービスの状況」が
+    // ロード中モデルの size_vram から演算デバイスを解決する。決定性のため、VRAMに載っていない
+    // (size_vram = 0、つまり cpu)モデルを1件返す。GPU非搭載ホストでも同じ結果になる。
+    if (method === 'GET' && pathname === '/api/ps') {
+      sendJson(res, 200, {
+        models: [{ name: 'e2e-stub', model: 'e2e-stub', size: 4_000_000_000, size_vram: 0 }],
+      });
+      return true;
+    }
+
     // OpenAI互換クライアントは baseUrl の末尾に /v1 を含める流儀もあるため、両方を受ける。
     if (method !== 'POST' || !/\/(v1\/)?chat\/completions$/.test(pathname)) return false;
 

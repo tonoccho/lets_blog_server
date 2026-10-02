@@ -1,5 +1,7 @@
 package com.letsblog.platform.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
@@ -41,6 +43,7 @@ import java.util.function.Supplier;
 public class ConnectedServiceStatusService {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
+    private static final ObjectMapper JSON = new ObjectMapper();
     private static final String PLANTUML_HEALTHCHECK_SOURCE = "@startuml\nA->B\n@enduml";
 
     private final DataSource dataSource;
@@ -167,7 +170,7 @@ public class ConnectedServiceStatusService {
                 health.id(), health.name(),
                 health.up() ? Status.NORMAL : Status.ERROR,
                 0, null, health.detail(),
-                letsBlogServiceStatusService.targetUrl(), Instant.now(), health.impact());
+                letsBlogServiceStatusService.targetUrl(), Instant.now(), health.impact(), null);
     }
 
     private CheckOutcome checkRabbitMqQueues() {
@@ -190,7 +193,8 @@ public class ConnectedServiceStatusService {
         long responseTimeMs = System.currentTimeMillis() - startedAt;
         return new ConnectedServiceStatusDetailResponse(
                 id, name, outcome.status(), responseTimeMs,
-                outcome.httpStatus(), outcome.errorMessage(), outcome.targetUrl(), Instant.now(), null);
+                outcome.httpStatus(), outcome.errorMessage(), outcome.targetUrl(), Instant.now(), null,
+                outcome.computeDevice());
     }
 
     private CheckOutcome checkDatabase() {
@@ -225,7 +229,72 @@ public class ConnectedServiceStatusService {
     private CheckOutcome checkLlmOllama() {
         String baseUrl = appSettingService.getLlmOllamaBaseUrl();
         RestClient client = ollamaClientBuilderFactory.apply(baseUrl).build();
-        return checkHttpService(client, baseUrl, "/models");
+        CheckOutcome outcome = checkHttpService(client, baseUrl, "/models");
+        if (outcome.status() != Status.NORMAL) {
+            return outcome;
+        }
+        return outcome.withComputeDevice(resolveOllamaComputeDevice(baseUrl));
+    }
+
+    /**
+     * Ollama固有API({@code GET /api/ps})でロード中モデルの配置から演算デバイスを解決する(issue #1397)。
+     * {@code /api/ps}はOpenAI互換の{@code /v1}の外にあるため、ベースURLから{@code /v1}を除いて呼ぶ。
+     * 付加情報なので、取得・解釈に失敗しても例外にせず{@code null}を返し、状態判定へは影響させない。
+     */
+    private String resolveOllamaComputeDevice(String baseUrl) {
+        String root = baseUrl.replaceFirst("/+$", "").replaceFirst("/v1$", "");
+        try {
+            RestClient client = ollamaClientBuilderFactory.apply(root).build();
+            return ollamaComputeDeviceOf(client.get().uri("/api/ps").retrieve().body(String.class));
+        } catch (RestClientException e) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code /api/ps}の応答からデバイスを決める。ロード中モデルのsize(総量)とsize_vram(VRAM上の量)を
+     * 合算し、VRAM上が0ならcpu、全量ならgpu、その間ならgpu+cpu。ロード中のモデルが無ければ
+     * 判別できないためunknown。本文が解釈できなければnull。
+     */
+    static String ollamaComputeDeviceOf(String body) {
+        JsonNode root = parseJson(body);
+        if (root == null) {
+            return null;
+        }
+        long size = 0;
+        long vram = 0;
+        for (JsonNode model : root.path("models")) {
+            size += model.path("size").asLong(0);
+            vram += model.path("size_vram").asLong(0);
+        }
+        if (size <= 0) {
+            return "unknown";
+        }
+        if (vram <= 0) {
+            return "cpu";
+        }
+        return vram >= size ? "gpu" : "gpu+cpu";
+    }
+
+    /** {@code /system_stats}の{@code devices[0].type}。無い・解釈できない場合はnull。 */
+    static String comfyUiComputeDeviceOf(String body) {
+        JsonNode root = parseJson(body);
+        if (root == null) {
+            return null;
+        }
+        String type = root.path("devices").path(0).path("type").asText("").trim();
+        return type.isEmpty() ? null : type;
+    }
+
+    private static JsonNode parseJson(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            return JSON.readTree(body);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return null;
+        }
     }
 
     private CheckOutcome checkLlmApiKeyConfigured(String apiKey) {
@@ -235,9 +304,13 @@ public class ConnectedServiceStatusService {
         return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);
     }
 
-    /** ComfyUI公式の軽量なシステム状態エンドポイントで判定する。 */
+    /**
+     * ComfyUI公式の軽量なシステム状態エンドポイントで判定する。同じ応答の本文から演算デバイスも読む
+     * (issue #1397)ため、HTTPリクエスト数は増えない。
+     */
     private CheckOutcome checkComfyUi() {
-        return checkHttpService(comfyUiClient, comfyUiBaseUrl, "/system_stats");
+        return checkHttpService(comfyUiClient, comfyUiBaseUrl, "/system_stats",
+                ConnectedServiceStatusService::comfyUiComputeDeviceOf);
     }
 
     /** provision-agentの専用ヘルスチェックルート(issue #197で追加)で判定する。 */
@@ -278,10 +351,24 @@ public class ConnectedServiceStatusService {
      * 5xxはプロセスは生きているが異常応答のため警告、接続自体ができない場合はエラーとして扱う。
      */
     private CheckOutcome checkHttpService(RestClient client, String baseUrl, String path) {
+        return checkHttpService(client, baseUrl, path, null);
+    }
+
+    /**
+     * {@code deviceResolver}が指定されたときだけ応答本文を読み、演算デバイスを解決する(issue #1397)。
+     * リゾルバは例外を投げない前提で、解決結果は状態判定に使わない。
+     */
+    private CheckOutcome checkHttpService(
+            RestClient client, String baseUrl, String path, Function<String, String> deviceResolver) {
         String targetUrl = baseUrl + path;
         try {
-            ResponseEntity<Void> response = client.get().uri(path).retrieve().toBodilessEntity();
-            return new CheckOutcome(Status.NORMAL, response.getStatusCode().value(), null, targetUrl);
+            if (deviceResolver == null) {
+                ResponseEntity<Void> response = client.get().uri(path).retrieve().toBodilessEntity();
+                return new CheckOutcome(Status.NORMAL, response.getStatusCode().value(), null, targetUrl);
+            }
+            ResponseEntity<String> response = client.get().uri(path).retrieve().toEntity(String.class);
+            return new CheckOutcome(Status.NORMAL, response.getStatusCode().value(), null, targetUrl,
+                    deviceResolver.apply(response.getBody()));
         } catch (RestClientResponseException e) {
             Status status = e.getStatusCode().is5xxServerError() ? Status.WARNING : Status.NORMAL;
             return new CheckOutcome(status, e.getStatusCode().value(), e.getMessage(), targetUrl);
@@ -305,9 +392,18 @@ public class ConnectedServiceStatusService {
     }
 
     /** 各チェックの結果(issue #199の詳細診断用フィールドを含む)。targetUrlはHTTPを伴わないチェックではnull。 */
-    private record CheckOutcome(Status status, Integer httpStatus, String errorMessage, String targetUrl) {
+    private record CheckOutcome(
+            Status status, Integer httpStatus, String errorMessage, String targetUrl, String computeDevice) {
+        private CheckOutcome(Status status, Integer httpStatus, String errorMessage, String targetUrl) {
+            this(status, httpStatus, errorMessage, targetUrl, null);
+        }
+
         private static CheckOutcome normal(String targetUrl) {
             return new CheckOutcome(Status.NORMAL, null, null, targetUrl);
+        }
+
+        private CheckOutcome withComputeDevice(String device) {
+            return new CheckOutcome(status, httpStatus, errorMessage, targetUrl, device);
         }
     }
 }

@@ -33,6 +33,34 @@ Then(
   }
 );
 
+// ---- 演算デバイス表示(issue #1397) ----
+
+function serviceRow(page: import('@playwright/test').Page, serviceName: string) {
+  return page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: '接続サービスの稼働状況' }) })
+    .locator('ul > li')
+    .filter({ has: page.getByText(serviceName, { exact: true }) });
+}
+
+Then(
+  '連携サービスの状況の「{word}」の行に演算デバイス「{word}」が表示される',
+  async ({ page }, serviceName: string, device: string) => {
+    const row = serviceRow(page, serviceName);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row.getByText(`演算デバイス: ${device}`)).toBeVisible();
+  }
+);
+
+Then(
+  '連携サービスの状況の「{word}」の行は表示され、演算デバイスは表示されない',
+  async ({ page }, serviceName: string) => {
+    const row = serviceRow(page, serviceName);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row.getByText('演算デバイス')).toHaveCount(0);
+  }
+);
+
 // ---- コンテナ状態パネル(#803・#725の退行検知) ----
 
 const FOREIGN_PROJECT_LABEL = 'e2e1154-foreign-project';
