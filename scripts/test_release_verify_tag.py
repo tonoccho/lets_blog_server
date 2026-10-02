@@ -1752,5 +1752,11 @@ class E2eUnitTestsStep(unittest.TestCase):
         self.assertNotEqual(e2e["counts_source"], web_test["counts_source"])
 
 
+class NoDeadIsAncestorHelper(unittest.TestCase):
+    def test_is_ancestor_is_not_defined(self):
+        """#1305 以降 呼び出し元の無い is_ancestor は残さない(#1307 AC1)。"""
+        self.assertFalse(hasattr(rvt, "is_ancestor"))
+
+
 if __name__ == "__main__":
     unittest.main()

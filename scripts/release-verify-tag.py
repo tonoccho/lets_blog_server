@@ -264,11 +264,6 @@ def tree_of(cwd, ref):
     return git(["rev-parse", ref + "^{tree}"], cwd=cwd).stdout.strip()
 
 
-def is_ancestor(cwd, ancestor, descendant):
-    r = git(["merge-base", "--is-ancestor", ancestor, descendant], cwd=cwd, check=False)
-    return r.returncode == 0
-
-
 def list_tags(cwd):
     r = git(["tag", "--list"], cwd=cwd)
     return [l for l in r.stdout.splitlines() if l.strip()]
