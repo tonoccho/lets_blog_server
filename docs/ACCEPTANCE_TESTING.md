@@ -346,7 +346,7 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | --- | --- | --- |
 | `auth-flow.spec.ts` | AT-3 (#929) | **移行完了。spec は削除済み**(`features/auth/` の6ファイル) |
 | `accessibility.spec.ts` | AT-18 (#944) | **移行完了。spec は削除済み**(`features/ui-quality/accessibility.feature`。旧`Identify accessibility violations for review`は合否を決めない調査用テストだったため移行対象から除外) |
-| `main-scenario.spec.ts` | AT-6 (#932) | 未 |
+| `main-scenario.spec.ts` | AT-6-1 (#1171) | **移行完了。spec は削除済み**(`features/publishing/publish-lifecycle.feature`) |
 | `site-registration.spec.ts` | AT-5 (#931) | **移行完了。spec は削除済み**(プロビジョニングは #1167 で `features/project/site-provisioning.feature`、資格情報誤りの疎通確認は #1168 で `features/project/site-registration.feature`) |
 | `post-creation.spec.ts` | AT-6 (#932) | **移行完了。spec は削除済み**(#1165 で `features/project/project-management.feature`) |
 | `image-upload.spec.ts` | AT-10 (#936) | **移行完了。spec は削除済み**(`features/media/image-gallery.feature`) |

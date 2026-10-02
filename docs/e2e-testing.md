@@ -45,7 +45,6 @@ Keycloak クライアント `letsblog-web` の redirect_uri が
 | `helpers.ts` | 共通ヘルパー(Keycloak ログイン、トークン取得、compose 操作、healthy 待ち) | - |
 | `global-setup.ts` | 全サービスの healthy 待ち + 公開URL/Keycloak への疎通確認 | - |
 | `global-teardown.ts` | 全スキーマ横断のテストデータ削除(`E2E_DB_CLEANUP=1` のときのみ) | - |
-| `main-scenario.spec.ts` | **主要シナリオ**: サイト登録 → 記事公開 → 履歴確認 | admin |
 | `security.spec.ts` | CSRF・SQL インジェクション対策・入力サニタイズ(XSS検出とテンプレート削除の認可は #938 で `features/custom-tag/` へ移行済み) | admin |
 
 ---
@@ -118,7 +117,7 @@ E2E_ADMIN_PASSWORD='<任意の強いパスワード>' \
 4. (手順 0 で作成済み)E2E 専用クライアント `letsblog-e2e`(public / direct access grant 可)。
    `apps/web/e2e` がブラウザを介さず API を直接叩くための専用トークン発行クライアントとして
    issue #588 で導入した(realm 既定の `admin-cli` を使わない理由は §7 参照)。
-   `main-scenario.spec.ts` が API を直接叩くときのトークン発行に使う(§7 参照)。
+   `features/publishing/publish-lifecycle.feature` のステップが API を直接叩くときのトークン発行に使う(§7 参照)。
    `infra/keycloak/realm-export.json` にも同じ定義があるが、Keycloak は realm export を
    **初回起動時にしか読まない** ため、既に起動済みの環境ではこのスクリプトで作る必要がある。
    既存の `admin-cli` などの実運用クライアントには一切触れない。
@@ -270,8 +269,7 @@ npm run test:at:fast                   # 受け入れテストから @slow / @de
 npm run test:at:clean                  # 環境をリセットしてから段階順に全実行(破壊的)
 
 npx playwright test --project=chromium              # ブラウザを絞る
-npx playwright test e2e/main-scenario.spec.ts       # ファイルを絞る
-npx playwright test -g "サイトを登録して記事を公開"     # テスト名で絞る
+npm run test:at -- --grep "記事を新規公開すると"   # シナリオ名で絞る(.feature は bddgen で変換される)
 ```
 
 `globalSetup` が実行前に以下を行うため、`docker compose up -d` の直後でもそのまま実行してよい。
@@ -387,13 +385,15 @@ wordpress コンテナ内のプロビジョニングエージェント(`POST /de
 
 ## 7. 主要シナリオ
 
-`main-scenario.spec.ts` が「サイト登録 → 記事公開 → 履歴確認」を1本で通す。
+`features/publishing/publish-lifecycle.feature`(旧 `main-scenario.spec.ts` から移行、spec は削除済み)が記事の公開と投稿履歴への反映を通す。
+`@slow` / `@mode:serial` で、基本のシナリオは次の流れを取る。
 
-1. Keycloak のホスト型ログイン画面で admin としてサインイン
-2. `/sites` から ManagedWordPress サイトを新規構築(project-service + wordpress コンテナ)
-3. `POST /api/posts/publish` を gateway 経由で呼び出して記事を公開(publishing-service)
-4. `/posts` の投稿履歴に反映されていることを確認(content-service)
-5. 投稿とサイトを削除して後片付け
+1. 前提(Background): 固定 siteKey の ManagedWordPress サイトを冪等に用意する(無ければ構築し、あれば実行をまたいで再利用する。wp-cli で WordPress 側を直接確認するため、#1167 の共有フィクスチャは使わない)
+2. `POST /api/posts/publish` を gateway 経由で呼び出して記事を公開(publishing-service)
+3. `/posts` の投稿履歴に反映されていることを確認(content-service)
+4. wp-cli で WordPress 側の実状態(post_status・タイトル・本文・アイキャッチ・スラッグ)を確認する
+
+同じ feature が、再公開での更新、スラッグによる既存記事の再利用、画像メディアの再利用も検証する。
 
 記事公開は **Web UI に存在しない機能**(通常は VSCode 拡張が gateway 経由で呼ぶ)なので、
 その部分だけ API を直接呼ぶ。トークンはブラウザと同じ Keycloak ユーザーで、
@@ -408,7 +408,7 @@ Resource Owner Password Credentials グラントで取得する(`helpers.ts` の
 > 記事公開が失敗する。`letsblog-e2e` はこの属性を持たないため、ブラウザ経由の
 > Authorization Code フローと同じ内容のトークンが得られる。
 
-WordPress の自動構築に数分かかるため、このテストのタイムアウトは 600 秒に設定している。
+サイトの初回構築には数分かかる。タイムアウトは `publish-lifecycle.feature` と Playwright の設定を参照すること。
 
 ---
 
@@ -447,7 +447,7 @@ healthy になるまで待つ。`E2E_ALLOW_SERVICE_DISRUPTION` によるオプ�
 さらに絞りたい場合:
 
 ```bash
-npx playwright test --project=chromium e2e/main-scenario.spec.ts e2e/security.spec.ts
+npx playwright test --project=chromium e2e/security.spec.ts
 ```
 
 ### 9.1 フィクスチャの並列実行に関する制約(issue #765)
@@ -462,9 +462,7 @@ ManagedWordPress を `beforeAll` で構築する spec をそのまま並列実�
 を宣言する**。describe 内の全テストが1ワーカーで順に実行され、フィクスチャの構築・削除は1回だけになる。
 他の spec ファイルとの並列実行は従来どおり行われるため、全体の実行時間への影響は小さい。
 
-| spec | フィクスチャ | 実行モード |
-| --- | --- | --- |
-| `main-scenario.spec.ts` | ManagedWordPress サイト1件(テスト内で構築・削除) | serial |
+現在この宣言を使う spec は無い(該当していた `main-scenario.spec.ts` は `features/publishing/publish-lifecycle.feature` へ移行し削除済み)。
 
 `site-registration.spec.ts` は `features/project/site-provisioning.feature`、`post-creation.spec.ts` は
 `features/project/project-management.feature` へ移行済みで、いずれも削除済み。
@@ -475,7 +473,7 @@ ManagedWordPress を `beforeAll` で構築する spec をそのまま並列実�
 
 ManagedWordPress の削除は「コンテナ内のファイル削除 + 専用 DB の `DROP DATABASE`」を伴い、
 30 秒では終わらないことがある。後片付けの待ちは 60 秒を目安にする
-(`main-scenario.spec.ts` は 60 秒。移行済みの `features/project/site-provisioning.feature` も同じ基準)。
+(移行済みの `features/project/site-provisioning.feature` も同じ基準)。
 削除しきれなかった場合は `[E2E ORPHAN] site_key=...` をログへ出力するので、
 実行後に孤児が残ったかどうかはレポートの標準出力から判別できる。
 
