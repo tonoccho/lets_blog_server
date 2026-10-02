@@ -74,9 +74,13 @@ DOC_PATTERNS = [
 #       【採用】nginx のルーティング、Keycloak のレルム定義、MySQL の初期化、
 #       WordPress のプロビジョニング、e2e-stubs。いずれも動く系の振る舞いを決める。
 #       e2e-stubs は検証用の環境だが、環境定義であることに変わりはない(#983 利用者決定)。
-#   docker-compose*.yml
+#   docker-compose*.yml(リポジトリ直下に限らず、入れ子の位置でも)
 #       【採用】コンテナ構成・環境変数・公開ポート。host-tests / e2e-stubs 用の
 #       compose も、環境定義という点で同じ扱い(#983 利用者決定)。
+#       入れ子(scripts/keycloak-clean-boot/ など)も一律プロダクション(#1292)。
+#       scripts/ が中立なのは道具立てのシェルなどの話で、compose は置き場所に
+#       関わらず環境定義である。ルート直下にしか一致しないと、置いた場所が他の
+#       パターンに当たるかで偶然決まってしまう。Dockerfile と同じく (^|/) で判定する。
 #   Dockerfile / Dockerfile.*
 #       【採用】実行時イメージそのものの定義。compose をプロダクションとしながら
 #       compose が組み立てるイメージ定義を中立に残すのは一貫しない。
@@ -96,7 +100,7 @@ PRODUCTION_PATTERNS = [
     r"^apps/[^/]+/manifest\.json$",
     r"^apps/[^/]+/(next|postcss|tailwind)\.config\.[cm]?[jt]s$",
     r"^infra/",
-    r"^docker-compose(\.[^/]+)?\.ya?ml$",
+    r"(^|/)docker-compose(\.[^/]+)?\.ya?ml$",
     r"(^|/)Dockerfile(\.[^/]+)?$",
     r"^apps/[^/]+/docker-entrypoint\.sh$",
 ]

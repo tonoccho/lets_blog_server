@@ -104,6 +104,11 @@ class ProductionCodeClassification(unittest.TestCase):
         "docker-compose.override.yml",
         "docker-compose.e2e-stubs.yml",
         "docker-compose.host-tests.yml",
+        # #1292: 入れ子の compose も同じ扱い。scripts/ 配下(中立宣言の対象)でも
+        # 環境定義であることに変わりはなく、infra/ 配下は従来どおり。
+        "scripts/keycloak-clean-boot/docker-compose.yml",
+        "infra/e2e-stubs/docker-compose.yml",
+        "infra/e2e-stubs/docker-compose.override.yaml",
         # 実装判断: 実行時イメージ定義。
         "apps/web/Dockerfile",
         "services/identity/Dockerfile",
