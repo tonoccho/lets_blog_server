@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PostComparisonPage, PostStatusOption, PostType } from "@/lib/apiClient";
+import type { PostComparisonPage, PostComparisonRow, PostStatusOption, PostType } from "@/lib/apiClient";
 import {
   fetchPostComparisonAction,
   fetchPostStatusesAction,
   deletePostEverywhereAction,
   updatePostStatusEverywhereAction,
 } from "./actions";
+import { buildDeleteConfirmation } from "./deleteConfirmation";
 
 const ENVIRONMENTS: ("local" | "test" | "production")[] = ["local", "test", "production"];
 
@@ -72,8 +73,16 @@ export function PostComparisonTable({
     }
   }
 
-  async function handleDelete(slug: string) {
-    if (!window.confirm(`「${slug}」を、投稿されているすべての環境から削除します。よろしいですか?`)) {
+  async function handleDelete(row: PostComparisonRow) {
+    const slug = row.slug;
+    if (
+      !window.confirm(
+        buildDeleteConfirmation(slug, (environment) => {
+          const value = row[environment];
+          return !value.error && value.available && !!value.postId;
+        })
+      )
+    ) {
       return;
     }
     setPendingAction({ slug, type: "delete" });
@@ -195,7 +204,7 @@ export function PostComparisonTable({
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDelete(row.slug)}
+                          onClick={() => handleDelete(row)}
                           disabled={rowBusy}
                           className="rounded bg-red-50 px-2 py-1 text-xs text-red-600 disabled:opacity-50"
                         >

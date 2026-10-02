@@ -179,6 +179,55 @@ describe("PluginThemeComparisonTable", () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
+  it("削除の確認に、インストールされている環境の数と環境名を表示する", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable({ items: [row({ production: envValue({ status: "INACTIVE" }) })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "「akismet」を、存在する3つの環境(ローカル・テスト・本番)から削除します。よろしいですか?"
+    );
+  });
+
+  it("未インストール・対象外・エラーの環境は、確認に含めない", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable({
+      items: [
+        row({
+          local: envValue({ available: false, status: null }),
+          test: envValue({ error: true, status: null }),
+          production: envValue({ status: "NOT_INSTALLED" }),
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    expect(window.confirm).toHaveBeenCalledWith("「akismet」を、存在するすべての環境から削除します。よろしいですか?");
+  });
+
+  it("状態が取得できていない環境は、確認に含めない", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable({ items: [row({ local: envValue({ status: null }) })] });
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    expect(window.confirm).toHaveBeenCalledWith("「akismet」を、存在する1つの環境(テスト)から削除します。よろしいですか?");
+  });
+
+  it("一部の環境にしか無い項目では、存在しない環境を確認に含めない", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable({ items: [row({ local: envValue({ status: "NOT_INSTALLED" }) })] }, "theme");
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    const message = (window.confirm as jest.Mock).mock.calls[0][0] as string;
+    expect(message).toContain("存在する1つの環境(テスト)");
+    expect(message).not.toContain("ローカル");
+    expect(message).not.toContain("本番");
+  });
+
   it("削除に成功すると成功メッセージを表示する", async () => {
     (window.confirm as jest.Mock).mockReturnValue(true);
     deleteMock.mockResolvedValue({});

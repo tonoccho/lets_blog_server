@@ -174,6 +174,54 @@ describe("TermComparisonTable", () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
+  it("削除の確認に、項目が存在する環境の数と環境名を表示する", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable();
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "「お知らせ」を、存在する3つの環境(ローカル・テスト・本番)から削除します。よろしいですか?"
+    );
+  });
+
+  it("一部の環境にしか無い項目では、存在しない環境を確認に含めない", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable({
+      items: [
+        row({
+          local: envValue({ available: false, slug: null }),
+          test: envValue({ error: true, slug: null }),
+          production: envValue(),
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    const message = (window.confirm as jest.Mock).mock.calls[0][0] as string;
+    expect(message).toContain("存在する1つの環境(本番)");
+    expect(message).not.toContain("ローカル");
+    expect(message).not.toContain("テスト");
+  });
+
+  it("どの環境にも存在しない行は、従来の文言で確認する", () => {
+    (window.confirm as jest.Mock).mockReturnValue(false);
+    renderTable({
+      items: [
+        row({
+          local: envValue({ slug: null }),
+          test: envValue({ available: false }),
+          production: envValue({ slug: null }),
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+
+    expect(window.confirm).toHaveBeenCalledWith("「お知らせ」を、存在するすべての環境から削除します。よろしいですか?");
+  });
+
   it("削除すると成功メッセージを表示し、編集中の行を閉じる", async () => {
     (window.confirm as jest.Mock).mockReturnValue(true);
     deleteMock.mockResolvedValue({});

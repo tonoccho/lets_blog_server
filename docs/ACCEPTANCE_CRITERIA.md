@@ -180,6 +180,7 @@ API: publishing `BulkManagementController`(23エンドポイント)
 | AC-BULK-011 | 一括適用 | 変更を全環境へ一度に流せる | `bulk-management/apply` / `apply-all` が対象環境へ反映される | — | 未着手 |
 | AC-BULK-012 | ファイルアップロード | 手元のファイルを公開先へ送れる | `bulk-management/upload` 後、公開先にファイルが存在する | — | 未着手 |
 | AC-BULK-013 | 生成画像のアップロード | ギャラリーの画像を記事素材にできる | `POST /api/projects/{id}/asset-images/{generatedImageId}/upload` 後、公開先メディアに現れる | — | 未着手 |
+| AC-BULK-014 | 一括削除の確認 | 取り消せない削除を、どの環境から消えるのかを知った上で承認できる | カテゴリ・タグ・プラグイン・テーマ・投稿の行削除の確認に、その項目が存在する環境の数と環境名が表示され、存在しない環境は含まれない(比較表の行データから求め、API・サーバの変更なし) | `apps/web/e2e/features/bulk/bulk-delete-confirmation.feature` › 5シナリオ(カテゴリ・タグ・プラグイン・投稿の2環境、およびテスト環境にだけあるカテゴリ)。単体: `apps/web/src/app/projects/[id]/__tests__/{Term,PluginTheme,Post}ComparisonTable.test.tsx`(#1181) | 実装済(受け入れテストの実行結果は #1181 のレポート参照) |
 
 ### 2.6 AI執筆支援 — `AI`
 

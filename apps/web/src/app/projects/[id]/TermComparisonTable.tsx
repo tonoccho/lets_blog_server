@@ -10,6 +10,7 @@ import {
   editTermAndSyncAction,
   syncAllTermsToMasterAction,
 } from "./actions";
+import { buildDeleteConfirmation } from "./deleteConfirmation";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
   local: "ローカル",
@@ -86,7 +87,14 @@ export function TermComparisonTable({
   }
 
   async function handleDelete(row: TermComparisonRow) {
-    if (!window.confirm(`「${row.name}」を、存在するすべての環境から削除します。よろしいですか?`)) {
+    if (
+      !window.confirm(
+        buildDeleteConfirmation(row.name, (environment) => {
+          const value = valueOf(row, environment);
+          return !value.error && value.available && !!value.slug;
+        })
+      )
+    ) {
       return;
     }
     setPendingAction({ slug: row.slug, type: "delete" });

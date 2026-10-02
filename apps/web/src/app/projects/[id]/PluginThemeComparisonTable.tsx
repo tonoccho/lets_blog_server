@@ -9,6 +9,7 @@ import {
   deleteSlugEverywhereAction,
   fetchStatusComparisonAction,
 } from "./actions";
+import { buildDeleteConfirmation } from "./deleteConfirmation";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
   local: "ローカル",
@@ -102,8 +103,16 @@ export function PluginThemeComparisonTable({
     }
   }
 
-  async function handleDelete(slug: string) {
-    if (!window.confirm(`「${slug}」を、インストールされているすべての環境から削除します。よろしいですか?`)) {
+  async function handleDelete(row: StatusComparisonRow) {
+    const slug = row.slug;
+    if (
+      !window.confirm(
+        buildDeleteConfirmation(slug, (environment) => {
+          const value = row[environment];
+          return !value.error && value.available && !!value.status && value.status !== "NOT_INSTALLED";
+        })
+      )
+    ) {
       return;
     }
     setPendingAction({ slug, type: "delete" });
@@ -235,7 +244,7 @@ export function PluginThemeComparisonTable({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDelete(row.slug)}
+                            onClick={() => handleDelete(row)}
                             disabled={rowBusy}
                             className="rounded bg-red-50 px-2 py-1 text-xs text-red-600 disabled:opacity-50"
                           >
