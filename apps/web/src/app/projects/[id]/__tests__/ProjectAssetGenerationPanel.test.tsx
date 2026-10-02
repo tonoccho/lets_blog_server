@@ -33,6 +33,9 @@ function openChatSection() {
   fireEvent.click(within(header).getByText('開く'))
 }
 
+// 256枚の描画は CPU 負荷・コールド時に既定の5秒を超える(#1523)
+const HEAVY_RENDER_TIMEOUT_MS = 30000
+
 describe('ProjectAssetGenerationPanel チャットでプロンプトを作成', () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -476,14 +479,15 @@ describe('ProjectAssetGenerationPanel ジョブの生成結果の確認 (issue #
     ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images })
     render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
 
-    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(256))
-    const grid = screen.getByTestId('generated-image-grid')
+    // getAllByRole はアクセシビリティ木を256枚ぶん辿って遅いので、グリッド内の img を直接数える
+    const grid = await screen.findByTestId('generated-image-grid', {}, { timeout: HEAVY_RENDER_TIMEOUT_MS })
+    expect(grid.querySelectorAll('img')).toHaveLength(256)
     expect(grid.className).toMatch(/overflow-y-auto/)
     expect(grid.className).toMatch(/max-h-/)
     const target = screen.getByAltText('生成画像 200').closest('button') as HTMLElement
     fireEvent.click(target)
     expect(target).toHaveAttribute('aria-pressed', 'true')
-  })
+  }, HEAVY_RENDER_TIMEOUT_MS)
 
   it('画像を選ぶまでアップロードボタンは押せない', async () => {
     ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: IMAGES })
