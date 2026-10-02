@@ -150,6 +150,15 @@ class OperationLogServiceTest {
     }
 
     @Test
+    void findTraceAsAdmin_利用者を問わずoperationIdの全行を取得する() {
+        service = new OperationLogService(repository, rabbitTemplate);
+        when(repository.findByOperationIdOrderByCreatedAtAsc("op-1")).thenReturn(List.of(entry(), entry()));
+
+        assertEquals(2, service.findTraceAsAdmin("op-1").size());
+        verify(repository, never()).findByUserIdAndOperationIdOrderByCreatedAtAsc(any(), any());
+    }
+
+    @Test
     void deleteOldLogs_30日以上前のログのみ削除する() {
         service = new OperationLogService(repository, rabbitTemplate);
         OperationLog oldLog = new OperationLog();

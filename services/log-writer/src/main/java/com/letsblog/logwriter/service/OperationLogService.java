@@ -91,6 +91,12 @@ public class OperationLogService {
         return repository.findByUserIdAndOperationIdOrderByCreatedAtAsc(userId, operationId);
     }
 
+    /** 管理者向け: 利用者を問わずoperationIdの全行を返す(issue #1471)。 */
+    @Transactional(readOnly = true)
+    public List<OperationLog> findTraceAsAdmin(String operationId) {
+        return repository.findByOperationIdOrderByCreatedAtAsc(operationId);
+    }
+
     /**
      * 30日以上前のログを削除する。毎日UTC 03:00に自動実行する(監査ログの削除時刻とずらし、負荷を分散する)。
      */

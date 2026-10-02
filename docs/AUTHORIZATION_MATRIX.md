@@ -310,7 +310,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | `SiteController` / `SiteStaticContentController` / `SshKeyPairController` / `TagDesignSettingController` | project |
 | `ArticlePlanController` | ai |
 | `ProjectDashboardController` | analytics |
-| `OperationLogController` / `FrontendErrorLogController` | log-writer |
+| `OperationLogController` / `OperationLogStatsController` / `FrontendErrorLogController` | log-writer |
 | `InternalPlatformSettingsController` | platform |
 | `DiagramController` / `GeneratedImageController` / `RenderController` / `MediaController` | media |
 | `CmsMediaBridgeController` / `TaxonomyController` | publishing |
@@ -1058,14 +1058,16 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | GET /api/metadata/post-statuses | なし(意図的) | 401 | 該当なし | 認可OK | 現状維持(設計として認証済み全員に公開) | クラスjavadocに「特定のPermissionは要求せず、認証済みactorであれば参照できる」と明記。ギャップではなく設計 |
 | GET /api/metadata/roles | なし(意図的) | 401 | 該当なし | 認可OK | 現状維持(設計として認証済み全員に公開) | 同上 |
 
-## OperationLogController (4エンドポイント、ベースパス `/api/operation-logs`)
+## OperationLogController / OperationLogStatsController (6エンドポイント、ベースパス `/api/operation-logs`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST /api/operation-logs | なし(自己スコープ) | 401 | 該当なし | 認可OK | 現状維持(設計として自己ログのみ) | ログイン中actor自身のログとして記録。`currentActorService`が`null`ならコントローラ内で自前401 |
 | GET /api/operation-logs | なし(自己スコープ) | 401 | 該当なし | 認可OK | 現状維持(設計として自己ログのみ) | `requireActorId()`で自分のログのみ参照(admin/project権限チェックではなく自己判定) |
-| GET /api/operation-logs/{operationId} | なし(自己スコープ) | 401 | 該当なし | 認可OK | 現状維持(設計として自己ログのみ) | 同上 |
+| GET /api/operation-logs/{operationId} | 本人、または`isAdmin()`で全利用者 | 401 | 該当なし(非adminは他人のoperationIdに空の一覧) | 認可OK | 本人、またはadminは全利用者 | issue #1471で変更。従来は「設計として自己ログのみ」だったが、adminが集計画面(下の2行)で見つけた他利用者の遅い操作を辿れるよう、adminには利用者を問わずその`operationId`の全行を返す。非adminは従来どおり自分の行だけ(他人のoperationIdには空の一覧、403ではない)。`OperationLogController#trace` |
 | GET /api/operation-logs/unified | なし(自己スコープ) | 401 | 該当なし | 認可OK | 現状維持(設計として自己ログのみ) | `isAdmin()`はフィルタ条件緩和のためだけに使い、拒否には使わない |
+| GET /api/operation-logs/stats/routes | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1471。期間(startDate/endDate)必須。method+正規化パス(数値ID・UUIDを`{id}`、クエリ除去)ごとの件数・p50・p95・最大(nearest-rank法)。`OperationLogStatsController` |
+| GET /api/operation-logs/stats/operations | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1471。期間必須。operationIdごとの合計所要時間・呼び出し数・開始時刻・利用者ID。`OperationLogStatsController` |
 
 ## PostController (4エンドポイント、ベースパス `/api/posts`)
 
@@ -1371,7 +1373,7 @@ grep -rn "認可不要:" services/*/src/main/java --include=*.java
 - `FrontendErrorLogController`: `POST /api/logs/errors`
 - `GenerationJobController`: `GET /api/generation-jobs`, `GET /api/generation-jobs/{id}`,
   `PATCH /api/generation-jobs/{id}`(#573 stage2で追加), `POST /api/generation-jobs`(#573 stage3で追加)
-- `OperationLogController`: 全4エンドポイント(ただし自己スコープ設計)
+- `OperationLogController`: 全4エンドポイント(自己スコープ設計。ただし`GET /{operationId}`のみ#1471でadminに全利用者を許可)。`OperationLogStatsController`(#1471): admin限定の集計2エンドポイント
 - `PostController`: 全4エンドポイント。WordPressへの投稿公開・削除を含む、影響の大きい操作
 - `ProjectController`: `GET /api/projects`(一覧), `GET /api/projects/{id}`(詳細)
 - `SiteController`: `POST /api/sites`, `POST /api/sites/managed-wordpress`,

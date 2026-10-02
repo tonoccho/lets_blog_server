@@ -80,6 +80,16 @@ export default async function OperationLogsPage({
           を時系列で一覧表示します。操作の行は「コピー」でトレースを取得し、AIやサポート担当者に共有できます。
         </p>
         <OperationLogTimeZoneLabel personalTimeZone={timezone} />
+        {isAdmin && (
+          <p className="mt-2 text-sm">
+            <Link href="/operation-logs/slow" className="text-blue-700 underline dark:text-blue-300">
+              遅い操作
+            </Link>
+            <span className="ml-2 text-neutral-600 dark:text-neutral-400">
+              ルート別・操作別の所要時間を遅い順に一覧します(管理者のみ)。
+            </span>
+          </p>
+        )}
       </div>
 
       <form className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5" method="get">

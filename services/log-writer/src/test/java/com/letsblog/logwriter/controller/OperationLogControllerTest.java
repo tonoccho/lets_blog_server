@@ -23,6 +23,8 @@ import org.springframework.http.ResponseEntity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -104,6 +106,28 @@ class OperationLogControllerTest {
 
         assertEquals(1, result.size());
         verify(service).findTrace(1L, "op-1");
+    }
+
+    @Test
+    void trace_adminなら利用者を問わずoperationIdの全行を取得する() {
+        OperationLogController controller = controller();
+        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        when(currentActorService.isAdmin()).thenReturn(true);
+        when(service.findTraceAsAdmin("op-other")).thenReturn(List.of(new OperationLog(), new OperationLog()));
+
+        List<OperationLog> result = controller.trace("op-other");
+
+        assertEquals(2, result.size());
+        verify(service).findTraceAsAdmin("op-other");
+        verify(service, never()).findTrace(any(), any());
+    }
+
+    @Test
+    void trace_未ログインならForbidden() {
+        OperationLogController controller = controller();
+        when(currentActorService.getCurrentActorId()).thenReturn(null);
+
+        assertThrows(ForbiddenException.class, () -> controller.trace("op-1"));
     }
 
     @Test

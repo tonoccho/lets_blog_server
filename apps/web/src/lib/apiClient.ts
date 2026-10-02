@@ -1177,6 +1177,55 @@ export function getOperationTrace(operationId: string): Promise<OperationLogEntr
   return apiFetch<OperationLogEntry[]>(`/api/operation-logs/${encodeURIComponent(operationId)}`);
 }
 
+/** ルート別集計の1行(issue #1471)。pathは数値ID・UUIDを{id}にしクエリを除いた形。p50/p95はnearest-rank法。 */
+export interface RouteStat {
+  method: string;
+  path: string;
+  count: number;
+  p50Ms: number;
+  p95Ms: number;
+  maxMs: number;
+}
+
+/** 操作別集計の1行(issue #1471)。 */
+export interface OperationStat {
+  operationId: string;
+  totalDurationMs: number;
+  callCount: number;
+  startedAt: string;
+  userId: number | null;
+}
+
+export interface OperationStatsParams {
+  /** 期間の開始。UTCのISO日時(オフセット指定子なし)。必須。 */
+  startDate: string;
+  /** 期間の終了。UTCのISO日時(オフセット指定子なし)。必須。 */
+  endDate: string;
+  sort?: string;
+  direction?: 'asc' | 'desc';
+  limit?: number;
+}
+
+function statsQuery(params: OperationStatsParams): string {
+  const query = new URLSearchParams();
+  query.set('startDate', params.startDate);
+  query.set('endDate', params.endDate);
+  if (params.sort) query.set('sort', params.sort);
+  if (params.direction) query.set('direction', params.direction);
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  return query.toString();
+}
+
+/** admin限定。ルート別(method + 正規化したパス)の件数・p50・p95・最大(issue #1471)。 */
+export function getRouteStats(params: OperationStatsParams): Promise<RouteStat[]> {
+  return apiFetch<RouteStat[]>(`/api/operation-logs/stats/routes?${statsQuery(params)}`);
+}
+
+/** admin限定。操作(operationId)別の合計所要時間・呼び出し数・開始時刻・利用者ID(issue #1471)。 */
+export function getOperationStats(params: OperationStatsParams): Promise<OperationStat[]> {
+  return apiFetch<OperationStat[]>(`/api/operation-logs/stats/operations?${statsQuery(params)}`);
+}
+
 /** 操作ログ・AIジョブ・監査ログを一元表示するための統合エントリ(issue #187)。 */
 export type UnifiedLogSourceType = "OPERATION" | "AI_JOB" | "AUDIT";
 

@@ -34,6 +34,8 @@ import {
   listArticleReviewPullRequests,
   listProjectAdSenseAccounts,
   listUnifiedOperationLogs,
+  getRouteStats,
+  getOperationStats,
   selectProjectAdSenseAccount,
   updateReviewStepSetting,
   listAiConnections,
@@ -594,5 +596,42 @@ describe('startProjectImageJob (issue #1408)', () => {
     expect(url).not.toMatch(/\/api\/ai\/image(\?|$)/)
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({ prompt: 'cat', projectId: 7, batchSize: 2 })
+  })
+})
+
+describe('操作ログ集計API(issue #1471)', () => {
+  it('getRouteStats は期間・並べ替え・上限をクエリに載せる', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([{ method: 'GET', path: '/a', count: 1, p50Ms: 1, p95Ms: 1, maxMs: 1 }]))
+
+    const result = await getRouteStats({
+      startDate: '2026-10-01T00:00:00',
+      endDate: '2026-10-02T00:00:00',
+      sort: 'count',
+      direction: 'asc',
+      limit: 50,
+    })
+
+    expect(result).toHaveLength(1)
+    const [url] = calls()[0]
+    expect(url).toContain('/api/operation-logs/stats/routes?')
+    const query = new URL(url, 'http://localhost').searchParams
+    expect(query.get('startDate')).toBe('2026-10-01T00:00:00')
+    expect(query.get('endDate')).toBe('2026-10-02T00:00:00')
+    expect(query.get('sort')).toBe('count')
+    expect(query.get('direction')).toBe('asc')
+    expect(query.get('limit')).toBe('50')
+  })
+
+  it('getOperationStats は並べ替えと上限が未指定ならクエリに載せない', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await getOperationStats({ startDate: '2026-10-01T00:00:00', endDate: '2026-10-02T00:00:00' })
+
+    const [url] = calls()[0]
+    expect(url).toContain('/api/operation-logs/stats/operations?')
+    const query = new URL(url, 'http://localhost').searchParams
+    expect(query.has('sort')).toBe(false)
+    expect(query.has('direction')).toBe(false)
+    expect(query.has('limit')).toBe(false)
   })
 })

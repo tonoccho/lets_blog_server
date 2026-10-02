@@ -80,7 +80,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/operation-logs"),
                 new Endpoint("GET", "/api/operation-logs"),
                 new Endpoint("GET", "/api/operation-logs/op-1"),
-                new Endpoint("GET", "/api/operation-logs/unified"));
+                new Endpoint("GET", "/api/operation-logs/unified"),
+                new Endpoint("GET", "/api/operation-logs/stats/routes"),
+                new Endpoint("GET", "/api/operation-logs/stats/operations"));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")

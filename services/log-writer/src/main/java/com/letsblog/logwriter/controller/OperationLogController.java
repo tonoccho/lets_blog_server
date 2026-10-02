@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Web BFFが記録する操作ログ(デバッグ/サポート共有用のAPI呼び出しトレース)。
- * 常にログイン中の本人のログのみを対象とする(他ユーザーのログは参照不可)。
+ * 一覧は常にログイン中の本人のログのみを対象とする。トレース({operationId})は本人、またはadminなら全利用者(issue #1471)。
  * /unified はAIジョブ・監査ログも合わせた統合ビュー向け(issue #187)。#572でlegacy-apiから移設。
  */
 @RestController
@@ -66,7 +66,12 @@ public class OperationLogController {
 
     @GetMapping("/{operationId}")
     public List<OperationLog> trace(@PathVariable String operationId) {
-        return service.findTrace(requireActorId(), operationId);
+        Long userId = requireActorId();
+        // adminは集計画面から任意の利用者の操作を辿れる(issue #1471)。それ以外は従来どおり本人の行だけ。
+        if (currentActorService.isAdmin()) {
+            return service.findTraceAsAdmin(operationId);
+        }
+        return service.findTrace(userId, operationId);
     }
 
     @GetMapping("/unified")

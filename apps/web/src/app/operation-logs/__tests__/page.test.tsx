@@ -101,7 +101,8 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
 
     const tree = await render({ startDate: '2026-09-10T09:30', endDate: '2026-09-11T09:30', type: 'OPERATION' });
 
-    const links = collect(tree, (e) => typeof e.props?.href === 'string');
+    // 「遅い操作」への導線(issue #1471)もhrefを持つので、ページ送りだけに絞る。
+    const links = collect(tree, (e) => typeof e.props?.href === 'string' && String(e.props.href).includes('page='));
     expect(links).toHaveLength(3);
     const query = new URL(links[1].props.href as string, 'http://localhost').searchParams;
     expect(query.get('startDate')).toBe('2026-09-10T09:30');
@@ -129,6 +130,21 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
     const tree = await render({});
     const options = collect(tree, (e) => e.type === 'option').map((e) => e.props.value);
     expect(options).not.toContain('AUDIT');
+  });
+
+  it('adminには「遅い操作」画面への導線を出す(issue #1471)', async () => {
+    const tree = await render({});
+
+    const link = collect(tree, (e) => e.props?.href === '/operation-logs/slow')[0];
+    expect(link).toBeDefined();
+  });
+
+  it('adminでなければ「遅い操作」画面への導線を出さない(issue #1471)', async () => {
+    requireSession.mockResolvedValue({ user: { role: 'user' } });
+
+    const tree = await render({});
+
+    expect(collect(tree, (e) => e.props?.href === '/operation-logs/slow')).toHaveLength(0);
   });
 
   it('表示中のタイムゾーンの表記に個人設定TZを渡す(issue #1260)', async () => {
