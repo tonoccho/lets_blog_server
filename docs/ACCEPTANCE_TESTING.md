@@ -982,8 +982,16 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 ### 段階
 
 ```
-全撤去+ゼロ構築 ─→ at-setup ─→ at-seed ─→ at-provision ─→ at-main ─→ at-destructive
+全撤去+ゼロ構築 ─→ at-setup ─→ at-seed ─→ at-provision ─┬─→ at-main ───────────────┬─→ at-destructive
+                                                        ├─→ at-timezone-exclusive ─┤
+                                                        └─→ at-llm-exclusive ──────┤
+                                                              └─→ at-analytics-exclusive ─┘
 ```
+
+`at-main` / `at-timezone-exclusive` / `at-llm-exclusive` は `at-provision` にのみ依存し、互いに
+並行して走る。`at-analytics-exclusive` は `at-llm-exclusive` の完了を待ち(`at-provision` ではない)、
+`at-destructive` は `at-main` と3つの専用レーンすべての完了を待つ
+(`apps/web/playwright.config.ts` の `projects[].dependencies`)。
 
 | 段階 | 中身 | 担当 |
 | --- | --- | --- |
@@ -992,7 +1000,10 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 | `at-seed` | `scripts/seed-acceptance-env.sh`。E2E専用の合成アカウントを発行 | AT-19 |
 | `at-provision` | `@stage:provision` のシナリオ。**WordPress のプロビジョニング** | AT-5 (#931) |
 | `at-main` | 上記以外すべて(`@destructive` を除く) | 各ドメインIssue |
-| `at-destructive` | `@destructive` のシナリオ。**最後に、それだけで**実行する | 各ドメインIssue |
+| `at-llm-exclusive` | `@stub-isolation:llm` のシナリオ。`llm-stub` の共有状態に触れるため `workers: 1` の専用レーンに集約。詳細は [§9 エラー注入](#エラー注入) | #1188 |
+| `at-timezone-exclusive` | `@account-isolation:timezone` のシナリオ。共有管理者の個人設定TZを書き換えるため `workers: 1` の専用レーンに集約。詳細は [§9 エラー注入](#エラー注入) | #1374 |
+| `at-analytics-exclusive` | `@stub-isolation:analytics` のシナリオ。`ga-stub` / `adsense-stub` の共有状態に触れるため `workers: 1` の専用レーンに集約。詳細は [§9 エラー注入](#エラー注入) | #1372 |
+| `at-destructive` | `@destructive` のシナリオ。`at-main` と3つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
 
 ### なぜ `@destructive` を別段階にするか(#929)
 
