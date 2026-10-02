@@ -23,6 +23,16 @@
         ]
       },
       {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard.py\" agent",
+            "statusMessage": "規約を検査中"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {

@@ -4244,5 +4244,58 @@ class AttachedGlobalValueFlagHelpTest(unittest.TestCase):
         self.assertIsNotNone(run_hook("bash", bash_payload("glab -Rsss mr merge")))
 
 
+def agent_payload(subagent_type, background=None, key="run_in_background"):
+    tool_input = {"subagent_type": subagent_type, "prompt": "x", "description": "x"}
+    if background is not None:
+        tool_input[key] = background
+    return {"tool_input": tool_input, "session_id": "test-session"}
+
+
+class WorkflowAgentForeground(unittest.TestCase):
+    """#1269: ワークフローのエージェントはフォアグラウンドで起動する。
+
+    バックグラウンドのまま段階のターンが終わると、`claude -p` が結果を返して再開を
+    1回消費する。理由と、汎用エージェントを対象外にした根拠は
+    docs/WORKFLOW_RULE_RATIONALE.md を参照。
+    """
+
+    WORKFLOW_AGENTS = ("implementer", "reviewer", "qa", "project-planner")
+
+    def test_background_workflow_agent_is_denied(self):
+        for agent in self.WORKFLOW_AGENTS:
+            with self.subTest(agent=agent):
+                reason = run_hook("agent", agent_payload(agent, True))
+                self.assertIsNotNone(reason)
+                self.assertIn("フォアグラウンド", reason)
+                self.assertIn("run_in_background", reason)
+
+    def test_foreground_workflow_agent_is_allowed(self):
+        for agent in self.WORKFLOW_AGENTS:
+            for flag in (None, False):
+                with self.subTest(agent=agent, flag=flag):
+                    self.assertIsNone(run_hook("agent", agent_payload(agent, flag)))
+
+    def test_background_general_purpose_agent_is_allowed(self):
+        for agent in ("general-purpose", "Explore", "claude", None):
+            with self.subTest(agent=agent):
+                self.assertIsNone(run_hook("agent", agent_payload(agent, True)))
+
+    def test_missing_tool_input_is_allowed(self):
+        self.assertIsNone(run_hook("agent", {"session_id": "test-session"}))
+
+
+class AgentHookRegistration(unittest.TestCase):
+    def test_settings_registers_guard_for_agent_and_task(self):
+        path = os.path.join(os.path.dirname(HOOK), "..", "settings.json")
+        with open(path, encoding="utf-8") as f:
+            settings = json.load(f)
+        entries = [
+            e for e in settings["hooks"]["PreToolUse"] if e.get("matcher") == "Agent|Task"
+        ]
+        self.assertEqual(len(entries), 1)
+        commands = [h["command"] for h in entries[0]["hooks"]]
+        self.assertTrue(any("guard.py" in c and c.rstrip().endswith("agent") for c in commands))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -775,6 +775,7 @@ Rules that can be checked mechanically are **enforced**: a violation is refused,
 | Phase separation | `Bash` (`git commit`) | A commit whose staged paths mix test code and production code |
 | Hook bypass | `Bash` | `git commit` / `git merge` / `git pull` / `git push` with `--no-verify` (and `git commit -n`) — the git hook is not optional |
 | Merge method | `Bash` (`glab mr merge`) | `--rebase`, and **any invocation without `--squash`** |
+| Foreground subagents | `Agent` / `Task` | A call with `run_in_background: true` whose `subagent_type` is `implementer` / `reviewer` / `qa` / `project-planner` (#1269) |
 | Coverage | `Bash` (`glab mr create`) | Opening a Merge Request while changed-code C1/C2 coverage is under 90% |
 
 ### SILENCERS has a single source

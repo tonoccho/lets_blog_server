@@ -1847,6 +1847,28 @@ def cmd_bash(payload):
     allow()
 
 
+# --------------------------------------------------------------------------- agent
+
+# ワークフローのエージェント。バックグラウンドで起動すると、メイン側が「待つ」と宣言して
+# ターンを終え、`claude -p` が結果を返して無人キューの再開を1回消費する(#1269)。
+# 汎用エージェントは対話作業で正当にバックグラウンド起動されうり、フックからは
+# ワークフロー中かどうか判別できないため対象外(docs/WORKFLOW_RULE_RATIONALE.md)。
+WORKFLOW_AGENTS = {"implementer", "reviewer", "qa", "project-planner"}
+
+
+def cmd_agent(payload):
+    tool_input = payload.get("tool_input") or {}
+    agent = tool_input.get("subagent_type")
+    if agent in WORKFLOW_AGENTS and tool_input.get("run_in_background") is True:
+        emit_deny(
+            "ワークフローのエージェント `%s` をバックグラウンドで起動してはいけません"
+            "(CLAUDE.md → Enforcement)。メイン側が待機を宣言してターンを終えると、"
+            "結果を受け取る前に段階が終わります。`run_in_background` を付けず、"
+            "フォアグラウンドで呼び直してください。" % agent
+        )
+    allow()
+
+
 # --------------------------------------------------------------------- explain
 
 
@@ -1929,6 +1951,7 @@ def main():
         "prompt": cmd_prompt,
         "write": cmd_write,
         "bash": cmd_bash,
+        "agent": cmd_agent,
     }.get(sys.argv[1], lambda _: sys.exit(0))(payload)
 
 

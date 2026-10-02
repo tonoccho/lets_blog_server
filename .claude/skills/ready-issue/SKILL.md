@@ -77,6 +77,10 @@ If it is `In Progress`, `Review`, `QA`, or `Done`, do not change its status. Rep
 
 ## Step 3: Invoke project-planner
 
+**サブエージェントの起動(#1269)**: `Agent` ツールに `run_in_background` を付けず、フォアグラウンドで起動する。
+結果を受け取るまでターンを終えない。残りのワークフローを汎用エージェントなどのバックグラウンドのエージェントに渡さない。
+無人実行(`claude -p`)では、待機を宣言してターンを終えた時点で段階が終わり、再開が1回消費される。
+
 Ask the `project-planner` agent to independently evaluate whether the Issue is implementation-ready, per the Readiness Criteria below.
 
 Run the agent on the Sonnet model — pass `model: "sonnet"` to the Agent tool. The skill body itself runs on Haiku (selection is a property comparison), but judging an Issue's readiness means actually reading and assessing it, so the evaluation is delegated at Sonnet.

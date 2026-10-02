@@ -53,6 +53,10 @@ Do not review based only on the implementation summary.
 
 ## Step 3: Invoke reviewer
 
+**サブエージェントの起動(#1269)**: `Agent` ツールに `run_in_background` を付けず、フォアグラウンドで起動する。
+結果を受け取るまでターンを終えない。残りのワークフローを汎用エージェントなどのバックグラウンドのエージェントに渡さない。
+無人実行(`claude -p`)では、待機を宣言してターンを終えた時点で段階が終わり、再開が1回消費される。
+
 Ask the `reviewer` agent to independently evaluate:
 
 ### Requirements

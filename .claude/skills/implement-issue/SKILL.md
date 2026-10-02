@@ -56,6 +56,10 @@ invoke the `implementer` agent until the branch is checked out and confirmed.
 
 ## Step 5: Invoke implementer
 
+**サブエージェントの起動(#1269)**: `Agent` ツールに `run_in_background` を付けず、フォアグラウンドで起動する。
+結果を受け取るまでターンを終えない。残りのワークフローを汎用エージェントなどのバックグラウンドのエージェントに渡さない。
+無人実行(`claude -p`)では、待機を宣言してターンを終えた時点で段階が終わり、再開が1回消費される。
+
 Ask the `implementer` agent to read the Issue, inspect the codebase, analyze impact, plan
 (including which Acceptance Criterion becomes which Gherkin scenario), and implement it,
 working **test-first** per `CLAUDE.md` → **Test-First Implementation** (the single definition

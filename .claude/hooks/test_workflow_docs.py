@@ -869,6 +869,39 @@ class HookBypassRowListsEverySubcommand(unittest.TestCase):
             self.assertIn("git %s" % sub, row)
 
 
+class ForegroundSubagentWording(unittest.TestCase):
+    """#1269: エージェントに委任するスキルが、フォアグラウンド起動を明記している。"""
+
+    SKILLS = (
+        "implement-issue",
+        "review-issue",
+        "qa-issue",
+        "work-next",
+        "triage-backlog",
+        "ready-issue",
+    )
+
+    def test_every_delegating_skill_states_the_three_points(self):
+        for name in self.SKILLS:
+            text = read(".claude/skills/%s/SKILL.md" % name)
+            with self.subTest(skill=name):
+                self.assertIn("run_in_background", text)
+                self.assertIn("フォアグラウンド", text)
+                self.assertIn("結果を受け取るまでターンを終えない", text)
+                self.assertIn("バックグラウンドのエージェントに渡さない", text)
+
+
+class ForegroundSubagentRecords(unittest.TestCase):
+    def test_claude_md_table_has_agent_row(self):
+        rows = [l for l in read(".claude/CLAUDE.md").splitlines() if l.startswith("| ")]
+        self.assertTrue(any("run_in_background" in l and "Agent" in l for l in rows))
+
+    def test_rationale_records_evidence_and_exemption(self):
+        text = read("docs/WORKFLOW_RULE_RATIONALE.md")
+        for needle in ("#1202", "#1203", "#1078", "general-purpose"):
+            self.assertIn(needle, text)
+
+
 if __name__ == "__main__":
     unittest.main()
 
