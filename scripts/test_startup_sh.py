@@ -35,10 +35,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 STARTUP_SCRIPT = os.path.join(REPO_ROOT, "startup.sh")
 COMPOSE_LIB = os.path.join(REPO_ROOT, "scripts", "lib", "compose-project.sh")
+CHECK_ENV = os.path.join(REPO_ROOT, "scripts", "check-env.sh")
 
 FAKE_DOCKER = """#!/bin/bash
 echo "docker $* [DOCKER_CONFIG=${DOCKER_CONFIG:-}]" >> "$FAKE_LOG"
 case "$*" in
+  *" version") [ -n "${FAKE_COMPOSE_VERSION_FAIL:-}" ] && exit 1; exit 0 ;;
   *"config --images"*) printf 'lets/web:latest\\nlets/content:latest\\n'; exit 0 ;;
   "image inspect"*) [ -n "${FAKE_IMAGES_MISSING:-}" ] && exit 1; exit 0 ;;
   *" build"*) [ -n "${FAKE_BUILD_FAIL:-}" ] && exit 1; exit 0 ;;
@@ -73,6 +75,14 @@ class StartupShTest(unittest.TestCase):
         self._write(os.path.join(self.repo, "scripts", "wait-for-stack-healthy.sh"), FAKE_WAIT)
         shutil.copy(COMPOSE_LIB, os.path.join(self.repo, "scripts", "lib", "compose-project.sh"))
         open(os.path.join(self.repo, "docker-compose.yml"), "w").close()
+        # 事前確認(#1527)が通る前提一式: .env / .env.example / check-env.sh / 証明書
+        shutil.copy(CHECK_ENV, os.path.join(self.repo, "scripts", "check-env.sh"))
+        for name in (".env.example", ".env"):
+            with open(os.path.join(self.repo, name), "w") as f:
+                f.write("LBS_KEY_A=a\nLBS_KEY_B=b\n")
+        os.makedirs(os.path.join(self.repo, "certs"))
+        for name in ("localhost.crt", "localhost.key"):
+            open(os.path.join(self.repo, "certs", name), "w").close()
         if os.path.exists(STARTUP_SCRIPT):
             shutil.copy(STARTUP_SCRIPT, os.path.join(self.repo, "startup.sh"))
 
@@ -226,6 +236,59 @@ class StartupShTest(unittest.TestCase):
             env=self._env(), text=True, capture_output=True)
         self.assertIn("sourced", r.stdout)
         self.assertEqual(self.logged(), "")
+
+    # ---- 事前確認(#1527) ----
+    def assert_refused_before_docker(self, r, *needles):
+        self.assertNotEqual(r.returncode, 0)
+        combined = r.stdout + r.stderr
+        for n in needles:
+            self.assertIn(n, combined)
+        self.assertNotIn("up -d", self.logged())
+        self.assertNotIn(" build", self.logged())
+        self.assertNotIn("wait", self.logged())
+
+    def test_missing_env_points_to_setup_and_starts_nothing(self):
+        os.remove(os.path.join(self.repo, ".env"))
+        r = self.startup()
+        self.assert_refused_before_docker(r, "./setup.sh")
+
+    def test_missing_certificate_is_named_with_generate_hint(self):
+        os.remove(os.path.join(self.repo, "certs", "localhost.crt"))
+        r = self.startup()
+        self.assert_refused_before_docker(r, "certs/localhost.crt", "scripts/generate-certs.sh")
+
+    def test_missing_key_is_named_with_generate_hint(self):
+        os.remove(os.path.join(self.repo, "certs", "localhost.key"))
+        r = self.startup()
+        self.assert_refused_before_docker(r, "certs/localhost.key", "scripts/generate-certs.sh")
+
+    def test_env_missing_required_key_shows_check_env_output(self):
+        with open(os.path.join(self.repo, ".env"), "w") as f:
+            f.write("LBS_KEY_A=a\n")
+        r = self.startup()
+        self.assert_refused_before_docker(r, "LBS_KEY_B")
+
+    def test_docker_not_on_path_is_reported(self):
+        os.remove(os.path.join(self.bin, "docker"))
+        env_path = self._env()
+        # docker を含まない最小の PATH(bash 等の基本コマンドは残す)
+        safe = os.path.join(self.tmp, "safebin")
+        os.makedirs(safe)
+        for tool in ("bash", "dirname", "grep", "sort", "tr", "cat", "sed", "awk", "comm",
+                     "uniq", "mktemp", "rm", "env", "basename", "cut", "head", "tail"):
+            src = shutil.which(tool)
+            if src:
+                os.symlink(src, os.path.join(safe, tool))
+        env_path["PATH"] = safe
+        r = subprocess.run(["bash", os.path.join(self.repo, "startup.sh")], cwd=self.repo,
+                           env=env_path, text=True, capture_output=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("使えません", r.stdout + r.stderr)
+        self.assertEqual(self.logged(), "")
+
+    def test_docker_compose_unavailable_is_reported(self):
+        r = self.startup(extra_env={"FAKE_COMPOSE_VERSION_FAIL": "1"})
+        self.assert_refused_before_docker(r, "docker compose", "使えません")
 
 
 if __name__ == "__main__":

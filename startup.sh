@@ -13,7 +13,7 @@
 #
 # 対象はベースの docker-compose.yml のみ(オーバーレイは適用しない)。
 # コンテナ・ボリュームを破棄する操作は一切使わない。
-# 起動前の事前確認(.env / 証明書 / docker の有無)は対象外(#1527)。
+# 起動前に事前確認(#1527): .env / check-env.sh / 証明書 / docker。欠けていれば起動を試みず非0で終わる。
 #
 # `source startup.sh` で関数だけを読み込める(直接実行時のみ main を呼ぶ)。
 set -euo pipefail
@@ -83,6 +83,33 @@ images_missing() {
   return 1
 }
 
+# 前提が欠けていれば、docker compose を呼ぶ前に何が足りないかを示して終了する(#1527)。
+preflight() {
+  if [ ! -f "$REPO_ROOT/.env" ]; then
+    err ".env がありません。先に ./setup.sh を実行してください。"
+    exit 1
+  fi
+  if ! bash "$REPO_ROOT/scripts/check-env.sh"; then
+    err ".env が .env.example に追随していません。上記の不足キーを .env に追加してください。"
+    exit 1
+  fi
+  local cert
+  for cert in certs/localhost.crt certs/localhost.key; do
+    if [ ! -f "$REPO_ROOT/$cert" ]; then
+      err "$cert がありません。scripts/generate-certs.sh で作成してください。"
+      exit 1
+    fi
+  done
+  if ! command -v docker >/dev/null 2>&1; then
+    err "docker コマンドが見つからず、Docker が使えません。Docker をインストールしてください。"
+    exit 1
+  fi
+  if ! compose version >/dev/null 2>&1; then
+    err "docker compose が使えません。Docker Compose v2 をインストールしてください。"
+    exit 1
+  fi
+}
+
 build_stage() {
   if [ "$FORCE_BUILD" -eq 1 ]; then
     log "[1/3] ビルド: --build が指定されたため再ビルドします"
@@ -126,6 +153,7 @@ main() {
   parse_args "$@"
   setup_docker_config
   COMPOSE_PROJECT="$(resolve_compose_project "$REPO_ROOT")"
+  preflight
   build_stage
   start_stage
   wait_stage
