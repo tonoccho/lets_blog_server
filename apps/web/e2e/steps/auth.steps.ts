@@ -916,11 +916,17 @@ When('不正なセッションで保護ページを開く', async ({ page }) => 
       secure: true,
     },
   ]);
-  await page.goto('/');
+  // issue #1349: #1078(保護ページを開くと認証を求められる)と同型の競合。/ → /login
+  // (proxy.tsのサーバリダイレクト)→ signIn("keycloak")のクライアント側リダイレクトと
+  // 2段で進むため、goto を既定の waitUntil: 'load' で待たせると ERR_ABORTED になりうる。
+  // waitUntil: 'commit' にし、到達の待機は次の Then ステップの toHaveURL に任せる。
+  await page.goto('/', { waitUntil: 'commit' });
 });
 
 Then('認証を求められる', async ({ page }) => {
-  await page.waitForURL(new RegExp(`/(login|${REALM_BASE.slice(1)})`), { timeout: 15000 });
+  // timeout を15秒から30秒へ引き上げた理由は #1017 / #1078 と同じ。goto が / の読み込みを
+  // 待たなくなった分、到達待ちがこの待機に寄る。
+  await expect(page).toHaveURL(new RegExp(`/(login|${REALM_BASE.slice(1)})`), { timeout: 30000 });
 });
 
 // ----------------------------------------------------------------- アクセストークンの寿命(issue #1053)
@@ -1008,7 +1014,27 @@ When('プロジェクトの環境にサイトを紐付ける', async ({ page, re
   const projectId = ctx.tlcProjectId as number;
   const siteId = ctx.tlcSiteId as number;
 
-  await page.goto(`/projects/${projectId}`);
+  // issue #1349: #1017 / #1078 と同じ理由で goto を load 完了まで待たせない。
+  // requireAdminSession() が再ログインへ誘導する場合(下のコメント)は /projects/{id} →
+  // /login → Keycloak と2段のリダイレクトになり、goto の load 待機を中断しうる。
+  // waitUntil: 'commit' の後、どちらの行き先でも落ち着くまで待つ。最初にコミットされる URL は
+  // 常に /projects/{id} なので、URL の一致だけでは再ログインへの遷移を待てない。
+  // 「フォームが出た」か「ログイン側へ移った」のどちらかが確定するまでポーリングする。
+  // timeout 30秒は #1017 / #1078 と同じ根拠(goto が負担していた読み込み時間が
+  // この明示待機に寄るため)。
+  await page.goto(`/projects/${projectId}`, { waitUntil: 'commit' });
+  const environmentSelect = page.locator(`select[aria-label="${TLC_ENVIRONMENT_LABEL}"]`);
+  const reloginPattern = new RegExp(`/login|${REALM_BASE.slice(1)}`);
+  await expect
+    .poll(
+      async () => {
+        if (reloginPattern.test(page.url())) return true;
+        // 遷移の最中は count() が実行コンテキストの破棄で投げる。次のポーリングで再判定する。
+        return (await environmentSelect.count().catch(() => 0)) > 0;
+      },
+      { timeout: 30000 }
+    )
+    .toBe(true);
   await page.waitForLoadState('load');
 
   // requireAdminSession()(apps/web/src/lib/session.ts)が再ログインへ誘導した場合、
@@ -1019,7 +1045,7 @@ When('プロジェクトの環境にサイトを紐付ける', async ({ page, re
     return;
   }
 
-  await page.locator(`select[aria-label="${TLC_ENVIRONMENT_LABEL}"]`).selectOption(String(siteId));
+  await environmentSelect.selectOption(String(siteId));
   await tlcEnvironmentSlot(page).locator('button:has-text("紐付ける")').click();
 });
 
