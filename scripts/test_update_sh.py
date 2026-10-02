@@ -62,6 +62,11 @@ echo "バックアップを作成しました: $1"
 exit 0
 """
 
+# .env 追随チェック(#1254)用の縮小版 .env.example と、それに揃った .env。
+ENV_EXAMPLE = "A_KEY=1\nDB_PASSWORD=changeme_db\nAPI_KEY=\n"
+ENV_FILE = "A_KEY=1\nDB_PASSWORD=my-own-secret\nAPI_KEY=\n"
+APP_KEY_PLACEHOLDER = "UkVQTEFDRV9XSVRIX09QRU5TU0xfUkFORF9CNjRfMzI="
+
 JAVA_SERVICES = ["gateway", "identity", "project", "content", "media", "ai",
                  "publishing", "analytics", "platform", "log-writer"]
 ALL_BUILD_SERVICES = ["web"] + JAVA_SERVICES + ["wordpress"]
@@ -103,6 +108,7 @@ class UpdateShTest(unittest.TestCase):
         self.other = os.path.join(self.tmp, "other")
         self.bin = os.path.join(self.tmp, "bin")
         self.home = os.path.join(self.tmp, "home")
+        self.env_path = os.path.join(self.repo, ".env")
         os.makedirs(self.bin)
         os.makedirs(self.home)
         self.log = os.path.join(self.tmp, "fake.log")
@@ -114,6 +120,12 @@ class UpdateShTest(unittest.TestCase):
         self._write(os.path.join(self.repo, "scripts", "wait-for-stack-healthy.sh"), FAKE_WAIT)
         self._write(os.path.join(self.repo, "scripts", "db-backup.sh"), FAKE_BACKUP)
         self._write(os.path.join(self.bin, "docker"), FAKE_DOCKER)
+        shutil.copy(os.path.join(REPO_ROOT, "scripts", "check-env.sh"),
+                    os.path.join(self.repo, "scripts", "check-env.sh"))
+        shutil.copytree(os.path.join(REPO_ROOT, "scripts", "lib"),
+                        os.path.join(self.repo, "scripts", "lib"))
+        with open(os.path.join(self.repo, ".env.example"), "w") as f:
+            f.write(ENV_EXAMPLE)
         shutil.copy(UPDATE_SCRIPT, os.path.join(self.repo, "update.sh")) \
             if os.path.exists(UPDATE_SCRIPT) else None
         with open(os.path.join(self.repo, "a.txt"), "w") as f:
@@ -127,6 +139,9 @@ class UpdateShTest(unittest.TestCase):
         git(self.repo, "branch", "main")
         git(self.repo, "push", "origin", "main")
         git(self.repo, "branch", "--set-upstream-to=origin/develop", "develop")
+        # .env は git 管理外(利用者の手元にしか無い)
+        with open(self.env_path, "w") as f:
+            f.write(ENV_FILE)
         run(["git", "clone", self.origin, self.other], self.tmp)
 
     def _write(self, path, content):
@@ -462,6 +477,138 @@ class UpdateShTest(unittest.TestCase):
         self.update(extra_env={"DOCKER_CONFIG": "/custom"})
         self.assertIn("DOCKER_CONFIG=/custom]", self.logged())
 
+    # ---- .env 追随チェック(#1254) ----
+    def env_text(self):
+        with open(self.env_path) as f:
+            return f.read()
+
+    def push_env_example(self, extra):
+        self.push_files({".env.example": ENV_EXAMPLE + extra})
+
+    def test_missing_keys_listed_and_exit_nonzero_without_startup(self):
+        self.push_env_example("NEW_FLAG=1\nNEW_OTHER=x\n")
+        r = self.update()
+        self.assertNotEqual(r.returncode, 0)
+        out = r.stdout + r.stderr
+        self.assertIn("NEW_FLAG", out)
+        self.assertIn("NEW_OTHER", out)
+        log = self.logged()
+        self.assertNotIn("docker compose up", log)
+        self.assertNotIn("wait --all", log)
+
+    def test_missing_keys_never_rewrite_existing_env(self):
+        self.push_env_example("NEW_FLAG=1\nNEW_SECRET=changeme_x\n")
+        r = self.update()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.env_text(), ENV_FILE)
+
+    def test_missing_secret_not_appended_without_flag(self):
+        self.push_env_example("NEW_SECRET=changeme_x\n")
+        r = self.update()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("NEW_SECRET", self.env_text())
+        self.assertIn("--fill-secrets", r.stdout + r.stderr)
+
+    def test_nothing_missing_adds_no_output(self):
+        self.push_upstream()
+        r = self.update("--skip-backup")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for marker in ("✓", "✗", "△", "check-env", ".env", "--fill-secrets"):
+            self.assertNotIn(marker, r.stdout, marker)
+        for marker in ("✗", "不足", "check-env"):
+            self.assertNotIn(marker, r.stderr, marker)
+        self.assertEqual(self.env_text(), ENV_FILE)
+
+    def test_fill_secrets_appends_only_generatable_secrets(self):
+        self.push_env_example(
+            "NEW_SECRET=changeme_x\nAPP_ENCRYPTION_KEY=%s\n" % APP_KEY_PLACEHOLDER)
+        r = self.update("--fill-secrets")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        env = self.env_text()
+        self.assertTrue(env.startswith(ENV_FILE), "既存の行が書き換わった")
+        added = dict(l.split("=", 1) for l in env[len(ENV_FILE):].splitlines())
+        self.assertEqual(sorted(added), ["APP_ENCRYPTION_KEY", "NEW_SECRET"])
+        self.assertNotIn("changeme_", added["NEW_SECRET"])
+        self.assertNotEqual(added["NEW_SECRET"], "")
+        self.assertNotEqual(added["APP_ENCRYPTION_KEY"], APP_KEY_PLACEHOLDER)
+        self.assertIn("docker compose up", self.logged())
+
+    def test_fill_secrets_does_not_print_generated_values(self):
+        self.push_env_example("NEW_SECRET=changeme_x\n")
+        r = self.update("--fill-secrets")
+        added = self.env_text()[len(ENV_FILE):].strip().split("=", 1)[1]
+        self.assertIn("NEW_SECRET", r.stdout)
+        self.assertNotIn(added, r.stdout + r.stderr)
+
+    def test_fill_secrets_does_not_append_external_values(self):
+        self.push_env_example("NEW_SECRET=changeme_x\nEXT_API_KEY=\nNEW_PLAIN=default\n")
+        r = self.update("--fill-secrets")
+        self.assertNotEqual(r.returncode, 0)
+        env = self.env_text()
+        self.assertIn("NEW_SECRET=", env)
+        self.assertNotIn("EXT_API_KEY", env)
+        self.assertNotIn("NEW_PLAIN", env)
+        out = r.stdout + r.stderr
+        self.assertIn("EXT_API_KEY", out)
+        self.assertNotIn("docker compose up", self.logged())
+
+    def test_fill_secrets_handles_env_without_trailing_newline(self):
+        with open(self.env_path, "w") as f:
+            f.write(ENV_FILE.rstrip("\n"))
+        self.push_env_example("NEW_SECRET=changeme_x\n")
+        r = self.update("--fill-secrets")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(self.env_text().startswith(ENV_FILE))
+
+    def test_fill_secrets_with_nothing_missing_changes_nothing(self):
+        r = self.update("--fill-secrets")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.env_text(), ENV_FILE)
+
+    def test_missing_env_file_fails_without_startup(self):
+        os.remove(self.env_path)
+        r = self.update()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("docker compose up", self.logged())
+
+    def test_help_mentions_fill_secrets(self):
+        r = self.update("--help")
+        self.assertIn("--fill-secrets", r.stdout)
+
+    # ---- 自動生成対象の分類は setup.sh と共有する(#960 / #1254) ----
+    def _lib(self, snippet):
+        lib = os.path.join(REPO_ROOT, "scripts", "lib", "env-secrets.sh")
+        return subprocess.run(["bash", "-c", 'source "%s"; %s' % (lib, snippet)],
+                              text=True, capture_output=True)
+
+    def test_lib_classifies_example_values(self):
+        cases = [
+            ("NEW_SECRET", "changeme_x", 0),
+            ("API_KEY", "", 1),
+            ("PLAIN", "default", 1),
+            ("APP_ENCRYPTION_KEY", APP_KEY_PLACEHOLDER, 0),
+            ("APP_ENCRYPTION_KEY", "other", 1),
+            ("KEYCLOAK_WEB_CLIENT_SECRET", "dev-only-web-change-me", 0),
+            ("KEYCLOAK_SERVICES_CLIENT_SECRET", "dev-only-s-change-me", 0),
+            ("OTHER_SECRET", "dev-only-x-change-me", 1),
+        ]
+        for key, value, want in cases:
+            r = self._lib('is_auto_generatable_secret "%s" "%s"' % (key, value))
+            self.assertEqual(r.returncode, want, (key, value))
+
+    def test_lib_generates_distinct_nonempty_values(self):
+        r = self._lib('generate_value_for_key NEXTAUTH_SECRET; generate_value_for_key NEXTAUTH_SECRET')
+        a, b = r.stdout.split()
+        self.assertNotEqual(a, b)
+        self.assertEqual(len(a), 64)
+
+    def test_generation_logic_defined_only_in_shared_lib(self):
+        for rel in ("setup.sh", "update.sh"):
+            with open(os.path.join(REPO_ROOT, rel)) as f:
+                text = f.read()
+            self.assertNotIn("generate_value_for_key()", text, rel)
+            self.assertIn("scripts/lib/env-secrets.sh", text, rel)
+
     # ---- ドキュメント ----
     def _doc(self, rel):
         with open(os.path.join(REPO_ROOT, rel)) as f:
@@ -479,6 +626,11 @@ class UpdateShTest(unittest.TestCase):
             self.assertIn("./update.sh", sec, rel)
             self.assertIn("--main", sec, rel)
             self.assertIn("develop", sec, rel)
+
+    def test_docs_describe_fill_secrets(self):
+        sec = self._update_section("docs/setup.md")
+        self.assertIn("--fill-secrets", sec)
+        self.assertIn("check-env.sh", sec)
 
 
 if __name__ == "__main__":

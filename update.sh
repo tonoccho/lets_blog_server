@@ -18,22 +18,31 @@
 #      docker compose up -d --build <対象> で再ビルド・反映する。
 #      判定が難しい変更(docker-compose.yml / build.gradle / settings.gradle / gradlew /
 #      packages/ / gradle/ / config/ / services/*/build.gradle)は全サービス再ビルドに倒す
+#   5.5 (取り込み直後・再ビルドの前)scripts/check-env.sh で .env が .env.example に追随して
+#      いるか確認する。不足キーがあれば一覧を表示し、起動を試みず非0で終了する。
+#      既存の .env の値は書き換えない。不足が無ければ何も表示しない(#1254)。
+#      --fill-secrets を付けたときだけ、不足キーのうち自動生成してよい秘密値
+#      (scripts/lib/env-secrets.sh。setup.sh と同じ分類)を .env の末尾へ追記する。
+#      APIキー等の外部の値は追記せず、不足として報告する
 #   6. scripts/wait-for-stack-healthy.sh --all で全サービスが healthy になるまで待つ
 #      (setup.sh と同じ判定を再利用。失敗・タイムアウト時は非0で終了し、
 #       更新前バックアップがあれば scripts/db-restore.sh での復旧手順を案内する)
 #
 # データボリュームには触れない(コンテナ・ボリュームを破棄する操作は一切使わない)。
-# .env 追随チェックは対象外(#1254)。
 #
 # `source update.sh` で関数だけを読み込める(直接実行時のみ main を呼ぶ)。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
+# 自動生成してよい秘密値の分類は setup.sh と共有する(#1254)
+# shellcheck source=scripts/lib/env-secrets.sh
+source "$REPO_ROOT/scripts/lib/env-secrets.sh"
 
 TARGET_BRANCH="develop"
 SKIP_BACKUP=0
 REBUILD_ALL=0
+FILL_SECRETS=0
 OLD_HEAD=""
 NEW_HEAD=""
 REBUILD_MODE="all"     # all = 全サービス / selected = REBUILD_TARGETS のみ
@@ -45,12 +54,14 @@ err() { echo "エラー: $*" >&2; }
 
 usage() {
   cat <<'USAGE'
-使い方: ./update.sh [--main | --branch <name>] [--skip-backup] [--rebuild-all]
+使い方: ./update.sh [--main | --branch <name>] [--skip-backup] [--rebuild-all] [--fill-secrets]
 
   (指定なし)        develop の最新を取り込んで再ビルド・再起動する(既定)
   --main            main を更新元にする
   --skip-backup     更新前のDBバックアップを省略する
   --rebuild-all     差分に関係なく全サービスを再ビルドする
+  --fill-secrets    .env に不足している秘密値のうち自動生成してよいものだけを追記する
+                    (既定は報告のみ。既存の値は書き換えない。APIキー等の外部の値は追記しない)
   --branch <name>   任意のブランチを更新元にする
   -h, --help        このヘルプを表示する
 USAGE
@@ -77,6 +88,10 @@ parse_args() {
         ;;
       --rebuild-all)
         REBUILD_ALL=1
+        shift
+        ;;
+      --fill-secrets)
+        FILL_SECRETS=1
         shift
         ;;
       -h|--help)
@@ -150,6 +165,52 @@ pull_latest() {
     exit 1
   fi
   NEW_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+}
+
+# ---- .env 追随チェック(#1254) ----
+# .env.example にあって .env に無いキーのうち、自動生成してよい秘密値だけを .env の末尾へ追記する。
+# 既存の行には触れない。生成した値は表示せず、キー名だけを知らせる。
+fill_missing_secrets() {
+  local example="$REPO_ROOT/.env.example" target="$REPO_ROOT/.env"
+  [ -f "$example" ] && [ -f "$target" ] || return 0
+  local filled=() line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    grep -qE "^${key}=" "$target" && continue
+    is_auto_generatable_secret "$key" "$value" || continue
+    # 末尾に改行が無い .env でも既存の最終行を壊さない
+    if [ -s "$target" ] && [ -n "$(tail -c1 "$target")" ]; then
+      printf '\n' >>"$target"
+    fi
+    printf '%s=%s\n' "$key" "$(generate_value_for_key "$key")" >>"$target"
+    filled+=("$key")
+  done <"$example"
+  if [ "${#filled[@]}" -gt 0 ]; then
+    log ".env に自動生成した秘密値を追記しました: ${filled[*]}"
+  fi
+}
+
+# .env が .env.example に追随しているか確認する。不足があれば一覧して中断する(起動しない)。
+# 不足が無いときは何も表示しない。
+check_env_up_to_date() {
+  if [ "$FILL_SECRETS" = "1" ]; then
+    fill_missing_secrets
+  fi
+  local out
+  # LC_ALL=C: check-env.sh は sort と comm を併用する。ロケールによっては両者の照合順が食い違い
+  # "comm: file 1 is not in sorted order" で誤検知する(A_KEY と API_KEY など)ため、C に固定する。
+  if out="$(LC_ALL=C bash "$REPO_ROOT/scripts/check-env.sh" 2>&1)"; then
+    return 0
+  fi
+  echo "$out" >&2
+  err ".env が .env.example に追随していないため、再起動せずに中断します(.env は書き換えていません)。"
+  err "  不足キーを .env に追記して ./update.sh を再実行してください(取り込みは済んでいるので再実行は安全です)。"
+  if [ "$FILL_SECRETS" != "1" ]; then
+    err "  自動生成できる秘密値だけなら --fill-secrets で追記できます(APIキー等の外部の値は自分で設定してください)。"
+  fi
+  exit 1
 }
 
 # ---- 再ビルド対象の判定(#1253) ----
@@ -264,6 +325,7 @@ main() {
   check_clean_and_branch
   backup_before_update
   pull_latest
+  check_env_up_to_date
   rebuild_and_wait
   log "アップデートが完了しました。"
 }

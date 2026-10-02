@@ -208,19 +208,9 @@ install_prerequisites() {
 # それを受け取るので、.env と realm の値は食い違わない。
 # 既に .env がある環境ではこの関数自体が走らない(ensure_env_file)。realm に import 済みの値と
 # 食い違うと invalid_client になるため、既存値は決して書き換えない。
-APP_ENCRYPTION_KEY_PLACEHOLDER="UkVQTEFDRV9XSVRIX09QRU5TU0xfUkFORF9CNjRfMzI="
-
-generate_value_for_key() {
-  local key="$1"
-  case "$key" in
-    APP_ENCRYPTION_KEY) openssl rand -base64 32 ;;
-    NEXTAUTH_SECRET) openssl rand -hex 32 ;;
-    PENPOT_SECRET_KEY) openssl rand -base64 64 | tr -d '\n' ;;
-    WP_PROVISION_TOKEN) openssl rand -hex 32 ;;
-    KEYCLOAK_SERVICES_CLIENT_SECRET|KEYCLOAK_WEB_CLIENT_SECRET) openssl rand -hex 32 ;;
-    *) openssl rand -base64 24 ;;
-  esac
-}
+# 分類と値の生成は scripts/lib/env-secrets.sh に集約(update.sh --fill-secrets と共有, #1254)。
+# shellcheck source=scripts/lib/env-secrets.sh
+source "$REPO_ROOT/scripts/lib/env-secrets.sh"
 
 # .env.example から .env を生成する。コメント行・空行・並びはそのまま保つ。
 generate_env_file() {
@@ -234,11 +224,7 @@ generate_env_file() {
       local key="${BASH_REMATCH[1]}"
       local value="${BASH_REMATCH[2]}"
       local new_value="$value"
-      if [[ "$value" == changeme_* ]]; then
-        new_value="$(generate_value_for_key "$key")"
-      elif [ "$key" = "APP_ENCRYPTION_KEY" ] && [ "$value" = "$APP_ENCRYPTION_KEY_PLACEHOLDER" ]; then
-        new_value="$(generate_value_for_key "$key")"
-      elif [[ "$key" =~ ^KEYCLOAK_(SERVICES|WEB)_CLIENT_SECRET$ ]] && [[ "$value" == dev-only-* ]]; then
+      if is_auto_generatable_secret "$key" "$value"; then
         new_value="$(generate_value_for_key "$key")"
       fi
       printf '%s=%s\n' "$key" "$new_value" >>"$tmp"
