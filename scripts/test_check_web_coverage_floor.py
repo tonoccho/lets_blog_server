@@ -179,6 +179,43 @@ class WebCoverageFloor(TempRepo):
         self.assertIsNone(self.npm_invocations(), "apps/web を触っていないのに npm が呼ばれた")
 
 
+class WebCoverageFloorTestPhase(TempRepo):
+    """#1377: RED のテスト位相のコミットは「テストが落ちている」ことを理由に拒否されない。
+
+    床(coverageThreshold)割れの検査は残す。落ちたテストと床割れは出力で区別する。
+    """
+
+    TEST_FAILURE = "Tests:       1 failed, 626 passed, 627 total"
+    FLOOR_FAILURE = "Jest: Coverage for branches (30%) does not meet global threshold (40%)"
+
+    def stage_test(self):
+        git(["add", self.write("apps/web/src/foo.test.ts", "test('x', () => {})\n")], cwd=self.tmp)
+
+    def test_test_only_commit_with_failing_tests_is_accepted(self):
+        self.stage_test()
+        r = self.commit("test: red", npm_exit_code=1, npm_output=self.TEST_FAILURE)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_production_commit_with_failing_tests_is_still_rejected(self):
+        git(["add", self.write("apps/web/src/foo.ts", "export const foo = 1\n")], cwd=self.tmp)
+        r = self.commit("feat: green", npm_exit_code=1, npm_output=self.TEST_FAILURE)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_test_only_commit_breaking_the_floor_is_still_rejected(self):
+        self.stage_test()
+        r = self.commit(
+            "test: red", npm_exit_code=1, npm_output=self.TEST_FAILURE + "\n" + self.FLOOR_FAILURE
+        )
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("下回っています", r.stdout + r.stderr)
+
+    def test_production_commit_breaking_the_floor_is_still_rejected(self):
+        git(["add", self.write("apps/web/src/foo.ts", "export const foo = 1\n")], cwd=self.tmp)
+        r = self.commit("feat: green", npm_exit_code=1, npm_output=self.FLOOR_FAILURE)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("下回っています", r.stdout + r.stderr)
+
+
 class WebCoverageFloorEnvironmentNotSetUp(TempRepo):
     """#1320: node_modules 未導入の worktree での失敗を「床割れ」と誤診断しない。
 

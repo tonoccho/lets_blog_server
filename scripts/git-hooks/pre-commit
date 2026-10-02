@@ -265,6 +265,10 @@ def committing_worktree_root():
     return out or REPO_ROOT
 
 
+def coverage_floor_broken(output):
+    return "does not meet" in output and "threshold" in output
+
+
 def check_web_coverage_floor(files):
     """apps/web を触るコミットに限り `npm run test:coverage` を走らせ、床割れを検知する(#1040)。
 
@@ -300,6 +304,12 @@ def check_web_coverage_floor(files):
                 "apps/web で `npm install`(または `npm ci`)を実行してから、"
                 "再度コミットしてください。" % output[-4000:],
             )
+        # テスト位相のコミット(ステージされたパスがすべてテスト)では、RED のテストが落ちて
+        # いるのは意図どおりなので、それだけを理由に拒否しない(#1377)。床割れは出力に
+        # 現れる jest の閾値メッセージで区別し、これは位相を問わず拒否する。
+        _, prod = classify(files)
+        if not prod and not coverage_floor_broken(output):
+            return
         fail(
             "apps/web のリポジトリ全体カバレッジ床(jest.config.ts の coverageThreshold)を"
             "下回っています",
