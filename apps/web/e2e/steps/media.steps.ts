@@ -3,6 +3,8 @@ import { After, Given, Then, When } from './fixtures';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
+  E2E_TEST_EMAIL,
+  E2E_TEST_PASSWORD,
   expect,
   fetchAccessToken,
   loginViaKeycloak,
@@ -62,6 +64,25 @@ async function createGeneratedImage(
     `生成画像の保存に失敗しました (status=${response.status()}): ${await response.text()}`
   ).toBe(true);
   return ((await response.json()) as CreatedImage).id;
+}
+
+/** ギャラリーのシナリオが作った画像の「プロンプト → id」。一括削除(issue #1492)で複数枚を扱う。 */
+function galleryImageIds(ctx: Record<string, unknown>): Record<string, number> {
+  ctx.mediaGalleryImageIds ??= {};
+  return ctx.mediaGalleryImageIds as Record<string, number>;
+}
+
+function selectedImageIds(ctx: Record<string, unknown>): number[] {
+  ctx.mediaGallerySelectedIds ??= [];
+  return ctx.mediaGallerySelectedIds as number[];
+}
+
+async function generatedImageFileStatus(
+  request: APIRequestContext,
+  headers: Record<string, string>,
+  id: number
+): Promise<number> {
+  return (await request.get(`/api/generated-images/${id}/file`, { headers })).status();
 }
 
 /** 詳細ダイアログの、指定した項目名に対応する値。 */
@@ -928,6 +949,8 @@ Given(
   async ({ ctx, request }, prompt: string) => {
     ctx.mediaImageId = await createGeneratedImage(request, { prompt, provider: 'COMFYUI', seed: 936_000 });
     ctx.mediaImagePrompt = prompt;
+    // 一括削除(issue #1492)は複数枚を扱う。プロンプトから id を引けるようにし、After が全部片付ける。
+    galleryImageIds(ctx)[prompt] = ctx.mediaImageId as number;
   }
 );
 
@@ -1096,6 +1119,199 @@ Then('その画像のファイルはもう取得できない', async ({ ctx, req
   ).toBe(404);
   // 削除済みなので @media の After が重ねて消さないようにする。
   ctx.mediaImageId = undefined;
+});
+
+// ---- ギャラリーの複数選択と一括削除(issue #1492) ----
+
+const BULK_DELETE_BUTTON = /^選択した\d+件を削除$/;
+
+When(
+  /^ギャラリーでプロンプト「([^」]+)」の画像を選択する$/,
+  async ({ ctx, page }, prompt: string) => {
+    const checkbox = page.getByLabel(`${prompt}を選択`);
+    await expect(checkbox).toBeVisible({ timeout: 30_000 });
+    // ハイドレーション完了前のクリックはネイティブにチェックされるだけで、ハイドレーション後に
+    // 未チェックへ戻される(issue #1284と同種)。チェック状態ではなく、Reactの状態を反映する
+    // 「N件選択中」が累計の期待値になるまで再試行する。
+    const expectedCount = selectedImageIds(ctx).length + 1;
+    await expect(async () => {
+      if (!(await checkbox.isChecked())) {
+        await checkbox.click();
+      }
+      await expect(page.getByText(`${expectedCount}件選択中`, { exact: true })).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    selectedImageIds(ctx).push(galleryImageIds(ctx)[prompt]);
+  }
+);
+
+Then(/^ギャラリーの選択件数に「([^」]+)」が表示される$/, async ({ page }, text: string) => {
+  await expect(page.getByText(text, { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
+When('ギャラリーで全選択する', async ({ page }) => {
+  await page.getByRole('button', { name: '全選択', exact: true }).click();
+});
+
+When('ギャラリーで全選択を解除する', async ({ page }) => {
+  await page.getByRole('button', { name: '全選択解除', exact: true }).click();
+});
+
+Then('ギャラリーの選択件数は表示中の画像の枚数と一致する', async ({ page }) => {
+  const displayed = await page.locator('input[type="checkbox"][aria-label$="を選択"]').count();
+  expect(displayed, '表示中の画像が1枚も無い').toBeGreaterThan(0);
+  await expect(page.getByText(`${displayed}件選択中`, { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
+Then('選択した件数の削除ボタンは押せない', async ({ page }) => {
+  await expect(page.getByRole('button', { name: BULK_DELETE_BUTTON })).toBeDisabled();
+});
+
+When('選択した画像の一括削除を押して確認をキャンセルする', async ({ ctx, page }) => {
+  page.once('dialog', (dialog) => {
+    ctx.mediaDialogMessage = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.getByRole('button', { name: BULK_DELETE_BUTTON }).click();
+  await expect.poll(() => ctx.mediaDialogMessage, { timeout: 15_000 }).toBeTruthy();
+});
+
+When('選択した画像の一括削除を押して確認を承諾する', async ({ page }) => {
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: BULK_DELETE_BUTTON }).click();
+});
+
+Then(/^確認ダイアログに「([^」]+)」と表示されていた$/, async ({ ctx }, text: string) => {
+  expect(ctx.mediaDialogMessage as string).toContain(text);
+});
+
+Then(/^ギャラリーに「([^」]+)」と表示される$/, async ({ page }, text: string) => {
+  await expect(page.getByRole('status').filter({ hasText: text })).toBeVisible({ timeout: 30_000 });
+});
+
+Then('ギャラリーで選択した画像のファイルは取得できる', async ({ ctx, request }) => {
+  const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+  for (const id of selectedImageIds(ctx)) {
+    expect(await generatedImageFileStatus(request, headers, id), `画像 ${id} のファイルが取得できない`).toBe(200);
+  }
+});
+
+Then('一括削除した画像のファイルはもう取得できない', async ({ ctx, request }) => {
+  const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+  const ids = selectedImageIds(ctx);
+  expect(ids.length, '選択した画像が記録されていない').toBeGreaterThan(0);
+  for (const id of ids) {
+    expect(
+      await generatedImageFileStatus(request, headers, id),
+      `一括削除したはずの画像 ${id} のファイルが取得できてしまいました`
+    ).toBe(404);
+  }
+});
+
+Then(
+  /^プロンプト「([^」]+)」の画像のファイルは取得できる$/,
+  async ({ ctx, request }, prompt: string) => {
+    const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+    expect(await generatedImageFileStatus(request, headers, galleryImageIds(ctx)[prompt])).toBe(200);
+  }
+);
+
+/**
+ * 権限の検証は画面経由ではなく API 経由で行う。ギャラリー画面は projectId 無しの一覧取得をするため、
+ * 実質 admin 専用で、一般利用者は画面からこの経路に到達できない。
+ */
+async function createBulkProject(request: APIRequestContext, label: string): Promise<number> {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const created = await request.post('/api/projects', {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: { name: `E2E 1492 ${label} ${suffix}`, slug: `e2e-1492-${label}-${suffix}` },
+  });
+  expect(
+    created.ok(),
+    `プロジェクトの作成に失敗しました (status=${created.status()}): ${await created.text()}`
+  ).toBe(true);
+  return ((await created.json()) as { id: number }).id;
+}
+
+Given(
+  '一般利用者が片方だけのメンバーである2つのプロジェクトにそれぞれ生成画像がある',
+  async ({ ctx, request }) => {
+    const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+    const ownProjectId = await createBulkProject(request, 'own');
+    const otherProjectId = await createBulkProject(request, 'other');
+    ctx.mediaBulkProjectIds = [ownProjectId, otherProjectId];
+
+    const me = await request.get('/api/identity/me', {
+      headers: { Authorization: `Bearer ${await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD)}` },
+    });
+    expect(me.ok(), `一般利用者の情報を取得できませんでした (status=${me.status()})`).toBe(true);
+    const memberUserId = ((await me.json()) as { id: number }).id;
+    const added = await request.post(`/api/projects/${ownProjectId}/users`, {
+      headers,
+      data: { userId: memberUserId, wpRole: 'editor' },
+    });
+    expect(
+      added.ok(),
+      `プロジェクトメンバーの追加に失敗しました (status=${added.status()}): ${await added.text()}`
+    ).toBe(true);
+    ctx.mediaBulkMember = { projectId: ownProjectId, userId: memberUserId };
+
+    const ownImageId = await createGeneratedImage(request, {
+      prompt: 'E2E gallery bulk own project',
+      provider: 'COMFYUI',
+      projectId: ownProjectId,
+    });
+    const otherImageId = await createGeneratedImage(request, {
+      prompt: 'E2E gallery bulk other project',
+      provider: 'COMFYUI',
+      projectId: otherProjectId,
+    });
+    ctx.mediaBulkImageIds = [ownImageId, otherImageId];
+  }
+);
+
+When('一般利用者が両方の生成画像を指定して一括削除を要求する', async ({ ctx, request }) => {
+  const token = await fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
+  const response = await request.post('/api/generated-images/bulk-delete', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { imageIds: ctx.mediaBulkImageIds },
+  });
+  ctx.mediaBulkStatus = response.status();
+  ctx.mediaBulkBody = await response.text();
+});
+
+Then('一括削除は一般利用者への403で拒否される', async ({ ctx }) => {
+  expect(
+    ctx.mediaBulkStatus,
+    `権限の無い画像を含む一括削除が403で拒否されていない: ${ctx.mediaBulkBody as string}`
+  ).toBe(403);
+});
+
+Then('要求に含まれた生成画像はどちらも削除されていない', async ({ ctx, request }) => {
+  const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+  for (const id of ctx.mediaBulkImageIds as number[]) {
+    expect(
+      await generatedImageFileStatus(request, headers, id),
+      `403で拒否されたはずなのに画像 ${id} が削除されている(権限のある画像も含めて1枚も消えてはならない)`
+    ).toBe(200);
+  }
+});
+
+After({ tags: '@media' }, async ({ ctx, request }) => {
+  const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+  const imageIds = [
+    ...Object.values(galleryImageIds(ctx)),
+    ...((ctx.mediaBulkImageIds as number[] | undefined) ?? []),
+  ];
+  for (const id of imageIds) {
+    await request.delete(`/api/generated-images/${id}`, { headers });
+  }
+  const member = ctx.mediaBulkMember as { projectId: number; userId: number } | undefined;
+  if (member) {
+    await request.delete(`/api/projects/${member.projectId}/users/${member.userId}`, { headers });
+  }
+  for (const projectId of (ctx.mediaBulkProjectIds as number[] | undefined) ?? []) {
+    await request.delete(`/api/projects/${projectId}`, { headers });
+  }
 });
 
 // ---- 画像設定(image-settings.feature) ----

@@ -478,6 +478,25 @@ export function deleteGeneratedImage(id: number): Promise<void> {
   return apiFetch<void>(`/api/generated-images/${id}`, { method: 'DELETE' });
 }
 
+/** 生成画像の一括削除の結果(issue #1492)。`failures` は画像id(文字列)から失敗理由。 */
+export interface GeneratedImageBulkDeleteResult {
+  deletedCount: number;
+  failedCount: number;
+  deletedIds: number[];
+  failures: Record<string, string>;
+}
+
+/**
+ * 生成画像をまとめて削除する(issue #1492)。権限の無い画像が1枚でも含まれれば403で、1枚も削除されない。
+ */
+export function bulkDeleteGeneratedImages(imageIds: number[]): Promise<GeneratedImageBulkDeleteResult> {
+  return apiFetch<GeneratedImageBulkDeleteResult>('/api/generated-images/bulk-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageIds }),
+  });
+}
+
 /** 自動生成されたタグを手動で編集・追加する(issue #281)。 */
 export function updateGeneratedImageTags(id: number, tags: string[]): Promise<GeneratedImageDetail> {
   return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/tags`, {

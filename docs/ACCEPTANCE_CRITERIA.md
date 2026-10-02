@@ -260,6 +260,7 @@ API: media `ImageGenerationController`, `GeneratedImageController`, `MediaContro
 | AC-IMG-011 | 画像生成の既定設定 | 毎回同じ設定を入れ直さなくてよい | プロンプト既定値・サイズ既定値・リサイズ既定値の保存内容が生成フォームに反映される(#913 の再発検知) | `features/media/image-settings.feature` › 画像生成のデフォルトプロンプトを保存すると、次の生成の既定値になる / デフォルトサイズと記事内画像のリサイズ幅は、保存後にページを開き直しても表示される | 検証済(#1285で実測、2026-09-15。2件目のシナリオでタブ切替がハイドレーション完了前クリックに弱い欠陥(#1283と同種)と、数値キャプチャを文字列APIへそのまま渡していた欠陥を修正) |
 | AC-IMG-012 | 画像コンテンツフィルタ設定 | 不適切な生成を抑止できる | `PUT /image-content-filter-settings` の設定が生成結果に反映される | `features/media/image-settings.feature` › コンテンツフィルタに抵触するプロンプトは、生成を始めずに拒否される | 検証済(#1285で実測、2026-09-15) |
 | AC-IMG-013 | メディアのガベージコレクション | 使われていない画像で容量を食わない | `GET /media-garbage-collection/scan` が未使用を列挙し、`POST /delete` で削除される | `features/media/media-garbage-collection.feature` › どの記事からも参照されていないメディアをスキャンで検出できる / ガベージコレクションを実行すると、選んだ未参照の画像だけが削除される / 記事から参照されている画像は、ガベージコレクションを実行しても残っている | 検証済(`@destructive`) |
+| AC-IMG-014 | ギャラリーの複数選択と一括削除 (`POST /api/generated-images/bulk-delete`) | 同一プロンプトの試行を大量に生成した後片付けを1回の操作で済ませられる | チェックで複数選択し件数を確認して一括削除でき、選んだ画像だけが消える(ファイル実体も取得不能)。キャンセルすれば1枚も消えず、権限の無い画像を含む要求は403で拒否され1枚も削除されない | `features/media/image-gallery.feature` › 複数の画像にチェックを入れると選択件数が表示され、全選択と全選択解除で表示中の全画像を切り替えられる / 一括削除の確認に選択件数が表示され、キャンセルすると画像は1枚も削除されない / 一括削除を承諾すると選択した画像だけが消え、選択しなかった画像は残りファイル実体も取得できなくなる / 権限の無い画像のidを含む一括削除は403で拒否され、その要求に含まれた画像は1枚も削除されない | 実装中(#1492。受け入れシナリオは未実測。単体テストは通過) |
 
 ### 2.9 ダイアグラムとレンダリング — `DIAG`
 
@@ -570,7 +571,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AT-7 (#933) | 一括管理・環境間比較 | AC-BULK-001〜013 |
 | AT-8 (#934) | AI執筆支援 | AC-AI-001〜014 |
 | AT-9 (#935) | 記事プランとGitHub Issue連携 | AC-PLAN-001〜012 |
-| AT-10 (#936) | 画像生成・ギャラリー・メディアGC | AC-IMG-001〜013 |
+| AT-10 (#936) | 画像生成・ギャラリー・メディアGC | AC-IMG-001〜013(014 は #1492 で追加。ギャラリーの一括削除) |
 | AT-11 (#937) | ダイアグラムとレンダリング | AC-DIAG-001〜007 |
 | AT-12 (#938) | カスタムタグ・テンプレート・コンテンツ設定 | AC-TAG-001〜015 |
 | AT-13 (#939) | Analytics | AC-ANA-001〜006 |
@@ -585,19 +586,19 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 ## 6. 集計
 
-§2 に列挙した機能ID: **216**。うち1件(AC-EXT-019)は §4 で対象外としたので、
-受け入れテストの対象は **215**。
+§2 に列挙した機能ID: **217**。うち1件(AC-EXT-019)は §4 で対象外としたので、
+受け入れテストの対象は **216**。
 
 | 状態 | 件数 |
 | --- | --- |
 | `検証済` | 160 |
 | `部分的に検証` | 3 |
-| `実装中` | 6 |
+| `実装中` | 7 |
 | `実装済み` | 21 |
 | `既存spec` / `既存spec(部分)` | 3 |
 | `未着手` | 22 |
 | `対象外`(§2 に行を持つもの) | 1 |
-| **§2 合計** | **216** |
+| **§2 合計** | **217** |
 
 `実装済み` は §1 の状態の定義に無い。`AC-AI-*` の全20行がこの語を使っており、§1 の
 どの状態に当たるかは各行を担当する Issue の判断である。ここでは行の値どおりに数える。
@@ -618,7 +619,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `SET` | 3 | | `AI` | 20 | | `SYS` | 9 |
 | `AUTH` | 10 | | `PLAN` | 12 | | `LOG` | 10 |
-| `USR` | 15 | | `IMG` | 13 | | `EXT` | 24 |
+| `USR` | 15 | | `IMG` | 14 | | `EXT` | 24 |
 | `PRJ` | 9 | | `DIAG` | 7 | | `XC` | 11 |
 | `SITE` | 11 | | `TAG` | 17 | | `UX` | 8 |
 | `POST` | 15 | | `ANA` | 6 | | `STUB` | 2 |
@@ -671,7 +672,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | `/sites` | AC-SITE-001〜006 |
 | `/sites/[id]/edit` | AC-SITE-007〜009, AC-SITE-011 |
 | `/custom-tag-templates` | AC-TAG-008〜011 |
-| `/image-gallery` | AC-IMG-003〜008 |
+| `/image-gallery` | AC-IMG-003〜008, AC-IMG-014 |
 | `/operation-logs` | AC-LOG-001〜005, AC-LOG-010 |
 
 ---
@@ -784,7 +785,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全110件)
+### 10.5 Server Action(全111件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -797,7 +798,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`(受け入れシナリオから到達できない: UI のどこからも呼ばれておらず(画面は公開・複製・プロジェクトで使うだけ。テンプレートの作成・編集・削除は API 直接)画面から起こせない)<br>`updateCustomTagTemplateAction`(受け入れシナリオから到達できない: UI のどこからも呼ばれておらず(画面は公開・複製・プロジェクトで使うだけ。テンプレートの作成・編集・削除は API 直接)画面から起こせない)<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction`(受け入れシナリオから到達できない: UI のどこからも呼ばれておらず(画面は公開・複製・プロジェクトで使うだけ。テンプレートの作成・編集・削除は API 直接)画面から起こせない) | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
-| `app/image-gallery/actions.ts`<br>`getGeneratedImageAction`<br>`fetchGalleryImagesPageAction`<br>`deleteGeneratedImageAction`<br>`updateGeneratedImageTagsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/image-gallery/actions.ts`<br>`getGeneratedImageAction`<br>`fetchGalleryImagesPageAction`<br>`deleteGeneratedImageAction`<br>`bulkDeleteGeneratedImagesAction`<br>`updateGeneratedImageTagsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/infoRailActions.ts`<br>`fetchQueueJobsAction`<br>`fetchRecentOperationLogsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。全画面の情報表示レールが処理キュー・操作ログを gateway から読むだけの操作(#1407)。**既定どおり予算対象**(#1544) | 予算対象 |
 | `app/login/actions.ts`<br>`startNoJsLoginAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/operation-logs/actions.ts`<br>`copyOperationTraceAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |

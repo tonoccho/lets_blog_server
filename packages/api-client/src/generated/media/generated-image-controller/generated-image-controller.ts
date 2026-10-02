@@ -5,7 +5,9 @@
  * OpenAPI spec version: v0
  */
 import type {
+  BulkDeleteGeneratedImagesRequest,
   CreateGeneratedImageRequest,
+  GeneratedImageBulkDeleteResponse,
   GeneratedImageDetailResponse,
   GeneratedImageSummaryResponse,
   ListParams,
@@ -147,6 +149,51 @@ const res = await fetch(getCreateUrl(),
 
   const data: createResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as createResponse
+}
+
+
+export type bulkDeleteResponse200 = {
+  data: GeneratedImageBulkDeleteResponse
+  status: 200
+}
+
+export type bulkDeleteResponseSuccess = (bulkDeleteResponse200) & {
+  headers: Headers;
+};
+;
+
+export type bulkDeleteResponse = (bulkDeleteResponseSuccess)
+
+export const getBulkDeleteUrl = () => {
+
+
+
+
+  return `http://localhost:8080/api/generated-images/bulk-delete`
+}
+
+export const bulkDelete = async (bulkDeleteGeneratedImagesRequest: BulkDeleteGeneratedImagesRequest, options?: RequestInit): Promise<bulkDeleteResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getBulkDeleteUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(bulkDeleteGeneratedImagesRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: bulkDeleteResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as bulkDeleteResponse
 }
 
 

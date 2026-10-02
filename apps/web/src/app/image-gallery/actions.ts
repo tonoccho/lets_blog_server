@@ -4,10 +4,12 @@ import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/session";
 import { GALLERY_PAGE_SIZE } from "./pageSize";
 import {
+  bulkDeleteGeneratedImages,
   deleteGeneratedImage,
   getGeneratedImage,
   listGeneratedImages,
   updateGeneratedImageTags,
+  type GeneratedImageBulkDeleteResult,
   type GeneratedImageDetail,
   type GeneratedImageSummary,
 } from "@/lib/apiClient";
@@ -38,6 +40,17 @@ export async function deleteGeneratedImageAction(id: number): Promise<void> {
   await requireSession();
   await deleteGeneratedImage(id);
   revalidatePath("/image-gallery");
+}
+
+/**
+ * 選んだ生成画像をまとめて削除する(issue #1492)。認可は上記参照(ログイン必須)。
+ * 画像ごとの認可は media-service が行い、権限の無い画像を含む要求は403で全体が拒否される。
+ */
+export async function bulkDeleteGeneratedImagesAction(ids: number[]): Promise<GeneratedImageBulkDeleteResult> {
+  await requireSession();
+  const result = await bulkDeleteGeneratedImages(ids);
+  revalidatePath("/image-gallery");
+  return result;
 }
 
 /** 自動生成されたタグを手動で編集・追加する(issue #281)。認可は上記参照。 */

@@ -707,6 +707,36 @@
         }
       }
     },
+    "/api/generated-images/bulk-delete": {
+      "post": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "bulkDelete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkDeleteGeneratedImagesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageBulkDeleteResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/diagrams": {
       "get": {
         "tags": [
@@ -1791,6 +1821,48 @@
           "prompt",
           "provider"
         ]
+      },
+      "BulkDeleteGeneratedImagesRequest": {
+        "type": "object",
+        "properties": {
+          "imageIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "imageIds"
+        ]
+      },
+      "GeneratedImageBulkDeleteResponse": {
+        "type": "object",
+        "properties": {
+          "deletedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failedCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "deletedIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "failures": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
       },
       "CreateDiagramRequest": {
         "type": "object",

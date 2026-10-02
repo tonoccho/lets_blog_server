@@ -3,7 +3,9 @@ package com.letsblog.media.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.domain.GeneratedImage;
+import com.letsblog.media.dto.BulkDeleteGeneratedImagesRequest;
 import com.letsblog.media.dto.CreateGeneratedImageRequest;
+import com.letsblog.media.dto.GeneratedImageBulkDeleteResponse;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
@@ -11,6 +13,7 @@ import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.GeneratedImageCreationService;
+import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -266,5 +273,114 @@ class GeneratedImageControllerTest {
         // ファイル保存が始まる前にプロジェクトメンバー判定を通していること(issue #830)。
         verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(1L);
         verify(generatedImageCreationService).create(request);
+    }
+
+    // ---- 一括削除(issue #1492) ----
+
+    private void stubFound(GeneratedImage... images) {
+        for (GeneratedImage image : images) {
+            when(generatedImageRepository.findById(image.getId())).thenReturn(Optional.of(image));
+        }
+    }
+
+    @Test
+    void bulkDelete_全件を認可してから実体とDB行を削除し件数を返す() {
+        GeneratedImage a = buildImage(1L, "a", null);
+        a.setProjectId(5L);
+        GeneratedImage b = buildImage(2L, "b", null);
+        b.setProjectId(6L);
+        stubFound(a, b);
+
+        GeneratedImageBulkDeleteResponse result =
+                controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 2L)));
+
+        assertEquals(2, result.deletedCount());
+        assertEquals(0, result.failedCount());
+        assertEquals(List.of(1L, 2L), result.deletedIds());
+        assertTrue(result.failures().isEmpty());
+        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(5L);
+        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(6L);
+        verify(generatedImageStorageService).delete("path/1.png");
+        verify(generatedImageStorageService).delete("path/2.png");
+        verify(generatedImageRepository).delete(a);
+        verify(generatedImageRepository).delete(b);
+    }
+
+    /** 権限の無い id が1つでもあれば、権限のある画像も含めて1件も削除しない(ファイル削除は取り消せない)。 */
+    @Test
+    void bulkDelete_権限の無いidが含まれると何も削除せずForbiddenになる() {
+        GeneratedImage allowed = buildImage(1L, "a", null);
+        allowed.setProjectId(5L);
+        GeneratedImage denied = buildImage(2L, "b", null);
+        denied.setProjectId(6L);
+        stubFound(allowed, denied);
+        // 権限のある画像側の判定は通る(厳格スタブのため、呼ばれる引数ごとに宣言する)。
+        doNothing().when(adminAuthorizationService).requireProjectMemberOrAdminForResource(5L);
+        doThrow(new ForbiddenException("not a member"))
+                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(6L);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 2L))));
+
+        verifyNoInteractions(generatedImageStorageService);
+        verify(generatedImageRepository, never()).delete(any(GeneratedImage.class));
+    }
+
+    @Test
+    void bulkDelete_存在しないidが含まれると何も削除せず404になる() {
+        GeneratedImage a = buildImage(1L, "a", null);
+        stubFound(a);
+        when(generatedImageRepository.findById(9L)).thenReturn(Optional.empty());
+
+        assertThrows(GeneratedImageNotFoundException.class,
+                () -> controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 9L))));
+
+        verifyNoInteractions(generatedImageStorageService);
+        verify(generatedImageRepository, never()).delete(any(GeneratedImage.class));
+    }
+
+    /** 個別に失敗した画像は failures に載り、残りの削除は続行される(DB行は失敗した画像では消さない)。 */
+    @Test
+    void bulkDelete_個別の削除失敗はfailuresに載り残りは続行する() {
+        GeneratedImage a = buildImage(1L, "a", null);
+        GeneratedImage b = buildImage(2L, "b", null);
+        stubFound(a, b);
+        doThrow(new RuntimeException("disk error")).when(generatedImageStorageService).delete("path/1.png");
+
+        GeneratedImageBulkDeleteResponse result =
+                controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 2L)));
+
+        assertEquals(1, result.deletedCount());
+        assertEquals(1, result.failedCount());
+        assertEquals(List.of(2L), result.deletedIds());
+        assertEquals("disk error", result.failures().get("1"));
+        verify(generatedImageRepository, never()).delete(a);
+        verify(generatedImageRepository).delete(b);
+    }
+
+    @Test
+    void bulkDelete_重複したidは1回だけ処理する() {
+        GeneratedImage a = buildImage(1L, "a", null);
+        stubFound(a);
+
+        GeneratedImageBulkDeleteResponse result =
+                controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 1L)));
+
+        assertEquals(1, result.deletedCount());
+        verify(generatedImageStorageService).delete("path/1.png");
+    }
+
+    @Test
+    void bulkDelete_例外メッセージがnullでも失敗として記録する() {
+        GeneratedImage a = buildImage(1L, "a", null);
+        stubFound(a);
+        doThrow(new RuntimeException()).when(generatedImageStorageService).delete("path/1.png");
+
+        GeneratedImageBulkDeleteResponse result =
+                controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L)));
+
+        assertEquals(0, result.deletedCount());
+        assertEquals(1, result.failedCount());
+        assertEquals("null", result.failures().get("1"));
     }
 }

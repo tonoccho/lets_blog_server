@@ -995,7 +995,7 @@ matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾�
 `/client-errors-foo` や `/client-errors/nested` のような「`client-errors` で始まる別のルート」
 まで認証ゲートを外れてしまい、そこにページを足した時点で無言でゲートが消える。
 
-## GeneratedImageController (6エンドポイント、ベースパスなし)
+## GeneratedImageController (7エンドポイント、ベースパスなし)
 
 media-service所有。ComfyUIで生成した画像とパラメータの一覧・詳細・バイナリ取得
 (issue #830で`requireProjectMemberOrAdmin`系を追加)。`projectId`を持たないリソースはadmin限定。
@@ -1008,6 +1008,7 @@ media-service所有。ComfyUIで生成した画像とパラメータの一覧・
 | PUT /api/generated-images/{id}/tags | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:116-122,156-160`。同上(存在しない場合は404が先) |
 | GET /api/generated-images/{id}/file | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:124-132,156-160`。同上(存在しない場合は404が先) |
 | DELETE /api/generated-images/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:134-140,156-160`。同上(存在しない場合は404が先) |
+| POST /api/generated-images/bulk-delete | requireProjectMemberOrAdminForResource(idごと) | 401 | 403 | 認可OK | 現状維持 | issue #1492。`bulkDelete`が**全idを`findAuthorized`で読んで認可してから**削除ループに入る。権限の無いidが1つでもあれば403、存在しないidがあれば404で、権限のある画像も含めて1件も削除しない(ファイル削除は取り消せないため)。`projectId==null`の画像はadminのみ |
 
 ## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 

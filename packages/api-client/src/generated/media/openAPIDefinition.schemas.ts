@@ -222,6 +222,20 @@ export interface CreateGeneratedImageRequest {
   imageData: string;
 }
 
+export interface BulkDeleteGeneratedImagesRequest {
+  /** @minItems 1 */
+  imageIds: number[];
+}
+
+export type GeneratedImageBulkDeleteResponseFailures = {[key: string]: string};
+
+export interface GeneratedImageBulkDeleteResponse {
+  deletedCount?: number;
+  failedCount?: number;
+  deletedIds?: number[];
+  failures?: GeneratedImageBulkDeleteResponseFailures;
+}
+
 export interface CreateDiagramRequest {
   projectId?: number;
   name?: string;

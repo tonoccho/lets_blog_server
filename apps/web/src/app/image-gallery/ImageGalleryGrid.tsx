@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClient";
 import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 import {
+  bulkDeleteGeneratedImagesAction,
   deleteGeneratedImageAction,
   fetchGalleryImagesPageAction,
   getGeneratedImageAction,
@@ -58,6 +59,10 @@ export function ImageGalleryGrid({
   const [isDeleting, startDeleteTransition] = useTransition();
   const [isSavingTags, startTagsTransition] = useTransition();
   const [newTag, setNewTag] = useState("");
+  /** 一括削除のために選んだ画像のid(issue #1492)。表示中の画像だけが対象。 */
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ type: "success" | "error"; text: string } | null>(null);
   /** タグ一覧を絞り込むフィルタ(issue #281)。nullは絞り込みなし。 */
   const [activeTag, setActiveTag] = useState<string | null>(null);
   /** 「この画像の設定をコピー」ボタンの一時的なフィードバック表示(issue #437)。 */
@@ -70,6 +75,8 @@ export function ImageGalleryGrid({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
+
+  const allChecked = items.length > 0 && items.every((image) => checkedIds.has(image.id));
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -115,6 +122,7 @@ export function ImageGalleryGrid({
         if (seq !== requestSeq.current) return;
         loadingRef.current = false;
         setActiveTag(tag);
+        setCheckedIds(new Set());
         setItems(first);
         if (tag === null) setKnownImages(first);
         setFetchedCount(first.length);
@@ -184,11 +192,62 @@ export function ImageGalleryGrid({
         if (items.some((image) => image.id === id)) setFetchedCount((count) => count - 1);
         setItems((current) => current.filter((image) => image.id !== id));
         setKnownImages((current) => current.filter((image) => image.id !== id));
+        // 選択中だった画像を単体削除したら選択からも外す。残すと次の一括削除が存在しない id を送る。
+        setCheckedIds((current) => {
+          if (!current.has(id)) return current;
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
         closeDetail();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
     });
+  }
+
+  function toggleChecked(id: number) {
+    setCheckedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** 表示中の画像がすべて選択済みなら全て外し、そうでなければ表示中の全画像を選ぶ。 */
+  function toggleCheckAll() {
+    setCheckedIds(allChecked ? new Set() : new Set(items.map((image) => image.id)));
+  }
+
+  async function handleBulkDelete() {
+    if (checkedIds.size === 0 || bulkDeleting) return;
+    if (!window.confirm(`${checkedIds.size}件の生成画像を削除します。この操作は元に戻せません。よろしいですか?`)) {
+      return;
+    }
+    setBulkDeleting(true);
+    setBulkResult(null);
+    try {
+      const result = await bulkDeleteGeneratedImagesAction(Array.from(checkedIds));
+      const deleted = new Set(result.deletedIds);
+      // 表示中の一覧から消えた分だけ、次の offset を戻す(単体削除と同じ扱い)。
+      const removedFromItems = items.filter((image) => deleted.has(image.id)).length;
+      setFetchedCount((count) => count - removedFromItems);
+      setItems((current) => current.filter((image) => !deleted.has(image.id)));
+      setKnownImages((current) => current.filter((image) => !deleted.has(image.id)));
+      setCheckedIds((current) => new Set(Array.from(current).filter((id) => !deleted.has(id))));
+      setBulkResult({
+        type: "success",
+        text:
+          result.failedCount > 0
+            ? `${result.deletedCount}件を削除しました。${result.failedCount}件の削除に失敗しました`
+            : `${result.deletedCount}件を削除しました`,
+      });
+    } catch (err) {
+      setBulkResult({ type: "error", text: errorMessage(err) });
+    } finally {
+      setBulkDeleting(false);
+    }
   }
 
   function saveTags(tags: string[]) {
@@ -284,45 +343,78 @@ export function ImageGalleryGrid({
         </div>
       )}
 
+      {items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <button type="button" onClick={toggleCheckAll} className="underline">
+            {allChecked ? "全選択解除" : "全選択"}
+          </button>
+          <span className="text-neutral-500 dark:text-neutral-400">{checkedIds.size}件選択中</span>
+          <button
+            type="button"
+            onClick={handleBulkDelete}
+            disabled={checkedIds.size === 0 || bulkDeleting}
+            className="rounded bg-red-600 px-3 py-1 text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {bulkDeleting ? "削除中…" : `選択した${checkedIds.size}件を削除`}
+          </button>
+        </div>
+      )}
+      {bulkResult && (
+        <p
+          role={bulkResult.type === "error" ? "alert" : "status"}
+          className={bulkResult.type === "error" ? "text-sm text-red-600" : "text-sm text-neutral-700 dark:text-neutral-300"}
+        >
+          {bulkResult.text}
+        </p>
+      )}
+
       {items.length === 0 ? (
         <p className="text-neutral-500 dark:text-neutral-400">該当する画像がありません。</p>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((image) => (
-            <button
-              key={image.id}
-              type="button"
-              onClick={() => openDetail(image.id)}
-              className="group overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-left"
-            >
-              <img
-                src={`/image-gallery/${image.id}/file`}
-                alt={image.prompt}
-                className="aspect-square w-full bg-neutral-100 object-contain group-hover:opacity-80 dark:bg-neutral-800"
+            <div key={image.id} className="relative">
+              <input
+                type="checkbox"
+                aria-label={`${image.prompt}を選択`}
+                checked={checkedIds.has(image.id)}
+                onChange={() => toggleChecked(image.id)}
+                className="absolute left-2 top-2 z-10 h-5 w-5"
               />
-              <div className="space-y-1 p-2 text-xs">
-                <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{image.prompt}</p>
-                {image.tags && image.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {image.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-neutral-600 dark:text-neutral-400"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <p className="text-neutral-400">
-                  {timezone
-                    ? formatDateTime(image.createdAt, timezone)
-                    : mounted
-                      ? formatDateTime(image.createdAt)
-                      : TIMEZONE_PENDING_PLACEHOLDER}
-                </p>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => openDetail(image.id)}
+                className="group w-full overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-left"
+              >
+                <img
+                  src={`/image-gallery/${image.id}/file`}
+                  alt={image.prompt}
+                  className="aspect-square w-full bg-neutral-100 object-contain group-hover:opacity-80 dark:bg-neutral-800"
+                />
+                <div className="space-y-1 p-2 text-xs">
+                  <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{image.prompt}</p>
+                  {image.tags && image.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {image.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-neutral-600 dark:text-neutral-400"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-neutral-400">
+                    {timezone
+                      ? formatDateTime(image.createdAt, timezone)
+                      : mounted
+                        ? formatDateTime(image.createdAt)
+                        : TIMEZONE_PENDING_PLACEHOLDER}
+                  </p>
+                </div>
+              </button>
+            </div>
           ))}
         </div>
       )}

@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.domain.GeneratedImage;
+import com.letsblog.media.dto.BulkDeleteGeneratedImagesRequest;
 import com.letsblog.media.dto.CreateGeneratedImageRequest;
+import com.letsblog.media.dto.GeneratedImageBulkDeleteResponse;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
@@ -32,7 +34,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 
 /**
  * ComfyUIで生成した画像とパラメータの一覧・詳細・バイナリ取得(Web管理画面のギャラリー表示用)。
@@ -182,6 +188,35 @@ public class GeneratedImageController {
         generatedImageStorageService.delete(image.getFilePath());
         generatedImageRepository.delete(image);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 複数の生成画像をまとめて物理削除する(issue #1492)。同期処理。
+     *
+     * <p>ファイル削除は取り消せないため、<b>先に全idを読んで全件の認可を通し</b>、そのあとで削除する。
+     * 権限の無い画像(403)や存在しない画像(404)が1つでも含まれていれば、権限のある画像も含めて
+     * 1件も削除しない。認可を通ったあとの個別の削除失敗は{@code failures}に載せて残りを続行する。
+     */
+    @PostMapping("/api/generated-images/bulk-delete")
+    public GeneratedImageBulkDeleteResponse bulkDelete(@Valid @RequestBody BulkDeleteGeneratedImagesRequest request) {
+        List<GeneratedImage> images = new ArrayList<>();
+        for (Long id : new LinkedHashSet<>(request.imageIds())) {
+            images.add(findAuthorized(id));
+        }
+
+        List<Long> deletedIds = new ArrayList<>();
+        Map<String, String> failures = new LinkedHashMap<>();
+        for (GeneratedImage image : images) {
+            try {
+                generatedImageStorageService.delete(image.getFilePath());
+                generatedImageRepository.delete(image);
+                deletedIds.add(image.getId());
+            } catch (RuntimeException e) {
+                log.warn("生成画像の一括削除で個別の削除に失敗しました(id={}): {}", image.getId(), e.getMessage());
+                failures.put(String.valueOf(image.getId()), String.valueOf(e.getMessage()));
+            }
+        }
+        return new GeneratedImageBulkDeleteResponse(deletedIds.size(), failures.size(), deletedIds, failures);
     }
 
     private GeneratedImageDetailResponse toDetailResponse(GeneratedImage image) {

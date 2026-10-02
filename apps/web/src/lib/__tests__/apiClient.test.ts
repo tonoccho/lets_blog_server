@@ -29,6 +29,7 @@ import {
   getSetupStatus,
   downloadGeneratedImageFile,
   deleteGeneratedImage,
+  bulkDeleteGeneratedImages,
   streamConnectedServiceStatuses,
   listReviewStepSettings,
   listArticleReviewPullRequests,
@@ -133,6 +134,17 @@ describe('apiFetch の成功経路', () => {
     await expect(deleteGeneratedImage(1)).resolves.toBeUndefined()
     const [, init] = calls()[0]
     expect(init.method).toBe('DELETE')
+  })
+
+  it('bulkDeleteGeneratedImages は imageIds を POST し、結果を返す (issue #1492)', async () => {
+    const result = { deletedCount: 2, failedCount: 0, deletedIds: [1, 2], failures: {} }
+    fetchMock.mockResolvedValue(jsonResponse(result))
+
+    await expect(bulkDeleteGeneratedImages([1, 2])).resolves.toEqual(result)
+    const [url, init] = calls()[0]
+    expect(String(url)).toContain('/api/generated-images/bulk-delete')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ imageIds: [1, 2] })
   })
 
   it('空ボディの200応答も undefined を返す', async () => {

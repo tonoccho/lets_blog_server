@@ -20,7 +20,8 @@ const redirect = jest.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
 });
 jest.mock('next/navigation', () => ({ redirect: (p: string) => redirect(p) }));
-jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }));
+const revalidatePath = jest.fn();
+jest.mock('next/cache', () => ({ revalidatePath: (...a: unknown[]) => revalidatePath(...a) }));
 
 const getServerSession = jest.fn();
 jest.mock('next-auth', () => ({
@@ -32,14 +33,17 @@ const getGeneratedImage = jest.fn();
 const deleteGeneratedImage = jest.fn();
 const updateGeneratedImageTags = jest.fn();
 const listGeneratedImages = jest.fn();
+const bulkDeleteGeneratedImages = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getGeneratedImage: (...a: unknown[]) => getGeneratedImage(...a),
   deleteGeneratedImage: (...a: unknown[]) => deleteGeneratedImage(...a),
   updateGeneratedImageTags: (...a: unknown[]) => updateGeneratedImageTags(...a),
   listGeneratedImages: (...a: unknown[]) => listGeneratedImages(...a),
+  bulkDeleteGeneratedImages: (...a: unknown[]) => bulkDeleteGeneratedImages(...a),
 }));
 
 import {
+  bulkDeleteGeneratedImagesAction,
   deleteGeneratedImageAction,
   fetchGalleryImagesPageAction,
   getGeneratedImageAction,
@@ -132,5 +136,30 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
     await fetchGalleryImagesPageAction(0, '猫');
 
     expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫' });
+  });
+});
+
+/** issue #1492: 一括削除の Server Action もログイン必須(#824 の方針)。認可の本体は media-service が id ごとに行う。 */
+describe('bulkDeleteGeneratedImagesAction(issue #1492)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('未ログインは /login へ送り、削除しない', async () => {
+    getServerSession.mockResolvedValue(null);
+
+    await expect(bulkDeleteGeneratedImagesAction([1, 2])).rejects.toThrow('NEXT_REDIRECT:/login');
+    expect(bulkDeleteGeneratedImages).not.toHaveBeenCalled();
+  });
+
+  it('ログイン済みなら id を渡して結果を返し、ギャラリーを再検証する', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    const result = { deletedCount: 2, failedCount: 0, deletedIds: [1, 2], failures: {} };
+    bulkDeleteGeneratedImages.mockResolvedValue(result);
+
+    await expect(bulkDeleteGeneratedImagesAction([1, 2])).resolves.toEqual(result);
+
+    expect(bulkDeleteGeneratedImages).toHaveBeenCalledWith([1, 2]);
+    expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
   });
 });
