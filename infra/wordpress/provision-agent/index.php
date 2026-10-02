@@ -57,6 +57,7 @@ function combinedOutput(string $stdout, string $stderr): string
 require __DIR__ . '/process-runner.php';
 // core downloadの壊れたキャッシュからの回復(issue #1419)。
 require __DIR__ . '/core-download.php';
+require __DIR__ . '/letsblog-plugin-installer.php';
 
 /**
  * 指定slugのサイトディレクトリパスを返す。存在しなければnullを返す
@@ -65,7 +66,16 @@ require __DIR__ . '/core-download.php';
 function resolveExistingSitePath(string $slug): ?string
 {
     $sitePath = "/var/www/html/sites/$slug";
-    return is_dir($sitePath) ? $sitePath : null;
+    if (!is_dir($sitePath)) {
+        return null;
+    }
+    // letsblogプラグイン導入前に構築したサイトにも、最初のwp-cli系アクセスで導入する(冪等。issue #1556)。
+    // 失敗しても呼び出し元の操作は止めず、ログに残して次回再試行する。
+    [$code, , $err] = ensureLetsblogPlugin($sitePath);
+    if ($code !== 0) {
+        error_log("letsblogプラグインの導入に失敗しました (slug=$slug): $err");
+    }
+    return $sitePath;
 }
 
 /**
@@ -238,6 +248,11 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($code !== 0) {
             cleanupAndRespond(500, ['error' => '言語パックのインストールに失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
         }
+    }
+
+    [$code, $out, $err] = ensureLetsblogPlugin($sitePath);
+    if ($code !== 0) {
+        cleanupAndRespond(500, ['error' => 'letsblogプラグインの導入に失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
     }
 
     // パーマリンクを「投稿名」構造にする(デフォルトの「基本」のままでは

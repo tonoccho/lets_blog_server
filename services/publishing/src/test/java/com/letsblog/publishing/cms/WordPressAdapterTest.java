@@ -140,6 +140,32 @@ class WordPressAdapterTest {
     }
 
     @Test
+    void testCreateOrUpdatePost_SSHトランスポートは投稿前にletsblogプラグインの導入を確かめる() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, null);
+        when(sshOperations.createOrUpdatePost(creds, content, null))
+                .thenReturn(new PostResult("123", "https://example.com/posts/test", "draft"));
+
+        adapter.createOrUpdatePost(creds, content, null);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(sshOperations);
+        order.verify(sshOperations).ensureLetsblogPlugin(creds);
+        order.verify(sshOperations).createOrUpdatePost(creds, content, null);
+    }
+
+    @Test
+    void testCreateOrUpdatePost_SSHでプラグイン導入に失敗しても投稿は続行する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, null);
+        PostResult expected = new PostResult("123", "https://example.com/posts/test", "draft");
+        org.mockito.Mockito.doThrow(new com.letsblog.publishing.cms.ssh.SshOperationException("activate failed"))
+                .when(sshOperations).ensureLetsblogPlugin(creds);
+        when(sshOperations.createOrUpdatePost(creds, content, null)).thenReturn(expected);
+
+        assertEquals(expected, adapter.createOrUpdatePost(creds, content, null));
+    }
+
+    @Test
     void testCreateOrUpdatePost_AGENTトランスポートはWordPressAgentOperationsに委譲する() {
         CmsCredentials.WordPressCredentials creds = agentCredentials();
         PostContent content = new PostContent("Test Title", "test-slug", "<p>HTML</p>", "draft", null, null, null, null);

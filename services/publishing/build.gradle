@@ -79,3 +79,11 @@ jacocoTestReport {
         csv.required = false
     }
 }
+
+// SSHサイトへ配置するletsblogプラグイン(issue #1556)。provision-agentが配置するものと同じ実体を
+// infra/wordpress/letsblog-plugin から取り込み、二重管理にしない。
+processResources {
+    from('../../infra/wordpress/letsblog-plugin') {
+        into 'wordpress-plugin'
+    }
+}

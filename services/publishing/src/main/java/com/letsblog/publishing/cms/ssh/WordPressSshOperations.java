@@ -1321,6 +1321,35 @@ public class WordPressSshOperations {
     }
 
     /**
+     * letsblogプラグインをリモートへ配置して有効化する(issue #1556)。配置済みなら何もしない(冪等)。
+     * 有効化に失敗したら配置を取り消す(配置だけが残ると次回以降「導入済み」と見なされ有効化されないため)。
+     */
+    public void ensureLetsblogPlugin(WordPressCredentials creds) {
+        String pluginDir = creds.wpPath() + "/wp-content/plugins/letsblog";
+        String pluginPath = pluginDir + "/letsblog.php";
+        if (exec(creds, "test -f " + ShellQuote.single(pluginPath)).ok()) {
+            return;
+        }
+        exec(creds, "mkdir -p " + ShellQuote.single(pluginDir));
+        executor.putFile(connectionParams(creds), letsblogPluginSource(), pluginPath);
+        SshCommandResult activate = exec(creds, wpCli(creds, "plugin activate letsblog"));
+        if (!activate.ok()) {
+            exec(creds, "rm -f " + ShellQuote.single(pluginPath));
+            throw new SshOperationException("letsblogプラグインの有効化に失敗しました: "
+                    + firstLine(activate.stderr(), activate.stdout()));
+        }
+    }
+
+    private byte[] letsblogPluginSource() {
+        try {
+            return new org.springframework.core.io.ClassPathResource("wordpress-plugin/letsblog.php")
+                    .getContentAsByteArray();
+        } catch (java.io.IOException e) {
+            throw new SshOperationException("letsblogプラグインのソースを読めません: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * `wp db export`でリモートに書き出したダンプをSFTPでダウンロードする
      * (環境同期の同期元がSSH管理サイトの場合に使用。issue #511)。各環境の管理者/プロジェクトメンバー
      * アカウント(wp_users/wp_usermeta)はProjectUserSyncServiceが環境ごとに個別管理しているため、

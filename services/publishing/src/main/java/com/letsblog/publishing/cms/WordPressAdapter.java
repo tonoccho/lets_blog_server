@@ -1,6 +1,7 @@
 package com.letsblog.publishing.cms;
 
 import com.letsblog.publishing.cms.agent.WordPressAgentOperations;
+import com.letsblog.publishing.cms.ssh.SshOperationException;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,12 @@ public class WordPressAdapter implements CmsAdapter {
     public PostResult createOrUpdatePost(CmsCredentials credentials, PostContent content, String existingPostId) {
         CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
         if (creds.isSsh()) {
+            // プラグインの導入失敗は投稿を止めない(agent経路と同じ。使えないサイトへの投稿の扱いは#1557)。
+            try {
+                sshOperations.ensureLetsblogPlugin(creds);
+            } catch (SshOperationException e) {
+                log.warn("letsblogプラグインの導入に失敗しました (sshHost={}): {}", creds.sshHost(), e.getMessage());
+            }
             return sshOperations.createOrUpdatePost(creds, content, existingPostId);
         }
         if (creds.isAgent()) {

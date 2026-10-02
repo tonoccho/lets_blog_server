@@ -866,6 +866,57 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void ensureLetsblogPlugin_未配置ならプラグインを配置して有効化する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("No such file or directory"))
+                .thenReturn(ok(""))
+                .thenReturn(ok("Success: Plugin 'letsblog' activated."));
+
+        operations.ensureLetsblogPlugin(creds());
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(0).contains("test -f"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("mkdir -p"));
+        assertEquals(true, commandCaptor.getAllValues().get(1).contains("wp-content/plugins/letsblog"));
+        assertEquals(true, commandCaptor.getAllValues().get(2).contains("plugin activate letsblog"));
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> dataCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).putFile(any(SshConnectionParams.class), dataCaptor.capture(), pathCaptor.capture());
+        assertEquals("/var/www/html/wp-content/plugins/letsblog/letsblog.php", pathCaptor.getValue());
+        String content = new String(dataCaptor.getValue(), StandardCharsets.UTF_8);
+        assertEquals(true, content.contains("Plugin Name:"));
+        assertEquals(true, content.contains("letsblog"));
+    }
+
+    @Test
+    void ensureLetsblogPlugin_配置済みなら何もしない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok(""));
+
+        operations.ensureLetsblogPlugin(creds());
+        operations.ensureLetsblogPlugin(creds());
+
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), any(), isNull());
+        verify(executor, never()).putFile(any(SshConnectionParams.class), any(), any());
+    }
+
+    @Test
+    void ensureLetsblogPlugin_有効化に失敗したら配置を取り消して例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("No such file or directory"))
+                .thenReturn(ok(""))
+                .thenReturn(fail("activate failed"))
+                .thenReturn(ok(""));
+
+        assertThrows(SshOperationException.class, () -> operations.ensureLetsblogPlugin(creds()));
+
+        ArgumentCaptor<String> commandCaptor = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commandCaptor.capture(), isNull());
+        assertEquals(true, commandCaptor.getAllValues().get(3).contains("rm -f"));
+    }
+
+    @Test
     void uploadMedia_成功時はSFTP転送してmedia_importで取り込み一時ファイルを削除する() {
         byte[] data = "image-bytes".getBytes(StandardCharsets.UTF_8);
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))

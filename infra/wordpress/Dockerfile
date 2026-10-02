@@ -24,6 +24,7 @@ RUN printf '[client]\nskip-ssl\n' > /root/.my.cnf
 COPY uploads.ini /usr/local/etc/php/conf.d/zz-uploads.ini
 
 COPY provision-agent /var/www/provision-agent
+COPY letsblog-plugin /var/www/letsblog-plugin
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
 

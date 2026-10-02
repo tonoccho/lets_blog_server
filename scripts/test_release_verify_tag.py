@@ -1617,6 +1617,27 @@ class BackendGradleStepEnablesDockerGatedTests(unittest.TestCase):
         self.assertIn("lint", step["argv"])
 
 
+class LetsblogPluginPhpTestStep(unittest.TestCase):
+    """issue #1556: letsblog プラグインの PHP テストをリリース検証で走らせる。"""
+
+    def step(self):
+        return next(
+            (s for s in rvt.DEFAULT_STEPS if s["name"] == "letsblog-plugin-php-test"), None
+        )
+
+    def test_step_exists_and_runs_the_plugin_test_through_the_wordpress_image(self):
+        step = self.step()
+        self.assertIsNotNone(step, "letsblog プラグインのPHPテストがリリース検証で実行されない")
+        argv = step["argv"]
+        self.assertIn("lets_blog_server-wordpress:latest", argv)
+        self.assertTrue(
+            any(a.endswith("/provision-agent/__tests__/test-letsblog-plugin.php") for a in argv),
+            argv,
+        )
+        mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+        self.assertTrue(any(m.startswith("%CHECKOUT%/infra/wordpress:") for m in mounts), mounts)
+
+
 class ProvisionAgentPhpTestsStep(unittest.TestCase):
     """issue #1418: provision-agent の PHP テストをリリース検証で走らせる。
 

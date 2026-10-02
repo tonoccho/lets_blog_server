@@ -10,6 +10,8 @@ RUN chmod +x gradlew && ./gradlew --version
 
 COPY packages ./packages
 COPY services/publishing ./services/publishing
+# SSHサイトへ配置するletsblogプラグイン(processResourcesが取り込む。issue #1556)。
+COPY infra/wordpress/letsblog-plugin ./infra/wordpress/letsblog-plugin
 COPY services/log-writer/build.gradle ./services/log-writer/build.gradle
 COPY services/gateway/build.gradle ./services/gateway/build.gradle
 COPY services/identity/build.gradle ./services/identity/build.gradle
