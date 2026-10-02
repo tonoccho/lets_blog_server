@@ -124,6 +124,88 @@ class UnifiedOperationLogServiceTest {
         verify(generationJobClient).listRecent("Bearer test-token");
     }
 
+    private GenerationJobSummary typedJob(long id, String type, LocalDateTime createdAt) {
+        return new GenerationJobSummary(id, type, "done", createdAt);
+    }
+
+    private void stubMixedJobs() {
+        stubEmptySources();
+        LocalDateTime now = LocalDateTime.now();
+        when(generationJobClient.listRecent("Bearer test-token")).thenReturn(List.of(
+                typedJob(1L, "image_generation", now),
+                typedJob(2L, "media_garbage_collection_delete", now.minusMinutes(1)),
+                typedJob(3L, "unknown_type", now.minusMinutes(2))));
+    }
+
+    @Test
+    void list_media_garbage_collection_deleteのジョブはAI_JOBではなくSYSTEM_JOBとして出す() {
+        stubMixedJobs();
+
+        Page<UnifiedLogEntryResponse> result =
+                service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        UnifiedLogEntryResponse gc = result.getContent().stream()
+                .filter(e -> e.id() == 2L).findFirst().orElseThrow();
+        assertEquals("SYSTEM_JOB", gc.sourceType());
+    }
+
+    @Test
+    void list_image_generationのジョブは従来どおりAI_JOBとして出す() {
+        stubMixedJobs();
+
+        Page<UnifiedLogEntryResponse> result =
+                service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals("AI_JOB", result.getContent().stream()
+                .filter(e -> e.id() == 1L).findFirst().orElseThrow().sourceType());
+    }
+
+    @Test
+    void list_AI_JOBで絞るとAI分類のジョブだけを返す() {
+        stubMixedJobs();
+
+        Page<UnifiedLogEntryResponse> result =
+                service().list(10L, true, "AI_JOB", null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(List.of(1L, 3L), result.getContent().stream().map(UnifiedLogEntryResponse::id).toList());
+        assertTrue(result.getContent().stream().allMatch(e -> "AI_JOB".equals(e.sourceType())));
+    }
+
+    @Test
+    void list_SYSTEM_JOBで絞ると非AI分類のジョブだけを返し_ai_serviceから取得する() {
+        stubMixedJobs();
+
+        Page<UnifiedLogEntryResponse> result = service().list(
+                10L, true, "SYSTEM_JOB", null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(List.of(2L), result.getContent().stream().map(UnifiedLogEntryResponse::id).toList());
+        assertEquals("SYSTEM_JOB", result.getContent().get(0).sourceType());
+        verify(generationJobClient).listRecent("Bearer test-token");
+        verify(operationLogRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
+        verify(auditLogRepository, never()).findAllByOrderByCreatedAtDesc(any());
+    }
+
+    @Test
+    void list_未知のジョブ種別は例外にならずAI_JOBに入る() {
+        stubMixedJobs();
+
+        Page<UnifiedLogEntryResponse> result =
+                service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        assertEquals(3, result.getTotalElements());
+        assertEquals("AI_JOB", result.getContent().stream()
+                .filter(e -> e.id() == 3L).findFirst().orElseThrow().sourceType());
+    }
+
+    @Test
+    void list_OPERATIONで絞るときはジョブを取得しない() {
+        stubEmptySources();
+
+        service().list(10L, true, "OPERATION", null, null, null, PageRequest.of(0, 20), "Bearer test-token");
+
+        verify(generationJobClient, never()).listRecent(any());
+    }
+
     @Test
     void list_キーワード検索でtitleに一致しないものを除外する() {
         stubEmptySources();

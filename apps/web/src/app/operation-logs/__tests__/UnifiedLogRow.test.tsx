@@ -52,6 +52,7 @@ describe("UnifiedLogRow", () => {
 
   it.each([
     ["AI_JOB", "AI"],
+    ["SYSTEM_JOB", "システム"],
     ["AUDIT", "監査"],
   ] as const)("sourceType=%sのラベルを表示する", (sourceType, label) => {
     render(<UnifiedLogRow entry={entry({ sourceType })} timezone={null} />);

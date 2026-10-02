@@ -132,6 +132,12 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
     expect(options).not.toContain('AUDIT');
   });
 
+  it('種別の選択肢にAIと非AIのジョブを別々に出す(issue #1481)', async () => {
+    const tree = await render({});
+    const options = collect(tree, (e) => e.type === 'option').map((e) => e.props.value);
+    expect(options).toEqual(expect.arrayContaining(['AI_JOB', 'SYSTEM_JOB']));
+  });
+
   it('adminには「遅い操作」画面への導線を出す(issue #1471)', async () => {
     const tree = await render({});
 

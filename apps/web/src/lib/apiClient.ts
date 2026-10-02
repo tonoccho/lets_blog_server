@@ -1227,7 +1227,7 @@ export function getOperationStats(params: OperationStatsParams): Promise<Operati
 }
 
 /** 操作ログ・AIジョブ・監査ログを一元表示するための統合エントリ(issue #187)。 */
-export type UnifiedLogSourceType = "OPERATION" | "AI_JOB" | "AUDIT";
+export type UnifiedLogSourceType = "OPERATION" | "AI_JOB" | "SYSTEM_JOB" | "AUDIT";
 
 export interface UnifiedLogEntry {
   sourceType: UnifiedLogSourceType;

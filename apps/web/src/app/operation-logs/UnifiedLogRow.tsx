@@ -9,12 +9,14 @@ import { useViewerTimeZone } from "./useViewerTimeZone";
 const SOURCE_LABEL: Record<UnifiedLogSourceType, string> = {
   OPERATION: "操作",
   AI_JOB: "AI",
+  SYSTEM_JOB: "システム",
   AUDIT: "監査",
 };
 
 const SOURCE_BADGE_CLASS: Record<UnifiedLogSourceType, string> = {
   OPERATION: "text-neutral-700 bg-neutral-100 dark:text-neutral-300 dark:bg-neutral-800",
   AI_JOB: "text-purple-700 bg-purple-100 dark:text-purple-300 dark:bg-purple-900",
+  SYSTEM_JOB: "text-amber-700 bg-amber-100 dark:text-amber-300 dark:bg-amber-900",
   AUDIT: "text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-900",
 };
 

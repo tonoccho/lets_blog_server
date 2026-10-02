@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 操作ログ・AIジョブ・監査ログを1画面に統合表示するための集約サービス(issue #187、
  * #572でlog-writerへ移設)。
  *
- * <p>OPERATION/AUDITはlog-writer自身が所有するlbs_logスキーマから直接取得する。AI_JOBのみ、
+ * <p>OPERATION/AUDITはlog-writer自身が所有するlbs_logスキーマから直接取得する。ジョブ(AI_JOB/SYSTEM_JOB)のみ、
  * ai-serviceが所有するgeneration_jobsテーブルに由来するため、{@link GenerationJobClient}経由の
  * 同期HTTP呼び出しで取得する(ADR-0004によりlbs_logスキーマからのクロススキーマ参照はできない)。
  * #572の時点ではlegacy-apiが所有していたが、AIサービス抽出でai-serviceへ移り、
@@ -65,6 +65,12 @@ public class UnifiedOperationLogService {
      *                  (マージ後に絞るだけでは直近の窓の外にある古いログへ到達できない、issue #1138)。
      *                  AI_JOBはai-serviceが直近分しか返さないため、取得後に範囲で絞る。
      * @param endDate 範囲の終了(含む)。
+     * @param sourceType 絞り込むソース種別。ジョブの{@code AI_JOB}は「取得元」ではなく
+     *                   {@link GenerationJobSourceClassifier}による<b>分類</b>を指す(issue #1481):
+     *                   {@code AI_JOB}はAI分類のジョブのみ(従来のように非AIジョブを含まない)、
+     *                   {@code SYSTEM_JOB}は非AI分類のジョブのみ、未指定は両方。
+     *                   取得自体は、未指定・AI_JOB・SYSTEM_JOBのいずれでもai-serviceへ1回だけ行い、
+     *                   取得後に分類で絞る。
      * @param bearerToken 呼び出し元の{@code Authorization}ヘッダー(AI_JOBソース取得のため
      *                    ai-serviceへ転送する。GenerationJobClientのJavadoc参照)。
      */
@@ -85,7 +91,7 @@ public class UnifiedOperationLogService {
                     : operationLogRepository.findByUserIdOrderByCreatedAtDesc(viewerUserId, fetchWindow);
             operationLogs.forEach(log -> entries.add(fromOperationLog(log)));
         }
-        if (includeSource(sourceType, "AI_JOB")) {
+        if (GenerationJobSourceClassifier.isJobSourceRequest(sourceType)) {
             // AIジョブはai-serviceへの同期HTTP呼び出しで取得する唯一の外部依存。ここが落ちても
             // DBから取得済みの操作ログ・監査ログは返す(issue #825)。
             //
@@ -98,6 +104,7 @@ public class UnifiedOperationLogService {
             // 作らないため。
             try {
                 generationJobClient.listRecent(bearerToken).stream()
+                        .filter(job -> GenerationJobSourceClassifier.matches(sourceType, job.type()))
                         .filter(job -> !ranged || (!job.createdAt().isBefore(from) && !job.createdAt().isAfter(to)))
                         .limit(SOURCE_FETCH_LIMIT)
                         .forEach(job -> entries.add(fromGenerationJob(job)));
@@ -153,7 +160,7 @@ public class UnifiedOperationLogService {
 
     private UnifiedLogEntryResponse fromGenerationJob(GenerationJobSummary job) {
         return new UnifiedLogEntryResponse(
-                "AI_JOB", job.id(), job.createdAt(), job.type(), null, job.status(), null, null);
+                GenerationJobSourceClassifier.classify(job.type()), job.id(), job.createdAt(), job.type(), null, job.status(), null, null);
     }
 
     private UnifiedLogEntryResponse fromAuditLog(AuditLog auditLog) {

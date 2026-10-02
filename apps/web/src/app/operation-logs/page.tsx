@@ -11,6 +11,7 @@ const PAGE_SIZE = 50;
 const TYPE_LABEL: Record<UnifiedLogSourceType, string> = {
   OPERATION: "操作",
   AI_JOB: "AI",
+  SYSTEM_JOB: "システム",
   AUDIT: "監査",
 };
 
