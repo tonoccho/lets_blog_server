@@ -686,6 +686,62 @@ if len(b)>3000: print("big")'""",
         self.assertIsNotNone(reason, "&> による実ファイルへの書き込みが素通りした")
         self.assertIn("real.txt", reason)
 
+    # ---------------------------------------------------------------- #1524
+    # shlex の punctuation_chars は `;>` `&&>` `|>` を1トークンへ結合する。
+    # 空白ありの `; >x` は検出されるのに、空白なしだと書き込み先が消えていた。
+
+    @staticmethod
+    def _guard():
+        hooks_dir = os.path.dirname(HOOK)
+        if hooks_dir not in sys.path:
+            sys.path.insert(0, hooks_dir)
+        import guard
+        return guard
+
+    GLUED_REDIRECTS = [
+        "echo a;>x",
+        "echo a&&>x",
+        "echo a|>x",
+        "echo a||>x",
+        "echo a;>>x",
+        "echo a;&>x",
+    ]
+
+    def test_separator_glued_to_redirect_is_denied(self):
+        for command in self.GLUED_REDIRECTS:
+            with self.subTest(command=command):
+                reason = self._in_stage(command)
+                self.assertIsNotNone(reason, "空白なしの区切り+リダイレクトが素通り: %s" % command)
+                self.assertIn("x", reason)
+
+    def test_separator_glued_to_devnull_redirect_is_allowed(self):
+        self.assertIsNone(self._in_stage("echo a;>/dev/null"))
+
+    def test_split_commands_separates_glued_separator_and_redirect(self):
+        for command in self.GLUED_REDIRECTS:
+            with self.subTest(command=command):
+                commands = self._guard().split_commands(command)
+                self.assertEqual(
+                    [["echo", "a"]], [argv for argv, _ in commands][:1])
+                self.assertEqual(["x"], [t for _, r in commands for t in r])
+
+    def test_split_commands_keeps_glued_fd_duplication_out_of_targets(self):
+        commands = self._guard().split_commands("echo a;>&2")
+        self.assertEqual([], [t for _, r in commands for t in r])
+
+    def test_explain_shows_target_of_glued_redirect(self):
+        for command in ("echo a;>x", "echo a&&>x", "echo a|>x"):
+            with self.subTest(command=command):
+                proc = subprocess.run(
+                    [sys.executable, HOOK, "explain", command],
+                    capture_output=True, text=True, timeout=60,
+                )
+                self.assertEqual(0, proc.returncode, proc.stderr)
+                self.assertTrue(
+                    any("書き込み" in l and "x" in l for l in proc.stdout.splitlines()),
+                    "x が書き込み先として表示されていない:\n%s" % proc.stdout,
+                )
+
 
 class HeredocAndProcessSubstitution(unittest.TestCase):
     """#1035: ヒアドキュメント本文とプロセス置換の中身を正しく扱う。

@@ -575,6 +575,23 @@ def strip_fd_numbers(command):
 PROCESS_SUBSTITUTION_OPENERS = {"<(", ">("}
 
 
+def split_glued_separator(token):
+    """`;>` `&&>` `|>` のように区切りとリダイレクトが結合したトークンを分ける(#1524)。
+
+    shlex の punctuation_chars は空白なしで連続する句読点を1トークンにするため、
+    `echo a;>x` は `;>` になり、区切りでもリダイレクトでもなく素通りしていた。
+    区切り+リダイレクトの組に分解できるときだけ分け、最長の区切りを優先する
+    (`&&>` は `&&` + `>`)。それ以外のトークンは変えない。
+    """
+    if token in SEPARATORS or token in REDIRECTS:
+        return [token]
+    for cut in range(len(token) - 1, 0, -1):
+        head, tail = token[:cut], token[cut:]
+        if head in SEPARATORS and tail in REDIRECTS:
+            return [head, tail]
+    return [token]
+
+
 def split_commands(command):
     """コマンド文字列を「実行される個々のコマンド」のトークン列へ分解する。
 
@@ -595,7 +612,7 @@ def split_commands(command):
                         posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
-        tokens = list(lexer)
+        tokens = [t for raw in lexer for t in split_glued_separator(raw)]
     except ValueError:
         # 引用符が閉じていない等。解析できないものを「該当なし」と扱うと
         # #1029 と同じ見逃しになるので、呼び出し側で生文字列へフォールバックする。
