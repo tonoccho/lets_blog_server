@@ -37,11 +37,16 @@ export default async function ProjectDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  /** `?tab=members` で初期選択タブを指定できる(ダッシュボードのメンバーウィジェットからの遷移先)。 */
-  searchParams?: Promise<{ tab?: string }>;
+  /**
+   * `?tab=members` で初期選択タブを指定できる(ダッシュボードのメンバーウィジェットからの遷移先)。
+   * `?imageJob=<ジョブID>` を付けると、アセット画像生成パネルがそのジョブの生成結果を開いた状態で
+   * 表示する(処理キューの画像生成ジョブの「結果を見る」の遷移先、issue #1408)。
+   */
+  searchParams?: Promise<{ tab?: string; imageJob?: string }>;
 }) {
   const { id } = await params;
-  const { tab: initialTabId } = (await searchParams) ?? {};
+  const { tab: initialTabId, imageJob } = (await searchParams) ?? {};
+  const imageJobId = Number(imageJob);
   await requireAdminSession();
   const projectId = Number(id);
 
@@ -199,7 +204,10 @@ export default async function ProjectDetailPage({
       content: (
         <div className="space-y-6">
           <ProjectAiModelsPanel projectId={project.id} />
-          <ProjectAssetGenerationPanel projectId={project.id} />
+          <ProjectAssetGenerationPanel
+            projectId={project.id}
+            imageJobId={Number.isInteger(imageJobId) && imageJobId > 0 ? imageJobId : undefined}
+          />
           <ProjectImageGenerationPromptDefaultsForm
             projectId={project.id}
             defaultNegativePrompt={imageSettings.defaultNegativePrompt}

@@ -396,11 +396,19 @@ Then('合計枚数の目安と、枚数によっては長時間かかる旨が�
 });
 
 When(
-  /^batch sizeに「(\d+)」、batch countに「(\d+)」を入力して生成する$/,
-  async ({ page }, batchSize: string, batchCount: string) => {
+  /^batch sizeに「(\d+)」、batch countに「(\d+)」を入力して生成を要求する$/,
+  async ({ ctx, page }, batchSize: string, batchCount: string) => {
     // 上と同じ理由(#1315)で batchSize/batchCount は実行時には number。
     // `Locator.fill()` は string しか受け付けないため文字列化する。
-    await page.getByPlaceholder('生成したい画像の説明').fill('e2e 1103 asset image');
+    // 生成はジョブとして受理され、結果は処理キューに現れる(issue #1408)。ジョブを後から特定できるよう、
+    // プロンプトに要求ごとの印を入れる(並列に走る他のシナリオのジョブと取り違えない)。
+    const prompt = `e2e 1408 asset image ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    ctx.assetJobPrompt = prompt;
+    // パネルはクリックで開いたあとに描画されるため既にハイドレーション済みだが、入力値が
+    // 反映されたことを確かめてから押す(押した時点の state を送るので、空振りは要求が空になる)。
+    const promptInput = page.getByPlaceholder('生成したい画像の説明');
+    await promptInput.fill(prompt);
+    await expect(promptInput).toHaveValue(prompt);
     await panelNumberInput(page, 'batch size(最大16)').fill(String(batchSize));
     await panelNumberInput(page, 'batch count(最大16)').fill(String(batchCount));
     const generate = page.getByRole('button', { name: '生成', exact: true });
@@ -408,6 +416,104 @@ When(
     await generate.click();
   }
 );
+
+/** 処理キューの項目(ジョブIDで特定する)。 */
+function queueItem(page: Page, jobId: number) {
+  return page.locator(`[data-testid="info-rail-queue-item"][data-job-id="${jobId}"]`);
+}
+
+/**
+ * このシナリオのパネルが要求した画像生成ジョブを、管理者の一覧からプロンプトの印で特定する。
+ * 受理後に作られるので、現れるまで短く再試行する。
+ */
+async function findAssetJob(
+  request: APIRequestContext,
+  prompt: string
+): Promise<{ id: number; resultPayload: string | null; status: string }> {
+  const token = await adminToken(request);
+  const headers = { Authorization: `Bearer ${token}` };
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const list = await request.get('/api/generation-jobs', { headers });
+    expect(list.ok(), `ジョブ一覧の取得に失敗しました (status=${list.status()})`).toBe(true);
+    const jobs = (await list.json()) as Array<{ id: number; type: string }>;
+    for (const job of jobs.filter((j) => j.type === 'image_generation')) {
+      const detail = await request.get(`/api/generation-jobs/${job.id}`, { headers });
+      if (!detail.ok()) continue;
+      const body = (await detail.json()) as {
+        id: number;
+        status: string;
+        requestPayload: string | null;
+        resultPayload: string | null;
+      };
+      if (body.requestPayload?.includes(prompt)) {
+        return { id: body.id, resultPayload: body.resultPayload, status: body.status };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`印(${prompt})を持つ画像生成ジョブが見つかりません`);
+}
+
+Then('生成の要求を受け付けた旨が示され、生成ボタンは押せる状態のままである', async ({ page }) => {
+  await expect(page.getByText(/生成を要求しました。処理キューに追加されました/)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole('button', { name: '生成', exact: true })).toBeEnabled();
+  // 完了を待たないので、結果のグリッドはまだ(この画面では)出ない。
+  await expect(page.getByTestId('generated-image-grid')).toHaveCount(0);
+});
+
+Then('処理キューにその画像生成のジョブが現れる', async ({ ctx, page, request }) => {
+  const job = await findAssetJob(request, ctx.assetJobPrompt as string);
+  ctx.assetJobId = job.id;
+  await expect(queueItem(page, job.id)).toBeVisible({ timeout: 30_000 });
+  await expect(queueItem(page, job.id)).toContainText('画像生成');
+});
+
+When('ダッシュボードへ移動してから、そのプロジェクトの管理画面へ戻る', async ({ ctx, page }) => {
+  // 「ジョブの実行中に」移動するのが条件なので、まず要求が受理された(ジョブが作られた)ことを待つ。
+  // 生成ボタンを押した直後に移動すると、送信中の Server Action がブラウザに中断され、ジョブが
+  // 作られる前に要求ごと失われる(受理前の離脱であって、このシナリオが確かめる「受理後の離脱」ではない)。
+  await expect(page.getByText(/生成を要求しました。処理キューに追加されました/)).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.goto('/', { waitUntil: 'commit' });
+  await page.goto(`/projects/${ctx.mediaProjectId}`, { waitUntil: 'commit' });
+});
+
+Given('そのプロジェクトに、別の要求で生成された画像が1枚ある', async ({ ctx, request }) => {
+  ctx.assetOtherImageId = await createGeneratedImage(request, {
+    prompt: 'e2e 1408 another request',
+    provider: 'CHATGPT',
+    projectId: ctx.mediaProjectId,
+  });
+});
+
+When('処理キューのその画像生成のジョブが完了するまで待つ', async ({ ctx, page, request }) => {
+  const job = await findAssetJob(request, ctx.assetJobPrompt as string);
+  ctx.assetJobId = job.id;
+  await expect(queueItem(page, job.id)).toContainText('完了', { timeout: 180_000 });
+});
+
+When('処理キューのその画像生成のジョブの「結果を見る」を押す', async ({ ctx, page }) => {
+  await queueItem(page, ctx.assetJobId as number)
+    .getByRole('link', { name: '結果を見る' })
+    .click();
+});
+
+Then('生成結果に別の要求で生成された画像は含まれない', async ({ ctx, page, request }) => {
+  const job = await findAssetJob(request, ctx.assetJobPrompt as string);
+  const expected = (JSON.parse(job.resultPayload ?? '{}') as { imageIds?: number[] }).imageIds ?? [];
+  expect(expected.length, `ジョブの結果に画像がありません: ${job.resultPayload}`).toBeGreaterThan(0);
+  const srcs = await page
+    .getByTestId('generated-image-grid')
+    .locator('img')
+    .evaluateAll((imgs) => imgs.map((img) => (img as HTMLImageElement).getAttribute('src') ?? ''));
+  const shown = srcs.map((src) => Number(/\/image-gallery\/(\d+)\/file/.exec(src)?.[1])).sort((x, y) => x - y);
+  expect(shown).toEqual([...expected].sort((x, y) => x - y));
+  expect(shown).not.toContain(ctx.assetOtherImageId as number);
+});
 
 When('batch sizeの入力を全消去する', async ({ page }) => {
   await panelNumberInput(page, 'batch size(最大16)').fill('');
@@ -433,7 +539,9 @@ Then('生成結果の1枚を選んでアセットとして追加できる', asyn
 
 Then('生成ボタンは押せる状態のままで、サーバーからの応答が表示される', async ({ page }) => {
   // フォームが要求を止めていれば、サーバーの応答は出ずボタンも押せないままになる。
-  // ChatGPT スタブは1回に10枚までなので、16枚の要求はサーバー側で拒否されるのが正しい。
+  // ChatGPT は1回に10枚までなので、batch size 16 はジョブを作る前の受理検証(400)で断られ、
+  // その理由(画像生成AI名を含む)がパネルに出る。非同期経路でも、枚数の拒否だけは受理前に
+  // 同期で返る(失敗がジョブの中で起きるのは生成が始まってから)。
   await expect(page.getByText(/CHATGPT/)).toBeVisible({ timeout: 180_000 });
   await expect(page.getByRole('button', { name: '生成', exact: true })).toBeEnabled();
 });

@@ -9,6 +9,7 @@ import { fetchQueueJobsAction } from "./infoRailActions";
 import {
   CHECKPOINT_DOWNLOAD_JOB_TYPE,
   GARBAGE_COLLECTION_JOB_TYPE,
+  IMAGE_GENERATION_JOB_TYPE,
   isActiveJobStatus,
   type QueueJob,
 } from "./infoRailQueue";
@@ -27,6 +28,7 @@ type QueueState =
 const TYPE_LABEL_KEYS: Record<string, string> = {
   [CHECKPOINT_DOWNLOAD_JOB_TYPE]: "queueTypeCheckpointDownload",
   [GARBAGE_COLLECTION_JOB_TYPE]: "queueTypeGarbageCollection",
+  [IMAGE_GENERATION_JOB_TYPE]: "queueTypeImageGeneration",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

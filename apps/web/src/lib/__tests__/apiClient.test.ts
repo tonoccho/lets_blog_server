@@ -23,6 +23,7 @@ jest.mock('next-auth/jwt', () => ({ getToken: (...args: unknown[]) => getTokenMo
 
 import {
   getGeneratedImage,
+  startProjectImageJob,
   getSiteAdminPath,
   listGeneratedImages,
   getSetupStatus,
@@ -578,5 +579,20 @@ describe('getSiteAdminPath', () => {
 
     expect(res).toEqual({ path: 'wp-admin' })
     expect(calls()[0][0]).toContain('/api/system-settings/site-admin-path')
+  })
+})
+
+describe('startProjectImageJob (issue #1408)', () => {
+  it('POST /api/ai/image/jobs へ要求を JSON で送り、受理されたジョブを返す', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 12, type: 'image_generation', status: 'running' }, 202))
+
+    const job = await startProjectImageJob({ prompt: 'cat', projectId: 7, batchSize: 2 })
+
+    expect(job).toEqual({ id: 12, type: 'image_generation', status: 'running' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/ai/image/jobs')
+    expect(url).not.toMatch(/\/api\/ai\/image(\?|$)/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ prompt: 'cat', projectId: 7, batchSize: 2 })
   })
 })

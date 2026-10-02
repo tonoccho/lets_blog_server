@@ -7,10 +7,12 @@ jest.mock('@/lib/session', () => ({
 const mockList = jest.fn()
 const mockListJobs = jest.fn()
 const mockGetJob = jest.fn()
+const mockGetImage = jest.fn()
 jest.mock('@/lib/apiClient', () => ({
   listUnifiedOperationLogs: (...args: unknown[]) => mockList(...args),
   listGenerationJobs: () => mockListJobs(),
   getGenerationJob: (...args: unknown[]) => mockGetJob(...args),
+  getGeneratedImage: (...args: unknown[]) => mockGetImage(...args),
 }))
 
 import { fetchQueueJobsAction, fetchRecentOperationLogsAction } from '../infoRailActions'
@@ -99,10 +101,49 @@ describe('fetchQueueJobsAction (#1407)', () => {
     mockListJobs.mockResolvedValue([
       job(1, 'media_garbage_collection_delete', 'running'),
       job(2, 'media_garbage_collection_delete', 'failed'),
-      job(3, 'image_generation', 'done'),
+      job(3, 'something_else', 'done'),
+      job(4, 'image_generation', 'running'),
+      job(5, 'image_generation', 'failed'),
     ])
     const result = await fetchQueueJobsAction()
-    expect(result.jobs.map((j) => j.resultHref)).toEqual([null, null, null])
+    expect(result.jobs.map((j) => j.resultHref)).toEqual([null, null, null, null, null])
     expect(mockGetJob).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchQueueJobsAction image generation (#1408)', () => {
+  beforeEach(() => {
+    mockListJobs.mockResolvedValue([job(9, 'image_generation', 'done')])
+    mockGetJob.mockResolvedValue({ resultPayload: '{"imageIds":[31,32]}' })
+    mockGetImage.mockResolvedValue({ id: 31, projectId: 7 })
+  })
+
+  it('links a done image generation to the result screen of the project that owns its images', async () => {
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(9)
+    expect(mockGetImage).toHaveBeenCalledWith(31)
+    expect(result.jobs[0].resultHref).toBe('/projects/7?tab=ai-models&imageJob=9')
+  })
+
+  it('gives no link when the job produced no images', async () => {
+    mockGetJob.mockResolvedValue({ resultPayload: '{"imageIds":[]}' })
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+    expect(mockGetImage).not.toHaveBeenCalled()
+  })
+
+  it('gives no link when the image has no project', async () => {
+    mockGetImage.mockResolvedValue({ id: 31, projectId: null })
+    expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives no link when the job detail cannot be read', async () => {
+    mockGetJob.mockRejectedValue(new Error('404'))
+    expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives no link when the image can no longer be read (deleted)', async () => {
+    mockGetImage.mockRejectedValue(new Error('404'))
+    expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
   })
 })

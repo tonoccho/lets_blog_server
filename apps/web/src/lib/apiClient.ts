@@ -530,21 +530,13 @@ export interface AiImageGenerationParams {
   projectId?: number;
 }
 
-export interface AiImageResult {
-  id: number;
-  fileName: string;
-  dataBase64: string;
-  mimeType: string;
-}
-
-export interface AiImageBatchResult {
-  images: AiImageResult[];
-}
-
-export function generateProjectImages(
-  params: AiImageGenerationParams
-): Promise<AiImageBatchResult> {
-  return apiFetch<AiImageBatchResult>('/api/ai/image', {
+/**
+ * 画像生成を非同期のジョブとして要求する(`POST /api/ai/image/jobs`、issue #1405/#1408)。
+ * 生成の完了を待たずに受理されたジョブ(id・状態)が返り、結果は処理キューと
+ * `GET /api/generation-jobs/{id}` の `resultPayload.imageIds` で引く。
+ */
+export function startProjectImageJob(params: AiImageGenerationParams): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>('/api/ai/image/jobs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

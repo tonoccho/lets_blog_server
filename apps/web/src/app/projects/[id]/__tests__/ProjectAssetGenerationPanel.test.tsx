@@ -6,7 +6,8 @@ jest.mock('../actions', () => ({
   fetchGeneratedImagesAction: jest.fn(),
   fetchImageGenerationOptionsAction: jest.fn(),
   generateImagePromptAction: jest.fn(),
-  generateProjectImagesAction: jest.fn(),
+  requestProjectImageJobAction: jest.fn(),
+  fetchImageJobResultAction: jest.fn(),
   uploadProjectAssetImageAction: jest.fn(),
 }))
 
@@ -286,24 +287,6 @@ describe('ProjectAssetGenerationPanel batch size / batch count (issue #1103)', (
     ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
   })
 
-  // 1920×1080のPNGはbase64で1MBを超えることも珍しくない。4バイトのダミーではReactも
-  // DOMも文字列長の影響を一切受けず、「256枚でも破綻しない」という受入基準を何も検証しない
-  // ことになる(issue #1103 のレビュー指摘)。jsdomで 256×1MB は現実的でないため、1枚あたり
-  // base64 40,960文字(≒40KB、元データ約30KB)に抑えた上で、256枚ぶんのdata URIが同時に
-  // React stateとDOMへ載る状態を作る。
-  const DUMMY_BASE64_LENGTH = 40 * 1024
-  const DUMMY_BASE64_BODY = 'A'.repeat(DUMMY_BASE64_LENGTH - 4)
-
-  function generatedImage(id: number) {
-    // 末尾4文字を画像ごとに変え、同一文字列の共有で長さの影響が消えないようにする。
-    return {
-      id,
-      fileName: `image-${id}.png`,
-      dataBase64: `${DUMMY_BASE64_BODY}${id.toString(36).padStart(4, 'A')}`,
-      mimeType: 'image/png',
-    }
-  }
-
   function fillPrompt(value = 'a cute cat') {
     fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value } })
   }
@@ -350,9 +333,7 @@ describe('ProjectAssetGenerationPanel batch size / batch count (issue #1103)', (
   })
 
   it('batch size 2・batch count 3で生成するとリクエストにbatchSize 2とbatchCount 3が含まれる', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({
-      images: [1, 2, 3, 4, 5, 6].map(generatedImage),
-    })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: 'running' })
     await openPanel()
     fillPrompt()
     fireEvent.change(batchSizeInput(), { target: { value: '2' } })
@@ -361,90 +342,64 @@ describe('ProjectAssetGenerationPanel batch size / batch count (issue #1103)', (
     fireEvent.click(screen.getByText('生成'))
 
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ batchSize: 2, batchCount: 3 })
       )
     })
-    await waitFor(() => {
-      expect(screen.getAllByRole('img')).toHaveLength(6)
-    })
   })
 
-  it('生成した6枚から1枚を選んでアセットとして追加できる', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({
-      images: [1, 2, 3, 4, 5, 6].map(generatedImage),
-    })
-    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({
-      logs: [{ environment: 'local', status: 'SUCCESS' }],
-    })
+  it('生成を要求するとジョブの完了を待たずにパネルが開放され、結果は処理キューで確認する旨を示す', async () => {
+    // 受理後の応答を待たせない。実行中のジョブを表す mock は不要で、受理(jobId)を返すだけでよい。
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: 'running' })
     await openPanel()
     fillPrompt()
-    fireEvent.change(batchSizeInput(), { target: { value: '2' } })
-    fireEvent.change(batchCountInput(), { target: { value: '3' } })
-    fireEvent.click(screen.getByText('生成'))
-
-    await waitFor(() => expect(screen.getByAltText('image-4.png')).toBeInTheDocument())
-    fireEvent.click(screen.getByAltText('image-4.png'))
-    fireEvent.click(screen.getByText('アセットとして追加(全環境へアップロード)'))
-
-    await waitFor(() => {
-      expect(actions.uploadProjectAssetImageAction).toHaveBeenCalledWith(1, 4)
-      expect(screen.getByText('全1環境へアップロードしました。')).toBeInTheDocument()
-    })
-  })
-
-  it('batch countを1のままにすると従来どおりbatch size枚だけが表示される', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({
-      images: [1, 2].map(generatedImage),
-    })
-    await openPanel()
-    fillPrompt()
-    fireEvent.change(batchSizeInput(), { target: { value: '2' } })
 
     fireEvent.click(screen.getByText('生成'))
 
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
-        1,
-        expect.objectContaining({ batchSize: 2, batchCount: 1 })
-      )
+      expect(screen.getByText(/生成を要求しました。処理キューに追加されました/)).toBeInTheDocument()
     })
-    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
+    expect(screen.getByText(/「結果を見る」から画像を確認できます/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成' })).toBeEnabled()
+    expect(screen.queryByText(/を生成しています/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('generated-image-grid')).not.toBeInTheDocument()
+    expect(actions.fetchImageJobResultAction).not.toHaveBeenCalled()
   })
 
-  it('生成中は要求した総枚数と長時間になりうる旨を表示する', async () => {
-    let resolveGeneration!: (value: { images: ReturnType<typeof generatedImage>[] }) => void
-    ;(actions.generateProjectImagesAction as jest.Mock).mockReturnValue(
+  it('受理の応答を待っている間も生成ボタンは「生成」のままで、押した直後にメッセージを消す', async () => {
+    let resolveAccept!: (value: { jobId: number; status: string }) => void
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockReturnValue(
       new Promise((resolve) => {
-        resolveGeneration = resolve
+        resolveAccept = resolve
       })
     )
     await openPanel()
     fillPrompt()
-    fireEvent.change(batchSizeInput(), { target: { value: '2' } })
-    fireEvent.change(batchCountInput(), { target: { value: '3' } })
+    fireEvent.click(screen.getByText('生成'))
+
+    expect(screen.queryByText('生成しています…')).not.toBeInTheDocument()
+    await act(async () => {
+      resolveAccept({ jobId: 5, status: 'running' })
+    })
+    expect(screen.getByRole('button', { name: '生成' })).toBeEnabled()
+  })
+
+  it('受理の時点で failed(待ち行列が満杯)ならエラーとして示し、処理キューの案内は出さない', async () => {
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: 'failed' })
+    await openPanel()
+    fillPrompt()
 
     fireEvent.click(screen.getByText('生成'))
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/合計6枚を生成しています。枚数によっては非常に長い時間がかかります/)
-      ).toBeInTheDocument()
+      expect(screen.getByText(/待ち行列が満杯です/)).toBeInTheDocument()
     })
-
-    // docs/ACCESSIBILITY.md のライブリージョンの例にそろえ、差分ではなく文面全体を読ませる。
-    const notice = screen.getByText(/合計6枚を生成しています/)
-    expect(notice).toHaveAttribute('aria-live', 'polite')
-    expect(notice).toHaveAttribute('aria-atomic', 'true')
-
-    await act(async () => {
-      resolveGeneration({ images: [] })
-    })
+    expect(screen.queryByText(/生成を要求しました/)).not.toBeInTheDocument()
   })
 
   it('batch size 16 × batch count 16でもフォームにブロックされず生成要求が送られる', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images: [] })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: 'running' })
     await openPanel()
     fillPrompt()
     fireEvent.change(batchSizeInput(), { target: { value: '16' } })
@@ -455,38 +410,129 @@ describe('ProjectAssetGenerationPanel batch size / batch count (issue #1103)', (
     fireEvent.click(generateButton)
 
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ batchSize: 16, batchCount: 16 })
       )
     })
   })
+})
 
-  it('256枚が返ってもすべて表示され、スクロールできるグリッドで任意の1枚を選択できる', async () => {
-    const images = Array.from({ length: 256 }, (_, index) => generatedImage(index + 1))
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images })
-    await openPanel()
-    fillPrompt()
-    fireEvent.change(batchSizeInput(), { target: { value: '16' } })
-    fireEvent.change(batchCountInput(), { target: { value: '16' } })
+describe('ProjectAssetGenerationPanel ジョブの生成結果の確認 (issue #1408)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
+    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
+  })
 
-    fireEvent.click(screen.getByText('生成'))
+  const IMAGES = [1, 2, 3, 4, 5, 6].map((id) => ({ id }))
+
+  async function openWithJob() {
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
+    await waitFor(() => expect(screen.getByTestId('generated-image-grid')).toBeInTheDocument())
+  }
+
+  it('imageJobId があるとパネルを開いた状態で、そのジョブの画像だけを表示する', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: IMAGES })
+    await openWithJob()
+
+    expect(actions.fetchImageJobResultAction).toHaveBeenCalledWith(9)
+    expect(screen.getByText('チャットでプロンプトを作成')).toBeInTheDocument()
+    const imgs = within(screen.getByTestId('generated-image-grid')).getAllByRole('img')
+    expect(imgs).toHaveLength(6)
+    expect(imgs[0]).toHaveAttribute('src', '/image-gallery/1/file')
+    expect(imgs[0]).toHaveAttribute('loading', 'lazy')
+    expect(screen.getByText(/ジョブ #9 が生成した6枚から/)).toBeInTheDocument()
+    expect(actions.fetchGeneratedImagesAction).not.toHaveBeenCalled()
+  })
+
+  it('選択肢の取得はパネルを手で開いたときと同じく一度だけ行う', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: IMAGES })
+    await openWithJob()
+    expect(actions.fetchImageGenerationOptionsAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('表示された6枚から1枚を選んでアセットとして追加できる', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: IMAGES })
+    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({
+      logs: [{ environment: 'local', status: 'SUCCESS' }],
+    })
+    await openWithJob()
+
+    const target = screen.getByAltText('生成画像 4').closest('button') as HTMLElement
+    expect(target).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(target)
+    expect(target).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByText('アセットとして追加(全環境へアップロード)'))
+
+    await waitFor(() => {
+      expect(actions.uploadProjectAssetImageAction).toHaveBeenCalledWith(1, 4)
+      expect(screen.getByText('全1環境へアップロードしました。')).toBeInTheDocument()
+    })
+  })
+
+  it('最大256枚が返ってもすべて表示され、スクロールできるグリッドで任意の1枚を選択できる', async () => {
+    const images = Array.from({ length: 256 }, (_, index) => ({ id: index + 1 }))
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images })
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
 
     await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(256))
     const grid = screen.getByTestId('generated-image-grid')
     expect(grid.className).toMatch(/overflow-y-auto/)
     expect(grid.className).toMatch(/max-h-/)
-
-    const rendered = screen.getAllByRole('img')
-    // 画面外のサムネイルはブラウザ側でデコードを遅らせる。実ブラウザでの描画コスト緩和。
-    expect(rendered.filter((img) => img.getAttribute('loading') === 'lazy')).toHaveLength(256)
-    // ダミーが実サイズ相当の長さのままDOMへ載っていることを確かめる(4バイトでは何も測れない)。
-    expect(rendered[0].getAttribute('src')?.length ?? 0).toBeGreaterThan(DUMMY_BASE64_LENGTH)
-
-    const target = screen.getByAltText('image-200.png').closest('button') as HTMLElement
-    expect(target).toHaveAttribute('aria-pressed', 'false')
+    const target = screen.getByAltText('生成画像 200').closest('button') as HTMLElement
     fireEvent.click(target)
     expect(target).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('画像を選ぶまでアップロードボタンは押せない', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: IMAGES })
+    await openWithJob()
+    expect(screen.getByText('アセットとして追加(全環境へアップロード)')).toBeDisabled()
+  })
+
+  it('結果の取得に失敗したらエラーを表示し、結果グリッドは出さない', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ error: 'ジョブが見つかりません' })
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
+
+    await waitFor(() => expect(screen.getByText('ジョブが見つかりません')).toBeInTheDocument())
+    expect(screen.queryByTestId('generated-image-grid')).not.toBeInTheDocument()
+  })
+
+  it('ジョブが画像を1枚も生成していなければ、その旨を示す', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: [] })
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
+
+    await waitFor(() => expect(screen.getByText('このジョブが生成した画像はありません。')).toBeInTheDocument())
+    expect(screen.queryByTestId('generated-image-grid')).not.toBeInTheDocument()
+  })
+
+  it('結果の取得を待つ間にパネルが外れたら、届いた結果を反映しない', async () => {
+    let resolveResult!: (value: { images: { id: number }[] }) => void
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockReturnValue(
+      new Promise((resolve) => {
+        resolveResult = resolve
+      })
+    )
+    const { unmount } = render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
+    unmount()
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined)
+    await act(async () => {
+      resolveResult({ images: IMAGES })
+    })
+    expect(errorSpy).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('結果が画像の配列を持たない応答でも、画像なしとして扱う', async () => {
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({})
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
+    await waitFor(() => expect(screen.getByText('このジョブが生成した画像はありません。')).toBeInTheDocument())
+  })
+
+  it('imageJobId が無ければ結果を取得しない', async () => {
+    await openPanel()
+    expect(actions.fetchImageJobResultAction).not.toHaveBeenCalled()
   })
 })
 
@@ -495,7 +541,7 @@ describe('ProjectAssetGenerationPanel 数値入力を空にしたとき (issue #
     jest.clearAllMocks()
     ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue({ ...OPTIONS, loras: ['my-lora'] })
     ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images: [] })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: "running" })
   })
 
   const FIELDS: Array<[string, string]> = [
@@ -530,7 +576,7 @@ describe('ProjectAssetGenerationPanel 数値入力を空にしたとき (issue #
     }
     fireEvent.click(screen.getByText('生成'))
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({
           steps: 20,
@@ -556,7 +602,7 @@ describe('ProjectAssetGenerationPanel 数値入力を空にしたとき (issue #
     fireEvent.change(screen.getByLabelText('height'), { target: { value: '' } })
     fireEvent.click(screen.getByText('生成'))
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ width: 640, height: 480 })
       )
@@ -570,7 +616,7 @@ describe('ProjectAssetGenerationPanel 数値入力を空にしたとき (issue #
     fireEvent.change(screen.getByLabelText('LoRA weight'), { target: { value: '' } })
     fireEvent.click(screen.getByText('生成'))
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ loraName: 'my-lora', loraWeight: 1 })
       )
@@ -677,12 +723,12 @@ describe('ProjectAssetGenerationPanel パラメータ選択肢の読み込み', 
     })
     await openPanel()
     fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'a cat' } })
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images: [] })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: "running" })
 
     fireEvent.click(screen.getByText('生成'))
 
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ samplerName: 'euler', scheduler: 'normal', checkpoint: undefined })
       )
@@ -703,11 +749,11 @@ describe('ProjectAssetGenerationPanel パラメータ選択肢の読み込み', 
     expect(screen.getByPlaceholderText('ugly')).toBeInTheDocument()
     expect(screen.getByText(/この設定で合計4枚/)).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'a cat' } })
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images: [] })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: "running" })
     fireEvent.click(screen.getByText('生成'))
 
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ width: 512, height: 768 })
       )
@@ -718,6 +764,7 @@ describe('ProjectAssetGenerationPanel パラメータ選択肢の読み込み', 
 describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
     ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
     ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
   })
@@ -730,11 +777,11 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
     await waitFor(() => {
       expect(screen.getByText('promptを入力してください。')).toBeInTheDocument()
     })
-    expect(actions.generateProjectImagesAction).not.toHaveBeenCalled()
+    expect(actions.requestProjectImageJobAction).not.toHaveBeenCalled()
   })
 
   it('生成に失敗するとエラーメッセージを表示する', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ error: 'ComfyUIに接続できません' })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ error: 'ComfyUIに接続できません' })
     await openPanel()
     fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'a cat' } })
 
@@ -742,21 +789,6 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
 
     await waitFor(() => {
       expect(screen.getByText('ComfyUIに接続できません')).toBeInTheDocument()
-    })
-    expect(screen.queryByTestId('generated-image-grid')).not.toBeInTheDocument()
-  })
-
-  it('生成が画像を返さなかった場合は結果グリッドを表示しない', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({})
-    await openPanel()
-    fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'a cat' } })
-
-    fireEvent.click(screen.getByText('生成'))
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('生成しました。アセットとして追加する画像を選択してください。')
-      ).toBeInTheDocument()
     })
     expect(screen.queryByTestId('generated-image-grid')).not.toBeInTheDocument()
   })
@@ -769,7 +801,7 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
         ),
       },
     })
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({ images: [] })
+    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: "running" })
     await openPanel()
 
     fireEvent.click(screen.getByText('クリップボードから作成'))
@@ -779,7 +811,7 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
     fireEvent.click(screen.getByText('生成'))
 
     await waitFor(() => {
-      expect(actions.generateProjectImagesAction).toHaveBeenCalledWith(1, {
+      expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(1, {
         prompt: 'a cat',
         negativePrompt: undefined,
         steps: 20,
@@ -812,16 +844,12 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
   })
 
   it('アップロードがエラーを返した場合はそのエラーを表示する', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({
-      images: [{ id: 7, fileName: 'image-7.png', dataBase64: 'AAAA', mimeType: 'image/png' }],
-    })
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: [{ id: 7 }] })
     ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({ error: '認可されていません' })
-    await openPanel()
-    fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'a cat' } })
-    fireEvent.click(screen.getByText('生成'))
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
 
-    await waitFor(() => expect(screen.getByAltText('image-7.png')).toBeInTheDocument())
-    fireEvent.click(screen.getByAltText('image-7.png'))
+    await waitFor(() => expect(screen.getByAltText('生成画像 7')).toBeInTheDocument())
+    fireEvent.click(screen.getByAltText('生成画像 7'))
     fireEvent.click(screen.getByText('アセットとして追加(全環境へアップロード)'))
 
     await waitFor(() => {
@@ -830,16 +858,12 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
   })
 
   it('アップロードの結果にログが無ければ全0環境として扱う', async () => {
-    ;(actions.generateProjectImagesAction as jest.Mock).mockResolvedValue({
-      images: [{ id: 8, fileName: 'image-8.png', dataBase64: 'AAAA', mimeType: 'image/png' }],
-    })
+    ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: [{ id: 8 }] })
     ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({})
-    await openPanel()
-    fireEvent.change(screen.getByPlaceholderText('生成したい画像の説明'), { target: { value: 'a cat' } })
-    fireEvent.click(screen.getByText('生成'))
+    render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
 
-    await waitFor(() => expect(screen.getByAltText('image-8.png')).toBeInTheDocument())
-    fireEvent.click(screen.getByAltText('image-8.png'))
+    await waitFor(() => expect(screen.getByAltText('生成画像 8')).toBeInTheDocument())
+    fireEvent.click(screen.getByAltText('生成画像 8'))
     fireEvent.click(screen.getByText('アセットとして追加(全環境へアップロード)'))
 
     await waitFor(() => {

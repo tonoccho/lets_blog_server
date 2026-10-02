@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AiImageGenerationParams,
-  AiImageResult,
   GeneratedImageSummary,
   ImageGenerationOptionsResponse,
   PlanChatMessage,
@@ -11,8 +10,9 @@ import type {
 import {
   fetchGeneratedImagesAction,
   fetchImageGenerationOptionsAction,
+  fetchImageJobResultAction,
   generateImagePromptAction,
-  generateProjectImagesAction,
+  requestProjectImageJobAction,
   uploadProjectAssetImageAction,
 } from "./actions";
 
@@ -60,9 +60,21 @@ function toNumberOrEmpty(value: string): number | "" {
  * 1回の要求で生成する枚数は batch size × batch count(issue #1103)。どちらも上限は16で、
  * 掛け算の合計には上限が無い(#1102 の決定)。合計を止めない代わりに、利用者が枚数を
  * 自分で判断できるよう、合計枚数と所要時間の目安をフォームに示す。
+ *
+ * 生成は非同期のジョブとして要求する(issue #1408)。受理された時点でパネルは開放され、ジョブは
+ * 情報表示レールの処理キューに現れる。完了後は、処理キューの「結果を見る」が
+ * `?imageJob=<ジョブID>` 付きでこのパネルへ導き(`imageJobId`)、そのジョブが生成した画像だけを
+ * 表示する。画像の選択とアセットとしてのアップロードは従来どおり。ページを離れても、生成結果の
+ * 表示先はジョブ(サーバー側)に残る。
  */
-export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }) {
-  const [open, setOpen] = useState(false);
+export function ProjectAssetGenerationPanel({
+  projectId,
+  imageJobId,
+}: {
+  projectId: number;
+  imageJobId?: number;
+}) {
+  const [open, setOpen] = useState(imageJobId !== undefined);
   const [options, setOptions] = useState<ImageGenerationOptionsResponse | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
 
@@ -82,10 +94,8 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
   const [loraName, setLoraName] = useState("");
   const [loraWeight, setLoraWeight] = useState<number | "">(1.0);
 
-  const [generating, setGenerating] = useState(false);
-  // 生成中に表示する「要求した」総枚数。生成中に入力を変えても要求時の枚数を出し続ける。
-  const [requestedTotal, setRequestedTotal] = useState(0);
-  const [images, setImages] = useState<AiImageResult[] | null>(null);
+  // 表示中のジョブが生成した画像(ID のみ。画像本体は /image-gallery/{id}/file から読む)。
+  const [images, setImages] = useState<{ id: number }[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
@@ -124,6 +134,28 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
     }
   }
 
+  // 処理キューの「結果を見る」から来たとき、パネルを開き、そのジョブが生成した画像を取得する。
+  useEffect(() => {
+    if (imageJobId === undefined) return;
+    let cancelled = false;
+    // 選択肢の取得(setLoadingOptions)を伴う。パネルを手で開いたときと同じ経路を使う。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void handleOpen();
+    fetchImageJobResultAction(imageJobId).then((result) => {
+      if (cancelled) return;
+      if (result.error) {
+        setMessage({ type: "error", text: result.error });
+        return;
+      }
+      setImages(result.images ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // handleOpen は毎回作り直される関数。ジョブが変わったときだけ取得し直す。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageJobId]);
+
   const effectiveBatchSize = batchSize === "" ? DEFAULTS.batchSize : batchSize;
   const effectiveBatchCount = batchCount === "" ? DEFAULTS.batchCount : batchCount;
 
@@ -132,12 +164,8 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       setMessage({ type: "error", text: "promptを入力してください。" });
       return;
     }
-    setGenerating(true);
-    setRequestedTotal(effectiveBatchSize * effectiveBatchCount);
     setMessage(null);
-    setImages(null);
-    setSelectedId(null);
-    const result = await generateProjectImagesAction(projectId, {
+    const result = await requestProjectImageJobAction(projectId, {
       prompt,
       negativePrompt: negativePrompt || undefined,
       steps: steps === "" ? DEFAULTS.steps : steps,
@@ -153,13 +181,19 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
       loraName: loraName || undefined,
       loraWeight: loraName ? (loraWeight === "" ? DEFAULTS.loraWeight : loraWeight) : undefined,
     });
-    setGenerating(false);
     if (result.error) {
       setMessage({ type: "error", text: result.error });
       return;
     }
-    setImages(result.images ?? []);
-    setMessage({ type: "success", text: "生成しました。アセットとして追加する画像を選択してください。" });
+    if (result.status === "failed") {
+      // 実行枠と待ち行列が満杯のとき、ジョブは作られた上で failed として返る。
+      setMessage({ type: "error", text: "画像生成の待ち行列が満杯です。しばらくしてからもう一度要求してください。" });
+      return;
+    }
+    setMessage({
+      type: "success",
+      text: "生成を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から画像を確認できます。",
+    });
   }
 
   /**
@@ -633,10 +667,9 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={generating}
-              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              className="w-fit rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
-              {generating ? "生成しています…" : "生成"}
+              生成
             </button>
             <button
               type="button"
@@ -646,22 +679,17 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
               クリップボードから作成
             </button>
           </div>
-          {generating && (
-            <p
-              aria-live="polite"
-              aria-atomic="true"
-              className="text-sm text-neutral-600 dark:text-neutral-300"
-            >
-              合計{requestedTotal}枚を生成しています。枚数によっては非常に長い時間がかかります。完了するまでこのページを離れないでください。
-            </p>
-          )}
         </div>
+      )}
+
+      {images && images.length === 0 && (
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">このジョブが生成した画像はありません。</p>
       )}
 
       {images && images.length > 0 && (
         <div className="space-y-3">
           <p className="text-sm text-neutral-600 dark:text-neutral-300">
-            生成された{images.length}枚から、アセットにする1枚を選んでください。
+            ジョブ #{imageJobId} が生成した{images.length}枚から、アセットにする1枚を選んでください。
           </p>
           {/*
             最大256枚(batch size 16 × batch count 16)が並びうるため、高さを固定して
@@ -679,19 +707,11 @@ export function ProjectAssetGenerationPanel({ projectId }: { projectId: number }
                 onClick={() => setSelectedId(img.id)}
                 className={`rounded border-2 p-1 ${selectedId === img.id ? "border-blue-600" : "border-transparent"}`}
               >
-                {/*
-                  data URIをそのままDOMに置くため、最大256枚ぶんのbase64(1920×1080なら
-                  1枚1MBを超えうる)が同時に載る。loading="lazy"で画面外のサムネイルの
-                  デコード・描画をブラウザに遅らせ、実コストを下げる。
-                  残存リスク: 実ブラウザ・実サイズ256枚での描画コストは未検証。ChatGPT
-                  スタブがnを10でクランプするため受入テストは生成開始前に止まり、目視
-                  確認は #1097(e2eアカウントのKeycloak認証)でブロックされている。jest側
-                  では1枚40KB相当×256枚でReactとDOMが壊れないことまでを確認している。
-                */}
+                {/* 最大256枚が並びうるので、画面外のサムネイルはブラウザに遅延読み込みさせる。 */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`data:${img.mimeType};base64,${img.dataBase64}`}
-                  alt={img.fileName}
+                  src={`/image-gallery/${img.id}/file`}
+                  alt={`生成画像 ${img.id}`}
                   loading="lazy"
                   className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
                 />

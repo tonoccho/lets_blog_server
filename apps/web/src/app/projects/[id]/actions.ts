@@ -71,7 +71,7 @@ import {
   deleteMediaGarbage,
   getGenerationJob,
   getImageGenerationOptions,
-  generateProjectImages,
+  startProjectImageJob,
   generateImagePromptFromChat,
   uploadProjectAssetImage,
   listGeneratedImages,
@@ -82,7 +82,6 @@ import {
   PostStatusOption,
   ImageGenerationOptionsResponse,
   AiImageGenerationParams,
-  AiImageResult,
   PlanChatMessage,
   PostComparisonPage,
   PostType,
@@ -105,6 +104,7 @@ import {
   MediaGarbageCollectionScanResponse,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
+import { readImageIds } from "@/app/infoRailQueue";
 
 export interface EnvironmentActionState {
   error?: string;
@@ -1122,15 +1122,41 @@ export async function fetchImageGenerationOptionsAction(projectId: number): Prom
   return getImageGenerationOptions(projectId);
 }
 
-export async function generateProjectImagesAction(
+/**
+ * アセット画像生成を非同期ジョブとして要求する(issue #1408)。生成の完了は待たず、受理された
+ * ジョブのIDと状態を返す。以前の同期経路(`POST /api/ai/image`)は、応答が3層のタイムアウトの
+ * 鎖に当たると失われ、ページを離れると結果の表示先も消えた。
+ */
+export async function requestProjectImageJobAction(
   projectId: number,
   params: Omit<AiImageGenerationParams, "projectId">
-): Promise<{ images?: AiImageResult[]; error?: string }> {
+): Promise<{ jobId?: number; status?: string; error?: string }> {
   await requireAdminSession();
 
   try {
-    const result = await generateProjectImages({ ...params, projectId });
-    return { images: result.images };
+    const job = await startProjectImageJob({ ...params, projectId });
+    return { jobId: job.id, status: job.status };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * 完了した画像生成ジョブが生成した画像のIDを返す(処理キューの「結果を見る」の遷移先が使う)。
+ * `generated_images` の全件ではなく、ジョブの `resultPayload.imageIds` だけ。ジョブの所有者による
+ * 絞り込みは API 側(#1406)なので、他人のジョブは取得できず error になる。
+ */
+export async function fetchImageJobResultAction(
+  jobId: number
+): Promise<{ images?: { id: number }[]; error?: string }> {
+  await requireAdminSession();
+
+  try {
+    const job = await getGenerationJob(jobId);
+    if (job.status !== "done") {
+      return { error: "このジョブはまだ完了していないか、失敗しています。" };
+    }
+    return { images: readImageIds(job.resultPayload).map((id) => ({ id })) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

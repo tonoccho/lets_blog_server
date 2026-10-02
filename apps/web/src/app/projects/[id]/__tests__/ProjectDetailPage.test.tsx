@@ -29,6 +29,8 @@ jest.mock('@/components/Tabs', () => ({
       {tabs.map((t) => <button key={t.id}>{t.label}</button>)}
       {/* 既定で開くのは先頭タブ(概要)。本物の Tabs と同じく先頭タブの中身だけを描く。 */}
       <section data-testid="active-tab">{tabs[0].content}</section>
+      {/* 「AI・アセット」タブ(issue #1408: ?imageJob の受け渡しを見る)。 */}
+      <section data-testid="ai-models-tab">{tabs.find((t) => t.id === 'ai-models')?.content}</section>
     </div>
   ),
 }))
@@ -42,7 +44,11 @@ jest.mock('../EnvironmentSyncPanel', () => ({ EnvironmentSyncPanel: () => null }
 jest.mock('../BulkManagementPanel', () => ({ BulkManagementPanel: () => null }))
 jest.mock('../GarbageCollectionPanel', () => ({ GarbageCollectionPanel: () => null }))
 jest.mock('../ProjectAiModelsPanel', () => ({ ProjectAiModelsPanel: () => null }))
-jest.mock('../ProjectAssetGenerationPanel', () => ({ ProjectAssetGenerationPanel: () => null }))
+jest.mock('../ProjectAssetGenerationPanel', () => ({
+  ProjectAssetGenerationPanel: ({ imageJobId }: { imageJobId?: number }) => (
+    <div data-testid="asset-panel" data-image-job-id={imageJobId ?? ''} />
+  ),
+}))
 jest.mock('../ProjectImageGenerationPromptDefaultsForm', () => ({ ProjectImageGenerationPromptDefaultsForm: () => null }))
 jest.mock('../ProjectImageGenerationSizeDefaultsForm', () => ({ ProjectImageGenerationSizeDefaultsForm: () => null }))
 jest.mock('../ProjectArticleImageResizeDefaultForm', () => ({ ProjectArticleImageResizeDefaultForm: () => null }))
@@ -154,5 +160,33 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
     getProject.mockResolvedValue({ id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null })
     const { container } = render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
     expect(container.querySelector('[data-default-tab]')).toHaveAttribute('data-default-tab', '')
+  })
+
+  describe('?imageJob (issue #1408)', () => {
+    const project = { id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null }
+
+    it.each([
+      ['42', '42'],
+      ['0', ''],
+      ['-3', ''],
+      ['abc', ''],
+      ['4.5', ''],
+      ['', ''],
+    ])('imageJob=%s のとき、生成結果パネルへ渡すジョブIDは「%s」', async (value, expected) => {
+      getProject.mockResolvedValue(project)
+      const { container } = render(
+        await ProjectDetailPage({
+          params: Promise.resolve({ id: '7' }),
+          searchParams: Promise.resolve({ tab: 'ai-models', imageJob: value }),
+        }),
+      )
+      expect(container.querySelector('[data-testid="asset-panel"]')).toHaveAttribute('data-image-job-id', expected)
+    })
+
+    it('imageJob の指定がなければジョブIDを渡さない', async () => {
+      getProject.mockResolvedValue(project)
+      const { container } = render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
+      expect(container.querySelector('[data-testid="asset-panel"]')).toHaveAttribute('data-image-job-id', '')
+    })
   })
 })

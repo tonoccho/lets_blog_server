@@ -51,7 +51,8 @@
     "queueStatusDone": "完了",
     "queueStatusFailed": "失敗",
     "queueTypeCheckpointDownload": "チェックポイントのダウンロード",
-    "queueTypeGarbageCollection": "メディアの整理"
+    "queueTypeGarbageCollection": "メディアの整理",
+    "queueTypeImageGeneration": "画像生成"
   },
   "dashboard": {
     "title": "ダッシュボード",
