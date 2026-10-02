@@ -17,6 +17,7 @@ jest.mock('@/lib/apiClient', () => ({
   getProjectGithubTokenStatus: jest.fn().mockResolvedValue({ configured: false }),
   getProjectBraveSearchApiKeyStatus: jest.fn().mockResolvedValue({ configured: false }),
   getProjectImageSettings: jest.fn().mockResolvedValue({}),
+  getSiteAdminPath: jest.fn().mockResolvedValue({ path: 'wp-admin' }),
 }))
 jest.mock('@/lib/session', () => ({
   requireAdminSession: jest.fn().mockResolvedValue(undefined),

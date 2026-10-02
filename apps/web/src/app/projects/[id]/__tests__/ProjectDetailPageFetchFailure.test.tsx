@@ -21,6 +21,7 @@ const api = {
   getProjectGithubTokenStatus: jest.fn(),
   getProjectBraveSearchApiKeyStatus: jest.fn(),
   getProjectImageSettings: jest.fn(),
+  getSiteAdminPath: jest.fn(),
 };
 jest.mock("@/lib/apiClient", () => ({
   getProject: (...a: unknown[]) => api.getProject(...a),
@@ -31,6 +32,7 @@ jest.mock("@/lib/apiClient", () => ({
   getProjectGithubTokenStatus: (...a: unknown[]) => api.getProjectGithubTokenStatus(...a),
   getProjectBraveSearchApiKeyStatus: (...a: unknown[]) => api.getProjectBraveSearchApiKeyStatus(...a),
   getProjectImageSettings: (...a: unknown[]) => api.getProjectImageSettings(...a),
+  getSiteAdminPath: (...a: unknown[]) => api.getSiteAdminPath(...a),
 }));
 jest.mock("@/lib/session", () => ({
   requireAdminSession: jest.fn().mockResolvedValue(undefined),
@@ -43,7 +45,7 @@ jest.mock("@/components/Tabs", () => ({
   ),
 }));
 for (const name of [
-  "ProjectSectionNav", "EnvironmentSlot", "MasterEnvironmentSelector", "ProjectGithubRepositoryForm",
+  "ProjectSectionNav", "MasterEnvironmentSelector", "ProjectGithubRepositoryForm",
   "ProjectApiKeysForm", "EnvironmentSyncPanel", "BulkManagementPanel", "GarbageCollectionPanel",
   "ProjectAiModelsPanel", "ProjectAssetGenerationPanel", "ProjectImageGenerationPromptDefaultsForm",
   "ProjectImageGenerationSizeDefaultsForm", "ProjectArticleImageResizeDefaultForm",
@@ -52,6 +54,9 @@ for (const name of [
 ]) {
   jest.mock(`../${name}`, () => ({ [name]: () => null }));
 }
+jest.mock("../EnvironmentSlot", () => ({
+  EnvironmentSlot: ({ environment, adminPath }: { environment: string; adminPath: string }) => `SLOT[${environment}:${adminPath}]`,
+}));
 import ProjectDetailPage from "../(detail)/page";
 
 const params = { params: Promise.resolve({ id: "7" }) };
@@ -70,6 +75,7 @@ describe("プロジェクト詳細ページの取得失敗表示(issue #1458: �
     api.getProjectGithubTokenStatus.mockResolvedValue({ configured: false });
     api.getProjectBraveSearchApiKeyStatus.mockResolvedValue({ configured: false });
     api.getProjectImageSettings.mockResolvedValue({});
+    api.getSiteAdminPath.mockResolvedValue({ path: "wp-admin" });
   });
   afterEach(() => errorSpy.mockRestore());
 
@@ -86,6 +92,21 @@ describe("プロジェクト詳細ページの取得失敗表示(issue #1458: �
     expect(html).toContain('role="alert"');
     expect(html).toContain(`${label}を取得できませんでした`);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(`[projects/7] ${label}の取得に失敗しました`), DOWN);
+  });
+
+  it("システム設定の管理画面パスを3環境すべてのスロットに渡す(issue #1530)", async () => {
+    api.getSiteAdminPath.mockResolvedValue({ path: "secret-admin" });
+    const html = renderToStaticMarkup(await ProjectDetailPage(params));
+    expect(html).toContain("SLOT[local:secret-admin]");
+    expect(html).toContain("SLOT[test:secret-admin]");
+    expect(html).toContain("SLOT[production:secret-admin]");
+  });
+
+  it("管理画面パスの取得に失敗しても wp-admin にフォールバックしてスロットを描画する(issue #1530)", async () => {
+    api.getSiteAdminPath.mockRejectedValue(DOWN);
+    const html = renderToStaticMarkup(await ProjectDetailPage(params));
+    expect(html).toContain("SLOT[test:wp-admin]");
+    expect(html).not.toContain('role="alert"');
   });
 
   it("メンバー一覧の取得失敗は従来のメンバー専用の文言で示し、共通通知とは重複させない", async () => {

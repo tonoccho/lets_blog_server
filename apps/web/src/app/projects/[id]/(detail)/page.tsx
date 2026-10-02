@@ -8,6 +8,7 @@ import {
   getProjectGithubTokenStatus,
   getProjectBraveSearchApiKeyStatus,
   getProjectImageSettings,
+  getSiteAdminPath,
   type ProjectUser,
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
@@ -84,6 +85,7 @@ export default async function ProjectDetailPage({
     githubTokenStatusResult,
     braveSearchApiKeyStatusResult,
     imageSettingsResult,
+    adminPathResult,
   ] = await Promise.all([
     loadOrReport(scope, "プロジェクト情報", getProject(projectId), null),
     loadOrReport(scope, "サイト一覧", listSites(), []),
@@ -99,6 +101,8 @@ export default async function ProjectDetailPage({
     // ため個別に取得する。以前はここを取得しておらず、保存できるのに画面には常に空が
     // 表示されていた(issue #913)。取得に失敗しても画面全体は落とさない。
     loadOrReport(scope, "画像生成設定", getProjectImageSettings(projectId), EMPTY_IMAGE_SETTINGS),
+    // 環境スロットの管理画面リンク用。取得に失敗しても画面は落とさず wp-admin にフォールバックする(issue #1530)。
+    loadOrReport(scope, "管理画面パス", getSiteAdminPath().then((r) => r.path), "wp-admin"),
   ]);
   const project = projectResult.data;
   const sites = sitesResult.data;
@@ -107,6 +111,7 @@ export default async function ProjectDetailPage({
   const githubTokenStatus = githubTokenStatusResult.data;
   const braveSearchApiKeyStatus = braveSearchApiKeyStatusResult.data;
   const imageSettings = imageSettingsResult.data;
+  const adminPath = adminPathResult.data;
   // メンバーの取得失敗は専用の文言で示すので、共通の通知からは外す(重複させない)。
   const failedFetchLabels = failedLabels(
     sitesResult,
@@ -136,13 +141,26 @@ export default async function ProjectDetailPage({
           <div>
             <h2 className="text-sm font-semibold mb-3">環境設定</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <EnvironmentSlot projectId={project.id} environment="local" site={project.localSite} candidateSites={sites} />
-              <EnvironmentSlot projectId={project.id} environment="test" site={project.testSite} candidateSites={sites} />
+              <EnvironmentSlot
+                projectId={project.id}
+                environment="local"
+                site={project.localSite}
+                candidateSites={sites}
+                adminPath={adminPath}
+              />
+              <EnvironmentSlot
+                projectId={project.id}
+                environment="test"
+                site={project.testSite}
+                candidateSites={sites}
+                adminPath={adminPath}
+              />
               <EnvironmentSlot
                 projectId={project.id}
                 environment="production"
                 site={project.productionSite}
                 candidateSites={sites}
+                adminPath={adminPath}
               />
             </div>
           </div>

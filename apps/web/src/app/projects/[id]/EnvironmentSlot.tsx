@@ -1,7 +1,9 @@
 "use client";
 
 import { useActionState, useTransition } from "react";
+import { ExternalLink, Settings } from "lucide-react";
 import type { Site, ProjectEnvironment } from "@/lib/apiClient";
+import { resolveSiteAdminUrl } from "@/lib/siteAdminUrl";
 import { bindEnvironmentAction, unbindEnvironmentAction, EnvironmentActionState } from "./actions";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
@@ -17,16 +19,19 @@ export function EnvironmentSlot({
   environment,
   site,
   candidateSites,
+  adminPath = "wp-admin",
 }: {
   projectId: number;
   environment: ProjectEnvironment;
   site: Site | null;
   candidateSites: Site[];
+  adminPath?: string;
 }) {
   const action = (prevState: EnvironmentActionState, formData: FormData) =>
     bindEnvironmentAction(projectId, environment, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
   const [isUnbinding, startUnbind] = useTransition();
+  const adminUrl = site ? resolveSiteAdminUrl(site.baseUrl, adminPath) : null;
 
   return (
     <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
@@ -35,9 +40,28 @@ export function EnvironmentSlot({
         <div className="space-y-2 text-sm">
           <p className="font-mono">{site.siteKey}</p>
           <p className="text-neutral-600 dark:text-neutral-400">{site.name}</p>
-          <a href={site.baseUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
-            {site.baseUrl}
-          </a>
+          <span className="inline-flex items-center gap-3">
+            <a
+              href={site.baseUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`${site.name} のサイトを開く`}
+              className="text-blue-700 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+            >
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+            {adminUrl && (
+              <a
+                href={adminUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`${site.name} の管理画面を開く`}
+                className="text-blue-700 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+              >
+                <Settings className="h-4 w-4" aria-hidden="true" />
+              </a>
+            )}
+          </span>
           <div>
             <button
               type="button"
