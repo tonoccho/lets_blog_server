@@ -127,7 +127,9 @@ public class VscodeExtensionBuildService {
      * 「読んでいる最中に消される」事故を合流という別の経路で再発させることになる。
      *
      * <p>ビルド自体が失敗した場合(このメソッドが例外を投げる場合)は、割り当てた
-     * 出力先ディレクトリの後片付けは行わない(既知の限界。issue #1378で追跡)。
+     * 出力先ディレクトリをリーダーがここで削除する(issue #1378)。失敗した成果物は
+     * 誰にも配布されず、レスポンス本体の書き込みも{@link #cleanupAfterDownload}も
+     * 到達しないため。合流していた側には同じ例外が伝わる。
      */
     public BuiltExtension buildAndGetVsix() {
         String version = readVersion();
@@ -198,6 +200,9 @@ public class VscodeExtensionBuildService {
                     pendingCleanupCounts.remove(build.requestOutputDir);
                 }
                 currentBuild = null;
+            }
+            if (failed) {
+                deleteRecursively(build.requestOutputDir);
             }
         }
     }
