@@ -73,7 +73,7 @@ already installed, if you're not on Ubuntu/Debian, or if you want to understand 
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/tonoccho/lets_blog_server.git
+git clone -b develop <this repository's URL>
 cd lets_blog_server
 ```
 
