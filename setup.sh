@@ -201,10 +201,13 @@ install_prerequisites() {
 #
 # 例外: APP_ENCRYPTION_KEY は "changeme_" ではなく、CredentialCipher(packages/lbs-common)が
 # strict Base64として要求するダミーの有効値を既定にしている(check-env.shの特別扱いと同じ理由)。
-# 例外: KEYCLOAK_SERVICES_CLIENT_SECRET / KEYCLOAK_WEB_CLIENT_SECRET は "changeme_" ではなく、
-# infra/keycloak/realm-export.json の `secret` と一致させる必要がある既定値
-# (.env.example のコメント参照)。ここで無条件に再生成すると realm import 済みの値と食い違い、
-# invalid_client でログインできなくなるため、setup.sh は変更しない。
+# 例外: KEYCLOAK_SERVICES_CLIENT_SECRET / KEYCLOAK_WEB_CLIENT_SECRET は "changeme_" ではなく
+# "dev-only-" で始まる既定値を持つ。この既定値は公開リポジトリに載っているため、初回構築では
+# ここで個別にランダム値へ置き換える(#1551)。realm 側には docker-compose.yml が同じ環境変数を
+# keycloak コンテナへ渡し、infra/keycloak/realm-export.json の `${VAR:既定値}` が import 時に
+# それを受け取るので、.env と realm の値は食い違わない。
+# 既に .env がある環境ではこの関数自体が走らない(ensure_env_file)。realm に import 済みの値と
+# 食い違うと invalid_client になるため、既存値は決して書き換えない。
 APP_ENCRYPTION_KEY_PLACEHOLDER="UkVQTEFDRV9XSVRIX09QRU5TU0xfUkFORF9CNjRfMzI="
 
 generate_value_for_key() {
@@ -214,6 +217,7 @@ generate_value_for_key() {
     NEXTAUTH_SECRET) openssl rand -hex 32 ;;
     PENPOT_SECRET_KEY) openssl rand -base64 64 | tr -d '\n' ;;
     WP_PROVISION_TOKEN) openssl rand -hex 32 ;;
+    KEYCLOAK_SERVICES_CLIENT_SECRET|KEYCLOAK_WEB_CLIENT_SECRET) openssl rand -hex 32 ;;
     *) openssl rand -base64 24 ;;
   esac
 }
@@ -233,6 +237,8 @@ generate_env_file() {
       if [[ "$value" == changeme_* ]]; then
         new_value="$(generate_value_for_key "$key")"
       elif [ "$key" = "APP_ENCRYPTION_KEY" ] && [ "$value" = "$APP_ENCRYPTION_KEY_PLACEHOLDER" ]; then
+        new_value="$(generate_value_for_key "$key")"
+      elif [[ "$key" =~ ^KEYCLOAK_(SERVICES|WEB)_CLIENT_SECRET$ ]] && [[ "$value" == dev-only-* ]]; then
         new_value="$(generate_value_for_key "$key")"
       fi
       printf '%s=%s\n' "$key" "$new_value" >>"$tmp"

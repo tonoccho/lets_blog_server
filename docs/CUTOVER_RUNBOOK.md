@@ -290,7 +290,8 @@ URL
 AUTH_CODE='<URLから取り出したcodeの値>'
 # client_secret が realm 側の値とずれていると invalid_client で失敗する。その場合は
 # Keycloak管理コンソール(letsblog realm → Clients → letsblog-web → Credentials)、
-# または infra/keycloak/realm-export.json の当該クライアントの secret を正として .env を直す。
+# の値を正として .env を直す(realm-export.json の値は既定値で、setup.sh 構築の環境とは異なる)。
+# 手順は docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md を参照。
 
 TOKEN_JSON=$(curl -sk -X POST \
   -d "grant_type=authorization_code" \

@@ -23,13 +23,14 @@ identity-serviceがDBで保持する。[#561](https://github.com/tonoccho/lets_b
 SMTP設定は開発環境向けに `penpot-mailcatch`(MailCatcher。認証不要、`http://localhost:1080`で
 受信メールを確認可能)を向いている。本番相当の環境では別途SMTP設定を上書きする必要がある。
 
-## 開発用クライアントシークレットについて
+## クライアントシークレットについて
 
-`letsblog-web` / `letsblog-services` の `secret` は `dev-only-...-change-me` という
-明示的なプレースホルダ値になっている。これはこのリポジトリ全体がローカル開発専用の構成
-(`docker-compose.yml`の`penpot-backend`が`PENPOT_DATABASE_PASSWORD: penpot`を直接埋め込んで
-いるのと同様の考え方)であり、本番運用を想定していないため。本番相当の環境で使う場合は
-Keycloak管理コンソール(またはAdmin REST API)でクライアントシークレットを再生成すること。
+`letsblog-web` / `letsblog-services` の `secret` は、realm import 時に環境変数
+`KEYCLOAK_WEB_CLIENT_SECRET` / `KEYCLOAK_SERVICES_CLIENT_SECRET` から置換される
+(`${VAR:既定値}`)。`setup.sh` の初回構築はこの2つをランダム生成して `.env` に書くため、
+新規環境はリポジトリの既定値では動かない。変数が未設定の単体起動
+(`scripts/keycloak-clean-boot` など)だけが `dev-only-...-change-me` の既定値で import する。
+既存環境の更新手順は `docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md` を参照。
 
 ## `realm-export.json` の再生成手順
 

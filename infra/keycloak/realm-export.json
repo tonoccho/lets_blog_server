@@ -792,7 +792,7 @@
       "enabled": true,
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
-      "secret": "dev-only-letsblog-services-secret-change-me",
+      "secret": "${KEYCLOAK_SERVICES_CLIENT_SECRET:dev-only-letsblog-services-secret-change-me}",
       "redirectUris": [],
       "webOrigins": [],
       "notBefore": 0,
@@ -884,7 +884,7 @@
       "enabled": true,
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
-      "secret": "dev-only-letsblog-web-secret-change-me",
+      "secret": "${KEYCLOAK_WEB_CLIENT_SECRET:dev-only-letsblog-web-secret-change-me}",
       "redirectUris": [
         "https://localhost/api/auth/callback/keycloak"
       ],

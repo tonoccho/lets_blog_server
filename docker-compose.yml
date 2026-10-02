@@ -856,6 +856,11 @@ services:
       KC_HOSTNAME: https://localhost/auth
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
+      # realm-export.json の `${VAR:既定値}` が import 時にこの値を受け取る(#1551)。
+      # setup.sh が .env に書いたランダム値と realm のクライアント secret を一致させる経路。
+      # 既存の realm には効かない(--import-realm は既存 realm を上書きしない)。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET}
     volumes:
       - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     depends_on:

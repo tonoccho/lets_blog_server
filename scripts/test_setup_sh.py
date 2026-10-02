@@ -413,18 +413,73 @@ class EnvGeneration(SetupShTestCase):
         self.assertIn("BRAVE_SEARCH_API_KEY", r.stdout)
         self.assertIn("MAIL_PASSWORD", r.stdout)
 
-    def test_fresh_generation_does_not_touch_keycloak_client_secrets(self):
-        """realm-export.json と一致させる必要があるため、setup.sh は再生成しない。"""
-        with open(os.path.join(self.repo, ".env.example"), encoding="utf-8") as f:
-            before = dict(
-                l.split("=", 1) for l in f if "=" in l and not l.startswith("#")
-            )
+    KEYCLOAK_SECRET_KEYS = ("KEYCLOAK_SERVICES_CLIENT_SECRET", "KEYCLOAK_WEB_CLIENT_SECRET")
+
+    def _read_env(self, path):
+        with open(path, encoding="utf-8") as f:
+            return dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l and not l.startswith("#"))
+
+    def test_fresh_generation_randomizes_keycloak_client_secrets(self):
+        """#1551 AC1: 初回構築では2つのクライアントシークレットが既定値と異なるランダム値になる。
+
+        旧テスト(test_fresh_generation_does_not_touch_keycloak_client_secrets)は
+        「setup.sh は2キーを再生成しない」ことを固定していたが、それは公開リポジトリに載った
+        既知の既定値(dev-only-*)で本番稼働する欠陥そのものだった。realm 側は import 時に
+        環境変数から同じ値を受け取る(docker-compose.yml / realm-export.json)ので、
+        再生成しても食い違わなくなった。この Issue が意図的に変えた前提であるため置き換える。
+        """
+        before = self._read_env(os.path.join(self.repo, ".env.example"))
         r = self._run_source("ensure_env_file")
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        with open(os.path.join(self.repo, ".env"), encoding="utf-8") as f:
-            after = dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l and not l.startswith("#"))
-        for key in ("KEYCLOAK_SERVICES_CLIENT_SECRET", "KEYCLOAK_WEB_CLIENT_SECRET"):
-            self.assertEqual(before[key].strip(), after[key].strip())
+        after = self._read_env(os.path.join(self.repo, ".env"))
+        values = []
+        for key in self.KEYCLOAK_SECRET_KEYS:
+            self.assertNotEqual(before[key].strip(), after[key], key)
+            self.assertNotIn("dev-only", after[key], key)
+            self.assertRegex(after[key], r"^[0-9a-f]{64}$", key)
+            values.append(after[key])
+        self.assertNotEqual(values[0], values[1], "2つのシークレットが同じ値")
+
+    def test_two_fresh_generations_yield_different_keycloak_secrets(self):
+        r = self._run_source("ensure_env_file")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        first = self._read_env(os.path.join(self.repo, ".env"))
+        os.remove(os.path.join(self.repo, ".env"))
+        r = self._run_source("ensure_env_file")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        second = self._read_env(os.path.join(self.repo, ".env"))
+        for key in self.KEYCLOAK_SECRET_KEYS:
+            self.assertNotEqual(first[key], second[key], key)
+
+    def test_rerun_keeps_keycloak_client_secrets_even_when_still_default(self):
+        """#1551 AC3: 既存 .env の値は、既定値のままでも書き換えない。
+
+        realm に import 済みの値と食い違うと invalid_client でログインできなくなるため。
+        """
+        env_path = os.path.join(self.repo, ".env")
+        shutil.copy(os.path.join(self.repo, ".env.example"), env_path)
+        os.chmod(env_path, 0o600)
+        with open(env_path, encoding="utf-8") as f:
+            before = f.read()
+        r = self._run_source("ensure_env_file")
+        with open(env_path, encoding="utf-8") as f:
+            after = f.read()
+        self.assertEqual(before, after)
+        # 既定値のままであることは check-env.sh が警告で知らせる(終了コードは変えない)。
+        self.assertIn("KEYCLOAK_SERVICES_CLIENT_SECRET", r.stdout)
+        self.assertIn("KEYCLOAK_WEB_CLIENT_SECRET", r.stdout)
+
+    def test_end_to_end_rerun_keeps_generated_keycloak_secrets(self):
+        r1 = self._run_setup()
+        self.assertEqual(0, r1.returncode, r1.stdout + r1.stderr)
+        first = self._read_env(os.path.join(self.repo, ".env"))
+        r2 = self._run_setup()
+        self.assertEqual(0, r2.returncode, r2.stdout + r2.stderr)
+        second = self._read_env(os.path.join(self.repo, ".env"))
+        for key in self.KEYCLOAK_SECRET_KEYS:
+            self.assertEqual(first[key], second[key], key)
+            self.assertNotIn("dev-only", second[key], key)
+        self.assertNotIn("既定値", r2.stdout + r2.stderr)
 
     def test_existing_env_is_never_overwritten(self):
         env_path = os.path.join(self.repo, ".env")

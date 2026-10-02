@@ -31,6 +31,7 @@ Keycloak(PostgreSQL バックエンド)は `description` を `character varying(
 
 import json
 import os
+import re
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +71,49 @@ class RealmExportDescriptionLengthTest(unittest.TestCase):
             "255文字を超える description がある(JSONパス, 長さ): "
             f"{violations}",
         )
+
+
+class RealmExportClientSecretsComeFromEnvironmentTest(unittest.TestCase):
+    """#1551: クライアントシークレットは import 時に環境変数から受け取る。
+
+    setup.sh が .env に書いたランダム値と realm の値を一致させるための経路。
+    既定値(.env.example と同じ dev-only-*)は未設定時のフォールバックとして残す
+    (単独起動の verify-clean-realm-import.sh と、.env をコピーしただけの環境のため)。
+    Web UI から到達できない設定なので Gherkin ではなくここで表現する。
+    """
+
+    CLIENTS = {
+        "letsblog-services": "KEYCLOAK_SERVICES_CLIENT_SECRET",
+        "letsblog-web": "KEYCLOAK_WEB_CLIENT_SECRET",
+    }
+
+    def setUp(self):
+        with open(REALM_EXPORT, encoding="utf-8") as f:
+            self.realm = json.load(f)
+        self.example = {}
+        with open(os.path.join(REPO_ROOT, ".env.example"), encoding="utf-8") as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.rstrip("\n").split("=", 1)
+                    self.example[k] = v
+
+    def test_secrets_are_env_placeholders_defaulting_to_the_example_values(self):
+        by_id = {c["clientId"]: c for c in self.realm["clients"]}
+        for client_id, var in self.CLIENTS.items():
+            with self.subTest(client=client_id):
+                self.assertEqual(
+                    "${%s:%s}" % (var, self.example[var]), by_id[client_id]["secret"]
+                )
+
+    def test_compose_passes_both_secrets_to_the_keycloak_service(self):
+        with open(os.path.join(REPO_ROOT, "docker-compose.yml"), encoding="utf-8") as f:
+            text = f.read()
+        start = text.index("\n  keycloak:\n")
+        m = re.search(r"\n  [a-z][a-z0-9-]*:\n", text[start + 1 :])
+        block = text[start : start + 1 + m.start()] if m else text[start:]
+        for var in self.CLIENTS.values():
+            with self.subTest(var=var):
+                self.assertIn("%s: ${%s}" % (var, var), block)
 
 
 class RealmExportOfflineSessionPolicyTest(unittest.TestCase):

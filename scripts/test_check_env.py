@@ -241,5 +241,67 @@ class CheckEnvDetectsAppEncryptionKeyProblems(unittest.TestCase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
 
+class CheckEnvWarnsOnRepositoryDefaultClientSecrets(unittest.TestCase):
+    """#1551 AC4: Keycloak クライアントシークレットがリポジトリ既定値のままなら名指しで警告する。
+
+    既定値(dev-only-*-change-me)は公開リポジトリに載っている。既存環境を壊さないよう
+    警告に留め、終了コードは変えない。Web UI から到達できない運用スクリプトなので
+    Gherkin ではなくここで表現する(上記 docstring の文書化された例外)。
+    """
+
+    KEYS = ("KEYCLOAK_SERVICES_CLIENT_SECRET", "KEYCLOAK_WEB_CLIENT_SECRET")
+    VALID_ENCRYPTION_KEY = CheckEnvDetectsAppEncryptionKeyProblems.VALID_ENCRYPTION_KEY
+    # テスト本体は継承せず、`.env` の組み立て道具だけを共有する。
+    setUp = CheckEnvDetectsAppEncryptionKeyProblems.setUp
+    tearDown = CheckEnvDetectsAppEncryptionKeyProblems.tearDown
+    env_from_example = CheckEnvDetectsAppEncryptionKeyProblems.env_from_example
+    run_check = CheckEnvDetectsAppEncryptionKeyProblems.run_check
+
+    def _overrides(self, **kw):
+        base = {"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY}
+        base.update(kw)
+        return base
+
+    def test_default_values_warn_naming_both_keys(self):
+        target = self.env_from_example(overrides=self._overrides())
+        r = self.run_check(target)
+        out = r.stdout + r.stderr
+        for key in self.KEYS:
+            self.assertIn(key, out)
+        self.assertIn("既定値", out)
+        self.assertEqual(0, r.returncode, "警告に留めるべきなのに失敗扱い: " + out)
+
+    def test_only_the_default_key_is_named(self):
+        target = self.env_from_example(
+            overrides=self._overrides(KEYCLOAK_WEB_CLIENT_SECRET="a" * 64)
+        )
+        out = self.run_check(target).stdout
+        self.assertIn("KEYCLOAK_SERVICES_CLIENT_SECRET", out)
+        self.assertNotIn("KEYCLOAK_WEB_CLIENT_SECRET", out)
+
+    def test_unique_values_do_not_warn(self):
+        target = self.env_from_example(
+            overrides=self._overrides(
+                KEYCLOAK_SERVICES_CLIENT_SECRET="a" * 64,
+                KEYCLOAK_WEB_CLIENT_SECRET="b" * 64,
+            )
+        )
+        r = self.run_check(target)
+        out = r.stdout + r.stderr
+        self.assertNotIn("KEYCLOAK_SERVICES_CLIENT_SECRET", out)
+        self.assertNotIn("KEYCLOAK_WEB_CLIENT_SECRET", out)
+        self.assertEqual(0, r.returncode, out)
+
+    def test_any_dev_only_change_me_value_counts_as_default(self):
+        target = self.env_from_example(
+            overrides=self._overrides(
+                KEYCLOAK_SERVICES_CLIENT_SECRET="dev-only-something-else-change-me",
+                KEYCLOAK_WEB_CLIENT_SECRET="b" * 64,
+            )
+        )
+        out = self.run_check(target).stdout
+        self.assertIn("KEYCLOAK_SERVICES_CLIENT_SECRET", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -143,6 +143,25 @@ if grep -qE "^APP_ENCRYPTION_KEY=" "$TARGET"; then
     fi
 fi
 
+# issue #1551: Keycloak クライアントシークレットがリポジトリ既定値(dev-only-*-change-me)の
+# ままなら警告する。既定値は公開リポジトリに載っており、誰でも知り得る。
+# 既存環境を壊さないよう警告に留める(終了コードは変えない)。値を変えるには
+# Keycloak 側の secret も揃える必要があり、手順は docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md。
+default_secret_keys=""
+for var in KEYCLOAK_SERVICES_CLIENT_SECRET KEYCLOAK_WEB_CLIENT_SECRET; do
+    grep -qE "^${var}=" "$TARGET" || continue
+    secret_value="$(value_of_key "$var" "$TARGET")"
+    example_secret="$(value_of_key "$var" "$EXAMPLE" 2>/dev/null || true)"
+    if [[ "$secret_value" =~ ^dev-only-.*-change-me$ ]] || { [ -n "$example_secret" ] && [ "$secret_value" = "$example_secret" ]; }; then
+        default_secret_keys="${default_secret_keys}${var}"$'\n'
+    fi
+done
+if [ -n "$default_secret_keys" ]; then
+    echo "△ 次のキーがリポジトリの既定値(公開済み)のままです。共有環境・本番では固有の値にしてください:"
+    printf '%s' "$default_secret_keys" | sed 's/^/    /'
+    echo "    → 変更手順: docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md(Keycloak 側の secret も揃える必要があります)"
+fi
+
 if [ "$status" -ne 0 ]; then
     echo
     echo "  対処:"
@@ -237,7 +256,7 @@ if [ -n "$extra" ]; then
     echo "$extra" | sed 's/^/    /'
 fi
 
-if [ "$status" -eq 0 ] && [ -z "$extra" ]; then
+if [ "$status" -eq 0 ] && [ -z "$extra" ] && [ -z "$default_secret_keys" ]; then
     echo "✓ .env は .env.example の全項目を満たしています"
 elif [ "$status" -eq 0 ]; then
     echo "✓ 不足なし(.env.example の全項目が .env に存在します)"
