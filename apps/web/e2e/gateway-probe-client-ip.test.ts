@@ -32,13 +32,15 @@
  * これらが自動実行されていないこと自体は **#1421** として別途起票した。
  */
 
-import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { nextProbeClientIp, probeStateFilePath } from './support/gateway';
 
 const STATE_FILE = probeStateFilePath(process.ppid);
+/** 1回の実行での払い出し総数(issue #1422)。連番(STATE_FILE)と違い、一周しても戻らない。 */
+const COUNT_FILE = `${STATE_FILE}.count`;
 
 function removeState(): void {
-  for (const path of [STATE_FILE, `${STATE_FILE}.lock`]) {
+  for (const path of [STATE_FILE, `${STATE_FILE}.lock`, COUNT_FILE]) {
     if (existsSync(path)) {
       unlinkSync(path);
     }
@@ -97,5 +99,53 @@ describe('nextProbeClientIp(issue #1420 で採番を一本化した)', () => {
     writeFileSync(STATE_FILE, '0');
     nextProbeClientIp();
     expect(existsSync(`${STATE_FILE}.lock`)).toBe(false);
+  });
+
+  /**
+   * issue #1422: 連番は250で一周して黙って使用中のIPを再配布していた。払い出し総数を別ファイルに
+   * 数え、プールを使い切ったら例外で止める(#1420の自作案と同じ設計)。
+   */
+  test('払い出し総数を数える', () => {
+    writeFileSync(STATE_FILE, '0');
+    nextProbeClientIp();
+    nextProbeClientIp();
+    expect(readFileSync(COUNT_FILE, 'utf8').trim()).toBe('2');
+  });
+
+  test('プールの250件を使い切った次の払い出しは、黙って一周せず例外で止まる', () => {
+    writeFileSync(STATE_FILE, '10');
+    writeFileSync(COUNT_FILE, '250');
+    expect(() => nextProbeClientIp()).toThrow(/250/);
+    // 連番は進めない(使用中のIPを配らない)。
+    expect(readFileSync(STATE_FILE, 'utf8').trim()).toBe('10');
+  });
+
+  test('249件目までは払い出せる', () => {
+    writeFileSync(STATE_FILE, '10');
+    writeFileSync(COUNT_FILE, '249');
+    expect(nextProbeClientIp()).toBe('198.51.100.12');
+  });
+
+  test('一周で例外になってもロックファイルを残さない', () => {
+    writeFileSync(STATE_FILE, '10');
+    writeFileSync(COUNT_FILE, '250');
+    expect(() => nextProbeClientIp()).toThrow();
+    expect(existsSync(`${STATE_FILE}.lock`)).toBe(false);
+  });
+
+  test('数えたファイルが壊れていても0件として扱う', () => {
+    writeFileSync(STATE_FILE, '10');
+    writeFileSync(COUNT_FILE, 'garbage');
+    expect(nextProbeClientIp()).toBe('198.51.100.12');
+    expect(readFileSync(COUNT_FILE, 'utf8').trim()).toBe('1');
+  });
+
+  test('2時間前に更新された古い総数(PID再利用の残り)は0件として扱う', () => {
+    writeFileSync(STATE_FILE, '10');
+    writeFileSync(COUNT_FILE, '250');
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(COUNT_FILE, old, old);
+    expect(nextProbeClientIp()).toBe('198.51.100.12');
+    expect(readFileSync(COUNT_FILE, 'utf8').trim()).toBe('1');
   });
 });

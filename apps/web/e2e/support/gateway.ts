@@ -60,6 +60,14 @@ export function probeStateFilePath(scopePid: number): string {
 }
 const PROBE_STATE_FILE = probeStateFilePath(process.ppid);
 const PROBE_LOCK_FILE = `${PROBE_STATE_FILE}.lock`;
+/**
+ * 1回の実行での払い出し総数(issue #1422)。連番は剰余で一周するが、こちらは一周しない。
+ * 総数が {@link PROBE_IP_POOL_SIZE} に達したら、使用中のIPを黙って再配布する代わりに例外で止める。
+ * 消費量は `cat` で確認できる(`probeStateFilePath` と同じ ppid でスコープされる)。ファイルは消さないので、
+ * PIDが再利用されても古い総数を引き継がないよう、{@link PROBE_COUNT_STALE_MS} より古ければ0件と見なす。
+ */
+const PROBE_COUNT_FILE = `${PROBE_STATE_FILE}.count`;
+const PROBE_COUNT_STALE_MS = 60 * 60 * 1000;
 /** ロック保持中に異常終了したプロセスが残したロックを、これより古ければ放棄する。 */
 const PROBE_LOCK_STALE_MS = 30_000;
 /** ロック取得を待つ上限。通常は連番の読み書きだけなのでほぼ即時に取得できる。 */
@@ -120,6 +128,18 @@ function readProbeSequence(): number {
   }
 }
 
+function readProbeCount(): number {
+  try {
+    if (Date.now() - statSync(PROBE_COUNT_FILE).mtimeMs > PROBE_COUNT_STALE_MS) {
+      return 0;
+    }
+    const parsed = Number(readFileSync(PROBE_COUNT_FILE, 'utf8').trim());
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * 呼び出しをまたいで別のIPを使う。1回の走査の中で区切るだけでは足りない
  * (同じ1分の中で2つのシナリオが走ると、2つ目が1つ目の使った枠を引き継いでしまい、
@@ -129,8 +149,16 @@ function readProbeSequence(): number {
 export const nextProbeClientIp = (): string => {
   acquireProbeLock();
   try {
+    const issued = readProbeCount();
+    if (issued >= PROBE_IP_POOL_SIZE) {
+      throw new Error(
+        `合成クライアントIPを${PROBE_IP_POOL_SIZE}件使い切りました。これ以上払い出すと使用中のIPを再配布し、` +
+          '無関係なシナリオが429で落ちます(issue #1422)。プールを広げてください。',
+      );
+    }
     const sequence = (readProbeSequence() + 1) % PROBE_IP_POOL_SIZE;
     writeFileSync(PROBE_STATE_FILE, String(sequence));
+    writeFileSync(PROBE_COUNT_FILE, String(issued + 1));
     return `198.51.100.${sequence + 1}`;
   } finally {
     releaseProbeLock();
