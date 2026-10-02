@@ -362,6 +362,13 @@ if args[:1] == ["exec"]:
             extra = os.environ.get("FAKE_EXTRA_KC_USER", "")
             if extra and extra not in users:
                 users = users + [extra]
+            # 破棄後も大量のユーザーが返る状況(#1277)。プローブより後ろに並ぶ。
+            # 「想定外ユーザー」検査(--fields id,username,email)には混ぜず、
+            # 存在確認(--fields username)の呼び出しにだけ混ぜる。
+            pad = 0
+            if joined.endswith("--fields username"):
+                pad = int(os.environ.get("FAKE_PAD_KC_USERS", "0") or "0")
+            users = users + ["zzz-user-%05d-%s@letsblog.local" % (i, "x" * 200) for i in range(pad)]
             # 本物の kcadm はユーザー名の辞書順で返す。プローブが中間に来ることで
             # SIGPIPE を再現する(#1233)ので、その順序をここでも模す。
             users = sorted(users)
@@ -1025,6 +1032,26 @@ class ProbesAreGoneAfterTheRebuild(RebuildScriptHarness):
             [], [d for d in self.read_state("mysqldbs") if d.startswith("at_wipe_probe_")]
         )
         self.assertEqual([], self.read_state("wpsites"))
+
+
+class RemainingKeycloakProbeSurvivesSigpipeUnderManyUsers(RebuildScriptHarness):
+    """#1277: 手順4-7 の `kcadm get users | grep -q` が SIGPIPE で診断を潰さないこと。
+
+    プローブが残っている異常系では grep -q が早期に一致して終了し、書き込み中の
+    kcadm が SIGPIPE を受ける。`set -o pipefail` 下ではパイプ全体が141になり、
+    `&& remaining=...` が実行されず、残存の名指しが消える。
+    """
+
+    def test_names_the_surviving_keycloak_probe_even_with_many_users(self):
+        r = self.run_script("--yes", FAKE_STICKY_PROBE="keycloak", FAKE_PAD_KC_USERS="3000")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertRegex(
+            out,
+            r"- Keycloak ユーザー at-wipe-probe-\d+@letsblog\.local"
+            + re.escape("(keycloak_postgres が破棄されていない)"),
+            "ユーザーが多いと SIGPIPE で残存プローブの名指しが消える(#1277):\n" + out,
+        )
 
 
 class RemainingProbeIsNamedAndFatal(RebuildScriptHarness):

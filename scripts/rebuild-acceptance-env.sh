@@ -616,8 +616,16 @@ fi
 # 4-7. プローブが3つとも消えていること。
 if [ "$PROBES_PLACED" -eq 1 ]; then
   remaining=""
-  kcadm get users -r "$KEYCLOAK_REALM" --fields username 2>/dev/null \
-    | grep -q "$PROBE_KC_USER" && remaining="${remaining}\n  - Keycloak ユーザー ${PROBE_KC_USER}(keycloak_postgres が破棄されていない)"
+  # `kcadm get users | grep -q` のパイプだと、プローブが残っている異常系で grep -q が
+  # 最初の一致で早期終了し、書き込み中の kcadm が SIGPIPE(141)を受ける。
+  # `set -o pipefail` 下ではパイプ全体が非0になり `&& remaining=...` が実行されず、
+  # 本来報告すべき残存の名指しが消える(#1233 と同種、#1277)。
+  # そこで出力を変数へ読み切ってから、ヒアストリングで grep する。
+  # `|| true` は kcadm 自体の失敗で set -e が発火するのを避けるため(手順0/5と同じ)。
+  kc_users_after="$(kcadm get users -r "$KEYCLOAK_REALM" --fields username 2>/dev/null)" || true
+  if grep -q "$PROBE_KC_USER" <<< "$kc_users_after"; then
+    remaining="${remaining}\n  - Keycloak ユーザー ${PROBE_KC_USER}(keycloak_postgres が破棄されていない)"
+  fi
   if [ -n "$(mysql_q "SHOW DATABASES LIKE 'at\\_wipe\\_probe\\_%';" || true)" ]; then
     remaining="${remaining}\n  - MySQL データベース ${PROBE_MYSQL_DB}(mysql_data が破棄されていない)"
   fi
