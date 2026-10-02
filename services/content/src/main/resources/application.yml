@@ -99,9 +99,12 @@ app:
   # 組み込みタグ展開時のPlantUML/Rechartsダイアグラム描画はmedia-serviceへ同期呼び出しする
   # (issueの注記。Playwrightを持つのはcontent-serviceになったが、実際のレンダリング処理自体は
   # 引き続きmedia-serviceに委譲する。legacy-api/media-serviceのMediaRenderClientと同じ構成)。
-  media-service-uri: ${MEDIA_SERVICE_URI:http://api:8080}
+  media-service-uri: ${MEDIA_SERVICE_URI:http://media:8080}
   # CustomTagGenerationService(カスタムタグのAI生成)/TagDesignGenerationService相当の呼び出し先。
-  ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
+  # 既定値を http://ai:8080 にしている理由(issue #825 / #1484): 撤去済みのlegacy-api(http://api:8080)を
+  # 指したままだと、環境変数未設定時に呼び出しが静かに失敗する(#825で実際に起きた事象。#827により
+  # 宛先URLがログに出ないため原因の切り分けも難しい)。log-writerのapplication.ymlと同じ宛先に揃えている。
+  ai-service-uri: ${AI_SERVICE_URI:http://ai:8080}
   # [blogcard]/[amazon]組み込みタグ向けスクレイピング結果のキャッシュTTL。legacy-apiの既定値と同じ。
   content-cache-ttl-hours: ${CONTENT_CACHE_TTL_HOURS:24}
 

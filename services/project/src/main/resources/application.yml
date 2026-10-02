@@ -83,7 +83,10 @@ app:
   # legacy-api から identity-service へ移ったため、legacy-api-uri は不要になった。
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
   # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
-  ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
+  # 既定値を http://ai:8080 にしている理由(issue #825 / #1484): 撤去済みのlegacy-api(http://api:8080)を
+  # 指したままだと、環境変数未設定時に呼び出しが静かに失敗する(#825で実際に起きた事象。#827により
+  # 宛先URLがログに出ないため原因の切り分けも難しい)。log-writerのapplication.ymlと同じ宛先に揃えている。
+  ai-service-uri: ${AI_SERVICE_URI:http://ai:8080}
   # ssh_key_pairs.private_key_encrypted / sites.credentials_encryptedの暗号化/復号(CredentialCipher、
   # lbs-common)。全サービス共通のAES-256-GCM鍵(legacy-api/ai-service/media-serviceと同じ値を使う)。
   encryption-key: ${APP_ENCRYPTION_KEY:}

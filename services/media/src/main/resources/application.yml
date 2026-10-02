@@ -123,7 +123,10 @@ app:
   # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob)の進捗反映先。#573 stage2では
   # legacy-apiが所有していたためlegacy-api-uriを共用していたが、issue #574でgeneration_jobsの
   # 所有権がai-serviceへ移ったため、GenerationJobClientの向き先をこちらへ切り替えた。
-  ai-service-uri: ${AI_SERVICE_URI:http://api:8080}
+  # 既定値を http://ai:8080 にしている理由(issue #825 / #1484): 撤去済みのlegacy-api(http://api:8080)を
+  # 指したままだと、環境変数未設定時に呼び出しが静かに失敗する(#825で実際に起きた事象。#827により
+  # 宛先URLがログに出ないため原因の切り分けも難しい)。log-writerのapplication.ymlと同じ宛先に揃えている。
+  ai-service-uri: ${AI_SERVICE_URI:http://ai:8080}
   # メディアガベージコレクション(ProjectMediaGarbageCollectionController)のrequireAdmin/
   # 自分自身のuserId解決のため、呼び出し元のBearerトークンをそのままidentity-serviceの
   # /api/identity/meへ転送して問い合わせる(#573 stage3、log-writer(#572)と同じ暫定策。
