@@ -193,6 +193,23 @@ Then('その手段からKeycloakのホスト型ログイン画面へ到達でき
   }
 });
 
+// issue #1392: NextAuthのpages.errorが指す公開ページ。ログイン不要で到達できることも兼ねて確認する。
+When('未ログインでログインエラー画面を開く', async ({ page }) => {
+  await page.goto('/login/error?error=Configuration');
+});
+
+Then('「もう一度ログインする」リンクが表示される', async ({ page }) => {
+  await expect(
+    page.locator('[data-testid="login-retry-link"]'),
+    'ログインエラー画面に再ログインのリンクが表示されない'
+  ).toBeVisible({ timeout: 10000 });
+});
+
+Then('そのリンクからログイン画面へ戻れる', async ({ page }) => {
+  await page.locator('[data-testid="login-retry-link"]').click();
+  await expect(page).toHaveURL(/\/login(\?|$)|\/auth\/realms\//, { timeout: 30000 });
+});
+
 // 「前提」でも「もし」でも同じ意味なので Step で定義する(Given と When の両方に一致する)。
 Step('一般ユーザーとしてログインする', async ({ page }) => {
   await loginViaKeycloak(page, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);

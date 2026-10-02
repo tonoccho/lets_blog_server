@@ -242,3 +242,9 @@ describe('Keycloakプロバイダのprofile()マッピング(issue #1053のス�
     })
   })
 })
+
+describe('pages(issue #1392)', () => {
+  it('signInは/login、errorは公開パス配下の/login/errorを指す(NextAuth既定のエラーページで行き止まりにしない)', () => {
+    expect(authOptions.pages).toEqual({ signIn: '/login', error: '/login/error' })
+  })
+})

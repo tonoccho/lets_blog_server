@@ -145,7 +145,12 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
  * (30秒)は変えておらず、行き止まりURLを検知したときだけ`/login`から撮り直す、という
  * 別の戦略を足しているだけである。
  */
-const TRANSIENT_LOGIN_DEAD_END_PATTERNS = [/^chrome-error:\/\//, /\/api\/auth\/error(\?|$)/];
+// `/login/error`は#1392でNextAuthの`/api/auth/error`の代わりに出すようにしたエラー画面。
+const TRANSIENT_LOGIN_DEAD_END_PATTERNS = [
+  /^chrome-error:\/\//,
+  /\/api\/auth\/error(\?|$)/,
+  /\/login\/error(\?|$)/,
+];
 
 /** issue #1391: 一過性の接続断が固定化した「それ以上進行しないURL」かどうかを判定する。 */
 function isTransientLoginDeadEnd(url: string): boolean {

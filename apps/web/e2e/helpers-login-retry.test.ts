@@ -107,6 +107,17 @@ describe('loginViaKeycloak(issue #1391: 一過性の行き止まりURLからの�
     expect(page.goto).toHaveBeenCalledTimes(2);
   });
 
+  test('/login/error(#1392の新エラー画面)へ落ちた場合も撮り直して再試行する', async () => {
+    toHaveURLMock
+      .mockRejectedValueOnce(new Error('Timeout: 30000ms 待っても一致しなかった'))
+      .mockResolvedValue(undefined);
+    const page = createFakePage(['https://localhost/login/error?error=Configuration', 'https://localhost/']);
+
+    await loginViaKeycloak(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+
+    expect(page.goto).toHaveBeenCalledTimes(2);
+  });
+
   test('行き止まりURLでない失敗(実際のログイン障害)では再試行せずそのまま失敗する', async () => {
     toHaveURLMock.mockRejectedValue(new Error('Timeout: 30000ms 待っても一致しなかった'));
     const page = createFakePage(['https://localhost/login']);

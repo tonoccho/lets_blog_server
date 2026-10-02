@@ -89,7 +89,8 @@ interface KeycloakProfile {
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  // error: signIn()のfetch失敗でNextAuth既定のエラーページに行き止まりにならないよう差し替える(#1392)。
+  pages: { signIn: "/login", error: "/login/error" },
   providers: [
     {
       id: "keycloak",
