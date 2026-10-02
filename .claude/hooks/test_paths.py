@@ -206,6 +206,9 @@ class NeutralClassification(unittest.TestCase):
         # #961: リポジトリ直下の startup.sh。setup.sh / update.sh と同型(既に中立の
         # scripts/wait-for-stack-healthy.sh へ委譲、ENTRYPOINT/CMD からは呼ばれない)。
         "startup.sh",
+        # #1528: リポジトリ直下の shutdown.sh。startup.sh と同型(docker compose を呼ぶだけの
+        # 運用スクリプトで、ENTRYPOINT/CMD からは呼ばれない)。
+        "shutdown.sh",
     ]
 
     def test_neutral_is_neither(self):

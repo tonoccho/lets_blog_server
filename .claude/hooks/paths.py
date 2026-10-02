@@ -172,6 +172,9 @@ PRODUCTION_PATTERNS = [
 #       setup.sh / update.sh と同型: 利用者がホストで直接実行する運用スクリプトで、
 #       中立の scripts/wait-for-stack-healthy.sh へ委譲する。Dockerfile /
 #       docker-compose*.yml の ENTRYPOINT/CMD からは呼ばれない。
+#   shutdown.sh(リポジトリ直下、個別指定。#1528)
+#       startup.sh と同型: 利用者がホストで直接実行する運用スクリプトで、docker compose を
+#       呼ぶだけ。Dockerfile / docker-compose*.yml の ENTRYPOINT/CMD からは呼ばれない。
 #
 #       代償: 直下にスクリプトが増えるたびに、この個別指定のリストへ追記しない限り
 #       「黙って中立」に落ち、develop 上で test_every_tracked_file_is_classified が
@@ -207,6 +210,7 @@ NEUTRAL_PATTERNS = [
     r"^setup\.sh$",
     r"^update\.sh$",
     r"^startup\.sh$",
+    r"^shutdown\.sh$",
 ]
 
 # Claude Code のサブエージェントが作る git worktree(#1036)。

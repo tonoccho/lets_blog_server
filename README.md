@@ -371,6 +371,20 @@ bash scripts/wait-for-stack-healthy.sh --all
 
 healthy にならないサービスがあれば、そのサービス名を表示して終了コード非0で終わる。
 
+### 停止
+
+停止は `./shutdown.sh` を使う。コンテナを停止・削除するが、名前付きボリュームは残るので、
+DB・Keycloak・生成画像などのデータは保たれ、`./startup.sh` で起動し直せる。
+起動していなければその旨を表示して正常終了する。
+
+```bash
+./shutdown.sh            # データを消さずに停止する
+./shutdown.sh --volumes  # ボリュームも削除する(確認あり)
+```
+
+`./shutdown.sh --volumes` と `docker compose down -v` は、**DB・Keycloak・生成画像などの全ボリュームを
+削除し、復元できない**。`--volumes` は消えるボリュームを列挙して確認を求める。
+
 環境変数の各項目の詳細、ComfyUIチェックポイントの配置、
 トラブルシューティング等は [docs/setup.md](docs/setup.md) を参照。
 

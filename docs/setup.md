@@ -55,6 +55,20 @@ bash scripts/wait-for-stack-healthy.sh --all
 ./startup.sh
 ```
 
+### 停止
+
+停止は `./shutdown.sh` を使う。コンテナを停止・削除するが、**名前付きボリュームは残す**ので、
+DB(mysql_data)・Keycloak(keycloak_postgres)・生成画像(generated_images)・ComfyUI モデルなどのデータは
+そのままで、`./startup.sh` で起動し直せば元の状態に戻る。起動していなければその旨を表示して正常終了する。
+
+```bash
+./shutdown.sh            # データを消さずに停止する
+./shutdown.sh --volumes  # ボリュームも削除する(全データが消える)
+```
+
+`./shutdown.sh --volumes`(および `docker compose down -v`)は **DB・Keycloak・生成画像を含む全ボリュームを
+削除し、復元できない**。`--volumes` は消えるボリュームを列挙し、`yes` と入力したときだけ削除する。
+
 ## システム要件
 
 - Docker / Docker Compose(Compose v2 系。`docker compose version` で確認)
