@@ -458,6 +458,7 @@ APIの認証にはKeycloakが発行するアクセストークンを`Authorizati
 - [**Getting Started Guide**](docs/GETTING_STARTED.md) — セットアップの詳細ガイド（スクリーンショット説明付き）
 - [**Features and Usage Guide**](docs/FEATURES_AND_USAGE.md) — 主要機能と使用方法
 - [**Article Authoring Best Practices**](docs/ARTICLE_AUTHORING_BEST_PRACTICES.md) — 記事作成のベストプラクティス
+- [**Article Review Workflow**](docs/ARTICLE_REVIEW_WORKFLOW.md) — 記事リポジトリの規約・PRレビュー・差し戻しの流れ・GitHubトークンの権限
 - [**Video Tutorials Guide**](docs/VIDEO_TUTORIALS_GUIDE.md) — ビデオチュートリアルの構成と活用方法
 - [**Comprehensive Troubleshooting Guide**](docs/COMPREHENSIVE_TROUBLESHOOTING.md) — 問題解決ガイド
 

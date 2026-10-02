@@ -131,6 +131,8 @@ docker compose up -d     # 再起動
 
 ## ユーザーガイド
 
+記事の執筆・PRレビュー・差し戻しの流れと前提は [記事レビューワークフロー](ARTICLE_REVIEW_WORKFLOW.md) を参照してください。
+
 ### Penpot（デザイン）の使用
 
 #### プロジェクト・ファイル作成
@@ -275,6 +277,7 @@ lets-blog-server/
 │   ├── design-tokens.json
 │   ├── design-tokens-generator.md
 │   ├── e2e-validation-guide.md
+│   ├── ARTICLE_REVIEW_WORKFLOW.md
 │   └── DOCUMENTATION.md (本ファイル)
 │
 ├── apps/                          # 利用者が直接触るアプリケーション(#963)
