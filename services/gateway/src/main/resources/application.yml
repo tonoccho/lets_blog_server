@@ -279,6 +279,18 @@ app:
         uri: ${PROJECT_SERVICE_URI:http://project:8080}
         paths:
           - /api/ssh-key-pairs/**
+      # タグデザインのAI生成(POST .../{tagType}/generate、issue #1410)。project-serviceが
+      # ai-serviceの内部ブリッジ経由で同期にLLMを呼ぶ。上のproject-ai-generate-image-promptと同じ理由
+      # (ai-service側のLLM_REQUEST_TIMEOUT_SECONDSは既定120秒なのに、既定の60秒だとgatewayだけが先に504)で
+      # 180秒にする。tag-design-settings配下には一覧取得(GET)・保存(PUT)もあり、それらを巻き込まないよう
+      # 生成のパスだけに絞り、下のproject-tag-design-settings / project-global-tag-design-settingsより
+      # 先に評価させる(先勝ちなので順序が効く)。
+      - id: project-tag-design-settings-generate
+        uri: ${PROJECT_SERVICE_URI:http://project:8080}
+        paths:
+          - /api/projects/*/tag-design-settings/*/generate
+          - /api/tag-design-settings/*/generate
+        response-timeout: 180s
       - id: project-tag-design-settings
         uri: ${PROJECT_SERVICE_URI:http://project:8080}
         paths:
@@ -316,6 +328,23 @@ app:
         uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
         paths:
           - /api/projects/*/article-review/**
+      # LLM生成を伴う同期APIの専用ルート(issue #1410)。下流のai-serviceは
+      # LLM_REQUEST_TIMEOUT_SECONDS(既定120秒)まで待つので、既定の60秒だとgatewayだけが先に504を返す。
+      # /api/sites/**と/api/custom-tags/**は生成以外のCRUDも含む広いプレフィックスのため、プレフィックスごと
+      # 延ばさず生成のパスだけを180秒にする(nginxのlocation /api/はproxy_read_timeout 1200sで範囲内)。
+      #   - POST /api/sites/{siteId}/static-content/generate(SiteStaticContentController、project-service)
+      #   - POST /api/custom-tags/generate(CustomTagController、content-service)
+      # 下のproject / contentルートより先に評価させる。
+      - id: project-site-static-content-generate
+        uri: ${PROJECT_SERVICE_URI:http://project:8080}
+        paths:
+          - /api/sites/*/static-content/generate
+        response-timeout: 180s
+      - id: content-custom-tags-generate
+        uri: ${CONTENT_SERVICE_URI:http://content:8080}
+        paths:
+          - /api/custom-tags/generate
+        response-timeout: 180s
       # Project/Site本体(CRUD・環境紐付け・CMS/WordPress自動プロビジョニング・サイト管理)を
       # project-serviceへ移設した(issue #577 stage2)。上記の、project-serviceへ移設していない
       # サブパス(bulk-management/users/asset-images/ai-models(LLM以外)/dashboard/api-keys/

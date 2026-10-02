@@ -132,6 +132,8 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 | legacy-api(`AiProjectSettingsClient`) | `GET/PUT/DELETE /api/internal/ai/projects/{id}/brave-search-api-key` | (未移行、既存はSTANDARD相当の10秒) | - | - | (未整理) | 未 |
 | log-writer(`GenerationJobClient`) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`ai-service`) | **機能縮退**(WARNを残しAI_JOBソースのみ除外。操作ログ・監査ログは返す。#825) | 済 |
 
+gateway(`services/gateway/src/main/resources/application.yml`)は、上記LLM呼び出しに到達する同期APIのパスに専用ルートを持ち、`response-timeout: 180s`(LLMプロファイルと同じ。ai-serviceの`LLM_REQUEST_TIMEOUT_SECONDS`既定120秒を上回る)を与えている(issue #1410)。対象は`POST /api/custom-tags/generate`(`content-custom-tags-generate`)、`POST /api/sites/*/static-content/generate`(`project-site-static-content-generate`)、`POST /api/projects/*/tag-design-settings/*/generate`と`POST /api/tag-design-settings/*/generate`(`project-tag-design-settings-generate`)。同じプレフィックスの一覧・保存などCRUDは延ばさず既定の60秒のまま。専用ルートは広い`project`/`content`系より前に置く(先勝ち)。nginxの`location /api/`は`proxy_read_timeout 1200s`で、180秒はその範囲内。テスト: `LlmGenerationRouteTimeoutTest`。
+
 
 #### log-writer の AIジョブ取得を機能縮退にしている理由(#825)
 
