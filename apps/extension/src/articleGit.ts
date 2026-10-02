@@ -21,7 +21,18 @@ export interface GitBackend {
   checkout(name: string): Promise<void>;
   /** relativePaths だけをステージしてコミットする。 */
   commit(relativePaths: string[], message: string): Promise<void>;
+  /** 現在チェックアウトしているブランチ名。 */
+  currentBranch(): Promise<string>;
+  /** relativePaths 配下に未コミットの変更(未追跡ファイルを含む)があればtrue。それ以外のパスは見ない。 */
+  hasChangesIn(relativePaths: string[]): Promise<boolean>;
+  /** relativePaths の外にステージ済みの変更があればtrue(コミットへ巻き込まれるため)。 */
+  hasStagedOutside(relativePaths: string[]): Promise<boolean>;
+  /** ブランチをリモートへ push し、upstream を設定する。資格情報は利用者のgit設定・VSCodeに委ねる。 */
+  push(branch: string): Promise<void>;
 }
+
+/** push 先のリモート名。 */
+export const PUSH_REMOTE = 'origin';
 
 export type GitRunner = (args: string[], cwd: string) => Promise<string>;
 
@@ -106,6 +117,26 @@ export class CliGitBackend implements GitBackend {
   async commit(relativePaths: string[], message: string): Promise<void> {
     await this.run(['add', '--', ...relativePaths], this.root);
     await this.run(['commit', '-m', message, '--', ...relativePaths], this.root);
+  }
+
+  currentBranch(): Promise<string> {
+    return this.run(['branch', '--show-current'], this.root);
+  }
+
+  async hasChangesIn(relativePaths: string[]): Promise<boolean> {
+    return (await this.run(['status', '--porcelain', '--', ...relativePaths], this.root)) !== '';
+  }
+
+  async hasStagedOutside(relativePaths: string[]): Promise<boolean> {
+    const staged = await this.run(['diff', '--cached', '--name-only', '-z'], this.root);
+    return staged
+      .split('\0')
+      .filter((file) => file !== '')
+      .some((file) => !relativePaths.some((p) => file === p || file.startsWith(`${p}/`)));
+  }
+
+  async push(branch: string): Promise<void> {
+    await this.run(['push', '--set-upstream', PUSH_REMOTE, branch], this.root);
   }
 }
 

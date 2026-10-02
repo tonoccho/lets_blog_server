@@ -240,3 +240,68 @@ export async function bindEnvironment(
     throw new Error(`環境の紐付けに失敗しました (HTTP ${result.status}): ${result.text}`);
   }
 }
+
+/** GitHub スタブが持つ固定リポジトリと、スタブが 200 を返すトークン(infra/e2e-stubs/github/server.js)。 */
+const GITHUB_STUB_REPOSITORY = 'e2e-stub/acceptance';
+const GITHUB_STUB_TOKEN = 'e2e-stub-token';
+const GITHUB_STUB_URL = 'http://127.0.0.1:18086';
+
+/**
+ * GitHub 連携(リポジトリ+トークン)がスタブへ向いたプロジェクトを新しく作る(issue #1342)。
+ * 提出 API はプロジェクトの GitHub 連携で PR を作るため、既定のフィクスチャプロジェクトは使えない。
+ */
+export async function createGithubLinkedProject(token: string): Promise<ProjectFixture> {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const created = await call('POST', '/api/projects', token, { name: `AT1342 ${suffix}`, slug: `at1342-${suffix}` });
+  if (created.status >= 300) {
+    throw new Error(`プロジェクトを作成できませんでした (HTTP ${created.status}): ${created.text}`);
+  }
+  const project = created.json as ProjectFixture;
+  const repo = await call('PUT', `/api/projects/${project.id}/github-repository`, token, {
+    githubRepository: GITHUB_STUB_REPOSITORY,
+  });
+  if (repo.status >= 300) throw new Error(`GitHubリポジトリを紐付けられませんでした (HTTP ${repo.status}): ${repo.text}`);
+  const key = await call('PUT', `/api/projects/${project.id}/api-keys/github-token`, token, {
+    githubToken: GITHUB_STUB_TOKEN,
+  });
+  if (key.status >= 300) throw new Error(`GitHubトークンを設定できませんでした (HTTP ${key.status}): ${key.text}`);
+  return project;
+}
+
+async function stubCall(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
+  const res = await httpRequest(`${GITHUB_STUB_URL}${pathname}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${GITHUB_STUB_TOKEN}`,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+    allowInsecureTls: true,
+  });
+  const text = await res.text();
+  return { status: res.status, json: text ? JSON.parse(text) : null };
+}
+
+/**
+ * 「push 済みのブランチ」を GitHub スタブへ用意する。スタブは git サーバではなく、ブランチを直接作る
+ * API も無い。PR 作成はヘッド不在なら空のブランチを作り、マージは PR を閉じてブランチを残すので、
+ * それで開いている PR の無いブランチを作る(apps/web の articleReviewSubmission.steps.ts と同じ手順)。
+ */
+export async function pushedBranchOnGithubStub(head: string): Promise<void> {
+  const created = await stubCall('POST', `/repos/${GITHUB_STUB_REPOSITORY}/pulls`, {
+    title: `E2Eスタブ: ${head}`,
+    head,
+    base: 'main',
+    body: '提出の受け入れテスト用の過去のPR',
+  });
+  if (created.status !== 201) throw new Error(`スタブへのPR作成に失敗: ${JSON.stringify(created.json)}`);
+  const merged = await stubCall('PUT', `/repos/${GITHUB_STUB_REPOSITORY}/pulls/${created.json.number}/merge`, {});
+  if (merged.status !== 200) throw new Error(`スタブでのPRマージに失敗: ${JSON.stringify(merged.json)}`);
+}
+
+/** スタブ上で、head を持つ開いている PR の URL 一覧。 */
+export async function openPullRequestUrlsFor(head: string): Promise<string[]> {
+  const res = await stubCall('GET', `/repos/${GITHUB_STUB_REPOSITORY}/pulls?state=open`);
+  return (res.json as any[]).filter((pr) => pr.head.ref === head).map((pr) => String(pr.html_url));
+}

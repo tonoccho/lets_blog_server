@@ -522,6 +522,32 @@ describe('apiClientが解釈するレスポンス', () => {
       issues: [expect.stringContaining('(root)')],
     });
   });
+
+  it('記事の提出は、projectIdをパスに、ブランチ・Issue番号・スラッグをボディに送り、PRのURLを返す', async () => {
+    respondWith({ prNumber: 9, url: 'https://github.test/o/r/pull/9', state: 'SUBMITTED', submittedByUserId: 1, created: true });
+
+    const result = await apiClient.submitArticleReview('token', undefined, 42, {
+      headBranch: 'article/7-my-post',
+      githubIssueNumber: 7,
+      articleSlug: 'my-post',
+    });
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0].method).toBe('POST');
+    expect(recorded[0].url).toBe('https://stack.test/api/projects/42/article-review/submissions');
+    expect(recorded[0].body).toEqual({ headBranch: 'article/7-my-post', githubIssueNumber: 7, articleSlug: 'my-post' });
+    expect(result).toEqual({ prNumber: 9, url: 'https://github.test/o/r/pull/9', created: true });
+  });
+
+  it('記事の提出でブランチがGitHubに無い(404)場合はApiErrorで失敗し、再試行しない', async () => {
+    respondWith({ message: 'branch not found' }, 404);
+
+    await expect(
+      apiClient.submitArticleReview('token', undefined, 42, { headBranch: 'b', githubIssueNumber: 1, articleSlug: 's' })
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(recorded).toHaveLength(1);
+  });
+
 });
 
 describe('listCustomTagsのキャッシュ(issue #1467)', () => {

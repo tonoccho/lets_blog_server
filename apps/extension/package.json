@@ -39,6 +39,10 @@
         "title": "Let's Blog: Publish"
       },
       {
+        "command": "letsBlog.submitArticle",
+        "title": "Let's Blog: Submit Article"
+      },
+      {
         "command": "letsBlog.deletePost",
         "title": "Let's Blog: Delete Post"
       },

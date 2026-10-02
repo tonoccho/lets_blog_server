@@ -825,6 +825,32 @@ export async function postPlanChat(
   }, schemas.PlanChatResultSchema);
 }
 
+/** 記事提出APIへ渡す、push済みのheadブランチの情報(issue #1342)。 */
+export interface ArticleSubmissionParams {
+  headBranch: string;
+  githubIssueNumber: number;
+  articleSlug: string;
+}
+
+/**
+ * push済みの記事ブランチを提出し、サーバー経由でPull Requestを作る(issue #1342)。
+ * 拡張はGitHubへ直接アクセスしない。同じheadに開いているPRがあればサーバーがそれを返す(created=false)。
+ * PRがサーバー側に記録されるため再試行しない。
+ */
+export async function submitArticleReview(
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  params: ArticleSubmissionParams
+): Promise<schemas.ArticleSubmissionResult> {
+  return requestJson(`/api/projects/${projectId}/article-review/submissions`, {
+    label: 'submitArticleReview',
+    method: 'POST',
+    headers: buildHeaders(apiKey, actor),
+    createBody: jsonBody(params),
+  }, schemas.ArticleSubmissionResultSchema);
+}
+
 /**
  * チャットメッセージ(と任意の履歴)から画像生成プロンプトを作成する。
  * サーバー側で状態を持たないため、再試行して差し支えない。

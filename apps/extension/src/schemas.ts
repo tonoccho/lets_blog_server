@@ -194,6 +194,14 @@ export const PlanChatResultSchema = z.object({
 });
 export type PlanChatResult = z.infer<typeof PlanChatResultSchema>;
 
+/** 記事提出API(issue #1339)の応答のうち、拡張が使う部分。 */
+export const ArticleSubmissionResultSchema = z.object({
+  prNumber: z.number(),
+  url: z.string(),
+  created: z.boolean(),
+});
+export type ArticleSubmissionResult = z.infer<typeof ArticleSubmissionResultSchema>;
+
 export const AiImagePromptResultSchema = z.object({
   prompt: z.string(),
 });

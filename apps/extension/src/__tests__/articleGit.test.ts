@@ -218,16 +218,19 @@ describe('VscodeGitBackend', () => {
       checkout: async (...a: unknown[]) => void calls.push(['checkout', ...a]),
       add: async (...a: unknown[]) => void calls.push(['add', ...a]),
       commit: async (...a: unknown[]) => void calls.push(['commit', ...a]),
+      push: async (...a: unknown[]) => void calls.push(['push', ...a]),
     };
     const backend: GitBackend = new VscodeGitBackend(root, repository);
     await backend.createBranch('article/1-a', 'main');
     await backend.checkout('article/1-a');
     await backend.commit(['articles/a/article.md'], 'msg');
+    await backend.push('article/1-a');
     expect(calls).toEqual([
       ['createBranch', 'article/1-a', true, 'main'],
       ['checkout', 'article/1-a'],
       ['add', [path.join(root, 'articles/a/article.md')]],
       ['commit', 'msg'],
+      ['push', 'origin', 'article/1-a', true],
     ]);
     // 問い合わせ系はCLI実装を引き継ぐ
     expect(await backend.isRepository()).toBe(true);
@@ -239,3 +242,69 @@ describe('VscodeGitBackend', () => {
 function initRepoForVscode(): string {
   return initRepo();
 }
+
+describe('CliGitBackend の提出用操作', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function repo(): string {
+    const d = initRepo();
+    dirs.push(d);
+    return d;
+  }
+
+  it('currentBranch は現在のブランチ名を返す', async () => {
+    const root = repo();
+    git(root, 'switch', '-q', '-c', 'article/1-a');
+    expect(await new CliGitBackend(root).currentBranch()).toBe('article/1-a');
+  });
+
+  it('hasChangesIn は指定パスの変更(未追跡を含む)だけを見る', async () => {
+    const root = repo();
+    const backend = new CliGitBackend(root);
+    fs.mkdirSync(path.join(root, 'articles', 'a'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'README.md'), 'dirty');
+    expect(await backend.hasChangesIn(['articles/a'])).toBe(false);
+    fs.writeFileSync(path.join(root, 'articles', 'a', 'article.md'), 'x');
+    expect(await backend.hasChangesIn(['articles/a'])).toBe(true);
+  });
+
+  it('hasStagedOutside は指定パス外のステージ済み変更だけを検出する', async () => {
+    const root = repo();
+    const backend = new CliGitBackend(root);
+    fs.mkdirSync(path.join(root, 'articles', 'a'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'articles', 'a', 'article.md'), 'x');
+    git(root, 'add', '.');
+    expect(await backend.hasStagedOutside(['articles/a'])).toBe(false);
+    fs.writeFileSync(path.join(root, 'README.md'), 'staged');
+    git(root, 'add', 'README.md');
+    expect(await backend.hasStagedOutside(['articles/a'])).toBe(true);
+  });
+
+  it('hasStagedOutside は日本語ファイル名(core.quotepath)でも記事ディレクトリ内外を正しく判定する', async () => {
+    const root = repo();
+    const backend = new CliGitBackend(root);
+    fs.mkdirSync(path.join(root, 'articles', 'a'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'articles', 'a', '画像.png'), 'x');
+    git(root, 'add', '.');
+    expect(await backend.hasStagedOutside(['articles/a'])).toBe(false);
+    fs.writeFileSync(path.join(root, '外.md'), 'y');
+    git(root, 'add', '外.md');
+    expect(await backend.hasStagedOutside(['articles/a'])).toBe(true);
+  });
+
+  it('push はブランチをoriginへ送り upstream を設定する。リモートが無ければ失敗する', async () => {
+    const root = repo();
+    const backend = new CliGitBackend(root);
+    git(root, 'switch', '-q', '-c', 'article/1-a');
+    await expect(backend.push('article/1-a')).rejects.toThrow('push');
+    const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'article-bare-'));
+    dirs.push(remote);
+    git(remote, 'init', '-q', '--bare');
+    git(root, 'remote', 'add', 'origin', remote);
+    await backend.push('article/1-a');
+    expect(git(remote, 'rev-parse', 'article/1-a')).toBe(git(root, 'rev-parse', 'HEAD'));
+    expect(git(root, 'rev-parse', '--abbrev-ref', '@{upstream}')).toBe('origin/article/1-a');
+  });
+});

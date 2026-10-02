@@ -30,6 +30,8 @@ import {
 } from './frontMatter';
 import { createArticleScaffold, openArticle, requireWorkspaceRoot } from './articleScaffold';
 import * as api from './apiClient';
+import { submitArticle } from './articleSubmit';
+import { resolveGitBackend } from './vscodeGit';
 import { PlanPanel } from './planPanel';
 import { ArticleCreationPanel } from './articleCreationPanel';
 import { PreviewMessage, PreviewPanel, SiteOption } from './previewPanel';
@@ -95,6 +97,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.logout', () => commandLogout(context)),
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context, proofreadController)),
+    vscode.commands.registerCommand('letsBlog.submitArticle', () => commandSubmitArticle(context)),
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
@@ -1101,6 +1104,51 @@ async function commandAskAiSearch(context: vscode.ExtensionContext): Promise<voi
     AskAiPanel.createOrShow(context, editor);
   } catch (err) {
     reportError('Ask AIパネルの起動に失敗しました', err);
+  }
+}
+
+/**
+ * 編集中の記事(`articles/<slug>/article.md`)を提出する(issue #1342)。記事ディレクトリだけをコミットして
+ * 現在のブランチをpushし(資格情報は利用者のgit設定/VSCode本体に委ねる)、サーバーの提出APIでPRを作る。
+ */
+async function commandSubmitArticle(context: vscode.ExtensionContext): Promise<void> {
+  const editor = getActiveMarkdownEditor();
+  if (!editor) return;
+
+  try {
+    const root = requireWorkspaceRoot();
+    await editor.document.save();
+    const text = editor.document.getText();
+    const projectId = (parseArticle(text).data.project_id as number | undefined) ?? requireProjectId(context);
+    const apiKey = await requireAccessToken(context);
+    const actor = await getActor(context);
+
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: '記事を提出しています…' },
+      async () =>
+        submitArticle({
+          root,
+          articlePath: editor.document.uri.fsPath,
+          text,
+          backend: await resolveGitBackend(root),
+          createSubmission: (request) => api.submitArticleReview(apiKey, actor, projectId, request),
+        })
+    );
+
+    if (result.status !== 'submitted') {
+      vscode.window.showErrorMessage(`記事を提出できませんでした。${result.reason}`);
+      return;
+    }
+    const open = 'Pull Request を開く';
+    const message = result.created
+      ? `Pull Request #${result.prNumber} を作成しました: ${result.url}`
+      : `既存の Pull Request #${result.prNumber} を再提出しました: ${result.url}`;
+    const choice = await vscode.window.showInformationMessage(message, open);
+    if (choice === open) {
+      await vscode.env.openExternal(vscode.Uri.parse(result.url));
+    }
+  } catch (err) {
+    reportError('記事の提出に失敗しました', err);
   }
 }
 

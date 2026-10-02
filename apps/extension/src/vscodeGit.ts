@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CliGitBackend, GitBackend } from './articleGit';
+import { CliGitBackend, GitBackend, PUSH_REMOTE } from './articleGit';
 
 /**
  * VSCode組み込みGit拡張(`vscode.git`)のAPIでgit操作を行う実装(issue #1335)。
@@ -14,6 +14,7 @@ export interface VscodeGitRepository {
   checkout(treeish: string): Promise<void>;
   add(paths: string[]): Promise<void>;
   commit(message: string): Promise<void>;
+  push(remoteName?: string, branchName?: string, setUpstream?: boolean): Promise<void>;
 }
 
 interface VscodeGitExports {
@@ -40,6 +41,11 @@ export class VscodeGitBackend extends CliGitBackend implements GitBackend {
   override async commit(relativePaths: string[], message: string): Promise<void> {
     await this.repository.add(relativePaths.map((p) => path.join(this.root, p)));
     await this.repository.commit(message);
+  }
+
+  /** 資格情報のプロンプトはVSCode本体が扱う。拡張はトークンを持たない。 */
+  override push(branch: string): Promise<void> {
+    return this.repository.push(PUSH_REMOTE, branch, true);
   }
 }
 
