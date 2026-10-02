@@ -34,16 +34,22 @@ const deleteGeneratedImage = jest.fn();
 const updateGeneratedImageTags = jest.fn();
 const listGeneratedImages = jest.fn();
 const bulkDeleteGeneratedImages = jest.fn();
+const createGeneratedImageFolder = jest.fn();
+const setGeneratedImageFolder = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getGeneratedImage: (...a: unknown[]) => getGeneratedImage(...a),
   deleteGeneratedImage: (...a: unknown[]) => deleteGeneratedImage(...a),
   updateGeneratedImageTags: (...a: unknown[]) => updateGeneratedImageTags(...a),
   listGeneratedImages: (...a: unknown[]) => listGeneratedImages(...a),
   bulkDeleteGeneratedImages: (...a: unknown[]) => bulkDeleteGeneratedImages(...a),
+  createGeneratedImageFolder: (...a: unknown[]) => createGeneratedImageFolder(...a),
+  setGeneratedImageFolder: (...a: unknown[]) => setGeneratedImageFolder(...a),
 }));
 
 import {
   bulkDeleteGeneratedImagesAction,
+  createGeneratedImageFolderAction,
+  setGeneratedImageFolderAction,
   deleteGeneratedImageAction,
   fetchGalleryImagesPageAction,
   getGeneratedImageAction,
@@ -115,7 +121,7 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
   it('未ログインは /login へ送り、取得しない', async () => {
     getServerSession.mockResolvedValue(null);
 
-    await expect(fetchGalleryImagesPageAction(24, null)).rejects.toThrow('NEXT_REDIRECT:/login');
+    await expect(fetchGalleryImagesPageAction(24, null, null)).rejects.toThrow('NEXT_REDIRECT:/login');
     expect(listGeneratedImages).not.toHaveBeenCalled();
   });
 
@@ -123,19 +129,19 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     listGeneratedImages.mockResolvedValue([{ id: 1 }]);
 
-    const result = await fetchGalleryImagesPageAction(48, null);
+    const result = await fetchGalleryImagesPageAction(48, null, null);
 
     expect(result).toEqual([{ id: 1 }]);
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 48, tag: undefined });
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 48, tag: undefined, folderId: undefined, unfiled: undefined });
   });
 
   it('tag があればそのまま渡す', async () => {
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     listGeneratedImages.mockResolvedValue([]);
 
-    await fetchGalleryImagesPageAction(0, '猫');
+    await fetchGalleryImagesPageAction(0, '猫', null);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫' });
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: undefined });
   });
 });
 
@@ -161,5 +167,74 @@ describe('bulkDeleteGeneratedImagesAction(issue #1492)', () => {
 
     expect(bulkDeleteGeneratedImages).toHaveBeenCalledWith([1, 2]);
     expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
+  });
+});
+
+/** issue #1493: フォルダでの絞り込みは一覧APIの条件(folderId / unfiled)として渡す。 */
+describe('fetchGalleryImagesPageAction のフォルダ絞り込み(issue #1493)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    listGeneratedImages.mockResolvedValue([]);
+  });
+
+  it('フォルダidは folderId として渡す', async () => {
+    await fetchGalleryImagesPageAction(0, null, 5);
+
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
+      limit: 24, offset: 0, tag: undefined, folderId: 5, unfiled: undefined,
+    });
+  });
+
+  it('"unfiled" は unfiled=true として渡し、folderId は付けない', async () => {
+    await fetchGalleryImagesPageAction(0, '猫', 'unfiled');
+
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
+      limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: true,
+    });
+  });
+});
+
+/** issue #1493: フォルダの作成・所属変更の Server Action はログイン必須。admin 判定は media-service が行い、403 はそのまま伝わる。 */
+describe('フォルダの Server Action(issue #1493)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('未ログインは /login へ送り、作成も所属変更もしない', async () => {
+    getServerSession.mockResolvedValue(null);
+
+    await expect(createGeneratedImageFolderAction('海', null)).rejects.toThrow('NEXT_REDIRECT:/login');
+    await expect(setGeneratedImageFolderAction(1, 2)).rejects.toThrow('NEXT_REDIRECT:/login');
+    expect(createGeneratedImageFolder).not.toHaveBeenCalled();
+    expect(setGeneratedImageFolder).not.toHaveBeenCalled();
+  });
+
+  it('作成は結果を返し、一覧を再検証する', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'admin' } });
+    createGeneratedImageFolder.mockResolvedValue({ id: 3, name: '海', parentId: 1 });
+
+    await expect(createGeneratedImageFolderAction('海', 1)).resolves.toEqual({ id: 3, name: '海', parentId: 1 });
+
+    expect(createGeneratedImageFolder).toHaveBeenCalledWith('海', 1);
+    expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
+  });
+
+  it('所属変更は結果を返し、一覧を再検証する', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'admin' } });
+    setGeneratedImageFolder.mockResolvedValue({ id: 1, folderId: null });
+
+    await expect(setGeneratedImageFolderAction(1, null)).resolves.toEqual({ id: 1, folderId: null });
+
+    expect(setGeneratedImageFolder).toHaveBeenCalledWith(1, null);
+    expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
+  });
+
+  it('media-service が403を返したら、再検証せずそのまま伝える', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    createGeneratedImageFolder.mockRejectedValue(new Error('APIエラー (403): forbidden'));
+
+    await expect(createGeneratedImageFolderAction('海', null)).rejects.toThrow('403');
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

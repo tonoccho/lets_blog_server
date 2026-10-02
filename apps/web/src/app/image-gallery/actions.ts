@@ -5,12 +5,15 @@ import { requireSession } from "@/lib/session";
 import { GALLERY_PAGE_SIZE } from "./pageSize";
 import {
   bulkDeleteGeneratedImages,
+  createGeneratedImageFolder,
   deleteGeneratedImage,
   getGeneratedImage,
   listGeneratedImages,
+  setGeneratedImageFolder,
   updateGeneratedImageTags,
   type GeneratedImageBulkDeleteResult,
   type GeneratedImageDetail,
+  type GeneratedImageFolder,
   type GeneratedImageSummary,
 } from "@/lib/apiClient";
 
@@ -62,19 +65,49 @@ export async function updateGeneratedImageTagsAction(id: number, tags: string[])
 }
 
 /**
+ * フォルダを作成する(issue #1493)。認可は上記参照(ログイン必須)。作成できるのは admin のみで、
+ * そうでなければ media-service が403を返し、その理由が呼び出し側へそのまま伝わる。
+ */
+export async function createGeneratedImageFolderAction(
+  name: string,
+  parentId: number | null,
+): Promise<GeneratedImageFolder> {
+  await requireSession();
+  const result = await createGeneratedImageFolder(name, parentId);
+  revalidatePath("/image-gallery");
+  return result;
+}
+
+/** 画像の所属フォルダを変える(null は未分類へ戻す)(issue #1493)。認可は上記参照。変更は admin のみ(media-service が判定)。 */
+export async function setGeneratedImageFolderAction(
+  id: number,
+  folderId: number | null,
+): Promise<GeneratedImageDetail> {
+  await requireSession();
+  const result = await setGeneratedImageFolder(id, folderId);
+  revalidatePath("/image-gallery");
+  return result;
+}
+
+/**
  * ギャラリーの続き(次の1ページ)を取得する(issue #1472)。認可は上記参照。
  *
  * ページサイズはここで固定し、クライアントから任意の limit を指定させない。
  * `tag` を渡すとサーバ側で絞り込んだ後の一覧の `offset` 位置から返る。
+ * `folder` はフォルダid(そのフォルダと子孫の画像)、`"unfiled"`(どのフォルダにも属さない画像)、
+ * null(絞り込みなし)(issue #1493)。タグ絞り込みとは併用できる。
  */
 export async function fetchGalleryImagesPageAction(
   offset: number,
   tag: string | null,
+  folder: number | "unfiled" | null,
 ): Promise<GeneratedImageSummary[]> {
   await requireSession();
   return listGeneratedImages(undefined, {
     limit: GALLERY_PAGE_SIZE,
     offset,
     tag: tag ?? undefined,
+    folderId: typeof folder === "number" ? folder : undefined,
+    unfiled: folder === "unfiled" ? true : undefined,
   });
 }

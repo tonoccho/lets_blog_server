@@ -15,8 +15,8 @@ export interface UpdateImageGenerationSizeDefaultsRequest {
      * @maximum 2048
      */
   defaultGeneratedImageHeight?: number;
-  heightMultipleOf8?: boolean;
   widthMultipleOf8?: boolean;
+  heightMultipleOf8?: boolean;
 }
 
 export interface ProjectImageSettingsResponse {
@@ -103,6 +103,21 @@ export interface GeneratedImageDetailResponse {
   createdAt?: string;
   tags?: string[];
   provider?: string;
+  folderId?: number;
+}
+
+export interface UpdateGeneratedImageFolderRequest {
+  folderId?: number;
+}
+
+export interface UpdateGeneratedImageFolderParentRequest {
+  parentId?: number;
+}
+
+export interface GeneratedImageFolderResponse {
+  id?: number;
+  name?: string;
+  parentId?: number;
 }
 
 export interface UpdateDiagramRequest {
@@ -222,6 +237,15 @@ export interface CreateGeneratedImageRequest {
   imageData: string;
 }
 
+export interface CreateGeneratedImageFolderRequest {
+  /**
+     * @minLength 0
+     * @maxLength 255
+     */
+  name: string;
+  parentId?: number;
+}
+
 export interface BulkDeleteGeneratedImagesRequest {
   /** @minItems 1 */
   imageIds: number[];
@@ -303,8 +327,8 @@ export interface AiImageRequest {
      */
   loraWeight?: number;
   projectId?: number;
-  heightMultipleOf8?: boolean;
   widthMultipleOf8?: boolean;
+  heightMultipleOf8?: boolean;
 }
 
 export interface AiImageResponse {
@@ -349,6 +373,7 @@ export interface GeneratedImageSummaryResponse {
   createdAt?: string;
   tags?: string[];
   provider?: string;
+  folderId?: number;
 }
 
 export interface DiagramSummaryResponse {
@@ -388,6 +413,8 @@ projectId?: number;
 tag?: string;
 limit?: number;
 offset?: number;
+folderId?: number;
+unfiled?: boolean;
 };
 
 export type List1Params = {

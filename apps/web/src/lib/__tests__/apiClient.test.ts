@@ -26,6 +26,9 @@ import {
   startProjectImageJob,
   getSiteAdminPath,
   listGeneratedImages,
+  listGeneratedImageFolders,
+  createGeneratedImageFolder,
+  setGeneratedImageFolder,
   getSetupStatus,
   downloadGeneratedImageFile,
   deleteGeneratedImage,
@@ -684,5 +687,56 @@ describe('配布物(Zip)のダウンロード(issue #1491)', () => {
   it('Penpotプラグインも既定のファイル名を持つ', async () => {
     fetchMock.mockResolvedValue(zipResponse(null))
     expect((await downloadPenpotPlugin()).filename).toBe('letsblog-penpot-plugin.zip')
+  })
+})
+
+describe('生成画像フォルダ(issue #1493)', () => {
+  it('listGeneratedImages は folderId を載せる', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages(undefined, { folderId: 5 })
+
+    const url = new URL(calls()[0][0])
+    expect(url.searchParams.get('folderId')).toBe('5')
+    expect(url.searchParams.has('unfiled')).toBe(false)
+  })
+
+  it('listGeneratedImages は unfiled=true を載せ、false/未指定では載せない', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages(undefined, { unfiled: true })
+    await listGeneratedImages(undefined, { unfiled: false })
+
+    expect(new URL(calls()[0][0]).searchParams.get('unfiled')).toBe('true')
+    expect(new URL(calls()[1][0]).searchParams.has('unfiled')).toBe(false)
+  })
+
+  it('listGeneratedImageFolders は GET /api/generated-images/folders を呼ぶ', async () => {
+    const folders = [{ id: 1, name: '風景', parentId: null }]
+    fetchMock.mockResolvedValue(jsonResponse(folders))
+
+    await expect(listGeneratedImageFolders()).resolves.toEqual(folders)
+    expect(String(calls()[0][0])).toMatch(/\/api\/generated-images\/folders$/)
+  })
+
+  it('createGeneratedImageFolder は name と parentId を POST する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 2, name: '山', parentId: 1 }))
+
+    await expect(createGeneratedImageFolder('山', 1)).resolves.toEqual({ id: 2, name: '山', parentId: 1 })
+    const [url, init] = calls()[0]
+    expect(String(url)).toMatch(/\/api\/generated-images\/folders$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ name: '山', parentId: 1 })
+  })
+
+  it('setGeneratedImageFolder は folderId を PUT する(null は未分類)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 7, folderId: null }))
+
+    await setGeneratedImageFolder(7, null)
+
+    const [url, init] = calls()[0]
+    expect(String(url)).toMatch(/\/api\/generated-images\/7\/folder$/)
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({ folderId: null })
   })
 })

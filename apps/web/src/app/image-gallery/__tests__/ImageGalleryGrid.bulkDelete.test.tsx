@@ -27,6 +27,7 @@ function image(id: number, tags: string[] = []): GeneratedImageSummary {
     createdAt: '2026-08-01T00:00:00Z',
     tags,
     provider: 'COMFYUI',
+    folderId: null,
   }
 }
 

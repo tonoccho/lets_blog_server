@@ -91,6 +91,10 @@ public class GeneratedImage {
     @Column(name = "tags_json", columnDefinition = "TEXT")
     private String tagsJson;
 
+    /** 所属フォルダ(issue #1493)。nullは未分類。ファイルの物理配置とは無関係の論理分類。 */
+    @Column(name = "folder_id")
+    private Long folderId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

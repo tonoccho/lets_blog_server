@@ -77,6 +77,14 @@ public class CurrentActorService {
         }
     }
 
+    /**
+     * 操作者をidentity-serviceが解決できる(有効なユーザーである)か。無効化ユーザーは
+     * 操作者として解決されないため、JWTを持っていてもfalseになる(issue #1493)。
+     */
+    public boolean isAuthenticated() {
+        return getCurrentActorId() != null;
+    }
+
     public boolean isAdmin() {
         return resolveProfile().map(ActorProfile::isAdmin).orElse(false);
     }

@@ -1314,6 +1314,294 @@ After({ tags: '@media' }, async ({ ctx, request }) => {
   }
 });
 
+// ---- ギャラリーの入れ子フォルダ(issue #1493) ----
+
+interface FolderDto {
+  id: number;
+  name: string;
+  parentId: number | null;
+}
+
+/**
+ * このシナリオで使うフォルダの実名。フォルダの削除は #1494 の範囲でこのIssueでは後片付けできず、
+ * 並列に走る他のシナリオや過去の実行のフォルダと名前がぶつからないよう、実行ごとの接尾辞を付ける。
+ */
+function folderName(ctx: Record<string, unknown>, label: string): string {
+  ctx.mediaFolderRun ??= `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `${label}-${ctx.mediaFolderRun as string}`;
+}
+
+function folderIds(ctx: Record<string, unknown>): Record<string, number> {
+  ctx.mediaFolderIds ??= {};
+  return ctx.mediaFolderIds as Record<string, number>;
+}
+
+async function apiCreateFolder(
+  request: APIRequestContext,
+  ctx: Record<string, unknown>,
+  label: string,
+  parentLabel: string | null
+): Promise<void> {
+  const response = await request.post('/api/generated-images/folders', {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: {
+      name: folderName(ctx, label),
+      parentId: parentLabel === null ? null : folderIds(ctx)[parentLabel],
+    },
+  });
+  expect(
+    response.status(),
+    `フォルダの作成に失敗しました: ${await response.text()}`
+  ).toBe(201);
+  folderIds(ctx)[label] = ((await response.json()) as FolderDto).id;
+}
+
+async function listFolders(request: APIRequestContext, token: string): Promise<FolderDto[]> {
+  const response = await request.get('/api/generated-images/folders', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.status(), `フォルダ一覧の取得に失敗しました: ${await response.text()}`).toBe(200);
+  return (await response.json()) as FolderDto[];
+}
+
+Given(/^最上位フォルダ「([^」]+)」がある$/, async ({ ctx, request }, label: string) => {
+  await apiCreateFolder(request, ctx, label, null);
+});
+
+Given(
+  /^フォルダ「([^」]+)」の子としてフォルダ「([^」]+)」がある$/,
+  async ({ ctx, request }, parentLabel: string, label: string) => {
+    await apiCreateFolder(request, ctx, label, parentLabel);
+  }
+);
+
+Given(
+  /^フォルダ「([^」]+)」に属するプロンプト「([^」]+)」の生成画像がある$/,
+  async ({ ctx, request }, folderLabel: string, prompt: string) => {
+    const id = await createGeneratedImage(request, { prompt, provider: 'COMFYUI', seed: 1_493_000 });
+    galleryImageIds(ctx)[prompt] = id;
+    const response = await request.put(`/api/generated-images/${id}/folder`, {
+      headers: { Authorization: `Bearer ${await adminToken(request)}` },
+      data: { folderId: folderIds(ctx)[folderLabel] },
+    });
+    expect(response.status(), `画像のフォルダ設定に失敗しました: ${await response.text()}`).toBe(200);
+  }
+);
+
+/** ツリー内の、名前が完全一致するフォルダ(treeitem)。 */
+function folderItem(scope: Page | Locator, name: string): Locator {
+  return scope.getByRole('treeitem', { name, exact: true });
+}
+
+When(
+  /^ギャラリーでフォルダ「([^」]+)」を親にしてフォルダ「([^」]+)」を作成する$/,
+  async ({ ctx, page }, parentLabel: string, label: string) => {
+    // 親は事前にAPIで作ってある。ツリーに現れるまでが「作成」の観測点になる。
+    const parentName = folderName(ctx, parentLabel);
+    await expect(folderItem(page, parentName)).toBeVisible({ timeout: 30_000 });
+    // ハイドレーション完了前の入力・クリックは取りこぼされる(issue #1284と同種)ので、
+    // ツリーに現れるまで再試行する。
+    await expect(async () => {
+      const nameInput = page.getByLabel('新しいフォルダの名前');
+      await nameInput.fill(folderName(ctx, label), { timeout: 2_000 });
+      await page.getByLabel('親フォルダ').selectOption({ label: parentName }, { timeout: 2_000 });
+      // ハイドレーションが入力を空に戻すことがある。値が残っているときだけクリックし、
+      // クリックは上限付きにして、失敗時にtoPassの再試行へ戻す(無限に待たない)。
+      await expect(nameInput).toHaveValue(folderName(ctx, label), { timeout: 1_000 });
+      await page.getByRole('button', { name: 'フォルダを作成' }).click({ timeout: 2_000 });
+      await expect(folderItem(page, folderName(ctx, label))).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
+  }
+);
+
+Then(
+  /^ギャラリーのフォルダツリーで「([^」]+)」は「([^」]+)」の子として表示される$/,
+  async ({ ctx, page }, label: string, parentLabel: string) => {
+    const parent = folderItem(page, folderName(ctx, parentLabel));
+    const child = folderItem(parent, folderName(ctx, label));
+    await expect(child).toBeVisible({ timeout: 30_000 });
+    await expect(child).toHaveAttribute('aria-level', '2');
+  }
+);
+
+Then(
+  /^ギャラリーを開き直してもフォルダツリーで「([^」]+)」は「([^」]+)」の子として表示される$/,
+  async ({ ctx, page }, label: string, parentLabel: string) => {
+    await page.goto(IMAGE_GALLERY_PATH, { waitUntil: 'commit' });
+    const parent = folderItem(page, folderName(ctx, parentLabel));
+    const child = folderItem(parent, folderName(ctx, label));
+    await expect(child).toBeVisible({ timeout: 30_000 });
+    await expect(child).toHaveAttribute('aria-level', '2');
+  }
+);
+
+async function selectFolderInTree(page: Page, name: string): Promise<void> {
+  const item = folderItem(page, name);
+  await expect(item).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    await item.getByRole('button', { name, exact: true }).first().click();
+    await expect(item).toHaveAttribute('aria-selected', 'true', { timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
+When(/^ギャラリーでフォルダ「([^」]+)」を選ぶ$/, async ({ ctx, page }, label: string) => {
+  await selectFolderInTree(page, folderName(ctx, label));
+});
+
+When('ギャラリーのフォルダで未分類を選ぶ', async ({ page }) => {
+  await selectFolderInTree(page, '未分類');
+});
+
+When('ギャラリーのフォルダですべてを選ぶ', async ({ page }) => {
+  await selectFolderInTree(page, 'すべて');
+});
+
+/** 所属フォルダの選択肢の表示名。入れ子の深さぶんだけ接頭辞が付くため、最上位以外は部分一致で探す。 */
+When(
+  /^詳細で所属フォルダとしてフォルダ「([^」]+)」を選ぶ$/,
+  async ({ ctx, page }, label: string) => {
+    const select = page.getByLabel('所属フォルダ');
+    await expect(select).toBeVisible({ timeout: 30_000 });
+    const id = String(folderIds(ctx)[label]);
+    await expect(async () => {
+      await select.selectOption(id);
+      await expect(select).toHaveValue(id, { timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
+  }
+);
+
+When('詳細で所属フォルダを未分類に戻す', async ({ page }) => {
+  const select = page.getByLabel('所属フォルダ');
+  await expect(select).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    await select.selectOption('');
+    await expect(select).toHaveValue('', { timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+Then(
+  /^詳細の所属フォルダにフォルダ「([^」]+)」が表示される$/,
+  async ({ ctx, page }, label: string) => {
+    await expect(page.getByLabel('所属フォルダ')).toHaveValue(String(folderIds(ctx)[label]), {
+      timeout: 30_000,
+    });
+  }
+);
+
+Then(/^詳細の所属フォルダに「未分類」が表示される$/, async ({ page }) => {
+  const select = page.getByLabel('所属フォルダ');
+  await expect(select).toHaveValue('', { timeout: 30_000 });
+  await expect(select.locator('option:checked')).toHaveText('未分類');
+});
+
+async function putFolderParent(
+  request: APIRequestContext,
+  ctx: Record<string, unknown>,
+  token: string,
+  label: string,
+  parentId: number | null
+): Promise<void> {
+  const response = await request.put(
+    `/api/generated-images/folders/${folderIds(ctx)[label]}/parent`,
+    { headers: { Authorization: `Bearer ${token}` }, data: { parentId } }
+  );
+  ctx.mediaFolderStatuses = [...((ctx.mediaFolderStatuses as number[] | undefined) ?? []), response.status()];
+}
+
+When(
+  /^管理者がフォルダ「([^」]+)」の親にフォルダ「([^」]+)」自身を指定する$/,
+  async ({ ctx, request }, label: string, parentLabel: string) => {
+    ctx.mediaFolderStatuses = [];
+    await putFolderParent(request, ctx, await adminToken(request), label, folderIds(ctx)[parentLabel]);
+  }
+);
+
+When(
+  /^管理者がフォルダ「([^」]+)」の親にフォルダ「([^」]+)」を指定する$/,
+  async ({ ctx, request }, label: string, parentLabel: string) => {
+    ctx.mediaFolderStatuses = [];
+    await putFolderParent(request, ctx, await adminToken(request), label, folderIds(ctx)[parentLabel]);
+  }
+);
+
+Then('フォルダの親の変更は409で拒否される', async ({ ctx }) => {
+  expect(ctx.mediaFolderStatuses, '循環を作る親の変更が409で拒否されていない').toEqual([409]);
+});
+
+Then(/^フォルダ「([^」]+)」は最上位のままである$/, async ({ ctx, request }, label: string) => {
+  const folders = await listFolders(request, await adminToken(request));
+  const folder = folders.find((f) => f.id === folderIds(ctx)[label]);
+  expect(folder, `フォルダ「${label}」が一覧に無い`).toBeDefined();
+  expect(folder?.parentId).toBeNull();
+});
+
+Then(
+  /^フォルダ「([^」]+)」の親はフォルダ「([^」]+)」のままである$/,
+  async ({ ctx, request }, label: string, parentLabel: string) => {
+    const folders = await listFolders(request, await adminToken(request));
+    const folder = folders.find((f) => f.id === folderIds(ctx)[label]);
+    expect(folder?.parentId).toBe(folderIds(ctx)[parentLabel]);
+  }
+);
+
+async function userToken(request: APIRequestContext): Promise<string> {
+  return fetchAccessToken(request, E2E_TEST_EMAIL, E2E_TEST_PASSWORD);
+}
+
+function recordFolderStatus(ctx: Record<string, unknown>, status: number): void {
+  ctx.mediaFolderStatuses = [...((ctx.mediaFolderStatuses as number[] | undefined) ?? []), status];
+}
+
+When('一般利用者がフォルダを作成しようとする', async ({ ctx, request }) => {
+  ctx.mediaFolderStatuses = [];
+  const response = await request.post('/api/generated-images/folders', {
+    headers: { Authorization: `Bearer ${await userToken(request)}` },
+    data: { name: folderName(ctx, '一般利用者作成'), parentId: null },
+  });
+  recordFolderStatus(ctx, response.status());
+});
+
+When(
+  /^一般利用者がフォルダ「([^」]+)」の親にフォルダ「([^」]+)」を指定する$/,
+  async ({ ctx, request }, label: string, parentLabel: string) => {
+    await putFolderParent(request, ctx, await userToken(request), label, folderIds(ctx)[parentLabel]);
+  }
+);
+
+When(
+  /^一般利用者がその生成画像をフォルダ「([^」]+)」へ入れようとする$/,
+  async ({ ctx, request }, label: string) => {
+    const response = await request.put(`/api/generated-images/${ctx.mediaImageId as number}/folder`, {
+      headers: { Authorization: `Bearer ${await userToken(request)}` },
+      data: { folderId: folderIds(ctx)[label] },
+    });
+    recordFolderStatus(ctx, response.status());
+  }
+);
+
+Then('フォルダの作成・親の変更・画像の所属変更はどれも一般利用者への403で拒否される', async ({ ctx }) => {
+  expect(ctx.mediaFolderStatuses, '一般利用者の変更要求(作成・親の変更・所属変更)が全て403で拒否されていない').toEqual([
+    403, 403, 403,
+  ]);
+});
+
+Then('その生成画像はどのフォルダにも属していない', async ({ ctx, request }) => {
+  const response = await request.get(`/api/generated-images/${ctx.mediaImageId as number}`, {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+  });
+  expect(response.status()).toBe(200);
+  expect(((await response.json()) as { folderId: number | null }).folderId).toBeNull();
+});
+
+Then(
+  /^一般利用者はフォルダ一覧を取得でき、フォルダ「([^」]+)」と「([^」]+)」が含まれる$/,
+  async ({ ctx, request }, labelA: string, labelB: string) => {
+    const ids = (await listFolders(request, await userToken(request))).map((f) => f.id);
+    expect(ids).toContain(folderIds(ctx)[labelA]);
+    expect(ids).toContain(folderIds(ctx)[labelB]);
+  }
+);
+
 // ---- 画像設定(image-settings.feature) ----
 
 Given('画像設定を確かめるためのプロジェクトがある', async ({ ctx, request }) => {

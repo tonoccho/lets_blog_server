@@ -106,4 +106,20 @@ class AdminAuthorizationServiceTest {
         assertThrows(ForbiddenException.class, () -> service().requireProjectMemberOrAdminForResource(null));
         verifyNoInteractions(identityBridgeClient);
     }
+
+    // ---- issue #1493: 認証済みなら誰でも(フォルダ一覧の閲覧) ----
+
+    @Test
+    void requireAuthenticated_認証済みなら例外を投げない() {
+        when(currentActorService.isAuthenticated()).thenReturn(true);
+
+        assertDoesNotThrow(() -> service().requireAuthenticated());
+    }
+
+    @Test
+    void requireAuthenticated_操作者を解決できなければForbidden() {
+        when(currentActorService.isAuthenticated()).thenReturn(false);
+
+        assertThrows(ForbiddenException.class, () -> service().requireAuthenticated());
+    }
 }

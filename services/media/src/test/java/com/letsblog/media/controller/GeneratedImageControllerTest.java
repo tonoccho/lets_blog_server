@@ -11,7 +11,10 @@ import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
+import com.letsblog.media.dto.UpdateGeneratedImageFolderRequest;
 import com.letsblog.media.service.AdminAuthorizationService;
+import com.letsblog.media.service.GeneratedImageFolderService;
+import com.letsblog.media.service.InvalidFilterParameterException;
 import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
@@ -55,6 +58,8 @@ class GeneratedImageControllerTest {
     private AdminAuthorizationService adminAuthorizationService;
     @Mock
     private GeneratedImageCreationService generatedImageCreationService;
+    @Mock
+    private GeneratedImageFolderService generatedImageFolderService;
 
     private GeneratedImageController controller;
 
@@ -62,7 +67,7 @@ class GeneratedImageControllerTest {
     void setUp() {
         controller = new GeneratedImageController(
                 generatedImageRepository, generatedImageStorageService, new ObjectMapper(), domainEventPublisher,
-                adminAuthorizationService, generatedImageCreationService);
+                adminAuthorizationService, generatedImageCreationService, generatedImageFolderService);
     }
 
     private GeneratedImage buildImage(Long id, String prompt, String tagsJson) {
@@ -82,7 +87,7 @@ class GeneratedImageControllerTest {
                 buildImage(1L, "a cat", "[\"猫\",\"動物\"]"),
                 buildImage(2L, "a dog", "[\"犬\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
 
         assertEquals(2, result.size());
     }
@@ -93,7 +98,7 @@ class GeneratedImageControllerTest {
                 buildImage(1L, "a cat", "[\"猫\",\"動物\"]"),
                 buildImage(2L, "a dog", "[\"犬\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, "猫", null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, "猫", null, null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(1L, result.get(0).id());
@@ -106,7 +111,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByProjectIdOrderByCreatedAtDescIdDesc(5L))
                 .thenReturn(List.of(buildImage(1L, "a cat", "[\"猫\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(5L, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(5L, null, null, null, null, null);
 
         assertEquals(1, result.size());
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
@@ -117,7 +122,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", "   ")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -156,7 +161,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", null)));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -166,7 +171,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", "not json")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -382,5 +387,104 @@ class GeneratedImageControllerTest {
         assertEquals(0, result.deletedCount());
         assertEquals(1, result.failedCount());
         assertEquals("null", result.failures().get("1"));
+    }
+
+    // ---- issue #1493: フォルダ ----
+
+    private GeneratedImage inFolder(Long id, Long folderId) {
+        GeneratedImage image = buildImage(id, "p" + id, null);
+        image.setFolderId(folderId);
+        return image;
+    }
+
+    @Test
+    void list_folderId指定時はそのフォルダと子孫の画像だけ返す() {
+        when(generatedImageFolderService.descendantIdsIncludingSelf(1L)).thenReturn(java.util.Set.of(1L, 2L));
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
+                inFolder(10L, 1L), inFolder(11L, 2L), inFolder(12L, 3L), inFolder(13L, null)));
+
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, 1L, null);
+
+        assertEquals(List.of(10L, 11L), result.stream().map(GeneratedImageSummaryResponse::id).toList());
+        assertEquals(1L, result.get(0).folderId());
+    }
+
+    @Test
+    void list_unfiled指定時はフォルダに属さない画像だけ返す() {
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
+                inFolder(10L, 1L), inFolder(13L, null)));
+
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, true);
+
+        assertEquals(List.of(13L), result.stream().map(GeneratedImageSummaryResponse::id).toList());
+        assertNull(result.get(0).folderId());
+    }
+
+    @Test
+    void list_unfiledがfalseなら絞り込まない() {
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
+                inFolder(10L, 1L), inFolder(13L, null)));
+
+        assertEquals(2, controller.list(null, null, null, null, null, false).size());
+    }
+
+    @Test
+    void list_folderIdとunfiledの同時指定は拒否する() {
+        assertThrows(InvalidFilterParameterException.class,
+                () -> controller.list(null, null, null, null, 1L, true));
+    }
+
+    @Test
+    void list_フォルダ絞り込みはDBでページングせず絞った後に切る() {
+        when(generatedImageFolderService.descendantIdsIncludingSelf(1L)).thenReturn(java.util.Set.of(1L));
+        when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
+                inFolder(10L, 2L), inFolder(11L, 1L), inFolder(12L, 1L), inFolder(13L, 1L)));
+
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, 1, 1, 1L, null);
+
+        assertEquals(List.of(12L), result.stream().map(GeneratedImageSummaryResponse::id).toList());
+    }
+
+    @Test
+    void updateFolder_adminでなければ画像を読まずに拒否する() {
+        doThrow(new ForbiddenException("admin")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(2L)));
+
+        verifyNoInteractions(generatedImageRepository, generatedImageFolderService);
+    }
+
+    @Test
+    void updateFolder_フォルダを設定して保存する() {
+        GeneratedImage image = buildImage(1L, "a", null);
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+        when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        GeneratedImageDetailResponse result = controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(2L));
+
+        verify(adminAuthorizationService).requireAdmin();
+        verify(generatedImageFolderService).requireExists(2L);
+        assertEquals(2L, result.folderId());
+    }
+
+    @Test
+    void updateFolder_nullなら未分類へ戻しフォルダの存在確認はしない() {
+        GeneratedImage image = inFolder(1L, 2L);
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+        when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        GeneratedImageDetailResponse result = controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(null));
+
+        assertNull(result.folderId());
+        verifyNoInteractions(generatedImageFolderService);
+    }
+
+    @Test
+    void updateFolder_画像が無ければ404相当の例外() {
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.empty());
+
+        assertThrows(GeneratedImageNotFoundException.class,
+                () -> controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(2L)));
     }
 }

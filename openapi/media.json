@@ -298,6 +298,88 @@
         }
       }
     },
+    "/api/generated-images/{id}/folder": {
+      "put": {
+        "tags": [
+          "generated-image-controller"
+        ],
+        "operationId": "updateFolder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGeneratedImageFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generated-images/folders/{id}/parent": {
+      "put": {
+        "tags": [
+          "generated-image-folder-controller"
+        ],
+        "operationId": "changeParent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGeneratedImageFolderParentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageFolderResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/diagrams/{id}": {
       "get": {
         "tags": [
@@ -660,6 +742,23 @@
               "type": "integer",
               "format": "int32"
             }
+          },
+          {
+            "name": "folderId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "unfiled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -700,6 +799,57 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GeneratedImageDetailResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generated-images/folders": {
+      "get": {
+        "tags": [
+          "generated-image-folder-controller"
+        ],
+        "operationId": "listFolders",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GeneratedImageFolderResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "generated-image-folder-controller"
+        ],
+        "operationId": "createFolder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGeneratedImageFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageFolderResponse"
                 }
               }
             }
@@ -1282,10 +1432,10 @@
             "maximum": 2048,
             "minimum": 64
           },
-          "heightMultipleOf8": {
+          "widthMultipleOf8": {
             "type": "boolean"
           },
-          "widthMultipleOf8": {
+          "heightMultipleOf8": {
             "type": "boolean"
           }
         }
@@ -1504,6 +1654,44 @@
           },
           "provider": {
             "type": "string"
+          },
+          "folderId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "UpdateGeneratedImageFolderRequest": {
+        "type": "object",
+        "properties": {
+          "folderId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "UpdateGeneratedImageFolderParentRequest": {
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "GeneratedImageFolderResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -1822,6 +2010,23 @@
           "provider"
         ]
       },
+      "CreateGeneratedImageFolderRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 0
+          },
+          "parentId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
       "BulkDeleteGeneratedImagesRequest": {
         "type": "object",
         "properties": {
@@ -1994,10 +2199,10 @@
             "type": "integer",
             "format": "int64"
           },
-          "heightMultipleOf8": {
+          "widthMultipleOf8": {
             "type": "boolean"
           },
-          "widthMultipleOf8": {
+          "heightMultipleOf8": {
             "type": "boolean"
           }
         },
@@ -2130,6 +2335,10 @@
           },
           "provider": {
             "type": "string"
+          },
+          "folderId": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

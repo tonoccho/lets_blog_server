@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClient";
+import type { GeneratedImageDetail, GeneratedImageFolder, GeneratedImageSummary } from "@/lib/apiClient";
 import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 import {
   bulkDeleteGeneratedImagesAction,
+  createGeneratedImageFolderAction,
   deleteGeneratedImageAction,
   fetchGalleryImagesPageAction,
   getGeneratedImageAction,
+  setGeneratedImageFolderAction,
   updateGeneratedImageTagsAction,
 } from "./actions";
 import { GALLERY_PAGE_SIZE } from "./pageSize";
@@ -27,16 +29,49 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** フォルダでの絞り込み。フォルダid(そのフォルダと子孫)、"unfiled"(未分類)、null(絞り込みなし)(issue #1493)。 */
+type FolderFilter = number | "unfiled" | null;
+
+/** 親idごとの子フォルダ(作成順)。ツリー表示と選択肢の元になる。 */
+function groupByParent(folders: GeneratedImageFolder[]): Map<number | null, GeneratedImageFolder[]> {
+  const byParent = new Map<number | null, GeneratedImageFolder[]>();
+  for (const folder of folders) {
+    byParent.set(folder.parentId, [...(byParent.get(folder.parentId) ?? []), folder]);
+  }
+  return byParent;
+}
+
+/** ツリーを深さ優先で平らにする。`<select>` の選択肢を階層順に並べるのに使う。 */
+function flattenFolders(
+  byParent: Map<number | null, GeneratedImageFolder[]>,
+  parentId: number | null = null,
+  depth = 0,
+): { folder: GeneratedImageFolder; depth: number }[] {
+  return (byParent.get(parentId) ?? []).flatMap((folder) => [
+    { folder, depth },
+    ...flattenFolders(byParent, folder.id, depth + 1),
+  ]);
+}
+
 /**
  * 生成画像の一覧。`images` は最初の1ページ(issue #1472)。末尾が画面に近づくと次のページを
  * Server Action で取得して追加する(無限スクロール)。タグの絞り込みはサーバ側で行い、
  * 選ぶたびに offset=0 から取り直す。
  */
+function folderButtonClass(selected: boolean): string {
+  return selected
+    ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+    : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400";
+}
+
 export function ImageGalleryGrid({
   images,
+  folders: initialFolders = [],
   timezone,
 }: {
   images: GeneratedImageSummary[];
+  /** 共通のフォルダツリー(フラット。親子は parentId)(issue #1493)。 */
+  folders?: GeneratedImageFolder[];
   timezone: string | null;
 }) {
   /** 表示中の一覧(絞り込み中は絞り込み後の一覧)。 */
@@ -65,6 +100,16 @@ export function ImageGalleryGrid({
   const [bulkResult, setBulkResult] = useState<{ type: "success" | "error"; text: string } | null>(null);
   /** タグ一覧を絞り込むフィルタ(issue #281)。nullは絞り込みなし。 */
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  /** フォルダで絞り込むフィルタ(issue #1493)。タグ絞り込みと併用できる。 */
+  const [activeFolder, setActiveFolder] = useState<FolderFilter>(null);
+  const [folders, setFolders] = useState<GeneratedImageFolder[]>(initialFolders);
+  /** 折りたたんだフォルダのid。既定はすべて展開。 */
+  const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderParent, setNewFolderParent] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [isSavingFolder, startFolderTransition] = useTransition();
   /** 「この画像の設定をコピー」ボタンの一時的なフィードバック表示(issue #437)。 */
   const [settingsCopied, setSettingsCopied] = useState(false);
   // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
@@ -84,20 +129,24 @@ export function ImageGalleryGrid({
     return Array.from(set).sort();
   }, [knownImages]);
 
+  const foldersByParent = useMemo(() => groupByParent(folders), [folders]);
+  const folderOptions = useMemo(() => flattenFolders(foldersByParent), [foldersByParent]);
+
   /** 現在の一覧の続きを取得して末尾に追加する。 */
   function loadMore() {
     if (loadingRef.current || !hasMore) return;
     const seq = ++requestSeq.current;
     const tag = activeTag;
+    const folder = activeFolder;
     loadingRef.current = true;
     setLoading(true);
     setLoadError(null);
-    fetchGalleryImagesPageAction(fetchedCount, tag).then(
+    fetchGalleryImagesPageAction(fetchedCount, tag, folder).then(
       (next) => {
         if (seq !== requestSeq.current) return;
         loadingRef.current = false;
         setItems((current) => appendUnique(current, next));
-        if (tag === null) setKnownImages((current) => appendUnique(current, next));
+        if (tag === null && folder === null) setKnownImages((current) => appendUnique(current, next));
         setFetchedCount((count) => count + next.length);
         setHasMore(next.length >= GALLERY_PAGE_SIZE);
         setLoading(false);
@@ -111,20 +160,24 @@ export function ImageGalleryGrid({
     );
   }
 
-  /** タグ(nullは「すべて」)を選び直し、offset=0 から取り直す。失敗したときは読み込み済みの一覧を残す。 */
-  function selectTag(tag: string | null) {
+  /**
+   * タグ(nullは「すべて」)とフォルダの絞り込みを選び直し、offset=0 から取り直す。
+   * 失敗したときは読み込み済みの一覧と現在の絞り込みを残す。
+   */
+  function applyFilter(tag: string | null, folder: FolderFilter) {
     const seq = ++requestSeq.current;
     loadingRef.current = true;
     setLoading(true);
     setLoadError(null);
-    fetchGalleryImagesPageAction(0, tag).then(
+    fetchGalleryImagesPageAction(0, tag, folder).then(
       (first) => {
         if (seq !== requestSeq.current) return;
         loadingRef.current = false;
         setActiveTag(tag);
+        setActiveFolder(folder);
         setCheckedIds(new Set());
         setItems(first);
-        if (tag === null) setKnownImages(first);
+        if (tag === null && folder === null) setKnownImages(first);
         setFetchedCount(first.length);
         setHasMore(first.length >= GALLERY_PAGE_SIZE);
         setLoading(false);
@@ -132,10 +185,111 @@ export function ImageGalleryGrid({
       (err) => {
         if (seq !== requestSeq.current) return;
         loadingRef.current = false;
-        setLoadError({ label: "絞り込みを読み込めませんでした", message: errorMessage(err), retry: () => selectTag(tag) });
+        setLoadError({
+          label: "絞り込みを読み込めませんでした",
+          message: errorMessage(err),
+          retry: () => applyFilter(tag, folder),
+        });
         setLoading(false);
       },
     );
+  }
+
+  function selectTag(tag: string | null) {
+    applyFilter(tag, activeFolder);
+  }
+
+  function selectFolder(folder: FolderFilter) {
+    applyFilter(activeTag, folder);
+  }
+
+  function toggleCollapsed(id: number) {
+    setCollapsedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** フォルダを作成する(admin のみ。権限が無ければ media-service の403の理由をそのまま表示する)。 */
+  async function handleCreateFolder() {
+    setCreatingFolder(true);
+    setFolderError(null);
+    try {
+      const created = await createGeneratedImageFolderAction(
+        newFolderName.trim(),
+        newFolderParent === "" ? null : Number(newFolderParent),
+      );
+      setFolders((current) => [...current, created]);
+      setNewFolderName("");
+    } catch (err) {
+      setFolderError(errorMessage(err));
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
+  /** 詳細の画像の所属フォルダを変える(空文字は未分類)。絞り込み中なら一覧を同じ条件で取り直す。 */
+  function handleFolderChange(imageId: number, value: string) {
+    const folderId = value === "" ? null : Number(value);
+    startFolderTransition(async () => {
+      try {
+        const result = await setGeneratedImageFolderAction(imageId, folderId);
+        setDetail(result);
+        const apply = (list: GeneratedImageSummary[]) =>
+          list.map((image) => (image.id === imageId ? { ...image, folderId: result.folderId } : image));
+        setItems(apply);
+        setKnownImages(apply);
+        if (activeFolder !== null) applyFilter(activeTag, activeFolder);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    });
+  }
+
+  function renderFolderNodes(parentId: number | null, depth: number) {
+    return (foldersByParent.get(parentId) ?? []).map((folder) => {
+      const hasChildren = foldersByParent.has(folder.id);
+      const collapsed = collapsedIds.has(folder.id);
+      return (
+        <li
+          key={folder.id}
+          role="treeitem"
+          aria-label={folder.name}
+          aria-level={depth}
+          aria-selected={activeFolder === folder.id}
+          aria-expanded={hasChildren ? !collapsed : undefined}
+        >
+          <div className="flex items-center gap-1">
+            {hasChildren ? (
+              <button
+                type="button"
+                onClick={() => toggleCollapsed(folder.id)}
+                aria-label={`「${folder.name}」を${collapsed ? "展開" : "折りたたむ"}`}
+                className="w-4 text-neutral-500"
+              >
+                {collapsed ? "▸" : "▾"}
+              </button>
+            ) : (
+              <span className="w-4" aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              onClick={() => selectFolder(folder.id)}
+              className={`rounded px-2 py-0.5 ${folderButtonClass(activeFolder === folder.id)}`}
+            >
+              {folder.name}
+            </button>
+          </div>
+          {hasChildren && !collapsed && (
+            <ul role="group" className="ml-4 space-y-1">
+              {renderFolderNodes(folder.id, depth + 1)}
+            </ul>
+          )}
+        </li>
+      );
+    });
   }
 
   // 最新の loadMore を observer から呼ぶ(observer は state が変わるたびに作り直すので古い閉包を掴まない)。
@@ -312,6 +466,70 @@ export function ImageGalleryGrid({
 
   return (
     <div className="space-y-4">
+      <div className="space-y-2 text-xs">
+        {folders.length > 0 && (
+          <div className="space-y-1">
+            <span className="text-neutral-500 dark:text-neutral-400">フォルダで絞り込み:</span>
+            <ul role="tree" aria-label="フォルダツリー" className="space-y-1">
+              {[
+                { label: "すべて", value: null },
+                { label: "未分類", value: "unfiled" as const },
+              ].map(({ label, value }) => (
+                <li key={label} role="treeitem" aria-label={label} aria-level={1} aria-selected={activeFolder === value}>
+                  <button
+                    type="button"
+                    onClick={() => selectFolder(value)}
+                    className={`ml-5 rounded px-2 py-0.5 ${folderButtonClass(activeFolder === value)}`}
+                  >
+                    {label}
+                  </button>
+                </li>
+              ))}
+              {renderFolderNodes(null, 1)}
+            </ul>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            aria-label="新しいフォルダの名前"
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            placeholder="新しいフォルダ"
+            disabled={creatingFolder}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1"
+          />
+          <select
+            aria-label="親フォルダ"
+            value={newFolderParent}
+            onChange={(e) => setNewFolderParent(e.target.value)}
+            disabled={creatingFolder}
+            className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1"
+          >
+            <option value="">(最上位)</option>
+            {folderOptions.map(({ folder, depth }) => (
+              <option key={folder.id} value={folder.id}>
+                {"— ".repeat(depth)}
+                {folder.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleCreateFolder}
+            disabled={creatingFolder || !newFolderName.trim()}
+            className="rounded bg-neutral-900 px-3 py-1 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+          >
+            {creatingFolder ? "作成中…" : "フォルダを作成"}
+          </button>
+        </div>
+        {folderError && (
+          <p role="alert" className="text-red-600">
+            {folderError}
+          </p>
+        )}
+      </div>
+
       {allTags.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-neutral-500 dark:text-neutral-400">タグで絞り込み:</span>
@@ -477,6 +695,25 @@ export function ImageGalleryGrid({
             {error && <p className="text-red-600">{error}</p>}
             {detail && (
               <>
+                <div className="mb-4 space-y-2">
+                  <p className="text-sm font-semibold">フォルダ</p>
+                  <select
+                    aria-label="所属フォルダ"
+                    value={String(detail.folderId ?? "")}
+                    onChange={(e) => handleFolderChange(detail.id, e.target.value)}
+                    disabled={isSavingFolder}
+                    className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm"
+                  >
+                    <option value="">未分類</option>
+                    {folderOptions.map(({ folder, depth }) => (
+                      <option key={folder.id} value={folder.id}>
+                        {"— ".repeat(depth)}
+                        {folder.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="mb-4 space-y-2">
                   <p className="text-sm font-semibold">タグ</p>
                   <div className="flex flex-wrap items-center gap-2">

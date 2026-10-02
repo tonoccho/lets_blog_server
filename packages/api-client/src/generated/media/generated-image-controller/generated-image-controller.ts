@@ -11,6 +11,7 @@ import type {
   GeneratedImageDetailResponse,
   GeneratedImageSummaryResponse,
   ListParams,
+  UpdateGeneratedImageFolderRequest,
   UpdateGeneratedImageTagsRequest
 } from '../openAPIDefinition.schemas';
 
@@ -58,6 +59,52 @@ const res = await fetch(getUpdateTagsUrl(id),
 
   const data: updateTagsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as updateTagsResponse
+}
+
+
+export type updateFolderResponse200 = {
+  data: GeneratedImageDetailResponse
+  status: 200
+}
+
+export type updateFolderResponseSuccess = (updateFolderResponse200) & {
+  headers: Headers;
+};
+;
+
+export type updateFolderResponse = (updateFolderResponseSuccess)
+
+export const getUpdateFolderUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/generated-images/${id}/folder`
+}
+
+export const updateFolder = async (id: number,
+    updateGeneratedImageFolderRequest: UpdateGeneratedImageFolderRequest, options?: RequestInit): Promise<updateFolderResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getUpdateFolderUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateGeneratedImageFolderRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: updateFolderResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as updateFolderResponse
 }
 
 

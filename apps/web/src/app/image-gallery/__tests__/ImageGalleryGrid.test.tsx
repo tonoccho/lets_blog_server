@@ -18,6 +18,7 @@ const SUMMARY: GeneratedImageSummary = {
   createdAt: '2026-08-01T00:00:00Z',
   tags: [],
   provider: 'COMFYUI',
+  folderId: null,
 }
 
 const DETAIL: GeneratedImageDetail = {
@@ -186,11 +187,11 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
 
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
     await waitFor(() => expect(screen.queryByAltText('a dog')).not.toBeInTheDocument())
-    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫')
+    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null)
 
     fireEvent.click(screen.getByRole('button', { name: 'すべて' }))
     expect(await screen.findByAltText('a dog')).toBeInTheDocument()
-    expect(fetchPage).toHaveBeenLastCalledWith(0, null)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null)
   })
 
   it('詳細の取得に失敗したらエラーを表示する', async () => {

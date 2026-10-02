@@ -21,8 +21,10 @@ jest.mock('@/lib/auth', () => ({ authOptions: {} }));
 
 const listGeneratedImages = jest.fn();
 const getMyProfile = jest.fn();
+const listGeneratedImageFolders = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   listGeneratedImages: (...a: unknown[]) => listGeneratedImages(...a),
+  listGeneratedImageFolders: (...a: unknown[]) => listGeneratedImageFolders(...a),
   getMyProfile: (...a: unknown[]) => getMyProfile(...a),
 }));
 
@@ -35,6 +37,7 @@ describe('/image-gallery のセッション判定(issue #1234)', () => {
     jest.clearAllMocks();
     listGeneratedImages.mockResolvedValue([]);
     getMyProfile.mockResolvedValue(null);
+    listGeneratedImageFolders.mockResolvedValue([]);
   });
 
   it('session.error が RefreshAccessTokenError のとき /login へ送り、画像を取得しない(「生成画像がありません」を出さない)', async () => {

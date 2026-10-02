@@ -1002,13 +1002,17 @@ media-service所有。ComfyUIで生成した画像とパラメータの一覧・
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/generated-images | requireProjectMemberOrAdmin(projectId指定時)/requireAdmin(未指定時) | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:67-91`。`projectId`未指定は全プロジェクト横断一覧になるためadmin限定 |
+| GET /api/generated-images | requireProjectMemberOrAdmin(projectId指定時)/requireAdmin(未指定時) | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:67-91`。`projectId`未指定は全プロジェクト横断一覧になるためadmin限定。issue #1493で`folderId`/`unfiled`の絞り込み条件を追加したが、**認可は変えない**(絞り込みは認可の範囲内の画像をさらに狭めるだけ。一般ユーザーが見られるのは自分がメンバーのプロジェクトの画像のみ) |
 | GET /api/generated-images/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:93-96,156-160`。`findAuthorized`が対象を読んでから`projectId`で判定するため、id=1の生成画像が存在しない場合は404が先に返る |
 | POST /api/generated-images | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:103-113`。リクエストの`projectId`で判定 |
 | PUT /api/generated-images/{id}/tags | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:116-122,156-160`。同上(存在しない場合は404が先) |
 | GET /api/generated-images/{id}/file | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:124-132,156-160`。同上(存在しない場合は404が先) |
 | DELETE /api/generated-images/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:134-140,156-160`。同上(存在しない場合は404が先) |
 | POST /api/generated-images/bulk-delete | requireProjectMemberOrAdminForResource(idごと) | 401 | 403 | 認可OK | 現状維持 | issue #1492。`bulkDelete`が**全idを`findAuthorized`で読んで認可してから**削除ループに入る。権限の無いidが1つでもあれば403、存在しないidがあれば404で、権限のある画像も含めて1件も削除しない(ファイル削除は取り消せないため)。`projectId==null`の画像はadminのみ |
+| PUT /api/generated-images/{id}/folder | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1493。画像をフォルダへ入れる/未分類へ戻す(`folderId`がnull)。フォルダは横断の共通ツリーで画像のプロジェクトに依存しないため、**画像の所属プロジェクトを問わずadminのみ**(利用者の判断 2026-10-01)。認可を先に行うので、権限の無い利用者には画像・フォルダの存在も漏らさない。存在しない画像・フォルダは404 |
+| GET /api/generated-images/folders | requireAuthenticated | 401 | 該当なし(認証済みなら誰でも可) | 認可OK | 現状維持 | issue #1493。共通ツリー(id・name・parentId)を全利用者に返す。応答に画像の件数や情報を含めず、他プロジェクトの画像の存在を露出させない。操作者を解決できない(無効化)ユーザーは403。`{id}`付きの`GET /api/generated-images/{id}`とはリテラルパスが優先して解決される |
+| POST /api/generated-images/folders | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1493。フォルダの作成(親は任意)。存在しない親は404、空の名前は400 |
+| PUT /api/generated-images/folders/{id}/parent | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1493。親の変更。自分自身・自分の子孫を親に指定すると409(再帰CTEで子孫を引いて確認。自己参照FKだけでは循環を防げないため)で、状態は変わらない。存在しないフォルダ・親は404 |
 
 ## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 

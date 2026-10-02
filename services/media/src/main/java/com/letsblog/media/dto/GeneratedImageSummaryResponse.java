@@ -10,6 +10,8 @@ public record GeneratedImageSummaryResponse(
         String checkpoint,
         LocalDateTime createdAt,
         List<String> tags,
-        String provider
+        String provider,
+        /** 所属フォルダ(issue #1493)。nullは未分類。 */
+        Long folderId
 ) {
 }

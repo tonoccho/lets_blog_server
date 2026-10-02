@@ -48,6 +48,18 @@ export interface GeneratedImageSummary {
   createdAt: string;
   tags: string[];
   provider: string;
+  /** 所属フォルダ(issue #1493)。nullは未分類。 */
+  folderId: number | null;
+}
+
+/**
+ * 生成画像の入れ子フォルダ(issue #1493)。横断の共通ツリーで、`parentId` が null なら最上位。
+ * 画像の件数や画像の情報は含まれない。
+ */
+export interface GeneratedImageFolder {
+  id: number;
+  name: string;
+  parentId: number | null;
 }
 
 export interface GeneratedImageDetail extends GeneratedImageSummary {
@@ -456,14 +468,18 @@ export function listGenerationJobs(): Promise<GenerationJob[]> {
  * 生成画像の一覧。`options` を省略すると従来どおり全件を返す(issue #1472)。
  * `limit` を指定すると createdAt 降順・同時刻は id 降順の並びで `offset` 件を飛ばした位置から最大 `limit` 件、
  * `tag` は絞り込んだ後の一覧に対して適用される。
+ * `folderId` はそのフォルダと子孫フォルダの画像、`unfiled` はどのフォルダにも属さない画像に絞る(issue #1493)。
  */
 export function listGeneratedImages(
   projectId?: number,
-  options: { limit?: number; offset?: number; tag?: string } = {},
+  options: { limit?: number; offset?: number; tag?: string; folderId?: number; unfiled?: boolean } = {},
 ): Promise<GeneratedImageSummary[]> {
   const params = new URLSearchParams();
   if (projectId) params.set('projectId', String(projectId));
   if (options.tag !== undefined) params.set('tag', options.tag);
+  // フォルダ(子孫を含む)と未分類の絞り込み(issue #1493)。同時指定はサーバが400で拒否する。
+  if (options.folderId !== undefined) params.set('folderId', String(options.folderId));
+  if (options.unfiled) params.set('unfiled', 'true');
   if (options.limit !== undefined) params.set('limit', String(options.limit));
   if (options.offset !== undefined) params.set('offset', String(options.offset));
   const query = params.toString();
@@ -494,6 +510,29 @@ export function bulkDeleteGeneratedImages(imageIds: number[]): Promise<Generated
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageIds }),
+  });
+}
+
+/** 生成画像フォルダの一覧(フラット。親子は `parentId`)。認証済みなら誰でも取得できる(issue #1493)。 */
+export function listGeneratedImageFolders(): Promise<GeneratedImageFolder[]> {
+  return apiFetch<GeneratedImageFolder[]>('/api/generated-images/folders');
+}
+
+/** フォルダを作成する。`parentId` が null なら最上位。admin のみ(issue #1493)。 */
+export function createGeneratedImageFolder(name: string, parentId: number | null): Promise<GeneratedImageFolder> {
+  return apiFetch<GeneratedImageFolder>('/api/generated-images/folders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, parentId }),
+  });
+}
+
+/** 画像をフォルダへ入れる。`folderId` が null なら未分類へ戻す。admin のみ(issue #1493)。 */
+export function setGeneratedImageFolder(id: number, folderId: number | null): Promise<GeneratedImageDetail> {
+  return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/folder`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folderId }),
   });
 }
 

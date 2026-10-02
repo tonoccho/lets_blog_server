@@ -5,7 +5,10 @@ import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.render.RechartsRenderException;
 import com.letsblog.media.service.CmsBridgeException;
 import com.letsblog.media.service.DiagramNotFoundException;
+import com.letsblog.media.service.FolderHierarchyCycleException;
 import com.letsblog.media.service.ForbiddenException;
+import com.letsblog.media.service.GeneratedImageFolderNotFoundException;
+import com.letsblog.media.service.InvalidFilterParameterException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import com.letsblog.common.client.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
@@ -85,6 +88,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidPagingParameterException.class)
     public ResponseEntity<ErrorResponse> handleInvalidPagingParameter(InvalidPagingParameterException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1493: 一覧の絞り込み条件(folderIdとunfiled)の矛盾。 */
+    @ExceptionHandler(InvalidFilterParameterException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidFilterParameter(InvalidFilterParameterException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1493: 存在しないフォルダの指定。 */
+    @ExceptionHandler(GeneratedImageFolderNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleGeneratedImageFolderNotFound(GeneratedImageFolderNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1493: 自分自身または子孫を親にする要求。階層に循環を作らないため拒否する。 */
+    @ExceptionHandler(FolderHierarchyCycleException.class)
+    public ResponseEntity<ErrorResponse> handleFolderHierarchyCycle(FolderHierarchyCycleException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(GeneratedImageNotFoundException.class)

@@ -25,6 +25,7 @@ export * from './generated/log-writer/frontend-error-log-controller/frontend-err
 // media-serviceへ移管、#573 stage1)
 export * from './generated/media/openAPIDefinition.schemas';
 export * from './generated/media/generated-image-controller/generated-image-controller';
+export * from './generated/media/generated-image-folder-controller/generated-image-folder-controller';
 export * from './generated/media/diagram-controller/diagram-controller';
 export * from './generated/media/render-controller/render-controller';
 export * from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';

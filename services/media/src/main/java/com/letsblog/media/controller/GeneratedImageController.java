@@ -9,13 +9,16 @@ import com.letsblog.media.dto.CreateGeneratedImageRequest;
 import com.letsblog.media.dto.GeneratedImageBulkDeleteResponse;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
+import com.letsblog.media.dto.UpdateGeneratedImageFolderRequest;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.repository.OffsetLimitPageable;
 import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.GeneratedImageCreationService;
+import com.letsblog.media.service.GeneratedImageFolderService;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
+import com.letsblog.media.service.InvalidFilterParameterException;
 import com.letsblog.media.service.InvalidPagingParameterException;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -39,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * ComfyUIで生成した画像とパラメータの一覧・詳細・バイナリ取得(Web管理画面のギャラリー表示用)。
@@ -61,19 +65,22 @@ public class GeneratedImageController {
     private final DomainEventPublisher domainEventPublisher;
     private final AdminAuthorizationService adminAuthorizationService;
     private final GeneratedImageCreationService generatedImageCreationService;
+    private final GeneratedImageFolderService generatedImageFolderService;
 
     public GeneratedImageController(GeneratedImageRepository generatedImageRepository,
                                      GeneratedImageStorageService generatedImageStorageService,
                                      ObjectMapper objectMapper,
                                      DomainEventPublisher domainEventPublisher,
                                      AdminAuthorizationService adminAuthorizationService,
-                                     GeneratedImageCreationService generatedImageCreationService) {
+                                     GeneratedImageCreationService generatedImageCreationService,
+                                     GeneratedImageFolderService generatedImageFolderService) {
         this.generatedImageRepository = generatedImageRepository;
         this.generatedImageStorageService = generatedImageStorageService;
         this.objectMapper = objectMapper;
         this.domainEventPublisher = domainEventPublisher;
         this.adminAuthorizationService = adminAuthorizationService;
         this.generatedImageCreationService = generatedImageCreationService;
+        this.generatedImageFolderService = generatedImageFolderService;
     }
 
     /**
@@ -83,13 +90,19 @@ public class GeneratedImageController {
      * 全件を返す({@code offset}だけ指定した場合はその件数を飛ばした残りを返す)。{@code limit}指定時は
      * createdAt降順・同時刻はid降順の並びで{@code offset}件を飛ばした位置から最大{@code limit}件を返し、
      * tag指定時は絞り込んだ後の一覧に適用する。レスポンスは常にJSON配列のまま。
+     *
+     * <p>{@code folderId}指定時は、そのフォルダと子孫フォルダに属する画像だけ、{@code unfiled=true}指定時は
+     * どのフォルダにも属さない画像だけに絞り込む(issue #1493)。同時指定は400。タグ絞り込み・ページング・
+     * projectIdと併用でき、画像の認可は変わらない(絞り込みは認可の範囲内の画像をさらに狭めるだけ)。
      */
     @GetMapping("/api/generated-images")
     public List<GeneratedImageSummaryResponse> list(
             @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) String tag,
             @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false) Integer offset) {
+            @RequestParam(required = false) Integer offset,
+            @RequestParam(required = false) Long folderId,
+            @RequestParam(required = false) Boolean unfiled) {
         // projectId 指定時はそのプロジェクトのメンバーに限定する(issue #830)。
         // 未指定は「全プロジェクトの生成画像を返す」なので admin に限定する。本来は
         // 「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を
@@ -101,16 +114,25 @@ public class GeneratedImageController {
             adminAuthorizationService.requireAdmin();
         }
         validatePaging(limit, offset);
+        boolean unfiledOnly = Boolean.TRUE.equals(unfiled);
+        if (folderId != null && unfiledOnly) {
+            throw new InvalidFilterParameterException("folderIdとunfiledは同時に指定できません");
+        }
+        Set<Long> folderIds = folderId == null ? null : generatedImageFolderService.descendantIdsIncludingSelf(folderId);
         long skip = offset == null ? 0 : offset;
-        // tagはtags_json(TEXT列)の中身なのでDBでは絞れない。tag無しでlimit指定のときだけDBで切り、
+        // tagはtags_json(TEXT列)の中身なのでDBでは絞れない。フォルダ絞り込みも、子孫を解決した
+        // idの集合でここで絞る。tag・フォルダ絞り込み無しでlimit指定のときだけDBで切り、
         // それ以外は全行を読んで絞り込んだ後にメモリ上で切る(絞り込み → ページングの順を守る)。
-        boolean pagedInDatabase = tag == null && limit != null;
+        boolean pagedInDatabase = tag == null && folderIds == null && !unfiledOnly && limit != null;
         List<GeneratedImage> images = findImages(projectId, pagedInDatabase ? new OffsetLimitPageable(skip, limit) : null);
         var summaries = images.stream()
+                .filter(image -> folderIds == null
+                        || (image.getFolderId() != null && folderIds.contains(image.getFolderId())))
+                .filter(image -> !unfiledOnly || image.getFolderId() == null)
                 .map(image -> new GeneratedImageSummaryResponse(
                         image.getId(), image.getProjectId(), image.getPrompt(),
                         image.getCheckpoint(), image.getCreatedAt(), parseTags(image.getTagsJson()),
-                        image.getProvider()))
+                        image.getProvider(), image.getFolderId()))
                 .filter(response -> tag == null || response.tags().stream().anyMatch(t -> t.equalsIgnoreCase(tag)));
         if (!pagedInDatabase) {
             summaries = summaries.skip(skip);
@@ -172,6 +194,22 @@ public class GeneratedImageController {
         return toDetailResponse(generatedImageRepository.save(image));
     }
 
+    /**
+     * 画像を1つのフォルダへ入れる、または未分類へ戻す(issue #1493)。管理者のみ。{@code folderId}がnullなら未分類。
+     * ファイルの物理配置は変えない(DB上の論理分類)。
+     */
+    @PutMapping("/api/generated-images/{id}/folder")
+    public GeneratedImageDetailResponse updateFolder(
+            @PathVariable Long id, @RequestBody UpdateGeneratedImageFolderRequest request) {
+        adminAuthorizationService.requireAdmin();
+        GeneratedImage image = findOrThrow(id);
+        if (request.folderId() != null) {
+            generatedImageFolderService.requireExists(request.folderId());
+        }
+        image.setFolderId(request.folderId());
+        return toDetailResponse(generatedImageRepository.save(image));
+    }
+
     @GetMapping("/api/generated-images/{id}/file")
     public ResponseEntity<byte[]> getImageFile(@PathVariable Long id) {
         GeneratedImage image = findAuthorized(id);
@@ -227,7 +265,7 @@ public class GeneratedImageController {
                 image.getWidth(), image.getHeight(), image.getBatchSize(), image.getBatchIndex(),
                 image.getCheckpoint(),
                 image.getLoraName(), image.getLoraWeight() != null ? image.getLoraWeight().doubleValue() : null,
-                image.getCreatedAt(), parseTags(image.getTagsJson()), image.getProvider());
+                image.getCreatedAt(), parseTags(image.getTagsJson()), image.getProvider(), image.getFolderId());
     }
 
     /**

@@ -41,6 +41,7 @@ const SUMMARY: GeneratedImageSummary = {
   createdAt: "2026-09-08T20:03:35",
   tags: [],
   provider: "COMFYUI",
+  folderId: null,
 };
 
 const DETAIL: GeneratedImageDetail = {

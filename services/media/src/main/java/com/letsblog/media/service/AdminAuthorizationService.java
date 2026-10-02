@@ -31,6 +31,16 @@ public class AdminAuthorizationService {
         }
     }
 
+    /**
+     * 認証済み(操作者を解決できる)利用者なら誰でも許可する(issue #1493)。プロジェクトやロールは問わない。
+     * 全利用者に見せる共通のもの(生成画像フォルダのツリー)の閲覧に使う。
+     */
+    public void requireAuthenticated() {
+        if (!currentActorService.isAuthenticated()) {
+            throw new ForbiddenException("この操作にはログインが必要です");
+        }
+    }
+
     /** プロジェクトメンバーまたはadminのみを許可する(issue #830)。 */
     public void requireProjectMemberOrAdmin(Long projectId) {
         if (currentActorService.isAdmin()) {
