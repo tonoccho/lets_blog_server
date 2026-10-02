@@ -1,6 +1,5 @@
-package com.letsblog.logwriter.client;
+package com.letsblog.common.client;
 
-import com.letsblog.logwriter.service.GenerationJobUnavailableException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -14,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestClient;
 
@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * ({@code services/legacy-api/.../PlatformServiceClientTest}と同じ方式)。
  */
 @DisplayName("GenerationJobClient: ai-serviceへの問い合わせ(issue #825)")
-class GenerationJobClientTest {
+class GenerationJobClientListTest {
 
     /** ai-serviceの{@code GenerationJobResponse}が実際に返す5フィールド({@code updatedAt}を含む)。 */
     private static final String AI_SERVICE_JSON = """
@@ -62,8 +62,10 @@ class GenerationJobClientTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", this::respond);
         server.start();
+        // listRecentはservice token不要(log-writerはServiceTokenClientを持たない)ためnullを渡す。
         client = new GenerationJobClient(
-                RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort());
+                RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort(), null,
+                io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry.ofDefaults());
     }
 
     @AfterEach
@@ -106,6 +108,14 @@ class GenerationJobClientTest {
     }
 
     @Test
+    @DisplayName("本文が空(JSON null)のレスポンスは空リストとして扱う")
+    void 空本文は空リスト() {
+        responseBody = "null";
+
+        assertThat(client.listRecent("Bearer token")).isEmpty();
+    }
+
+    @Test
     @DisplayName("/api/generation-jobs を叩く")
     void 問い合わせパス() {
         client.listRecent("Bearer token");
@@ -144,7 +154,7 @@ class GenerationJobClientTest {
         responseBody = "{\"error\":\"Not Found\"}";
 
         assertThatThrownBy(() -> client.listRecent("Bearer token"))
-                .isInstanceOf(GenerationJobUnavailableException.class)
+                .isInstanceOf(GenerationJobBridgeException.class)
                 .hasMessageContaining("ai-serviceの/api/generation-jobs呼び出しに失敗しました")
                 // SyncServiceExceptionが組み立てる "[ai-service] GET /api/generation-jobs: ..." が
                 // 連結されていること。ここが落ちると原因不明のWARNが1行出るだけになる。
@@ -163,12 +173,16 @@ class GenerationJobClientTest {
     @Test
     @DisplayName("ベースURLをapp.ai-service-uriから解決している")
     void 設定キー() {
-        Constructor<?> constructor = GenerationJobClient.class.getDeclaredConstructors()[0];
         String expression = null;
-        for (Parameter parameter : constructor.getParameters()) {
-            Value value = parameter.getAnnotation(Value.class);
-            if (value != null) {
-                expression = value.value();
+        for (Constructor<?> constructor : GenerationJobClient.class.getDeclaredConstructors()) {
+            if (constructor.getAnnotation(Autowired.class) == null) {
+                continue;
+            }
+            for (Parameter parameter : constructor.getParameters()) {
+                Value value = parameter.getAnnotation(Value.class);
+                if (value != null) {
+                    expression = value.value();
+                }
             }
         }
 

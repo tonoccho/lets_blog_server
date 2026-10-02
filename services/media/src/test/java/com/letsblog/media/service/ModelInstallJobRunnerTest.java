@@ -3,7 +3,7 @@ package com.letsblog.media.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.ComfyUiCheckpointStorageService;
 import com.letsblog.media.ai.DownloadProgress;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

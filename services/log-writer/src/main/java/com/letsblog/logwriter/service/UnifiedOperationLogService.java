@@ -1,7 +1,8 @@
 package com.letsblog.logwriter.service;
 
-import com.letsblog.logwriter.client.GenerationJobClient;
-import com.letsblog.logwriter.client.GenerationJobSummary;
+import com.letsblog.common.client.GenerationJobBridgeException;
+import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.logwriter.domain.AuditLog;
 import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
@@ -108,7 +109,7 @@ public class UnifiedOperationLogService {
                         .filter(job -> !ranged || (!job.createdAt().isBefore(from) && !job.createdAt().isAfter(to)))
                         .limit(SOURCE_FETCH_LIMIT)
                         .forEach(job -> entries.add(fromGenerationJob(job)));
-            } catch (GenerationJobUnavailableException e) {
+            } catch (GenerationJobBridgeException e) {
                 // 例外そのものも渡してスタックトレースを残す。縮退により失敗がHTTPレスポンスに
                 // 現れなくなったので、ここが唯一の手がかりになる。
                 log.warn("AIジョブの取得に失敗したため、統合操作ログからAI_JOBソースを除外します: {}",

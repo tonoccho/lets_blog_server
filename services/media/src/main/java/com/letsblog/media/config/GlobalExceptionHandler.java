@@ -7,7 +7,7 @@ import com.letsblog.media.service.CmsBridgeException;
 import com.letsblog.media.service.DiagramNotFoundException;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
-import com.letsblog.media.service.GenerationJobBridgeException;
+import com.letsblog.common.client.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
 import com.letsblog.media.service.InvalidPagingParameterException;
 import com.letsblog.media.service.ProhibitedContentException;

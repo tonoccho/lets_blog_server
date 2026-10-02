@@ -2,7 +2,7 @@ package com.letsblog.media.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.client.CmsBridgeClient;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;

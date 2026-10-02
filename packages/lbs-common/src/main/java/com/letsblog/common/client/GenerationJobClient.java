@@ -1,23 +1,34 @@
-package com.letsblog.media.client;
+package com.letsblog.common.client;
 
 import com.letsblog.common.auth.ServiceTokenClient;
-import com.letsblog.common.client.ServiceAuthHeaders;
-import com.letsblog.common.client.SyncCallProfile;
-import com.letsblog.common.client.SyncServiceClient;
-import com.letsblog.common.client.SyncServiceClientErrorException;
-import com.letsblog.common.client.SyncServiceException;
-import com.letsblog.media.service.GenerationJobBridgeException;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.RestClient;
 
 /**
- * ai-serviceの{@code POST /api/generation-jobs}・{@code PATCH /api/generation-jobs/{id}}を
+ * <b>オプトイン(#1483)</b>: 本クラスはlbs-commonにあるが{@code @Component}ではなく、コンポーネント
+ * スキャンされない。{@code generation_jobs}を使うサービス(media-service、log-writer)だけが
+ * {@code @Import(GenerationJobClient.class)}で取り込む。使わないサービスにai-serviceクライアントや
+ * {@code app.ai-service-uri}の要求を強制しない。#1250(2つのコンストラクタがあり
+ * {@code @Autowired}無しではBean生成に失敗した)の再発を避けるため、公開コンストラクタを
+ * {@code @Autowired}で明示し、テスト用コンストラクタはpackage-privateのままにしている。
+ *
+ * <p>操作ごとに使うサービスが違う: media-serviceは{@link #create}+{@link #updateStatus}、
+ * log-writerは{@link #listRecent}のみ(Keycloakトークンを持たない)。{@link ServiceTokenClient}は
+ * {@link ObjectProvider}で遅延解決し、{@link #updateStatus}を呼ぶときにだけ要求する
+ * (Beanが無ければ{@code NoSuchBeanDefinitionException})。
+ *
+ * <p>以下は元のmedia-service側の記述。
+ *
+ * <p>ai-serviceの{@code POST /api/generation-jobs}・{@code PATCH /api/generation-jobs/{id}}を
  * 呼び出し、ジョブの作成・状態/結果を更新するクライアント(#573 stage2)。issue #581(C12)で
  * lbs-commonの{@link SyncServiceClient}(タイムアウト・リトライ・サーキットブレーカーの共通実装)へ
  * 移行した。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
@@ -59,7 +70,6 @@ import org.springframework.web.client.RestClient;
  *       取り残されたジョブをai-service側で検出・解消するタイムアウト機構に委ねる)。</li>
  * </ul>
  */
-@Component
 public class GenerationJobClient {
 
     private static final Logger log = LoggerFactory.getLogger(GenerationJobClient.class);
@@ -74,7 +84,7 @@ public class GenerationJobClient {
     private static final long AUTH_WARN_SUPPRESSION_WINDOW_MS = 30_000L;
 
     private final SyncServiceClient client;
-    private final ServiceTokenClient serviceTokenClient;
+    private final Supplier<ServiceTokenClient> serviceTokenClient;
 
     private volatile long lastAuthWarnLoggedAtMs = 0L;
 
@@ -82,8 +92,8 @@ public class GenerationJobClient {
     public GenerationJobClient(
             RestClient.Builder builder,
             @Value("${app.ai-service-uri}") String aiServiceUri,
-            ServiceTokenClient serviceTokenClient) {
-        this(builder, aiServiceUri, serviceTokenClient, null);
+            ObjectProvider<ServiceTokenClient> serviceTokenClient) {
+        this(builder, aiServiceUri, serviceTokenClient::getObject, null);
     }
 
     /**
@@ -98,6 +108,14 @@ public class GenerationJobClient {
             RestClient.Builder builder,
             String aiServiceUri,
             ServiceTokenClient serviceTokenClient,
+            io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry circuitBreakerRegistry) {
+        this(builder, aiServiceUri, () -> serviceTokenClient, circuitBreakerRegistry);
+    }
+
+    private GenerationJobClient(
+            RestClient.Builder builder,
+            String aiServiceUri,
+            Supplier<ServiceTokenClient> serviceTokenClient,
             io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry circuitBreakerRegistry) {
         SyncServiceClient.Builder syncClientBuilder =
                 SyncServiceClient.builder(builder, "ai-service", aiServiceUri).profile(SyncCallProfile.SHORT);
@@ -125,6 +143,35 @@ public class GenerationJobClient {
             return created;
         } catch (SyncServiceException e) {
             throw new GenerationJobBridgeException("ai-serviceの/api/generation-jobs作成呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 直近のジョブ一覧を取得する(log-writerの統合操作ログ、#572、#825)。
+     *
+     * <p>問い合わせ先はai-serviceの{@code GET /api/generation-jobs}(#825: #572の時点ではlegacy-apiが
+     * 所有していたが、AIサービス抽出でai-serviceへ移設され、取り残されたクライアントが404を受け続けて
+     * 統合ログAPIが常に502になっていた)。ai-serviceのSecurityConfigは有効なBearer JWTの無い
+     * リクエストを一律401にする(ADR-0008)ため、呼び出し元(統合ログAPIの実際の利用者)の
+     * Bearerトークンをそのまま転送する(IdentityClientと同じ理由・パターン)。
+     *
+     * @param bearerToken 呼び出し元の{@code Authorization}ヘッダーの値(例: {@code "Bearer xxx"}）。
+     *                    nullの場合はヘッダーを付与せずに呼び出す(ai-service側で401になる)。
+     */
+    public List<GenerationJobSummary> listRecent(String bearerToken) {
+        try {
+            List<GenerationJobSummary> jobs = client.get(
+                    "/api/generation-jobs", new Object[0],
+                    new ParameterizedTypeReference<List<GenerationJobSummary>>() { },
+                    ServiceAuthHeaders.forwardedBearer(bearerToken));
+            return jobs != null ? jobs : List.of();
+        } catch (SyncServiceException e) {
+            // 原因(SyncServiceExceptionのメッセージ。"[ai-service] GET /api/generation-jobs: <詳細>")を
+            // 必ず連結する。#825の縮退で失敗がHTTPレスポンスに出なくなったため、ログに原因が
+            // 残らないと404(向き先ミス)・401(realm/audience不整合)・タイムアウト・
+            // サーキットオープンのどれなのかを切り分けられない。
+            throw new GenerationJobBridgeException(
+                    "ai-serviceの/api/generation-jobs呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 
@@ -176,7 +223,7 @@ public class GenerationJobClient {
         client.patch(
                 "/api/internal/ai/generation-jobs/{id}", new Object[] {jobId},
                 Map.of("status", status, "resultPayload", resultPayload == null ? "" : resultPayload),
-                ServiceAuthHeaders.clientCredentials(serviceTokenClient));
+                ServiceAuthHeaders.clientCredentials(serviceTokenClient.get()));
     }
 
     private void logProgressUpdateFailure(Long jobId, String status, SyncServiceException e) {

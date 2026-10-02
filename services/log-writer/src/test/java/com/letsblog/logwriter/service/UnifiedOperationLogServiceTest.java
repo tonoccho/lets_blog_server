@@ -1,7 +1,8 @@
 package com.letsblog.logwriter.service;
 
-import com.letsblog.logwriter.client.GenerationJobClient;
-import com.letsblog.logwriter.client.GenerationJobSummary;
+import com.letsblog.common.client.GenerationJobBridgeException;
+import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.logwriter.domain.AuditLog;
 import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
@@ -63,7 +64,7 @@ class UnifiedOperationLogServiceTest {
     }
 
     private GenerationJobSummary generationJob(long id, LocalDateTime createdAt) {
-        return new GenerationJobSummary(id, "draft", "done", createdAt);
+        return new GenerationJobSummary(id, "draft", "done", createdAt, null);
     }
 
     private AuditLog auditLog(long id, LocalDateTime createdAt) {
@@ -125,7 +126,7 @@ class UnifiedOperationLogServiceTest {
     }
 
     private GenerationJobSummary typedJob(long id, String type, LocalDateTime createdAt) {
-        return new GenerationJobSummary(id, type, "done", createdAt);
+        return new GenerationJobSummary(id, type, "done", createdAt, null);
     }
 
     private void stubMixedJobs() {
@@ -259,7 +260,7 @@ class UnifiedOperationLogServiceTest {
         when(auditLogRepository.findAllByOrderByCreatedAtDesc(any()))
                 .thenReturn(new PageImpl<>(List.of(auditLog(3L, now.minusMinutes(1)))));
         when(generationJobClient.listRecent("Bearer test-token"))
-                .thenThrow(new GenerationJobUnavailableException("ai-service down", new RuntimeException()));
+                .thenThrow(new GenerationJobBridgeException("ai-service down", new RuntimeException()));
 
         Page<UnifiedLogEntryResponse> result =
                 service().list(10L, true, null, null, null, null, PageRequest.of(0, 20), "Bearer test-token");
@@ -273,7 +274,7 @@ class UnifiedOperationLogServiceTest {
     void list_AIジョブのみを要求して失敗した場合は空を返す() {
         stubEmptySources();
         when(generationJobClient.listRecent("Bearer test-token"))
-                .thenThrow(new GenerationJobUnavailableException("ai-service down", new RuntimeException()));
+                .thenThrow(new GenerationJobBridgeException("ai-service down", new RuntimeException()));
 
         Page<UnifiedLogEntryResponse> result =
                 service().list(10L, true, "AI_JOB", null, null, null, PageRequest.of(0, 20), "Bearer test-token");
@@ -284,7 +285,7 @@ class UnifiedOperationLogServiceTest {
     /**
      * identity-serviceの障害は握り潰さない。操作者を解決できないまま統合ログを返すと
      * 「他人のログが見えているのか自分のログなのか」が保証できなくなるため、502のままにする。
-     * 型で区別している理由は{@code GenerationJobUnavailableException}のJavadoc参照。
+     * 型で区別している理由は{@code GenerationJobBridgeException}のJavadoc参照。
      */
     @Test
     void list_identity障害を表す例外は握り潰さない() {

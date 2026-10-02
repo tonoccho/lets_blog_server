@@ -7,7 +7,7 @@ import com.letsblog.media.ai.ComfyUiImage;
 import com.letsblog.media.ai.ImageProvider;
 import com.letsblog.media.ai.SeedResolver;
 import com.letsblog.media.client.AiGenerationClient;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.service.ImageGenerationService.BatchOutcome;

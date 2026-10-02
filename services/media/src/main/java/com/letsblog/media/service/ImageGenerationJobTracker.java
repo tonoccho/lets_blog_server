@@ -1,7 +1,7 @@
 package com.letsblog.media.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;

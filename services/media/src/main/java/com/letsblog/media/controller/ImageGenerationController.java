@@ -1,7 +1,7 @@
 package com.letsblog.media.controller;
 
 import com.letsblog.media.dto.AiImageBatchResponse;
-import com.letsblog.media.client.GenerationJobSummary;
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.dto.GenerationJobResponse;
 import com.letsblog.media.dto.ImageGenerationOptionsResponse;

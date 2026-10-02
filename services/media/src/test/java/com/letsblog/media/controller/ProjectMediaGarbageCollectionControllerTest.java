@@ -1,6 +1,6 @@
 package com.letsblog.media.controller;
 
-import com.letsblog.media.client.GenerationJobSummary;
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.media.dto.MediaGarbageCollectionDeleteRequest;
 import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
 import com.letsblog.media.service.AdminAuthorizationService;

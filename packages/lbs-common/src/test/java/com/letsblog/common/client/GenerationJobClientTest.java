@@ -1,4 +1,4 @@
-package com.letsblog.media.client;
+package com.letsblog.common.client;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -18,17 +18,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.web.client.RestClient;
 
 import com.letsblog.common.auth.ServiceTokenClient;
-import com.letsblog.media.service.GenerationJobBridgeException;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * GenerationJobClient(media-service)の回帰テスト(issue #1083)。
+ * GenerationJobClient(lbs-common、#1483でmedia-serviceから移設)の回帰テスト(issue #1083)。
  *
  * <p>#1083: ModelInstallJobRunnerが起動時のユーザーBearerトークンを長時間の非同期ジョブ全体で
  * 使い回していたため、Keycloakの{@code accessTokenLifespan}(既定300秒)を超えるチェックポイント
@@ -254,7 +254,10 @@ class GenerationJobClientTest {
     @Test
     @DisplayName("公開コンストラクタ(既定のCircuitBreakerRegistryを使う版)でも進捗更新できる")
     void 公開コンストラクタでも動く() {
-        GenerationJobClient publicClient = new GenerationJobClient(RestClient.builder(), baseUri, serviceTokenClient);
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerSingleton("serviceTokenClient", serviceTokenClient);
+        GenerationJobClient publicClient = new GenerationJobClient(
+                RestClient.builder(), baseUri, beanFactory.getBeanProvider(ServiceTokenClient.class));
 
         publicClient.updateStatus(6L, "running", "{}");
 

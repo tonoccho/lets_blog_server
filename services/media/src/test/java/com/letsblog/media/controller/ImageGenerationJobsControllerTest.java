@@ -1,6 +1,6 @@
 package com.letsblog.media.controller;
 
-import com.letsblog.media.client.GenerationJobSummary;
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.media.config.GlobalExceptionHandler;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.service.AdminAuthorizationService;

@@ -5,7 +5,7 @@ import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.media.ai.ChatGptImageClient;
 import com.letsblog.media.ai.ComfyUiClient;
 import com.letsblog.media.ai.ImageProvider;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.ImageModelService;
 import org.junit.jupiter.api.DisplayName;
@@ -106,7 +106,7 @@ class ImageGenerationBatchValidationIntegrationTest {
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         when(comfyUiClient.generateImage(any())).thenReturn(java.util.List.of());
         when(generationJobClient.create(anyString(), anyString(), any()))
-                .thenReturn(new com.letsblog.media.client.GenerationJobSummary(1L, "comfyui_image", "running", null, null));
+                .thenReturn(new com.letsblog.common.client.GenerationJobSummary(1L, "comfyui_image", "running", null, null));
 
         postImage("{\"prompt\":\"a cat\",\"batchSize\":16}")
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(400));
@@ -134,7 +134,7 @@ class ImageGenerationBatchValidationIntegrationTest {
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         when(comfyUiClient.generateImage(any())).thenReturn(java.util.List.of());
         when(generationJobClient.create(anyString(), anyString(), any()))
-                .thenReturn(new com.letsblog.media.client.GenerationJobSummary(1L, "comfyui_image", "running", null, null));
+                .thenReturn(new com.letsblog.common.client.GenerationJobSummary(1L, "comfyui_image", "running", null, null));
 
         postImage("{\"prompt\":\"a cat\",\"batchSize\":16,\"batchCount\":16}")
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(400));

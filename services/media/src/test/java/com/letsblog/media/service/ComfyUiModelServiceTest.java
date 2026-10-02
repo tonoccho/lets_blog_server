@@ -2,8 +2,8 @@ package com.letsblog.media.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.ComfyUiClient;
-import com.letsblog.media.client.GenerationJobClient;
-import com.letsblog.media.client.GenerationJobSummary;
+import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.media.client.ProjectServiceClient;
 import com.letsblog.media.dto.ComfyUiCheckpointListResponse;
 import com.letsblog.media.dto.GenerationJobResponse;

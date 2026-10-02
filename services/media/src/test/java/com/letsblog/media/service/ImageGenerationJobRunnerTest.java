@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.ai.ComfyUiUnreachableException;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.dto.AiImageResponse;
 import com.letsblog.media.service.ImageGenerationService.BatchOutcome;

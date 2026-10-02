@@ -96,7 +96,7 @@ public class CurrentActorService {
     /**
      * 呼び出し元が送ってきた{@code Authorization}ヘッダーの値をそのまま返す(例:
      * {@code "Bearer xxx"}）。identity-service以外のサービス間同期呼び出し
-     * ({@link com.letsblog.media.client.GenerationJobClient}等)へも同じトークンを
+     * ({@link com.letsblog.common.client.GenerationJobClient}等)へも同じトークンを
      * 転送するために公開する。ヘッダーが無ければnull。
      */
     public String getAuthorizationHeader() {

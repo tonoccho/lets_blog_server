@@ -3,7 +3,7 @@ package com.letsblog.media.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.ai.ComfyUiUnreachableException;
-import com.letsblog.media.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.dto.AiImageResponse;
 import java.util.LinkedHashMap;

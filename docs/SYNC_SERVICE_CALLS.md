@@ -95,7 +95,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 下流の認可チェックを合わせて変更できるタイミングの別Issueに委ねる。ユーザーコンテキストが
 そもそも存在しない呼び出し(定期バッチ等)を新設する場合は、`clientCredentials`を今から使ってよい。
 
-**例外(issue #1083)**: media(`GenerationJobClient`)の`PATCH /api/generation-jobs/{id}`は、
+**例外(issue #1083)**: media(lbs-common版`GenerationJobClient`)の`PATCH /api/generation-jobs/{id}`は、
 `@Async`な非同期ジョブランナー(ModelInstallJobRunner等)が起動から数分〜数十分後に呼ぶため、
 起動時点のユーザーBearerトークンは`forwardedBearer`のままでは失効する(Keycloakの
 `accessTokenLifespan`、既定300秒)。ここは「元々ユーザーコンテキストが必要だった」わけではなく
@@ -123,14 +123,14 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
-| media(`GenerationJobClient`) | `POST /api/generation-jobs` | SHORT(5秒) | なし(POST) | あり(`ai-service`) | 明確なエラー(ジョブID無しでは非同期処理を開始できないため) | 済 |
-| media(`GenerationJobClient`) | `PATCH /api/generation-jobs/{id}`(進捗更新"running") | SHORT(5秒) | なし(PATCH) | あり(`ai-service`) | 機能縮退(1回試行してログ警告のみ。認証エラーのWARNは30秒間隔に抑制。issue #1083) | 済 |
-| media(`GenerationJobClient`) | `PATCH /api/generation-jobs/{id}`(終端通知"done"/"failed") | SHORT(5秒) | アプリ層で最大3回(issue #1083、下記参照) | あり(`ai-service`) | 再試行を使い切ったらERRORとして記録(例外は投げない。取り残しはai-service側のタイムアウトに委ねる。issue #1083) | 済 |
+| media(lbs-common版`GenerationJobClient`) | `POST /api/generation-jobs` | SHORT(5秒) | なし(POST) | あり(`ai-service`) | 明確なエラー(ジョブID無しでは非同期処理を開始できないため) | 済 |
+| media(lbs-common版`GenerationJobClient`) | `PATCH /api/generation-jobs/{id}`(進捗更新"running") | SHORT(5秒) | なし(PATCH) | あり(`ai-service`) | 機能縮退(1回試行してログ警告のみ。認証エラーのWARNは30秒間隔に抑制。issue #1083) | 済 |
+| media(lbs-common版`GenerationJobClient`) | `PATCH /api/generation-jobs/{id}`(終端通知"done"/"failed") | SHORT(5秒) | アプリ層で最大3回(issue #1083、下記参照) | あり(`ai-service`) | 再試行を使い切ったらERRORとして記録(例外は投げない。取り残しはai-service側のタイムアウトに委ねる。issue #1083) | 済 |
 | legacy-api(`GenerationJobClient`) | `POST /api/generation-jobs`・`PATCH /api/generation-jobs/{id}` | SHORT(5秒) | なし | あり(`ai-service`) | media-service版と同じ(作成=明確なエラー、更新=機能縮退) | 済 |
 | content(`AiGenerationClient`) | `POST /api/ai/internal/generate` | LLM(180秒) | なし(POST) | あり(`ai-service`) | 明確なエラー(LLM生成結果はプレースホルダで代替できる性質のものではない) | 済 |
 | legacy-api(`AiGenerationClient`) | `POST /api/ai/internal/generate` | LLM(180秒) | なし | あり(`ai-service`) | content-service版と同じ | 済 |
 | legacy-api(`AiProjectSettingsClient`) | `GET/PUT/DELETE /api/internal/ai/projects/{id}/brave-search-api-key` | (未移行、既存はSTANDARD相当の10秒) | - | - | (未整理) | 未 |
-| log-writer(`GenerationJobClient`) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`ai-service`) | **機能縮退**(WARNを残しAI_JOBソースのみ除外。操作ログ・監査ログは返す。#825) | 済 |
+| log-writer(lbs-common版`GenerationJobClient`、#1483) | `GET /api/generation-jobs` | SHORT(5秒) | あり(GET) | あり(`ai-service`) | **機能縮退**(WARNを残しAI_JOBソースのみ除外。操作ログ・監査ログは返す。#825) | 済 |
 
 gateway(`services/gateway/src/main/resources/application.yml`)は、上記LLM呼び出しに到達する同期APIのパスに専用ルートを持ち、`response-timeout: 180s`(LLMプロファイルと同じ。ai-serviceの`LLM_REQUEST_TIMEOUT_SECONDS`既定120秒を上回る)を与えている(issue #1410)。対象は`POST /api/custom-tags/generate`(`content-custom-tags-generate`)、`POST /api/sites/*/static-content/generate`(`project-site-static-content-generate`)、`POST /api/projects/*/tag-design-settings/*/generate`と`POST /api/tag-design-settings/*/generate`(`project-tag-design-settings-generate`)。同じプレフィックスの一覧・保存などCRUDは延ばさず既定の60秒のまま。専用ルートは広い`project`/`content`系より前に置く(先勝ち)。nginxの`location /api/`は`proxy_read_timeout 1200s`で、180秒はその範囲内。テスト: `LlmGenerationRouteTimeoutTest`。
 

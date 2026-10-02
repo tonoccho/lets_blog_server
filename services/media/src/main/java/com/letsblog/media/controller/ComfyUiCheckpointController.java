@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code accessTokenLifespan}(既定300秒)を超えて長引くとこのトークンが失効し、
  * 完了/失敗通知が握りつぶされてジョブがDB上{@code running}のまま残る不具合があったため
  * (issue #1083)、GenerationJob更新呼び出しはmedia-service自身のClient Credentialsトークンで
- * 認証するように変更した({@link com.letsblog.media.client.GenerationJobClient}参照)。
+ * 認証するように変更した({@link com.letsblog.common.client.GenerationJobClient}参照)。
  */
 @RestController
 public class ComfyUiCheckpointController {

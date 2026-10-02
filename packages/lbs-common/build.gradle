@@ -40,7 +40,9 @@ dependencies {
     testImplementation 'org.springframework.amqp:spring-amqp'
     testImplementation 'com.h2database:h2'
     testImplementation 'org.hamcrest:hamcrest'
-    testRuntimeOnly 'ch.qos.logback:logback-classic'
+    // GenerationJobClientTest(#1483でmediaから移設)がassertjとlogbackのListAppenderを使う。
+    testImplementation 'org.assertj:assertj-core'
+    testImplementation 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     // JwtTestFixtures(#587)がJwt/SecurityMockMvcRequestPostProcessorsを組み立てるために必要。
