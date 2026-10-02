@@ -667,7 +667,7 @@ function wpCli(siteKey: string, args: string[]): string {
 
 async function createBulkDeleteTaxonomySite(
   request: APIRequestContext, token: string, projectId: number
-): Promise<number> {
+): Promise<{ siteId: number; siteKey: string }> {
   const siteKey = `at15bd${uniqueSuffix()}`.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32);
   const created = await sendWithRateLimitRetry(() => request.post('/api/sites/managed-wordpress', {
     headers: { Authorization: `Bearer ${token}` },
@@ -704,7 +704,7 @@ async function createBulkDeleteTaxonomySite(
     'term', 'create', 'post_tag', 'AT15 一括削除タグ', `--slug=${BULK_DELETE_TAG_SLUG}`, '--porcelain',
   ]);
 
-  return siteId;
+  return { siteId, siteKey };
 }
 
 Given('監査ログ検証用の、公開先に実カテゴリと実タグを持つプロジェクトがある', async ({ ctx, request }) => {
@@ -722,8 +722,101 @@ Given('監査ログ検証用の、公開先に実カテゴリと実タグを持�
   ctx.at15AuditProjectId = projectId;
   rememberProject(ctx, projectId);
 
-  const siteId = await createBulkDeleteTaxonomySite(request, token, projectId);
+  const { siteId } = await createBulkDeleteTaxonomySite(request, token, projectId);
   rememberSite(ctx, siteId);
+});
+
+// --------------------------------------- プラグイン・テーマ・投稿の一括削除(issue #1323)
+
+/**
+ * 実プラグイン・実テーマ・実投稿を公開先に用意する。外部ネットワークに依存しないよう、
+ * プラグインは`wp scaffold plugin`、テーマは`wp scaffold child-theme`(親は導入済みテーマ)、
+ * 投稿は`wp post create`(AT-10の`createReferencingPost`と同じ手順)で作る。
+ */
+const BULK_DELETE_PLUGIN_SLUG = 'at15-bulk-plugin';
+const BULK_DELETE_THEME_SLUG = 'at15-bulk-theme';
+const BULK_DELETE_POST_SLUG = 'at15-bulk-post';
+
+Given('監査ログ検証用の、公開先に実プラグイン・実テーマ・実投稿を持つプロジェクトがある', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const unique = uniqueSuffix();
+  const response = await sendWithRateLimitRetry(() => request.post('/api/projects', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { name: `AT15 一括削除2 ${unique}`, slug: `at15-bulkdelete2-${unique}` },
+  }));
+  expect(
+    response.ok(),
+    `一括削除検証用プロジェクトの作成に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  const projectId = ((await response.json()) as { id: number }).id;
+  ctx.at15AuditProjectId = projectId;
+  rememberProject(ctx, projectId);
+
+  const { siteId, siteKey } = await createBulkDeleteTaxonomySite(request, token, projectId);
+  rememberSite(ctx, siteId);
+
+  wpCli(siteKey, ['scaffold', 'plugin', BULK_DELETE_PLUGIN_SLUG, '--skip-tests', '--activate']);
+  const parent = wpCli(siteKey, ['theme', 'list', '--field=name']).split(/\s+/).filter(Boolean)[0];
+  wpCli(siteKey, ['scaffold', 'child-theme', BULK_DELETE_THEME_SLUG, `--parent_theme=${parent}`]);
+  wpCli(siteKey, [
+    'post', 'create', '--post_type=post', '--post_status=publish',
+    '--post_title=AT15 一括削除投稿', `--post_name=${BULK_DELETE_POST_SLUG}`, '--porcelain',
+  ]);
+});
+
+async function bulkDeleteAll(
+  request: APIRequestContext, projectId: number, path: string, slug: string, label: string
+): Promise<void> {
+  const token = await adminToken(request);
+  const response = await sendWithRateLimitRetry(() => request.post(
+    `/api/projects/${projectId}/bulk-management/${path}/delete-all`,
+    { headers: { Authorization: `Bearer ${token}` }, data: { slug }, timeout: 120_000 }
+  ));
+  expect(
+    response.ok(),
+    `${label}の一括削除に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+}
+
+When('そのプラグインを一括削除する', async ({ ctx, request }) => {
+  await bulkDeleteAll(request, ctx.at15AuditProjectId as number, 'plugins', BULK_DELETE_PLUGIN_SLUG, 'プラグイン');
+});
+
+When('そのテーマを一括削除する', async ({ ctx, request }) => {
+  await bulkDeleteAll(request, ctx.at15AuditProjectId as number, 'themes', BULK_DELETE_THEME_SLUG, 'テーマ');
+});
+
+When('その投稿を一括削除する', async ({ ctx, request }) => {
+  await bulkDeleteAll(request, ctx.at15AuditProjectId as number, 'posts', BULK_DELETE_POST_SLUG, '投稿');
+});
+
+async function waitForBulkDeleteAudit(
+  ctx: Record<string, unknown>, request: APIRequestContext, testInfo: { setTimeout(n: number): void; timeout: number },
+  label: string, action: string, resourceType: string
+): Promise<void> {
+  testInfo.setTimeout(testInfo.timeout + LOG_POLL_TIMEOUT_MS);
+  const token = await adminToken(request);
+  const projectId = ctx.at15AuditProjectId as number;
+  const known = ctx.at15KnownAuditIds as Set<number>;
+  const entry = await pollFor(`${label}一括削除の監査ログ`, async () => {
+    const logs = (await listAuditLogs(request, token)).content;
+    return findNewAuditLog(logs, known, projectId, action);
+  });
+  ctx.at15AuditEntries = [entry];
+  ctx.at15AuditExpectedResourceType = resourceType;
+  ctx.at15AuditExpectedResourceId = projectId;
+}
+
+Then('プラグインの一括削除が監査ログに現れるまで待つ', async ({ ctx, request, $testInfo }) => {
+  await waitForBulkDeleteAudit(ctx, request, $testInfo, 'プラグイン', 'PLUGIN_BULK_DELETED', 'PLUGIN');
+});
+
+Then('テーマの一括削除が監査ログに現れるまで待つ', async ({ ctx, request, $testInfo }) => {
+  await waitForBulkDeleteAudit(ctx, request, $testInfo, 'テーマ', 'THEME_BULK_DELETED', 'THEME');
+});
+
+Then('投稿の一括削除が監査ログに現れるまで待つ', async ({ ctx, request, $testInfo }) => {
+  await waitForBulkDeleteAudit(ctx, request, $testInfo, '投稿', 'POST_BULK_DELETED', 'POST');
 });
 
 When('そのカテゴリを一括削除する', async ({ ctx, request }) => {
