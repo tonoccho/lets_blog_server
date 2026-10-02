@@ -106,7 +106,7 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 一覧は実体から書き起こしたもので、`scripts/test_acceptance_domain_dirs.py` が
 実体とのずれを検出する。新しい領域を足すときは、ディレクトリと次の一覧を同時に更新する。
 
-- web(`apps/web/e2e/features/`): `ai` / `analytics` / `article-plan` / `auth` / `cross-cutting` / `custom-tag` / `diagram` / `identity` / `logging` / `media` / `platform` / `project` / `publishing` / `ui-quality`
+- web(`apps/web/e2e/features/`): `ai` / `analytics` / `article-plan` / `auth` / `bulk` / `cross-cutting` / `custom-tag` / `diagram` / `identity` / `logging` / `media` / `platform` / `project` / `publishing` / `response-budget` / `ui-quality`
 - 拡張(`apps/extension/e2e/features/`): `ai` / `articles` / `auth` / `cross-cutting` / `diagrams` / `media` / `projects`
 
 **揃えない理由(web `diagram` / 拡張 `diagrams`、web `project` / 拡張 `projects`)。**

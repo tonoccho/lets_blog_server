@@ -96,13 +96,13 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | --- | --- | --- | --- | --- | --- |
 | AC-USR-001 | ユーザー一覧 (`/users`) | 誰がシステムを使えるか把握できる | 管理者は一覧を閲覧でき、非管理者はアクセスを拒否される | `features/auth/permissions.feature` › 非管理者は管理者専用ページへアクセスすると拒否される / 管理者は管理者専用ページへアクセスできる | 検証済 |
 | AC-USR-002 | ユーザー作成 | 新しいメンバーを迎え入れられる | `POST /api/users` でユーザーが作成され、一覧と Keycloak の双方に現れる | `features/identity/user-management.feature` › 管理者が新しいメンバーを登録でき、一覧とKeycloakの双方に現れる | 検証済 |
-| AC-USR-003 | ユーザー編集 (`/users/[id]/edit`) | 氏名・メール・所属を直せる | `PUT/PATCH /api/users/{id}` の変更が一覧へ反映される | `features/identity/user-management.feature` › 管理者がメンバーの表示名を編集できる / › 管理者がメンバーのメールアドレスを編集でき、一覧とKeycloakの双方に反映される / › 管理者が既に使われているメールアドレスへは変更できない | 表示名は検証済。メールアドレス編集は#1192で実装済みだがGherkin 2件は未実行(検証用のAT環境が無いホストで作成)のため、AT環境での実行結果をもって検証済とする |
+| AC-USR-003 | ユーザー編集 (`/users/[id]/edit`) | 氏名・メール・所属を直せる | `PUT/PATCH /api/users/{id}` の変更が一覧へ反映される | `features/identity/user-management.feature` › 管理者がメンバーの表示名を編集できる / › 管理者がメンバーのメールアドレスを編集でき、一覧とKeycloakの双方に反映される / › 管理者が既に使われているメールアドレスへは変更できない | 部分的に検証。表示名は検証済。メールアドレス編集は#1192で実装済みだがGherkin 2件は未実行(検証用のAT環境が無いホストで作成)のため、AT環境での実行結果をもって検証済とする |
 | AC-USR-004 | ユーザー削除 | 不要なアカウントを消せる | `DELETE /api/users/{id}` 後、そのユーザーではログインできない | `features/identity/user-management.feature` › 管理者が一覧から不要なメンバーを削除でき、Keycloak側とも整合する | 検証済 |
 | AC-USR-005 | 無効化 / 再有効化 | 退職者を消さずに止められる | `deactivate` でログイン・API利用が拒否され、`reactivate` で戻る | `features/identity/user-deactivation.feature` › 管理者がアカウントを無効化でき、無効化されたアカウントではログインできない / 無効化したアカウントを再有効化でき、再びログインできる | 検証済 |
 | AC-USR-006 | ロール付与 / 剥奪 | 権限を後から変えられる | `POST/DELETE /api/users/{userId}/roles/{roleName}` の結果が `/me/permissions` に反映される | `features/identity/roles-and-permissions.feature` › ロールを付与/剥奪すると対象ユーザーのGET /api/identity/me/permissionsの内容が変わる / 権限(users.roleの付与/剥奪)の変化がUIのメニュー出し分けに反映される | 検証済 |
 | AC-USR-007 | ロール一覧 (`/admin/roles`) | どんな権限セットがあるか分かる | `GET /api/roles` の内容が画面に表示される | `features/identity/roles-and-permissions.feature` › /admin/rolesに表示されるロールごとの権限一覧はGET /api/rolesの内容と一致する | 検証済 |
 | AC-USR-008 | プロジェクトメンバー管理 | プロジェクト単位でアクセスを絞れる | `/api/projects/{id}/users` の追加・変更・削除が、そのユーザーの見えるプロジェクトに反映される | `features/identity/project-members.feature` › 管理者がプロジェクトにメンバーを追加でき、そのメンバーがプロジェクトを閲覧できる / プロジェクトメンバーの役割を変更できる / メンバーから外された利用者は、そのプロジェクトへアクセスできない | 検証済 |
-| AC-USR-009 | 自分の参加プロジェクト一覧 | 自分に関係するプロジェクトだけ見える | 非管理者の `GET /api/projects` は自分が所属するプロジェクトだけを返し、管理者は全件を返す(`accessibleProjectIds()` による絞り込み、#830)。`GET /api/project-users` は管理画面(`/users`)向けの管理者専用・全件返却(`requireAdmin`、全プロジェクト横断の割当一覧)であり、「自分の所属だけ」を返す仕様ではない(#1195 で確定。`docs/AUTHORIZATION_MATRIX.md` の `GET /api/project-users` 行の「現状維持」と一致) | `GET /api/project-users` は `AuthorizationMatrixIntegrationTest` で認証なし(401)のみ検証しており、非管理者の403は未検証。共有シナリオ(`features/identity/project-members.feature` › メンバーから外された利用者は、そのプロジェクトへアクセスできない、AC-USR-008 と共有)が検証するのは除外後の `GET /api/projects/{id}` の403であり、`GET /api/projects` 一覧の絞り込みと `GET /api/project-users` の非管理者403を検証するGherkin・統合テストは未作成 | 仕様確定(#1195)。一覧絞り込みの受け入れテストは未着手 |
+| AC-USR-009 | 自分の参加プロジェクト一覧 | 自分に関係するプロジェクトだけ見える | 非管理者の `GET /api/projects` は自分が所属するプロジェクトだけを返し、管理者は全件を返す(`accessibleProjectIds()` による絞り込み、#830)。`GET /api/project-users` は管理画面(`/users`)向けの管理者専用・全件返却(`requireAdmin`、全プロジェクト横断の割当一覧)であり、「自分の所属だけ」を返す仕様ではない(#1195 で確定。`docs/AUTHORIZATION_MATRIX.md` の `GET /api/project-users` 行の「現状維持」と一致) | `GET /api/project-users` は `AuthorizationMatrixIntegrationTest` で認証なし(401)のみ検証しており、非管理者の403は未検証。共有シナリオ(`features/identity/project-members.feature` › メンバーから外された利用者は、そのプロジェクトへアクセスできない、AC-USR-008 と共有)が検証するのは除外後の `GET /api/projects/{id}` の403であり、`GET /api/projects` 一覧の絞り込みと `GET /api/project-users` の非管理者403を検証するGherkin・統合テストは未作成 | 未着手。仕様確定(#1195)。一覧絞り込みの受け入れテストは未着手 |
 | AC-USR-010 | GitHubトークンの登録 | 記事プランのIssue連携が使える | `PUT /api/users/{id}/github-token` 後、Issue連携が成功する | — | 未着手 |
 | AC-USR-011 | メタデータ(投稿ステータス/ロール)の取得 | 画面の選択肢がサーバー定義と一致する | `GET /api/metadata/post-statuses` と `/roles` が画面の選択肢と一致する | `features/publishing/publish-status.feature` › 投稿ステータスの選択肢はAPIとUIで一致する(issue #1172 / AT-6-2、親issue #932の親シナリオ7。投稿ステータス側のみ。プロジェクト一括管理画面「ポスト/ページ」タブのステータス変更セレクトと比較する)。**対象外**: ロール(`/roles`)側は #1163(AT-6-7)が担当、未検証のまま | 検証済(`@slow`。投稿ステータス側のみ) |
 | AC-USR-014 | 本人設定(タイムゾーン/ロケール)の保存 | 自分の表示設定を保てる。タイムゾーンは任意の上書きで、未設定なら閲覧者のブラウザのタイムゾーンに従う(#1259) | `PATCH /api/identity/me/preferences` で保存した内容が、再ログイン後も `GET /api/identity/me` に反映される(#784 の退行検知)。タイムゾーンに `null` を送ると未設定(ブラウザのタイムゾーンに従う)に戻せる(#1259) | `features/identity/user-management.feature` › 利用者が自分のタイムゾーン/ロケールを保存でき、再ログイン後も保持される / `features/identity/timezone-override.feature` (#1259) | 検証済 |
@@ -180,7 +180,7 @@ API: publishing `BulkManagementController`(23エンドポイント)
 | AC-BULK-011 | 一括適用 | 変更を全環境へ一度に流せる | `bulk-management/apply` / `apply-all` が対象環境へ反映される | — | 未着手 |
 | AC-BULK-012 | ファイルアップロード | 手元のファイルを公開先へ送れる | `bulk-management/upload` 後、公開先にファイルが存在する | — | 未着手 |
 | AC-BULK-013 | 生成画像のアップロード | ギャラリーの画像を記事素材にできる | `POST /api/projects/{id}/asset-images/{generatedImageId}/upload` 後、公開先メディアに現れる | — | 未着手 |
-| AC-BULK-014 | 一括削除の確認 | 取り消せない削除を、どの環境から消えるのかを知った上で承認できる | カテゴリ・タグ・プラグイン・テーマ・投稿の行削除の確認に、その項目が存在する環境の数と環境名が表示され、存在しない環境は含まれない(比較表の行データから求め、API・サーバの変更なし) | `apps/web/e2e/features/bulk/bulk-delete-confirmation.feature` › 5シナリオ(カテゴリ・タグ・プラグイン・投稿の2環境、およびテスト環境にだけあるカテゴリ)。単体: `apps/web/src/app/projects/[id]/__tests__/{Term,PluginTheme,Post}ComparisonTable.test.tsx`(#1181) | 実装済(受け入れテストの実行結果は #1181 のレポート参照) |
+| AC-BULK-014 | 一括削除の確認 | 取り消せない削除を、どの環境から消えるのかを知った上で承認できる | カテゴリ・タグ・プラグイン・テーマ・投稿の行削除の確認に、その項目が存在する環境の数と環境名が表示され、存在しない環境は含まれない(比較表の行データから求め、API・サーバの変更なし) | `apps/web/e2e/features/bulk/bulk-delete-confirmation.feature` › 5シナリオ(カテゴリ・タグ・プラグイン・投稿の2環境、およびテスト環境にだけあるカテゴリ)。単体: `apps/web/src/app/projects/[id]/__tests__/{Term,PluginTheme,Post}ComparisonTable.test.tsx`(#1181) | 実装済み(受け入れテストの実行結果は #1181 のレポート参照) |
 
 ### 2.6 AI執筆支援 — `AI`
 
@@ -585,21 +585,21 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 ## 6. 集計
 
-§2 に列挙した機能ID: **212**。うち1件(AC-EXT-019)は §4 で対象外としたので、
-受け入れテストの対象は **211**。
+§2 に列挙した機能ID: **216**。うち1件(AC-EXT-019)は §4 で対象外としたので、
+受け入れテストの対象は **215**。
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 153 |
-| `部分的に検証` | 2 |
-| `実装中` | 5 |
-| `実装済み` | 18 |
+| `検証済` | 160 |
+| `部分的に検証` | 3 |
+| `実装中` | 6 |
+| `実装済み` | 21 |
 | `既存spec` / `既存spec(部分)` | 3 |
-| `未着手` | 30 |
+| `未着手` | 22 |
 | `対象外`(§2 に行を持つもの) | 1 |
-| **§2 合計** | **212** |
+| **§2 合計** | **216** |
 
-`実装済み` は §1 の状態の定義に無い。`AC-AI-*` の全18行がこの語を使っており、§1 の
+`実装済み` は §1 の状態の定義に無い。`AC-AI-*` の全20行がこの語を使っており、§1 の
 どの状態に当たるかは各行を担当する Issue の判断である。ここでは行の値どおりに数える。
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
@@ -616,13 +616,13 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 領域 | 件数 | | 領域 | 件数 | | 領域 | 件数 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `SET` | 3 | | `AI` | 18 | | `SYS` | 9 |
+| `SET` | 3 | | `AI` | 20 | | `SYS` | 9 |
 | `AUTH` | 10 | | `PLAN` | 12 | | `LOG` | 10 |
-| `USR` | 14 | | `IMG` | 13 | | `EXT` | 24 |
+| `USR` | 15 | | `IMG` | 13 | | `EXT` | 24 |
 | `PRJ` | 9 | | `DIAG` | 7 | | `XC` | 11 |
 | `SITE` | 11 | | `TAG` | 17 | | `UX` | 8 |
 | `POST` | 15 | | `ANA` | 6 | | `STUB` | 2 |
-| `BULK` | 13 | | | | | | |
+| `BULK` | 14 | | | | | | |
 
 **受け入れテストが1件も無い領域**: `BULK`(13 機能ID、全行 `未着手`)。
 `AI` は全行が `実装済み` で、`検証済` の行は無い。
