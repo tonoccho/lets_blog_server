@@ -91,14 +91,25 @@ configured_path() {
 }
 
 # 設定値は相対でも絶対でも書ける。文字列比較ではなく、同じディレクトリを指しているかで見る。
+#
+# linked worktree(`git worktree add`)では `.git/config` が全作業ツリーで共有され、
+# `core.hooksPath` にはメイン作業ツリーの絶対パスが入る(#1290)。それは worktree 自身の
+# `scripts/git-hooks` とは別ディレクトリだが、フックはそのパスで実際に動いている。
+# したがって「このリポジトリのいずれかの作業ツリーの `scripts/git-hooks`」を指していれば
+# 束縛済みとみなす。無関係なディレクトリや未設定は従来どおり未束縛である。
 points_at_hooks_dir() {
     local configured="$1"
     [ -n "$configured" ] || return 1
     local resolved
     resolved="$(cd "$REPO_ROOT" && cd "$configured" 2>/dev/null && pwd -P)" || return 1
-    local expected
-    expected="$(cd "$REPO_ROOT/$HOOKS_DIR" && pwd -P)" || return 1
-    [ "$resolved" = "$expected" ]
+    # grep -q は早期終了で SIGPIPE を起こし pipefail と衝突するので、全件読んでから比べる。
+    local wt candidate worktrees
+    worktrees="$(printf '%s\n' "$REPO_ROOT"; git -C "$REPO_ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')"
+    while IFS= read -r wt; do
+        candidate="$(cd "$wt/$HOOKS_DIR" 2>/dev/null && pwd -P)" || continue
+        [ "$resolved" = "$candidate" ] && return 0
+    done <<<"$worktrees"
+    return 1
 }
 
 report_unbound() {

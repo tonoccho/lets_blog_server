@@ -64,6 +64,16 @@ def git(args, cwd, **kwargs):
     )
 
 
+def worktree_hooks_dirs(cwd):
+    """このリポジトリの全作業ツリーの `scripts/git-hooks` の実体パス。"""
+    out = git(["worktree", "list", "--porcelain"], cwd=cwd).stdout
+    return [
+        os.path.realpath(os.path.join(line[len("worktree "):], HOOKS_DIR))
+        for line in out.splitlines()
+        if line.startswith("worktree ")
+    ]
+
+
 def read(rel_path):
     with open(os.path.join(REPO_ROOT, rel_path), encoding="utf-8") as f:
         return f.read()
@@ -85,9 +95,11 @@ class ThisCheckoutIsBound(unittest.TestCase):
         )
         configured = r.stdout.strip()
         resolved = os.path.realpath(os.path.join(REPO_ROOT, configured))
-        self.assertEqual(
-            os.path.realpath(os.path.join(REPO_ROOT, HOOKS_DIR)),
+        # linked worktree では共有 config の値がメイン作業ツリーの絶対パスになる(#1290)。
+        # 同じリポジトリのどの作業ツリーの scripts/git-hooks でも有効な束縛とみなす。
+        self.assertIn(
             resolved,
+            worktree_hooks_dirs(REPO_ROOT),
             "core.hooksPath が %s ではなく %s を指している。\n  %s"
             % (HOOKS_DIR, configured, FIX_HINT),
         )
@@ -223,6 +235,66 @@ class Detection(TempRepo):
         os.chmod(os.path.join(self.tmp, "scripts", "git-hooks", "pre-commit"), 0o644)
         r = self.run_setup("--check")
         self.assertNotEqual(0, r.returncode, r.stdout)
+
+
+class LinkedWorktree(TempRepo):
+    """#1290: linked worktree でも、実際に有効な束縛を有効と判定する。
+
+    共有 `.git/config` の `core.hooksPath` はメイン作業ツリーの絶対パスで入るため、
+    worktree 自身の `scripts/git-hooks` との単純な一致では誤って未束縛と判定していた。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.wt = self.tmp + "-wt"
+        r = git(["worktree", "add", "-q", self.wt, "-b", "wt-branch"], cwd=self.tmp)
+        self.assertEqual(0, r.returncode, r.stderr)
+
+    def tearDown(self):
+        shutil.rmtree(self.wt, ignore_errors=True)
+        super().tearDown()
+
+    def run_wt(self, *args):
+        return subprocess.run(
+            ["bash", os.path.join(self.wt, "scripts", "setup-git-hooks.sh")] + list(args),
+            capture_output=True, text=True, timeout=60, cwd=self.wt,
+        )
+
+    def bind_main_absolute(self):
+        git(["config", "core.hooksPath", os.path.join(self.tmp, HOOKS_DIR)], cwd=self.tmp)
+
+    def test_check_passes_in_worktree_when_main_is_bound_by_absolute_path(self):
+        self.bind_main_absolute()
+        r = self.run_wt("--check")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_check_fails_in_worktree_when_unbound(self):
+        r = self.run_wt("--check")
+        self.assertNotEqual(0, r.returncode, r.stdout)
+
+    def test_check_fails_in_worktree_when_pointing_at_unrelated_dir(self):
+        unrelated = tempfile.mkdtemp()
+        try:
+            git(["config", "core.hooksPath", unrelated], cwd=self.tmp)
+            for run in (self.run_setup, self.run_wt):
+                r = run("--check")
+                self.assertNotEqual(0, r.returncode, r.stdout)
+        finally:
+            shutil.rmtree(unrelated, ignore_errors=True)
+
+    def test_binding_in_worktree_survives_worktree_removal(self):
+        self.bind_main_absolute()
+        self.run_wt()
+        git(["worktree", "remove", "--force", self.wt], cwd=self.tmp)
+        r = self.run_setup("--check")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_binding_unbound_repo_from_worktree_survives_worktree_removal(self):
+        r = self.run_wt()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        git(["worktree", "remove", "--force", self.wt], cwd=self.tmp)
+        r = self.run_setup("--check")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
 
 class PreMergeCommitHookIsChecked(TempRepo):
