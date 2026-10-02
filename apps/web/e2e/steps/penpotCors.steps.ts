@@ -19,6 +19,9 @@ const PASSWORD_SELECTOR = 'input#password[type="password"]';
 /** ブラウザが出すCORSエラーメッセージに必ず含まれる文言。 */
 const CORS_ERROR_MARKER = 'blocked by CORS policy';
 
+/** ブラウザが、MIMEタイプ不一致でスタイルシートを拒否したときに出すメッセージの文言(#1255)。 */
+const STYLESHEET_MIME_ERROR_MARKER = 'not a supported stylesheet MIME type';
+
 When('{string} を開く', async ({ ctx, page }, url: string) => {
   const consoleErrors: string[] = [];
   page.on('console', (msg) => {
@@ -43,4 +46,10 @@ Then('ブラウザコンソールにCORSエラーが出ていない', async ({ c
   const consoleErrors = (ctx.penpotConsoleErrors as string[] | undefined) ?? [];
   const corsErrors = consoleErrors.filter((text) => text.includes(CORS_ERROR_MARKER));
   expect(corsErrors, `CORSエラーが出ている:\n  ${corsErrors.join('\n  ')}`).toEqual([]);
+});
+
+Then('ブラウザコンソールにスタイルシートのMIMEタイプエラーが出ていない', async ({ ctx }) => {
+  const consoleErrors = (ctx.penpotConsoleErrors as string[] | undefined) ?? [];
+  const mimeErrors = consoleErrors.filter((text) => text.includes(STYLESHEET_MIME_ERROR_MARKER));
+  expect(mimeErrors, `スタイルシートのMIMEタイプエラーが出ている:\n  ${mimeErrors.join('\n  ')}`).toEqual([]);
 });

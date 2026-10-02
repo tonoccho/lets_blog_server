@@ -895,6 +895,8 @@ services:
       # (/etc/nginx/overrides/{http,server}.d/*.conf)へ読み取り専用でマウントする。
       - ./infra/penpot/nginx-overrides/http.d/lbs-cors.conf:/etc/nginx/overrides/http.d/lbs-cors.conf:ro
       - ./infra/penpot/nginx-overrides/server.d/lbs-cors-api.conf:/etc/nginx/overrides/server.d/lbs-cors-api.conf:ro
+      # issue #1255: image が同梱しない css/ui.css への参照を、空の text/css で解消する。
+      - ./infra/penpot/nginx-overrides/server.d/lbs-ui-css.conf:/etc/nginx/overrides/server.d/lbs-ui-css.conf:ro
     depends_on:
       - penpot-backend
       - penpot-exporter
