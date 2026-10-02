@@ -32,10 +32,17 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "エラー: $ENV_FILE が見つかりません" >&2
   exit 1
 fi
-# shellcheck disable=SC1090
-set -a
-source "$ENV_FILE"
-set +a
+# .env は bash として実行しない(空白やシェル特殊文字を含む値で壊れるため。#1603)。
+# 必要な MYSQL_ROOT_PASSWORD だけを取り出し、前後を囲む同種の引用符1組は docker compose と同様に外す。
+MYSQL_ROOT_PASSWORD="$(grep -m1 '^MYSQL_ROOT_PASSWORD=' "$ENV_FILE" | cut -d= -f2- || true)"
+case "$MYSQL_ROOT_PASSWORD" in
+  \"*\") MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:1:${#MYSQL_ROOT_PASSWORD}-2}" ;;
+  \'*\') MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:1:${#MYSQL_ROOT_PASSWORD}-2}" ;;
+esac
+if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+  echo "エラー: .env の MYSQL_ROOT_PASSWORD が未設定、または空です" >&2
+  exit 1
+fi
 
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
   echo "エラー: コンテナ ${CONTAINER} が見つかりません(docker compose up -d で起動していますか?)" >&2
