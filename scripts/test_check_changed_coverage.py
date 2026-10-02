@@ -16,6 +16,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -28,6 +29,40 @@ SCRIPT = os.path.join(HERE, "check-changed-coverage.py")
 _spec = importlib.util.spec_from_file_location("check_changed_coverage", SCRIPT)
 ccc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ccc)
+
+
+def _typescript_is_resolvable():
+    """リポジトリ内のいずれかの node_modules から実物の typescript を解決できるか。
+
+    `emits_no_runtime_code()` が使う解決先と同じディレクトリ群で、同じ node を使って確かめる。
+    """
+    try:
+        proc = subprocess.run(
+            [
+                "node",
+                "-e",
+                "const d=JSON.parse(process.argv[1]);"
+                "require.resolve('typescript',{paths:d})",
+                json.dumps(ccc.typescript_resolve_dirs(REPO_ROOT)),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+# 型のみモジュールの判定は「TypeScript 自身に emit させる」ことが本質なので、実物の
+# typescript(apps/*/node_modules、.gitignore 対象)が無い作業ツリーでは検証そのものが
+# 成立しない(#1291)。偽物に差し替えると検出力が落ちるため、失敗にもせず、理由付きの
+# skip にする。これは前提環境が無いことの skip であり、失敗を隠すものではない
+# (CLAUDE.md「テストを黙らせない」)。前提が揃っていれば従来どおり全件実行される。
+requires_typescript = unittest.skipUnless(
+    _typescript_is_resolvable(),
+    "typescript を解決できない(apps/web で npm ci が必要): node_modules が無い作業ツリー",
+)
 
 
 def run_main(changed, coverage=None):
@@ -435,6 +470,7 @@ class TypeOnlyModuleDetection(unittest.TestCase):
 
     # --- 型のみ(実行時コードが1行も残らない) ---
 
+    @requires_typescript
     def test_type_and_interface_only(self):
         rel = self.write(
             "types.ts",
@@ -442,10 +478,12 @@ class TypeOnlyModuleDetection(unittest.TestCase):
         )
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_type_only_tsx(self):
         rel = self.write("props.tsx", "export interface Props { children?: unknown }\n")
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_imports_used_only_as_types_are_erased(self):
         """型としてしか使われない import は emit から消えるので型のみと判定する。"""
         rel = self.write(
@@ -456,10 +494,12 @@ class TypeOnlyModuleDetection(unittest.TestCase):
         )
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_declaration_only_module(self):
         rel = self.write("ambient.ts", "declare module 'foo' { export type X = 1; }\nexport {};\n")
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_comment_only_module(self):
         rel = self.write("doc.ts", "// 説明だけのモジュール\n/* 何も出力しない */\n")
         self.assertEqual(self.detect([rel]), {rel})
@@ -492,6 +532,7 @@ class TypeOnlyModuleDetection(unittest.TestCase):
         rel = self.write("sideeffect.ts", "import './polyfill';\nexport type A = { a: number };\n")
         self.assertEqual(self.detect([rel]), set())
 
+    @requires_typescript
     def test_declaration_file_with_runtime_neighbour(self):
         """混在した入力でも、型のみのファイルだけが返ること。"""
         types = self.write("mixed/types.ts", "export type A = number;\n")
@@ -500,6 +541,7 @@ class TypeOnlyModuleDetection(unittest.TestCase):
 
     # --- 宣言ファイル(.d.ts / .d.mts / .d.cts): 定義上ランタイムコードを emit しえない ---
 
+    @requires_typescript
     def test_declaration_file_is_type_only(self):
         """`.d.ts` は宣言ファイルであり、tsc は JS を1バイトも出力しない。"""
         rel = self.write(
@@ -508,6 +550,7 @@ class TypeOnlyModuleDetection(unittest.TestCase):
         )
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_declaration_file_augmenting_a_module_is_type_only(self):
         """`declare module` によるモジュール拡張(最も普通の .d.ts の形)。"""
         rel = self.write(
@@ -516,16 +559,19 @@ class TypeOnlyModuleDetection(unittest.TestCase):
         )
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_declaration_file_with_ambient_value_export_is_type_only(self):
         """宣言された値を re-export していても、宣言ファイルからは実体が出ない。"""
         rel = self.write("ambient-value.d.ts", "declare const x: number;\nexport { x };\n")
         self.assertEqual(self.detect([rel]), {rel})
 
+    @requires_typescript
     def test_declaration_mts_and_cts_are_type_only(self):
         mts = self.write("esm.d.mts", "export type A = number;\n")
         cts = self.write("cjs.d.cts", "export interface B { b: string }\n")
         self.assertEqual(self.detect([mts, cts]), {mts, cts})
 
+    @requires_typescript
     def test_real_repository_declaration_file(self):
         """レビュー指摘の実例。`apps/web/src/types/next-auth.d.ts` は実在の宣言ファイル。"""
         rel = "apps/web/src/types/next-auth.d.ts"
@@ -660,6 +706,7 @@ class TypeOnlyModuleDetection(unittest.TestCase):
             self.assertEqual(ccc.emits_no_runtime_code([], root=self.tmp), set())
             self.assertEqual(ccc.emits_no_runtime_code(["a.java"], root=self.tmp), set())
 
+    @requires_typescript
     def test_real_repository_type_only_module(self):
         """#1116 の実例。`apps/extension/src/webviewMessages.ts` は全 export が型。"""
         rel = "apps/extension/src/webviewMessages.ts"
@@ -678,11 +725,13 @@ class TypeOnlyModuleGate(unittest.TestCase):
     RUNTIME = "apps/extension/src/proofreadLogic.ts"
     DECLARATION = "apps/web/src/types/next-auth.d.ts"
 
+    @requires_typescript
     def test_type_only_module_without_report_passes(self):
         code, out = run_main([self.TYPE_ONLY])
         self.assertEqual(code, 0, out)
         self.assertNotIn("カバレッジレポートが見つかりません", out)
 
+    @requires_typescript
     def test_type_only_module_is_reported_not_silently_dropped(self):
         _, out = run_main([self.TYPE_ONLY])
         self.assertIn(self.TYPE_ONLY, out)
@@ -712,6 +761,7 @@ class TypeOnlyModuleGate(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("下回っています", out)
 
+    @requires_typescript
     def test_declaration_file_without_report_passes(self):
         """実在の `.d.ts` を変更しただけのブランチがゲートを通ること。"""
         code, out = run_main([self.DECLARATION])
@@ -726,6 +776,7 @@ class TypeOnlyModuleGate(unittest.TestCase):
         self.assertIn("カバレッジレポートが見つかりません", out)
         self.assertIn(self.RUNTIME, out)
 
+    @requires_typescript
     def test_only_type_only_changes_skips_the_gate(self):
         code, out = run_main([self.TYPE_ONLY, "apps/extension/webviews/diagramGallery.js"])
         self.assertEqual(code, 0, out)

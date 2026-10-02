@@ -44,6 +44,8 @@ import subprocess
 import tempfile
 import threading
 import unittest
+
+import shadow_checkout
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -501,14 +503,29 @@ class SetupScriptBase(unittest.TestCase):
             }
         )
         env.update({k: str(v) for k, v in env_overrides.items()})
+        root = self.script_root()
         return subprocess.run(
-            ["bash", os.path.join(REPO_ROOT, SETUP_SCRIPT)] + list(args),
+            ["bash", os.path.join(root, SETUP_SCRIPT)] + list(args),
             capture_output=True,
             text=True,
             timeout=120,
             env=env,
-            cwd=REPO_ROOT,
+            cwd=root,
         )
+
+    def script_root(self):
+        """スクリプトを走らせるリポジトリ直下。
+
+        `certs/` は .gitignore 対象で、worktree や新規チェックアウトには無い(#1291)。
+        無いときだけ、ダミー証明書で補った影のチェックアウトを使う。揃っていれば実物のままで、
+        テストの件数も検出力も変わらない。
+        """
+        wanted = ["certs/localhost.crt", "certs/localhost.key"]
+        if not shadow_checkout.needs_shadow(wanted):
+            return REPO_ROOT
+        if not hasattr(self, "_shadow_root"):
+            self._shadow_root = shadow_checkout.make(tempfile.mkdtemp(dir=self.tmp), wanted)
+        return self._shadow_root
 
     def docker_calls(self):
         if not os.path.exists(self.log):

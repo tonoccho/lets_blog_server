@@ -72,6 +72,8 @@ import subprocess
 import tempfile
 import unittest
 
+import shadow_checkout
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
@@ -681,14 +683,28 @@ class RebuildScriptHarness(unittest.TestCase):
         env["INFRA_DIR"] = self.infra
         env["GITLAB_HEALTH_URL"] = ""
         env.update({k: str(v) for k, v in env_overrides.items()})
+        root = self.script_root()
         return subprocess.run(
-            ["bash", os.path.join(REPO_ROOT, SCRIPT)] + list(args),
+            ["bash", os.path.join(root, SCRIPT)] + list(args),
             capture_output=True,
             text=True,
             timeout=300,
             env=env,
-            cwd=REPO_ROOT,
+            cwd=root,
         )
+
+    def script_root(self):
+        """スクリプトを走らせるリポジトリ直下。
+
+        `.env` / `certs/` は .gitignore 対象で、worktree や新規チェックアウトには無い(#1291)。
+        足りないときだけ、ダミーで補った影のチェックアウトを使う。揃っていれば実物のままで、
+        テストの件数も検出力も変わらない。
+        """
+        if not shadow_checkout.needs_shadow():
+            return REPO_ROOT
+        if not hasattr(self, "_shadow_root"):
+            self._shadow_root = shadow_checkout.make(tempfile.mkdtemp(dir=self.tmp))
+        return self._shadow_root
 
     def out(self, r):
         return r.stdout + r.stderr
