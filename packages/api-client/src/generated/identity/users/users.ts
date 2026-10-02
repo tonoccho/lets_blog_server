@@ -92,15 +92,25 @@ export type updateProfileResponse401 = {
   status: 401
 }
 
+export type updateProfileResponse403 = {
+  data: UserProfileResponse
+  status: 403
+}
+
 export type updateProfileResponse404 = {
   data: UserProfileResponse
   status: 404
 }
 
+export type updateProfileResponse409 = {
+  data: UserProfileResponse
+  status: 409
+}
+
 export type updateProfileResponseSuccess = (updateProfileResponse200) & {
   headers: Headers;
 };
-export type updateProfileResponseError = (updateProfileResponse401 | updateProfileResponse404) & {
+export type updateProfileResponseError = (updateProfileResponse401 | updateProfileResponse403 | updateProfileResponse404 | updateProfileResponse409) & {
   headers: Headers;
 };
 

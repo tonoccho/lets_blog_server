@@ -39,6 +39,7 @@ export interface UserProfileUpdateRequest {
   position?: string;
   socialLinks?: SocialLinks;
   customLinks?: CustomLink[];
+  email?: string;
 }
 
 export interface UserProfileResponse {
@@ -147,8 +148,7 @@ export interface UserUpdateRequest {
 export interface UpdateUserPreferencesRequest {
   /** @minLength 1 */
   locale: string;
-  /** @minLength 1 */
-  timezone: string;
+  timezone?: string;
 }
 
 export type RoleResponsePermissionsItem = typeof RoleResponsePermissionsItem[keyof typeof RoleResponsePermissionsItem];

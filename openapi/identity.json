@@ -124,8 +124,28 @@
               }
             }
           },
+          "403": {
+            "description": "メールアドレスの変更はadmin限定",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "ユーザーが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "メールアドレスが既に使われています",
             "content": {
               "application/json": {
                 "schema": {
@@ -163,7 +183,7 @@
             "description": "認証ヘッダが無効"
           },
           "403": {
-            "description": "admin権限が無い、または自分自身を削除しようとした"
+            "description": "admin権限が無い、自分自身を削除しようとした、または最後の管理者を削除しようとした"
           },
           "404": {
             "description": "ユーザーが見つかりません"
@@ -776,7 +796,7 @@
             }
           },
           "403": {
-            "description": "admin権限が無い、または自分自身を無効化しようとした",
+            "description": "admin権限が無い、自分自身を無効化しようとした、または最後の管理者を無効化しようとした",
             "content": {
               "application/json": {
                 "schema": {
@@ -1793,6 +1813,9 @@
             "items": {
               "$ref": "#/components/schemas/CustomLink"
             }
+          },
+          "email": {
+            "type": "string"
           }
         }
       },
@@ -2085,13 +2108,11 @@
             "minLength": 1
           },
           "timezone": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           }
         },
         "required": [
-          "locale",
-          "timezone"
+          "locale"
         ]
       },
       "RoleResponse": {
