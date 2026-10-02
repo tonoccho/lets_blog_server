@@ -1145,8 +1145,8 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST /api/projects | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
-| GET /api/projects | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 全プロジェクト一覧。所属確認なしで全件参照可能 |
-| GET /api/projects/{id} | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 単一プロジェクト参照。所属確認なし |
+| GET /api/projects | accessibleProjectIds(所属で絞り込み。adminは全件) | 401 | 該当なし(他人のプロジェクトは一覧から除外) | 認可OK | 現状維持 | issue #830。`ProjectController#list`。操作者が所属するプロジェクトだけを返す |
+| GET /api/projects/{id} | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | issue #830。`ProjectController#get`。非メンバーは403 |
 | PUT /api/projects/{id} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | DELETE /api/projects/{id} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/environments | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
