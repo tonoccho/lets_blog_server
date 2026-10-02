@@ -33,7 +33,9 @@ export function PostComparisonTable({
   const [statusOptions, setStatusOptions] = useState<PostStatusOption[]>([]);
 
   useEffect(() => {
-    fetchPostStatusesAction().then(setStatusOptions);
+    fetchPostStatusesAction()
+      .then(setStatusOptions)
+      .catch(() => setMessage({ type: "error", text: "ステータス一覧の取得に失敗しました。" }));
   }, []);
 
   const totalPages = Math.max(1, Math.ceil(pageData.totalCount / pageData.size));

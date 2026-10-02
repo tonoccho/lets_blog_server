@@ -143,4 +143,19 @@ describe("PostComparisonTable", () => {
 
     await waitFor(() => expect(screen.getByText("変更しました。")).toBeInTheDocument());
   });
+
+  // issue #1382: ステータス一覧の取得失敗を無言にしない
+  it("ステータス一覧の取得に失敗するとエラーメッセージを表示する", async () => {
+    statusesMock.mockRejectedValue(new Error("boom"));
+    await renderTable();
+
+    await waitFor(() => expect(screen.getByText("ステータス一覧の取得に失敗しました。")).toBeInTheDocument());
+  });
+
+  it("ステータス一覧を取得できたときはエラーメッセージを表示せず、選択肢を描画する", async () => {
+    await renderTable();
+
+    await waitFor(() => expect(screen.getByRole("option", { name: "下書き" })).toBeInTheDocument());
+    expect(screen.queryByText("ステータス一覧の取得に失敗しました。")).not.toBeInTheDocument();
+  });
 });
