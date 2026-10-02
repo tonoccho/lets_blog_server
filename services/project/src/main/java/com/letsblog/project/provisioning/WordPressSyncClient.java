@@ -1,6 +1,8 @@
 package com.letsblog.project.provisioning;
 
 import com.letsblog.project.service.ProvisioningException;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
@@ -24,10 +26,23 @@ public class WordPressSyncClient {
     private final RestClient client;
     private final String provisionToken;
 
+    /**
+     * 読み取りタイムアウト(秒)。DB/メディア/テーマのインポートはサイズ次第で長引くため、
+     * プロビジョニングと同じ300秒とする。接続タイムアウトは3秒。
+     */
+    static final long DEFAULT_READ_TIMEOUT_SECONDS = 300;
+
+    @Autowired
     public WordPressSyncClient(
             @Value("${app.wordpress-provision-base-url}") String baseUrl,
             @Value("${app.wordpress-provision-token}") String provisionToken) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        this(baseUrl, provisionToken, AgentRestClients.DEFAULT_CONNECT_TIMEOUT,
+                Duration.ofSeconds(DEFAULT_READ_TIMEOUT_SECONDS));
+    }
+
+    /** タイムアウトを指定できるコンストラクタ(テスト用)。 */
+    WordPressSyncClient(String baseUrl, String provisionToken, Duration connectTimeout, Duration readTimeout) {
+        this.client = AgentRestClients.create(baseUrl, connectTimeout, readTimeout);
         this.provisionToken = provisionToken;
     }
 

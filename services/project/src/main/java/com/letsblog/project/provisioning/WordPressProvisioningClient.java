@@ -3,6 +3,8 @@ package com.letsblog.project.provisioning;
 import com.letsblog.project.service.ProvisioningException;
 import com.letsblog.project.service.SiteAlreadyProvisionedException;
 import com.letsblog.project.service.SiteNotFoundException;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
@@ -24,10 +26,24 @@ public class WordPressProvisioningClient {
     private final RestClient client;
     private final String provisionToken;
 
+    /**
+     * 読み取りタイムアウト(秒)。サイト自動構築の実測最大は240秒のため、それを下回らないよう300秒
+     * (実測最大の1.25倍の余裕)とする。短くすると正常な構築を切ってしまう。provision/adopt/deprovisionで
+     * 同じ値を共有する。接続タイムアウトは3秒。
+     */
+    static final long DEFAULT_READ_TIMEOUT_SECONDS = 300;
+
+    @Autowired
     public WordPressProvisioningClient(
             @Value("${app.wordpress-provision-base-url}") String baseUrl,
             @Value("${app.wordpress-provision-token}") String provisionToken) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        this(baseUrl, provisionToken, AgentRestClients.DEFAULT_CONNECT_TIMEOUT,
+                Duration.ofSeconds(DEFAULT_READ_TIMEOUT_SECONDS));
+    }
+
+    /** タイムアウトを指定できるコンストラクタ(テスト用)。 */
+    WordPressProvisioningClient(String baseUrl, String provisionToken, Duration connectTimeout, Duration readTimeout) {
+        this.client = AgentRestClients.create(baseUrl, connectTimeout, readTimeout);
         this.provisionToken = provisionToken;
     }
 

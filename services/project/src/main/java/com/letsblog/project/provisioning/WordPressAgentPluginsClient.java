@@ -2,6 +2,8 @@ package com.letsblog.project.provisioning;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -21,10 +23,20 @@ public class WordPressAgentPluginsClient {
     private final RestClient client;
     private final String provisionToken;
 
+    /** 読み取りタイムアウト(秒)。プラグイン一覧の取得のみで短時間に終わるため60秒。接続は3秒。 */
+    static final long DEFAULT_READ_TIMEOUT_SECONDS = 60;
+
+    @Autowired
     public WordPressAgentPluginsClient(
             @Value("${app.wordpress-provision-base-url}") String baseUrl,
             @Value("${app.wordpress-provision-token}") String provisionToken) {
-        this.client = RestClient.builder().baseUrl(baseUrl).build();
+        this(baseUrl, provisionToken, AgentRestClients.DEFAULT_CONNECT_TIMEOUT,
+                Duration.ofSeconds(DEFAULT_READ_TIMEOUT_SECONDS));
+    }
+
+    /** タイムアウトを指定できるコンストラクタ(テスト用)。 */
+    WordPressAgentPluginsClient(String baseUrl, String provisionToken, Duration connectTimeout, Duration readTimeout) {
+        this.client = AgentRestClients.create(baseUrl, connectTimeout, readTimeout);
         this.provisionToken = provisionToken;
     }
 
