@@ -251,17 +251,22 @@ fi
 # ---------------------------------------------------------------- 4. メディア
 
 step "5/6 生成画像と ComfyUI の output を空にします"
-if docker inspect "$MEDIA_CONTAINER" >/dev/null 2>&1; then
+# `docker inspect` はコンテナが Created(compose の gpu プロファイルで未起動の
+# lbs-comfyui など)でも成功するため、存在確認では docker exec の可否を決められない。
+# 実行中(State.Running == true)であることで判定する(#1306)。
+is_running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" = "true" ]; }
+
+if is_running "$MEDIA_CONTAINER"; then
   docker exec "$MEDIA_CONTAINER" sh -c 'rm -rf /app/data/generated-images/* 2>/dev/null || true'
   log "  空にしました: ${MEDIA_CONTAINER}:/app/data/generated-images"
 else
-  log "  スキップ: $MEDIA_CONTAINER が見つかりません"
+  log "  スキップ: $MEDIA_CONTAINER は未起動のためスキップします"
 fi
-if docker inspect "$COMFYUI_CONTAINER" >/dev/null 2>&1; then
+if is_running "$COMFYUI_CONTAINER"; then
   docker exec "$COMFYUI_CONTAINER" sh -c 'rm -rf /root/ComfyUI/output/* 2>/dev/null || true'
   log "  空にしました: ${COMFYUI_CONTAINER}:/root/ComfyUI/output"
 else
-  log "  スキップ: $COMFYUI_CONTAINER が見つかりません"
+  log "  スキップ: $COMFYUI_CONTAINER は未起動のためスキップします"
 fi
 
 # ---------------------------------------------------------------- 5. RabbitMQ
