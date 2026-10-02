@@ -13,9 +13,16 @@
 
   監査ログに残る認可操作は、プロジェクトメンバーのロール付与・変更・剥奪
   (`PROJECT_USER_ADDED` / `PROJECT_USER_ROLE_UPDATED` / `PROJECT_USER_REMOVED`、
-  services/identity/.../ProjectUserSyncService.java)に加え、issue #1137で
+  services/identity/.../ProjectUserSyncService.java)と、issue #1242で加わった
+  メンバー個別のユーザー情報再同期(`PROJECT_USER_SYNCED`、同
+  `syncUserProfileToProjectSites`)に加え、issue #1137で
   ユーザーの無効化・再有効化・削除・roleの変更(`services/identity/.../UserService.java`)
   も対象になった。
+
+  `PROJECT_USER_SYNCED`が記録されることは、このfeatureではなく
+  `features/identity/project-members.feature`(#1242のシナリオ、ステップは
+  `projectMember.steps.ts`)が検証しているので、ここにシナリオは重ねない。
+  media の `MEDIA_GARBAGE_COLLECTED` は認可に関わる操作ではないため、対象外とする。
 
   一括削除(`/api/projects/{id}/bulk-management/*/delete-all`)も#1137で
   `@AuditLog`(`services/publishing/.../TermComparisonService`等)を持つようになった。
