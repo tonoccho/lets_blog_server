@@ -66,7 +66,7 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 |---|---|---|
 | `GET /api/users` | `requireAdmin()` | #653 で追加 |
 | `POST /api/users` | `requireAdmin()` | **#796 で追加**。`UserCreateRequest` が `role` を受け取るため、認可が無いと `role=admin` のアカウントを誰でも作れた(権限昇格) |
-| `PATCH /api/users/{id}` | `requireAdmin()` + `requireNotSelfDemotion(id, role)` | **#796 で追加、#798 で自己降格ガードを追加**。扱うのは `role` / `password` で管理者が管理する項目。本人に許すと自分の `role` を admin へ書き換えられる。逆に admin が自分を `role="user"` へ降格すると admin 限定エンドポイントが全て閉じて復旧できなくなるため、**自分自身を admin 以外へ変更すること**も禁止した(パスワードのみの更新と admin→admin は通る) |
+| `PATCH /api/users/{id}` | `requireAdmin()` + `requireNotSelfDemotion(id, role)` | **#796 で追加、#798 で自己降格ガードを追加**。扱うのは `role` / `password` で管理者が管理する項目。本人に許すと自分の `role` を admin へ書き換えられる。逆に admin が自分を `role="user"` へ降格すると admin 限定エンドポイントが全て閉じて復旧できなくなるため、**自分自身を admin 以外へ変更すること**も禁止した(パスワードのみの更新と admin→admin は通る)。**#1427 で「最後の有効な admin」の降格も拒否**(403) |
 | `DELETE /api/users/{id}` | `requireAdminAndNotSelf(id, ...)` | **#796 で追加**。無効化が admin 限定なのに削除に認可が無い非対称を解消。あわせて自己削除も禁止(最後の admin が自分を消して誰も管理できなくなるのを防ぐ)。**#1162 で「最後の有効な admin」の削除も拒否**(403) |
 | `POST /api/users/{id}/deactivate` | `requireAdminAndNotSelf(id, ...)` | **#798 で自己ガードを追加**。#796 は自己「削除」だけを禁止し「無効化」を放置していた。admin が自分を無効化するとログインできなくなり、他に admin がいなければ `reactivate` も `requireAdmin()` を要求するため誰も復旧できない。**#1162 で「最後の有効な admin」の無効化も拒否**(403) |
 | `POST /api/users/{id}/reactivate` | `requireAdmin()` | 自己ガードは付けていない。#798 の時点では「無効化しても発行済みトークンが失効しないため厳密には自己 reactivate が可能」だったが、それは無効化全般のギャップ(下記)であり `reactivate` 固有ではないとして #816 に委ねた。**#816 で無効化ユーザーが操作者として解決されなくなったため、自己 reactivate は実際に不可能になった**(`requireAdmin()` の手前で 403)|
@@ -122,8 +122,10 @@ identity-service / log-writer が従来から行っていた、各コントロ�
 Keycloak 呼び出しはこの検査より後に置く(拒否時に外部を触らない)。検証は実 MySQL に対する
 `LastAdminGuardIntegrationTest`(2人の admin が互いを同時に削除/無効化する競合を繰り返し、必ず1人残ること)。
 
-自己削除・自己無効化の禁止(`requireAdminAndNotSelf`)は従来どおり残る。範囲外: `PATCH` による他 admin の
-`role` 降格で有効な admin が 0 になる経路は本判定の対象外(#1162 は削除と無効化のみ)。
+自己削除・自己無効化の禁止(`requireAdminAndNotSelf`)は従来どおり残る。**#1427 で `PATCH` による降格も同じ判定の対象にした**:
+`UserService#update` は `role` を admin 以外へ変更するとき、削除・無効化と同じ `requireNotLastEnabledAdmin`
+(同じ `lockEnabledAdmins` の悲観ロック下、Keycloak 呼び出しより前)で、対象が最後の有効な admin なら
+403(`最後の管理者は降格できません`)で拒否する。admin が2人以上なら互いに降格できる。
 
 ##### 無効化されたユーザーの発行済みトークン(#816 で一部解消)
 

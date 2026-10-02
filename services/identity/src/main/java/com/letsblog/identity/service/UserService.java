@@ -303,6 +303,12 @@ public class UserService {
             validateRole(request.role());
         }
 
+        // issue #1427: admin以外への降格も、削除/無効化(#1162)と同じ悲観ロック下で
+        // 「最後の有効なadmin」を判定する。Keycloak呼び出しより前に置く(拒否時に外部を触らない)。
+        if (request.role() != null && !isAdminRole(request.role())) {
+            requireNotLastEnabledAdmin(user, "最後の管理者は降格できません");
+        }
+
         boolean wasAdmin = isAdminRole(user.getRole());
         boolean syncedKeycloak = request.role() != null && user.getKeycloakSub() != null;
         if (syncedKeycloak) {
@@ -471,6 +477,7 @@ public class UserService {
 
     /**
      * 対象が「最後に残った有効なadmin」なら拒否する(#1162。#798の「数えない」判断を覆す)。
+     * {@link #update}のadmin以外への降格(#1427)でも使う。
      *
      * <p><b>検査時-使用時(TOCTOU)の穴の塞ぎ方</b>: 呼び出し元({@link #delete}/{@link #deactivate})の
      * {@code @Transactional}の中で、有効なadmin全行を{@code SELECT ... FOR UPDATE}で取得する

@@ -2,6 +2,7 @@ package com.letsblog.identity.service;
 
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.identity.domain.User;
+import com.letsblog.identity.dto.UserUpdateRequest;
 import com.letsblog.identity.keycloak.KeycloakAdminClient;
 import com.letsblog.identity.messaging.DomainEventPublisher;
 import com.letsblog.identity.repository.RoleRepository;
@@ -136,5 +137,53 @@ class UserServiceLastAdminGuardTest {
 
         verify(userRepository, never()).lockEnabledAdmins();
         verify(userRepository).deleteById(1L);
+    }
+
+    // ---------------------------------------------- issue #1427: PATCHによる降格
+
+    @Test
+    void update_唯一の有効なadminの降格は拒否しKeycloakにも保存にも触れない() {
+        User admin = user(1L, "admin");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
+        when(userRepository.lockEnabledAdmins()).thenReturn(List.of(admin));
+
+        ForbiddenException e = assertThrows(ForbiddenException.class,
+                () -> service().update(1L, new UserUpdateRequest("user", null)));
+
+        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("最後の管理者"));
+        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        verify(userRepository, never()).saveAndFlush(any());
+        verify(auditLogService, never()).logUserRoleUpdated(any(), any(), any());
+    }
+
+    @Test
+    void update_有効なadminが2人いれば降格でき_ロックを先に取ってからKeycloakを触る() {
+        User target = user(1L, "admin");
+        User other = user(2L, "admin");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(userRepository.lockEnabledAdmins()).thenReturn(List.of(target, other));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service().update(1L, new UserUpdateRequest("user", null));
+
+        InOrder order = inOrder(userRepository, keycloakAdminClient);
+        order.verify(userRepository).lockEnabledAdmins();
+        order.verify(keycloakAdminClient).revokeRealmRole(any(), any());
+        order.verify(userRepository).saveAndFlush(target);
+    }
+
+    @Test
+    void update_adminのままのrole指定_パスワードのみ_非admin昇格ではロックしない() {
+        User admin = user(1L, "admin");
+        User plain = user(2L, "user");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(plain));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(i -> i.getArgument(0));
+
+        service().update(1L, new UserUpdateRequest("admin", null));
+        service().update(1L, new UserUpdateRequest(null, null));
+        service().update(2L, new UserUpdateRequest("user", null));
+
+        verify(userRepository, never()).lockEnabledAdmins();
     }
 }

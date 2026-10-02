@@ -2,6 +2,7 @@ package com.letsblog.identity.integration;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.User;
+import com.letsblog.identity.dto.UserUpdateRequest;
 import com.letsblog.identity.keycloak.KeycloakAdminClient;
 import com.letsblog.identity.repository.UserRepository;
 import com.letsblog.identity.service.ForbiddenException;
@@ -212,6 +213,55 @@ class LastAdminGuardIntegrationTest {
             int succeeded = race(() -> userService.deactivate(b), () -> userService.deactivate(a));
 
             assertThat(succeeded).as("round %d: 成功した無効化の数", round).isEqualTo(1);
+            assertThat(enabledAdminCount()).as("round %d: 残った有効なadmin", round).isEqualTo(1);
+        }
+    }
+
+    // ---------------------------------------------- issue #1427: PATCHによる降格
+
+    @Test
+    @DisplayName("有効なadminが1人だけのとき、その降格は拒否され、roleはadminのまま")
+    void 唯一のadminは降格できない() {
+        userRepository.findById(adminBId).ifPresent(u -> {
+            u.setEnabled(false);
+            userRepository.save(u);
+        });
+
+        assertThatThrownBy(() -> userService.update(adminAId, new UserUpdateRequest("user", null)))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("最後の管理者");
+
+        assertThat(userRepository.findById(adminAId).orElseThrow().getRole()).isEqualTo("admin");
+    }
+
+    @Test
+    @DisplayName("adminが2人いれば、一方は他方を降格できる(HTTP)")
+    void 二人いれば降格できる() throws Exception {
+        mockMvc.perform(request(HttpMethod.PATCH, "/api/users/" + adminBId)
+                        .with(JwtTestFixtures.jwtRequestPostProcessor(ADMIN_A_SUB, "admin"))
+                        .contentType("application/json")
+                        .content("{\"role\":\"user\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(userRepository.findById(adminBId).orElseThrow().getRole()).isEqualTo("user");
+        assertThat(enabledAdminCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("2人のadminが互いを同時に降格しても、最後の1人はadminのまま残る")
+    void 同時降格でも一人残る() throws Exception {
+        for (int round = 0; round < RACE_ROUNDS; round++) {
+            if (round > 0) {
+                cleanup();
+                adminAId = createAdmin(ADMIN_A_SUB);
+                adminBId = createAdmin(ADMIN_B_SUB);
+            }
+            Long a = adminAId;
+            Long b = adminBId;
+            UserUpdateRequest demote = new UserUpdateRequest("user", null);
+            int succeeded = race(() -> userService.update(b, demote), () -> userService.update(a, demote));
+
+            assertThat(succeeded).as("round %d: 成功した降格の数", round).isEqualTo(1);
             assertThat(enabledAdminCount()).as("round %d: 残った有効なadmin", round).isEqualTo(1);
         }
     }
