@@ -73,11 +73,6 @@ export const ProofreadIssueSchema = z.object({
 });
 export type ProofreadIssue = z.infer<typeof ProofreadIssueSchema>;
 
-export const ProofreadResultSchema = z.object({
-  issues: z.array(ProofreadIssueSchema).default([]),
-});
-export type ProofreadResult = z.infer<typeof ProofreadResultSchema>;
-
 /**
  * 多段レビューの1ステップが返した1件の指摘。
  * POST /api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions のレスポンス(issue #1215)。

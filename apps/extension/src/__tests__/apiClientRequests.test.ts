@@ -78,26 +78,6 @@ describe('apiClientが組み立てるリクエスト', () => {
     expect(result.skipped).toBe(false);
   });
 
-  it('校正チェックは本文とプロバイダーだけを送る', async () => {
-    respondWith({ issues: [] });
-
-    await apiClient.proofreadContent('token', undefined, '校正したい本文', 'OPENAI');
-
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0].url).toBe('https://stack.test/api/ai/proofread');
-    expect(recorded[0].method).toBe('POST');
-    expect(recorded[0].body).toEqual({ text: '校正したい本文', provider: 'OPENAI' });
-    expect(recorded[0].headers.Authorization).toBe('Bearer token');
-  });
-
-  it('プロバイダー未指定の校正チェックはproviderを送らない(サーバー既定を使う)', async () => {
-    respondWith({ issues: [] });
-
-    await apiClient.proofreadContent('token', undefined, '本文');
-
-    expect(recorded[0].body).toEqual({ text: '本文' });
-  });
-
   it('セクション生成は見出しと直前の文脈・記事タイトルを含めて送る', async () => {
     respondWith({ result: '生成結果', sources: [] });
 
@@ -386,15 +366,13 @@ describe('apiClientが解釈するレスポンス', () => {
 
     await apiClient.askAi('token', 'draft', '本文', undefined, 'CLAUDE', 7);
     await apiClient.askAiSearch('token', undefined, '質問', undefined, undefined, 7);
-    await apiClient.proofreadContent('token', undefined, '本文', undefined, undefined, 7);
     await apiClient.generateSection('token', undefined, { mode: 'body', heading: '背景', projectId: 7 });
     await apiClient.generateSection('token', undefined, { mode: 'body', heading: '背景' });
 
     expect(recorded[0].body).toEqual({ mode: 'draft', text: '本文', provider: 'CLAUDE', projectId: 7 });
     expect(recorded[1].body).toEqual({ question: '質問', projectId: 7 });
-    expect(recorded[2].body).toEqual({ text: '本文', projectId: 7 });
-    expect(recorded[3].body).toEqual({ mode: 'body', heading: '背景', projectId: 7 });
-    expect(recorded[4].body).toEqual({ mode: 'body', heading: '背景' });
+    expect(recorded[2].body).toEqual({ mode: 'body', heading: '背景', projectId: 7 });
+    expect(recorded[3].body).toEqual({ mode: 'body', heading: '背景' });
   });
 
   it('タグ提案は指定されたproviderとprojectIdだけを載せる', async () => {

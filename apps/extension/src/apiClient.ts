@@ -285,7 +285,6 @@ import type {
   ProjectDetail,
   ProjectSite,
   ProjectSummary,
-  ProofreadResult,
   PublishResult,
   RepositoryIssue,
   SiteSummary,
@@ -312,7 +311,6 @@ export type {
   ProjectDetail,
   ProjectSite,
   ProjectSummary,
-  ProofreadResult,
   PublishResult,
   RepositoryIssue,
   SiteSummary,
@@ -618,29 +616,6 @@ export async function suggestTags(
     createBody: jsonBody({ text, provider: provider || undefined, projectId }),
     retryable: true,
   }, schemas.AiTagsResultSchema);
-}
-
-/**
- * 本文の校正チェックをAIへ依頼する。エディタでの波線表示に使うため、超過した指摘によって
- * 誤って古い結果を表示し続けないよう、呼び出し元でsignalによるキャンセルを行える。
- * @param signal 再入力等で古いリクエストを打ち切るためのキャンセル用(issue #523)。
- */
-export async function proofreadContent(
-  apiKey: string,
-  actor: Actor | undefined,
-  text: string,
-  provider?: string,
-  signal?: AbortSignal,
-  projectId?: number
-): Promise<ProofreadResult> {
-  return requestJson('/api/ai/proofread', {
-    label: 'proofreadContent',
-    signal,
-    method: 'POST',
-    headers: buildHeaders(apiKey, actor),
-    createBody: jsonBody({ text, provider: provider || undefined, projectId }),
-    retryable: true,
-  }, schemas.ProofreadResultSchema);
 }
 
 /**
