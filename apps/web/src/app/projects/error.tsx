@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { logErrorToBackend, logErrorToConsole } from '@/lib/errorLogger';
 
@@ -10,7 +10,11 @@ interface ErrorProps {
 }
 
 export default function ProjectsError({ error, reset }: ErrorProps) {
+  // StrictModeのeffect二重実行でも同じerrorを2回送らない(#1394)。別のerrorなら改めて送る。
+  const loggedError = useRef<Error | null>(null);
   useEffect(() => {
+    if (loggedError.current === error) return;
+    loggedError.current = error;
     logErrorToConsole('Projects page error', error, { page: 'projects' });
     logErrorToBackend(error, {
       level: 'error',
