@@ -20,6 +20,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * issue #1468: @PathVariable / @RequestParam の型変換失敗(未知のenum値、数値項目への非数値など)は
+     * クライアントの入力誤りなので400で返す。専用ハンドラが無いと、Springは原因連鎖を辿って
+     * 下の IllegalArgumentException ハンドラに一致してしまう。内部のクラス名や例外文面は
+     * 漏らさず、パラメータ名だけを示す。
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of("パラメータ '" + e.getName() + "' の値が不正です。"));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
