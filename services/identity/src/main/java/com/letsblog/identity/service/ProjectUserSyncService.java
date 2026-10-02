@@ -2,6 +2,7 @@ package com.letsblog.identity.service;
 
 import com.letsblog.identity.client.ProjectServiceClient;
 import com.letsblog.identity.client.PublishingServiceClient;
+import com.letsblog.identity.client.PublishingServiceException;
 import com.letsblog.identity.domain.ProjectUser;
 import com.letsblog.identity.domain.User;
 import com.letsblog.identity.domain.UserSiteAuthor;
@@ -180,7 +181,14 @@ public class ProjectUserSyncService {
 
     private void syncToProjectSites(ProjectServiceClient.ProjectBridge project, User user, String wpRole) {
         for (ProjectServiceClient.SiteBridge site : getProjectSites(project)) {
-            provisionUserOnSite(site, user, wpRole);
+            try {
+                provisionUserOnSite(site, user, wpRole);
+            } catch (PublishingServiceException e) {
+                // issue #1302: 複数環境が紐づくとき、どの環境で失敗したか利用者に分かるよう環境名を添える。
+                // 環境名はここ(all-or-nothingの経路)でだけ付ける。syncUserProfileToProjectSites は
+                // 環境名を別項目(siteName)で返すため、provisionUserOnSite 側では付けない。
+                throw new PublishingServiceException(site.name() + ": " + e.getMessage(), e);
+            }
         }
     }
 

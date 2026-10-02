@@ -98,6 +98,53 @@ describe("ProjectUserManager(issue #1242: ユーザー情報同期ボタン)", (
   });
 });
 
+describe("ProjectUserManager(issue #1302: ロール変更の失敗表示)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("ロール変更が失敗すると、そのメンバー行にエラーメッセージが表示される", async () => {
+    updateProjectUserRoleAction.mockResolvedValue({
+      error: "テスト環境: 著者プロビジョニング呼び出しに失敗しました: connect timed out",
+    });
+
+    render(<ProjectUserManager projectId={1} members={[buildMember({ userId: 5 })]} />);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "editor" } });
+
+    await waitFor(() => {
+      expect(updateProjectUserRoleAction).toHaveBeenCalledWith(1, 5, "editor");
+    });
+    const message = await screen.findByText(/テスト環境: 著者プロビジョニング呼び出しに失敗しました/);
+    expect(message.closest("tr")).toHaveTextContent("member@example.com");
+  });
+
+  it("ロール変更が成功すると、エラーは表示されない", async () => {
+    updateProjectUserRoleAction.mockResolvedValue({});
+
+    render(<ProjectUserManager projectId={1} members={[buildMember({ userId: 5 })]} />);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "editor" } });
+
+    await waitFor(() => {
+      expect(updateProjectUserRoleAction).toHaveBeenCalledWith(1, 5, "editor");
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("失敗後に再度ロール変更して成功すると、前回のエラー表示は消える", async () => {
+    updateProjectUserRoleAction.mockResolvedValueOnce({ error: "失敗しました" });
+    updateProjectUserRoleAction.mockResolvedValueOnce({});
+
+    render(<ProjectUserManager projectId={1} members={[buildMember({ userId: 5 })]} />);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "editor" } });
+    expect(await screen.findByText("失敗しました")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "contributor" } });
+    await waitFor(() => {
+      expect(screen.queryByText("失敗しました")).not.toBeInTheDocument();
+    });
+  });
+});
+
 describe("ProjectUserManager の空状態(issue #1069)", () => {
   it("メンバーが居ないときは、居ない旨に加えて追加の方法を案内する", () => {
     render(<ProjectUserManager projectId={1} members={[]} />);

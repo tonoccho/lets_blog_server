@@ -598,10 +598,24 @@ export async function addProjectUserAction(
   return { success: true };
 }
 
-export async function updateProjectUserRoleAction(projectId: number, userId: number, wpRole: string) {
+export interface UpdateProjectUserRoleResult {
+  error?: string;
+}
+
+/** issue #1302: 失敗(WordPress環境への同期失敗など)は例外ではなく`{ error }`で返し、行の近くへ表示させる。 */
+export async function updateProjectUserRoleAction(
+  projectId: number,
+  userId: number,
+  wpRole: string
+): Promise<UpdateProjectUserRoleResult> {
   await requireAdminSession();
-  await updateProjectUserRole(projectId, userId, wpRole);
+  try {
+    await updateProjectUserRole(projectId, userId, wpRole);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
   revalidatePath(`/projects/${projectId}`);
+  return {};
 }
 
 export async function removeProjectUserAction(projectId: number, userId: number) {

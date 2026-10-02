@@ -537,6 +537,85 @@ Then('ユーザー情報同期の監査ログが記録されるまで待つ', as
   expect(found!.changes ?? '', `監査ログのchangesに対象メンバー(${memberId})が含まれません`).toContain(String(memberId));
 });
 
+// ---- issue #1302: 同期失敗時の環境名と理由 ----
+
+Given('疎通不能な環境だけがそのプロジェクトに紐づいている', async ({ ctx, request }) => {
+  const headers = await adminHeaders(request);
+  const ngSite = await registerUnreachableSite(request, headers);
+  await bindSiteToProject(request, headers, ctx.pmProjectId as number, 'production', ngSite.id);
+  ctx.pmUnreachableSiteId = ngSite.id;
+  ctx.pmUnreachableSiteName = ngSite.name;
+});
+
+/** 失敗理由の既存文言(PublishingServiceClient#provisionAuthor)。サイト名と併せて両方が含まれることを確かめる。 */
+const FAILURE_REASON = '著者プロビジョニング';
+
+When('管理者がそのメンバーをプロジェクトへauthorとして追加しようとする', async ({ request, ctx }) => {
+  const headers = await adminHeaders(request);
+  ctx.pmFailedResponse = await request.post(`/api/projects/${ctx.pmProjectId}/users`, {
+    headers,
+    data: { userId: ctx.pmMemberId, wpRole: 'author' },
+  });
+});
+
+When('管理者がそのメンバーの役割をeditorへ変更しようとする', async ({ request, ctx }) => {
+  const headers = await adminHeaders(request);
+  ctx.pmFailedResponse = await request.put(`/api/projects/${ctx.pmProjectId}/users/${ctx.pmMemberId}`, {
+    headers,
+    data: { wpRole: 'editor' },
+  });
+});
+
+Then('502で拒否され、メッセージに疎通不能な環境の名前と失敗の理由が含まれる', async ({ ctx }) => {
+  const response = ctx.pmFailedResponse as Awaited<ReturnType<APIRequestContext['post']>>;
+  expect(response.status()).toBe(502);
+  const body = await response.text();
+  expect(body, '応答に失敗した環境の名前が含まれていません').toContain(ctx.pmUnreachableSiteName as string);
+  expect(body, '応答に失敗の理由が含まれていません').toContain(FAILURE_REASON);
+});
+
+Then('そのプロジェクトのメンバー一覧にそのメンバーは含まれない', async ({ request, ctx }) => {
+  const members = await fetchProjectUsers(request, ctx.pmProjectId as number);
+  expect(members.find((item) => item.userId === ctx.pmMemberId)).toBeUndefined();
+});
+
+Then('そのプロジェクトのメンバー一覧でそのメンバーの役割がauthorのままである', async ({ request, ctx }) => {
+  const members = await fetchProjectUsers(request, ctx.pmProjectId as number);
+  const member = members.find((item) => item.userId === ctx.pmMemberId);
+  expect(member, 'メンバー一覧にそのメンバーが見つかりません').toBeTruthy();
+  expect(member!.wpRole).toBe('author');
+});
+
+When('管理者としてそのプロジェクトのメンバー画面でそのメンバーの役割をeditorへ変更する', async ({ ctx, page }) => {
+  await loginAsAdmin(page);
+  await openMembersTab(page, ctx.pmProjectId as number);
+  const row = page.locator('tr', { hasText: ctx.pmMemberEmail as string });
+  await row.getByRole('combobox').selectOption('editor');
+  ctx.pmSyncRow = row;
+});
+
+Then('そのメンバーの行に疎通不能な環境の名前と失敗の理由が表示される', async ({ ctx }) => {
+  const row = ctx.pmSyncRow as ReturnType<Page['locator']>;
+  await expect(row.getByText(ctx.pmUnreachableSiteName as string, { exact: false })).toBeVisible({ timeout: 60_000 });
+  await expect(row.getByText(FAILURE_REASON, { exact: false })).toBeVisible();
+});
+
+When('管理者としてそのプロジェクトのメンバー画面でそのメンバーをauthorとして追加する', async ({ ctx, page }) => {
+  await loginAsAdmin(page);
+  await openMembersTab(page, ctx.pmProjectId as number);
+  const form = page.locator('form').filter({ hasText: 'ユーザーを追加' });
+  await form.locator('select[name="userId"]').selectOption({ label: ctx.pmMemberEmail as string });
+  await form.locator('select[name="wpRole"]').selectOption('author');
+  await form.getByRole('button', { name: '追加', exact: true }).click();
+  ctx.pmAddForm = form;
+});
+
+Then('追加フォームに疎通不能な環境の名前と失敗の理由が表示される', async ({ ctx }) => {
+  const form = ctx.pmAddForm as ReturnType<Page['locator']>;
+  await expect(form.getByText(ctx.pmUnreachableSiteName as string, { exact: false })).toBeVisible({ timeout: 60_000 });
+  await expect(form.getByText(FAILURE_REASON, { exact: false })).toBeVisible();
+});
+
 // --------------------------------------------------------------- 後片付け
 
 After({ tags: '@identity' }, async ({ ctx, request }) => {

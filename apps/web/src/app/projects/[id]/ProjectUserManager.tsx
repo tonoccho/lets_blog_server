@@ -30,10 +30,15 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
   const [isPending, startTransition] = useTransition();
   const [syncResults, setSyncResults] = useState<ProjectUserSyncSiteResult[] | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   function handleRoleChange(newRole: string) {
-    startTransition(() => {
-      updateProjectUserRoleAction(projectId, member.userId, newRole);
+    setRoleError(null);
+    startTransition(async () => {
+      const result = await updateProjectUserRoleAction(projectId, member.userId, newRole);
+      if (result.error) {
+        setRoleError(result.error);
+      }
     });
   }
 
@@ -76,6 +81,11 @@ function MemberRow({ projectId, member }: { projectId: number; member: ProjectUs
             </option>
           ))}
         </select>
+        {roleError && (
+          <p role="alert" className="mt-1 text-xs text-red-600">
+            {roleError}
+          </p>
+        )}
       </td>
       <td className="px-4 py-2 text-right">
         <div className="flex items-center justify-end gap-3">

@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -213,5 +214,71 @@ class ProjectUserSyncServiceTest {
         verify(projectServiceClient, never()).getSite(anyLong());
         verify(publishingServiceClient, never()).provisionAuthor(any(), any());
         verify(userSiteAuthorRepository, never()).save(any());
+    }
+
+    // ------------------------------------------------------------------
+    // issue #1302: 追加/ロール変更の失敗メッセージに、失敗した環境名と元の理由の両方を含める。
+    // ------------------------------------------------------------------
+
+    private void stubTwoSitesSecondFails() {
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProject());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(buildUser()));
+        when(projectServiceClient.getSite(10L)).thenReturn(Optional.of(
+                new ProjectServiceClient.SiteBridge(10L, "local-key", "ローカル", "https://local.example.com")));
+        when(projectServiceClient.getSite(20L)).thenReturn(Optional.of(
+                new ProjectServiceClient.SiteBridge(20L, "test-key", "テスト環境", "https://test.example.com")));
+        when(publishingServiceClient.provisionAuthor(eq("local-key"), any()))
+                .thenReturn(new PublishingServiceClient.AuthorProvisioningResponse("101"));
+        when(userSiteAuthorRepository.findByUserIdAndSiteId(anyLong(), anyLong())).thenReturn(Optional.empty());
+    }
+
+    @Test
+    void メンバー追加で環境の著者登録が失敗すると例外メッセージに環境名と元の理由が含まれ何も保存されない() {
+        stubTwoSitesSecondFails();
+        PublishingServiceException original =
+                new PublishingServiceException("著者プロビジョニング呼び出しに失敗しました: connect timed out", null);
+        when(publishingServiceClient.provisionAuthor(eq("test-key"), any())).thenThrow(original);
+
+        PublishingServiceException thrown = assertThrows(PublishingServiceException.class,
+                () -> service().addUserToProject(1L, 42L, "author"));
+
+        assertTrue(thrown.getMessage().contains("テスト環境"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("connect timed out"), thrown.getMessage());
+        assertSame(original, thrown.getCause());
+        verify(projectUserRepository, never()).save(any(ProjectUser.class));
+    }
+
+    @Test
+    void ロール変更で環境の著者登録が失敗すると例外メッセージに環境名と元の理由が含まれロールは変わらない() {
+        ProjectUser existing = new ProjectUser(1L, 42L, "author");
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 42L)).thenReturn(Optional.of(existing));
+        stubTwoSitesSecondFails();
+        when(publishingServiceClient.provisionAuthor(eq("test-key"), any()))
+                .thenThrow(new PublishingServiceException("著者プロビジョニング呼び出しに失敗しました: connect timed out", null));
+
+        PublishingServiceException thrown = assertThrows(PublishingServiceException.class,
+                () -> service().updateUserProjectRole(1L, 42L, "editor"));
+
+        assertTrue(thrown.getMessage().contains("テスト環境"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("connect timed out"), thrown.getMessage());
+        verify(projectUserRepository, never()).save(any(ProjectUser.class));
+    }
+
+    @Test
+    void 環境同期結果のerrorMessageには環境名を重ねず元の理由だけを返す() {
+        when(projectUserRepository.findByProjectIdAndUserId(1L, 42L))
+                .thenReturn(Optional.of(new ProjectUser(1L, 42L, "author")));
+        when(projectServiceClient.getProject(1L)).thenReturn(buildProject());
+        when(userRepository.findById(42L)).thenReturn(Optional.of(buildUser()));
+        when(projectServiceClient.getSite(10L)).thenReturn(Optional.of(
+                new ProjectServiceClient.SiteBridge(10L, "local-key", "ローカル", "https://local.example.com")));
+        when(projectServiceClient.getSite(20L)).thenReturn(Optional.empty());
+        when(publishingServiceClient.provisionAuthor(eq("local-key"), any()))
+                .thenThrow(new PublishingServiceException("接続に失敗しました", null));
+
+        List<ProjectUserSyncSiteResult> results = service().syncUserProfileToProjectSites(1L, 42L);
+
+        assertEquals(1, results.size());
+        assertEquals("接続に失敗しました", results.get(0).errorMessage());
     }
 }
