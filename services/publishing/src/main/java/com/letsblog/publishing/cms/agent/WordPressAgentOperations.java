@@ -9,7 +9,6 @@ import com.letsblog.publishing.cms.CmsMediaSummary;
 import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
-import com.letsblog.publishing.cms.MediaContentHash;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -432,8 +431,8 @@ public class WordPressAgentOperations {
     public MediaUploadResult uploadMedia(WordPressCredentials creds, String filename, String contentType, byte[] data) {
         MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
         form.add("slug", creds.wpSlug());
-        // アップロードしたバイト列のsha256(issue #1432)。エージェントがメディアのpost metaへ記録する。
-        form.add("sha256", MediaContentHash.sha256Hex(data));
+        // メディアのpost metaへ記録するsha256は、エージェントがアップロードされたファイルから計算する
+        // (issue #1436)。client送信値は信用しないため、ここでは送らない。
         form.add("file", new ByteArrayResource(data) {
             @Override
             public String getFilename() {

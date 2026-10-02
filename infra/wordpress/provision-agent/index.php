@@ -57,6 +57,8 @@ function combinedOutput(string $stdout, string $stderr): string
 require __DIR__ . '/process-runner.php';
 // core downloadの壊れたキャッシュからの回復(issue #1419)。
 require __DIR__ . '/core-download.php';
+// media-uploadが記録するsha256はagentがファイル内容から計算する(issue #1436)。
+require __DIR__ . '/media-hash.php';
 require __DIR__ . '/letsblog-plugin-installer.php';
 
 /**
@@ -1655,6 +1657,10 @@ if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     ensureSvgUploadMuPlugin($sitePath);
 
+    // 記録するsha256は、client送信値($_POST['sha256'])ではなく保存したファイルから計算する(issue #1436)。
+    // 一時ファイルは media import 後に削除するため、その前に計算する。
+    $sha256 = computeMediaSha256($tmpPath);
+
     [$code, $out, $err] = runWp(['media', 'import', $tmpPath, '--porcelain', "--path=$sitePath", '--allow-root']);
     runCommand(['rm', '-f', $tmpPath]);
     if ($code !== 0) {
@@ -1670,8 +1676,7 @@ if ($path === '/wp-cli/media-upload' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // アップロードしたバイト列のsha256をメディアのpost metaへ記録する(issue #1432)。以後の投稿で
     // 同一内容の画像を media-find-by-hash で同定するための印。記録に失敗してもメディアは作成済みで
     // 投稿は続行できる(次回その画像が再アップロードされるだけ)ため、ログに留めて成功として返す。
-    $sha256 = strtolower((string) ($_POST['sha256'] ?? ''));
-    if (isValidSha256($sha256)) {
+    if ($sha256 !== null) {
         [$metaCode, $metaOut, $metaErr] = runWp(['post', 'meta', 'update', $mediaId, '_letsblog_sha256', $sha256,
             "--path=$sitePath", '--allow-root']);
         if ($metaCode !== 0) {

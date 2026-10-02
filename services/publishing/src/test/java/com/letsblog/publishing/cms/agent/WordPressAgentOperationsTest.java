@@ -426,16 +426,13 @@ class WordPressAgentOperationsTest {
     }
 
     @Test
-    void uploadMedia_アップロードしたバイト列のsha256をフォームで送る() throws Exception {
+    void uploadMedia_sha256はフォームで送らない_エージェントがファイル内容から計算する() throws Exception {
         byte[] data = new byte[]{1, 2, 3};
-        String sha = java.util.HexFormat.of().formatHex(
-                java.security.MessageDigest.getInstance("SHA-256").digest(data));
         server.expect(requestTo("http://wordpress:9000/wp-cli/media-upload"))
                 .andExpect(request -> {
                     String body = ((org.springframework.mock.http.client.MockClientHttpRequest) request)
                             .getBodyAsString();
-                    org.junit.jupiter.api.Assertions.assertTrue(body.contains("name=\"sha256\""), body);
-                    org.junit.jupiter.api.Assertions.assertTrue(body.contains(sha), body);
+                    org.junit.jupiter.api.Assertions.assertFalse(body.contains("name=\"sha256\""), body);
                 })
                 .andRespond(withSuccess("{\"mediaId\":\"77\",\"guid\":\"http://wordpress/img.png\"}",
                         MediaType.APPLICATION_JSON));
