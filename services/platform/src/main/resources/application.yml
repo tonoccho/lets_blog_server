@@ -173,6 +173,11 @@ app:
   # (docker-compose.ymlのplatformサービス定義の./extension:/app/extension-src:ro参照)。
   vscode-extension-source-path: ${VSCODE_EXTENSION_SOURCE_PATH:/app/extension-src}
   vscode-extension-build-path: ${VSCODE_EXTENSION_BUILD_PATH:/app/extension-build}
+  # SourceArchiveService(issue #1491)がPenpotプラグイン / MCPサーバーのソースZipを作る際の
+  # ソース(読み取り専用マウント。docker-compose.ymlのplatformサービス定義参照)。
+  # VSCode拡張と違いサーバー側ではビルドしないので、作業ディレクトリは持たない。
+  penpot-plugin-source-path: ${PENPOT_PLUGIN_SOURCE_PATH:/app/penpot-plugin-src}
+  mcp-server-source-path: ${MCP_SERVER_SOURCE_PATH:/app/mcp-server-src}
   # BackupService(issue #694、C10-2)が全サービスのMySQLスキーマ + Keycloak PostgreSQLを横断して
   # バックアップ/リストアするための接続情報。各サービス専用のDBユーザーでは他スキーマへ
   # アクセスできない(#570のスキーマ分離)ため、バックアップ専用のMySQLユーザー(既定値

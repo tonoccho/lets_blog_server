@@ -45,6 +45,8 @@ import {
   clearProjectOpenAiApiKey,
   setProjectClaudeApiKey,
   clearProjectClaudeApiKey,
+  downloadPenpotPlugin,
+  downloadMcpServer,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -633,5 +635,42 @@ describe('操作ログ集計API(issue #1471)', () => {
     expect(query.has('sort')).toBe(false)
     expect(query.has('direction')).toBe(false)
     expect(query.has('limit')).toBe(false)
+  })
+})
+
+describe('配布物(Zip)のダウンロード(issue #1491)', () => {
+  function zipResponse(disposition: string | null): Response {
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      arrayBuffer: async () => new ArrayBuffer(6),
+      text: async () => '',
+      headers: { get: (name: string) => (name === 'content-disposition' ? disposition : null) },
+    } as unknown as Response
+  }
+
+  it('Penpotプラグインは /api/system/penpot-plugin を呼び、Content-Dispositionのファイル名を返す', async () => {
+    fetchMock.mockResolvedValue(zipResponse('attachment; filename="p.zip"'))
+
+    const result = await downloadPenpotPlugin()
+
+    expect(calls()[0][0]).toContain('/api/system/penpot-plugin')
+    expect(result.filename).toBe('p.zip')
+    expect(result.body.byteLength).toBe(6)
+  })
+
+  it('MCPサーバーは /api/system/mcp-server を呼び、Content-Dispositionが無ければ既定のファイル名', async () => {
+    fetchMock.mockResolvedValue(zipResponse(null))
+
+    const result = await downloadMcpServer()
+
+    expect(calls()[0][0]).toContain('/api/system/mcp-server')
+    expect(result.filename).toBe('letsblog-mcp-server.zip')
+  })
+
+  it('Penpotプラグインも既定のファイル名を持つ', async () => {
+    fetchMock.mockResolvedValue(zipResponse(null))
+    expect((await downloadPenpotPlugin()).filename).toBe('letsblog-penpot-plugin.zip')
   })
 })

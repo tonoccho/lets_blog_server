@@ -81,6 +81,10 @@ class AuthorizationMatrixIntegrationTest {
                 // -- VscodeExtensionController (1、issue #696) --
                 new Endpoint("GET", "/api/system/vscode-extension"),
 
+                // -- PenpotPluginController / McpServerController (各1、issue #1491) --
+                new Endpoint("GET", "/api/system/penpot-plugin"),
+                new Endpoint("GET", "/api/system/mcp-server"),
+
                 // -- BackupController (2、issue #694) --
                 new Endpoint("GET", "/api/backup/download"),
                 new Endpoint("POST", "/api/backup/restore"),

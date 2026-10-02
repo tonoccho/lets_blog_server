@@ -42,6 +42,34 @@ describe('DownloadMenu', () => {
     expect(screen.getByRole('menuitem', { name: /VSCode拡張機能/ })).toBeInTheDocument()
   })
 
+  it('lists the Penpot plugin and MCP server items too (issue #1491)', () => {
+    renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
+    expect(screen.getAllByRole('menuitem')).toHaveLength(3)
+    expect(screen.getByRole('menuitem', { name: /Penpotプラグイン/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /MCPサーバー/ })).toBeInTheDocument()
+  })
+
+  it('downloads the Penpot plugin zip from /downloads/penpot-plugin', async () => {
+    global.fetch = jest.fn().mockResolvedValue(okResponse())
+    renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Penpotプラグイン/ }))
+    await waitFor(() => expect(clicked).toHaveLength(1))
+    expect(global.fetch).toHaveBeenCalledWith('/downloads/penpot-plugin')
+    expect(clicked[0].download).toBe('letsblog-penpot-plugin.zip')
+  })
+
+  it('downloads the MCP server zip from /downloads/mcp-server', async () => {
+    global.fetch = jest.fn().mockResolvedValue(okResponse())
+    renderMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /MCPサーバー/ }))
+    await waitFor(() => expect(clicked).toHaveLength(1))
+    expect(global.fetch).toHaveBeenCalledWith('/downloads/mcp-server')
+    expect(clicked[0].download).toBe('letsblog-mcp-server.zip')
+  })
+
   it('closes on Escape', () => {
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
@@ -70,7 +98,7 @@ describe('DownloadMenu', () => {
     global.fetch = jest.fn().mockResolvedValue(okResponse('attachment; filename="ext-1.2.vsix"'))
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     await waitFor(() => expect(clicked).toHaveLength(1))
     expect(global.fetch).toHaveBeenCalledWith('/downloads/vscode-extension')
     expect(clicked[0].download).toBe('ext-1.2.vsix')
@@ -80,7 +108,7 @@ describe('DownloadMenu', () => {
     global.fetch = jest.fn().mockResolvedValue(okResponse())
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     await waitFor(() => expect(clicked).toHaveLength(1))
     expect(clicked[0].download).toBe('letsblog-vscode.vsix')
   })
@@ -90,7 +118,7 @@ describe('DownloadMenu', () => {
     global.fetch = jest.fn().mockReturnValue(new Promise((r) => (resolve = r)))
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     const item = await screen.findByRole('menuitem', { name: /ビルド中/ })
     expect(item).toBeDisabled()
     resolve(okResponse())
@@ -101,7 +129,7 @@ describe('DownloadMenu', () => {
     global.fetch = jest.fn().mockResolvedValue({ ...okResponse(), redirected: true })
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('セッションが切れている')
   })
 
@@ -115,7 +143,7 @@ describe('DownloadMenu', () => {
     })
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('build failed')
   })
 
@@ -129,7 +157,7 @@ describe('DownloadMenu', () => {
     })
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 502')
   })
 
@@ -137,7 +165,7 @@ describe('DownloadMenu', () => {
     global.fetch = jest.fn().mockRejectedValue('boom')
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('boom')
   })
 
@@ -151,7 +179,7 @@ describe('DownloadMenu', () => {
     })
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('plain failure')
   })
 
@@ -160,7 +188,7 @@ describe('DownloadMenu', () => {
     global.fetch = jest.fn().mockReturnValue(new Promise((_, r) => (reject = r)))
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /VSCode拡張機能/ }))
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
     reject(new Error('late failure'))

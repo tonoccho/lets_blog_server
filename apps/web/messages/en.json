@@ -20,7 +20,11 @@
     "logout": "Logout",
     "downloadMenu": "Downloads",
     "downloadVscodeExtension": "Download VSCode extension (.vsix)",
-    "downloadVscodeExtensionPending": "Building VSCode extension…"
+    "downloadVscodeExtensionPending": "Building VSCode extension…",
+    "downloadPenpotPlugin": "Download Penpot plugin (.zip)",
+    "downloadPenpotPluginPending": "Preparing Penpot plugin…",
+    "downloadMcpServer": "Download MCP server (.zip)",
+    "downloadMcpServerPending": "Preparing MCP server…"
   },
   "sideNav": {
     "admin": "Admin",

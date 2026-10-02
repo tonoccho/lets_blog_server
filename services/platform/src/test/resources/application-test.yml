@@ -64,6 +64,9 @@ app:
   # AdminAuthorizationIntegrationTestがBean生成のために必要とする。
   vscode-extension-source-path: /tmp/lbs-platform-test-extension-src
   vscode-extension-build-path: /tmp/lbs-platform-test-extension-build
+  # SourceArchiveService(issue #1491)のテスト用値。フルコンテキスト起動のBean生成に必要。
+  penpot-plugin-source-path: /tmp/lbs-platform-test-penpot-plugin-src
+  mcp-server-source-path: /tmp/lbs-platform-test-mcp-server-src
   backup:
     mysql:
       host: localhost

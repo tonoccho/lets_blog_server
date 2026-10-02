@@ -90,6 +90,12 @@ DOC_PATTERNS = [
 #       実行時イメージの振る舞いそのものを決める。Dockerfile をプロダクション扱い
 #       としながら、その ENTRYPOINT が呼ぶスクリプトだけ TEST/DOC/NEUTRAL のどれにも
 #       当たらず黙って中立に落ちるのは一貫しない。
+#   apps/*/setup.sh
+#       【採用】Zip で配る導入スクリプト(apps/penpot-plugin/setup.sh・apps/mcp-server/setup.sh、
+#       #1491)。利用者の手元でビルドを走らせる出荷物そのもので、Node のバージョン検査や
+#       .env の用意といった利用者が観測する振る舞いを決める。リポジトリ直下の setup.sh
+#       (中立、#1321)は利用者がホストで動かす運用スクリプトという別物。直下のものを
+#       巻き込まないよう `^apps/[^/]+/setup\.sh$` と個別に指定する。
 PRODUCTION_PATTERNS = [
     r"^apps/[^/]+/src/",
     r"^services/[^/]+/src/",
@@ -103,6 +109,7 @@ PRODUCTION_PATTERNS = [
     r"(^|/)docker-compose(\.[^/]+)?\.ya?ml$",
     r"(^|/)Dockerfile(\.[^/]+)?$",
     r"^apps/[^/]+/docker-entrypoint\.sh$",
+    r"^apps/[^/]+/setup\.sh$",
 ]
 
 # 中立。テストと同じコミットに入れてもフェーズ分離違反にならず、

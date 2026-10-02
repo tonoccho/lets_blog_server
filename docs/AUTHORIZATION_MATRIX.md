@@ -526,6 +526,7 @@ content-service / media-service のコンテナ間呼び出しだけだった。
 | `content/ContentCacheController#resolve` | blogcard/amazon 用。記事を書く利用者が普通に使うので admin 限定にできず、メンバー限定にしても緩和にならない |
 | `platform/DashboardController#getServiceStatus` / `#streamServiceStatus` | 共通ダッシュボードの「アプリが動いているか」の要約。詳細版は admin 限定 |
 | `platform/VscodeExtensionController#download` | 拡張(.vsix)の配布。利用者固有のデータを含まない |
+| `platform/PenpotPluginController#download` / `platform/McpServerController#download` | Penpotプラグイン / MCPサーバーのソースZip(+ setup.sh)の配布。利用者固有のデータを含まない(#1491) |
 | `log-writer/FrontendErrorLogController#logError` | クライアントが自分のエラーを送る書き込み専用の窓口。読み取り側には認可あり |
 | `log-writer/OperationLogController#record` | 同上 |
 | `legacy-api/AuthController#setupStatus` / `#setup` | `PUBLIC_PATHS` の**認証前に叩かれる公開パス**。認可を掛けると初回セットアップが不可能になる |
@@ -1303,6 +1304,17 @@ issue #705でも変更しておらず、下記「既知のギャップ」に残�
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/system/vscode-extension | なし(#830 で「認可不要」と決定) | 401 | 該当なし | 認可OK | 現状維持 | VSCode拡張機能(.vsix)のビルド・ダウンロード。認証済みなら誰でも取得可能。#830 で意図的な判断として `認可不要:` コメントに記録済み |
+
+## PenpotPluginController / McpServerController (各1エンドポイント、ベースパス `/api/system/penpot-plugin` / `/api/system/mcp-server`)
+
+platform-service所有(issue #1491)。ソース一式 + `setup.sh` + README のZipを返す(サーバー側ではビルドしない)。
+未認証401は`SecurityConfig`が担い、`VscodeExtensionController`と同じく「ログイン済みなら誰でも取得可能」を
+意図的な判断として各メソッドの`認可不要:`コメントに記録している。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/system/penpot-plugin | なし(「認可不要」) | 401 | 該当なし | 認可OK | 現状維持 | Penpotプラグインのソース一式Zip。`node_modules`とビルド生成物は含めない |
+| GET /api/system/mcp-server | なし(「認可不要」) | 401 | 該当なし | 認可OK | 現状維持 | MCPサーバーのソース一式Zip。`node_modules`・`.env`・ログは含めない |
 
 ---
 

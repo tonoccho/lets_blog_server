@@ -2691,10 +2691,27 @@ export function deleteMediaGarbage(
  * なく、共通処理はそのままにResponseを返すapiRequest()を使ってバイナリを直接扱う。
  */
 export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; filename: string }> {
-  const res = await apiRequest('/api/system/vscode-extension');
+  return downloadSystemFile('/api/system/vscode-extension', 'letsblog-vscode.vsix');
+}
+
+/** Penpotプラグインのソース一式 + setup.sh のZip(issue #1491)。ビルドは利用者の手元で走る。 */
+export function downloadPenpotPlugin(): Promise<{ body: ArrayBuffer; filename: string }> {
+  return downloadSystemFile('/api/system/penpot-plugin', 'letsblog-penpot-plugin.zip');
+}
+
+/** MCPサーバーのソース一式 + setup.sh のZip(issue #1491)。ビルドは利用者の手元で走る。 */
+export function downloadMcpServer(): Promise<{ body: ArrayBuffer; filename: string }> {
+  return downloadSystemFile('/api/system/mcp-server', 'letsblog-mcp-server.zip');
+}
+
+async function downloadSystemFile(
+  path: string,
+  defaultFilename: string,
+): Promise<{ body: ArrayBuffer; filename: string }> {
+  const res = await apiRequest(path);
   const disposition = res.headers.get('content-disposition') ?? '';
   const match = disposition.match(/filename="([^"]+)"/);
-  const filename = match ? match[1] : 'letsblog-vscode.vsix';
+  const filename = match ? match[1] : defaultFilename;
   return { body: await res.arrayBuffer(), filename };
 }
 

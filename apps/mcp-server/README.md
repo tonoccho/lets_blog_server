@@ -29,7 +29,20 @@ Ollama API (qwen2.5:7b-instruct)
 - Ollama running on `http://ollama:11434` (or configured via environment)
 - Penpot instance running
 
-### Setup
+### Quick Setup (downloaded Zip)
+
+Download **MCPサーバー (.zip)** from the header's download menu in Let's Blog, unzip it and run:
+
+```bash
+cd letsblog-mcp-server
+bash setup.sh
+```
+
+`setup.sh` checks Node.js (>= 20), installs the dependencies (`npm ci --omit=dev`), creates `.env`
+from `.env.example` (an existing `.env` is kept) and prints how to start the server (`npm start`).
+The Zip contains the sources only (no `node_modules`); the install runs on your machine.
+
+### Setup (manual)
 
 ```bash
 cd mcp-server

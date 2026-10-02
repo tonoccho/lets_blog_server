@@ -20,7 +20,11 @@
     "logout": "ログアウト",
     "downloadMenu": "ダウンロード",
     "downloadVscodeExtension": "VSCode拡張機能をダウンロード (.vsix)",
-    "downloadVscodeExtensionPending": "VSCode拡張機能をビルド中…"
+    "downloadVscodeExtensionPending": "VSCode拡張機能をビルド中…",
+    "downloadPenpotPlugin": "Penpotプラグインをダウンロード (.zip)",
+    "downloadPenpotPluginPending": "Penpotプラグインを準備中…",
+    "downloadMcpServer": "MCPサーバーをダウンロード (.zip)",
+    "downloadMcpServerPending": "MCPサーバーを準備中…"
   },
   "sideNav": {
     "admin": "管理",

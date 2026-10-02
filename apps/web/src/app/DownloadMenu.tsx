@@ -21,6 +21,20 @@ const DOWNLOAD_ITEMS: DownloadItem[] = [
     labelKey: "downloadVscodeExtension",
     pendingKey: "downloadVscodeExtensionPending",
   },
+  {
+    id: "penpot-plugin",
+    url: "/downloads/penpot-plugin",
+    defaultFilename: "letsblog-penpot-plugin.zip",
+    labelKey: "downloadPenpotPlugin",
+    pendingKey: "downloadPenpotPluginPending",
+  },
+  {
+    id: "mcp-server",
+    url: "/downloads/mcp-server",
+    defaultFilename: "letsblog-mcp-server.zip",
+    labelKey: "downloadMcpServer",
+    pendingKey: "downloadMcpServerPending",
+  },
 ];
 
 /** 狭い画面ではビューポート内に収め、広い画面ではトリガの右端に揃える。 */

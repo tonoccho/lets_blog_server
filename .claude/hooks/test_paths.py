@@ -115,6 +115,9 @@ class ProductionCodeClassification(unittest.TestCase):
         "infra/wordpress/Dockerfile",
         # #1208: Dockerfile の ENTRYPOINT/CMD から起動される apps/*/ 直下のスクリプト。
         "apps/web/docker-entrypoint.sh",
+        # #1491: Zip で配る導入スクリプト。利用者の手元でビルドを走らせる出荷物そのもの。
+        "apps/penpot-plugin/setup.sh",
+        "apps/mcp-server/setup.sh",
         # 実装判断: 実行時・ビルド出力を決める設定。
         "apps/web/next.config.ts",
         "apps/web/postcss.config.mjs",

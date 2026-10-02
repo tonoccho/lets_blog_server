@@ -17,7 +17,20 @@ AI-powered design assistant plugin for Penpot, powered by Ollama LLM integrated 
 - MCP Server running on `http://localhost:3000` (or configure the endpoint)
 - Node.js >= 20 for building
 
-### Build Plugin
+### Quick Setup (downloaded Zip)
+
+Download **Penpotプラグイン (.zip)** from the header's download menu in Let's Blog, unzip it and run:
+
+```bash
+cd letsblog-penpot-plugin
+bash setup.sh
+```
+
+`setup.sh` checks Node.js (>= 20), installs the dependencies (`npm ci`), builds `plugin.js` / `ui.js`
+and prints the Penpot registration steps with the absolute path of `manifest.json`.
+The Zip contains the sources only (no `node_modules`, no build output); the build runs on your machine.
+
+### Build Plugin (manual)
 
 ```bash
 cd penpot-plugin
