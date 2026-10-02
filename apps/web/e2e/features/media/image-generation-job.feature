@@ -21,7 +21,7 @@
   進捗の書き込みは `ImageGenerationJobRunnerTest`(サービスレベル)が固定している。
   ここでは受理直後のジョブが `running` として返ることと、完了後に結果が引けることを見る。
 
-  ## レート制限バケット(docs/ACCEPTANCE_TESTING.md §11)
+  ## レート制限バケット(docs/ACCEPTANCE_TESTING.md §9)
 
   `POST /api/ai/image/jobs` は upload-endpoint 枠(プロセス全体で1時間に10回)に**入れない**
   (api-global に置く)。したがって本フィーチャは upload-endpoint 枠を消費しない。

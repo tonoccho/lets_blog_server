@@ -27,7 +27,7 @@
   通常の実行構成(`docker-compose.e2e-stubs.yml` を重ねる。docs/ACCEPTANCE_TESTING.md §9)では
   `COMFYUI_BASE_URL` がスタブを指すので GPU は要らない。
 
-  ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §11)
+  ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §9)
 
   3つ目のシナリオが `POST /api/ai/image` を1回叩き、gateway の upload-endpoint 枠
   (プロセス全体で1時間に10回)を1つ消費する。枠全体の内訳は

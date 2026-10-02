@@ -35,7 +35,7 @@
   受け入れ基準であり、統合すると両方の意味が読めなくなる。ワーカー数1(CI の既定)では
   起こらない。
 
-  ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §11)
+  ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §9)
 
   各シナリオが `POST /api/ai/image` を1回ずつ叩き、gateway の upload-endpoint 枠
   (プロセス全体で1時間に10回)を計2つ消費する。枠全体の内訳は

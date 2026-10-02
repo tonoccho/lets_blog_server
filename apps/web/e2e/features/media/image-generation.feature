@@ -29,7 +29,7 @@
   したがって全シナリオに `@api` を付け、ブラウザのログインを前提に置かない
   (docs/ACCEPTANCE_TESTING.md §4)。前提のプロジェクトは管理者のトークンで API から作る。
 
-  ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §11)
+  ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §9)
 
   `POST /api/ai/image` は gateway の upload-endpoint バケット(**プロセス全体で1時間に10回**)
   に属する。このフィーチャの消費は2で、いずれも `@slow` なので通常実行(`test:at:fast`)では

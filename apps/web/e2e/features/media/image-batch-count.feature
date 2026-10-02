@@ -16,7 +16,7 @@
 
   注記: このフィーチャの各シナリオは実際に POST /api/ai/image を叩くため、
   upload-endpoint 枠を1シナリオにつき1つ消費する(全体で5)。同種のシナリオを足すときは
-  枠(10/時)を意識すること。docs/ACCEPTANCE_TESTING.md §11 参照。
+  枠(10/時)を意識すること。docs/ACCEPTANCE_TESTING.md §9 参照。
 
   シナリオ: 1回の要求で batch size × batch count 枚が生成される
     前提 管理者としてログインする

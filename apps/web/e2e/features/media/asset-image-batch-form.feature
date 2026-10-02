@@ -16,7 +16,7 @@
   upload-endpoint 枠(プロセス全体で1時間に10回)に入らない(api-global)ので、
   このフィーチャは枠を消費しない。以前は同期の `POST /api/ai/image` を2回叩いて枠を使っていた
   (image-batch-count.feature が使う5と合わせて7)。いまは image-batch-count.feature の5だけが残る
-  (docs/ACCEPTANCE_TESTING.md §11)。
+  (docs/ACCEPTANCE_TESTING.md §9)。
 
   受け入れテストで確かめられない観点: ChatGPT スタブは即座に応答するため、生成が**実行中**の状態は
   観測できない。「ジョブの実行中に別のページへ移動して戻っても残る」は、要求直後に別ページへ移って

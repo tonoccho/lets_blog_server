@@ -21,7 +21,7 @@
   メディアは `wp-cli`(`lbs-wordpress` コンテナ)で直接作る。`POST /api/media/upload` は
   gateway の upload-endpoint 枠(プロセス全体で1時間に10回)に属し、この3シナリオで
   6回消費すると同じ1時間に走る画像生成のシナリオを巻き添えで429にするためである
-  (docs/ACCEPTANCE_TESTING.md §11)。ここで確かめたいのはメディアの**作り方**ではなく
+  (docs/ACCEPTANCE_TESTING.md §9)。ここで確かめたいのはメディアの**作り方**ではなく
   **GC の判定**なので、用意の経路は問わない。
 
   ## 画面ではなくAPIから確かめる理由(`@api`)
