@@ -45,12 +45,17 @@ export async function updateSiteAction(
     }
   }
 
+  // adminPath は認証情報ではない。空文字は「上書き解除」を表すので落とさずに送る。
+  const adminPathValue = formData.get("adminPath");
+  const adminPath = adminPathValue === null ? undefined : String(adminPathValue).trim();
+
   try {
     const site = await updateSite(
       siteId,
       {
         name: name || undefined,
         credentials: Object.keys(credentials).length > 0 ? credentials : undefined,
+        adminPath,
       }
     );
     revalidatePath("/sites");

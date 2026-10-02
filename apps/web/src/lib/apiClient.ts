@@ -325,6 +325,8 @@ export interface SiteDetail {
   sshConfigured: boolean;
   credentials: Record<string, string>;
   configuredSecretFields: string[];
+  /** サイト個別の管理画面パス。null はグローバル既定値を使う(上書きなし)。 */
+  adminPath: string | null;
 }
 
 export function getSiteDetail(id: number): Promise<SiteDetail> {
@@ -354,6 +356,8 @@ export function deleteSite(id: number): Promise<void> {
 export interface SiteUpdateInput {
   name?: string;
   credentials?: Record<string, string>;
+  /** 省略=変更しない、空文字=上書き解除、それ以外=設定。 */
+  adminPath?: string;
 }
 
 export function updateSite(id: number, input: SiteUpdateInput): Promise<Site> {

@@ -17,13 +17,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 const SESSION_EXPIRED = "セッションの有効期限が切れました。お手数ですが再度ログインしてください。";
 const DOWN = new Error("APIエラー (503): Service Unavailable");
 
-const api = { getSiteDetail: jest.fn(), listSshKeyPairs: jest.fn(), listStaticContent: jest.fn() };
+const api = { getSiteDetail: jest.fn(), listSshKeyPairs: jest.fn(), listStaticContent: jest.fn(), getSiteAdminPath: jest.fn() };
 jest.mock("@/lib/apiClient", () => ({
   getSiteDetail: (...a: unknown[]) => api.getSiteDetail(...a),
   listSshKeyPairs: (...a: unknown[]) => api.listSshKeyPairs(...a),
   listStaticContent: (...a: unknown[]) => api.listStaticContent(...a),
+  getSiteAdminPath: (...a: unknown[]) => api.getSiteAdminPath(...a),
 }));
-jest.mock("../SiteEditForm", () => ({ SiteEditForm: () => "FORM" }));
+jest.mock("../SiteEditForm", () => ({
+  SiteEditForm: ({ defaultAdminPath }: { defaultAdminPath: string | null }) => `FORM[${defaultAdminPath}]`,
+}));
 jest.mock("../StaticContentPanel", () => ({ StaticContentPanel: () => "STATIC" }));
 import Page from "../page";
 
@@ -38,6 +41,7 @@ describe("サイト編集ページの取得失敗表示(issue #1235)", () => {
     api.getSiteDetail.mockResolvedValue({ id: 5, name: "S" });
     api.listSshKeyPairs.mockResolvedValue([]);
     api.listStaticContent.mockResolvedValue([]);
+    api.getSiteAdminPath.mockResolvedValue({ path: "wp-admin" });
   });
   afterEach(() => errorSpy.mockRestore());
 
@@ -72,6 +76,18 @@ describe("サイト編集ページの取得失敗表示(issue #1235)", () => {
     expect(html).not.toContain("FORM");
   });
 
+  it("グローバル既定の管理画面パスをフォームへ渡す", async () => {
+    api.getSiteAdminPath.mockResolvedValue({ path: "secret-admin" });
+    expect(await render()).toContain("FORM[secret-admin]");
+  });
+
+  it("グローバル既定の取得失敗は通知するが、フォームは描画する(既定値なし)", async () => {
+    api.getSiteAdminPath.mockRejectedValue(DOWN);
+    const html = await render();
+    expect(html).toContain("管理画面パスの既定値を取得できませんでした");
+    expect(html).toContain("FORM[null]");
+  });
+
   it("すべて成功したときは通知なし", async () => {
     const html = await render();
     expect(html).not.toContain('role="alert"');
@@ -82,5 +98,11 @@ describe("サイト編集ページの取得失敗表示(issue #1235)", () => {
   it("セッション切れは /login へ", async () => {
     api.listSshKeyPairs.mockRejectedValue(new Error(SESSION_EXPIRED));
     await expect(render()).rejects.toThrow("NEXT_REDIRECT:/login");
+  });
+
+  it("非 admin は / へ戻され、サイト情報を取得しない(issue #1532 AC5)", async () => {
+    getServerSession.mockResolvedValue({ user: { role: "user" } });
+    await expect(render()).rejects.toThrow("NEXT_REDIRECT:/");
+    expect(api.getSiteDetail).not.toHaveBeenCalled();
   });
 });

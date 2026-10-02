@@ -10,7 +10,15 @@ const initialState: UpdateSiteState = {};
 
 type SshKeyMode = "unchanged" | "existing" | "new";
 
-export function SiteEditForm({ site, sshKeyPairs }: { site: SiteDetail; sshKeyPairs: SavedSshKeyPair[] }) {
+export function SiteEditForm({
+  site,
+  sshKeyPairs,
+  defaultAdminPath,
+}: {
+  site: SiteDetail;
+  sshKeyPairs: SavedSshKeyPair[];
+  defaultAdminPath: string | null;
+}) {
   const action = (prevState: UpdateSiteState, formData: FormData) => updateSiteAction(site.id, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
   const [sshKeyMode, setSshKeyMode] = useState<SshKeyMode>("unchanged");
@@ -54,6 +62,19 @@ export function SiteEditForm({ site, sshKeyPairs }: { site: SiteDetail; sshKeyPa
           defaultValue={site.name}
           className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
         />
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">管理画面パス</span>
+        <input
+          name="adminPath"
+          defaultValue={site.adminPath ?? ""}
+          placeholder={defaultAdminPath ? `既定: ${defaultAdminPath}` : "空欄ならシステム設定の既定値"}
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
+        />
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">
+          空欄ならシステム設定の既定値を使います。入力すると、このサイトだけ別のパスで上書きします。
+        </span>
       </label>
 
       {site.managedWordpress ? (
