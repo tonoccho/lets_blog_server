@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { ExternalLink, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CmsType, Project, Site } from "@/lib/apiClient";
+import { resolveSiteAdminUrl } from "@/lib/siteAdminUrl";
 import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 import { DeleteSiteButton } from "./DeleteSiteButton";
 import { CheckConnectionButton } from "./CheckConnectionButton";
@@ -36,11 +38,13 @@ export function SiteListTable({
   projects,
   isAdmin,
   timezone,
+  adminPath,
 }: {
   sites: Site[];
   projects: Project[];
   isAdmin: boolean;
   timezone: string | null;
+  adminPath: string;
 }) {
   const [searchText, setSearchText] = useState("");
   const [cmsFilter, setCmsFilter] = useState<CmsFilter>("ALL");
@@ -166,7 +170,7 @@ export function SiteListTable({
               </th>
               <th className="px-4 py-2">CMS種別</th>
               <th className="px-4 py-2">プロジェクト</th>
-              <th className="px-4 py-2">URL</th>
+              <th className="px-4 py-2">リンク</th>
               <th className="cursor-pointer px-4 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => handleColumnSort("createdAt")}>
                 登録日{renderSortIndicator("createdAt")}
               </th>
@@ -184,6 +188,7 @@ export function SiteListTable({
             )}
             {filteredSites.map((site) => {
               const projectInfo = siteToProject.get(site.id);
+              const adminUrl = resolveSiteAdminUrl(site.baseUrl, adminPath);
               return (
                 <tr key={site.id} className="border-b border-neutral-100 dark:border-neutral-800 odd:bg-neutral-50/50 last:border-0 cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
                   <td className="px-4 py-2 font-mono">{site.siteKey}</td>
@@ -218,10 +223,29 @@ export function SiteListTable({
                       </span>
                     )}
                   </td>
-                  <td className="max-w-xs truncate px-4 py-2" title={site.baseUrl}>
-                    <a href={site.baseUrl} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500">
-                      {site.baseUrl}
-                    </a>
+                  <td className="px-4 py-2">
+                    <span className="inline-flex items-center gap-3">
+                      <a
+                        href={site.baseUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`${site.name} のサイトを開く`}
+                        className="text-blue-700 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                      >
+                        <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                      </a>
+                      {adminUrl && (
+                        <a
+                          href={adminUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`${site.name} の管理画面を開く`}
+                          className="text-blue-700 hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                        >
+                          <Settings className="h-4 w-4" aria-hidden="true" />
+                        </a>
+                      )}
+                    </span>
                   </td>
                   <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">
                     {timezone

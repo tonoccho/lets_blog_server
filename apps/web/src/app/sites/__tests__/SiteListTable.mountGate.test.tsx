@@ -59,7 +59,7 @@ function site(overrides: Partial<Site> = {}): Site {
 
 describe("SiteListTable(マウント前)", () => {
   it("個人設定TZが未設定のとき、マウント前は登録日に固定プレースホルダーを表示する(#1362と同じmountedフラグ方式、issue #1363)", () => {
-    render(<SiteListTable sites={[site()]} projects={[]} isAdmin={false} timezone={null} />);
+    render(<SiteListTable sites={[site()]} projects={[]} isAdmin={false} timezone={null} adminPath="wp-admin" />);
 
     expect(formatDateTime).not.toHaveBeenCalled();
     expect(screen.queryByText("FORMATTED_CREATED_AT")).not.toBeInTheDocument();

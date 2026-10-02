@@ -42,7 +42,7 @@ function site(overrides: Partial<Site> = {}): Site {
 describe("SiteListTable 個人設定TZ未設定(issue #1363)", () => {
   it("マウント後はformatDateTimeをTZ引数無しで呼ぶ(ブラウザTZへフォールバック)", () => {
     const s = site();
-    render(<SiteListTable sites={[s]} projects={[]} isAdmin={false} timezone={null} />);
+    render(<SiteListTable sites={[s]} projects={[]} isAdmin={false} timezone={null} adminPath="wp-admin" />);
 
     expect(formatDateTime).toHaveBeenCalledWith(s.createdAt);
     expect(screen.getByText(`FORMATTED(${s.createdAt}|undefined)`)).toBeInTheDocument();

@@ -17,15 +17,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 const SESSION_EXPIRED = "セッションの有効期限が切れました。お手数ですが再度ログインしてください。";
 const DOWN = new Error("APIエラー (503): Service Unavailable");
 
-const api = { listSites: jest.fn(), listProjects: jest.fn(), listUsers: jest.fn(), listSshKeyPairs: jest.fn(), getMyProfile: jest.fn() };
+const api = { listSites: jest.fn(), listProjects: jest.fn(), listUsers: jest.fn(), listSshKeyPairs: jest.fn(), getMyProfile: jest.fn(), getSiteAdminPath: jest.fn() };
 jest.mock("@/lib/apiClient", () => ({
   listSites: (...a: unknown[]) => api.listSites(...a),
   listProjects: (...a: unknown[]) => api.listProjects(...a),
   listUsers: (...a: unknown[]) => api.listUsers(...a),
   listSshKeyPairs: (...a: unknown[]) => api.listSshKeyPairs(...a),
   getMyProfile: (...a: unknown[]) => api.getMyProfile(...a),
+  getSiteAdminPath: (...a: unknown[]) => api.getSiteAdminPath(...a),
 }));
-jest.mock("../SiteListTable", () => ({ SiteListTable: () => "SITE_TABLE" }));
+jest.mock("../SiteListTable", () => ({ SiteListTable: ({ adminPath }: { adminPath: string }) => `SITE_TABLE[${adminPath}]` }));
 jest.mock("../SiteCreationPanel", () => ({ SiteCreationPanel: () => "SITE_CREATION" }));
 import SitesPage from "../page";
 
@@ -40,6 +41,7 @@ describe("サイト一覧ページの取得失敗表示(issue #1235)", () => {
     api.listUsers.mockResolvedValue([]);
     api.listSshKeyPairs.mockResolvedValue([]);
     api.getMyProfile.mockResolvedValue(null);
+    api.getSiteAdminPath.mockResolvedValue({ path: "wp-admin" });
   });
   afterEach(() => errorSpy.mockRestore());
 
@@ -77,6 +79,18 @@ describe("サイト一覧ページの取得失敗表示(issue #1235)", () => {
     expect(html).not.toContain('role="alert"');
     expect(html).toContain("SITE_TABLE");
     expect(html).toContain("SITE_CREATION");
+  });
+
+  it("システム設定の管理画面パスを表に渡す(issue #1529)", async () => {
+    api.getSiteAdminPath.mockResolvedValue({ path: "secret-admin" });
+    expect(renderToStaticMarkup(await SitesPage())).toContain("SITE_TABLE[secret-admin]");
+  });
+
+  it("管理画面パスの取得に失敗しても wp-admin にフォールバックして表を描画する(issue #1529)", async () => {
+    api.getSiteAdminPath.mockRejectedValue(DOWN);
+    const html = renderToStaticMarkup(await SitesPage());
+    expect(html).toContain("SITE_TABLE[wp-admin]");
+    expect(html).not.toContain('role="alert"');
   });
 
   it("セッション切れは /login へ", async () => {

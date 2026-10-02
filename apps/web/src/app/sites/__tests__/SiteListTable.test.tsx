@@ -71,6 +71,7 @@ describe('SiteListTable', () => {
         projects={mockProjects}
         isAdmin={false}
         timezone="Asia/Tokyo"
+        adminPath="wp-admin"
       />
     )
     expect(screen.getByText('Test Site 1')).toBeInTheDocument()
@@ -84,6 +85,7 @@ describe('SiteListTable', () => {
         projects={[]}
         isAdmin={false}
         timezone="Asia/Tokyo"
+        adminPath="wp-admin"
       />
     )
     expect(screen.getByText('登録済みサイトはありません')).toBeInTheDocument()
@@ -96,6 +98,7 @@ describe('SiteListTable', () => {
         projects={mockProjects}
         isAdmin={false}
         timezone="Asia/Tokyo"
+        adminPath="wp-admin"
       />
     )
     const searchInput = screen.getByPlaceholderText(/サイトキー・表示名・URLで検索/)
@@ -111,6 +114,7 @@ describe('SiteListTable', () => {
         projects={mockProjects}
         isAdmin={false}
         timezone="Asia/Tokyo"
+        adminPath="wp-admin"
       />
     )
     const projectSelect = screen.getByDisplayValue(/プロジェクト紐付け: すべて/)
@@ -125,6 +129,7 @@ describe('SiteListTable', () => {
         projects={mockProjects}
         isAdmin={false}
         timezone="Asia/Tokyo"
+        adminPath="wp-admin"
       />
     )
     expect(screen.getByText(/2件を表示.*全2件中/)).toBeInTheDocument()
@@ -137,6 +142,7 @@ describe('SiteListTable', () => {
         projects={mockProjects}
         isAdmin={true}
         timezone="Asia/Tokyo"
+        adminPath="wp-admin"
       />
     )
     const editLinks = screen.getAllByText('管理')
@@ -145,7 +151,7 @@ describe('SiteListTable', () => {
 
   it('filters unbound projects only(issue #944: aria-label付きselectで絞り込む)', () => {
     render(
-      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />
     )
     fireEvent.change(screen.getByLabelText('プロジェクト紐付け状況で絞り込む'), {
       target: { value: 'UNBOUND' },
@@ -156,7 +162,7 @@ describe('SiteListTable', () => {
 
   it('CMS種別で絞り込める(issue #944: aria-label付きselect)', () => {
     render(
-      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />
     )
     fireEvent.change(screen.getByLabelText('CMS種別で絞り込む'), { target: { value: 'WORDPRESS' } })
     expect(screen.getByText('Test Site 1')).toBeInTheDocument()
@@ -165,7 +171,7 @@ describe('SiteListTable', () => {
 
   it('絞り込んだ結果が0件のとき「全n件」とだけ表示する', () => {
     render(
-      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />
     )
     fireEvent.change(screen.getByPlaceholderText(/サイトキー・表示名・URLで検索/), {
       target: { value: '該当なし' },
@@ -175,7 +181,7 @@ describe('SiteListTable', () => {
 
   it('表示名の列見出しをクリックすると並び替え、再クリックで昇順/降順が切り替わる', () => {
     render(
-      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" />
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />
     )
     const nameHeader = screen.getByText('表示名').closest('th') as HTMLElement
     fireEvent.click(nameHeader)
@@ -196,7 +202,49 @@ describe('SiteListTable', () => {
         productionSite: mockSites[1],
       },
     ]
-    render(<SiteListTable sites={mockSites} projects={projects} isAdmin={false} timezone="Asia/Tokyo" />)
+    render(<SiteListTable sites={mockSites} projects={projects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />)
     expect(screen.getAllByText('Project 1').length).toBe(2)
+  })
+
+  describe('リンク列(issue #1529)', () => {
+    const renderTable = (adminPath = 'wp-admin') =>
+      render(<SiteListTable sites={mockSites} projects={[]} isAdmin={false} timezone="Asia/Tokyo" adminPath={adminPath} />)
+
+    it('公開URLの文字列をテキストとして表示しない', () => {
+      renderTable()
+      expect(screen.queryByText('https://test1.example.com')).not.toBeInTheDocument()
+      expect(screen.queryByText('https://test2.example.com')).not.toBeInTheDocument()
+    })
+
+    it('サイトを開くリンクは公開URLを新しいタブで開く', () => {
+      renderTable()
+      const link = screen.getByRole('link', { name: 'Test Site 1 のサイトを開く' })
+      expect(link).toHaveAttribute('href', 'https://test1.example.com')
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noreferrer')
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    })
+
+    it('管理画面を開くリンクは <公開URL>/wp-admin を新しいタブで開く', () => {
+      renderTable()
+      const link = screen.getByRole('link', { name: 'Test Site 2 の管理画面を開く' })
+      expect(link).toHaveAttribute('href', 'https://test2.example.com/wp-admin')
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noreferrer')
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    })
+
+    it('管理画面パスが別オリジンを指して解決できないときは管理画面リンクだけ描画しない', () => {
+      renderTable('https://evil.example.com/wp-admin')
+      expect(screen.queryByRole('link', { name: /管理画面を開く/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Test Site 1 のサイトを開く' })).toBeInTheDocument()
+    })
+
+    it('公開URLの一部で検索すると、そのサイトだけに絞り込まれる', () => {
+      renderTable()
+      fireEvent.change(screen.getByPlaceholderText('サイトキー・表示名・URLで検索'), { target: { value: 'test1' } })
+      expect(screen.getByText('Test Site 1')).toBeInTheDocument()
+      expect(screen.queryByText('Test Site 2')).not.toBeInTheDocument()
+    })
   })
 })

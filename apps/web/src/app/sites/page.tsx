@@ -1,4 +1,4 @@
-import { listSites, listProjects, listUsers, listSshKeyPairs } from "@/lib/apiClient";
+import { getSiteAdminPath, listSites, listProjects, listUsers, listSshKeyPairs } from "@/lib/apiClient";
 import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { requireSession, getViewerTimeZone } from "@/lib/session";
@@ -10,11 +10,12 @@ export default async function SitesPage() {
   // 以前はgetSession()でsession.errorを見ておらず、リロードしないと再ログイン画面へ
   // 遷移できなかった。
   const session = await requireSession();
-  const [sites, projects, users, timezone] = await Promise.all([
+  const [sites, projects, users, timezone, adminPath] = await Promise.all([
     loadOrReport("sites", "サイト一覧", listSites(), []),
     loadOrReport("sites", "プロジェクト一覧", listProjects(), []),
     loadOrReport("sites", "ユーザー一覧", listUsers(), []),
     getViewerTimeZone(),
+    loadOrReport("sites", "管理画面パス", getSiteAdminPath().then((r) => r.path), "wp-admin"),
   ]);
   const isAdmin = session?.user.role === "admin";
   const sshKeyPairs = isAdmin
@@ -28,7 +29,7 @@ export default async function SitesPage() {
       <FetchErrorNotice labels={failedLabels(sites, projects, users, sshKeyPairs)} />
 
       {!sites.failed && (
-        <SiteListTable sites={sites.data} projects={projects.data} isAdmin={isAdmin} timezone={timezone} />
+        <SiteListTable sites={sites.data} projects={projects.data} isAdmin={isAdmin} timezone={timezone} adminPath={adminPath.data} />
       )}
 
       {/*

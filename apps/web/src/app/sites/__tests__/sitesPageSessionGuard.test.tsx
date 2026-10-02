@@ -24,12 +24,14 @@ const listProjects = jest.fn();
 const listUsers = jest.fn();
 const listSshKeyPairs = jest.fn();
 const getMyProfile = jest.fn();
+const getSiteAdminPath = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   listSites: (...a: unknown[]) => listSites(...a),
   listProjects: (...a: unknown[]) => listProjects(...a),
   listUsers: (...a: unknown[]) => listUsers(...a),
   listSshKeyPairs: (...a: unknown[]) => listSshKeyPairs(...a),
   getMyProfile: (...a: unknown[]) => getMyProfile(...a),
+  getSiteAdminPath: (...a: unknown[]) => getSiteAdminPath(...a),
 }));
 
 jest.mock('../SiteCreationPanel', () => ({ SiteCreationPanel: () => null }));
@@ -47,6 +49,7 @@ describe('/sites のセッション判定(issue #1234)', () => {
     listUsers.mockResolvedValue([]);
     listSshKeyPairs.mockResolvedValue([]);
     getMyProfile.mockResolvedValue(null);
+    getSiteAdminPath.mockResolvedValue({ path: 'wp-admin' });
   });
 
   it('session.error が RefreshAccessTokenError のとき /login へ送り、データ取得を行わない', async () => {
