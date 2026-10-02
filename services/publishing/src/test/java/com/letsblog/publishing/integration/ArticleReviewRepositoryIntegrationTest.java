@@ -123,4 +123,41 @@ class ArticleReviewRepositoryIntegrationTest {
         assertThat(found.getState()).isEqualTo(ArticleReviewState.SUBMITTED);
         assertThat(found.getTestPostUrl()).isEqualTo("http://test.example/sample/");
     }
+
+    @Test
+    @DisplayName("差し戻すと実施者・時刻・コメントIDが保存され、状態が差し戻しになり、提出者は変わらない(issue #1344)")
+    void persistsChangesRequested() {
+        ArticleReview saved = repository.saveAndFlush(review(9));
+        assertThat(saved.getRejectedByUserId()).isNull();
+        assertThat(saved.getRejectedAt()).isNull();
+        assertThat(saved.getRejectCommentId()).isNull();
+
+        saved.markChangesRequested(8L, 5_000_000_001L);
+        repository.saveAndFlush(saved);
+
+        ArticleReview found = repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, 9).orElseThrow();
+        assertThat(found.getState()).isEqualTo(ArticleReviewState.CHANGES_REQUESTED);
+        assertThat(found.getRejectedByUserId()).isEqualTo(8L);
+        assertThat(found.getRejectedAt()).isNotNull();
+        assertThat(found.getRejectCommentId()).isEqualTo(5_000_000_001L);
+        assertThat(found.getSubmittedByUserId()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("提出者で絞った行だけを、提出日時の新しい順に引ける(issue #1344)")
+    void findsBySubmitter() {
+        repository.saveAndFlush(review(9));
+        ArticleReview other = review(10);
+        other.setSubmittedByUserId(4L);
+        repository.saveAndFlush(other);
+        repository.saveAndFlush(review(11));
+        jdbcTemplate.update(
+                "UPDATE article_reviews SET submitted_at = '2020-01-01 00:00:00' WHERE project_id = ? AND github_pr_number = 9",
+                PROJECT_ID);
+
+        assertThat(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, 3L))
+                .extracting(ArticleReview::getGithubPrNumber)
+                .containsExactly(11, 9);
+        assertThat(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, 99L)).isEmpty();
+    }
 }

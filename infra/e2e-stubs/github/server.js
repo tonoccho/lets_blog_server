@@ -22,6 +22,7 @@
  *   PUT    /repos/{owner}/{repo}/contents/{path}           (branch へファイルを置く/更新する。head の sha が進む)
  *   GET    /repos/{owner}/{repo}/git/blobs/{sha}           (Accept: application/vnd.github.raw なら生のバイト列)
  *   GET|POST /repos/{owner}/{repo}/issues/{number}/comments   (PR も Issue として扱う)
+ *   GET      /repos/{owner}/{repo}/issues/comments/{id}        (コメント1件。#1344)
  * PR を作るとき head ブランチがスタブに無ければ、空のブランチを作る(実 GitHub なら 422 だが、
  * スタブは受け入れテストが毎回一意な head を使えるよう寛容にしている)。
  *
@@ -425,6 +426,15 @@ createStub({
         sendJson(res, 201, commentToApi(comment));
         return true;
       }
+    }
+
+    // コメント1件をIDで取る(publishing-service の差し戻し一覧が指摘の本文を引く。issue #1344)。
+    const commentByIdMatch = /^\/repos\/[^/]+\/[^/]+\/issues\/comments\/(\d+)$/.exec(pathname);
+    if (commentByIdMatch && method === 'GET') {
+      const id = Number(commentByIdMatch[1]);
+      const comment = repo.comments.find((c) => c.id === id);
+      sendJson(res, comment ? 200 : 404, comment ? commentToApi(comment) : NOT_FOUND);
+      return true;
     }
 
     const listMatch = /^\/repos\/[^/]+\/[^/]+\/issues$/.exec(pathname);

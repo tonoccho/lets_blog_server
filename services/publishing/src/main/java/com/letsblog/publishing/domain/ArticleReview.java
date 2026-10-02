@@ -63,6 +63,18 @@ public class ArticleReview {
     @Column(name = "reviewed_by_user_id")
     private Long reviewedByUserId;
 
+    /** 差し戻しを行ったLet's Blogユーザー(issue #1344)。差し戻されるまでnull。FKは持たない。 */
+    @Column(name = "rejected_by_user_id")
+    private Long rejectedByUserId;
+
+    /** 差し戻した日時(issue #1344)。差し戻されるまでnull。 */
+    @Column(name = "rejected_at")
+    private LocalDateTime rejectedAt;
+
+    /** 指摘として投稿したPull RequestコメントのID(issue #1344)。本文はGitHub側にのみ保持する。 */
+    @Column(name = "reject_comment_id")
+    private Long rejectCommentId;
+
     @Column(name = "submitted_at", nullable = false)
     private LocalDateTime submittedAt;
 
@@ -96,5 +108,13 @@ public class ArticleReview {
         state = ArticleReviewState.IN_REVIEW;
         this.testPostUrl = testPostUrl;
         this.reviewedByUserId = reviewerUserId;
+    }
+
+    /** 差し戻しへ遷移させ、実施者・時刻・投稿したコメントのIDを記録する(issue #1344)。 */
+    public void markChangesRequested(Long rejectorUserId, Long commentId) {
+        state = ArticleReviewState.CHANGES_REQUESTED;
+        this.rejectedByUserId = rejectorUserId;
+        this.rejectedAt = LocalDateTime.now();
+        this.rejectCommentId = commentId;
     }
 }

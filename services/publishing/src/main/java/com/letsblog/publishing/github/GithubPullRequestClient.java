@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -170,6 +171,64 @@ public class GithubPullRequestClient {
                 response.path("head").path("ref").asText(""),
                 response.path("created_at").asText(""),
                 response.path("html_url").asText(""));
+    }
+
+    /**
+     * PRにコメントを1件投稿して返す(issue #1344)。PRはIssueでもあるため、PR専用ではなく
+     * issuesのcomments API({@code POST /repos/{o}/{r}/issues/{n}/comments})を使う。行単位のレビューコメントではない。
+     */
+    public GithubIssueComment createIssueComment(GithubAccess access, int issueNumber, String body) {
+        JsonNode response;
+        try {
+            response = client.post()
+                    .uri("/repos/{owner}/{repo}/issues/{n}/comments", access.owner(), access.repo(), issueNumber)
+                    .header("Authorization", "Bearer " + access.token())
+                    .accept(MediaType.parseMediaType(GITHUB_JSON))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("body", body))
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(errorMessage(e, "コメントの投稿",
+                    "Pull Request #" + issueNumber + " が見つかりません: " + slug(access)), e);
+        } catch (RestClientException e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new GithubApiException("GitHubから空の応答を受け取りました(コメントの投稿: #" + issueNumber + ")");
+        }
+        long id = response.path("id").asLong(0);
+        if (id == 0) {
+            throw new GithubApiException("GitHubの応答からコメントIDを読み取れませんでした(#" + issueNumber + ")");
+        }
+        return new GithubIssueComment(id, response.path("body").asText(""));
+    }
+
+    /**
+     * コメントをIDで取得する(issue #1344)。GitHub側で消されていれば(404)空を返す。認証失敗・権限不足・
+     * 通信失敗は空にせず{@link GithubApiException}にする。
+     */
+    public Optional<GithubIssueComment> findIssueComment(GithubAccess access, long commentId) {
+        JsonNode response;
+        try {
+            response = client.get()
+                    .uri("/repos/{owner}/{repo}/issues/comments/{id}", access.owner(), access.repo(), commentId)
+                    .header("Authorization", "Bearer " + access.token())
+                    .accept(MediaType.parseMediaType(GITHUB_JSON))
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return Optional.empty();
+            }
+            throw new GithubApiException(errorMessage(e, "コメントの取得", "コメントが見つかりません: " + commentId), e);
+        } catch (RestClientException e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new GithubApiException("GitHubから空の応答を受け取りました(コメント " + commentId + ")");
+        }
+        return Optional.of(new GithubIssueComment(commentId, response.path("body").asText("")));
     }
 
     /**
