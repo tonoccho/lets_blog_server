@@ -9,7 +9,7 @@ import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.ProjectEnvironmentSyncService;
 import com.letsblog.project.service.ProjectService;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Set;
 import java.util.Optional;
 import java.util.List;
@@ -43,7 +43,7 @@ class ProjectControllerTest {
 
     private ProjectResponse buildResponse() {
         return new ProjectResponse(1L, "テスト", "test", null, null, null, "test", null,
-                LocalDateTime.now(), LocalDateTime.now());
+                Instant.now(), Instant.now());
     }
 
     @Test

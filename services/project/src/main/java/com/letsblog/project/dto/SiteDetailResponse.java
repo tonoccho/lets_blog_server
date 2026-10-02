@@ -2,7 +2,7 @@ package com.letsblog.project.dto;
 
 import com.letsblog.project.cms.CmsType;
 import com.letsblog.project.domain.Site;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -12,8 +12,8 @@ public record SiteDetailResponse(
         String siteKey,
         CmsType cmsType,
         String baseUrl,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt,
+        Instant createdAt,
+        Instant updatedAt,
         boolean managedWordpress,
         boolean sshConfigured,
         Map<String, String> credentials,
@@ -28,8 +28,8 @@ public record SiteDetailResponse(
                 site.getSiteKey(),
                 site.getCmsType(),
                 site.getBaseUrl(),
-                site.getCreatedAt(),
-                site.getUpdatedAt(),
+                UtcDateTimes.toInstant(site.getCreatedAt()),
+                UtcDateTimes.toInstant(site.getUpdatedAt()),
                 site.isManagedWordpress(),
                 sshConfigured,
                 credentials,

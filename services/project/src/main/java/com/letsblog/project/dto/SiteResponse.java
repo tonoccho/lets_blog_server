@@ -2,7 +2,7 @@ package com.letsblog.project.dto;
 
 import com.letsblog.project.cms.CmsType;
 import com.letsblog.project.domain.Site;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record SiteResponse(
         Long id,
@@ -10,8 +10,8 @@ public record SiteResponse(
         String siteKey,
         CmsType cmsType,
         String baseUrl,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt,
+        Instant createdAt,
+        Instant updatedAt,
         String connectionCheckStatus,
         boolean managedWordpress,
         boolean sshConfigured,
@@ -32,8 +32,8 @@ public record SiteResponse(
                 site.getSiteKey(),
                 site.getCmsType(),
                 site.getBaseUrl(),
-                site.getCreatedAt(),
-                site.getUpdatedAt(),
+                UtcDateTimes.toInstant(site.getCreatedAt()),
+                UtcDateTimes.toInstant(site.getUpdatedAt()),
                 connectionOk == null ? null : (connectionOk ? "SUCCESS" : "FAILED"),
                 site.isManagedWordpress(),
                 sshConfigured,

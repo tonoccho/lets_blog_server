@@ -23,7 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.Optional;
 import java.util.Set;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -69,7 +69,7 @@ class SiteControllerTest {
 
     private SiteResponse buildResponse() {
         return new SiteResponse(1L, "Name", "my-site", CmsType.WORDPRESS, "https://example.com",
-                LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null);
+                Instant.now(), Instant.now(), "SUCCESS", false, false, null);
     }
 
     @Test

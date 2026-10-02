@@ -8,6 +8,7 @@ import com.letsblog.project.dto.AdoptWordPressSiteRequest;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.project.dto.SiteRegisterRequest;
 import com.letsblog.project.dto.SiteResponse;
+import com.letsblog.project.dto.UtcDateTimes;
 import com.letsblog.project.messaging.DomainEventPublisher;
 import com.letsblog.project.provisioning.WordPressProvisioningClient;
 import com.letsblog.project.provisioning.WordPressSyncClient;
@@ -105,7 +106,8 @@ public class WordPressSiteProvisioningService {
 
         return new SiteResponse(
                 site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
-                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true, false,
+                UtcDateTimes.toInstant(site.getCreatedAt()), UtcDateTimes.toInstant(site.getUpdatedAt()),
+                response.connectionCheckStatus(), true, false,
                 site.getAdminPath());
     }
 
@@ -159,7 +161,8 @@ public class WordPressSiteProvisioningService {
 
         return new SiteResponse(
                 site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
-                site.getCreatedAt(), site.getUpdatedAt(), response.connectionCheckStatus(), true, false,
+                UtcDateTimes.toInstant(site.getCreatedAt()), UtcDateTimes.toInstant(site.getUpdatedAt()),
+                response.connectionCheckStatus(), true, false,
                 site.getAdminPath());
     }
 

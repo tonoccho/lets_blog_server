@@ -1,7 +1,7 @@
 package com.letsblog.project.dto;
 
 import com.letsblog.project.domain.Project;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * issue #577 stage2。project-serviceのProjectResponseは、他サービスが所有する設定
@@ -19,8 +19,8 @@ public record ProjectResponse(
         SiteResponse productionSite,
         String masterEnvironment,
         String githubRepository,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
     public static ProjectResponse from(
             Project project, SiteResponse localSite, SiteResponse testSite, SiteResponse productionSite) {
@@ -33,8 +33,8 @@ public record ProjectResponse(
                 productionSite,
                 project.getMasterEnvironment(),
                 project.getGithubRepository(),
-                project.getCreatedAt(),
-                project.getUpdatedAt()
+                UtcDateTimes.toInstant(project.getCreatedAt()),
+                UtcDateTimes.toInstant(project.getUpdatedAt())
         );
     }
 }

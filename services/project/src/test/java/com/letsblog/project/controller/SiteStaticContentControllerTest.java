@@ -6,7 +6,7 @@ import com.letsblog.project.dto.StaticContentResponse;
 import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.StaticContentGenerationService;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,7 +34,7 @@ class SiteStaticContentControllerTest {
     @Test
     void list_一覧を返す() {
         StaticContentResponse response = new StaticContentResponse(
-                1L, 1L, StaticContentType.PRIVACY_POLICY, "本文", LocalDateTime.now(), LocalDateTime.now());
+                1L, 1L, StaticContentType.PRIVACY_POLICY, "本文", Instant.now(), Instant.now());
         when(staticContentGenerationService.listBySite(1L)).thenReturn(List.of(response));
 
         List<StaticContentResponse> result = controller().list(1L);

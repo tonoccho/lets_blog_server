@@ -2,7 +2,7 @@ package com.letsblog.project.dto;
 
 import com.letsblog.project.domain.SshKeyPair;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * 鍵ペア生成直後のみ返す秘密鍵付きレスポンス。保存後はこのレスポンスからのみ秘密鍵を取得でき、
@@ -14,11 +14,11 @@ public record SshKeyPairGeneratedResponse(
         String comment,
         String publicKeyLine,
         String privateKeyPem,
-        LocalDateTime createdAt) {
+        Instant createdAt) {
 
     public static SshKeyPairGeneratedResponse of(SshKeyPair entity, String privateKeyPem) {
         return new SshKeyPairGeneratedResponse(
                 entity.getId(), entity.getName(), entity.getComment(),
-                entity.getPublicKeyLine(), privateKeyPem, entity.getCreatedAt());
+                entity.getPublicKeyLine(), privateKeyPem, UtcDateTimes.toInstant(entity.getCreatedAt()));
     }
 }

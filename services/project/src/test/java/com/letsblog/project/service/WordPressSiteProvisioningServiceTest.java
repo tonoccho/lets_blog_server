@@ -13,6 +13,7 @@ import com.letsblog.project.messaging.DomainEventPublisher;
 import com.letsblog.project.provisioning.WordPressProvisioningClient;
 import com.letsblog.project.provisioning.WordPressSyncClient;
 import com.letsblog.project.repository.SiteRepository;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -68,10 +69,12 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
+                1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
+        site.setCreatedAt(LocalDateTime.of(2026, 9, 8, 20, 3, 35));
+        site.setUpdatedAt(LocalDateTime.of(2026, 9, 9, 1, 2, 3));
         when(siteRepository.findBySiteKey("my-site")).thenReturn(Optional.of(site));
 
         CreateManagedWordPressSiteRequest request = new CreateManagedWordPressSiteRequest(
@@ -80,6 +83,9 @@ class WordPressSiteProvisioningServiceTest {
         SiteResponse response = service().createManagedSite(request);
 
         assertEquals("my-site", response.siteKey());
+        // issue #1237: UTC壁時計のLocalDateTimeを、実時刻を変えずZ終端のInstantとして返す
+        assertEquals("2026-09-08T20:03:35Z", String.valueOf(response.createdAt()));
+        assertEquals("2026-09-09T01:02:03Z", String.valueOf(response.updatedAt()));
         verify(siteRepository).save(site);
     }
 
@@ -115,7 +121,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
+                1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -135,7 +141,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
+                1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -163,7 +169,7 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.provision(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
+                1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
@@ -261,11 +267,13 @@ class WordPressSiteProvisioningServiceTest {
         when(provisioningClient.adopt(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                1L, "Name", "my-site", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
+                1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
 
         Site site = new Site();
         site.setId(1L);
         site.setSiteKey("my-site");
+        site.setCreatedAt(LocalDateTime.of(2026, 9, 8, 20, 3, 35));
+        site.setUpdatedAt(LocalDateTime.of(2026, 9, 9, 1, 2, 3));
         when(siteRepository.findBySiteKey("my-site")).thenReturn(Optional.of(site));
         when(siteRepository.findAll()).thenReturn(List.of(site));
 
@@ -283,6 +291,8 @@ class WordPressSiteProvisioningServiceTest {
         }
 
         assertEquals("my-site", response.siteKey());
+        assertEquals("2026-09-08T20:03:35Z", String.valueOf(response.createdAt()));
+        assertEquals("2026-09-09T01:02:03Z", String.valueOf(response.updatedAt()));
         verify(siteRepository).save(site);
         boolean warned = appender.list.stream().anyMatch(event -> event.getLevel() == Level.WARN);
         assertFalse(warned, "wp_slugの衝突が無ければWARNログを出さないこと");
@@ -301,7 +311,7 @@ class WordPressSiteProvisioningServiceTest {
                 new WordPressProvisioningClient.ProvisionResult(
                         "https://localhost/sites/target-key", "admin", "app-pw"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
-                2L, "Name", "target_key", null, null, LocalDateTime.now(), LocalDateTime.now(), "SUCCESS", false, false, null));
+                2L, "Name", "target_key", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
 
         Site newSite = new Site();
         newSite.setId(2L);
