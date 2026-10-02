@@ -161,6 +161,121 @@ describe('scaffoldArticleOnBranch (実git)', () => {
     expect(git(root, 'log', '--oneline', '-n', '5').split('\n')).toHaveLength(1);
   });
 
+  it('雛形生成が取り消されると、元のブランチへ戻り、新規作成した記事用ブランチを削除する(#1510)', async () => {
+    const root = repo();
+    const result = await scaffoldArticleOnBranch({
+      ...base,
+      root,
+      backend: new CliGitBackend(root),
+      scaffold: async () => undefined,
+      chooseOnExistingBranch: async () => 'abort',
+    });
+    expect(result.status).toBe('cancelled');
+    expect(git(root, 'branch', '--show-current')).toBe('main');
+    expect(git(root, 'branch', '--list', 'article/*')).toBe('');
+  });
+
+  it('雛形生成が例外で失敗すると、元のブランチへ戻りブランチを削除して、元の例外を再送出する(#1510)', async () => {
+    const root = repo();
+    await expect(
+      scaffoldArticleOnBranch({
+        ...base,
+        root,
+        backend: new CliGitBackend(root),
+        scaffold: async () => {
+          throw new Error('雛形の失敗');
+        },
+        chooseOnExistingBranch: async () => 'abort',
+      })
+    ).rejects.toThrow('雛形の失敗');
+    expect(git(root, 'branch', '--show-current')).toBe('main');
+    expect(git(root, 'branch', '--list', 'article/*')).toBe('');
+  });
+
+  it('既存ブランチへ切り替えた後に取り消されたら、元へ戻るだけでそのブランチは削除しない(#1510)', async () => {
+    const root = repo();
+    git(root, 'branch', 'article/7-my-post');
+    const result = await scaffoldArticleOnBranch({
+      ...base,
+      root,
+      backend: new CliGitBackend(root),
+      scaffold: async () => undefined,
+      chooseOnExistingBranch: async () => 'switch',
+    });
+    expect(result.status).toBe('cancelled');
+    expect(git(root, 'branch', '--show-current')).toBe('main');
+    expect(git(root, 'branch', '--list', 'article/*')).toContain('article/7-my-post');
+  });
+
+  it('巻き戻し自体が失敗しても、元の例外を隠さない(#1510)', async () => {
+    const root = repo();
+    const cli = new CliGitBackend(root);
+    const backend: GitBackend = Object.create(cli);
+    backend.checkout = async () => {
+      throw new Error('checkout失敗');
+    };
+    await expect(
+      scaffoldArticleOnBranch({
+        ...base,
+        root,
+        backend,
+        scaffold: async () => {
+          throw new Error('雛形の失敗');
+        },
+        chooseOnExistingBranch: async () => 'abort',
+      })
+    ).rejects.toThrow('雛形の失敗');
+  });
+
+  it('巻き戻し自体が失敗しても、取り消しの結果は cancelled のまま返す(#1510)', async () => {
+    const root = repo();
+    const backend: GitBackend = Object.create(new CliGitBackend(root));
+    backend.deleteBranch = async () => {
+      throw new Error('delete失敗');
+    };
+    const result = await scaffoldArticleOnBranch({
+      ...base,
+      root,
+      backend,
+      scaffold: async () => undefined,
+      chooseOnExistingBranch: async () => 'abort',
+    });
+    expect(result.status).toBe('cancelled');
+  });
+
+  it('同一内容で上書きしてコミットする差分が無い場合は、gitエラーにせず committed:false で成功を返す(#1510)', async () => {
+    const root = repo();
+    await scaffoldArticleOnBranch({
+      ...base,
+      root,
+      backend: new CliGitBackend(root),
+      scaffold: fakeScaffold(root, 'my-post'),
+      chooseOnExistingBranch: async () => 'abort',
+    });
+    git(root, 'switch', '-q', 'main');
+    const result = await scaffoldArticleOnBranch({
+      ...base,
+      root,
+      backend: new CliGitBackend(root),
+      scaffold: fakeScaffold(root, 'my-post'),
+      chooseOnExistingBranch: async () => 'switch',
+    });
+    expect(result).toMatchObject({ status: 'created', switched: true, committed: false });
+    expect(git(root, 'rev-list', '--count', 'main..HEAD')).toBe('1');
+  });
+
+  it('差分があれば committed:true を返す(#1510)', async () => {
+    const root = repo();
+    const result = await scaffoldArticleOnBranch({
+      ...base,
+      root,
+      backend: new CliGitBackend(root),
+      scaffold: fakeScaffold(root, 'my-post'),
+      chooseOnExistingBranch: async () => 'abort',
+    });
+    expect(result).toMatchObject({ status: 'created', committed: true });
+  });
+
   it('既定ブランチが origin/HEAD で示される場合、その最新から切る', async () => {
     const upstream = repo();
     git(upstream, 'checkout', '-q', '-b', 'develop');
@@ -235,6 +350,47 @@ describe('VscodeGitBackend', () => {
     // 問い合わせ系はCLI実装を引き継ぐ
     expect(await backend.isRepository()).toBe(true);
     expect(await backend.isClean()).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('deleteBranch (#1510)', () => {
+  it('CliGitBackend は git branch -D で削除する', async () => {
+    const root = initRepo();
+    git(root, 'branch', 'article/1-a');
+    await new CliGitBackend(root).deleteBranch('article/1-a');
+    expect(git(root, 'branch', '--list', 'article/*')).toBe('');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('VscodeGitBackend はRepositoryの deleteBranch があれば強制削除を委譲する', async () => {
+    const root = initRepo();
+    const calls: unknown[][] = [];
+    const repository = {
+      createBranch: async () => undefined,
+      checkout: async () => undefined,
+      add: async () => undefined,
+      commit: async () => undefined,
+      push: async () => undefined,
+      deleteBranch: async (...a: unknown[]) => void calls.push(a),
+    };
+    await new VscodeGitBackend(root, repository).deleteBranch('article/1-a');
+    expect(calls).toEqual([['article/1-a', true]]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('VscodeGitBackend は Repository に deleteBranch が無ければCLI実装を使う', async () => {
+    const root = initRepo();
+    git(root, 'branch', 'article/1-a');
+    const repository = {
+      createBranch: async () => undefined,
+      checkout: async () => undefined,
+      add: async () => undefined,
+      commit: async () => undefined,
+      push: async () => undefined,
+    };
+    await new VscodeGitBackend(root, repository).deleteBranch('article/1-a');
+    expect(git(root, 'branch', '--list', 'article/*')).toBe('');
     fs.rmSync(root, { recursive: true, force: true });
   });
 });

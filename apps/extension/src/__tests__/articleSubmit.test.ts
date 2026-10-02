@@ -271,6 +271,7 @@ describe('submitArticle', () => {
       branchExists: async () => false,
       createBranch: async () => undefined,
       checkout: async () => undefined,
+      deleteBranch: async () => undefined,
       currentBranch: async () => 'article/9-my-post',
       hasChangesIn: async () => true,
       hasStagedOutside: async () => false,

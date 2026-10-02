@@ -14,6 +14,8 @@ export interface VscodeGitRepository {
   checkout(treeish: string): Promise<void>;
   add(paths: string[]): Promise<void>;
   commit(message: string): Promise<void>;
+  /** 古いGit拡張には無い。無ければ `git branch -D` を使う。 */
+  deleteBranch?(name: string, force?: boolean): Promise<void>;
   push(remoteName?: string, branchName?: string, setUpstream?: boolean): Promise<void>;
 }
 
@@ -36,6 +38,10 @@ export class VscodeGitBackend extends CliGitBackend implements GitBackend {
 
   override checkout(name: string): Promise<void> {
     return this.repository.checkout(name);
+  }
+
+  override deleteBranch(name: string): Promise<void> {
+    return this.repository.deleteBranch ? this.repository.deleteBranch(name, true) : super.deleteBranch(name);
   }
 
   override async commit(relativePaths: string[], message: string): Promise<void> {

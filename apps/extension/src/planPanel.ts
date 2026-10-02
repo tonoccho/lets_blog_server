@@ -200,6 +200,11 @@ export class PlanPanel extends WebviewPanelBase<PlanInboundMessage, PlanOutbound
       this.postMessage('error', { error: 'キャンセルしました。' });
       return;
     }
+    if (!result.committed) {
+      void vscode.window.showInformationMessage(
+        '記事の雛形は既存のコミットと同じ内容だったため、コミットする変更はありません。'
+      );
+    }
     const scaffold = result.scaffold;
     this._lastArticlePath = scaffold.articlePath;
 

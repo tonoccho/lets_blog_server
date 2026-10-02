@@ -19,6 +19,8 @@ export interface GitBackend {
   /** baseRef から name を作り、チェックアウトする。 */
   createBranch(name: string, baseRef: string): Promise<void>;
   checkout(name: string): Promise<void>;
+  /** ブランチを強制削除する(取り消し時に、新規作成した空のブランチを片付けるため)。 */
+  deleteBranch(name: string): Promise<void>;
   /** relativePaths だけをステージしてコミットする。 */
   commit(relativePaths: string[], message: string): Promise<void>;
   /** 現在チェックアウトしているブランチ名。 */
@@ -114,6 +116,10 @@ export class CliGitBackend implements GitBackend {
     await this.run(['switch', name], this.root);
   }
 
+  async deleteBranch(name: string): Promise<void> {
+    await this.run(['branch', '-D', name], this.root);
+  }
+
   async commit(relativePaths: string[], message: string): Promise<void> {
     await this.run(['add', '--', ...relativePaths], this.root);
     await this.run(['commit', '-m', message, '--', ...relativePaths], this.root);
@@ -171,7 +177,8 @@ export interface ScaffoldOnBranchOptions<T extends ScaffoldFiles> {
 }
 
 export type ScaffoldOnBranchResult<T extends ScaffoldFiles> =
-  | { status: 'created'; scaffold: T; branch: string; switched: boolean }
+  /** committed が false なら、雛形が既存と同一でコミットする差分が無かった。 */
+  | { status: 'created'; scaffold: T; branch: string; switched: boolean; committed: boolean }
   | { status: 'aborted'; reason: string }
   | { status: 'cancelled' };
 
@@ -196,6 +203,7 @@ export async function scaffoldArticleOnBranch<T extends ScaffoldFiles>(
     };
   }
 
+  const originalBranch = await backend.currentBranch();
   const branch = buildBranchName(options.issueNumber, options.slug);
   const switched = await backend.branchExists(branch);
   if (switched) {
@@ -207,13 +215,39 @@ export async function scaffoldArticleOnBranch<T extends ScaffoldFiles>(
     await backend.createBranch(branch, await backend.resolveBaseRef());
   }
 
-  const scaffold = await options.scaffold();
+  let scaffold: T | undefined;
+  try {
+    scaffold = await options.scaffold();
+  } catch (error) {
+    await rollBack(backend, originalBranch, branch, !switched);
+    throw error;
+  }
   if (!scaffold) {
+    await rollBack(backend, originalBranch, branch, !switched);
     return { status: 'cancelled' };
   }
   const files = [scaffold.articlePath, path.join(scaffold.articleDir, 'assets', '.gitkeep')].map((file) =>
     path.relative(options.root, file).split(path.sep).join('/')
   );
-  await backend.commit(files, buildCommitMessage(options.title, options.issueNumber));
-  return { status: 'created', scaffold, branch, switched };
+  // 既存記事を同一内容で上書きすると差分が無く、`git commit` が生のエラーで失敗するため、コミットを省く。
+  const committed = await backend.hasChangesIn(files);
+  if (committed) {
+    await backend.commit(files, buildCommitMessage(options.title, options.issueNumber));
+  }
+  return { status: 'created', scaffold, branch, switched, committed };
+}
+
+/**
+ * 取り消し・失敗時に、元のブランチへ戻し、この呼び出しで作ったブランチだけを削除する。
+ * 巻き戻しの失敗は握りつぶす(呼び出し元が見るべきは元の失敗であり、巻き戻しの失敗で隠してはならない)。
+ */
+async function rollBack(backend: GitBackend, originalBranch: string, branch: string, created: boolean): Promise<void> {
+  try {
+    await backend.checkout(originalBranch);
+    if (created) {
+      await backend.deleteBranch(branch);
+    }
+  } catch {
+    // ベストエフォート。
+  }
 }
