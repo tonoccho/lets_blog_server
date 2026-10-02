@@ -1,5 +1,5 @@
 # language: ja
-@logging @api @slow @destructive @timeout:600000
+@logging @slow @destructive @timeout:600000
 機能: ログの非同期経路が落ちたときのふるまい
 
   「ログのために業務操作を失敗させない」「停止中のログがどうなるかが決まっている」を
