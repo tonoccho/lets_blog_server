@@ -37,7 +37,7 @@ export interface Pageable {
   sort?: string[];
 }
 
-export interface OperationLog {
+export interface OperationLogResponse {
   id?: number;
   operationId?: string;
   userId?: number;
@@ -66,11 +66,11 @@ export interface PageableObject {
   pageSize?: number;
 }
 
-export interface PageOperationLog {
+export interface PageOperationLogResponse {
   totalPages?: number;
   totalElements?: number;
   size?: number;
-  content?: OperationLog[];
+  content?: OperationLogResponse[];
   number?: number;
   sort?: SortObject;
   pageable?: PageableObject;
@@ -105,7 +105,7 @@ export interface PageUnifiedLogEntryResponse {
   empty?: boolean;
 }
 
-export interface FrontendErrorLog {
+export interface FrontendErrorLogResponse {
   id?: number;
   message?: string;
   stack?: string;
@@ -120,11 +120,11 @@ export interface FrontendErrorLog {
   createdAt?: string;
 }
 
-export interface PageFrontendErrorLog {
+export interface PageFrontendErrorLogResponse {
   totalPages?: number;
   totalElements?: number;
   size?: number;
-  content?: FrontendErrorLog[];
+  content?: FrontendErrorLogResponse[];
   number?: number;
   sort?: SortObject;
   pageable?: PageableObject;
@@ -134,7 +134,7 @@ export interface PageFrontendErrorLog {
   empty?: boolean;
 }
 
-export interface AuditLog {
+export interface AuditLogResponse {
   id?: number;
   userId?: number;
   actorKeycloakSub?: string;
@@ -147,11 +147,11 @@ export interface AuditLog {
   createdAt?: string;
 }
 
-export interface PageAuditLog {
+export interface PageAuditLogResponse {
   totalPages?: number;
   totalElements?: number;
   size?: number;
-  content?: AuditLog[];
+  content?: AuditLogResponse[];
   number?: number;
   sort?: SortObject;
   pageable?: PageableObject;

@@ -7,12 +7,12 @@
 import type {
   FrontendErrorLogRequest,
   GetErrorsParams,
-  PageFrontendErrorLog
+  PageFrontendErrorLogResponse
 } from '../openAPIDefinition.schemas';
 
 
 export type getErrorsResponse200 = {
-  data: PageFrontendErrorLog
+  data: PageFrontendErrorLogResponse
   status: 200
 }
 

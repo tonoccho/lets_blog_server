@@ -6,12 +6,12 @@
  */
 import type {
   List1Params,
-  PageAuditLog
+  PageAuditLogResponse
 } from '../openAPIDefinition.schemas';
 
 
 export type list1Response200 = {
-  data: PageAuditLog
+  data: PageAuditLogResponse
   status: 200
 }
 

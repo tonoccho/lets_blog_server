@@ -2,6 +2,7 @@ package com.letsblog.logwriter.controller;
 
 import com.letsblog.logwriter.domain.FrontendErrorLog;
 import com.letsblog.logwriter.dto.FrontendErrorLogRequest;
+import com.letsblog.logwriter.dto.FrontendErrorLogResponse;
 import com.letsblog.logwriter.service.AdminAuthorizationService;
 import com.letsblog.logwriter.service.FrontendErrorLogService;
 import jakarta.validation.Valid;
@@ -48,7 +49,7 @@ public class FrontendErrorLogController {
     }
 
     @GetMapping("/errors")
-    public Page<FrontendErrorLog> getErrors(
+    public Page<FrontendErrorLogResponse> getErrors(
             @RequestParam(required = false) String level,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
@@ -58,14 +59,14 @@ public class FrontendErrorLogController {
         adminAuthorizationService.requireAdmin();
 
         if (level != null) {
-            return service.findByLevel(level.toUpperCase(Locale.ROOT), pageable);
+            return service.findByLevel(level.toUpperCase(Locale.ROOT), pageable).map(FrontendErrorLogResponse::from);
         }
         if (startDate != null && endDate != null) {
-            return service.findByDateRange(startDate, endDate, pageable);
+            return service.findByDateRange(startDate, endDate, pageable).map(FrontendErrorLogResponse::from);
         }
         if (url != null) {
-            return service.findByUrl(url, pageable);
+            return service.findByUrl(url, pageable).map(FrontendErrorLogResponse::from);
         }
-        return service.findAll(pageable);
+        return service.findAll(pageable).map(FrontendErrorLogResponse::from);
     }
 }

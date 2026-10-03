@@ -33,7 +33,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageOperationLog"
+                  "$ref": "#/components/schemas/PageOperationLogResponse"
                 }
               }
             }
@@ -118,7 +118,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageFrontendErrorLog"
+                  "$ref": "#/components/schemas/PageFrontendErrorLogResponse"
                 }
               }
             }
@@ -171,7 +171,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/OperationLog"
+                    "$ref": "#/components/schemas/OperationLogResponse"
                   }
                 }
               }
@@ -301,7 +301,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PageAuditLog"
+                  "$ref": "#/components/schemas/PageAuditLogResponse"
                 }
               }
             }
@@ -393,7 +393,7 @@
           }
         }
       },
-      "OperationLog": {
+      "OperationLogResponse": {
         "type": "object",
         "properties": {
           "id": {
@@ -436,7 +436,7 @@
           }
         }
       },
-      "PageOperationLog": {
+      "PageOperationLogResponse": {
         "type": "object",
         "properties": {
           "totalPages": {
@@ -454,7 +454,7 @@
           "content": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/OperationLog"
+              "$ref": "#/components/schemas/OperationLogResponse"
             }
           },
           "number": {
@@ -599,7 +599,7 @@
           }
         }
       },
-      "FrontendErrorLog": {
+      "FrontendErrorLogResponse": {
         "type": "object",
         "properties": {
           "id": {
@@ -644,7 +644,7 @@
           }
         }
       },
-      "PageFrontendErrorLog": {
+      "PageFrontendErrorLogResponse": {
         "type": "object",
         "properties": {
           "totalPages": {
@@ -662,7 +662,7 @@
           "content": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FrontendErrorLog"
+              "$ref": "#/components/schemas/FrontendErrorLogResponse"
             }
           },
           "number": {
@@ -690,7 +690,7 @@
           }
         }
       },
-      "AuditLog": {
+      "AuditLogResponse": {
         "type": "object",
         "properties": {
           "id": {
@@ -729,7 +729,7 @@
           }
         }
       },
-      "PageAuditLog": {
+      "PageAuditLogResponse": {
         "type": "object",
         "properties": {
           "totalPages": {
@@ -747,7 +747,7 @@
           "content": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/AuditLog"
+              "$ref": "#/components/schemas/AuditLogResponse"
             }
           },
           "number": {

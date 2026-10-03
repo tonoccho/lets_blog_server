@@ -1,6 +1,7 @@
 package com.letsblog.logwriter.controller;
 
 import com.letsblog.logwriter.domain.AuditLog;
+import com.letsblog.logwriter.dto.AuditLogResponse;
 import com.letsblog.logwriter.service.AdminAuthorizationService;
 import com.letsblog.logwriter.service.AuditLogService;
 import com.letsblog.logwriter.service.ForbiddenException;
@@ -47,7 +48,7 @@ class AuditLogControllerTest {
         Page<AuditLog> page = new PageImpl<>(List.of(new AuditLog()));
         when(auditLogService.findByUserId(1L, pageable)).thenReturn(page);
 
-        Page<AuditLog> result = controller().list(1L, null, null, null, pageable);
+        Page<AuditLogResponse> result = controller().list(1L, null, null, null, pageable);
 
         assertEquals(1, result.getTotalElements());
         verify(auditLogService).findByUserId(1L, pageable);

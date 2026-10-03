@@ -2,6 +2,7 @@ package com.letsblog.logwriter.controller;
 
 import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.OperationLogRequest;
+import com.letsblog.logwriter.dto.OperationLogResponse;
 import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
 import com.letsblog.logwriter.service.CurrentActorService;
 import com.letsblog.logwriter.service.ForbiddenException;
@@ -81,7 +82,7 @@ class OperationLogControllerTest {
         Page<OperationLog> page = new PageImpl<>(List.of(new OperationLog()));
         when(service.findByUser(1L, pageable)).thenReturn(page);
 
-        Page<OperationLog> result = controller.list(pageable);
+        Page<OperationLogResponse> result = controller.list(pageable);
 
         assertEquals(1, result.getTotalElements());
         verify(service).findByUser(1L, pageable);
@@ -102,7 +103,7 @@ class OperationLogControllerTest {
         when(currentActorService.getCurrentActorId()).thenReturn(1L);
         when(service.findTrace(1L, "op-1")).thenReturn(List.of(new OperationLog()));
 
-        List<OperationLog> result = controller.trace("op-1");
+        List<OperationLogResponse> result = controller.trace("op-1");
 
         assertEquals(1, result.size());
         verify(service).findTrace(1L, "op-1");
@@ -115,7 +116,7 @@ class OperationLogControllerTest {
         when(currentActorService.isAdmin()).thenReturn(true);
         when(service.findTraceAsAdmin("op-other")).thenReturn(List.of(new OperationLog(), new OperationLog()));
 
-        List<OperationLog> result = controller.trace("op-other");
+        List<OperationLogResponse> result = controller.trace("op-other");
 
         assertEquals(2, result.size());
         verify(service).findTraceAsAdmin("op-other");

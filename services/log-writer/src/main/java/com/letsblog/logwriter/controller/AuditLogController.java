@@ -1,6 +1,6 @@
 package com.letsblog.logwriter.controller;
 
-import com.letsblog.logwriter.domain.AuditLog;
+import com.letsblog.logwriter.dto.AuditLogResponse;
 import com.letsblog.logwriter.service.AdminAuthorizationService;
 import com.letsblog.logwriter.service.AuditLogService;
 import java.time.LocalDateTime;
@@ -28,7 +28,7 @@ public class AuditLogController {
     }
 
     @GetMapping
-    public Page<AuditLog> list(
+    public Page<AuditLogResponse> list(
             @RequestParam(required = false) Long userId,
             @RequestParam(required = false) String action,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
@@ -38,14 +38,14 @@ public class AuditLogController {
         adminAuthorizationService.requireAdmin();
 
         if (userId != null) {
-            return auditLogService.findByUserId(userId, pageable);
+            return auditLogService.findByUserId(userId, pageable).map(AuditLogResponse::from);
         }
         if (action != null) {
-            return auditLogService.findByAction(action, pageable);
+            return auditLogService.findByAction(action, pageable).map(AuditLogResponse::from);
         }
         if (startDate != null && endDate != null) {
-            return auditLogService.findByDateRange(startDate, endDate, pageable);
+            return auditLogService.findByDateRange(startDate, endDate, pageable).map(AuditLogResponse::from);
         }
-        return auditLogService.findAll(pageable);
+        return auditLogService.findAll(pageable).map(AuditLogResponse::from);
     }
 }

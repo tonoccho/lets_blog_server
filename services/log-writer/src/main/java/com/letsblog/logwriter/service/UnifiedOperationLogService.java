@@ -6,6 +6,7 @@ import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.logwriter.domain.AuditLog;
 import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
+import com.letsblog.logwriter.dto.UtcDateTimes;
 import com.letsblog.logwriter.repository.AuditLogRepository;
 import com.letsblog.logwriter.repository.OperationLogRepository;
 import java.time.LocalDateTime;
@@ -151,7 +152,7 @@ public class UnifiedOperationLogService {
         return new UnifiedLogEntryResponse(
                 "OPERATION",
                 log.getId(),
-                log.getCreatedAt(),
+                UtcDateTimes.toInstant(log.getCreatedAt()),
                 log.getMethod() + " " + log.getPath(),
                 log.getErrorMessage(),
                 log.isSuccess() ? "SUCCESS" : "FAILED",
@@ -161,7 +162,7 @@ public class UnifiedOperationLogService {
 
     private UnifiedLogEntryResponse fromGenerationJob(GenerationJobSummary job) {
         return new UnifiedLogEntryResponse(
-                GenerationJobSourceClassifier.classify(job.type()), job.id(), job.createdAt(), job.type(), null, job.status(), null, null);
+                GenerationJobSourceClassifier.classify(job.type()), job.id(), UtcDateTimes.toInstant(job.createdAt()), job.type(), null, job.status(), null, null);
     }
 
     private UnifiedLogEntryResponse fromAuditLog(AuditLog auditLog) {
@@ -173,7 +174,7 @@ public class UnifiedOperationLogService {
             }
         }
         return new UnifiedLogEntryResponse(
-                "AUDIT", auditLog.getId(), auditLog.getCreatedAt(), title, auditLog.getRemoteIp(), null, null,
+                "AUDIT", auditLog.getId(), UtcDateTimes.toInstant(auditLog.getCreatedAt()), title, auditLog.getRemoteIp(), null, null,
                 auditLog.getActorKeycloakSub());
     }
 }

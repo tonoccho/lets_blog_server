@@ -2,6 +2,7 @@ package com.letsblog.logwriter.controller;
 
 import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.OperationLogRequest;
+import com.letsblog.logwriter.dto.OperationLogResponse;
 import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
 import com.letsblog.logwriter.service.CurrentActorService;
 import com.letsblog.logwriter.service.ForbiddenException;
@@ -60,18 +61,18 @@ public class OperationLogController {
     }
 
     @GetMapping
-    public Page<OperationLog> list(Pageable pageable) {
-        return service.findByUser(requireActorId(), pageable);
+    public Page<OperationLogResponse> list(Pageable pageable) {
+        return service.findByUser(requireActorId(), pageable).map(OperationLogResponse::from);
     }
 
     @GetMapping("/{operationId}")
-    public List<OperationLog> trace(@PathVariable String operationId) {
+    public List<OperationLogResponse> trace(@PathVariable String operationId) {
         Long userId = requireActorId();
         // adminは集計画面から任意の利用者の操作を辿れる(issue #1471)。それ以外は従来どおり本人の行だけ。
-        if (currentActorService.isAdmin()) {
-            return service.findTraceAsAdmin(operationId);
-        }
-        return service.findTrace(userId, operationId);
+        List<OperationLog> rows = currentActorService.isAdmin()
+                ? service.findTraceAsAdmin(operationId)
+                : service.findTrace(userId, operationId);
+        return rows.stream().map(OperationLogResponse::from).toList();
     }
 
     @GetMapping("/unified")

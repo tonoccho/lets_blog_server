@@ -1,6 +1,6 @@
 package com.letsblog.logwriter.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * 操作ログ・AIジョブ・監査ログを一元表示するための共通形式(issue #187、#572でlog-writerへ移設)。
@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 public record UnifiedLogEntryResponse(
         String sourceType,
         Long id,
-        LocalDateTime createdAt,
+        Instant createdAt,
         String title,
         String detail,
         String status,

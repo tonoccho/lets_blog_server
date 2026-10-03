@@ -7,15 +7,15 @@
 import type {
   ListParams,
   ListUnifiedParams,
-  OperationLog,
   OperationLogRequest,
-  PageOperationLog,
+  OperationLogResponse,
+  PageOperationLogResponse,
   PageUnifiedLogEntryResponse
 } from '../openAPIDefinition.schemas';
 
 
 export type listResponse200 = {
-  data: PageOperationLog
+  data: PageOperationLogResponse
   status: 200
 }
 
@@ -106,7 +106,7 @@ const res = await fetch(getRecordUrl(),
 
 
 export type traceResponse200 = {
-  data: OperationLog[]
+  data: OperationLogResponse[]
   status: 200
 }
 
