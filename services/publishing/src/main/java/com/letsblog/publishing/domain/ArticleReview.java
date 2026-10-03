@@ -75,6 +75,14 @@ public class ArticleReview {
     @Column(name = "reject_comment_id")
     private Long rejectCommentId;
 
+    /** 本番環境へ投稿した記事のURL(issue #1343)。公開済みになるまでnull。 */
+    @Column(name = "production_post_url", length = 2048)
+    private String productionPostUrl;
+
+    /** レビュー完了APIを呼んだLet's Blogユーザー(issue #1343)。公開済みになるまでnull。FKは持たない。 */
+    @Column(name = "published_by_user_id")
+    private Long publishedByUserId;
+
     @Column(name = "submitted_at", nullable = false)
     private LocalDateTime submittedAt;
 
@@ -116,5 +124,12 @@ public class ArticleReview {
         this.rejectedByUserId = rejectorUserId;
         this.rejectedAt = LocalDateTime.now();
         this.rejectCommentId = commentId;
+    }
+
+    /** 公開済みへ遷移させ、本番環境の投稿URLとレビュー完了の実施者を記録する(issue #1343)。 */
+    public void markPublished(String productionPostUrl, Long publisherUserId) {
+        state = ArticleReviewState.PUBLISHED;
+        this.productionPostUrl = productionPostUrl;
+        this.publishedByUserId = publisherUserId;
     }
 }

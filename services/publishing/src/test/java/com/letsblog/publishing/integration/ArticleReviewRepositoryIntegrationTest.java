@@ -160,4 +160,25 @@ class ArticleReviewRepositoryIntegrationTest {
                 .containsExactly(11, 9);
         assertThat(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, 99L)).isEmpty();
     }
+
+    @Test
+    @DisplayName("公開済みへ遷移させると本番の投稿URLと実施者が保存され、状態がPUBLISHEDになる(issue #1343)")
+    void persistsPublished() {
+        ArticleReview saved = repository.saveAndFlush(review(9));
+        assertThat(saved.getProductionPostUrl()).isNull();
+        assertThat(saved.getPublishedByUserId()).isNull();
+
+        saved.markInReview("http://test.example/sample/", 8L);
+        saved.markPublished("http://prod.example/sample/", 6L);
+        repository.saveAndFlush(saved);
+
+        ArticleReview found = repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, 9).orElseThrow();
+        assertThat(found.getState()).isEqualTo(ArticleReviewState.PUBLISHED);
+        assertThat(found.getProductionPostUrl()).isEqualTo("http://prod.example/sample/");
+        assertThat(found.getPublishedByUserId()).isEqualTo(6L);
+        assertThat(found.getTestPostUrl()).isEqualTo("http://test.example/sample/");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT state FROM article_reviews WHERE project_id = ? AND github_pr_number = 9",
+                String.class, PROJECT_ID)).isEqualTo("PUBLISHED");
+    }
 }

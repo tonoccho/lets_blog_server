@@ -23,6 +23,7 @@
  *   GET    /repos/{owner}/{repo}/git/blobs/{sha}           (Accept: application/vnd.github.raw なら生のバイト列)
  *   GET|POST /repos/{owner}/{repo}/issues/{number}/comments   (PR も Issue として扱う)
  *   GET      /repos/{owner}/{repo}/issues/comments/{id}        (コメント1件。#1344)
+ * head のブランチ名に `-conflict-` を含む PR はコンフリクトとして扱う(詳細で mergeable が false、マージは 405。#1343)。
  * PR を作るとき head ブランチがスタブに無ければ、空のブランチを作る(実 GitHub なら 422 だが、
  * スタブは受け入れテストが毎回一意な head を使えるよう寛容にしている)。
  *
@@ -119,6 +120,11 @@ function resolveBranch(ref) {
   return undefined;
 }
 
+/** head のブランチ名に `-conflict-` を含む PR は、受け入れテストがコンフリクトを再現するためのもの(#1343)。 */
+function isConflicting(pr) {
+  return pr.head.includes('-conflict-');
+}
+
 function prToApi(pr) {
   return {
     number: pr.number,
@@ -134,7 +140,7 @@ function prToApi(pr) {
     head: { ref: pr.head, sha: headSha(pr), label: `e2e-stub:${pr.head}` },
     base: { ref: pr.base, sha: commitSha(`base-${pr.base}`) },
     merged: pr.merged,
-    mergeable: pr.state === 'open',
+    mergeable: pr.state === 'open' && !isConflicting(pr),
     merge_commit_sha: pr.merge_commit_sha,
   };
 }
@@ -306,7 +312,7 @@ createStub({
           sendJson(res, forbidden.status, forbidden.body);
           return true;
         }
-        if (pr.state !== 'open') {
+        if (pr.state !== 'open' || isConflicting(pr)) {
           sendJson(res, 405, { message: 'Pull Request is not mergeable', documentation_url: 'stub' });
           return true;
         }

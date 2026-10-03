@@ -68,6 +68,12 @@ When(/^head「(.+)」・base「(.+)」でPRを作成する$/, async ({}, head: s
   void head;
 });
 
+When('コンフリクトするheadでPRを作成する', async () => {
+  state.head = `article/e2e-conflict-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  state.created = await createPull(state.head, 'main');
+  state.last = state.created;
+});
+
 function createdNumber(): number {
   const n = state.created?.body?.number;
   expect(n, 'PR作成の応答に number が無い').toBeDefined();
@@ -101,6 +107,13 @@ Then('作成したPRの詳細は mergeable が true で merged が false であ�
   expect(res.body.head.sha).toBe(state.created!.body.head.sha);
 });
 
+Then('作成したPRの詳細は mergeable が false で merged が false である', async () => {
+  const res = await call('GET', `${REPO}/pulls/${createdNumber()}`);
+  expect(res.status).toBe(200);
+  expect(res.body.mergeable).toBe(false);
+  expect(res.body.merged).toBe(false);
+});
+
 Then('作成したPRの変更ファイル一覧は配列で返る', async () => {
   const res = await call('GET', `${REPO}/pulls/${createdNumber()}/files`);
   expect(res.status).toBe(200);
@@ -114,6 +127,10 @@ When('作成したPRをマージする', async () => {
 Then('マージの応答は 200 で merged が true である', async () => {
   expect(state.last!.status).toBe(200);
   expect(state.last!.body.merged).toBe(true);
+});
+
+Then(/^マージの応答は 405 である$/, async () => {
+  expect(state.last!.status).toBe(405);
 });
 
 Then('作成したPRの詳細は merged が true で state が「closed」である', async () => {

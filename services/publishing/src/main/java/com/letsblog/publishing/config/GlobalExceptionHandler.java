@@ -6,6 +6,7 @@ import com.letsblog.publishing.cms.agent.AgentOperationException;
 import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import com.letsblog.publishing.cms.ssh.SshOperationException;
 import com.letsblog.publishing.github.GithubApiException;
+import com.letsblog.publishing.github.PullRequestNotMergeableException;
 import com.letsblog.publishing.render.MediaRenderException;
 import com.letsblog.publishing.service.ArticleReviewNotFoundException;
 import com.letsblog.publishing.service.BranchNotFoundException;
@@ -195,6 +196,12 @@ public class GlobalExceptionHandler {
     }
 
     /** PRから記事を取り出せない理由(issue #1338)。見つからない404・1 PR = 1 記事違反409・不正な記事422。 */
+    /** マージできないPR(コンフリクト等、issue #1343)。強制マージはせず、原因の分かる文面を409で返す。 */
+    @ExceptionHandler(PullRequestNotMergeableException.class)
+    public ResponseEntity<ErrorResponse> handlePullRequestNotMergeable(PullRequestNotMergeableException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
+    }
+
     @ExceptionHandler(PullRequestArticleException.class)
     public ResponseEntity<ErrorResponse> handlePullRequestArticle(PullRequestArticleException e) {
         HttpStatus status = switch (e.getKind()) {

@@ -84,7 +84,8 @@ public class ArticleReviewPublishService {
                 .orElse(null);
 
         PostPublishResponse published = postPublishService.publish(
-                command(testSite.siteKey(), slug, existingWpPostId, article, fetched.assetBytes()));
+                command(testSite.siteKey(), slug, existingWpPostId, article, fetched.assetBytes(),
+                        TEST_ENVIRONMENT_STATUS, null));
 
         review.markInReview(published.wpPostUrl(), actorId);
         repository.save(review);
@@ -110,8 +111,9 @@ public class ArticleReviewPublishService {
      * ({@code assets/xxx.png})を{@code images}と同じ順序で渡す(渡さないとパス区切りを含むfilenameの
      * 往復で壊れる。{@code PostController}のJavadoc参照)。
      */
-    private static PostPublishCommand command(String siteKey, String slug, String wpPostId,
-            PullRequestArticleResponse article, Map<String, byte[]> assetBytes) {
+    static PostPublishCommand command(String siteKey, String slug, String wpPostId,
+            PullRequestArticleResponse article, Map<String, byte[]> assetBytes, String status,
+            String publishScheduledAt) {
         List<MultipartFile> images = new ArrayList<>();
         List<String> imageReferences = new ArrayList<>();
         assetBytes.forEach((name, bytes) -> {
@@ -120,9 +122,9 @@ public class ArticleReviewPublishService {
             imageReferences.add(reference);
         });
         FrontMatter frontMatter = article.frontMatter();
-        return new PostPublishCommand(siteKey, frontMatter.title(), slug, TEST_ENVIRONMENT_STATUS,
+        return new PostPublishCommand(siteKey, frontMatter.title(), slug, status,
                 frontMatter.categories(), frontMatter.tags(), wpPostId, article.body(), images,
-                frontMatter.featuredImage(), imageReferences, null);
+                frontMatter.featuredImage(), imageReferences, publishScheduledAt);
     }
 
     private static String contentTypeOf(String name) {

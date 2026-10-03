@@ -205,6 +205,72 @@ public class GithubPullRequestClient {
     }
 
     /**
+     * Pull Requestをマージする(issue #1343)。マージ方式は指定せず、GitHub側の既定・リポジトリ設定に従う。
+     * 405(コンフリクト・draft・保護規則)と409(headが進んだ等)は{@link PullRequestNotMergeableException}に
+     * し、GitHubの理由を載せる。強制マージはしない。それ以外の失敗(認証・権限・レート制限・通信)は
+     * {@link GithubApiException}。
+     */
+    public void mergePullRequest(GithubAccess access, int number) {
+        JsonNode response;
+        try {
+            response = client.put()
+                    .uri("/repos/{owner}/{repo}/pulls/{n}/merge", access.owner(), access.repo(), number)
+                    .header("Authorization", "Bearer " + access.token())
+                    .accept(MediaType.parseMediaType(GITHUB_JSON))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of())
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException e) {
+            int status = e.getStatusCode().value();
+            if (status == 405 || status == 409) {
+                throw new PullRequestNotMergeableException("Pull Request #" + number
+                        + " をマージできません(GitHubの応答: " + e.getResponseBodyAsString() + ")");
+            }
+            throw new GithubApiException(errorMessage(e, "Pull Requestのマージ",
+                    "Pull Request #" + number + " が見つかりません: " + slug(access)), e);
+        } catch (RestClientException e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            throw new GithubApiException("GitHubから空の応答を受け取りました(Pull Request #" + number + " のマージ)");
+        }
+        if (!response.path("merged").asBoolean(false)) {
+            throw new PullRequestNotMergeableException("Pull Request #" + number
+                    + " をマージできません(GitHubの応答: " + response.path("message").asText("") + ")");
+        }
+    }
+
+    /**
+     * ブランチを削除する(issue #1343)。{@code git/refs/heads/{branch}}をDELETEする。
+     * スラッシュを含むブランチ名はセグメントごとにエンコードして渡す。
+     */
+    public void deleteBranch(GithubAccess access, String branch) {
+        List<Object> vars = new ArrayList<>();
+        vars.add(access.owner());
+        vars.add(access.repo());
+        StringBuilder template = new StringBuilder("/repos/{owner}/{repo}/git/refs/heads");
+        int index = 0;
+        for (String segment : branch.split("/")) {
+            template.append("/{s").append(index++).append('}');
+            vars.add(segment);
+        }
+        try {
+            client.delete()
+                    .uri(template.toString(), vars.toArray())
+                    .header("Authorization", "Bearer " + access.token())
+                    .accept(MediaType.parseMediaType(GITHUB_JSON))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            throw new GithubApiException(
+                    errorMessage(e, "ブランチの削除", "ブランチが見つかりません: " + branch), e);
+        } catch (RestClientException e) {
+            throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * コメントをIDで取得する(issue #1344)。GitHub側で消されていれば(404)空を返す。認証失敗・権限不足・
      * 通信失敗は空にせず{@link GithubApiException}にする。
      */
