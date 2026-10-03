@@ -318,7 +318,7 @@ ERROR: error running exit hooks: error removing container: <container_id>
    docker compose logs -f <service-name>
    
    # Examples:
-   docker compose logs -f api
+   docker compose logs -f gateway
    docker compose logs -f web
    docker compose logs -f ollama
    ```
@@ -377,11 +377,11 @@ or `rabbitmq` never becomes healthy, everything that depends on them stays stuck
    - `mysql` unhealthy: often a bad/missing `MYSQL_ROOT_PASSWORD` in `.env`, or a corrupted
      data volume from an interrupted previous startup. As a last resort (destroys local
      data), `docker compose down -v` and start fresh.
-   - `rabbitmq` unhealthy or `api`/`log-writer` crash-looping with an `AuthenticationFailureException`/
+   - `rabbitmq` unhealthy or a RabbitMQ client service (`identity`, `project`, `ai`, `content`, `media`, `analytics`, `platform`, `publishing`, `log-writer`) crash-looping with an `AuthenticationFailureException`/
      `ACCESS_REFUSED` in their logs: `RABBITMQ_USER`/`RABBITMQ_PASSWORD` aren't set in `.env`
      (they're referenced in `docker-compose.yml` but have no default). Set them, then
-     `docker compose up -d rabbitmq api log-writer` to recreate with the new credentials.
-   - `api`/`log-writer` themselves unhealthy (`docker compose ps` shows `Up (unhealthy)`):
+     `docker compose up -d rabbitmq identity project ai content media analytics platform publishing log-writer` to recreate with the new credentials.
+   - the domain services or `gateway` themselves unhealthy (`docker compose ps` shows `Up (unhealthy)`):
      their healthcheck hits `/actuator/health` — check
      `docker exec <container> curl -s http://localhost:8080/actuator/health` for the
      failing component (mail, datasource, etc.) rather than assuming the whole app is down.
@@ -534,7 +534,7 @@ Service unavailable
 
 3. **Test internal connectivity**
    ```bash
-   docker compose exec api curl http://localhost:8080/api/health
+   docker compose exec gateway curl http://localhost:8080/actuator/health
    ```
 
 4. **Try accessing directly (for debugging)**
@@ -650,7 +650,7 @@ refused to connect
 
 4. **Restart affected service**
    ```bash
-   docker compose restart api
+   docker compose restart gateway
    # or
    docker compose restart web
    ```
@@ -1012,9 +1012,9 @@ not needed. A manual pull is for a model other than the default, or for recovery
    # Should show qwen2.5:7b-instruct
    ```
 
-5. **Restart API service**
+5. **Restart the LLM-calling service (`platform`)**
    ```bash
-   docker compose restart api
+   docker compose restart platform
    ```
 
 ---
@@ -1064,7 +1064,7 @@ not needed. A manual pull is for a model other than the default, or for recovery
    
    Then restart:
    ```bash
-   docker compose up -d api
+   docker compose up -d platform
    ```
 
 ---

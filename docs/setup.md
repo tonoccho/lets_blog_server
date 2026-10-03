@@ -192,7 +192,7 @@ Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443
 
 ```bash
 docker compose ps           # 起動状況確認(healthyかどうかも表示される)
-docker compose logs -f api  # 個別サービスのログ確認
+docker compose logs -f gateway  # 個別サービスのログ確認
 docker compose logs -f web  # Web管理画面のログ確認
 ```
 
@@ -202,7 +202,7 @@ docker compose logs -f web  # Web管理画面のログ確認
 
 ```bash
 # 環境変数変更など、再ビルド不要な場合
-docker compose restart api
+docker compose restart gateway
 
 # コード変更を反映する場合(イメージの再ビルドが必要。例: content-service)
 docker compose build content
@@ -275,7 +275,7 @@ ComfyUI と PlantUML はブラウザからは開けない(#979 で reverse-proxy
 docker cp <ダウンロードしたcheckpointファイル> lbs-comfyui:/root/ComfyUI/models/checkpoints/
 ```
 
-配置後、`.env` の `COMFYUI_CHECKPOINT` にファイル名を設定し、`docker compose up -d api` で反映する。
+配置後、`.env` の `COMFYUI_CHECKPOINT` にファイル名を設定し、`docker compose up -d media` で反映する。
 配置確認:
 
 ```bash
@@ -485,7 +485,7 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 
 **下書き/校正/要約・タグ提案・記事プランニングが失敗する(LLM呼び出しエラー)**
 `.env` の `LLM_API_KEY` が正しく設定されているか確認する。ダッシュボードの接続サービス状況
-(admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs api`で
+(admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs platform`で
 詳細なエラー内容(レート制限・認証エラー等)を確認する。
 
 **各サービスの個別ポート(内部8080等)に直接アクセスできない**

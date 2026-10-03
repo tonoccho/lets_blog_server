@@ -195,24 +195,24 @@ You don't need to restart the whole stack after changing one service:
 
 ```bash
 # Restart a running container (e.g. after an env var change)
-docker compose restart api
+docker compose restart gateway
 
 # Rebuild the image and recreate the container (e.g. after a code change)
-docker compose build api
-docker compose up -d api
+docker compose build gateway
+docker compose up -d gateway
 ```
 
 #### Reading logs
 
 ```bash
 # Follow one service's logs
-docker compose logs -f api
+docker compose logs -f gateway
 
 # Follow several at once
-docker compose logs -f api log-writer
+docker compose logs -f gateway log-writer
 
 # Last 100 lines, no follow
-docker compose logs --tail 100 api
+docker compose logs --tail 100 gateway
 ```
 
 ### Step 5: Access the Web Admin Panel
