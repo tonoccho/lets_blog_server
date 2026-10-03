@@ -7,6 +7,7 @@ import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.Post;
 import com.letsblog.content.dto.PostLookupResponse;
 import com.letsblog.content.dto.PostSummaryResponse;
+import com.letsblog.content.dto.UtcDateTimes;
 import com.letsblog.content.repository.PostRepository;
 import com.letsblog.content.service.CurrentActorService;
 import com.letsblog.content.service.ForbiddenException;
@@ -92,9 +93,9 @@ public class PostController {
                         post.getWpPostId(),
                         post.getSlug(),
                         post.getStatus(),
-                        post.getLastPublishedAt(),
+                        UtcDateTimes.toInstant(post.getLastPublishedAt()),
                         deserializeCategories(post.getCategories()),
-                        post.getPublishScheduledAt()
+                        UtcDateTimes.toInstant(post.getPublishScheduledAt())
                 ))
                 .toList();
     }

@@ -2,7 +2,7 @@ package com.letsblog.content.dto;
 
 import com.letsblog.content.domain.ContentType;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 /**
@@ -14,6 +14,6 @@ public record ContentCacheResponse(
         String url,
         ContentType type,
         Map<String, String> data,
-        LocalDateTime lastCheckedAt,
-        LocalDateTime lastUpdatedAt) {
+        Instant lastCheckedAt,
+        Instant lastUpdatedAt) {
 }

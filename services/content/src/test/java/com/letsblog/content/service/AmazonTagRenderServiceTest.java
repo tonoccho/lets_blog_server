@@ -11,7 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -61,7 +61,7 @@ class AmazonTagRenderServiceTest {
                 "price", "1000");
         when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
                 .thenReturn(new ContentCacheResponse(
-                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, LocalDateTime.now(), LocalDateTime.now()));
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, Instant.now(), Instant.now()));
 
         String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
 
@@ -78,7 +78,7 @@ class AmazonTagRenderServiceTest {
                 "price", "1000");
         when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
                 .thenReturn(new ContentCacheResponse(
-                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, LocalDateTime.now(), LocalDateTime.now()));
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, Instant.now(), Instant.now()));
 
         String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
 
@@ -96,7 +96,7 @@ class AmazonTagRenderServiceTest {
                 "price", "1000");
         when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
                 .thenReturn(new ContentCacheResponse(
-                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, LocalDateTime.now(), LocalDateTime.now()));
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, Instant.now(), Instant.now()));
 
         String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
 
@@ -112,7 +112,7 @@ class AmazonTagRenderServiceTest {
                 "price", "1000");
         when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
                 .thenReturn(new ContentCacheResponse(
-                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, LocalDateTime.now(), LocalDateTime.now()));
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, Instant.now(), Instant.now()));
 
         String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, false);
 
@@ -146,13 +146,30 @@ class AmazonTagRenderServiceTest {
         when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
                 .thenReturn(new ContentCacheResponse(
                         "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                        Instant.now(), Instant.now()));
 
         String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", null, true);
 
         assertTrue(result.contains("lb-amazon-card"));
         assertTrue(result.contains("商品名"));
         verify(projectBridgeClient, atLeastOnce()).resolveTagDesign(isNull(), anyString(), any());
+    }
+
+    @Test
+    void render_価格の取得時刻はUTCの壁時計でyyyy_MM_dd_HH_mm表記になる() {
+        stubTagDesign();
+        Map<String, String> data = Map.of(
+                "productName", "商品名",
+                "productUrl", "https://amazon.co.jp/dp/xxx",
+                "price", "1000");
+        Instant checked = Instant.parse("2026-09-08T20:03:35Z");
+        when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
+                .thenReturn(new ContentCacheResponse(
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, checked, checked));
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
+
+        assertTrue(result.contains("2026/09/08 20:03時点の価格です"), result);
     }
 
     @Test

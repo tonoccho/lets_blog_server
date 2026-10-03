@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -34,7 +35,7 @@ public class AmazonTagRenderService {
             Pattern.compile("\\[amazon\\s+(\\S+)\\s*]", Pattern.CASE_INSENSITIVE);
 
     private static final String CARD_CLASS_ATTR = "class=\"lb-amazon-card\"";
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm").withZone(ZoneOffset.UTC);
 
     private final ContentCacheService contentCacheService;
     private final ProjectBridgeClient projectBridgeClient;
@@ -118,7 +119,7 @@ public class AmazonTagRenderService {
             String escapedHref = HtmlUtils.htmlEscape(href);
             String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
             String fetchedAt = response.lastCheckedAt() == null
-                    ? "" : response.lastCheckedAt().format(TIMESTAMP_FORMATTER);
+                    ? "" : TIMESTAMP_FORMATTER.format(response.lastCheckedAt());
             String priceTimestamp = fetchedAt.isEmpty() || price.isEmpty()
                     ? "" : fetchedAt + "時点の価格です";
 

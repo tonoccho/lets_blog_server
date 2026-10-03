@@ -11,7 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -60,7 +60,7 @@ class BlogCardTagRenderServiceTest {
         when(contentCacheService.resolve("https://example.com/article"))
                 .thenReturn(new ContentCacheResponse(
                         "https://example.com/article", ContentType.BLOGCARD, data,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                        Instant.now(), Instant.now()));
 
         String result = service().render("[blogcard https://example.com/article]", 1L);
 
@@ -78,7 +78,7 @@ class BlogCardTagRenderServiceTest {
         when(contentCacheService.resolve("https://example.com/article"))
                 .thenReturn(new ContentCacheResponse(
                         "https://example.com/article", ContentType.BLOGCARD, data,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                        Instant.now(), Instant.now()));
 
         String result = service().render("[blogcard https://example.com/article]", 1L);
 
@@ -128,7 +128,7 @@ class BlogCardTagRenderServiceTest {
         when(contentCacheService.resolve("https://example.com/article"))
                 .thenReturn(new ContentCacheResponse(
                         "https://example.com/article", ContentType.BLOGCARD, data,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                        Instant.now(), Instant.now()));
 
         String result = service().render("[blogcard https://example.com/article]", null);
 

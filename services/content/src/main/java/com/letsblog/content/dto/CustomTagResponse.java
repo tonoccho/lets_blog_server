@@ -3,7 +3,7 @@ package com.letsblog.content.dto;
 import com.letsblog.content.domain.CustomTag;
 import com.letsblog.content.domain.CustomTagFormat;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record CustomTagResponse(
         Long id,
@@ -13,8 +13,8 @@ public record CustomTagResponse(
         String cssContent,
         CustomTagFormat tagFormat,
         Long projectId,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt,
+        Instant createdAt,
+        Instant updatedAt,
         /** AI生成時にLLMへのリクエストを元にPenpotへ作成したデザインファイルのURL(ベストエフォート、手動作成タグではnull)。 */
         String penpotFileUrl
 ) {
@@ -27,8 +27,8 @@ public record CustomTagResponse(
                 tag.getCssContent(),
                 tag.getTagFormat(),
                 tag.getProjectId(),
-                tag.getCreatedAt(),
-                tag.getUpdatedAt(),
+                UtcDateTimes.toInstant(tag.getCreatedAt()),
+                UtcDateTimes.toInstant(tag.getUpdatedAt()),
                 tag.getPenpotFileUrl());
     }
 }

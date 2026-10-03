@@ -1,6 +1,6 @@
 package com.letsblog.content.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record PostSummaryResponse(
@@ -10,8 +10,8 @@ public record PostSummaryResponse(
         String wpPostId,
         String slug,
         String status,
-        LocalDateTime lastPublishedAt,
+        Instant lastPublishedAt,
         List<String> categories,
-        LocalDateTime publishScheduledAt
+        Instant publishScheduledAt
 ) {
 }

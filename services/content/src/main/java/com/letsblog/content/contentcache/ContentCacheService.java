@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.content.domain.ContentCache;
 import com.letsblog.content.domain.ContentType;
 import com.letsblog.content.dto.ContentCacheResponse;
+import com.letsblog.content.dto.UtcDateTimes;
 import com.letsblog.content.repository.ContentCacheRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -149,7 +150,8 @@ public class ContentCacheService {
     private ContentCacheResponse toResponse(ContentCache cache) {
         return new ContentCacheResponse(
                 cache.getUrl(), cache.getContentType(), readJson(cache.getDataJson()),
-                cache.getLastCheckedAt(), cache.getLastUpdatedAt());
+                UtcDateTimes.toInstant(cache.getLastCheckedAt()),
+                UtcDateTimes.toInstant(cache.getLastUpdatedAt()));
     }
 
     private String writeJson(Map<String, String> data) {

@@ -2,7 +2,7 @@ package com.letsblog.content.dto;
 
 import com.letsblog.content.domain.CustomTagTemplate;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record CustomTagTemplateResponse(
         Long id,
@@ -16,8 +16,8 @@ public record CustomTagTemplateResponse(
         Long originalTagId,
         Long projectId,
         Long createdBy,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
     public static CustomTagTemplateResponse from(CustomTagTemplate template) {
         return new CustomTagTemplateResponse(
@@ -32,8 +32,8 @@ public record CustomTagTemplateResponse(
                 template.getOriginalTagId(),
                 template.getProjectId(),
                 template.getCreatedBy(),
-                template.getCreatedAt(),
-                template.getUpdatedAt()
+                UtcDateTimes.toInstant(template.getCreatedAt()),
+                UtcDateTimes.toInstant(template.getUpdatedAt())
         );
     }
 }
