@@ -87,7 +87,8 @@ public class InternalPostBridgeController {
     private PostBridgeResponse toResponse(Post post) {
         return new PostBridgeResponse(
                 post.getSiteId(), post.getWpPostId(), post.getSlug(), post.getStatus(),
-                post.getUploadedImagesJson(), post.getCategories(), post.getPublishScheduledAt(),
-                post.getLastPublishedAt());
+                post.getUploadedImagesJson(), post.getCategories(),
+                PostBridgeResponse.toInstant(post.getPublishScheduledAt()),
+                PostBridgeResponse.toInstant(post.getLastPublishedAt()));
     }
 }

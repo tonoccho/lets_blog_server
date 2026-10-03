@@ -247,6 +247,31 @@ class ContentServiceClientTest {
         assertThrows(IllegalStateException.class, () -> client.findPostBySlug("test-site", "my-slug"));
     }
 
+    @Test
+    void findPost_はZ付きの予約日時と最終公開日時を同じ実時刻として読む() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 200,
+                "{\"siteId\":1,\"wpPostId\":\"42\",\"slug\":\"s\",\"status\":\"future\",\"uploadedImagesJson\":null,"
+                        + "\"categories\":null,\"publishScheduledAt\":\"2026-12-25T09:00:00Z\","
+                        + "\"lastPublishedAt\":\"2026-09-08T20:03:35Z\"}"));
+
+        ContentServiceClient.PostBridgeResponse post = newClient().findPost(1L, "42").orElseThrow();
+
+        assertEquals(java.time.LocalDateTime.of(2026, 12, 25, 9, 0, 0), post.publishScheduledAt());
+        assertEquals(java.time.LocalDateTime.of(2026, 9, 8, 20, 3, 35), post.lastPublishedAt());
+    }
+
+    @Test
+    void findPost_は日時がnullの応答も読める() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 200,
+                "{\"siteId\":1,\"wpPostId\":\"42\",\"slug\":\"s\",\"status\":\"draft\",\"publishScheduledAt\":null,"
+                        + "\"lastPublishedAt\":null}"));
+
+        ContentServiceClient.PostBridgeResponse post = newClient().findPost(1L, "42").orElseThrow();
+
+        assertEquals(null, post.publishScheduledAt());
+        assertEquals(null, post.lastPublishedAt());
+    }
+
     private ContentServiceClient newClient() {
         MockHttpServletRequest servletRequest = new MockHttpServletRequest();
         servletRequest.addHeader("Authorization", "Bearer test-token");
