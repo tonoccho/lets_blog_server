@@ -20,6 +20,13 @@
 # node_modules/.lbs-package-lock.sha256 へ記録し、起動のたびに比較する。記録が無い・
 # 一致しない場合に npm ci を実行する。記録は npm ci が成功した後、chown の前に書く
 # (失敗した node_modules を一致済みとして扱わず、記録もホストユーザー所有にする)。
+#
+# ./apps/web:/app をバインドマウントしているため、next dev の Turbopack 永続キャッシュ
+# (.next/dev/cache 等)もホストに残り、コンテナを作り直しても消えない。古い node_modules に
+# 対するモジュール解決の失敗(Cannot find module '@tailwindcss/postcss')がそこに残ると、
+# npm ci で node_modules が正しくなった後も next dev が失敗を返し続ける(#1609)。そのため
+# npm ci が成功した起動では exec の前に .next 全体を消す(作り直すのは su-exec 後の next dev
+# なのでホストユーザー所有になる)。npm ci を実行しない起動ではキャッシュをそのまま使う。
 set -e
 
 # 既定は /app(Dockerfile の WORKDIR/バインドマウント先)。scripts/test_web_docker_entrypoint.py
@@ -39,6 +46,7 @@ if [ ! -x "$APP_DIR/node_modules/.bin/next" ] \
   ( cd "$APP_DIR" && npm ci --legacy-peer-deps )
   printf '%s\n' "$LOCK_HASH" > "$STAMP_FILE"
   chown -R "$HOST_UID:$HOST_GID" "$APP_DIR/node_modules"
+  rm -rf "$APP_DIR/.next"
 fi
 
 exec su-exec "$HOST_UID:$HOST_GID" "$@"

@@ -234,5 +234,71 @@ class NpmCiWhenLockfileChanged(DockerEntrypointTestCase):
         self.assertEqual(1, self._npm_ci_count(), "失敗後の次の起動で npm ci が再実行されていない")
 
 
+class NextCacheClearedOnNpmCi(DockerEntrypointTestCase):
+    """#1609: npm ci を実行した起動では、"$@" の実行前に .next(Turbopack 永続キャッシュ)を
+    消す。実行しない起動では .next をそのまま残す。"""
+
+    OBSERVER = 'if [ -e "$APP_DIR/.next" ]; then echo present > "$MARKER"; else echo absent > "$MARKER"; fi'
+
+    def _make_cache(self):
+        d = os.path.join(self.app_dir, ".next", "dev", "cache")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "x"), "w", encoding="utf-8") as f:
+            f.write("stale")
+
+    def _observe(self):
+        self.marker = os.path.join(self.tmp, "marker")
+        return self._run(["sh", "-c", self.OBSERVER], {"MARKER": self.marker})
+
+    def _marker(self):
+        with open(self.marker, encoding="utf-8") as f:
+            return f.read().strip()
+
+    def test_ac1_lock_changed_removes_next_before_command(self):
+        self._run(["true"])  # 記録を作る
+        self._write_lock("lock-v2")
+        self._make_cache()
+        r = self._observe()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(2, self._npm_ci_count())
+        self.assertEqual("absent", self._marker())
+
+    def test_ac2_no_stamp_removes_next_before_command(self):
+        self._make_next_present()  # next はあるが記録が無い
+        self._make_cache()
+        r = self._observe()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual("absent", self._marker())
+
+    def test_ac2_next_missing_removes_next_before_command(self):
+        self._make_cache()
+        r = self._observe()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual("absent", self._marker())
+
+    def test_ac2_no_next_dir_is_not_an_error(self):
+        r = self._observe()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual("absent", self._marker())
+
+    def test_ac3_stamp_matches_keeps_next(self):
+        self._run(["true"])
+        os.remove(self.fake_log)
+        self._make_cache()
+        r = self._observe()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(0, self._npm_ci_count())
+        self.assertEqual("present", self._marker())
+        self.assertTrue(os.path.exists(os.path.join(self.app_dir, ".next", "dev", "cache", "x")))
+
+    def test_npm_ci_failure_keeps_next(self):
+        self._run(["true"])
+        self._write_lock("lock-v2")
+        self._make_cache()
+        r = self._run(["true"], {"FAKE_NPM_CI_FAIL": "1"})
+        self.assertNotEqual(0, r.returncode)
+        self.assertTrue(os.path.exists(os.path.join(self.app_dir, ".next", "dev", "cache", "x")))
+
+
 if __name__ == "__main__":
     unittest.main()
