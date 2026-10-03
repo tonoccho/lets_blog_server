@@ -6,7 +6,8 @@ import com.letsblog.publishing.domain.BulkOperationSourceType;
 import com.letsblog.publishing.domain.BulkOperationStatus;
 import com.letsblog.publishing.domain.BulkOperationType;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneOffset;
 
 public record BulkOperationLogResponse(
         BulkOperationType operationType,
@@ -23,7 +24,7 @@ public record BulkOperationLogResponse(
         BulkOperationLogLevel level,
         String errorMessage,
         String stackTrace,
-        LocalDateTime createdAt
+        Instant createdAt
 ) {
     public static BulkOperationLogResponse from(BulkOperationLog log) {
         return new BulkOperationLogResponse(
@@ -31,6 +32,8 @@ public record BulkOperationLogResponse(
                 log.getCategorySlug(), log.getCategoryParentSlug(), log.getCategoryTargetSlug(),
                 log.getCategoryDescription(),
                 log.getOriginalFilename(), log.getPostStatus(), log.getEnvironment(), log.getStatus(), log.getLevel(),
-                log.getErrorMessage(), log.getStackTrace(), log.getCreatedAt());
+                log.getErrorMessage(), log.getStackTrace(),
+                // DB / エンティティの LocalDateTime は UTC の壁時計(#1257)。公開レスポンスは Z 終端 RFC 3339 で返す(#1540)。
+                log.getCreatedAt() == null ? null : log.getCreatedAt().toInstant(ZoneOffset.UTC));
     }
 }
