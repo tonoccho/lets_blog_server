@@ -4,15 +4,18 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
  * サービス間のClient Credentials認証用トークンクライアント(#567)をBeanとして公開する。
  *
- * <p><b>オプトイン(#1483)</b>: 本クラスはlbs-commonにあるが{@code @Configuration}の
- * コンポーネントスキャン対象ではない(各サービスは自パッケージ配下しかスキャンしない)。
+ * <p><b>オプトイン(#1483, #1596)</b>: 本クラスはlbs-commonにあるが、あえて{@code @Configuration}等の
+ * ステレオタイプを付けず、コンポーネントスキャンでは拾われない。ai/analytics/identity/platform/projectの
+ * 各サービスは{@code CredentialCipher}を拾うため{@code com.letsblog.common}をスキャンしており、
+ * {@code @Configuration}にすると全員に取り込まれ、{@code keycloak.admin.*}未設定のサービスが起動に失敗し、
+ * identityの独自{@code ServiceTokenClientConfig}とはBean名が衝突する。ステレオタイプが無くても
+ * {@code @Import}されれば{@code @Bean}メソッドは処理される(Bean間の呼び出しは無くlite modeで足りる)。
  * {@code keycloak.admin.*}プロパティを持ち、トークンを必要とするサービスだけが
  * {@code @Import(ServiceTokenClientConfig.class)}で取り込む。使わないサービスには
  * Beanもプロパティ要求も生じない。media-service・publishing-serviceが利用する(以前は各サービスに
@@ -36,7 +39,6 @@ import org.springframework.web.client.RestClient;
  *
  * <p>Keycloakが停止/無応答のときにTCP接続の確立で長時間ハングしないようタイムアウトを設定する。
  */
-@Configuration
 public class ServiceTokenClientConfig {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
