@@ -13,7 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -67,9 +67,9 @@ class UserControllerTest {
         UserController controller = controller();
         List<UserResponse> users = List.of(
                 new UserResponse(1L, "a@example.com", "admin", List.of("admin"),
-                        true, true, LocalDateTime.now(), LocalDateTime.now()),
+                        true, true, Instant.now(), Instant.now()),
                 new UserResponse(2L, "b@example.com", "user", List.of("user"),
-                        true, false, LocalDateTime.now(), LocalDateTime.now()));
+                        true, false, Instant.now(), Instant.now()));
         when(userService.list()).thenReturn(users);
 
         List<UserResponse> result = controller.list();

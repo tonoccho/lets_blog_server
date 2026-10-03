@@ -5,7 +5,7 @@ import com.letsblog.identity.domain.Role;
 import com.letsblog.identity.domain.SocialLinks;
 import com.letsblog.identity.domain.User;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record UserProfileResponse(
@@ -27,8 +27,8 @@ public record UserProfileResponse(
         SocialLinks socialLinks,
         List<CustomLink> customLinks,
         boolean githubTokenConfigured,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
     public static UserProfileResponse from(User user) {
         return new UserProfileResponse(
@@ -50,8 +50,8 @@ public record UserProfileResponse(
                 user.getSocialLinks(),
                 user.getCustomLinks(),
                 user.hasGithubToken(),
-                user.getCreatedAt(),
-                user.getUpdatedAt()
+                UtcDateTimes.toInstant(user.getCreatedAt()),
+                UtcDateTimes.toInstant(user.getUpdatedAt())
         );
     }
 }

@@ -3,7 +3,7 @@ package com.letsblog.identity.dto;
 import com.letsblog.identity.domain.Role;
 import com.letsblog.identity.domain.User;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record UserResponse(
@@ -13,8 +13,8 @@ public record UserResponse(
         List<String> roleNames,
         boolean enabled,
         boolean keycloakLinked,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
     public static UserResponse from(User user) {
         return new UserResponse(
@@ -24,8 +24,8 @@ public record UserResponse(
                 user.getRoles().stream().map(Role::getRoleName).sorted().toList(),
                 user.isEnabled(),
                 user.getKeycloakSub() != null,
-                user.getCreatedAt(),
-                user.getUpdatedAt()
+                UtcDateTimes.toInstant(user.getCreatedAt()),
+                UtcDateTimes.toInstant(user.getUpdatedAt())
         );
     }
 }

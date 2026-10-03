@@ -13,7 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -48,7 +48,7 @@ class AvatarControllerTest {
                 1L, "a@example.com", "user", java.util.List.of("user"),
                 null, null, null, null, null, null, null, null,
                 "/api/users/1/avatar", null, null, null, null, false,
-                LocalDateTime.now(), LocalDateTime.now());
+                Instant.now(), Instant.now());
     }
 
     @Test
