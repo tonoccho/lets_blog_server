@@ -1,6 +1,6 @@
 package com.letsblog.media.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record DiagramDetailResponse(
         Long id,
@@ -8,7 +8,7 @@ public record DiagramDetailResponse(
         String name,
         String xml,
         String svg,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
 }

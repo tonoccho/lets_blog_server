@@ -181,14 +181,6 @@ export interface MediaGarbageCollectionDeleteRequest {
   mediaIds: string[];
 }
 
-export interface GenerationJobSummary {
-  id?: number;
-  type?: string;
-  status?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
 export interface InstallComfyUiCheckpointRequest {
   /** @minLength 1 */
   downloadUrl: string;

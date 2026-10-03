@@ -1,12 +1,12 @@
 package com.letsblog.media.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record DiagramSummaryResponse(
         Long id,
         Long projectId,
         String name,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
 }

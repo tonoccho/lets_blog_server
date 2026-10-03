@@ -1,6 +1,7 @@
 package com.letsblog.media.controller;
 
 import com.letsblog.common.client.GenerationJobSummary;
+import com.letsblog.media.dto.GenerationJobResponse;
 import com.letsblog.media.dto.MediaGarbageCollectionDeleteRequest;
 import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
 import com.letsblog.media.service.AdminAuthorizationService;
@@ -75,7 +76,7 @@ class ProjectMediaGarbageCollectionControllerTest {
         when(mediaGarbageCollectionService.startDelete(1L, "local", List.of("10"), 9L, "keycloak-sub-1", "Bearer token-2"))
                 .thenReturn(job);
 
-        GenerationJobSummary response = controller.delete(1L, "local", new MediaGarbageCollectionDeleteRequest(List.of("10")));
+        GenerationJobResponse response = controller.delete(1L, "local", new MediaGarbageCollectionDeleteRequest(List.of("10")));
 
         assertEquals(5L, response.id());
         verify(adminAuthorizationService).requireAdmin();

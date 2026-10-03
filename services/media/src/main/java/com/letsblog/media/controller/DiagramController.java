@@ -5,6 +5,7 @@ import com.letsblog.media.dto.CreateDiagramRequest;
 import com.letsblog.media.dto.DiagramDetailResponse;
 import com.letsblog.media.dto.DiagramSummaryResponse;
 import com.letsblog.media.dto.UpdateDiagramRequest;
+import com.letsblog.media.dto.UtcDateTimes;
 import com.letsblog.media.repository.DiagramRepository;
 import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.DiagramNotFoundException;
@@ -96,8 +97,8 @@ public class DiagramController {
                 diagram.getName(),
                 diagram.getXml(),
                 diagram.getSvg(),
-                diagram.getCreatedAt(),
-                diagram.getUpdatedAt()
+                UtcDateTimes.toInstant(diagram.getCreatedAt()),
+                UtcDateTimes.toInstant(diagram.getUpdatedAt())
         );
     }
 
@@ -106,8 +107,8 @@ public class DiagramController {
                 diagram.getId(),
                 diagram.getProjectId(),
                 diagram.getName(),
-                diagram.getCreatedAt(),
-                diagram.getUpdatedAt()
+                UtcDateTimes.toInstant(diagram.getCreatedAt()),
+                UtcDateTimes.toInstant(diagram.getUpdatedAt())
         );
     }
 

@@ -11,6 +11,7 @@ import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageFolderRequest;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
+import com.letsblog.media.dto.UtcDateTimes;
 import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.repository.OffsetLimitPageable;
@@ -131,7 +132,7 @@ public class GeneratedImageController {
                 .filter(image -> !unfiledOnly || image.getFolderId() == null)
                 .map(image -> new GeneratedImageSummaryResponse(
                         image.getId(), image.getProjectId(), image.getPrompt(),
-                        image.getCheckpoint(), image.getCreatedAt(), parseTags(image.getTagsJson()),
+                        image.getCheckpoint(), UtcDateTimes.toInstant(image.getCreatedAt()), parseTags(image.getTagsJson()),
                         image.getProvider(), image.getFolderId()))
                 .filter(response -> tag == null || response.tags().stream().anyMatch(t -> t.equalsIgnoreCase(tag)));
         if (!pagedInDatabase) {
@@ -265,7 +266,8 @@ public class GeneratedImageController {
                 image.getWidth(), image.getHeight(), image.getBatchSize(), image.getBatchIndex(),
                 image.getCheckpoint(),
                 image.getLoraName(), image.getLoraWeight() != null ? image.getLoraWeight().doubleValue() : null,
-                image.getCreatedAt(), parseTags(image.getTagsJson()), image.getProvider(), image.getFolderId());
+                UtcDateTimes.toInstant(image.getCreatedAt()), parseTags(image.getTagsJson()), image.getProvider(),
+                image.getFolderId());
     }
 
     /**

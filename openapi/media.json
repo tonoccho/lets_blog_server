@@ -604,7 +604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenerationJobSummary"
+                  "$ref": "#/components/schemas/GenerationJobResponse"
                 }
               }
             }
@@ -1853,29 +1853,6 @@
         "required": [
           "mediaIds"
         ]
-      },
-      "GenerationJobSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "type": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
       },
       "InstallComfyUiCheckpointRequest": {
         "type": "object",

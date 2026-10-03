@@ -119,7 +119,7 @@ public class ComfyUiModelService {
     }
 
     private GenerationJobResponse toResponse(GenerationJobSummary job) {
-        return new GenerationJobResponse(job.id(), job.type(), job.status(), job.createdAt(), job.updatedAt());
+        return GenerationJobResponse.from(job);
     }
 
     private String toJson(Object value) {

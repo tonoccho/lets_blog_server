@@ -74,7 +74,7 @@ public class ImageGenerationController {
         }
         GenerationJobSummary job = imageGenerationJobStarter.start(request, authorization);
         return ResponseEntity.accepted()
-                .body(new GenerationJobResponse(job.id(), job.type(), job.status(), job.createdAt(), job.updatedAt()));
+                .body(GenerationJobResponse.from(job));
     }
 
     /** {@link #image}と同じ理由で、projectId 指定時はメンバー判定を行う(issue #830)。 */

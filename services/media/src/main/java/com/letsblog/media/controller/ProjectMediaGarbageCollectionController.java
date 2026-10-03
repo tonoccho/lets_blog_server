@@ -1,6 +1,6 @@
 package com.letsblog.media.controller;
 
-import com.letsblog.common.client.GenerationJobSummary;
+import com.letsblog.media.dto.GenerationJobResponse;
 import com.letsblog.media.dto.MediaGarbageCollectionDeleteRequest;
 import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
 import com.letsblog.media.service.AdminAuthorizationService;
@@ -45,13 +45,13 @@ public class ProjectMediaGarbageCollectionController {
     }
 
     @PostMapping("/delete")
-    public GenerationJobSummary delete(@PathVariable Long id, @RequestParam String environment,
+    public GenerationJobResponse delete(@PathVariable Long id, @RequestParam String environment,
             @Valid @RequestBody MediaGarbageCollectionDeleteRequest request) {
         adminAuthorizationService.requireAdmin();
         Long actorId = currentActorService.getCurrentActorId();
         String actorKeycloakSub = currentActorService.getCurrentActorKeycloakSub();
-        return mediaGarbageCollectionService.startDelete(
+        return GenerationJobResponse.from(mediaGarbageCollectionService.startDelete(
                 id, environment, request.mediaIds(), actorId, actorKeycloakSub,
-                currentActorService.getAuthorizationHeader());
+                currentActorService.getAuthorizationHeader()));
     }
 }

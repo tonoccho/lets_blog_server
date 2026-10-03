@@ -6,7 +6,7 @@
  */
 import type {
   Delete1Params,
-  GenerationJobSummary,
+  GenerationJobResponse,
   MediaGarbageCollectionDeleteRequest,
   MediaGarbageCollectionScanResponse,
   ScanParams
@@ -14,7 +14,7 @@ import type {
 
 
 export type delete1Response200 = {
-  data: GenerationJobSummary
+  data: GenerationJobResponse
   status: 200
 }
 

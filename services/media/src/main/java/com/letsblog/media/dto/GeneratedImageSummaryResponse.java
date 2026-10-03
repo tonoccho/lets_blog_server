@@ -1,6 +1,6 @@
 package com.letsblog.media.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record GeneratedImageSummaryResponse(
@@ -8,7 +8,7 @@ public record GeneratedImageSummaryResponse(
         Long projectId,
         String prompt,
         String checkpoint,
-        LocalDateTime createdAt,
+        Instant createdAt,
         List<String> tags,
         String provider,
         /** 所属フォルダ(issue #1493)。nullは未分類。 */
