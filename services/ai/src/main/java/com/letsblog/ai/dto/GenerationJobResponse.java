@@ -1,12 +1,12 @@
 package com.letsblog.ai.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record GenerationJobResponse(
         Long id,
         String type,
         String status,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        Instant createdAt,
+        Instant updatedAt
 ) {
 }

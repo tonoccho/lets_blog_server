@@ -4,6 +4,7 @@ import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.dto.CreateGenerationJobRequest;
 import com.letsblog.ai.dto.GenerationJobResponse;
 import com.letsblog.ai.dto.UpdateGenerationJobRequest;
+import com.letsblog.ai.dto.UtcDateTimes;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
@@ -64,7 +65,7 @@ public class InternalGenerationJobController {
         job.setOwnerUserId(currentActorService.getCurrentActorId());
         GenerationJob saved = generationJobRepository.save(job);
         return new GenerationJobResponse(
-                saved.getId(), saved.getType(), saved.getStatus(), saved.getCreatedAt(), saved.getUpdatedAt());
+                saved.getId(), saved.getType(), saved.getStatus(), UtcDateTimes.toInstant(saved.getCreatedAt()), UtcDateTimes.toInstant(saved.getUpdatedAt()));
     }
 
     /**
@@ -80,6 +81,6 @@ public class InternalGenerationJobController {
         job.setResultPayload(request.resultPayload());
         GenerationJob saved = generationJobRepository.save(job);
         return new GenerationJobResponse(
-                saved.getId(), saved.getType(), saved.getStatus(), saved.getCreatedAt(), saved.getUpdatedAt());
+                saved.getId(), saved.getType(), saved.getStatus(), UtcDateTimes.toInstant(saved.getCreatedAt()), UtcDateTimes.toInstant(saved.getUpdatedAt()));
     }
 }

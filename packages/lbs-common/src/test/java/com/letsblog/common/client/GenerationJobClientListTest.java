@@ -107,6 +107,24 @@ class GenerationJobClientListTest {
         assertThat(jobs.get(1).id()).isEqualTo(1L);
     }
 
+    /**
+     * ai-serviceは#1535以降、日時をZ終端のRFC 3339で返す。{@link GenerationJobSummary}は
+     * {@code LocalDateTime}のままなので、Z付きを読めなくなると#825の縮退でAI_JOBが無音で消える。
+     */
+    @Test
+    @DisplayName("Z終端のRFC 3339日時(#1535)をデシリアライズできる")
+    void Z終端の日時() {
+        responseBody = """
+                [{"id":1,"type":"IMAGE","status":"COMPLETED",
+                  "createdAt":"2026-09-08T20:03:35Z","updatedAt":"2026-09-08T20:05:00Z"}]
+                """;
+
+        List<GenerationJobSummary> jobs = client.listRecent("Bearer token");
+
+        assertThat(jobs).hasSize(1);
+        assertThat(jobs.get(0).createdAt()).isEqualTo(java.time.LocalDateTime.of(2026, 9, 8, 20, 3, 35));
+    }
+
     @Test
     @DisplayName("本文が空(JSON null)のレスポンスは空リストとして扱う")
     void 空本文は空リスト() {

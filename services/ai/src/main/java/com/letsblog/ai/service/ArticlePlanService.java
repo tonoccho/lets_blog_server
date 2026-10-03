@@ -22,6 +22,7 @@ import com.letsblog.ai.dto.RepositoryIssueResponse;
 import com.letsblog.ai.dto.SuggestMetadataResponse;
 import com.letsblog.ai.dto.SuggestStructureResponse;
 import com.letsblog.ai.dto.SuggestTitlesResponse;
+import com.letsblog.ai.dto.UtcDateTimes;
 import com.letsblog.ai.github.GithubClient;
 import com.letsblog.ai.github.GithubIssue;
 import com.letsblog.ai.github.GithubIssueSummary;
@@ -212,7 +213,7 @@ public class ArticlePlanService {
     public List<ArticlePlanSessionSummaryResponse> listSessions(Long projectId) {
         return articlePlanSessionRepository.findByProjectIdOrderByUpdatedAtDescIdDesc(projectId).stream()
                 .map(s -> new ArticlePlanSessionSummaryResponse(
-                        s.getId(), s.getTitle(), s.getGithubIssueNumber(), s.getCreatedAt(), s.getUpdatedAt()))
+                        s.getId(), s.getTitle(), s.getGithubIssueNumber(), UtcDateTimes.toInstant(s.getCreatedAt()), UtcDateTimes.toInstant(s.getUpdatedAt())))
                 .toList();
     }
 
@@ -239,7 +240,7 @@ public class ArticlePlanService {
         List<PlanChatMessage> history = fromJson(session.getHistory());
         return new ArticlePlanSessionDetailResponse(
                 session.getId(), session.getTitle(), session.getGithubIssueNumber(), history,
-                session.getCreatedAt(), session.getUpdatedAt());
+                UtcDateTimes.toInstant(session.getCreatedAt()), UtcDateTimes.toInstant(session.getUpdatedAt()));
     }
 
     /**

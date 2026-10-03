@@ -3,6 +3,7 @@ package com.letsblog.ai.controller;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.dto.GenerationJobDetailResponse;
 import com.letsblog.ai.dto.GenerationJobResponse;
+import com.letsblog.ai.dto.UtcDateTimes;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
@@ -64,7 +65,7 @@ public class GenerationJobController {
                         .thenComparing(GenerationJob::getId)
                         .reversed())
                 .map(job -> new GenerationJobResponse(
-                        job.getId(), job.getType(), job.getStatus(), job.getCreatedAt(), job.getUpdatedAt()))
+                        job.getId(), job.getType(), job.getStatus(), UtcDateTimes.toInstant(job.getCreatedAt()), UtcDateTimes.toInstant(job.getUpdatedAt())))
                 .toList();
     }
 
@@ -84,7 +85,7 @@ public class GenerationJobController {
         return new GenerationJobDetailResponse(
                 job.getId(), job.getType(), job.getStatus(),
                 job.getRequestPayload(), job.getResultPayload(),
-                job.getCreatedAt(), job.getUpdatedAt());
+                UtcDateTimes.toInstant(job.getCreatedAt()), UtcDateTimes.toInstant(job.getUpdatedAt()));
     }
 
     private List<GenerationJob> visibleJobs() {
