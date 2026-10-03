@@ -132,9 +132,13 @@ class PreMergeCommitUnclassified(unittest.TestCase):
         paths_py = os.path.join(self.tmp, ".claude", "hooks", "paths.py")
         with open(paths_py, encoding="utf-8") as f:
             content = f.read()
-        anchor = 'r"^startup\\.sh$",\n]'
-        self.assertIn(anchor, content, "paths.py の NEUTRAL_PATTERNS の構造が前提と異なる")
-        content = content.replace(anchor, 'r"^startup\\.sh$",\n    r"^%s$",\n]' % UNCLASSIFIED, 1)
+        # #1608: 末尾要素(例: startup.sh)に依存せず、NEUTRAL_PATTERNS リストの閉じ `]` の
+        # 直前へ挿入する。
+        start = content.find("NEUTRAL_PATTERNS = [")
+        self.assertNotEqual(-1, start, "paths.py に `NEUTRAL_PATTERNS = [` が見つからない")
+        close = content.find("\n]", start)
+        self.assertNotEqual(-1, close, "paths.py の NEUTRAL_PATTERNS の閉じ括弧が見つからない")
+        content = content[:close] + '\n    r"^%s$",' % UNCLASSIFIED + content[close:]
         with open(paths_py, "w", encoding="utf-8") as f:
             f.write(content)
         git(["add", ".claude/hooks/paths.py"], self.tmp)
