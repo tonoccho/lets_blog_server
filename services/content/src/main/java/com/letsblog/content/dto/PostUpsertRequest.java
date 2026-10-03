@@ -1,6 +1,7 @@
 package com.letsblog.content.dto;
 
 import java.time.LocalDateTime;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * legacy-api側のPostPublishService#upsertPostRecordが公開結果をposts行へ反映するための
@@ -13,5 +14,6 @@ public record PostUpsertRequest(
         String status,
         String uploadedImagesJson,
         String categories,
+        @JsonDeserialize(using = UtcWallClockDeserializer.class)
         LocalDateTime publishScheduledAt) {
 }

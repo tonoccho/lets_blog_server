@@ -4,7 +4,6 @@ import com.letsblog.logwriter.domain.FrontendErrorLog;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Set;
 
@@ -41,7 +40,7 @@ public record FrontendErrorLogRequest(
 
         if (timestamp != null) {
             try {
-                log.setTimestamp(LocalDateTime.parse(timestamp, DateTimeFormatter.ISO_DATE_TIME));
+                log.setTimestamp(UtcDateTimes.parseUtcWallClock(timestamp));
             } catch (Exception e) {
                 log.setTimestamp(LocalDateTime.now());
             }

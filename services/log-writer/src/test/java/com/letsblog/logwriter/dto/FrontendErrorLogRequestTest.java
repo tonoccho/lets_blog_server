@@ -92,4 +92,31 @@ class FrontendErrorLogRequestTest {
 
         assertThrows(NullPointerException.class, request::toDomain);
     }
+
+    // issue #1542: オフセット付き timestamp は UTC 壁時計へ換算して保存する。
+
+    @Test
+    void toDomain_timestampが正のオフセット付きならUTC壁時計へ換算する() {
+        FrontendErrorLogRequest request = new FrontendErrorLogRequest(
+                "boom", null, null, "error", null, null, null, "2026-09-09T05:03:35+09:00");
+
+        assertEquals(java.time.LocalDateTime.of(2026, 9, 8, 20, 3, 35), request.toDomain().getTimestamp());
+    }
+
+    @Test
+    void toDomain_timestampが負のオフセット付きならUTC壁時計へ換算する() {
+        FrontendErrorLogRequest request = new FrontendErrorLogRequest(
+                "boom", null, null, "error", null, null, null, "2026-09-08T15:03:35-05:00");
+
+        assertEquals(java.time.LocalDateTime.of(2026, 9, 8, 20, 3, 35), request.toDomain().getTimestamp());
+    }
+
+    @Test
+    void toDomain_timestampがZ終端なら同じ実時刻で保存する() {
+        FrontendErrorLogRequest request = new FrontendErrorLogRequest(
+                "boom", null, null, "error", null, null, null, "2026-09-08T20:03:35.123Z");
+
+        assertEquals(java.time.LocalDateTime.of(2026, 9, 8, 20, 3, 35, 123_000_000),
+                request.toDomain().getTimestamp());
+    }
 }
