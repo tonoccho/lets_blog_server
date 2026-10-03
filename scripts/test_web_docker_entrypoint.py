@@ -41,6 +41,9 @@ FAKE_BINS = {}
 FAKE_BINS["npm"] = """#!/bin/bash
 echo "npm $*" >> "$FAKE_LOG"
 if [ "$1" = "ci" ]; then
+  if [ -n "$FAKE_NPM_CI_FAIL" ]; then
+    exit 1
+  fi
   mkdir -p node_modules/.bin
   printf '#!/bin/sh\\nexit 0\\n' > node_modules/.bin/next
   chmod +x node_modules/.bin/next
@@ -80,6 +83,8 @@ class DockerEntrypointTestCase(unittest.TestCase):
         for name, content in FAKE_BINS.items():
             _write_bin(self.bin_dir, name, content)
 
+        self._write_lock("lock-v1")
+
         st = os.stat(self.app_dir)
         self.expected_uid = st.st_uid
         self.expected_gid = st.st_gid
@@ -105,6 +110,13 @@ class DockerEntrypointTestCase(unittest.TestCase):
             return []
         with open(self.fake_log, encoding="utf-8") as f:
             return [l.rstrip("\n") for l in f]
+
+    def _write_lock(self, content):
+        with open(os.path.join(self.app_dir, "package-lock.json"), "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def _npm_ci_count(self):
+        return sum(1 for l in self._fake_log_lines() if l.startswith("npm ci"))
 
     def _make_next_present(self):
         bin_dir = os.path.join(self.app_dir, "node_modules", ".bin")
@@ -161,14 +173,65 @@ class NpmCiWhenNextMissing(DockerEntrypointTestCase):
         )
 
     def test_npm_ci_skipped_when_next_already_present(self):
+        # 判定用の記録(#1607)が無いと npm ci が走るため、まず1回起動して記録を作り、
+        # 以後 next も記録も揃った状態で npm ci が呼ばれないことを確認する。
         self._make_next_present()
+        r = self._run(["true"])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        os.remove(self.fake_log)
         r = self._run(["true"])
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         log = self._fake_log_lines()
         self.assertFalse(
             any(l.startswith("npm ci") for l in log),
-            f"next 実行ファイルが既にあるのに npm ci が呼ばれている: {log}",
+            f"next 実行ファイルも記録もあるのに npm ci が呼ばれている: {log}",
         )
+
+
+class NpmCiWhenLockfileChanged(DockerEntrypointTestCase):
+    """#1607: node_modules があっても package-lock.json が変わっていれば入れ直す。"""
+
+    def test_ac1_lock_changed_runs_npm_ci_then_su_exec(self):
+        self._run(["true"])  # 初回インストールで記録を作る
+        os.remove(self.fake_log)
+        self._write_lock("lock-v2")
+        r = self._run(["true"])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        log = self._fake_log_lines()
+        ci = [i for i, l in enumerate(log) if l.startswith("npm ci")]
+        su = [i for i, l in enumerate(log) if l.startswith("su-exec")]
+        self.assertTrue(ci, f"lock が変わったのに npm ci が呼ばれていない: {log}")
+        self.assertTrue(su and su[0] > ci[0], f"npm ci の後に su-exec で実行されていない: {log}")
+
+    def test_ac2_lock_unchanged_skips_npm_ci(self):
+        self._run(["true"])
+        os.remove(self.fake_log)
+        r = self._run(["true"])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(0, self._npm_ci_count(), self._fake_log_lines())
+
+    def test_ac3_no_stamp_runs_npm_ci_once(self):
+        self._make_next_present()  # 修正前から使っている環境: next はあるが記録が無い
+        r = self._run(["true"])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(1, self._npm_ci_count(), self._fake_log_lines())
+        r = self._run(["true"])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(1, self._npm_ci_count(), "2回目の起動でも npm ci が走った")
+
+    def test_ac4_npm_ci_failure_exits_nonzero_and_retries_next_time(self):
+        self._run(["true"])
+        os.remove(self.fake_log)
+        self._write_lock("lock-v2")
+        marker = os.path.join(self.tmp, "ran")
+        r = self._run(["sh", "-c", f"touch {marker}"], {"FAKE_NPM_CI_FAIL": "1"})
+        self.assertNotEqual(0, r.returncode)
+        self.assertFalse(os.path.exists(marker), '失敗したのに "$@" が実行された')
+        self.assertFalse(any(l.startswith("su-exec") for l in self._fake_log_lines()))
+        os.remove(self.fake_log)
+        r = self._run(["true"])
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(1, self._npm_ci_count(), "失敗後の次の起動で npm ci が再実行されていない")
 
 
 if __name__ == "__main__":
