@@ -9,7 +9,13 @@ const initialState: RegisterSiteState = {};
 
 type SshKeyMode = "existing" | "new";
 
-export function SiteForm({ sshKeyPairs }: { sshKeyPairs: SavedSshKeyPair[] }) {
+export function SiteForm({
+  sshKeyPairs,
+  defaultAdminPath,
+}: {
+  sshKeyPairs: SavedSshKeyPair[];
+  defaultAdminPath: string | null;
+}) {
   const [state, formAction, pending] = useActionState(registerSiteAction, initialState);
   const [sshKeyMode, setSshKeyMode] = useState<SshKeyMode>(sshKeyPairs.length > 0 ? "existing" : "new");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
@@ -55,6 +61,18 @@ export function SiteForm({ sshKeyPairs }: { sshKeyPairs: SavedSshKeyPair[] }) {
         <Field name="name" label="表示名" placeholder="My Blog" />
         <Field name="siteKey" label="サイトキー" placeholder="main" />
       </div>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-700 dark:text-neutral-300 font-medium">管理画面パス(任意)</span>
+        <input
+          name="adminPath"
+          placeholder={defaultAdminPath ? `既定: ${defaultAdminPath}` : "空欄ならシステム設定の既定値"}
+          className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+        />
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">
+          空欄ならシステム設定の既定値を使います。入力すると、このサイトだけ別のパスで上書きします。
+        </span>
+      </label>
 
       <div className="space-y-3 rounded border border-neutral-200 dark:border-neutral-800 p-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

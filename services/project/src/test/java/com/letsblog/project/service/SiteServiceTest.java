@@ -24,6 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -68,7 +70,7 @@ class SiteServiceTest {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(true);
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"));
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"), null);
 
         assertThrows(IllegalArgumentException.class, () -> service().register(request));
     }
@@ -84,7 +86,7 @@ class SiteServiceTest {
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"));
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"), null);
 
         SiteResponse response = service().register(request);
 
@@ -111,7 +113,7 @@ class SiteServiceTest {
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "ssh-site", CmsType.WORDPRESS,
                 Map.of("baseUrl", "https://example.com", "transport", "SSH", "sshHost", "host",
-                        "sshUser", "user", "wpPath", "/var/www", "sshKeyPairId", "1"));
+                        "sshUser", "user", "wpPath", "/var/www", "sshKeyPairId", "1"), null);
 
         service().register(request);
 
@@ -125,7 +127,7 @@ class SiteServiceTest {
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "site", CmsType.WORDPRESS,
                 Map.of("baseUrl", "https://example.com", "transport", "SSH", "sshHost", "host",
                         "sshUser", "user", "wpPath", "/var/www",
-                        "sshPrivateKeyPem", "PEM", "sshKeyPairId", "1"));
+                        "sshPrivateKeyPem", "PEM", "sshKeyPairId", "1"), null);
 
         assertThrows(IllegalArgumentException.class, () -> service().register(request));
     }
@@ -136,9 +138,58 @@ class SiteServiceTest {
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "site", CmsType.WORDPRESS,
                 Map.of("baseUrl", "https://example.com", "transport", "SSH", "sshHost", "host",
-                        "sshUser", "user", "wpPath", "/var/www", "sshKeyPairId", "99"));
+                        "sshUser", "user", "wpPath", "/var/www", "sshKeyPairId", "99"), null);
 
         assertThrows(IllegalArgumentException.class, () -> service().register(request));
+    }
+
+    private SiteRegisterRequest registerRequestWithAdminPath(String adminPath) {
+        return new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"),
+                adminPath);
+    }
+
+    private Site registerAndCaptureSite(String adminPath) {
+        when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
+        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
+        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com")))
+                .thenReturn(new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null));
+        when(bridgeClient.testConnection(eq("WORDPRESS"), any()))
+                .thenReturn(new ConnectionCheckResult(true, null, null, null));
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service().register(registerRequestWithAdminPath(adminPath));
+
+        ArgumentCaptor<Site> captor = ArgumentCaptor.forClass(Site.class);
+        verify(siteRepository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void register_adminPathを指定するとそのまま保存する_issue1533() {
+        assertEquals("secret-login", registerAndCaptureSite("secret-login").getAdminPath());
+    }
+
+    @Test
+    void register_adminPath未指定はNULLで保存する_issue1533() {
+        assertNull(registerAndCaptureSite(null).getAdminPath());
+    }
+
+    @Test
+    void register_adminPathが空文字ならNULLで保存する_issue1533() {
+        assertNull(registerAndCaptureSite("").getAdminPath());
+    }
+
+    @Test
+    void register_不正なadminPathは拒否しプロビジョニングも保存も行わない_issue1533() {
+        for (String invalid : new String[] {"//evil.example.com", "https://evil.example.com", "a b", "../x",
+                "a\\b", "a".repeat(201)}) {
+            assertThrows(InvalidSiteAdminPathException.class,
+                    () -> service().register(registerRequestWithAdminPath(invalid)), invalid);
+        }
+
+        verify(siteRepository, never()).save(any());
+        verifyNoInteractions(provisioningService, bridgeClient);
     }
 
     @Test

@@ -77,6 +77,12 @@ public class SiteService {
     @AuditLog(action = AuditLogAction.SITE_REGISTERED, resourceType = "SITE")
     @Transactional
     public SiteResponse register(SiteRegisterRequest request) {
+        // adminPathは副作用(プロビジョニング・保存)の前に検証する。更新(update)と同じ規則(#1081/#1533)。
+        String adminPath = request.adminPath() == null || request.adminPath().isEmpty() ? null : request.adminPath();
+        if (adminPath != null) {
+            requireRelativePath(adminPath);
+        }
+
         if (siteRepository.existsBySiteKey(request.siteKey())) {
             throw new IllegalArgumentException("siteKey '" + request.siteKey() + "' は既に登録されています");
         }
@@ -104,6 +110,7 @@ public class SiteService {
         site.setName(request.name());
         site.setSiteKey(request.siteKey());
         site.setCmsType(request.cmsType());
+        site.setAdminPath(adminPath);
         site.setBaseUrl(resolveDisplayBaseUrl(request.cmsType(), request.credentials()));
         site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(credentialsToStore)));
 

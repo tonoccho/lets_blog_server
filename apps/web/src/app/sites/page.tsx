@@ -41,7 +41,7 @@ export default async function SitesPage() {
       */}
       {isAdmin && !users.failed && !sites.failed && !sshKeyPairs.failed && (
         <div id="site-creation">
-          <SiteCreationPanel users={users.data} sites={sites.data} sshKeyPairs={sshKeyPairs.data} />
+          <SiteCreationPanel users={users.data} sites={sites.data} sshKeyPairs={sshKeyPairs.data} defaultAdminPath={adminPath.data} />
         </div>
       )}
     </div>

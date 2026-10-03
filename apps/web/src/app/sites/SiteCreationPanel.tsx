@@ -11,10 +11,12 @@ export function SiteCreationPanel({
   users,
   sites,
   sshKeyPairs,
+  defaultAdminPath,
 }: {
   users: AppUser[];
   sites: Site[];
   sshKeyPairs: SavedSshKeyPair[];
+  defaultAdminPath: string | null;
 }) {
   const [mode, setMode] = useState<Mode>("external");
   const templateCandidates = sites.filter((site) => site.managedWordpress);
@@ -42,7 +44,7 @@ export function SiteCreationPanel({
         </button>
       </div>
       {mode === "external" ? (
-        <SiteForm sshKeyPairs={sshKeyPairs} />
+        <SiteForm sshKeyPairs={sshKeyPairs} defaultAdminPath={defaultAdminPath} />
       ) : (
         <ManagedWordPressForm users={users} templateCandidates={templateCandidates} />
       )}

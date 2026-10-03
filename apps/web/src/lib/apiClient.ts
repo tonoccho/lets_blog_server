@@ -88,6 +88,8 @@ export interface SiteRegisterInput {
   siteKey: string;
   cmsType: CmsType;
   credentials: Record<string, string>;
+  /** 省略・空欄はグローバル既定を使う(issue #1533)。 */
+  adminPath?: string;
 }
 
 export interface ManagedWordPressSiteInput {

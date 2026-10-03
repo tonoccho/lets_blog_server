@@ -82,7 +82,7 @@ public class WordPressSiteProvisioningService {
                 "wpSlug", slug);
 
         SiteRegisterRequest registerRequest = new SiteRegisterRequest(
-                request.name(), request.siteKey(), CmsType.WORDPRESS, credentials);
+                request.name(), request.siteKey(), CmsType.WORDPRESS, credentials, null);
 
         SiteResponse response;
         try {
@@ -137,7 +137,7 @@ public class WordPressSiteProvisioningService {
                 "wpSlug", slug);
 
         SiteRegisterRequest registerRequest = new SiteRegisterRequest(
-                request.name(), request.siteKey(), CmsType.WORDPRESS, credentials);
+                request.name(), request.siteKey(), CmsType.WORDPRESS, credentials, null);
 
         SiteResponse response = siteService.register(registerRequest);
 

@@ -87,9 +87,12 @@ export async function registerSiteAction(
     return { error: "SSH秘密鍵を指定してください(保存済みの鍵ペアを選択するか、新しい鍵ペアを生成してください)。" };
   }
 
+  // 空欄は送らない(バックエンドはNULL=グローバル既定として扱う)。不正値の400はcatchで表示する。
+  const adminPath = String(formData.get("adminPath") ?? "").trim();
+
   let connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   try {
-    const site = await registerSite({ name, siteKey, cmsType, credentials });
+    const site = await registerSite({ name, siteKey, cmsType, credentials, adminPath: adminPath || undefined });
     connectionCheckStatus = site.connectionCheckStatus;
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

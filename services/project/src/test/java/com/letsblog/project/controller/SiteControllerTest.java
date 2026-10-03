@@ -75,7 +75,7 @@ class SiteControllerTest {
     @Test
     void register_登録できる() {
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com"));
+                Map.of("baseUrl", "https://example.com"), null);
         when(siteService.register(request)).thenReturn(buildResponse());
 
         ResponseEntity<SiteResponse> response = controller().register(request);
@@ -128,7 +128,7 @@ class SiteControllerTest {
 
         assertThrows(ForbiddenException.class,
                 () -> controller().register(new SiteRegisterRequest(
-                        "Name", "my-site", CmsType.WORDPRESS, Map.of("baseUrl", "https://example.com"))));
+                        "Name", "my-site", CmsType.WORDPRESS, Map.of("baseUrl", "https://example.com"), null)));
 
         verifyNoInteractions(siteService);
     }
