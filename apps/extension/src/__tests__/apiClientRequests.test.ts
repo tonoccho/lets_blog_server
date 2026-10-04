@@ -528,6 +528,35 @@ describe('apiClientが解釈するレスポンス', () => {
 
 });
 
+describe('自分のレビュー一覧の取得(issue #1347)', () => {
+  it('projectIdをパスに、GETで取得し、差し戻し情報を含む行を返す', async () => {
+    mockedRequest.mockReset();
+    resetMocks();
+    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
+    setConfiguration('letsBlog.allowInsecureTls', true);
+    const payload = [
+      { prNumber: 7, articleSlug: 'my-post', state: 'CHANGES_REQUESTED', submittedAt: '2026-10-01T00:00:00', rejectComment: '直す', rejectedAt: '2026-10-02T00:00:00' },
+      { prNumber: 8, articleSlug: 'other', state: 'SUBMITTED', submittedAt: '2026-10-01T00:00:00', rejectComment: null, rejectedAt: null },
+    ];
+    let url = '';
+    let method = '';
+    mockedRequest.mockImplementation(async (u, options) => {
+      url = u;
+      method = options.method;
+      return {
+        status: 200, ok: true, statusText: 'OK', header: () => undefined,
+        text: async () => JSON.stringify(payload), json: async () => payload, arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    });
+
+    const result = await apiClient.listMyArticleReviews('token', undefined, 42);
+
+    expect(url).toBe('https://stack.test/api/projects/42/article-review/my-reviews');
+    expect(method).toBe('GET');
+    expect(result).toEqual(payload);
+  });
+});
+
 describe('listCustomTagsのキャッシュ(issue #1467)', () => {
   const tag = { tagName: 'warn', description: null, tagFormat: 'BLOCK' };
   let calls: number;

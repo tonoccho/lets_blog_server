@@ -44,6 +44,7 @@ import { AskAiPanel } from './askAiPanel';
 import { resolveSectionContext } from './headingContext';
 import { buildSourcesSection } from './markdownSources';
 import { logger } from './logger';
+import { checkRejections, RejectionCheckDeps, RejectionPoller, resolvePollIntervalMs } from './rejectionNotifier';
 import { CancelledError, messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
 import { ProofreadController } from './proofreadDiagnostics';
@@ -68,8 +69,21 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration('letsBlog.debugMode')) {
         logger.refreshFromConfiguration();
       }
+      if (event.affectsConfiguration('letsBlog.rejectionPollIntervalMs')) {
+        rejectionPoller.restart();
+      }
     })
   );
+
+  // issue #1347: 自分が提出した記事の差し戻しを、起動時と一定間隔ごとに確認して通知する。
+  const rejectionDeps = createRejectionCheckDeps(context);
+  const rejectionPoller = new RejectionPoller(
+    () => checkRejections(rejectionDeps),
+    () =>
+      resolvePollIntervalMs(vscode.workspace.getConfiguration('letsBlog').get<number>('rejectionPollIntervalMs'))
+  );
+  context.subscriptions.push(rejectionPoller);
+  rejectionPoller.start();
 
   // issue #1216: 指摘チェックリストの対応状態とレビュー結果(本文スナップショット込み)は
   // ワークスペース状態(context.workspaceState)へローカル保存する。サーバー側は追加しない。
@@ -98,6 +112,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context, proofreadController)),
     vscode.commands.registerCommand('letsBlog.submitArticle', () => commandSubmitArticle(context)),
+    vscode.commands.registerCommand('letsBlog.checkRejections', () => commandCheckRejections(rejectionDeps)),
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
     vscode.commands.registerCommand('letsBlog.suggestTags', () => commandSuggestTags(context)),
@@ -175,6 +190,37 @@ function registerDiagramCursorContext(): vscode.Disposable {
   const selectionListener = vscode.window.onDidChangeTextEditorSelection((e) => update(e.textEditor));
   const activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => update(editor));
   return vscode.Disposable.from(selectionListener, activeEditorListener);
+}
+
+/** 差し戻し確認(issue #1347)へVSCode APIと保存済みログイン・プロジェクトを接続する。 */
+function createRejectionCheckDeps(context: vscode.ExtensionContext): RejectionCheckDeps {
+  return {
+    getProjectId: () => getProjectId(context),
+    getAccessToken: () => getAccessToken(context),
+    getActor: () => getActor(context),
+    fetchMyReviews: (apiKey, actor, projectId) => api.listMyArticleReviews(apiKey, actor, projectId),
+    // 別のマシンで開くと再通知される(Issue #1347: 既読管理は拡張側だけで完結させる)。
+    state: {
+      get: (key) => context.globalState.get<string[]>(key),
+      update: (key, value) => context.globalState.update(key, value),
+    },
+    notify: (message) => void vscode.window.showWarningMessage(message),
+    reportError: (message) => void vscode.window.showErrorMessage(message),
+  };
+}
+
+/** 間隔を待たずに差し戻しを確認する(issue #1347)。 */
+async function commandCheckRejections(deps: RejectionCheckDeps): Promise<void> {
+  const outcome = await checkRejections(deps, { manual: true });
+  if (outcome.status === 'skipped') {
+    void vscode.window.showInformationMessage(
+      outcome.reason === 'not-logged-in'
+        ? "ログインしていないため確認できません。「Let's Blog: Login」を先に実行してください。"
+        : "プロジェクトが未選択のため確認できません。「Let's Blog: Select Project」を先に実行してください。"
+    );
+  } else if (outcome.status === 'checked' && outcome.notified === 0) {
+    void vscode.window.showInformationMessage('新たな差し戻しはありません。');
+  }
 }
 
 /** 拡張の無効化。破棄処理はcontext.subscriptionsに登録済みのため、ここでは何もしない。 */

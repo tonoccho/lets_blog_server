@@ -197,6 +197,17 @@ export const ArticleSubmissionResultSchema = z.object({
 });
 export type ArticleSubmissionResult = z.infer<typeof ArticleSubmissionResultSchema>;
 
+/** 自分宛のレビュー一覧(issue #1344)の1行。rejectComment/rejectedAtは差し戻しの行だけに付く。 */
+export const MyArticleReviewSchema = z.object({
+  prNumber: z.number(),
+  articleSlug: z.string(),
+  state: z.enum(['SUBMITTED', 'IN_REVIEW', 'CHANGES_REQUESTED', 'PUBLISHED']),
+  submittedAt: z.string().nullish(),
+  rejectComment: z.string().nullish(),
+  rejectedAt: z.string().nullish(),
+});
+export type MyArticleReview = z.infer<typeof MyArticleReviewSchema>;
+
 export const AiImagePromptResultSchema = z.object({
   prompt: z.string(),
 });

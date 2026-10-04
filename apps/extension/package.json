@@ -125,6 +125,10 @@
       {
         "command": "letsBlog.reviewChecklist",
         "title": "Let's Blog: 指摘チェックリストを表示"
+      },
+      {
+        "command": "letsBlog.checkRejections",
+        "title": "Let's Blog: 差し戻しを今すぐ確認"
       }
     ],
     "keybindings": [
@@ -212,6 +216,12 @@
           "type": "boolean",
           "default": false,
           "description": "letsBlog.serverUrlへのHTTPS接続で自己署名証明書を許容する(証明書検証をスキップする)。既定はfalse(検証を行う)。自己署名証明書のローカル環境(https://localhost等)へ接続する場合のみ、接続先が信頼できることを確認したうえでtrueに設定してください。trueにすると中間者攻撃を検出できなくなります。"
+        },
+        "letsBlog.rejectionPollIntervalMs": {
+          "type": "number",
+          "default": 300000,
+          "minimum": 10000,
+          "description": "自分が提出した記事が差し戻されたかを確認する間隔(ミリ秒)。既定は300000(5分)。未ログイン・プロジェクト未選択の間は確認しません。"
         },
         "letsBlog.debugMode": {
           "type": "boolean",

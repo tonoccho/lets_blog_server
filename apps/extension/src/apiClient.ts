@@ -827,6 +827,22 @@ export async function submitArticleReview(
 }
 
 /**
+ * 自分が提出した記事のレビュー状態の一覧を取得する(issue #1347)。差し戻しの検知に使う。
+ * 副作用の無い取得なので再試行して差し支えない。
+ */
+export async function listMyArticleReviews(
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number
+): Promise<schemas.MyArticleReview[]> {
+  return requestJson(`/api/projects/${projectId}/article-review/my-reviews`, {
+    label: 'listMyArticleReviews',
+    method: 'GET',
+    headers: buildHeaders(apiKey, actor),
+  }, z.array(schemas.MyArticleReviewSchema));
+}
+
+/**
  * チャットメッセージ(と任意の履歴)から画像生成プロンプトを作成する。
  * サーバー側で状態を持たないため、再試行して差し支えない。
  * @param signal 利用者によるキャンセル用。
