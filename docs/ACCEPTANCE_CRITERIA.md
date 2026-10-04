@@ -417,7 +417,7 @@ API: log-writer `AuditLogController`, `OperationLogController`, `FrontendErrorLo
 | AC-EXT-009 | `letsBlog.askAi` | 執筆中に下書き/校正/要約を頼める | 選択範囲に対する応答がエディタへ挿入される | `ext:ai/assist.feature` › askAiは選んだモードでAIへ依頼する(draft / proofread / summarize の3例) | 検証済(`@stub`) |
 | AC-EXT-010 | `letsBlog.askAiSearch` | Web検索を踏まえた回答を得られる | 検索結果を根拠にした応答が返る | `ext:ai/assist.feature` › askAiSearchはWeb検索の結果を根拠として返す | 検証済(`@stub`) |
 | AC-EXT-011 | `letsBlog.suggestTags` | タグを考えなくてよい | 本文からタグ候補が提示される | —(#1004 でブロック。LLMスタブがJSONを要求するプロンプトへ散文で応答するため候補が常に空。単体 `apiClientRequests.test.ts` がリクエスト形式のみ担保) | 未着手(#1004) |
-| AC-EXT-012 | `letsBlog.proofreadNow` | その場で校正できる | 校正指摘が提示される | —(#1004 でブロック。LLMスタブが校正指摘のJSONを返さないため指摘が常に空)。単体 `apiClientRequests.test.ts` › 校正チェックは本文とプロバイダーだけを送る(送信内容のみ担保)、手動: チェックリスト §5。Publish直前のレビューと未対応の指摘による投稿ブロック(#1217): `ext:articles/publish-review.feature`、単体 `publishReviewLogic.test.ts` / `proofreadDiagnostics.test.ts` / `reviewChecklistLogic.test.ts`、手動: チェックリスト §6.1 | 未着手(#1004。送信内容は単体で検証済)。Publish直前のレビューとブロックは検証済(#1217。ブロック表示の操作は手動) |
+| AC-EXT-012 | `letsBlog.proofreadNow` | 公開前に記事を複数の観点で順にレビューできる | 日本語チェック→校正チェック→校閲→読者視点でのチェック→文体チェックの5ステップが順に実行され、指摘がステップ別の色のアンダーラインと指摘チェックリスト(未対応/修正済み/スキップ)で示される。未対応の指摘が残っている間は Publish がブロックされ、プレビューでは警告される | `ext:ai/review-steps.feature` › レビュー5ステップを定義された順に、ステップキーとプロジェクトIDを指定して依頼する(#1215)、単体 `apiClientRequests.test.ts`(ステップ別の依頼先)/ `proofreadLogic.test.ts` / `proofreadDiagnostics.test.ts` / `reviewChecklistLogic.test.ts` / `reviewChecklistStore.test.ts` / `reviewChecklistPanel.test.ts` / `reviewChecklistWebview.test.ts`、手動: チェックリスト §5(色分け・中断・失敗・スキップ)/ §5.1・§5.1.1・§5.2(指摘チェックリスト)。Publish直前のレビューと未対応の指摘による投稿ブロック(#1217): `ext:articles/publish-review.feature`、単体 `publishReviewLogic.test.ts`、手動: チェックリスト §6.1。プレビュー直前のレビュー(#1226): `ext:articles/preview-review.feature`、単体 `previewReviewLogic.test.ts`、手動: チェックリスト §6.2 | 検証済(部分。5ステップの依頼とPublish/プレビュー連携は自動。色分け・チェックリストの操作・実プロバイダーでの指摘内容は手動。Epic #1210) |
 | AC-EXT-013 | `letsBlog.generateSection` | 節単位で書き足せる | 見出しに対応する本文が挿入される | `ext:ai/assist.feature` › generateSectionは見出しのコンテキストを含めて依頼する、単体 `apiClientRequests.test.ts` › セクション生成は見出しと直前の文脈・記事タイトルを含めて送る | 検証済(`@stub`) |
 | AC-EXT-014 | `letsBlog.switchAiProvider` | 用途に応じてAIを変えられる | 切り替えたプロバイダが以後の生成に使われる | `ext:ai/assist.feature` › AIプロバイダーを切り替えると以降のリクエストへ反映される、単体 `apiClientRequests.test.ts` | 検証済(`@stub`) |
 | AC-EXT-015 | `letsBlog.planArticle` | 何を書くか詰められる | プラン対話が開始し、結果を記事へ引き継げる | `ext:articles/authoring.feature` › AIありの記事作成では見出しを含む構成案が提案される(`/article-plan/suggest-structure`)、手動: チェックリスト §4 | 検証済(部分。壁打ちパネルの対話は手動) |
@@ -596,12 +596,12 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 160 |
+| `検証済` | 161 |
 | `部分的に検証` | 3 |
 | `実装中` | 8 |
 | `実装済み` | 21 |
 | `既存spec` / `既存spec(部分)` | 3 |
-| `未着手` | 22 |
+| `未着手` | 21 |
 | `対象外`(§2 に行を持つもの) | 1 |
 | **§2 合計** | **218** |
 
@@ -610,7 +610,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
 `@fail`(不具合が直るまで失敗が期待値)のシナリオは無い(#955 の修正で最後の1件が外れた)。
-`AC-EXT-011` / `012` / `016` は実装側・スタブ側の不具合(#1004 / #998)のため自動化できず
+`AC-EXT-011` / `016` は実装側・スタブ側の不具合(#1004 / #998)のため自動化できず
 `未着手` のままにしてある——バグを期待値として固定しないため。
 
 | 区分 | 件数 |
