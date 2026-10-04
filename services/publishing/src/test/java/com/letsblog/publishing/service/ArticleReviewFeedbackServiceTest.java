@@ -96,7 +96,7 @@ class ArticleReviewFeedbackServiceTest {
         assertThat(response.state()).isEqualTo(ArticleReviewState.CHANGES_REQUESTED);
         assertThat(response.commentId()).isEqualTo(5001L);
         assertThat(response.rejectedByUserId()).isEqualTo(9L);
-        assertThat(response.rejectedAt()).isEqualTo(review.getRejectedAt());
+        assertThat(response.rejectedAt()).isEqualTo(review.getRejectedAt().toInstant(java.time.ZoneOffset.UTC));
     }
 
     @Test
@@ -174,9 +174,9 @@ class ArticleReviewFeedbackServiceTest {
         assertThat(row.prNumber()).isEqualTo(PR);
         assertThat(row.articleSlug()).isEqualTo("sample");
         assertThat(row.state()).isEqualTo(ArticleReviewState.CHANGES_REQUESTED);
-        assertThat(row.submittedAt()).isEqualTo(LocalDateTime.of(2026, 10, 1, 9, 0));
+        assertThat(row.submittedAt()).isEqualTo(java.time.Instant.parse("2026-10-01T09:00:00Z"));
         assertThat(row.rejectComment()).isEqualTo("見出しを直して");
-        assertThat(row.rejectedAt()).isEqualTo(rejected.getRejectedAt());
+        assertThat(row.rejectedAt()).isEqualTo(rejected.getRejectedAt().toInstant(java.time.ZoneOffset.UTC));
     }
 
     @Test

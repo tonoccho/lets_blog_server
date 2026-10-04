@@ -42,7 +42,7 @@ class ArticleReviewFeedbackControllerTest {
     @DisplayName("差し戻しは認可後に、操作者のIDとメールを添えてサービスへ渡す")
     void reject() {
         ArticleRejectResponse expected = new ArticleRejectResponse(
-                201, ArticleReviewState.CHANGES_REQUESTED, 5001L, 3L, LocalDateTime.of(2026, 10, 2, 9, 0));
+                201, ArticleReviewState.CHANGES_REQUESTED, 5001L, 3L, java.time.Instant.parse("2026-10-02T09:00:00Z"));
         when(currentActorService.getCurrentActorId()).thenReturn(3L);
         when(currentActorService.getCurrentActorEmail()).thenReturn("a@example.com");
         when(feedbackService.reject(7L, 3L, "a@example.com", 201, "直して")).thenReturn(expected);
@@ -76,7 +76,7 @@ class ArticleReviewFeedbackControllerTest {
     @DisplayName("自分宛の一覧は認可後に、操作者のIDで絞ってサービスから返す")
     void myReviews() {
         List<MyArticleReviewResponse> expected = List.of(new MyArticleReviewResponse(
-                201, "sample", ArticleReviewState.SUBMITTED, LocalDateTime.of(2026, 10, 1, 9, 0), null, null));
+                201, "sample", ArticleReviewState.SUBMITTED, java.time.Instant.parse("2026-10-01T09:00:00Z"), null, null));
         when(currentActorService.getCurrentActorId()).thenReturn(3L);
         when(feedbackService.myReviews(7L, 3L)).thenReturn(expected);
 

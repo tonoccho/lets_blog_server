@@ -1914,6 +1914,90 @@
           }
         }
       }
+    },
+    "/api/projects/{projectId}/article-review/pull-requests/{prNumber}/reject": {
+      "post": {
+        "tags": [
+          "article-review-feedback-controller"
+        ],
+        "operationId": "reject",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "prNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleRejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArticleRejectResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/article-review/my-reviews": {
+      "get": {
+        "tags": [
+          "article-review-feedback-controller"
+        ],
+        "operationId": "myReviews",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MyArticleReviewResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2770,6 +2854,81 @@
           },
           "parentName": {
             "type": "string"
+          }
+        }
+      },
+      "ArticleRejectRequest": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "comment"
+        ]
+      },
+      "ArticleRejectResponse": {
+        "type": "object",
+        "properties": {
+          "prNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "SUBMITTED",
+              "IN_REVIEW",
+              "CHANGES_REQUESTED",
+              "PUBLISHED"
+            ]
+          },
+          "commentId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rejectedByUserId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rejectedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MyArticleReviewResponse": {
+        "type": "object",
+        "properties": {
+          "prNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "articleSlug": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "SUBMITTED",
+              "IN_REVIEW",
+              "CHANGES_REQUESTED",
+              "PUBLISHED"
+            ]
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "rejectComment": {
+            "type": "string"
+          },
+          "rejectedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }

@@ -401,6 +401,51 @@ export interface CategoryOption {
   parentName?: string;
 }
 
+export interface ArticleRejectRequest {
+  /**
+     * @minLength 1
+     * @pattern \S
+     */
+  comment: string;
+}
+
+export type ArticleRejectResponseState = typeof ArticleRejectResponseState[keyof typeof ArticleRejectResponseState];
+
+
+export const ArticleRejectResponseState = {
+  SUBMITTED: 'SUBMITTED',
+  IN_REVIEW: 'IN_REVIEW',
+  CHANGES_REQUESTED: 'CHANGES_REQUESTED',
+  PUBLISHED: 'PUBLISHED',
+} as const;
+
+export interface ArticleRejectResponse {
+  prNumber?: number;
+  state?: ArticleRejectResponseState;
+  commentId?: number;
+  rejectedByUserId?: number;
+  rejectedAt?: string;
+}
+
+export type MyArticleReviewResponseState = typeof MyArticleReviewResponseState[keyof typeof MyArticleReviewResponseState];
+
+
+export const MyArticleReviewResponseState = {
+  SUBMITTED: 'SUBMITTED',
+  IN_REVIEW: 'IN_REVIEW',
+  CHANGES_REQUESTED: 'CHANGES_REQUESTED',
+  PUBLISHED: 'PUBLISHED',
+} as const;
+
+export interface MyArticleReviewResponse {
+  prNumber?: number;
+  articleSlug?: string;
+  state?: MyArticleReviewResponseState;
+  submittedAt?: string;
+  rejectComment?: string;
+  rejectedAt?: string;
+}
+
 export type RunBulkOperationUploadParams = {
 operationType: RunBulkOperationUploadOperationType;
 };

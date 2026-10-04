@@ -58,7 +58,7 @@ public class ArticleReviewFeedbackService {
 
         review.markChangesRequested(actorId, posted.id());
         repository.save(review);
-        return new ArticleRejectResponse(
+        return ArticleRejectResponse.of(
                 prNumber, review.getState(), posted.id(), actorId, review.getRejectedAt());
     }
 
@@ -81,7 +81,7 @@ public class ArticleReviewFeedbackService {
                         .orElse(null);
             }
             boolean rejected = review.getState() == ArticleReviewState.CHANGES_REQUESTED;
-            result.add(new MyArticleReviewResponse(
+            result.add(MyArticleReviewResponse.of(
                     review.getGithubPrNumber(), review.getArticleSlug(), review.getState(),
                     review.getSubmittedAt(), rejectComment, rejected ? review.getRejectedAt() : null));
         }
