@@ -621,6 +621,46 @@ DEFAULT_STEPS = [
         "touches_stack": True,
     },
     {
+        # WordPress コアのダウンロード処理のテスト(issue #1419 / #1594)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "provision-agent-core-download-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-core-download.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
+        # media-upload の sha256 検証のテスト(issue #1436 / #1594)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "provision-agent-media-hash-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-media-hash.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         # letsblog プラグインと provision-agent への導入処理のテスト(issue #1556)。
         # 実行方法の理由は上の provision-agent-php-test と同じ。
         "name": "letsblog-plugin-php-test",

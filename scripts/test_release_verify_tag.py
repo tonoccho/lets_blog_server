@@ -1863,6 +1863,34 @@ class LetsblogPvPhpTestStep(unittest.TestCase):
         self.assertTrue(any(a.endswith("/provision-agent/__tests__/test-letsblog-pv.php") for a in argv), argv)
 
 
+class ProvisionAgentCoreDownloadAndMediaHashPhpTestSteps(unittest.TestCase):
+    """issue #1594: test-core-download.php(#1419)と test-media-hash.php(#1436)も
+    リリース検証で走らせる。手順表に無いテストは退行を検知しない(#1418)。"""
+
+    CASES = (
+        ("provision-agent-core-download-php-test", "test-core-download.php"),
+        ("provision-agent-media-hash-php-test", "test-media-hash.php"),
+    )
+
+    def test_each_step_runs_its_test_through_the_wordpress_image(self):
+        for name, script in self.CASES:
+            with self.subTest(name=name):
+                step = next((s for s in rvt.DEFAULT_STEPS if s["name"] == name), None)
+                self.assertIsNotNone(step, "%s がリリース検証で実行されない" % script)
+                argv = step["argv"]
+                self.assertEqual("timeout", argv[0])
+                self.assertIn("lets_blog_server-wordpress:latest", argv)
+                self.assertTrue(
+                    any(a.endswith("/provision-agent/__tests__/" + script) for a in argv), argv
+                )
+                mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+                self.assertTrue(
+                    any(m.startswith("%CHECKOUT%/infra/wordpress:") for m in mounts), mounts
+                )
+                names = [s["name"] for s in rvt.DEFAULT_STEPS]
+                self.assertLess(names.index("web-test-at-clean"), names.index(name))
+
+
 class ProvisionAgentPhpTestsStep(unittest.TestCase):
     """issue #1418: provision-agent の PHP テストをリリース検証で走らせる。
 
