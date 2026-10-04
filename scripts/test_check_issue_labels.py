@@ -275,6 +275,64 @@ class MergePrecondition(Harness):
         self.assertNotIn("#700", r.stdout + r.stderr)
 
 
+class ClosedStatusCount(Harness):
+    """#1548: 閉じ方(MR か手動か)に関係なく、CUTOFF 以降に閉じた Issue の status:: が
+    ちょうど1つでなければ違反。手動 close で 0 個になった Issue(#1350)を拾う。"""
+
+    def test_manually_closed_with_no_status_label_is_flagged(self):
+        r = self.run_with(
+            [],
+            closed_issues=[closed_issue(1350, ["bug", "priority::P1"])],
+            closed_by={"1350": []},
+        )
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("#1350", r.stdout + r.stderr)
+
+    def test_closed_with_two_status_labels_is_flagged(self):
+        r = self.run_with(
+            [],
+            closed_issues=[
+                closed_issue(1351, ["status::Done", "status::QA", "priority::P1"])
+            ],
+            closed_by={"1351": []},
+        )
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("#1351", r.stdout + r.stderr)
+
+    def test_closed_before_cutoff_with_no_status_label_is_not_flagged(self):
+        r = self.run_with(
+            [],
+            closed_issues=[
+                closed_issue(1352, ["priority::P1"], closed_at=BEFORE_CUTOFF)
+            ],
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertNotIn("#1352", r.stdout + r.stderr)
+
+    def test_zero_and_two_are_reported_differently(self):
+        zero = self.run_with([], closed_issues=[closed_issue(1353, ["priority::P1"])]).stdout
+        two = self.run_with(
+            [], closed_issues=[closed_issue(1354, ["status::Done", "status::QA"])]
+        ).stdout
+        self.assertNotEqual(zero.replace("1353", "N"), two.replace("1354", "N"))
+
+    def test_merged_mr_with_zero_status_is_reported_once(self):
+        r = self.run_with(
+            [],
+            closed_issues=[closed_issue(1355, ["priority::P1"])],
+            closed_by={"1355": [merged_mr(1)]},
+        )
+        self.assertEqual(1, r.stdout.count("#1355 "), r.stdout)
+
+    def test_manually_closed_with_one_status_label_is_not_flagged(self):
+        r = self.run_with(
+            [],
+            closed_issues=[closed_issue(1356, ["status::Backlog", "priority::P1"])],
+            closed_by={"1356": []},
+        )
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+
 class Pagination(Harness):
     """#1031 レビュー再検討: per_page=100 の1ページ目しか見ておらず、2ページ目以降の
     closed / open Issue が検査対象から漏れていた。ページを跨いで応答を返すスタブで、

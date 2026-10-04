@@ -101,8 +101,22 @@ CLOSED_CANDIDATES="$(echo "$CLOSED_ISSUES" | jq -r --arg cutoff "$CUTOFF" '
   | . as $i
   | ([$i.labels[] | select(startswith("status::"))]) as $s
   | select(($s | join(",")) != "status::Done")
+  | select(($s | length) == 1)
   | select(($i.closed_at // "") >= $cutoff)
   | "\($i.iid)\t\($s | join(", "))\t\($i.title[0:56])"
+')"
+
+# issue #1548: closed の status:: 個数は、閉じ方(MR か手動か)に関係なく検査する。
+# 手動で閉じて Web UI でラベルを付け替え損ねた Issue(#1350: 0個)は closed_by に
+# merged な MR が無く、上の方式Cでは拾えない。個数が1でないものはここで報告し、
+# 方式Cの対象(ちょうど1個で Done でないもの)とは重複させない。
+CLOSED_COUNT_REPORT="$(echo "$CLOSED_ISSUES" | jq -r --arg cutoff "$CUTOFF" '
+  .[]
+  | . as $i
+  | ([$i.labels[] | select(startswith("status::"))]) as $s
+  | select(($s | length) != 1)
+  | select(($i.closed_at // "") >= $cutoff)
+  | "\($i.iid)\t\($s | length)\t\($s | join(", "))\t\($i.title[0:56])"
 ')"
 
 CLOSED_REPORT=""
@@ -179,6 +193,23 @@ if [ -n "$CLOSED_REPORT" ]; then
         echo "          経ていなければ、何が省略されたかを調査すること。"
     done <<< "$CLOSED_REPORT"
     VIOLATIONS=$(( VIOLATIONS + $(echo "$CLOSED_REPORT" | grep -c . || true) ))
+fi
+
+if [ -n "$CLOSED_COUNT_REPORT" ]; then
+    echo
+    echo "=== 違反(closed の status:: の個数, #1548)==="
+    while IFS=$'\t' read -r iid ns slabels title; do
+        [ -z "$iid" ] && continue
+        echo "#${iid} ${title}"
+        if [ "$ns" -eq 0 ]; then
+            echo "  ステータス: closed だが **無し**。閉じ方(MR か手動か)を問わず検出する。"
+            echo "    対処: 実態に合う段(通常は status::Done)を1つ付ける。"
+        else
+            echo "  ステータス: closed で **${ns}個** (${slabels})。どの段か決まらない。"
+            echo "    対処: 正しい1つを残し、他を同じ呼び出しで remove_labels する。"
+        fi
+    done <<< "$CLOSED_COUNT_REPORT"
+    VIOLATIONS=$(( VIOLATIONS + $(echo "$CLOSED_COUNT_REPORT" | grep -c . || true) ))
 fi
 
 if [ "$HOTFIX_COUNT" -gt "$HOTFIX_CAP" ]; then
