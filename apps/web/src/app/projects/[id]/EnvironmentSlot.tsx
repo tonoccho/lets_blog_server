@@ -31,7 +31,7 @@ export function EnvironmentSlot({
     bindEnvironmentAction(projectId, environment, prevState, formData);
   const [state, formAction, pending] = useActionState(action, initialState);
   const [isUnbinding, startUnbind] = useTransition();
-  const adminUrl = site ? resolveSiteAdminUrl(site.baseUrl, adminPath) : null;
+  const adminUrl = site ? resolveSiteAdminUrl(site.baseUrl, adminPath, site.adminPath) : null;
 
   return (
     <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">

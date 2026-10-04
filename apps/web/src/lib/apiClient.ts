@@ -20,6 +20,8 @@ export interface Site {
   sshConfigured: boolean;
   /** letsblog プラグインへの同期の状態(issue #1558)。一度も同期していなければ null。 */
   letsblogSync?: LetsblogSyncState | null;
+  /** サイト個別の管理画面パス。null・未設定はグローバル既定値を使う(issue #1534)。 */
+  adminPath?: string | null;
 }
 
 /** letsblog プラグインへの同期の結果(issue #1558)。 */

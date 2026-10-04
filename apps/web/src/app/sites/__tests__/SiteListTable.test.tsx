@@ -260,6 +260,22 @@ describe('SiteListTable', () => {
       expect(screen.getByRole('link', { name: 'Test Site 1 のサイトを開く' })).toBeInTheDocument()
     })
 
+    it('サイト個別の管理画面パスがあるサイトは <公開URL>/<個別パス> を開き、null のサイトはグローバル既定にフォールバックする(issue #1534)', () => {
+      const sites: Site[] = [
+        { ...mockSites[0], adminPath: 'secret-login' },
+        { ...mockSites[1], adminPath: null },
+      ]
+      render(<SiteListTable sites={sites} projects={[]} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />)
+      expect(screen.getByRole('link', { name: 'Test Site 1 の管理画面を開く' })).toHaveAttribute(
+        'href',
+        'https://test1.example.com/secret-login'
+      )
+      expect(screen.getByRole('link', { name: 'Test Site 2 の管理画面を開く' })).toHaveAttribute(
+        'href',
+        'https://test2.example.com/wp-admin'
+      )
+    })
+
     it('公開URLの一部で検索すると、そのサイトだけに絞り込まれる', () => {
       renderTable()
       fireEvent.change(screen.getByPlaceholderText('サイトキー・表示名・URLで検索'), { target: { value: 'test1' } })

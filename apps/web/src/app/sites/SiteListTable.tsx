@@ -188,7 +188,7 @@ export function SiteListTable({
             )}
             {filteredSites.map((site) => {
               const projectInfo = siteToProject.get(site.id);
-              const adminUrl = resolveSiteAdminUrl(site.baseUrl, adminPath);
+              const adminUrl = resolveSiteAdminUrl(site.baseUrl, adminPath, site.adminPath);
               return (
                 <tr key={site.id} className="border-b border-neutral-100 dark:border-neutral-800 odd:bg-neutral-50/50 last:border-0 cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
                   <td className="px-4 py-2 font-mono">{site.siteKey}</td>

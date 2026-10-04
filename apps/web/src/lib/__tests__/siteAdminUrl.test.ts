@@ -28,4 +28,28 @@ describe('resolveSiteAdminUrl', () => {
   it('パスが URL として解釈できないときは null', () => {
     expect(resolveSiteAdminUrl('https://example.com', 'http://[bad')).toBeNull()
   })
+
+  describe('サイト個別の管理画面パス(3番目の引数)', () => {
+    it('個別の値があればグローバル既定より優先する', () => {
+      expect(resolveSiteAdminUrl('https://example.com', 'wp-admin', 'secret-login')).toBe(
+        'https://example.com/secret-login'
+      )
+    })
+
+    it('個別の値が null ならグローバル既定を使う', () => {
+      expect(resolveSiteAdminUrl('https://example.com', 'wp-admin', null)).toBe('https://example.com/wp-admin')
+    })
+
+    it('個別の値が undefined ならグローバル既定を使う', () => {
+      expect(resolveSiteAdminUrl('https://example.com', 'wp-admin', undefined)).toBe('https://example.com/wp-admin')
+    })
+
+    it('個別の値が空文字ならグローバル既定を使う', () => {
+      expect(resolveSiteAdminUrl('https://example.com', 'wp-admin', '')).toBe('https://example.com/wp-admin')
+    })
+
+    it('個別の値が別オリジンを指すときはグローバル既定に戻さず null', () => {
+      expect(resolveSiteAdminUrl('https://example.com', 'wp-admin', 'https://evil.example.com/x')).toBeNull()
+    })
+  })
 })

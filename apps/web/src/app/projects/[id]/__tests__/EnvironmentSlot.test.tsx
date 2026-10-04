@@ -215,6 +215,24 @@ describe("EnvironmentSlot", () => {
     expect(screen.queryByRole("link", { name: "テストサイト の管理画面を開く" })).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["サイト個別パスあり", "secret-login", "https://example.com/secret-login"],
+    ["サイト個別パスが null", null, "https://example.com/wp-admin"],
+    ["サイト個別パスが空文字(クリア済み)", "", "https://example.com/wp-admin"],
+  ])("管理画面リンクの href: %s(issue #1534)", (_label, siteAdminPath, expected) => {
+    render(
+      <EnvironmentSlot
+        projectId={1}
+        environment="test"
+        site={buildSite({ name: "テストサイト", adminPath: siteAdminPath })}
+        candidateSites={[]}
+        adminPath="wp-admin"
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "テストサイト の管理画面を開く" })).toHaveAttribute("href", expected);
+  });
+
   it("未紐付けのスロットにはサイト・管理画面リンクを表示しない(issue #1530)", () => {
     render(<EnvironmentSlot projectId={1} environment="test" site={null} candidateSites={[]} adminPath="wp-admin" />);
 
