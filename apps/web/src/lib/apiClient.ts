@@ -2886,6 +2886,7 @@ export interface ContainerStatus {
   id: string;
   name: string;
   status: "NORMAL" | "WARNING" | "ERROR";
+  /** "standby" は演算デバイスの代替構成として意図的に停止していることを表す(issue #1584)。 */
   state: string;
   detail: string;
 }

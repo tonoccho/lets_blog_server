@@ -240,6 +240,107 @@ class ContainerStatusServiceTest {
         assertEquals(Status.ERROR, containers.get(1).status());
     }
 
+    // ------------------------------------------------------------------
+    // issue #1584: 演算デバイスの代替構成(comfyui <-> comfyui-cpu)の待機側は異常に数えない。
+    // ------------------------------------------------------------------
+
+    private static String entry(String name, String state, String status) {
+        return "{\"Id\":\"id-" + name + "\",\"Names\":[\"/lbs-" + name + "\"],"
+                + "\"State\":\"" + state + "\",\"Status\":\"" + status + "\"}";
+    }
+
+    private ContainerStatusResponse find(List<ContainerStatusResponse> containers, String name) {
+        return containers.stream().filter(c -> c.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"created", "exited"})
+    void testListAll_相方がrunningなら停止側は待機中の正常にする(String standbyState) {
+        expectList("[" + entry("comfyui", "running", "Up 1 hour") + ","
+                + entry("comfyui-cpu", standbyState, "Exited (0) 1 minute ago") + "]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        ContainerStatusResponse standby = find(containers, "comfyui-cpu");
+        assertEquals(Status.NORMAL, standby.status());
+        assertEquals("standby", standby.state());
+        assertEquals("Exited (0) 1 minute ago", standby.detail());
+        assertEquals(Status.NORMAL, find(containers, "comfyui").status());
+        assertEquals("running", find(containers, "comfyui").state());
+        // 既存の読み取りだけで判定し、詳細取得を足さない。
+        server.verify();
+    }
+
+    @Test
+    void testListAll_GPU側が待機でCPU側が稼働中でも待機中にする() {
+        expectList("[" + entry("comfyui", "created", "Created") + ","
+                + entry("comfyui-cpu", "running", "Up 1 hour") + "]");
+
+        ContainerStatusResponse standby = find(service.listAll(), "comfyui");
+
+        assertEquals(Status.NORMAL, standby.status());
+        assertEquals("standby", standby.state());
+    }
+
+    @Test
+    void testListAll_相方がunhealthyでも稼働中として待機中にする() {
+        expectList("[" + entry("comfyui", "running", "Up 5 minutes (unhealthy)") + ","
+                + entry("comfyui-cpu", "exited", "Exited (0) 1 minute ago") + "]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.WARNING, find(containers, "comfyui").status());
+        assertEquals("standby", find(containers, "comfyui-cpu").state());
+        assertEquals(Status.NORMAL, find(containers, "comfyui-cpu").status());
+    }
+
+    @Test
+    void testListAll_両方とも稼働していなければどちらもエラー() {
+        expectList("[" + entry("comfyui", "exited", "Exited (0) 1 minute ago") + ","
+                + entry("comfyui-cpu", "created", "Created") + "]");
+        expectInspect("id-comfyui", 0, "unless-stopped");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, find(containers, "comfyui").status());
+        assertEquals("exited", find(containers, "comfyui").state());
+        assertEquals(Status.ERROR, find(containers, "comfyui-cpu").status());
+        assertEquals("created", find(containers, "comfyui-cpu").state());
+    }
+
+    @Test
+    void testListAll_相方が存在しなければ従来どおりエラー() {
+        expectList("[" + entry("comfyui", "created", "Created") + "]");
+
+        ContainerStatusResponse only = service.listAll().get(0);
+
+        assertEquals(Status.ERROR, only.status());
+        assertEquals("created", only.state());
+    }
+
+    @Test
+    void testListAll_相方がrunningでも停止系以外の状態は待機中にしない() {
+        expectList("[" + entry("comfyui", "running", "Up 1 hour") + ","
+                + entry("comfyui-cpu", "restarting", "Restarting (1) 5 seconds ago") + "]");
+
+        ContainerStatusResponse cpu = find(service.listAll(), "comfyui-cpu");
+
+        assertEquals(Status.ERROR, cpu.status());
+        assertEquals("restarting", cpu.state());
+    }
+
+    @Test
+    void testListAll_組に属さないコンテナは相方が無くても待機中にならない() {
+        expectList("[" + entry("comfyui", "running", "Up 1 hour") + ","
+                + entry("mysql", "exited", "Exited (1) 1 minute ago") + "]");
+        expectInspect("id-mysql", 1, "unless-stopped");
+
+        ContainerStatusResponse mysql = find(service.listAll(), "mysql");
+
+        assertEquals(Status.ERROR, mysql.status());
+        assertEquals("exited", mysql.state());
+    }
+
     private void expectList(String json) {
         server.expect(requestTo(DOCKER_URL + "/containers/json?all=true"))
                 .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));

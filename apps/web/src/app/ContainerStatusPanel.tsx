@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, PauseCircle } from "lucide-react";
 import type { ContainerStatus } from "@/lib/apiClient";
 
 const POLL_INTERVAL_MS = 30000;
@@ -18,7 +18,15 @@ const STATUS_STYLE: Record<ContainerStatus["status"], string> = {
   ERROR: "text-red-700 dark:text-red-400",
 };
 
-function StatusIcon({ status }: { status: ContainerStatus["status"] }) {
+/** 演算デバイスの代替構成として待機中のコンテナ(issue #1584)。異常ではないので中立の見た目にする。 */
+const STANDBY_STATE = "standby";
+const STANDBY_STYLE = "text-neutral-500 dark:text-neutral-400";
+
+function StatusIcon({ container }: { container: ContainerStatus }) {
+  const status = container.status;
+  if (container.state === STANDBY_STATE) {
+    return <PauseCircle className={`h-4 w-4 ${STANDBY_STYLE}`} aria-hidden="true" />;
+  }
   const className = `h-4 w-4 ${STATUS_STYLE[status]}`;
   if (status === "NORMAL") return <CheckCircle2 className={className} aria-hidden="true" />;
   if (status === "WARNING") return <AlertTriangle className={className} aria-hidden="true" />;
@@ -153,9 +161,13 @@ export function ContainerStatusPanel({
               title={container.detail || undefined}
             >
               <span className="text-sm text-neutral-700 dark:text-neutral-300">{container.name}</span>
-              <span className={`flex items-center gap-1 text-xs font-medium ${STATUS_STYLE[container.status]}`}>
-                <StatusIcon status={container.status} />
-                {STATUS_LABEL[container.status]}
+              <span
+                className={`flex items-center gap-1 text-xs font-medium ${
+                  container.state === STANDBY_STATE ? STANDBY_STYLE : STATUS_STYLE[container.status]
+                }`}
+              >
+                <StatusIcon container={container} />
+                {container.state === STANDBY_STATE ? "待機中" : STATUS_LABEL[container.status]}
               </span>
             </li>
           ))}

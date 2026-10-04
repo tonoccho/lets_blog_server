@@ -18,7 +18,10 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * legacy-apiから移設(issue #695、C10-3、元は issue #280)。ダッシュボードに表示する、このアプリ自体を
@@ -37,6 +40,26 @@ public class ContainerStatusService {
     private static final String CONTAINER_NAME_PREFIX = "lbs-";
     /** docker composeが全コンテナへ付けるプロジェクト名ラベル。一覧APIのLabelsに含まれる。 */
     private static final String COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
+
+    /** 演算デバイスの代替構成で停止しているコンテナに付ける状態値(issue #1584)。 */
+    static final String STANDBY_STATE = "standby";
+    /**
+     * 代替構成の組(issue #1584)。片方が稼働している間、もう片方は意図的に停止している。
+     * 組を足すときは {@link #ALTERNATIVE_PAIRS} に1行足す(例: {@code {"ollama", "ollama-cpu"}})。
+     */
+    private static final String[][] ALTERNATIVE_PAIRS = {{"comfyui", "comfyui-cpu"}};
+    private static final Map<String, String> ALTERNATIVE_OF = alternativeOf();
+
+    private static Map<String, String> alternativeOf() {
+        Map<String, String> map = new java.util.HashMap<>();
+        for (String[] pair : ALTERNATIVE_PAIRS) {
+            map.put(pair[0], pair[1]);
+            map.put(pair[1], pair[0]);
+        }
+        return Map.copyOf(map);
+    }
+
+    private record RawContainer(String id, String name, String state, String detail) {}
 
     private final RestClient dockerClient;
     /**
@@ -100,7 +123,7 @@ public class ContainerStatusService {
             if (response == null) {
                 return List.of();
             }
-            List<ContainerStatusResponse> containers = new ArrayList<>();
+            List<RawContainer> raws = new ArrayList<>();
             for (JsonNode item : response) {
                 String rawName = firstName(item.path("Names"));
                 if (rawName == null || !rawName.startsWith(CONTAINER_NAME_PREFIX)) {
@@ -109,12 +132,27 @@ public class ContainerStatusService {
                 if (!belongsToThisProject(item)) {
                     continue;
                 }
-                String name = rawName.substring(CONTAINER_NAME_PREFIX.length());
-                String state = item.path("State").asText("");
-                String detail = item.path("Status").asText("");
-                String id = item.path("Id").asText("");
-                Status status = resolveStatus(id, state, detail);
-                containers.add(new ContainerStatusResponse(name, name, status, state, detail));
+                raws.add(new RawContainer(
+                        item.path("Id").asText(""),
+                        rawName.substring(CONTAINER_NAME_PREFIX.length()),
+                        item.path("State").asText(""),
+                        item.path("Status").asText("")));
+            }
+            Set<String> running = new HashSet<>();
+            for (RawContainer raw : raws) {
+                if ("running".equals(raw.state())) {
+                    running.add(raw.name());
+                }
+            }
+            List<ContainerStatusResponse> containers = new ArrayList<>();
+            for (RawContainer raw : raws) {
+                if (isStandbyAlternative(raw, running)) {
+                    containers.add(new ContainerStatusResponse(
+                            raw.name(), raw.name(), Status.NORMAL, STANDBY_STATE, raw.detail()));
+                    continue;
+                }
+                Status status = resolveStatus(raw.id(), raw.state(), raw.detail());
+                containers.add(new ContainerStatusResponse(raw.name(), raw.name(), status, raw.state(), raw.detail()));
             }
             containers.sort(Comparator.comparing(ContainerStatusResponse::name));
             return containers;
@@ -122,6 +160,18 @@ public class ContainerStatusService {
             log.warn("コンテナ状態の取得に失敗しました(docker-socket-proxy未設定/未到達の可能性があります): {}", e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * 代替構成の組の相方が稼働中で、自分は停止({@code created}/{@code exited})している場合に真(issue #1584)。
+     * 相方が稼働していなければ偽(従来どおりの判定へ進む)。
+     */
+    private static boolean isStandbyAlternative(RawContainer raw, Set<String> running) {
+        String partner = ALTERNATIVE_OF.get(raw.name());
+        if (partner == null || !running.contains(partner)) {
+            return false;
+        }
+        return "created".equals(raw.state()) || "exited".equals(raw.state());
     }
 
     /**

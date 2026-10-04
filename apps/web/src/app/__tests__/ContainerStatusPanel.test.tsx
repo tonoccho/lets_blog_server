@@ -69,6 +69,34 @@ describe("ContainerStatusPanel", () => {
     expect(screen.getByText("lbs-web")).toBeInTheDocument();
   });
 
+  it("state が standby のコンテナは「正常」ではなく「待機中」と表示する(issue #1584)", () => {
+    render(
+      <ContainerStatusPanel
+        initialStatuses={[
+          containerStatus({ id: "a", name: "comfyui", state: "running" }),
+          containerStatus({ id: "b", name: "comfyui-cpu", state: "standby", detail: "Exited (0) 1 minute ago" }),
+        ]}
+        personalTimeZone={null}
+      />
+    );
+
+    expect(screen.getByText("待機中")).toBeInTheDocument();
+    expect(screen.getAllByText("正常")).toHaveLength(1);
+    expect(screen.getByText("comfyui-cpu").closest("li")).toHaveAttribute("title", "Exited (0) 1 minute ago");
+  });
+
+  it("エラーのコンテナは state に関わらず「エラー」と表示する(issue #1584)", () => {
+    render(
+      <ContainerStatusPanel
+        initialStatuses={[containerStatus({ status: "ERROR", state: "exited" })]}
+        personalTimeZone={null}
+      />
+    );
+
+    expect(screen.getByText("エラー")).toBeInTheDocument();
+    expect(screen.queryByText("待機中")).not.toBeInTheDocument();
+  });
+
   it("個人設定TZが設定されているとき、最終更新時刻はtoLocaleTimeStringにそのTZを渡す(issue #1362)", () => {
     const spy = jest.spyOn(Date.prototype, "toLocaleTimeString").mockReturnValue("MOCKED_TIME");
     render(<ContainerStatusPanel initialStatuses={[]} personalTimeZone="Asia/Tokyo" />);
