@@ -384,6 +384,30 @@ public class WordPressAdapter implements CmsAdapter {
         return sshOperations.installWpCli(creds);
     }
 
+    @Override
+    public LetsblogPluginStatus letsblogPluginStatus(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.letsblogPluginStatus(creds);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.letsblogPluginStatus(creds);
+        }
+        throw unsupportedTransport(creds);
+    }
+
+    @Override
+    public LetsblogPluginStatus installLetsblogPlugin(CmsCredentials credentials) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.installLetsblogPlugin(creds);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.installLetsblogPlugin(creds);
+        }
+        throw unsupportedTransport(creds);
+    }
+
     private IllegalStateException unsupportedTransport(CmsCredentials.WordPressCredentials creds) {
         return new IllegalStateException("サポートされていないWordPress接続方式です(transport=" + creds.transport() + ")");
     }

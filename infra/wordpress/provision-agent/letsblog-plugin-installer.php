@@ -12,9 +12,11 @@ const LETSBLOG_PLUGIN_SOURCE_DIR = '/var/www/letsblog-plugin';
 
 /**
  * @param callable(array):array|null $run wp-cliの引数を受け取り[終了コード, stdout, stderr]を返す(既定はrunWp)
+ * @param bool $force trueなら配置済みで内容が同じでも有効化し直す(サイト画面からの再導入。プラグインを停止した
+ *                    サイトを戻すため。issue #1557)。有効化に失敗しても導入済みの配置は消さない
  * @return array{0:int,1:string,2:string}
  */
-function ensureLetsblogPlugin(string $sitePath, ?callable $run = null, string $sourceDir = LETSBLOG_PLUGIN_SOURCE_DIR): array
+function ensureLetsblogPlugin(string $sitePath, ?callable $run = null, string $sourceDir = LETSBLOG_PLUGIN_SOURCE_DIR, bool $force = false): array
 {
     $run ??= 'runWp';
     $source = "$sourceDir/letsblog.php";
@@ -26,7 +28,7 @@ function ensureLetsblogPlugin(string $sitePath, ?callable $run = null, string $s
     $pluginDir = "$sitePath/wp-content/plugins/letsblog";
     $dest = "$pluginDir/letsblog.php";
     $previous = is_file($dest) ? file_get_contents($dest) : null;
-    if ($previous === $contents) {
+    if ($previous === $contents && !$force) {
         return [0, '', ''];
     }
 

@@ -106,6 +106,9 @@ public class PostPublishService {
         // WordPressへの公開は「認証済みなら誰でも」ではなく、そのサイトが属するプロジェクトの
         // メンバー(またはadmin)に限定する(issue #830)。CMSへの副作用が始まる前に判定する。
         adminAuthorizationService.requireProjectMemberOrAdminForSite(projectId);
+        // letsblogプラグインが使えない(未導入・要更新の)サイトへは投稿しない。CMSへ何かを書き込む前に
+        // 理由と対処(再導入)を示して拒否する(issue #1557)。
+        cmsAdapter.requireLetsblogPlugin(credentials);
         // カスタムタグ→[blogcard]→[amazon]→[recharts]の展開はcontent-serviceへ委譲する(issue #576)。
         // [recharts]タグの記法・データが不正な場合はInvalidRechartsTagExceptionが未捕捉のまま伝播し、
         // GlobalExceptionHandlerが400として返すことで投稿自体を拒否する(Issue #340、ContentServiceClient

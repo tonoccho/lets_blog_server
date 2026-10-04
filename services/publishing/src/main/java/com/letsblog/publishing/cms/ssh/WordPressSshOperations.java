@@ -11,6 +11,7 @@ import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.MediaContentHash;
+import com.letsblog.publishing.cms.LetsblogPluginStatus;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -1338,6 +1339,58 @@ public class WordPressSshOperations {
             throw new SshOperationException("letsblogプラグインの有効化に失敗しました: "
                     + firstLine(activate.stderr(), activate.stdout()));
         }
+    }
+
+    /**
+     * `wp letsblog status` で letsblog プラグインの導入状態を判定する(issue #1557)。
+     * 「`letsblog` は登録されたコマンドではない」(プラグインが無い・停止している)だけが未導入。
+     * それ以外の失敗(wpPathの誤り・wp-cli未導入・PHPの致命的エラー・JSONでない出力)は、未導入と
+     * 取り違えないよう、stderrをログに残して例外にする。
+     */
+    public LetsblogPluginStatus letsblogPluginStatus(WordPressCredentials creds) {
+        SshCommandResult result = exec(creds, wpCli(creds, "letsblog status"));
+        if (!result.ok()) {
+            if (LetsblogPluginStatus.isCommandMissing(result.stderr())
+                    || LetsblogPluginStatus.isCommandMissing(result.stdout())) {
+                return LetsblogPluginStatus.notInstalled();
+            }
+            log.warn("wp letsblog statusが失敗しました (sshHost={}, wpPath={}): {}",
+                    creds.sshHost(), creds.wpPath(), result.stderr());
+            throw new SshOperationException("wp letsblog statusの実行に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        try {
+            return LetsblogPluginStatus.fromStatusOutput(result.stdout());
+        } catch (IllegalArgumentException e) {
+            log.warn("wp letsblog statusの出力を解釈できません (sshHost={}, wpPath={}): {}",
+                    creds.sshHost(), creds.wpPath(), result.stderr());
+            throw new SshOperationException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * letsblog プラグインを配置し直して有効化し、導入後の状態を返す(issue #1557)。
+     * {@link #ensureLetsblogPlugin}と違い、配置済みでも有効化し直す(停止したサイトを戻すため)。
+     * 有効化に失敗したら配置を取り消す。ただし導入済みだったファイルは消さず、元の内容へ戻す。
+     */
+    public LetsblogPluginStatus installLetsblogPlugin(WordPressCredentials creds) {
+        String pluginDir = creds.wpPath() + "/wp-content/plugins/letsblog";
+        String pluginPath = pluginDir + "/letsblog.php";
+        SshCommandResult existing = exec(creds, "cat " + ShellQuote.single(pluginPath));
+        exec(creds, "mkdir -p " + ShellQuote.single(pluginDir));
+        executor.putFile(connectionParams(creds), letsblogPluginSource(), pluginPath);
+        SshCommandResult activate = exec(creds, wpCli(creds, "plugin activate letsblog"));
+        if (!activate.ok()) {
+            if (existing.ok()) {
+                executor.putFile(connectionParams(creds),
+                        existing.stdout().getBytes(StandardCharsets.UTF_8), pluginPath);
+            } else {
+                exec(creds, "rm -f " + ShellQuote.single(pluginPath));
+            }
+            throw new SshOperationException("letsblogプラグインの有効化に失敗しました: "
+                    + firstLine(activate.stderr(), activate.stdout()));
+        }
+        return letsblogPluginStatus(creds);
     }
 
     private byte[] letsblogPluginSource() {

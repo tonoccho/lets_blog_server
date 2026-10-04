@@ -1289,4 +1289,23 @@ class PostPublishServiceTest {
 
         verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
     }
+
+    // ---- issue #1557: プラグインが使えないサイトへの投稿は拒否する ----
+
+    @Test
+    void publish_letsblogプラグインが使えないサイトは拒否しCMSへ何も書き込まない() {
+        doThrow(new com.letsblog.publishing.cms.LetsblogPluginUnavailableException(
+                com.letsblog.publishing.cms.LetsblogPluginStatus.notInstalled()))
+                .when(cmsAdapter).requireLetsblogPlugin(any());
+
+        com.letsblog.publishing.cms.LetsblogPluginUnavailableException e = assertThrows(
+                com.letsblog.publishing.cms.LetsblogPluginUnavailableException.class,
+                () -> service.publish(command("slug", "title", List.of(), null)));
+
+        assertTrue(e.getMessage().contains("再導入"));
+        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        verify(cmsAdapter, never()).resolveCategories(any(), any());
+        verify(domainEventPublisher, never()).publishPostPublished(any(), any(), any(), any(), any());
+    }
 }

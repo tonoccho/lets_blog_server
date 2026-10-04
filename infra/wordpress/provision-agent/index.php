@@ -1050,6 +1050,41 @@ if ($path === '/wp-cli/core-version' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     respond(200, ['version' => $out]);
 }
 
+// letsblogプラグインの導入状態(issue #1557)。`wp letsblog status` の終了コードと標準出力をそのまま返し、
+// 判定(導入済み/未導入/要更新)はアプリ側で行う。ここでは導入処理を走らせない(resolveExistingSitePath()は
+// 未導入のサイトへ導入してしまうため使わない)。停止したサイトを「未導入」のまま返すため。
+if ($path === '/wp-cli/letsblog-status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = runWp(['letsblog', 'status', "--path=$sitePath", '--allow-root']);
+    respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
+}
+
+// letsblogプラグインの再導入(issue #1557)。配置済みで内容が同じでも有効化し直す。
+if ($path === '/wp-cli/letsblog-install' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    if (!isValidSlug($slug)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    [$code, $out, $err] = ensureLetsblogPlugin($sitePath, null, LETSBLOG_PLUGIN_SOURCE_DIR, true);
+    if ($code !== 0) {
+        respond(500, ['error' => 'letsblogプラグインの導入に失敗しました', 'detail' => combinedOutput($out, $err)]);
+    }
+    respond(200, ['installed' => true]);
+}
+
 const ALLOWED_RESOLVE_TAXONOMIES = ['category', 'post_tag'];
 
 if ($path === '/wp-cli/resolve-terms' && $_SERVER['REQUEST_METHOD'] === 'POST') {

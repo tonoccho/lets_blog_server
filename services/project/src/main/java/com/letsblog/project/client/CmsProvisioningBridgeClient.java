@@ -2,6 +2,7 @@ package com.letsblog.project.client;
 
 import com.letsblog.project.cms.ConnectionCheckResult;
 import com.letsblog.project.cms.DatabaseExport;
+import com.letsblog.project.cms.LetsblogPluginStatus;
 import com.letsblog.project.cms.ProvisioningResult;
 import com.letsblog.project.cms.WpCliInstallResult;
 import jakarta.servlet.http.HttpServletRequest;
@@ -72,6 +73,16 @@ public class CmsProvisioningBridgeClient {
 
     public WpCliInstallResult installWpCli(String cmsType, Map<String, String> credentials) {
         return post("/api/internal/project/cms/install-wp-cli", credentialsBody(cmsType, credentials), WpCliInstallResult.class);
+    }
+
+    public LetsblogPluginStatus letsblogPluginStatus(String cmsType, Map<String, String> credentials) {
+        return post("/api/internal/project/cms/letsblog-plugin-status", credentialsBody(cmsType, credentials),
+                LetsblogPluginStatus.class);
+    }
+
+    public LetsblogPluginStatus installLetsblogPlugin(String cmsType, Map<String, String> credentials) {
+        return post("/api/internal/project/cms/install-letsblog-plugin", credentialsBody(cmsType, credentials),
+                LetsblogPluginStatus.class);
     }
 
     public boolean hasAuthorProvisioningCapability(String cmsType, Map<String, String> credentials) {

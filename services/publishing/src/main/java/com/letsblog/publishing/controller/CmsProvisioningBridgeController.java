@@ -5,6 +5,7 @@ import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.LetsblogPluginStatus;
 import com.letsblog.publishing.cms.WpCliInstallResult;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.dto.CmsBridgeConnectionCheckResponse;
@@ -66,6 +67,22 @@ public class CmsProvisioningBridgeController {
         CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
         CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
         return adapter.installWpCli(credentials);
+    }
+
+    /** サイトの letsblog プラグインの導入状態(issue #1557)。 */
+    @PostMapping("/api/internal/project/cms/letsblog-plugin-status")
+    public LetsblogPluginStatus letsblogPluginStatus(@Valid @RequestBody CmsBridgeCredentialsRequest request) {
+        CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
+        CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        return adapter.letsblogPluginStatus(credentials);
+    }
+
+    /** letsblog プラグインの(再)導入。導入後の状態を返す(issue #1557)。 */
+    @PostMapping("/api/internal/project/cms/install-letsblog-plugin")
+    public LetsblogPluginStatus installLetsblogPlugin(@Valid @RequestBody CmsBridgeCredentialsRequest request) {
+        CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
+        CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        return adapter.installLetsblogPlugin(credentials);
     }
 
     @PostMapping("/api/internal/project/cms/has-author-capability")

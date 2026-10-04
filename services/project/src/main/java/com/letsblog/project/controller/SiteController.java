@@ -1,5 +1,6 @@
 package com.letsblog.project.controller;
 
+import com.letsblog.project.cms.LetsblogPluginStatus;
 import com.letsblog.project.cms.WpCliInstallResult;
 import com.letsblog.project.crypto.SshKeyGenerationService;
 import com.letsblog.project.dto.AdoptWordPressSiteRequest;
@@ -169,6 +170,21 @@ public class SiteController {
     public WpCliInstallResult installWpCli(@Parameter(description = "サイトID") @PathVariable Long id) {
         adminAuthorizationService.requireAdmin();
         return siteService.installWpCli(id);
+    }
+
+    @Operation(summary = "letsblog プラグインの導入状態を取得",
+            description = "wp-cliの`wp letsblog status`で、導入済み(バージョン) / 未導入 / 要更新 を判定します")
+    @GetMapping("/{id}/letsblog-plugin")
+    public LetsblogPluginStatus letsblogPluginStatus(@Parameter(description = "サイトID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return siteService.getLetsblogPluginStatus(id);
+    }
+
+    @Operation(summary = "letsblog プラグインを再導入", description = "プラグインを配置し直して有効化し、導入後の状態を返します")
+    @PostMapping("/{id}/letsblog-plugin/install")
+    public LetsblogPluginStatus installLetsblogPlugin(@Parameter(description = "サイトID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return siteService.installLetsblogPlugin(id);
     }
 
     @Operation(summary = "サイトを再プロビジョニング", description = "サイトのカテゴリ・タグ・著者情報を再設定します")

@@ -9,6 +9,7 @@ import com.letsblog.publishing.cms.CmsMediaSummary;
 import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
+import com.letsblog.publishing.cms.LetsblogPluginStatus;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -298,6 +299,52 @@ public class WordPressAgentOperations {
         } catch (ResourceAccessException e) {
             throw new AgentOperationException(accessFailureMessage(e), e);
         }
+    }
+
+    /**
+     * エージェント経由で `wp letsblog status` を実行し、letsblog プラグインの導入状態を判定する
+     * (issue #1557)。コマンドが失敗する(プラグインが無い・停止している)場合は未導入。
+     */
+    public LetsblogPluginStatus letsblogPluginStatus(WordPressCredentials creds) {
+        try {
+            JsonNode body = post("/wp-cli/letsblog-status", Map.of("slug", creds.wpSlug()));
+            String stdout = body.path("stdout").asText("");
+            String stderr = body.path("stderr").asText("");
+            if (body.path("exitCode").asInt(1) != 0) {
+                // 「letsblogは登録されたコマンドではない」だけが未導入。それ以外(wpPathの誤り・PHPの
+                // 致命的エラー等)は未導入と取り違えず、stderrをログに残して例外にする。
+                if (LetsblogPluginStatus.isCommandMissing(stderr) || LetsblogPluginStatus.isCommandMissing(stdout)) {
+                    return LetsblogPluginStatus.notInstalled();
+                }
+                log.warn("wp letsblog statusが失敗しました (wpSlug={}): {}", creds.wpSlug(), stderr);
+                throw new AgentOperationException("wp letsblog statusの実行に失敗しました: "
+                        + (stderr.isBlank() ? stdout : stderr).strip());
+            }
+            try {
+                return LetsblogPluginStatus.fromStatusOutput(stdout);
+            } catch (IllegalArgumentException e) {
+                log.warn("wp letsblog statusの出力を解釈できません (wpSlug={}): {}", creds.wpSlug(), stderr);
+                throw new AgentOperationException(e.getMessage(), e);
+            }
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("letsblogプラグインの状態取得に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException(accessFailureMessage(e), e);
+        }
+    }
+
+    /**
+     * letsblog プラグインを(再)導入して有効化し、導入後の状態を返す(issue #1557)。
+     */
+    public LetsblogPluginStatus installLetsblogPlugin(WordPressCredentials creds) {
+        try {
+            post("/wp-cli/letsblog-install", Map.of("slug", creds.wpSlug()));
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("letsblogプラグインの導入に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException(accessFailureMessage(e), e);
+        }
+        return letsblogPluginStatus(creds);
     }
 
     /**

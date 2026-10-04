@@ -85,6 +85,8 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/sites/1/test-connection"),
                 new Endpoint("DELETE", "/api/sites/1"),
                 new Endpoint("POST", "/api/sites/1/install-wp-cli"),
+                new Endpoint("GET", "/api/sites/1/letsblog-plugin"),
+                new Endpoint("POST", "/api/sites/1/letsblog-plugin/install"),
                 new Endpoint("POST", "/api/sites/1/reprovision"),
 
                 // -- SiteStaticContentController --

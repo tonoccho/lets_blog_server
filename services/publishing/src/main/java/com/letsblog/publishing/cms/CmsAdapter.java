@@ -120,6 +120,33 @@ public interface CmsAdapter {
     }
 
     /**
+     * サイトの letsblog プラグインの導入状態を返す(issue #1557)。対応しない場合はUnsupportedOperationExceptionを投げる。
+     */
+    default LetsblogPluginStatus letsblogPluginStatus(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはletsblogプラグインの導入状態の取得に対応していません");
+    }
+
+    /**
+     * letsblog プラグインを(再)導入して有効化し、導入後の状態を返す(issue #1557)。
+     * 対応しない場合はUnsupportedOperationExceptionを投げる。
+     */
+    default LetsblogPluginStatus installLetsblogPlugin(CmsCredentials credentials) {
+        throw new UnsupportedOperationException("このCMSはletsblogプラグインの導入に対応していません");
+    }
+
+    /**
+     * letsblog プラグインが使えるサイトであることを要求する(issue #1557)。導入済み以外(未導入・要更新)なら、
+     * 理由と対処(再導入)を示す{@link LetsblogPluginUnavailableException}を投げる。投稿・プレビューが
+     * CMSへ何かを書き込む前に呼ぶ。
+     */
+    default void requireLetsblogPlugin(CmsCredentials credentials) {
+        LetsblogPluginStatus status = letsblogPluginStatus(credentials);
+        if (!status.installed()) {
+            throw new LetsblogPluginUnavailableException(status);
+        }
+    }
+
+    /**
      * 投稿を削除する(WordPressの場合、既定でゴミ箱へ移動する。完全削除は行わない)。
      * 対応しないCMSはUnsupportedOperationExceptionを投げる。
      */

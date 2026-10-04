@@ -6,6 +6,7 @@ import com.letsblog.publishing.cms.AuthCookie;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.cms.LetsblogPluginUnavailableException;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
@@ -703,6 +704,20 @@ public class ArticlePreviewService {
             String featuredImageDataUri, String existingPreviewPostId, String slug,
             List<String> categories, List<String> tags) {
         CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        // letsblogプラグインが使えない(未導入・要更新の)サイトではプレビューしない。メディアのアップロードや
+        // 非公開投稿の作成など、CMSへ何かを書き込む前に、理由と対処(再導入)を示して拒否する(issue #1557)。
+        try {
+            cmsAdapter.requireLetsblogPlugin(credentials);
+        } catch (LetsblogPluginUnavailableException e) {
+            logger.warn("letsblogプラグインが使えないためプレビューを拒否しました: {} ({})",
+                    site.getSiteKey(), e.getStatus().state());
+            return new ThemeSkeletonResponse(null, false, e.getMessage(), false, "");
+        } catch (RuntimeException e) {
+            // 状態そのものを取得できなかった(接続失敗・wp-cliの異常等)。未導入とは区別して理由を返す。
+            logger.warn("letsblogプラグインの状態を確認できないためプレビューを拒否しました: {}", site.getSiteKey(), e);
+            return new ThemeSkeletonResponse(null, false,
+                    "letsblogプラグインの状態を確認できませんでした: " + e.getMessage(), false, "");
+        }
         // 通常の投稿(PostPublishService)と同様、front matterのcategories/tags(名前)をCMS側の
         // IDへ解決してから渡す。ここを素通りさせるとプレビュー用の非公開投稿にカテゴリ/タグが
         // 一切反映されない(issue #483 フィードバック)。

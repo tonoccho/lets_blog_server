@@ -7,6 +7,7 @@ import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.project.aop.AuditLog;
 import com.letsblog.project.cms.CmsType;
 import com.letsblog.project.cms.ConnectionCheckResult;
+import com.letsblog.project.cms.LetsblogPluginStatus;
 import com.letsblog.project.cms.WpCliInstallResult;
 import com.letsblog.project.client.CmsProvisioningBridgeClient;
 import com.letsblog.project.domain.AuditLogAction;
@@ -410,6 +411,24 @@ public class SiteService {
                 .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
         Map<String, String> credentials = resolveSshKeyMaterial(getRawCredentials(site));
         return bridgeClient.installWpCli(site.getCmsType().name(), credentials);
+    }
+
+    /** サイトの letsblog プラグインの導入状態(wp-cliの`wp letsblog status`で判定、issue #1557)。 */
+    @Transactional(readOnly = true)
+    public LetsblogPluginStatus getLetsblogPluginStatus(Long id) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        Map<String, String> credentials = resolveSshKeyMaterial(getRawCredentials(site));
+        return bridgeClient.letsblogPluginStatus(site.getCmsType().name(), credentials);
+    }
+
+    /** letsblog プラグインを(再)導入し、導入後の状態を返す(issue #1557)。 */
+    @Transactional(readOnly = true)
+    public LetsblogPluginStatus installLetsblogPlugin(Long id) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        Map<String, String> credentials = resolveSshKeyMaterial(getRawCredentials(site));
+        return bridgeClient.installLetsblogPlugin(site.getCmsType().name(), credentials);
     }
 
     private Boolean resolveHasAdminCapability(ConnectionCheckResult connectionCheckResult, Site site,

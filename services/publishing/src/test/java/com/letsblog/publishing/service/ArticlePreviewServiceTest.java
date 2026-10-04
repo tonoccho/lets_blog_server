@@ -2541,4 +2541,57 @@ class ArticlePreviewServiceTest {
         verifyNoInteractions(wordPressSshOperations);
         server.verify();
     }
+
+    // ---- issue #1557: プラグインが使えないサイトのプレビューは拒否する ----
+
+    @Test
+    void renderRealPrivatePost_letsblogプラグインが使えないサイトは理由と対処を返し投稿もアップロードもしない() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 40L, null));
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        org.mockito.Mockito.doThrow(new com.letsblog.publishing.cms.LetsblogPluginUnavailableException(
+                com.letsblog.publishing.cms.LetsblogPluginStatus.notInstalled()))
+                .when(cmsAdapter).requireLetsblogPlugin(sshCredentials());
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", "data:image/png;base64,AAAA", null, null, null, null);
+
+        assertEquals(false, response.available());
+        assertTrue(response.reason().contains("再導入"));
+        org.mockito.Mockito.verify(cmsAdapter, org.mockito.Mockito.never())
+                .createOrUpdatePost(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(cmsAdapter, org.mockito.Mockito.never())
+                .uploadMedia(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void renderRealPrivatePost_letsblogプラグインの状態を確認できないときも理由を返し投稿もアップロードもしない() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 40L, null));
+        Site site = wordPressSite(40L, "http://production.example.com");
+        site.setSiteKey("production-site");
+        when(siteService.getById(40L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("production-site")).thenReturn(sshCredentials());
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        org.mockito.Mockito.doThrow(new IllegalStateException("wp letsblog statusの実行に失敗しました: wp: command not found"))
+                .when(cmsAdapter).requireLetsblogPlugin(sshCredentials());
+
+        ThemeSkeletonResponse response = service.renderSkeleton(
+                1L, 40L, "新タイトル", "<p>新本文</p>", null, null, null, null, null);
+
+        assertEquals(false, response.available());
+        assertTrue(response.reason().contains("状態を確認できません"));
+        assertTrue(response.reason().contains("command not found"));
+        org.mockito.Mockito.verify(cmsAdapter, org.mockito.Mockito.never())
+                .createOrUpdatePost(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any());
+    }
 }

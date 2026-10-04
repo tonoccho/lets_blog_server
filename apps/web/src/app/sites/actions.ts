@@ -8,7 +8,10 @@ import {
   deleteSite,
   generateSshKeyPair,
   generateStaticContent,
+  getLetsblogPluginStatus,
+  installLetsblogPlugin,
   installWpCli,
+  LetsblogPluginStatus,
   registerSite,
   SiteConnectionCheckResult,
   StaticContent,
@@ -180,6 +183,18 @@ export async function checkSiteConnectionAction(id: number): Promise<SiteConnect
 export async function installWpCliAction(id: number): Promise<WpCliInstallResult> {
   await requireAdminSession();
   return installWpCli(id);
+}
+
+/** サイトの letsblog プラグインの導入状態を返す(admin 限定、issue #1557)。 */
+export async function getLetsblogPluginStatusAction(id: number): Promise<LetsblogPluginStatus> {
+  await requireAdminSession();
+  return getLetsblogPluginStatus(id);
+}
+
+/** letsblog プラグインを再導入し、導入後の状態を返す(admin 限定、issue #1557)。 */
+export async function installLetsblogPluginAction(id: number): Promise<LetsblogPluginStatus> {
+  await requireAdminSession();
+  return installLetsblogPlugin(id);
 }
 
 export interface GenerateStaticContentResult {

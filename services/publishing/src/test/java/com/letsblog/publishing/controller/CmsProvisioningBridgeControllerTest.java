@@ -135,4 +135,26 @@ class CmsProvisioningBridgeControllerTest {
 
         assertEquals(List.of("Akismet"), result);
     }
+
+    // ---- issue #1557 ----
+
+    @Test
+    void letsblogPluginStatus_導入状態を返す() {
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        com.letsblog.publishing.cms.LetsblogPluginStatus status = new com.letsblog.publishing.cms.LetsblogPluginStatus(
+                com.letsblog.publishing.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
+        when(cmsAdapter.letsblogPluginStatus(any())).thenReturn(status);
+
+        assertEquals(status, controller().letsblogPluginStatus(agentRequest()));
+    }
+
+    @Test
+    void installLetsblogPlugin_導入後の状態を返す() {
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        com.letsblog.publishing.cms.LetsblogPluginStatus status = new com.letsblog.publishing.cms.LetsblogPluginStatus(
+                com.letsblog.publishing.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
+        when(cmsAdapter.installLetsblogPlugin(any())).thenReturn(status);
+
+        assertEquals(status, controller().installLetsblogPlugin(agentRequest()));
+    }
 }

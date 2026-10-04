@@ -5,6 +5,7 @@ import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SiteEditForm } from "./SiteEditForm";
+import { LetsblogPluginPanel } from "./LetsblogPluginPanel";
 import { StaticContentPanel } from "./StaticContentPanel";
 
 export default async function SiteEditPage({
@@ -51,6 +52,7 @@ export default async function SiteEditPage({
       {!sshKeyPairs.failed && (
         <SiteEditForm site={site} sshKeyPairs={sshKeyPairs.data} defaultAdminPath={defaultAdminPath.data?.path ?? null} />
       )}
+      <LetsblogPluginPanel siteId={site.id} />
       {!staticContents.failed && <StaticContentPanel siteId={site.id} initialContents={staticContents.data} />}
     </div>
   );

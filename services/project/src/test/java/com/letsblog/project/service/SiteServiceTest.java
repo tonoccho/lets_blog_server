@@ -454,4 +454,52 @@ class SiteServiceTest {
         assertEquals(false, result.connectionOk());
         assertEquals("接続失敗", result.failureReason());
     }
+
+    // ---- issue #1557: letsblogプラグインの導入状態 ----
+
+    private Site agentSite() {
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("site-key");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setWpSlug("my-slug");
+        site.setCredentialsEncrypted(credentialCipher.encrypt(
+                "{\"baseUrl\":\"https://x.example.com\",\"transport\":\"AGENT\"}"));
+        return site;
+    }
+
+    @Test
+    void getLetsblogPluginStatus_ブリッジ経由で導入状態を返す() {
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
+        com.letsblog.project.cms.LetsblogPluginStatus status = new com.letsblog.project.cms.LetsblogPluginStatus(
+                com.letsblog.project.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
+        when(bridgeClient.letsblogPluginStatus(eq("WORDPRESS"), any())).thenReturn(status);
+
+        assertEquals(status, service().getLetsblogPluginStatus(1L));
+    }
+
+    @Test
+    void getLetsblogPluginStatus_未登録のサイトはSiteNotFound() {
+        when(siteRepository.findById(9L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service().getLetsblogPluginStatus(9L));
+    }
+
+    @Test
+    void installLetsblogPlugin_ブリッジ経由で導入し導入後の状態を返す() {
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
+        com.letsblog.project.cms.LetsblogPluginStatus status = new com.letsblog.project.cms.LetsblogPluginStatus(
+                com.letsblog.project.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
+        when(bridgeClient.installLetsblogPlugin(eq("WORDPRESS"), any())).thenReturn(status);
+
+        assertEquals(status, service().installLetsblogPlugin(1L));
+    }
+
+    @Test
+    void installLetsblogPlugin_未登録のサイトはSiteNotFound() {
+        when(siteRepository.findById(9L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service().installLetsblogPlugin(9L));
+        verify(bridgeClient, never()).installLetsblogPlugin(anyString(), any());
+    }
 }

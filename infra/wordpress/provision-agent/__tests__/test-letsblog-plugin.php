@@ -157,6 +157,45 @@ check('AC2: 既存サイトも wp-cli 系の初回アクセスで導入される
 $dockerfile = (string) file_get_contents("$agentDir/../Dockerfile");
 check('Dockerfile がプラグインをイメージへ入れる', str_contains($dockerfile, 'COPY letsblog-plugin /var/www/letsblog-plugin'));
 
+// --- issue #1557: 導入状態の判定と再導入 ---
+if (function_exists('ensureLetsblogPlugin')) {
+    // 配置済みで内容が同じでも、再導入(force)では有効化し直す(プラグインを停止したサイトを戻すため)
+    $root4 = makeTmpDir();
+    $site4 = "$root4/site";
+    mkdir("$site4/wp-content/plugins", 0777, true);
+    $run4Calls = [];
+    $run4 = function (array $args) use (&$run4Calls): array {
+        $run4Calls[] = $args;
+        return [0, 'Success', ''];
+    };
+    ensureLetsblogPlugin($site4, $run4, $pluginDir);
+    $run4Calls = [];
+    [$code] = ensureLetsblogPlugin($site4, $run4, $pluginDir, true);
+    check('再導入: 配置済みで内容が同じでも終了コード0', $code === 0, "code=$code");
+    check('再導入: 配置済みで内容が同じでも wp plugin activate letsblog が実行される',
+        count($run4Calls) === 1 && array_slice($run4Calls[0], 0, 3) === ['plugin', 'activate', 'letsblog'],
+        json_encode($run4Calls));
+    check('再導入: 配置済みの内容は変わらない', file_get_contents("$site4/wp-content/plugins/letsblog/letsblog.php") === $source);
+
+    // 再導入で有効化に失敗しても、導入済みの配置は消さない
+    $failingRun4 = fn(array $args): array => [1, '', 'Error: activate failed'];
+    [$code] = ensureLetsblogPlugin($site4, $failingRun4, $pluginDir, true);
+    check('再導入: 有効化に失敗したら非0を返す', $code !== 0);
+    check('再導入: 有効化に失敗しても導入済みの配置は残す', is_file("$site4/wp-content/plugins/letsblog/letsblog.php"));
+}
+
+check('index.php が /wp-cli/letsblog-status を持つ', str_contains($index, "'/wp-cli/letsblog-status'"));
+check('index.php が /wp-cli/letsblog-install を持つ', str_contains($index, "'/wp-cli/letsblog-install'"));
+$statusPos = strpos($index, "\$path === '/wp-cli/letsblog-status'");
+$installPos = strpos($index, "\$path === '/wp-cli/letsblog-install'");
+$statusBlock = ($statusPos !== false && $installPos !== false && $installPos > $statusPos) ? substr($index, $statusPos, $installPos - $statusPos) : '';
+check('状態の判定は wp letsblog status を wp-cli で実行する', str_contains($statusBlock, "'letsblog', 'status'"));
+check('状態の判定は stderr も返す(未登録エラーとその他の失敗をアプリ側で区別するため)', str_contains($statusBlock, "'stderr'"));
+check('状態の判定は導入処理を走らせない(停止したサイトを未導入のまま返すため)',
+    $statusBlock !== '' && !str_contains($statusBlock, 'ensureLetsblogPlugin(') && !str_contains($statusBlock, 'resolveExistingSitePath('));
+$installBlock = $installPos !== false ? substr($index, $installPos, 1500) : '';
+check('再導入は force 付きで導入処理を実行する', str_contains($installBlock, 'ensureLetsblogPlugin($sitePath, null, LETSBLOG_PLUGIN_SOURCE_DIR, true)'));
+
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";
     foreach ($failures as $f) {

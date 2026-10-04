@@ -475,4 +475,86 @@ class WordPressAdapterTest {
         assertThrows(RuntimeException.class,
                 () -> adapter.findMediaBySha256(unsupportedCredentials(), java.util.Set.of("aa")));
     }
+
+    // ---- issue #1557: letsblogプラグインの導入状態 ----
+
+    private LetsblogPluginStatus installedStatus() {
+        return new LetsblogPluginStatus(LetsblogPluginStatus.State.INSTALLED, "1.0.0",
+                LetsblogPluginStatus.SUPPORTED_PROTOCOL_VERSION);
+    }
+
+    @Test
+    void letsblogPluginStatus_SSHはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.letsblogPluginStatus(creds)).thenReturn(installedStatus());
+
+        assertEquals(installedStatus(), adapter.letsblogPluginStatus(creds));
+        verify(agentOperations, never()).letsblogPluginStatus(any());
+    }
+
+    @Test
+    void letsblogPluginStatus_AGENTはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.letsblogPluginStatus(creds)).thenReturn(LetsblogPluginStatus.notInstalled());
+
+        assertEquals(LetsblogPluginStatus.notInstalled(), adapter.letsblogPluginStatus(creds));
+        verify(sshOperations, never()).letsblogPluginStatus(any());
+    }
+
+    @Test
+    void letsblogPluginStatus_未対応トランスポートは例外() {
+        assertThrows(IllegalStateException.class, () -> adapter.letsblogPluginStatus(unsupportedCredentials()));
+    }
+
+    @Test
+    void installLetsblogPlugin_SSHは導入して導入後の状態を返す() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.installLetsblogPlugin(creds)).thenReturn(installedStatus());
+
+        assertEquals(installedStatus(), adapter.installLetsblogPlugin(creds));
+        verify(agentOperations, never()).installLetsblogPlugin(any());
+    }
+
+    @Test
+    void installLetsblogPlugin_AGENTは導入して導入後の状態を返す() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.installLetsblogPlugin(creds)).thenReturn(installedStatus());
+
+        assertEquals(installedStatus(), adapter.installLetsblogPlugin(creds));
+        verify(sshOperations, never()).installLetsblogPlugin(any());
+    }
+
+    @Test
+    void installLetsblogPlugin_未対応トランスポートは例外() {
+        assertThrows(IllegalStateException.class, () -> adapter.installLetsblogPlugin(unsupportedCredentials()));
+    }
+
+    @Test
+    void requireLetsblogPlugin_導入済みなら何も投げない() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.letsblogPluginStatus(creds)).thenReturn(installedStatus());
+
+        adapter.requireLetsblogPlugin(creds);
+    }
+
+    @Test
+    void requireLetsblogPlugin_未導入なら再導入を案内する例外を投げる() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.letsblogPluginStatus(creds)).thenReturn(LetsblogPluginStatus.notInstalled());
+
+        LetsblogPluginUnavailableException e =
+                assertThrows(LetsblogPluginUnavailableException.class, () -> adapter.requireLetsblogPlugin(creds));
+        assertEquals(true, e.getMessage().contains("再導入"));
+    }
+
+    @Test
+    void requireLetsblogPlugin_要更新でも例外を投げる() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.letsblogPluginStatus(creds)).thenReturn(
+                new LetsblogPluginStatus(LetsblogPluginStatus.State.NEEDS_UPDATE, "0.9.0", 0));
+
+        LetsblogPluginUnavailableException e =
+                assertThrows(LetsblogPluginUnavailableException.class, () -> adapter.requireLetsblogPlugin(creds));
+        assertEquals(LetsblogPluginStatus.State.NEEDS_UPDATE, e.getStatus().state());
+    }
 }

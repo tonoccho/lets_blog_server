@@ -1857,4 +1857,118 @@ class WordPressSshOperationsTest {
         assertEquals(true, operations.readStylesheetFile(
                 creds(), layout(), "https://example.com/wp-content/a.css").isEmpty());
     }
+
+    // ---- issue #1557: letsblogプラグインの導入状態 ----
+
+    @Test
+    void letsblogPluginStatus_wp_letsblog_statusの出力から導入済みと判定する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"plugin_version\":\"1.0.0\",\"protocol_version\":1}"));
+
+        com.letsblog.publishing.cms.LetsblogPluginStatus status = operations.letsblogPluginStatus(creds());
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.INSTALLED, status.state());
+        assertEquals("1.0.0", status.version());
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), isNull());
+        assertEquals("wp --path='/var/www/html' letsblog status", command.getValue());
+    }
+
+    @Test
+    void letsblogPluginStatus_コマンドが失敗すれば未導入() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: 'letsblog' is not a registered wp command"));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NOT_INSTALLED,
+                operations.letsblogPluginStatus(creds()).state());
+    }
+
+    @Test
+    void letsblogPluginStatus_プロトコル非互換なら要更新() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"plugin_version\":\"0.9.0\",\"protocol_version\":99}"));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NEEDS_UPDATE,
+                operations.letsblogPluginStatus(creds()).state());
+    }
+
+    @Test
+    void letsblogPluginStatus_それ以外の失敗は未導入ではなく例外にしstderrを含める() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: This does not seem to be a WordPress installation."));
+
+        SshOperationException e =
+                assertThrows(SshOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+        assertEquals(true, e.getMessage().contains("does not seem to be a WordPress installation"));
+    }
+
+    @Test
+    void letsblogPluginStatus_正常終了でもJSONでなければ例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("PHP Fatal error: boom"));
+
+        assertThrows(SshOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+    }
+
+    @Test
+    void installLetsblogPlugin_配置済みでも配置し直して有効化し導入後の状態を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("<?php // previous")) // cat(既存の内容の退避)
+                .thenReturn(ok("")) // mkdir -p
+                .thenReturn(ok("Success: Plugin 'letsblog' activated.")) // plugin activate
+                .thenReturn(ok("{\"plugin_version\":\"1.0.0\",\"protocol_version\":1}")); // letsblog status
+
+        com.letsblog.publishing.cms.LetsblogPluginStatus status = operations.installLetsblogPlugin(creds());
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.INSTALLED, status.state());
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(true, commands.getAllValues().get(0).startsWith("cat "));
+        assertEquals(true, commands.getAllValues().get(1).contains("mkdir -p"));
+        assertEquals(true, commands.getAllValues().get(2).contains("plugin activate letsblog"));
+        verify(executor).putFile(any(SshConnectionParams.class), any(byte[].class),
+                eq("/var/www/html/wp-content/plugins/letsblog/letsblog.php"));
+    }
+
+    @Test
+    void installLetsblogPlugin_新規導入で有効化に失敗したら配置を取り消して例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("cat: No such file")) // cat: 既存なし
+                .thenReturn(ok("")) // mkdir -p
+                .thenReturn(fail("Error: activate failed")) // plugin activate
+                .thenReturn(ok("")); // rm -f
+
+        SshOperationException e =
+                assertThrows(SshOperationException.class, () -> operations.installLetsblogPlugin(creds()));
+        assertEquals(true, e.getMessage().contains("activate failed"));
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(true, commands.getAllValues().get(3).startsWith("rm -f"));
+    }
+
+    @Test
+    void installLetsblogPlugin_導入済みの更新で有効化に失敗しても既存のファイルは消さず元の内容へ戻す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("<?php // previous")) // cat(既存の内容の退避)
+                .thenReturn(ok("")) // mkdir -p
+                .thenReturn(fail("Error: activate failed")); // plugin activate
+
+        assertThrows(SshOperationException.class, () -> operations.installLetsblogPlugin(creds()));
+
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(3)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(false, commands.getAllValues().stream().anyMatch(c -> c.startsWith("rm -f")));
+        ArgumentCaptor<byte[]> written = ArgumentCaptor.forClass(byte[].class);
+        verify(executor, times(2)).putFile(any(SshConnectionParams.class), written.capture(),
+                eq("/var/www/html/wp-content/plugins/letsblog/letsblog.php"));
+        assertArrayEquals("<?php // previous".getBytes(StandardCharsets.UTF_8), written.getAllValues().get(1));
+    }
+
+    @Test
+    void letsblogPluginStatus_未登録のエラーがstdoutに出ても未導入() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(new SshCommandResult(1, "Error: 'letsblog' is not a registered wp command.", "", null));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NOT_INSTALLED,
+                operations.letsblogPluginStatus(creds()).state());
+    }
 }

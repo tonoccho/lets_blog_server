@@ -268,4 +268,44 @@ class SiteControllerTest {
         assertEquals("keep-me", site.getAdminPath());
         verify(siteRepository, never()).save(any());
     }
+
+    // ---- issue #1557: letsblogプラグインの導入状態 ----
+
+    @Test
+    void letsblogPluginStatus_admin権限で導入状態を返す() {
+        com.letsblog.project.cms.LetsblogPluginStatus status = new com.letsblog.project.cms.LetsblogPluginStatus(
+                com.letsblog.project.cms.LetsblogPluginStatus.State.NOT_INSTALLED, null, null);
+        when(siteService.getLetsblogPluginStatus(1L)).thenReturn(status);
+
+        assertEquals(status, controller().letsblogPluginStatus(1L));
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void letsblogPluginStatus_admin以外は拒否する() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().letsblogPluginStatus(1L));
+        verifyNoInteractions(siteService);
+    }
+
+    @Test
+    void installLetsblogPlugin_admin権限で再導入し導入後の状態を返す() {
+        com.letsblog.project.cms.LetsblogPluginStatus status = new com.letsblog.project.cms.LetsblogPluginStatus(
+                com.letsblog.project.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
+        when(siteService.installLetsblogPlugin(1L)).thenReturn(status);
+
+        assertEquals(status, controller().installLetsblogPlugin(1L));
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void installLetsblogPlugin_admin以外は拒否し導入しない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().installLetsblogPlugin(1L));
+        verifyNoInteractions(siteService);
+    }
 }

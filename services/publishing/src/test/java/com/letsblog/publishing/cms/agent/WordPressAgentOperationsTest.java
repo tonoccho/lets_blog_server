@@ -441,4 +441,120 @@ class WordPressAgentOperationsTest {
 
         server.verify();
     }
+
+    // ---- issue #1557: letsblogプラグインの導入状態 ----
+
+    @Test
+    void letsblogPluginStatus_wp_letsblog_statusの出力から導入済みと判定する() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andExpect(content().json("{\"slug\":\"main\"}"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"plugin_version\\\":\\\"1.0.0\\\",\\\"protocol_version\\\":1}\"}",
+                        MediaType.APPLICATION_JSON));
+
+        com.letsblog.publishing.cms.LetsblogPluginStatus status = operations.letsblogPluginStatus(creds());
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.INSTALLED, status.state());
+        assertEquals("1.0.0", status.version());
+        server.verify();
+    }
+
+    @Test
+    void letsblogPluginStatus_コマンド未登録のエラーなら未導入() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"\",\"stderr\":\"Error: 'letsblog' is not a registered wp command.\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NOT_INSTALLED,
+                operations.letsblogPluginStatus(creds()).state());
+    }
+
+    @Test
+    void letsblogPluginStatus_それ以外の失敗は未導入ではなく例外にしstderrを含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"\",\"stderr\":\"Error: This does not seem to be a WordPress installation.\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e =
+                assertThrows(AgentOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+        assertTrue(e.getMessage().contains("does not seem to be a WordPress installation"));
+    }
+
+    @Test
+    void letsblogPluginStatus_正常終了でもJSONでなければ例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withSuccess("{\"exitCode\":0,\"stdout\":\"PHP Fatal error\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThrows(AgentOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+    }
+
+    @Test
+    void letsblogPluginStatus_サイトが見つからなければ例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"サイト 'main' が見つかりません\"}"));
+
+        assertThrows(AgentOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+    }
+
+    @Test
+    void installLetsblogPlugin_導入してから導入後の状態を返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-install"))
+                .andExpect(content().json("{\"slug\":\"main\"}"))
+                .andRespond(withSuccess("{\"installed\":true}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"plugin_version\\\":\\\"1.0.0\\\",\\\"protocol_version\\\":1}\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.INSTALLED,
+                operations.installLetsblogPlugin(creds()).state());
+        server.verify();
+    }
+
+    @Test
+    void installLetsblogPlugin_導入に失敗したら詳細つきの例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-install"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"letsblogプラグインの導入に失敗しました\",\"detail\":\"activate failed\"}"));
+
+        AgentOperationException e =
+                assertThrows(AgentOperationException.class, () -> operations.installLetsblogPlugin(creds()));
+        assertTrue(e.getMessage().contains("activate failed"));
+    }
+
+    @Test
+    void letsblogPluginStatus_未登録のエラーがstdoutに出ても未導入() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"Error: 'letsblog' is not a registered wp command.\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NOT_INSTALLED,
+                operations.letsblogPluginStatus(creds()).state());
+    }
+
+    @Test
+    void letsblogPluginStatus_stderrが空の失敗はstdoutを理由にして例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(withSuccess("{\"exitCode\":255,\"stdout\":\"PHP Fatal error: boom\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e =
+                assertThrows(AgentOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+        assertTrue(e.getMessage().contains("PHP Fatal error: boom"));
+    }
+
+    @Test
+    void letsblogPluginStatus_接続に失敗したら例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-status"))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("connection refused");
+                });
+
+        assertThrows(AgentOperationException.class, () -> operations.letsblogPluginStatus(creds()));
+    }
 }

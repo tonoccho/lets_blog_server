@@ -127,6 +127,8 @@ class AuthorizationMatrixIntegrationTest {
                 // -- 内部ブリッジ(CmsProvisioningBridgeController) --
                 new Endpoint("POST", "/api/internal/project/cms/test-connection"),
                 new Endpoint("POST", "/api/internal/project/cms/install-wp-cli"),
+                new Endpoint("POST", "/api/internal/project/cms/letsblog-plugin-status"),
+                new Endpoint("POST", "/api/internal/project/cms/install-letsblog-plugin"),
                 new Endpoint("POST", "/api/internal/project/cms/has-author-capability"),
                 new Endpoint("POST", "/api/internal/project/cms/list-active-plugins"),
                 new Endpoint("POST", "/api/internal/project/cms/provision"),

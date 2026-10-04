@@ -389,6 +389,23 @@ export function installWpCli(id: number): Promise<WpCliInstallResult> {
   return apiFetch<WpCliInstallResult>(`/api/sites/${id}/install-wp-cli`, { method: 'POST' });
 }
 
+/** サイトの letsblog プラグインの導入状態(issue #1557)。 */
+export type LetsblogPluginState = "INSTALLED" | "NOT_INSTALLED" | "NEEDS_UPDATE";
+
+export interface LetsblogPluginStatus {
+  state: LetsblogPluginState;
+  version: string | null;
+  protocolVersion: number | null;
+}
+
+export function getLetsblogPluginStatus(id: number): Promise<LetsblogPluginStatus> {
+  return apiFetch<LetsblogPluginStatus>(`/api/sites/${id}/letsblog-plugin`);
+}
+
+export function installLetsblogPlugin(id: number): Promise<LetsblogPluginStatus> {
+  return apiFetch<LetsblogPluginStatus>(`/api/sites/${id}/letsblog-plugin/install`, { method: 'POST' });
+}
+
 export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO" | "TERMS_OF_SERVICE";
 
 export interface StaticContent {
