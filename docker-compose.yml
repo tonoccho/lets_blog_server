@@ -187,6 +187,12 @@ services:
       # 非ヒープ(メタスペース・スレッド・ダイレクトバッファ)と RechartsRenderer の Chromium の余裕。
       # 根拠と見積もりは docs/DOCKER_COMPOSE_ARCHITECTURE.md「media のメモリ上限」。
       JAVA_TOOL_OPTIONS: -Xmx1g
+      # .env の SAFETY_NEGATIVE_PROMPT_* を media へ渡す(#1605)。未設定のときだけ application.yml と
+      # 同じ既定値を使う(コロン無しの `${VAR-既定値}`)。`${VAR}` や `${VAR:-}` だと未設定が空文字になり
+      # 既定値を潰す。空文字を明示したカテゴリは空のまま渡り、連結されない(SafetyNegativePromptService)。
+      SAFETY_NEGATIVE_PROMPT_SEXUAL: ${SAFETY_NEGATIVE_PROMPT_SEXUAL-nsfw, nude, naked, nudity, explicit, sexual, lewd, erotic, underwear, lingerie, cleavage}
+      SAFETY_NEGATIVE_PROMPT_VIOLENT: ${SAFETY_NEGATIVE_PROMPT_VIOLENT-gore, gory, mutilated, dismembered, corpse, blood, violence, decapitated}
+      SAFETY_NEGATIVE_PROMPT_DISCRIMINATORY: ${SAFETY_NEGATIVE_PROMPT_DISCRIMINATORY-nazi symbol, hate symbol, racist imagery, offensive stereotype}
     # deploy.resources.limits ではなく mem_limit を使う: Swarm 専用扱いの deploy 節に頼らず、
     # 通常の `docker compose up` でも docker inspect の HostConfig.Memory に確実に反映されるため。
     mem_limit: 2g
