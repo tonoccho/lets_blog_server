@@ -3,8 +3,8 @@
 機能: 全ページの初回表示が3秒の予算内に収まる
 
   利用者の要望は「すべてのクリックに対する応答を3秒以内にする」(issue #1476)。
-  対象は `docs/ACCEPTANCE_CRITERIA.md` §10.4 の全24ページの初回表示で、本ファイルは
-  そのうち `click-response-budget.feature` が持つ `/projects` と `/users` を除く22ページを
+  対象は `docs/ACCEPTANCE_CRITERIA.md` §10.4 の全27ページの初回表示で、本ファイルは
+  そのうち `click-response-budget.feature` が持つ `/projects` と `/users` を除く25ページを
   1ページ1シナリオで検証する(issue #1477)。Server Action は §10.5 の側で別に置く。
 
   ## 計り方
@@ -87,10 +87,21 @@
     もし ウォームアップ後に「/login」を開く
     ならば ページロードは「3000」ミリ秒以内に完了する
 
+  @budget-page:/login/error
+  シナリオ: 「/login/error」画面の初回表示が3秒以内に完了する
+    もし ウォームアップ後に「/login/error」を開く
+    ならば ページロードは「3000」ミリ秒以内に完了する
+
   @budget-page:/operation-logs
   シナリオ: 「/operation-logs」画面の初回表示が3秒以内に完了する
     前提 応答時間予算の検証のために管理者としてログインしている
     もし ウォームアップ後に「/operation-logs」を開く
+    ならば ページロードは「3000」ミリ秒以内に完了する
+
+  @budget-page:/operation-logs/slow
+  シナリオ: 「/operation-logs/slow」画面の初回表示が3秒以内に完了する
+    前提 応答時間予算の検証のために管理者としてログインしている
+    もし ウォームアップ後に「/operation-logs/slow」を開く
     ならば ページロードは「3000」ミリ秒以内に完了する
 
   @budget-page:/posts
