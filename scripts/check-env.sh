@@ -20,6 +20,11 @@
 
 set -euo pipefail
 
+# sort と comm は同じ照合順でなければならない。ロケール依存のままだと、アンダースコアを
+# 含むキー名(A_KEY と API_KEY など)で並びが食い違い、comm が「not in sorted order」を
+# 出して揃った .env でも失敗する(#1591)。
+export LC_ALL=C
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXAMPLE="$REPO_ROOT/.env.example"
 TARGET="${1:-$REPO_ROOT/.env}"

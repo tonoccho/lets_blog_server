@@ -303,5 +303,31 @@ class CheckEnvWarnsOnRepositoryDefaultClientSecrets(unittest.TestCase):
         self.assertIn("KEYCLOAK_SERVICES_CLIENT_SECRET", out)
 
 
+class CheckEnvIsLocaleIndependent(unittest.TestCase):
+    """#1591: sort と comm の照合順がロケールで食い違わないこと。
+
+    アンダースコアを含むキー名(`A_KEY` と `API_KEY`)は、C ロケールと
+    en_US.UTF-8 で並びが逆転する。照合順を固定していないと comm が
+    「not in sorted order」を出して、揃った .env でも終了コード1になる。
+    """
+
+    def test_matching_env_passes_under_en_us_utf8(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "scripts"))
+            shutil.copy(SCRIPT, os.path.join(root, "scripts", "check-env.sh"))
+            with open(os.path.join(root, ".env.example"), "w", encoding="utf-8") as f:
+                f.write("A_KEY=1\nDB_PASSWORD=changeme_db\nAPI_KEY=\n")
+            with open(os.path.join(root, ".env"), "w", encoding="utf-8") as f:
+                f.write("A_KEY=1\nDB_PASSWORD=my\nAPI_KEY=\n")
+            env = dict(os.environ, LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8")
+            proc = subprocess.run(
+                ["bash", os.path.join(root, "scripts", "check-env.sh")],
+                capture_output=True, text=True, env=env,
+            )
+            out = proc.stdout + proc.stderr
+            self.assertNotIn("not in sorted order", out)
+            self.assertEqual(0, proc.returncode, out)
+
+
 if __name__ == "__main__":
     unittest.main()
