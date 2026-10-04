@@ -1,8 +1,10 @@
 import {
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
+  FAILURE_REASON_MAX_LENGTH,
   buildImageGenerationResultHref,
   isActiveJobStatus,
+  readFailureReason,
   readImageIds,
   resolveResultHref,
 } from '../infoRailQueue'
@@ -82,5 +84,39 @@ describe('infoRailQueue (#1407)', () => {
     it('drops entries that are not numbers', () => {
       expect(readImageIds('{"imageIds":[1,"2",null,3]}')).toEqual([1, 3])
     })
+  })
+})
+
+describe('readFailureReason (#1571)', () => {
+  it('reads the error text out of the failed result payload', () => {
+    expect(readFailureReason('{"error":"ComfyUI timed out"}')).toBe('ComfyUI timed out')
+  })
+
+  it.each([
+    ['no payload', null],
+    ['broken JSON', '{nope'],
+    ['non-object JSON', '7'],
+    ['null JSON', 'null'],
+    ['no error', '{"imageIds":[1]}'],
+    ['a non-string error', '{"error":42}'],
+    ['a blank error', '{"error":"   "}'],
+  ])('reads no reason from %s', (_label, payload) => {
+    expect(readFailureReason(payload)).toBeNull()
+  })
+
+  it('trims surrounding whitespace', () => {
+    expect(readFailureReason('{"error":"  boom \\n"}')).toBe('boom')
+  })
+
+  it('keeps a reason of exactly the maximum length as is', () => {
+    const exact = 'a'.repeat(FAILURE_REASON_MAX_LENGTH)
+    expect(readFailureReason(JSON.stringify({ error: exact }))).toBe(exact)
+  })
+
+  it('truncates a longer reason to the maximum length with an ellipsis', () => {
+    const long = 'a'.repeat(FAILURE_REASON_MAX_LENGTH + 50)
+    const reason = readFailureReason(JSON.stringify({ error: long }))
+    expect(reason).toBe('a'.repeat(FAILURE_REASON_MAX_LENGTH - 1) + '…')
+    expect(reason).toHaveLength(FAILURE_REASON_MAX_LENGTH)
   })
 })

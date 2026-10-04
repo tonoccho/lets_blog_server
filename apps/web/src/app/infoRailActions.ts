@@ -6,6 +6,7 @@ import {
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
   buildImageGenerationResultHref,
+  readFailureReason,
   readImageIds,
   resolveResultHref,
   type QueueJob,
@@ -35,6 +36,7 @@ export async function fetchRecentOperationLogsAction(): Promise<{
  * 情報表示レールの「処理キュー」タブ用に、直近のジョブを新しい順で取得する。
  * 所有者による絞り込みは API 側(#1406)。完了ジョブにだけ「結果を見る」の遷移先を付ける。
  * 遷移先にリクエスト内容(project ID)が要る種別だけ、詳細を取りに行く。詳細が読めなければリンクなし。
+ * 失敗したジョブは詳細の `resultPayload.error` を失敗理由として載せる(#1571)。
  * 画像生成はリクエストに project ID が無いので、結果の最初の画像が属するプロジェクトを遷移先にする(#1408)。
  */
 export async function fetchQueueJobsAction(): Promise<{ jobs: QueueJob[]; timeZone: string | null }> {
@@ -45,7 +47,11 @@ export async function fetchQueueJobsAction(): Promise<{ jobs: QueueJob[]; timeZo
     .slice(0, QUEUE_JOB_LIMIT);
   const jobs = await Promise.all(
     recent.map(async (job): Promise<QueueJob> => {
-      const base = { id: job.id, type: job.type, status: job.status, createdAt: job.createdAt };
+      const base = { id: job.id, type: job.type, status: job.status, createdAt: job.createdAt, failureReason: null };
+      if (job.status === "failed") {
+        const detail = await getGenerationJob(job.id).catch(() => null);
+        return { ...base, resultHref: null, failureReason: readFailureReason(detail?.resultPayload ?? null) };
+      }
       if (job.status !== "done") return { ...base, resultHref: null };
       if (job.type === IMAGE_GENERATION_JOB_TYPE) return { ...base, resultHref: await imageGenerationHref(job.id) };
       if (job.type !== GARBAGE_COLLECTION_JOB_TYPE) return { ...base, resultHref: resolveResultHref(job.type, null) };

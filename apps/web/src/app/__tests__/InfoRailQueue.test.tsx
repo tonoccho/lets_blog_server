@@ -20,7 +20,7 @@ jest.mock('../infoRailActions', () => ({
   fetchQueueJobsAction: (...args: unknown[]) => mockFetch(...args),
 }))
 
-type J = { id: number; type: string; status: string; createdAt: string; resultHref: string | null }
+type J = { id: number; type: string; status: string; createdAt: string; resultHref: string | null; failureReason?: string | null }
 const job = (over: Partial<J> & { id: number }): J => ({
   type: 'image_generation',
   status: 'done',
@@ -319,5 +319,29 @@ describe('InfoRailQueue (#1407)', () => {
       'href',
       '/projects/7?tab=ai-models&imageJob=4'
     )
+  })
+})
+
+describe('InfoRailQueue failure reason (#1571)', () => {
+  it('shows the failure reason on a failed job', async () => {
+    mockFetch.mockResolvedValue({
+      jobs: [job({ id: 1, status: 'failed', failureReason: 'ComfyUI timed out' })],
+      timeZone: 'UTC',
+    })
+    setup()
+    await flush()
+    const item = screen.getByTestId('info-rail-queue-item')
+    expect(item).toHaveTextContent('失敗')
+    expect(within(item).getByTestId('info-rail-queue-failure-reason')).toHaveTextContent('ComfyUI timed out')
+  })
+
+  it('shows no failure reason when the job has none', async () => {
+    mockFetch.mockResolvedValue({
+      jobs: [job({ id: 1, status: 'failed' }), job({ id: 2, status: 'done' })],
+      timeZone: 'UTC',
+    })
+    setup()
+    await flush()
+    expect(screen.queryByTestId('info-rail-queue-failure-reason')).not.toBeInTheDocument()
   })
 })

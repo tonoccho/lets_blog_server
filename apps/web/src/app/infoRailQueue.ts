@@ -15,7 +15,12 @@ export interface QueueJob {
   createdAt: string;
   /** 完了したジョブの「結果を見る」の遷移先。種別が未知、または導けないときは null。 */
   resultHref: string | null;
+  /** 受理後に失敗したジョブの失敗理由(`resultPayload.error`、短く切り詰め済み)。失敗でない、または読めないときは null。 */
+  failureReason: string | null;
 }
+
+/** 狭いレールに収まる失敗理由の最大文字数(超えたら末尾を省略記号にする)。 */
+export const FAILURE_REASON_MAX_LENGTH = 120
 
 /** 進行中(ポーリングを続ける)状態か。useGenerationJobPolling と同じ running / pending。 */
 export function isActiveJobStatus(status: string): boolean {
@@ -71,5 +76,20 @@ export function readImageIds(resultPayload: string | null): number[] {
     return Array.isArray(ids) ? ids.filter((id): id is number => typeof id === "number") : [];
   } catch {
     return [];
+  }
+}
+
+/** 失敗したジョブの結果(`result_payload` の `{"error": ...}`)から、失敗理由を短く読む。読めなければ null。 */
+export function readFailureReason(resultPayload: string | null): string | null {
+  if (!resultPayload) return null;
+  try {
+    const parsed: unknown = JSON.parse(resultPayload);
+    const error = (parsed as { error?: unknown } | null)?.error;
+    if (typeof error !== "string") return null;
+    const text = error.trim();
+    if (!text) return null;
+    return text.length > FAILURE_REASON_MAX_LENGTH ? `${text.slice(0, FAILURE_REASON_MAX_LENGTH - 1)}…` : text;
+  } catch {
+    return null;
   }
 }

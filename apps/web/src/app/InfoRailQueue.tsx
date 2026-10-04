@@ -106,6 +106,14 @@ export function InfoRailQueue() {
                   ? formatOperationLogDateTime(job.createdAt, displayTimeZone)
                   : TIMEZONE_PENDING_PLACEHOLDER}
               </time>
+              {job.failureReason && (
+                <p
+                  data-testid="info-rail-queue-failure-reason"
+                  className="break-words text-xs text-red-600 dark:text-red-400"
+                >
+                  {job.failureReason}
+                </p>
+              )}
               {job.resultHref && (
                 <Link
                   href={job.resultHref}

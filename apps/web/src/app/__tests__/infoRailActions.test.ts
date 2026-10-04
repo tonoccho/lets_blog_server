@@ -78,6 +78,7 @@ describe('fetchQueueJobsAction (#1407)', () => {
       status: 'done',
       createdAt: '2026-09-30T10:01:00',
       resultHref: '/projects',
+      failureReason: null,
     })
     expect(mockGetJob).not.toHaveBeenCalled()
   })
@@ -97,7 +98,7 @@ describe('fetchQueueJobsAction (#1407)', () => {
     expect(result.jobs[0].resultHref).toBeNull()
   })
 
-  it('gives no link to running, failed or unknown-type jobs, and fetches no detail for them', async () => {
+  it('gives no link to running, failed or unknown-type jobs, and fetches no detail for running or unknown ones', async () => {
     mockListJobs.mockResolvedValue([
       job(1, 'media_garbage_collection_delete', 'running'),
       job(2, 'media_garbage_collection_delete', 'failed'),
@@ -107,7 +108,34 @@ describe('fetchQueueJobsAction (#1407)', () => {
     ])
     const result = await fetchQueueJobsAction()
     expect(result.jobs.map((j) => j.resultHref)).toEqual([null, null, null, null, null])
-    expect(mockGetJob).not.toHaveBeenCalled()
+    expect(mockGetJob.mock.calls.map((c) => c[0]).sort()).toEqual([2, 5])
+  })
+})
+
+describe('fetchQueueJobsAction failure reason (#1571)', () => {
+  beforeEach(() => {
+    mockGetJob.mockResolvedValue({ resultPayload: '{"error":"ComfyUI timed out"}' })
+  })
+
+  it('carries resultPayload.error of a failed job as its failure reason', async () => {
+    mockListJobs.mockResolvedValue([job(5, 'image_generation', 'failed')])
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(5)
+    expect(result.jobs[0].failureReason).toBe('ComfyUI timed out')
+    expect(result.jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives a null reason when the failed job detail cannot be read or has no error', async () => {
+    mockListJobs.mockResolvedValue([job(5, 'image_generation', 'failed'), job(6, 'image_generation', 'failed')])
+    mockGetJob.mockRejectedValueOnce(new Error('404')).mockResolvedValueOnce({ resultPayload: null })
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs.map((j) => j.failureReason)).toEqual([null, null])
+  })
+
+  it('gives a null reason to jobs that did not fail', async () => {
+    mockListJobs.mockResolvedValue([job(1, 'image_generation', 'running'), job(2, 'something_else', 'done')])
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs.map((j) => j.failureReason)).toEqual([null, null])
   })
 })
 
