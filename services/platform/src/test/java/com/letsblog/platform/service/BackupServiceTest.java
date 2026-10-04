@@ -2,11 +2,14 @@ package com.letsblog.platform.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.platform.config.BackupProperties;
+import com.letsblog.platform.keycloak.KeycloakAdminClient;
+import com.letsblog.platform.keycloak.KeycloakAdminException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.junit.jupiter.api.io.TempDir;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -49,6 +52,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -77,6 +81,9 @@ class BackupServiceTest {
     @Mock
     private CurrentActorService currentActorService;
 
+    @Mock
+    private KeycloakAdminClient keycloakAdminClient;
+
     private BackupService service;
 
     @TempDir
@@ -85,7 +92,7 @@ class BackupServiceTest {
     @BeforeEach
     void setUp() {
         service = new BackupService(buildDefaultProperties(), generatedImagesDir.toString(), ENCRYPTION_KEY,
-                adminAuthorizationService, new ObjectMapper(), auditLogService, currentActorService);
+                adminAuthorizationService, new ObjectMapper(), auditLogService, currentActorService, keycloakAdminClient);
     }
 
     private BackupProperties buildDefaultProperties() {
@@ -736,6 +743,75 @@ class BackupServiceTest {
             assertThrows(ForbiddenException.class, () -> service.createBackup());
 
             verify(auditLogService, never()).log(any(), any(), any(), anyString(), any(), any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Keycloak cache invalidation after restore (issue #1590)")
+    class KeycloakCacheInvalidationTests {
+
+        private BackupService spied;
+
+        @BeforeEach
+        void spyService() {
+            spied = spy(service);
+            doReturn(new byte[0]).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+        }
+
+        private byte[] archive(boolean withPostgres) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("metadata.json"));
+                zip.write(new ObjectMapper().writeValueAsBytes(new BackupService.BackupMetadata(
+                        sha256Hex(ENCRYPTION_KEY), Instant.now().toString(), MYSQL_SCHEMAS,
+                        List.of(POSTGRES_DATABASE), null, null)));
+                zip.closeEntry();
+                zip.putNextEntry(new ZipEntry("mysql/lbs_identity.sql"));
+                zip.write("SELECT 1;".getBytes());
+                zip.closeEntry();
+                if (withPostgres) {
+                    zip.putNextEntry(new ZipEntry("postgres/" + POSTGRES_DATABASE + ".dump"));
+                    zip.write(new byte[]{1, 2, 3});
+                    zip.closeEntry();
+                }
+            }
+            return out.toByteArray();
+        }
+
+        @Test
+        @DisplayName("clears Keycloak caches after the PostgreSQL restore, so stale users are not served")
+        void clearsCachesAfterPostgresRestore() throws Exception {
+            spied.restoreBackup(new ByteArrayInputStream(archive(true)), true, true);
+
+            InOrder order = inOrder(spied, keycloakAdminClient);
+            order.verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+            order.verify(keycloakAdminClient).clearCaches();
+        }
+
+        @Test
+        @DisplayName("does not touch Keycloak when the archive has no PostgreSQL dump")
+        void skipsWhenNoPostgresDump() throws Exception {
+            spied.restoreBackup(new ByteArrayInputStream(archive(false)), true, true);
+
+            verify(keycloakAdminClient, never()).clearCaches();
+        }
+
+        @Test
+        @DisplayName("a cache-invalidation failure is logged as an error and does not fail the completed restore")
+        void cacheInvalidationFailureDoesNotFailRestore() throws Exception {
+            doThrow(new KeycloakAdminException("boom")).when(keycloakAdminClient).clearCaches();
+            Logger logger = (Logger) LoggerFactory.getLogger(BackupService.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                spied.restoreBackup(new ByteArrayInputStream(archive(true)), true, true);
+            } finally {
+                logger.detachAppender(appender);
+            }
+
+            assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.ERROR
+                    && e.getFormattedMessage().contains("Keycloak")));
         }
     }
 

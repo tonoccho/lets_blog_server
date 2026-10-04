@@ -109,6 +109,29 @@ public class KeycloakAdminClient {
         }
     }
 
+    /**
+     * Keycloakのユーザー/レルム/鍵キャッシュ(Infinispan)を無効化する(issue #1590)。バックアップ復元は
+     * KeycloakのPostgreSQLを直接書き換えるため、稼働中のKeycloakが復元前のユーザー情報を返し続けるのを防ぐ。
+     * 3つのエンドポイントを順に呼び、いずれかが失敗したら{@link KeycloakAdminException}を送出する。
+     */
+    public void clearCaches() {
+        String action = "キャッシュの無効化";
+        try {
+            String token = serviceTokenClient.getAccessToken();
+            for (String path : new String[] {"/clear-user-cache", "/clear-realm-cache", "/clear-keys-cache"}) {
+                adminClient.post()
+                        .uri(path)
+                        .header("Authorization", "Bearer " + token)
+                        .retrieve()
+                        .toBodilessEntity();
+            }
+        } catch (RestClientResponseException e) {
+            throw new KeycloakAdminException(errorMessage(action, e), e);
+        } catch (Exception e) {
+            throw connectionFailure(action, e);
+        }
+    }
+
     private KeycloakAdminException connectionFailure(String action, Exception cause) {
         return new KeycloakAdminException(
                 "Keycloak Admin APIの呼び出しに失敗しました(Keycloakが停止している可能性があります): "

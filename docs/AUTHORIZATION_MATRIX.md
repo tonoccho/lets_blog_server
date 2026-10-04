@@ -685,14 +685,21 @@ admin 性と無関係な RBAC ロールの付け外しまで Keycloak の一時�
 
 #### 必要な Keycloak の権限
 
+(#1590)バックアップ復元後の `clear-user-cache` / `clear-realm-cache` / `clear-keys-cache` は `manage-realm` を要求するため、
+`realm-export.json` はサービスアカウントに `manage-realm` も付与する。構築済みの環境は realm の再インポートか
+`kcadm.sh add-roles --uusername service-account-letsblog-services --cclientid realm-management --rolename manage-realm` が要る。
+未付与でも復元自体は成功し、キャッシュ無効化の失敗が ERROR ログに残るだけである。
+既知の限界: ロールの割当は Keycloak の DB に入っているため、`manage-realm` 付与前に取ったバックアップを復元すると
+付与が失われ、キャッシュ無効化は 403 になる(ERROR ログのみ。Keycloak の再起動で解消する)。
+
 `letsblog-services` のサービスアカウントが持つ `realm-management` のロールは
-`manage-users` と `view-users` だけである(`infra/keycloak/realm-export.json`)。
+`manage-users` と `view-users`、および上記キャッシュ無効化専用の `manage-realm` である(`infra/keycloak/realm-export.json`)。
 ロールマッピングは「ロールの表現(`id` + `name`)の配列」を要求するため id の解決が要るが、
 素直な `GET /admin/realms/{realm}/roles/{name}` は **`view-realm` を要求し、実機で 403 になる**。
 
 そこでユーザースコープの `GET .../users/{id}/role-mappings/realm`(割当済み)と
 `.../role-mappings/realm/available`(割当可能)から id を引く。こちらは `view-users` で読めるため、
-**realm の権限設定を変えずに済む** — 既に構築済みの環境が realm の再インポートを迫られない。
+**ロールマッピングのために realm の権限設定を足さずに済む** — 既に構築済みの環境が realm の再インポートを迫られない。
 
 ## 現行の認可モデル(2層構造)
 

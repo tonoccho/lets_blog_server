@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.platform.aop.AuditLog;
 import com.letsblog.platform.config.BackupProperties;
 import com.letsblog.platform.domain.AuditLogAction;
+import com.letsblog.platform.keycloak.KeycloakAdminClient;
+import com.letsblog.platform.keycloak.KeycloakAdminException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -71,6 +73,7 @@ public class BackupService {
     private final ObjectMapper objectMapper;
     private final AuditLogService auditLogService;
     private final CurrentActorService currentActorService;
+    private final KeycloakAdminClient keycloakAdminClient;
 
     public BackupService(
             BackupProperties backupProperties,
@@ -79,7 +82,8 @@ public class BackupService {
             AdminAuthorizationService adminAuthorizationService,
             ObjectMapper objectMapper,
             AuditLogService auditLogService,
-            CurrentActorService currentActorService) {
+            CurrentActorService currentActorService,
+            KeycloakAdminClient keycloakAdminClient) {
         this.backupProperties = backupProperties;
         this.generatedImagesDir = Path.of(generatedImagesStoragePath);
         this.encryptionKey = encryptionKey;
@@ -87,6 +91,7 @@ public class BackupService {
         this.objectMapper = objectMapper;
         this.auditLogService = auditLogService;
         this.currentActorService = currentActorService;
+        this.keycloakAdminClient = keycloakAdminClient;
     }
 
     public record BackupMetadata(
@@ -217,11 +222,25 @@ public class BackupService {
         }
         if (postgresDump != null) {
             restorePostgresDatabase(postgresDump);
+            clearKeycloakCaches();
         }
         restoreGeneratedImages(generatedImageFiles);
 
         log.info("バックアップからのリストアが完了しました (mysqlSchemas={}, postgresRestored={}, images={})",
                 restoredSchemaCount, postgresDump != null, generatedImageFiles.size());
+    }
+
+    /**
+     * Keycloakを書き換えた後にキャッシュを無効化する(issue #1590)。復元自体はこの時点で完了済みのため、
+     * 無効化の失敗は復元を失敗扱いにせずERRORログに残す(Keycloakの再起動で解消できる)。
+     */
+    private void clearKeycloakCaches() {
+        try {
+            keycloakAdminClient.clearCaches();
+        } catch (KeycloakAdminException e) {
+            log.error("Keycloakのキャッシュ無効化に失敗しました。復元自体は完了していますが、Keycloakが復元前の"
+                    + "ユーザー情報を返す可能性があります。Keycloakを再起動してください: {}", e.getMessage(), e);
+        }
     }
 
     /**

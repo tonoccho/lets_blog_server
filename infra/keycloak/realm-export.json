@@ -1047,7 +1047,8 @@
       "clientRoles": {
         "realm-management": [
           "manage-users",
-          "view-users"
+          "view-users",
+          "manage-realm"
         ]
       }
     }
