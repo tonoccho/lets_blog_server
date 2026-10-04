@@ -1,0 +1,146 @@
+'use strict';
+/**
+ * LLM スタブの画像入力(issue #1600)の契約テスト。実行: node --test infra/e2e-stubs/llm/server.test.js
+ * OpenAI 互換の content 配列に image_url(data URL)が含まれる要求へ固定タグを返し、
+ * 受け取った画像の素性(モデル・MIME・バイト数・sha256・Exif/GPS の有無)を
+ * /__control/state から読めること、文字だけの要求は従来どおりであることを検証する。
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const net = require('node:net');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
+function freePort() {
+  return new Promise((resolve) => {
+    const s = net.createServer();
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
+
+let child;
+let base;
+
+test.before(async () => {
+  const port = await freePort();
+  base = `http://127.0.0.1:${port}`;
+  child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, PORT: String(port) },
+    stdio: 'ignore',
+  });
+  for (let i = 0; i < 50; i++) {
+    try {
+      const r = await fetch(`${base}/health`);
+      if (r.ok) return;
+    } catch {
+      /* 起動待ち */
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('stub did not start');
+});
+
+test.after(() => child && child.kill());
+
+const chat = (messages, model = 'llava:7b') =>
+  fetch(`${base}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages }),
+  });
+const state = async () => (await fetch(`${base}/__control/state`)).json();
+const reset = () => fetch(`${base}/__control/reset`, { method: 'POST' });
+
+const imageMessage = (bytes, mime = 'image/png', text = '説明して') => [
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text },
+      { type: 'image_url', image_url: { url: `data:${mime};base64,${bytes.toString('base64')}` } },
+    ],
+  },
+];
+
+test('画像入力付きの要求には固定のビジョン用タグを返す', async () => {
+  await reset();
+  const r = await chat(imageMessage(Buffer.from([1, 2, 3])));
+  assert.equal(r.status, 200);
+  const content = (await r.json()).choices[0].message.content;
+  assert.deepEqual(JSON.parse(content), {
+    tags: ['e2e-stub-vision-tag-a', 'e2e-stub-vision-tag-b', 'e2e-stub-vision-tag-c'],
+  });
+});
+
+test('受け取った画像の素性を state の imageRequests に残す', async () => {
+  await reset();
+  const bytes = Buffer.from([1, 2, 3, 4, 5]);
+  await chat(imageMessage(bytes, 'image/jpeg'), 'llava:7b-e2e-x');
+  const { imageRequests } = await state();
+  assert.equal(imageRequests.length, 1);
+  assert.deepEqual(imageRequests[0], {
+    model: 'llava:7b-e2e-x',
+    mimeType: 'image/jpeg',
+    bytes: 5,
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    containsExif: false,
+    containsGpsMarker: false,
+  });
+});
+
+test('Exif と GPS の目印が画像に含まれていれば検出して記録する', async () => {
+  await reset();
+  const bytes = Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    Buffer.from('Exif\0\0GPS-35.6586N-139.7454E', 'latin1'),
+  ]);
+  await chat(imageMessage(bytes, 'image/jpeg'));
+  const { imageRequests } = await state();
+  assert.equal(imageRequests[0].containsExif, true);
+  assert.equal(imageRequests[0].containsGpsMarker, true);
+});
+
+test('reset で受信履歴を空にする', async () => {
+  await chat(imageMessage(Buffer.from([1])));
+  await reset();
+  assert.deepEqual((await state()).imageRequests, []);
+});
+
+test('履歴は直近50件までに切り詰める', async () => {
+  await reset();
+  for (let i = 0; i < 52; i++) {
+    await chat(imageMessage(Buffer.from([i])), `m-${i}`);
+  }
+  const { imageRequests } = await state();
+  assert.equal(imageRequests.length, 50);
+  assert.equal(imageRequests[0].model, 'm-2');
+});
+
+test('文字だけの要求は従来どおりで、imageRequests に残らない', async () => {
+  await reset();
+  const r = await chat([
+    { role: 'user', content: '以下の画像生成プロンプト {"tags": ["タグ1", "タグ2", "タグ3"]} 猫' },
+  ]);
+  const content = (await r.json()).choices[0].message.content;
+  assert.deepEqual(JSON.parse(content), {
+    tags: ['e2e-stub-image-tag-a', 'e2e-stub-image-tag-b', 'e2e-stub-image-tag-c'],
+  });
+  assert.deepEqual((await state()).imageRequests, []);
+});
+
+test('data URL でない image_url は画像として数えるが素性は空として記録する', async () => {
+  await reset();
+  await chat([
+    {
+      role: 'user',
+      content: [{ type: 'image_url', image_url: { url: 'https://example.invalid/a.png' } }],
+    },
+  ]);
+  const { imageRequests } = await state();
+  assert.equal(imageRequests.length, 1);
+  assert.equal(imageRequests[0].bytes, 0);
+  assert.equal(imageRequests[0].mimeType, null);
+});

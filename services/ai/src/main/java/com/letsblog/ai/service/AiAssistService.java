@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.ai.BraveSearchResult;
 import com.letsblog.ai.ai.LlmClient;
+import com.letsblog.ai.ai.VisionSupport;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiAskRequest;
@@ -322,6 +323,26 @@ public class AiAssistService {
             provider = llmModelService.getSelectedProvider(projectId);
         }
         return llmClient.generate(prompt, model, provider);
+    }
+
+    /**
+     * issue #1600: アップロード画像のAIタグ付けなど、画像1枚を添えた生成({@code POST /api/internal/ai/generate-with-image}が呼ぶ)。
+     *
+     * <p>プロバイダ・モデルは{@link #generateForBridge}と同じくプロジェクトの選択に従う。
+     * 画像入力に対応しない(モデル名が{@link VisionSupport}の許可リストに無い)場合や、
+     * projectId未指定でモデルを特定できない場合は、LLMを呼ばずnullを返す(呼び出し側はタグ付けを省略する)。
+     */
+    public String generateWithImageForBridge(Long projectId, String prompt, String mimeType, byte[] imageData) {
+        if (projectId == null) {
+            return null;
+        }
+        llmClient.useProject(projectId);
+        String model = llmModelService.getSelectedModel(projectId);
+        AiProvider provider = llmModelService.getSelectedProvider(projectId);
+        if (!VisionSupport.supports(provider, model)) {
+            return null;
+        }
+        return llmClient.generate(prompt, new LlmClient.ImageInput(mimeType, imageData), model, provider);
     }
 
     /**

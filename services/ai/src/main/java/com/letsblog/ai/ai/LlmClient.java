@@ -3,6 +3,7 @@ package com.letsblog.ai.ai;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.ai.config.LegacyJacksonRestClientConfig;
 import com.letsblog.common.net.ForbiddenDestinationException;
 import com.letsblog.common.net.GuardedTarget;
@@ -16,6 +17,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.regex.Pattern;
 
 /**
@@ -135,6 +137,19 @@ public class LlmClient {
      * (issue #530: 呼び出し元がプロジェクト単位/リクエスト単位でプロバイダを上書きできるようにするため)。
      */
     public String generate(String prompt, String modelName, AiProvider providerOverride) {
+        return generate(prompt, null, modelName, providerOverride);
+    }
+
+    /**
+     * 画像1枚を添えて生成する(issue #1600)。画像の渡し方はプロバイダごとに異なる:
+     * OLLAMA/OPENAIはOpenAI互換のcontent配列(textとimage_urlのbase64 data URL)、
+     * CLAUDEはAnthropicのimageブロック(base64 source)。Ollamaのvisionモデルも
+     * OpenAI互換エンドポイントのimage_urlを受けるため、OLLAMAはOPENAIと同じ形式で送る。
+     *
+     * <p>呼び出し側は事前に{@link VisionSupport#supports}で画像入力に対応するモデルか確かめること
+     * (このメソッドでは判定しない)。imageがnullなら文字列のみの従来の呼び出しと同じ。
+     */
+    public String generate(String prompt, ImageInput image, String modelName, AiProvider providerOverride) {
         AiProvider provider = providerOverride != null ? providerOverride : configProvider.provider();
         String model = (modelName != null && !modelName.isBlank())
                 ? modelName : configProvider.defaultModelFor(provider);
@@ -145,7 +160,7 @@ public class LlmClient {
         }
 
         if (provider == AiProvider.CLAUDE) {
-            return generateWithClaude(prompt, model, apiKey);
+            return generateWithClaude(prompt, image, model, apiKey);
         }
         GuardedTarget target;
         try {
@@ -154,14 +169,47 @@ public class LlmClient {
             // 接続を試みずに失敗させる。メッセージは原因のプロジェクト設定を示す(issue #1547)。
             throw new AiServiceException(e.getMessage(), e);
         }
-        return generateWithOpenAiCompatible(prompt, model, apiKey, target, provider);
+        return generateWithOpenAiCompatible(prompt, image, model, apiKey, target, provider);
+    }
+
+    /** LLMへ添える画像(変換済みのバイト列とそのMIME)。 */
+    public record ImageInput(String mimeType, byte[] data) {
+    }
+
+    /** OpenAI互換のuserメッセージ。画像なしは文字列のcontent、画像ありはtext+image_urlの配列。 */
+    static ObjectNode openAiUserMessage(String prompt, ImageInput image) {
+        ObjectNode message = JsonNodeFactory.instance.objectNode().put("role", "user");
+        if (image == null) {
+            return message.put("content", prompt);
+        }
+        ArrayNode content = message.putArray("content");
+        content.addObject().put("type", "text").put("text", prompt);
+        String dataUrl = "data:" + image.mimeType() + ";base64," + Base64.getEncoder().encodeToString(image.data());
+        content.addObject().put("type", "image_url").putObject("image_url").put("url", dataUrl);
+        return message;
+    }
+
+    /** Anthropic Messages APIのuserメッセージ。画像ありはimageブロックをtextブロックの前に置く。 */
+    static ObjectNode claudeUserMessage(String prompt, ImageInput image) {
+        ObjectNode message = JsonNodeFactory.instance.objectNode().put("role", "user");
+        if (image == null) {
+            return message.put("content", prompt);
+        }
+        ArrayNode content = message.putArray("content");
+        ObjectNode source = content.addObject().put("type", "image").putObject("source");
+        source.put("type", "base64")
+                .put("media_type", image.mimeType())
+                .put("data", Base64.getEncoder().encodeToString(image.data()));
+        content.addObject().put("type", "text").put("text", prompt);
+        return message;
     }
 
     private String generateWithOpenAiCompatible(
-            String prompt, String modelName, String apiKey, GuardedTarget target, AiProvider provider) {
+            String prompt, ImageInput image, String modelName, String apiKey, GuardedTarget target,
+            AiProvider provider) {
         try {
             ArrayNode messages = JsonNodeFactory.instance.arrayNode();
-            messages.add(JsonNodeFactory.instance.objectNode().put("role", "user").put("content", prompt));
+            messages.add(openAiUserMessage(prompt, image));
             JsonNode body = JsonNodeFactory.instance.objectNode()
                     .put("model", modelName)
                     .put("stream", false)
@@ -189,10 +237,10 @@ public class LlmClient {
     }
 
     /** Anthropic Messages API(POST /v1/messages)を呼び出す。認証ヘッダ/リクエスト形式がOpenAI互換APIと異なる。 */
-    private String generateWithClaude(String prompt, String modelName, String apiKey) {
+    private String generateWithClaude(String prompt, ImageInput image, String modelName, String apiKey) {
         try {
             ArrayNode messages = JsonNodeFactory.instance.arrayNode();
-            messages.add(JsonNodeFactory.instance.objectNode().put("role", "user").put("content", prompt));
+            messages.add(claudeUserMessage(prompt, image));
             JsonNode body = JsonNodeFactory.instance.objectNode()
                     .put("model", modelName)
                     .put("max_tokens", 4096)

@@ -20,11 +20,11 @@ import {
 const MAX_BYTES = 20 * 1024 * 1024;
 
 /** 64x36 の赤い JPEG(sharp で生成した最小の実画像)。EXIF は持たない。 */
-const LANDSCAPE_JPEG_BASE64 =
+export const LANDSCAPE_JPEG_BASE64 =
   '/9j/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAAkAEADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAcI/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8Ak4CeNkAAAAAAAAAAAAAAAAAAAAAAP//Z';
 
 /** 出力に残っていてはならない、GPS位置情報とみなす目印。 */
-const GPS_MARKER = 'GPS-35.6586N-139.7454E';
+export const GPS_MARKER = 'GPS-35.6586N-139.7454E';
 
 // ---------------------------------------------------------------- 画像フィクスチャ
 
@@ -75,7 +75,7 @@ function createSolidPng(width: number, height: number): Buffer {
 }
 
 /** JPEG の SOI 直後に、GPS の目印を持つ APP1(Exif) セグメントを差し込む。 */
-function jpegWithGps(jpeg: Buffer): Buffer {
+export function jpegWithGps(jpeg: Buffer): Buffer {
   const tiff = Buffer.concat([
     Buffer.from([0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
     Buffer.from(GPS_MARKER, 'ascii'),

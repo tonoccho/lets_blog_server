@@ -4,6 +4,7 @@ import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.common.client.SyncCallProfile;
 import com.letsblog.common.client.SyncServiceClient;
 import com.letsblog.common.client.SyncServiceException;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,6 +56,32 @@ public class AiGenerationClient {
             return response.result();
         } catch (SyncServiceException e) {
             throw new AiServiceException("ai-serviceの/api/internal/ai/generate呼び出しに失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 画像1枚を添えて生成する(issue #1600、{@code POST /api/internal/ai/generate-with-image})。
+     * プロバイダ・モデルはai-service側がプロジェクトの選択に従って解決する。
+     * プロジェクトのLLMが画像入力に対応しない場合、ai-serviceは{@code result=null}を返し、ここでもnullを返す
+     * (エラーではない。呼び出し側はタグ付けを省略する)。画像はbase64で本文に載せる。
+     */
+    public String generateWithImage(Long projectId, String prompt, String mimeType, byte[] imageData) {
+        try {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("projectId", projectId);
+            body.put("prompt", prompt);
+            body.put("mimeType", mimeType);
+            body.put("imageBase64", Base64.getEncoder().encodeToString(imageData));
+            GenerateResponse response = client.post(
+                    "/api/internal/ai/generate-with-image", new Object[0], body, GenerateResponse.class,
+                    authHeaders.current());
+            if (response == null) {
+                throw new AiServiceException("ai-serviceから空の応答を受け取りました", null);
+            }
+            return response.result();
+        } catch (SyncServiceException e) {
+            throw new AiServiceException(
+                    "ai-serviceの/api/internal/ai/generate-with-image呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

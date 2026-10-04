@@ -143,6 +143,7 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- 内部ブリッジ(InternalAiGenerationController) --
                 new Endpoint("POST", "/api/internal/ai/generate"),
+                new Endpoint("POST", "/api/internal/ai/generate-with-image"),
 
                 // -- 内部ブリッジ(InternalProjectAiSettingsController) --
                 new Endpoint("GET", "/api/internal/ai/projects/1/brave-search-api-key"),

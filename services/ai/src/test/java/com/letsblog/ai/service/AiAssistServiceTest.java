@@ -138,6 +138,47 @@ class AiAssistServiceTest {
         org.mockito.Mockito.verify(llmModelService).getSelectedProvider(1L);
     }
 
+    // ---- 画像入力付き生成(issue #1600) ----
+
+    @Test
+    void generateWithImageForBridge_vision対応のプロジェクト設定なら画像付きで生成する() {
+        when(llmModelService.getSelectedModel(1L)).thenReturn("llava:7b");
+        when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OLLAMA);
+        byte[] data = {1, 2, 3};
+        when(llmClient.generate(eq("説明して"), any(LlmClient.ImageInput.class), eq("llava:7b"), eq(AiProvider.OLLAMA)))
+                .thenReturn("結果");
+
+        String result = service.generateWithImageForBridge(1L, "説明して", "image/png", data);
+
+        assertEquals("結果", result);
+        ArgumentCaptor<LlmClient.ImageInput> captor = ArgumentCaptor.forClass(LlmClient.ImageInput.class);
+        org.mockito.Mockito.verify(llmClient).generate(eq("説明して"), captor.capture(), eq("llava:7b"), eq(AiProvider.OLLAMA));
+        assertEquals("image/png", captor.getValue().mimeType());
+        assertEquals(data, captor.getValue().data());
+        org.mockito.Mockito.verify(llmClient).useProject(1L);
+    }
+
+    @Test
+    void generateWithImageForBridge_vision非対応モデルならLLMを呼ばずnullを返す() {
+        when(llmModelService.getSelectedModel(1L)).thenReturn("qwen2.5:7b-instruct");
+        when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OLLAMA);
+
+        String result = service.generateWithImageForBridge(1L, "説明して", "image/png", new byte[] {1});
+
+        assertNull(result);
+        org.mockito.Mockito.verify(llmClient, org.mockito.Mockito.never())
+                .generate(anyString(), any(LlmClient.ImageInput.class), any(), any());
+    }
+
+    @Test
+    void generateWithImageForBridge_projectId未指定ならシステム既定のプロバイダとモデルで判定する() {
+        // projectId未指定ではモデル/プロバイダを解決せず、既定のモデル名が分からないため非対応として扱う。
+        String result = service.generateWithImageForBridge(null, "説明して", "image/png", new byte[] {1});
+
+        assertNull(result);
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any());
+    }
+
     @Test
     void generateImagePrompt_履歴が無い場合はSystem_Userのみのプロンプトを組み立てる() {
         when(llmClient.generate(anyString(), any(), any())).thenReturn("english, prompt");

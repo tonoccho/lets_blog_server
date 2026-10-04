@@ -12,6 +12,7 @@
  * 決定性のため created は固定値。`Date.now()` を入れると同一入力でも応答が変わり、
  * シナリオが応答全体をアサートできなくなる。
  */
+const crypto = require('node:crypto');
 const { createStub } = require('../lib/stub');
 
 /** 固定のUnix秒。決定性のために Date.now() を使わない。 */
@@ -518,6 +519,72 @@ function completionFor(prompt) {
 const RECENT_MODELS_LIMIT = 50;
 let recentModels = [];
 
+// ------------------------------------ 画像入力(issue #1600)
+
+/**
+ * 画像入力(OpenAI互換の content 配列に image_url が含まれる要求)への固定のタグ。
+ * アップロード画像のAIタグ付け(UploadedImageTagService)が受ける。文字だけのタグ提案
+ * ({@link IMAGE_TAGS_JSON_TAGS})とは別の値にしてあるので、受け入れテストは「画像を見て付いたタグ」を
+ * 見分けられる。
+ */
+const VISION_TAGS_JSON_TAGS = ['e2e-stub-vision-tag-a', 'e2e-stub-vision-tag-b', 'e2e-stub-vision-tag-c'];
+const VISION_TAGS_JSON_COMPLETION = JSON.stringify({ tags: VISION_TAGS_JSON_TAGS });
+
+/** GPS位置情報とみなす目印。受け入れテスト(imageUpload.steps.ts の GPS_MARKER)が画像へ埋め込む。 */
+const GPS_MARKER = 'GPS-35.6586N-139.7454E';
+
+/**
+ * 受け取った画像の素性の履歴(`/__control/state` の `imageRequests`)。
+ * 「AIへ送られた画像が、保存済みの変換後の画像と同一で、EXIF/GPSを含まない」を、
+ * 外から検査できるようにするために公開する(`recentModels` と同じ理由で履歴にし、50件に切り詰める)。
+ */
+const IMAGE_REQUESTS_LIMIT = 50;
+let imageRequests = [];
+
+/** content が文字列ならそのまま、配列なら text パーツだけを連結する。 */
+function contentText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((part) => part && part.type === 'text')
+    .map((part) => part.text || '')
+    .join('\n');
+}
+
+/** メッセージ中の image_url パーツをすべて集める。 */
+function imageUrls(messages) {
+  const urls = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part && part.type === 'image_url') {
+        urls.push((part.image_url && part.image_url.url) || '');
+      }
+    }
+  }
+  return urls;
+}
+
+/** data URL から画像の素性を作る。data URL でなければバイト数0・MIME null の空の素性。 */
+function describeImage(model, url) {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);
+  if (!match) {
+    return {
+      model, mimeType: null, bytes: 0, sha256: null, containsExif: false, containsGpsMarker: false,
+    };
+  }
+  const bytes = Buffer.from(match[2], 'base64');
+  const text = bytes.toString('latin1');
+  return {
+    model,
+    mimeType: match[1],
+    bytes: bytes.length,
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    containsExif: text.includes('Exif'),
+    containsGpsMarker: text.includes(GPS_MARKER),
+  };
+}
+
 createStub({
   name: 'llm',
   port: Number(process.env.PORT || 8080),
@@ -526,8 +593,9 @@ createStub({
   }),
   onReset: () => {
     recentModels = [];
+    imageRequests = [];
   },
-  extraState: () => ({ recentModels: [...recentModels] }),
+  extraState: () => ({ recentModels: [...recentModels], imageRequests: [...imageRequests] }),
   async handle({ method, pathname, body, res, sendJson }) {
     // Ollama固有の GET /api/ps(issue #1397)。platform-service の「連携サービスの状況」が
     // ロード中モデルの size_vram から演算デバイスを解決する。決定性のため、VRAMに載っていない
@@ -543,9 +611,18 @@ createStub({
     if (method !== 'POST' || !/\/(v1\/)?chat\/completions$/.test(pathname)) return false;
 
     let prompt = '';
+    let images = [];
     try {
       const parsed = JSON.parse(body || '{}');
-      prompt = (parsed.messages || []).map((m) => m.content || '').join('\n');
+      const messages = parsed.messages || [];
+      prompt = messages.map((m) => contentText(m.content)).join('\n');
+      images = imageUrls(messages);
+      for (const url of images) {
+        imageRequests.push(describeImage(parsed.model, url));
+        if (imageRequests.length > IMAGE_REQUESTS_LIMIT) {
+          imageRequests.shift();
+        }
+      }
       if (typeof parsed.model === 'string') {
         recentModels.push(parsed.model);
         if (recentModels.length > RECENT_MODELS_LIMIT) {
@@ -562,13 +639,16 @@ createStub({
       return true;
     }
 
+    // 画像入力付きの要求には、プロンプトの特徴語に関わらず固定のビジョン用タグを返す(issue #1600)。
+    const completion = images.length > 0 ? VISION_TAGS_JSON_COMPLETION : completionFor(prompt);
+
     sendJson(res, 200, {
       id: 'chatcmpl-e2e-stub',
       object: 'chat.completion',
       created: FIXED_CREATED,
       model: 'e2e-stub',
       choices: [
-        { index: 0, message: { role: 'assistant', content: completionFor(prompt) }, finish_reason: 'stop' },
+        { index: 0, message: { role: 'assistant', content: completion }, finish_reason: 'stop' },
       ],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     });

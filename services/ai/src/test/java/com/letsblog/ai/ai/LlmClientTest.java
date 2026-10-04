@@ -260,6 +260,93 @@ class LlmClientTest {
         assertTrue(e.getMessage().contains("タイムアウトまたはネットワークエラー"), "実際: " + e.getMessage());
     }
 
+    // ---- 画像入力(issue #1600) ----
+
+    private static final LlmClient.ImageInput PNG_INPUT =
+            new LlmClient.ImageInput("image/png", new byte[] {1, 2, 3});
+
+    @Test
+    void openAiUserMessage_画像なしは従来どおり文字列のcontent() {
+        com.fasterxml.jackson.databind.JsonNode message = LlmClient.openAiUserMessage("こんにちは", null);
+
+        assertEquals("user", message.get("role").asText());
+        assertEquals("こんにちは", message.get("content").asText());
+    }
+
+    @Test
+    void openAiUserMessage_画像ありはtextとimage_urlのdataURLを並べる() {
+        com.fasterxml.jackson.databind.JsonNode content = LlmClient.openAiUserMessage("説明して", PNG_INPUT).get("content");
+
+        assertEquals("text", content.get(0).get("type").asText());
+        assertEquals("説明して", content.get(0).get("text").asText());
+        assertEquals("image_url", content.get(1).get("type").asText());
+        assertEquals("data:image/png;base64,AQID", content.get(1).get("image_url").get("url").asText());
+    }
+
+    @Test
+    void claudeUserMessage_画像なしは従来どおり文字列のcontent() {
+        assertEquals("こんにちは", LlmClient.claudeUserMessage("こんにちは", null).get("content").asText());
+    }
+
+    @Test
+    void claudeUserMessage_画像ありはimageブロックとtextブロックを並べる() {
+        com.fasterxml.jackson.databind.JsonNode content = LlmClient.claudeUserMessage("説明して", PNG_INPUT).get("content");
+
+        assertEquals("image", content.get(0).get("type").asText());
+        assertEquals("base64", content.get(0).get("source").get("type").asText());
+        assertEquals("image/png", content.get(0).get("source").get("media_type").asText());
+        assertEquals("AQID", content.get(0).get("source").get("data").asText());
+        assertEquals("text", content.get(1).get("type").asText());
+        assertEquals("説明して", content.get(1).get("text").asText());
+    }
+
+    @Test
+    void generate_画像付きOLLAMAはimage_urlを含む本文をchat_completionsへ送る() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        startServer(exchange -> {
+            body.set(readBody(exchange));
+            respond(exchange, 200, OPENAI_STYLE_RESPONSE);
+        });
+        LlmClient ollamaClient = new LlmClient(
+                new StubConfigProvider(AiProvider.OLLAMA, baseUrl() + "/v1", "", "llava:7b"));
+
+        String result = ollamaClient.generate("説明して", PNG_INPUT, "llava:7b", null);
+
+        assertEquals("こんにちは", result);
+        assertTrue(body.get().contains("\"image_url\""), "実際: " + body.get());
+        assertTrue(body.get().contains("data:image/png;base64,AQID"), "実際: " + body.get());
+        assertTrue(body.get().contains("\"model\":\"llava:7b\""), "実際: " + body.get());
+    }
+
+    @Test
+    void generate_画像付きOPENAIもimage_urlを送りBearerトークンを付ける() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        AtomicReference<String> authorization = new AtomicReference<>();
+        startServer(exchange -> {
+            body.set(readBody(exchange));
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            respond(exchange, 200, OPENAI_STYLE_RESPONSE);
+        });
+        LlmClient openAiClient = new LlmClient(
+                new StubConfigProvider(AiProvider.OPENAI, baseUrl() + "/v1", "sk-test", "gpt-4o-mini"));
+
+        openAiClient.generate("説明して", PNG_INPUT, null, null);
+
+        assertTrue(body.get().contains("data:image/png;base64,AQID"), "実際: " + body.get());
+        assertEquals("Bearer sk-test", authorization.get());
+    }
+
+    @Test
+    void generate_画像付きでもOLLAMA以外はAPIキー未設定なら呼び出す前に例外() {
+        LlmClient openAiClient = new LlmClient(
+                new StubConfigProvider(AiProvider.OPENAI, "http://127.0.0.1:1/v1", "", "gpt-4o-mini"));
+
+        AiServiceException e = assertThrows(AiServiceException.class,
+                () -> openAiClient.generate("説明して", PNG_INPUT, null, null));
+
+        assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
+    }
+
     // ---- テスト用の土台 ----
 
     private void startServer(HttpHandler handler) throws IOException {

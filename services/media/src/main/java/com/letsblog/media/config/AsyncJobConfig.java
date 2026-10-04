@@ -59,4 +59,20 @@ public class AsyncJobConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * アップロード画像のAIタグ付け(issue #1600)。アップロード応答の後に非同期で行う補助処理で、
+     * 1件はLLMの応答待ち(最大でai-serviceのタイムアウト)なので並列度は小さく抑える。
+     * 溢れた要求は受理側がタグ付けを省略する(アップロード自体は成功させる)。
+     */
+    @Bean(name = "imageTaggingExecutor")
+    public Executor imageTaggingExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("image-tagging-");
+        executor.initialize();
+        return executor;
+    }
 }
