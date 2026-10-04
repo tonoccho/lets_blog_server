@@ -237,7 +237,7 @@ class LlmClientTest {
 
         AiServiceException e = assertThrows(AiServiceException.class, () -> openAiClient.generate("こんにちは"));
 
-        assertTrue(e.getMessage().contains("APIキーが設定されていません"), "実際: " + e.getMessage());
+        assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
     }
 
     @Test
@@ -247,7 +247,7 @@ class LlmClientTest {
 
         AiServiceException e = assertThrows(AiServiceException.class, () -> claudeClient.generate("こんにちは"));
 
-        assertTrue(e.getMessage().contains("APIキーが設定されていません"), "実際: " + e.getMessage());
+        assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
     }
 
     @Test

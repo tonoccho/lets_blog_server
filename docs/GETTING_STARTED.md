@@ -54,7 +54,7 @@ On a fresh Ubuntu/Debian machine with no prerequisites installed, running `setup
 after cloning takes you straight to a running `https://localhost` — it installs prerequisites
 (Docker Engine + Compose v2, and the NVIDIA Container Toolkit only if `nvidia-smi` works),
 generates `.env` (auto-generating internal secrets, leaving external values like
-`LLM_API_KEY` blank for you to fill in), generates the TLS certificate, starts the stack, and
+`BRAVE_SEARCH_API_KEY` blank for you to fill in), generates the TLS certificate, starts the stack, and
 waits for it to become healthy:
 
 ```bash

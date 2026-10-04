@@ -1,6 +1,9 @@
 package com.letsblog.ai.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -128,36 +131,38 @@ class RemoteLlmConfigProviderTest {
     }
 
     @Test
-    void apiKeyFor_OPENAIでキーを保存していないプロジェクトはシステム設定のキーを使う() {
+    void apiKeyFor_OPENAIでキーを保存していないプロジェクトはシステム設定のキーへ落ちずエラーになる() {
         stubSystemOpenAiKey("sk-system");
         provider.useProject(8L);
 
         when(projectSettings.getOpenAiApiKeyEncrypted(8L)).thenReturn(null);
-        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+        AiServiceException e1 = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
+        assertTrue(e1.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e1.getMessage());
+        assertFalse(e1.getMessage().contains("sk-system"));
 
         when(projectSettings.getOpenAiApiKeyEncrypted(8L)).thenReturn(new byte[0]);
-        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
 
         verify(cipher, never()).decrypt(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void apiKeyFor_OPENAIでもプロジェクト未指定ならシステム設定のキーを使い上書きを引かない() {
+    void apiKeyFor_OPENAIでプロジェクト未指定ならシステム設定のキーへ落ちずエラーになる() {
         stubSystemOpenAiKey("sk-system");
 
-        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+        AiServiceException e = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
+        assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
 
         verify(projectSettings, never()).getOpenAiApiKeyEncrypted(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
-    void apiKeyFor_OPENAI以外のプロバイダーにはプロジェクトのキーを適用しない() {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig("CLAUDE", "Bearer t")).thenReturn(
-                new PlatformServiceClient.LlmConfig("CLAUDE", "u", "sk-claude", "c", List.of("c"), 10L));
+    void apiKeyFor_OPENAI以外のプロバイダーにはOPENAIのプロジェクトのキーを適用しない() {
         provider.useProject(7L);
+        when(projectSettings.getOpenAiApiKeyEncrypted(7L)).thenReturn(new byte[] {1});
+        when(projectSettings.getClaudeApiKeyEncrypted(7L)).thenReturn(null);
 
-        assertEquals("sk-claude", provider.apiKeyFor(AiProvider.CLAUDE));
+        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
 
         verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
     }
@@ -183,34 +188,36 @@ class RemoteLlmConfigProviderTest {
     }
 
     @Test
-    void apiKeyFor_CLAUDEでキーを保存していないプロジェクトはシステム設定のキーを使う() {
+    void apiKeyFor_CLAUDEでキーを保存していないプロジェクトはシステム設定のキーへ落ちずエラーになる() {
         stubSystemClaudeKey("sk-ant-system");
         provider.useProject(8L);
 
         when(projectSettings.getClaudeApiKeyEncrypted(8L)).thenReturn(null);
-        assertEquals("sk-ant-system", provider.apiKeyFor(AiProvider.CLAUDE));
+        AiServiceException e = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
+        assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
 
         when(projectSettings.getClaudeApiKeyEncrypted(8L)).thenReturn(new byte[0]);
-        assertEquals("sk-ant-system", provider.apiKeyFor(AiProvider.CLAUDE));
+        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
 
         verify(cipher, never()).decrypt(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
-    void apiKeyFor_CLAUDEでもプロジェクト未指定ならシステム設定のキーを使い上書きを引かない() {
+    void apiKeyFor_CLAUDEでプロジェクト未指定ならシステム設定のキーへ落ちずエラーになる() {
         stubSystemClaudeKey("sk-ant-system");
 
-        assertEquals("sk-ant-system", provider.apiKeyFor(AiProvider.CLAUDE));
+        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
 
         verify(projectSettings, never()).getClaudeApiKeyEncrypted(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
     void apiKeyFor_CLAUDEのプロジェクトのキーはOPENAIには適用されない() {
-        stubSystemOpenAiKey("sk-system");
         provider.useProject(7L);
+        when(projectSettings.getOpenAiApiKeyEncrypted(7L)).thenReturn(null);
+        when(projectSettings.getClaudeApiKeyEncrypted(7L)).thenReturn(new byte[] {1});
 
-        assertEquals("sk-system", provider.apiKeyFor(AiProvider.OPENAI));
+        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
 
         verify(projectSettings, never()).getClaudeApiKeyEncrypted(7L);
     }

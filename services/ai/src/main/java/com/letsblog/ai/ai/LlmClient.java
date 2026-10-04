@@ -34,6 +34,12 @@ public class LlmClient {
      */
     public static final String ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
+    /**
+     * ChatGPT / ClaudeのAPIキーはプロジェクト単位だけ(issue #1568)。キーが無いときのエラー文。
+     * 先頭に「{provider}」を付けて使う。
+     */
+    public static final String PROJECT_API_KEY_REQUIRED = "のAPIキーが設定されていません。このプロジェクトでAPIキーを設定してください。";
+
     private static final String ANTHROPIC_VERSION = "2023-06-01";
 
     /**
@@ -132,7 +138,7 @@ public class LlmClient {
         String apiKey = configProvider.apiKeyFor(provider);
         if (provider != AiProvider.OLLAMA && (apiKey == null || apiKey.isBlank())) {
             throw new AiServiceException(
-                    provider + "のAPIキーが設定されていません。Web管理画面のシステム設定で設定してください。", null);
+                    provider + PROJECT_API_KEY_REQUIRED, null);
         }
 
         if (provider == AiProvider.CLAUDE) {

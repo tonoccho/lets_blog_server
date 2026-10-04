@@ -56,7 +56,7 @@
 | 旧(Ollama) | 新(LLM) | 備考 |
 | --- | --- | --- |
 | `OLLAMA_BASE_URL` | `LLM_BASE_URL` | 既定値 `https://api.openai.com/v1` |
-| (なし) | `LLM_API_KEY` | 新規。ホスト型APIのため必須(未設定時はヘルスチェックがWARNINGになる) |
+| (なし) | `LLM_API_KEY` | 調査当時の想定。**issue #1568 で廃止**。ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、環境変数・システム設定には持たない |
 | `OLLAMA_MODEL` | `LLM_MODEL` | 既定値 `gpt-4o-mini` |
 | (なし) | `LLM_AVAILABLE_MODELS` | 新規。プロジェクト設定画面で候補表示するモデル名のカンマ区切りリスト |
 | `OLLAMA_REQUEST_TIMEOUT_SECONDS` | `LLM_REQUEST_TIMEOUT_SECONDS` | 既定値 `120`(ホスト型APIはネットワーク越しのため、ローカルGPU推論より短めでも問題ない想定) |

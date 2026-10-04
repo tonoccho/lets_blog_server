@@ -119,9 +119,8 @@ class ConnectedServiceStatusServiceTest {
         lenient().when(letsBlogServiceStatusService.targetUrl()).thenReturn("http://gateway:8080/actuator/health");
         lenient().when(rabbitMqQueueStatusService.check())
                 .thenReturn(new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
-        // LLMチェックの既定はOPENAI・キー設定済み。個々のテストで上書きする。
+        // LLMチェックの既定はOPENAI。個々のテストで上書きする。
         lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
-        lenient().when(appSettingService.getLlmApiKey()).thenReturn("test-llm-api-key");
         service = buildService();
     }
 
@@ -168,38 +167,11 @@ class ConnectedServiceStatusServiceTest {
         assertEquals(Status.ERROR, toMapById(statuses).get("database"));
     }
 
+    // ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、システム全体には「設定の有無」が無い(issue #1568)。
+    // 第三者の有料APIなので実リクエストは送らず、システム側のキー有無で警告も出さない。
     @Test
-    void checkAll_LLM_APIキー未設定であればWARNINGを返す() throws SQLException {
+    void checkAll_LLM_provider_OPENAIはシステム側にキーが無くても警告にしない() throws SQLException {
         when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
-        when(appSettingService.getLlmApiKey()).thenReturn("");
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.isValid(3)).thenReturn(true);
-        respondSuccessToAll();
-        mockBraveSearchConfigured(true);
-
-        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
-
-        assertEquals(Status.WARNING, toMapById(statuses).get("llm"));
-    }
-
-    @Test
-    void checkAll_LLM_APIキーがnullであればWARNINGを返す() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
-        when(appSettingService.getLlmApiKey()).thenReturn(null);
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.isValid(3)).thenReturn(true);
-        respondSuccessToAll();
-        mockBraveSearchConfigured(true);
-
-        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
-
-        assertEquals(Status.WARNING, toMapById(statuses).get("llm"));
-    }
-
-    @Test
-    void checkAll_LLM_provider_OPENAIでAPIキー設定済みであればNORMALを返す() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
-        when(appSettingService.getLlmApiKey()).thenReturn("configured-key");
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
@@ -211,24 +183,8 @@ class ConnectedServiceStatusServiceTest {
     }
 
     @Test
-    void checkAll_LLM_provider_CLAUDEはllm_claude_api_keyの設定有無で判定する_未設定はWARNING() throws SQLException {
+    void checkAll_LLM_provider_CLAUDEはシステム側にキーが無くても警告にしない() throws SQLException {
         when(appSettingService.getLlmProvider()).thenReturn(AiProvider.CLAUDE);
-        when(appSettingService.getLlmClaudeApiKey()).thenReturn("");
-        when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.isValid(3)).thenReturn(true);
-        respondSuccessToAll();
-        mockBraveSearchConfigured(true);
-
-        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
-
-        assertEquals(Status.WARNING, toMapById(statuses).get("llm"));
-        verify(appSettingService, never()).getLlmApiKey();
-    }
-
-    @Test
-    void checkAll_LLM_provider_CLAUDEはllm_claude_api_keyの設定有無で判定する_設定済みはNORMAL() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.CLAUDE);
-        when(appSettingService.getLlmClaudeApiKey()).thenReturn("claude-key");
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
@@ -237,7 +193,6 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.NORMAL, toMapById(statuses).get("llm"));
-        verify(appSettingService, never()).getLlmApiKey();
     }
 
     @Test
@@ -254,7 +209,6 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.NORMAL, toMapById(statuses).get("llm"));
-        verify(appSettingService, never()).getLlmApiKey();
     }
 
     @Test
@@ -272,7 +226,6 @@ class ConnectedServiceStatusServiceTest {
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
         assertEquals(Status.ERROR, toMapById(statuses).get("llm"));
-        verify(appSettingService, never()).getLlmApiKey();
     }
 
     @Test

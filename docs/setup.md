@@ -101,7 +101,6 @@ DB(mysql_data)・Keycloak(keycloak_postgres)・生成画像(generated_images)・
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | MySQLのパスワード | 必須変更 |
 | `APP_ENCRYPTION_KEY` | CMS認証情報暗号化キー(Base64, 32バイト)。生成例: `openssl rand -base64 32` | 必須変更 |
 | `COMFYUI_IMAGE` | ComfyUIイメージ(GPU種別に応じて変更。既定はNVIDIA CUDA13系) | 環境に応じて変更 |
-| `LLM_API_KEY` | 下書き/校正/要約・タグ提案・記事プランニングで使う外部LLMサービス(既定: OpenAI)のAPIキー | 必須変更 |
 | `LLM_MODEL` | 使用するモデル名(既定: `gpt-4o-mini`) | 既定値のままでも可 |
 | `COMFYUI_CHECKPOINT` | 画像生成に使うチェックポイントファイル名 | 既定値のままでも可 |
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
@@ -484,9 +483,10 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 `docker compose logs comfyui` でGPU認識ログを確認できる。
 
 **下書き/校正/要約・タグ提案・記事プランニングが失敗する(LLM呼び出しエラー)**
-`.env` の `LLM_API_KEY` が正しく設定されているか確認する。ダッシュボードの接続サービス状況
-(admin限定)で `LLM` がWARNINGの場合はAPIキー未設定、ERRORの場合は`docker compose logs platform`で
-詳細なエラー内容(レート制限・認証エラー等)を確認する。
+ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、環境変数・システム設定には持たない(#1568)。
+対象プロジェクトの「AI・アセット」タブでキーが「接続済み」になっているか確認する。ダッシュボードの接続サービス状況
+(admin限定)で `LLM` がERRORの場合は(Ollama利用時)`docker compose logs platform`で
+詳細なエラー内容を確認する。
 
 **各サービスの個別ポート(内部8080等)に直接アクセスできない**
 Phase 6以降は意図した仕様(すべて `https://localhost/...` 経由に一本化。内部ポートは#556で

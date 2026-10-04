@@ -92,7 +92,7 @@ Then(
 
 Then(/^Claudeの設定の出所が「(.+)」ではなくなる$/, async ({ page }, source: string) => {
   await expect(field(page, '設定の出所')).not.toHaveText(source, { timeout: 15_000 });
-  await expect(field(page, '設定の出所')).toHaveText(/^(システム設定|環境変数既定|未設定)$/);
+  await expect(field(page, '設定の出所')).toHaveText('未設定');
 });
 
 Then(/^Claudeのai-connectionsの応答に「(.+)」が含まれない$/, async ({ ctx, request }, secret: string) => {
@@ -129,6 +129,11 @@ Then('プロジェクトのClaude APIキーは保存されていない', async (
   });
   expect(response.ok()).toBe(true);
   expect((await response.json()).configured).toBe(false);
+});
+
+Then('Claude欄にシステム設定のキーへ戻る旨の記述が無い', async ({ page }) => {
+  await expect(section(page)).toBeVisible();
+  expect(await section(page).innerText()).not.toContain('システム設定');
 });
 
 After({ tags: '@ai' }, async ({ ctx, request }) => {

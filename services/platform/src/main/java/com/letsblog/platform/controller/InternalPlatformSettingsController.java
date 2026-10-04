@@ -53,6 +53,12 @@ public class InternalPlatformSettingsController {
         return new SystemBraveSearchApiKeyResponse(apiKey == null || apiKey.isBlank() ? null : apiKey);
     }
 
+    /**
+     * ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、システム全体のキーは無い(issue #1568)。
+     * ai-serviceはプロジェクトのキーだけを使うので、この項目は常に空(契約の互換のために項目は残す)。
+     */
+    private static final String NO_SYSTEM_API_KEY = "";
+
     public record LlmConfigResponse(
             String provider, String baseUrl, String apiKey, String defaultModel,
             List<String> availableModels, long requestTimeoutSeconds) {
@@ -69,7 +75,7 @@ public class InternalPlatformSettingsController {
         return new LlmConfigResponse(
                 resolved.name(),
                 appSettingService.baseUrlFor(resolved),
-                appSettingService.apiKeyFor(resolved),
+                NO_SYSTEM_API_KEY,
                 appSettingService.defaultModelFor(resolved),
                 appSettingService.availableModelsFor(resolved),
                 appSettingService.requestTimeoutSeconds());
@@ -100,7 +106,7 @@ public class InternalPlatformSettingsController {
 
     /**
      * ai-serviceのai-connections API(issue #1499)向け。4プロバイダーそれぞれの接続先・設定の出所・
-     * 設定有無を返す。OpenAI/ClaudeのAPIキー、OllamaとComfyUIのURLとも、実際のキー値はレスポンスに
+     * 設定有無を返す。OllamaとComfyUIのURLを含め、実際のキー値はレスポンスに
      * 含めない(ai-serviceは有無しか必要としない)。
      */
     @GetMapping("/api/internal/platform/ai-connections-config")
@@ -108,8 +114,8 @@ public class InternalPlatformSettingsController {
         return new AiConnectionsConfigResponse(
                 urlConfig(appSettingService.getLlmOllamaBaseUrl(), appSettingService.ollamaBaseUrlSource()),
                 urlConfig(appSettingService.getComfyUiBaseUrl(), appSettingService.comfyUiBaseUrlSource()),
-                keyConfig(appSettingService.openAiApiKeySource()),
-                keyConfig(appSettingService.claudeApiKeySource()));
+                NO_SYSTEM_KEY,
+                NO_SYSTEM_KEY);
     }
 
     private static ProviderConnectionConfig urlConfig(String baseUrl, AppSettingService.SettingSource source) {
@@ -117,8 +123,7 @@ public class InternalPlatformSettingsController {
         return new ProviderConnectionConfig(configured ? baseUrl : null, source.name(), configured);
     }
 
-    private static ProviderConnectionConfig keyConfig(AppSettingService.SettingSource source) {
-        return new ProviderConnectionConfig(
-                null, source.name(), source != AppSettingService.SettingSource.NONE);
-    }
+    /** ChatGPT / Claudeはシステム側に出所が無い(プロジェクト単位のキーだけ。ai-serviceがプロジェクトの有無で上書きする)。 */
+    private static final ProviderConnectionConfig NO_SYSTEM_KEY =
+            new ProviderConnectionConfig(null, AppSettingService.SettingSource.NONE.name(), false);
 }

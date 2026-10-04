@@ -211,17 +211,15 @@ public class ConnectedServiceStatusService {
     /**
      * 実効プロバイダー(DB優先で解決される{@link AppSettingService#getLlmProvider()}、issue #1087)
      * によって判定方法を切り替える。OLLAMAは自ホスト上のコンテナで無料のため実際に疎通確認する
-     * (ComfyUIと同じ方針)。OPENAI/CLAUDEは第三者の有料APIのため、疎通確認のために定期的に実リクエスト
-     * を送ることはせず、APIキーが設定されているかどうかを稼働状況の代わりとして扱う(Brave Searchと
-     * 同じ方針)。この場合も参照するAPIキーはプロバイダーに対応するもの(OPENAI→llm_api_key、
-     * CLAUDE→llm_claude_api_key)に切り替える。
+     * (ComfyUIと同じ方針)。OPENAI/CLAUDEは第三者の有料APIのため実リクエストは送らない。APIキーは
+     * プロジェクト単位だけでシステム全体の「設定の有無」が無いため(issue #1568)、システムの連携状況としては
+     * 警告にせず正常とする(キーの設定状況はプロジェクトのAI・アセットで確認する)。
      */
     private CheckOutcome checkLlm() {
         AiProvider provider = appSettingService.getLlmProvider();
         return switch (provider) {
             case OLLAMA -> checkLlmOllama();
-            case CLAUDE -> checkLlmApiKeyConfigured(appSettingService.getLlmClaudeApiKey());
-            case OPENAI -> checkLlmApiKeyConfigured(appSettingService.getLlmApiKey());
+            case CLAUDE, OPENAI -> CheckOutcome.normal(null);
         };
     }
 
@@ -295,13 +293,6 @@ public class ConnectedServiceStatusService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             return null;
         }
-    }
-
-    private CheckOutcome checkLlmApiKeyConfigured(String apiKey) {
-        if (apiKey != null && !apiKey.isBlank()) {
-            return CheckOutcome.normal(null);
-        }
-        return new CheckOutcome(Status.WARNING, null, "APIキーが設定されていません", null);
     }
 
     /**

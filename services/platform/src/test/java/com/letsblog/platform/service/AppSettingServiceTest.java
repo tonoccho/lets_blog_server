@@ -45,29 +45,40 @@ class AppSettingServiceTest {
     private AppSettingService service() {
         return new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
-                "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
+                "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
+                "OPENAI", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
                 "http://localhost:8188", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
     }
 
-    @Test
-    void getLlmApiKey_DB設定があればそれを優先する() {
-        AppSettingService service = service();
-        when(repository.findById("llm_api_key"))
-                .thenReturn(Optional.of(new SystemSetting("llm_api_key", credentialCipher.encrypt("db-key"))));
+    // ---- ChatGPT / ClaudeのAPIキーはプロジェクト単位だけ(issue #1568) ----
 
-        assertEquals("db-key", service.getLlmApiKey());
+    @Test
+    void getAllSettings_システム全体のChatGPTとClaudeのAPIキーの項目を持たない() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        List<String> keys = service.getAllSettings().stream().map(AppSettingService.SettingStatus::key).toList();
+
+        assertTrue(!keys.contains("llm_api_key"), "実際のキー一覧: " + keys);
+        assertTrue(!keys.contains("llm_claude_api_key"), "実際のキー一覧: " + keys);
+        // 画像生成のキー(#1521)と、キー以外のLLM設定は残る。
+        assertTrue(keys.contains("llm_base_url"), "実際のキー一覧: " + keys);
+        assertTrue(keys.contains("llm_claude_model"), "実際のキー一覧: " + keys);
     }
 
     @Test
-    void getLlmApiKey_DB未設定なら環境変数値にフォールバックする() {
+    void updateSettings_llm_api_keyとllm_claude_api_keyは不明なキーとして拒否され何も保存されない() {
         AppSettingService service = service();
-        when(repository.findById("llm_api_key")).thenReturn(Optional.empty());
 
-        assertEquals("env-llm-key", service.getLlmApiKey());
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("llm_api_key", "sk-system")));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("llm_claude_api_key", "sk-ant-system")));
+
+        verify(repository, never()).save(any());
     }
 
     @Test
@@ -85,7 +96,6 @@ class AppSettingServiceTest {
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
         assertEquals("https://api.openai.com/v1", service.baseUrl());
-        assertEquals("env-llm-key", service.apiKey());
         assertEquals("gpt-4o-mini", service.defaultModel());
         assertEquals(120L, service.requestTimeoutSeconds());
         assertEquals(AiProvider.OPENAI, service.provider());
@@ -106,15 +116,6 @@ class AppSettingServiceTest {
                 .thenReturn(Optional.of(new SystemSetting("llm_provider", credentialCipher.encrypt("CLAUDE"))));
 
         assertEquals(AiProvider.CLAUDE, service.getLlmProvider());
-    }
-
-    @Test
-    void apiKeyFor_CLAUDEはClaude用のAPIキーを返す() {
-        AppSettingService service = service();
-        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
-
-        assertEquals("env-claude-key", service.apiKeyFor(AiProvider.CLAUDE));
-        assertEquals("env-llm-key", service.apiKeyFor(AiProvider.OPENAI));
     }
 
     @Test
@@ -193,11 +194,11 @@ class AppSettingServiceTest {
 
         List<AppSettingService.SettingStatus> statuses = service.getAllSettings();
 
-        AppSettingService.SettingStatus llmApiKey = statuses.stream()
-                .filter(status -> status.key().equals("llm_api_key")).findFirst().orElseThrow();
-        assertTrue(llmApiKey.secret());
-        assertEquals(null, llmApiKey.value());
-        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, llmApiKey.source());
+        AppSettingService.SettingStatus mailPassword = statuses.stream()
+                .filter(status -> status.key().equals("mail_password")).findFirst().orElseThrow();
+        assertTrue(mailPassword.secret());
+        assertEquals(null, mailPassword.value());
+        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, mailPassword.source());
 
         AppSettingService.SettingStatus mailHost = statuses.stream()
                 .filter(status -> status.key().equals("mail_host")).findFirst().orElseThrow();
@@ -210,7 +211,7 @@ class AppSettingServiceTest {
         AppSettingService service = service();
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
-        assertThrows(ForbiddenException.class, () -> service.updateSettings(Map.of("llm_api_key", "new-key")));
+        assertThrows(ForbiddenException.class, () -> service.updateSettings(Map.of("mail_password", "new-key")));
     }
 
     @Test
@@ -218,7 +219,7 @@ class AppSettingServiceTest {
         AppSettingService service = service();
 
         assertThrows(IllegalArgumentException.class,
-                () -> service.updateSettings(Map.of("llm_api_key", "new-key", "unknown_key", "value")));
+                () -> service.updateSettings(Map.of("mail_password", "new-key", "unknown_key", "value")));
 
         verify(repository, never()).save(any());
     }
@@ -228,7 +229,7 @@ class AppSettingServiceTest {
         AppSettingService service = service();
 
         assertThrows(IllegalArgumentException.class, () -> service.updateSettings(
-                Map.of("llm_api_key", "new-key", "app_web_base_url", "not-a-url")));
+                Map.of("mail_password", "new-key", "app_web_base_url", "not-a-url")));
 
         verify(repository, never()).save(any());
     }
@@ -238,7 +239,7 @@ class AppSettingServiceTest {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
-        service.updateSettings(Map.of("llm_api_key", "new-key", "app_web_base_url", "https://blog.example.com"));
+        service.updateSettings(Map.of("mail_password", "new-key", "app_web_base_url", "https://blog.example.com"));
 
         verify(repository, org.mockito.Mockito.times(2)).save(any());
     }
@@ -247,9 +248,9 @@ class AppSettingServiceTest {
     void updateSettings_空文字は既存設定を削除する() {
         AppSettingService service = service();
 
-        service.updateSettings(Map.of("llm_api_key", ""));
+        service.updateSettings(Map.of("mail_password", ""));
 
-        verify(repository).deleteById("llm_api_key");
+        verify(repository).deleteById("mail_password");
         verify(repository, never()).save(any());
     }
 
@@ -368,17 +369,6 @@ class AppSettingServiceTest {
         assertNotEquals("gpt-4o-mini", service.defaultModelFor(AiProvider.OLLAMA));
     }
 
-    /** ローカルのOllamaコンテナへOpenAIのAPIキーを送らないため、OLLAMAには共用キーを渡さない。 */
-    @Test
-    void apiKeyFor_OLLAMAはllm_api_keyを返さず空を返す() {
-        AppSettingService service = service();
-        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
-        lenient().when(repository.findById("llm_api_key")).thenReturn(Optional.of(
-                new SystemSetting("llm_api_key", credentialCipher.encrypt("sk-openai-secret"))));
-
-        assertEquals("", service.apiKeyFor(AiProvider.OLLAMA));
-    }
-
     @Test
     void OPENAIとCLAUDEの解決はOLLAMA専用キーの追加後も変わらない() {
         AppSettingService service = service();
@@ -386,10 +376,8 @@ class AppSettingServiceTest {
 
         assertEquals("https://api.openai.com/v1", service.baseUrlFor(AiProvider.OPENAI));
         assertEquals("gpt-4o-mini", service.defaultModelFor(AiProvider.OPENAI));
-        assertEquals("env-llm-key", service.apiKeyFor(AiProvider.OPENAI));
         assertEquals("https://api.anthropic.com", service.baseUrlFor(AiProvider.CLAUDE));
         assertEquals("claude-3-5-haiku-20241022", service.defaultModelFor(AiProvider.CLAUDE));
-        assertEquals("env-claude-key", service.apiKeyFor(AiProvider.CLAUDE));
     }
 
     @Test
@@ -584,8 +572,8 @@ class AppSettingServiceTest {
     private AppSettingService serviceWithoutEnvDefaults() {
         return new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "", "", "", "", "120",
-                "", "", "",
+                "", "", "", "120",
+                "", "",
                 "", "",
                 "", "",
                 "", "587", "", "", "",
@@ -610,11 +598,11 @@ class AppSettingServiceTest {
     void getAllSettings_秘匿項目はDB設定済みでも値を含めない() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
-        when(repository.findById("llm_api_key")).thenReturn(Optional.of(
-                new SystemSetting("llm_api_key", credentialCipher.encrypt("sk-secret"))));
+        when(repository.findById("mail_password")).thenReturn(Optional.of(
+                new SystemSetting("mail_password", credentialCipher.encrypt("sk-secret"))));
 
         AppSettingService.SettingStatus status = service.getAllSettings().stream()
-                .filter(s -> s.key().equals("llm_api_key")).findFirst().orElseThrow();
+                .filter(s -> s.key().equals("mail_password")).findFirst().orElseThrow();
 
         assertEquals(AppSettingService.SettingSource.DATABASE, status.source());
         assertEquals(null, status.value());
@@ -781,7 +769,7 @@ class AppSettingServiceTest {
         AppSettingService service = service();
 
         assertThrows(IllegalArgumentException.class, () -> service.updateSettings(
-                Map.of("llm_api_key", "new-key", "site_admin_path", "javascript:alert(1)")));
+                Map.of("mail_password", "new-key", "site_admin_path", "javascript:alert(1)")));
 
         verify(repository, never()).save(any());
     }
@@ -838,8 +826,8 @@ class AppSettingServiceTest {
     void availableModelsFor_OPENAIの一覧が空なら空を返す() {
         AppSettingService service = new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "", "120",
-                "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
+                "https://api.openai.com/v1", "gpt-4o-mini", "", "120",
+                "OPENAI", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
                 "http://localhost:8188", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
@@ -853,8 +841,8 @@ class AppSettingServiceTest {
     void availableModelsFor_OLLAMAの既定モデルも空なら空を返す() {
         AppSettingService service = new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "env-llm-key", "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o", "120",
-                "OPENAI", "env-claude-key", "claude-3-5-haiku-20241022",
+                "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o", "120",
+                "OPENAI", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "",
                 "http://localhost:8188", "https://api.openai.com/v1",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
@@ -879,14 +867,12 @@ class AppSettingServiceTest {
     // ---- ai-connections向けの取得元(issue #1499) ----
 
     @Test
-    void 取得元_環境変数のみなら4項目ともENVIRONMENTを返す() {
+    void 取得元_環境変数のみなら2項目ともENVIRONMENTを返す() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
         assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.ollamaBaseUrlSource());
         assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.comfyUiBaseUrlSource());
-        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.openAiApiKeySource());
-        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.claudeApiKeySource());
     }
 
     @Test
@@ -895,11 +881,8 @@ class AppSettingServiceTest {
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
         when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.of(
                 new SystemSetting("llm_ollama_base_url", credentialCipher.encrypt("http://db-ollama/v1"))));
-        when(repository.findById("llm_api_key")).thenReturn(Optional.of(
-                new SystemSetting("llm_api_key", credentialCipher.encrypt("db-key"))));
 
         assertEquals(AppSettingService.SettingSource.DATABASE, service.ollamaBaseUrlSource());
-        assertEquals(AppSettingService.SettingSource.DATABASE, service.openAiApiKeySource());
     }
 
     @Test
@@ -909,8 +892,6 @@ class AppSettingServiceTest {
 
         assertEquals(AppSettingService.SettingSource.NONE, service.ollamaBaseUrlSource());
         assertEquals(AppSettingService.SettingSource.NONE, service.comfyUiBaseUrlSource());
-        assertEquals(AppSettingService.SettingSource.NONE, service.openAiApiKeySource());
-        assertEquals(AppSettingService.SettingSource.NONE, service.claudeApiKeySource());
     }
 
     @Test
@@ -918,7 +899,7 @@ class AppSettingServiceTest {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
-        service.claudeApiKeySource();
+        service.comfyUiBaseUrlSource();
 
         verify(adminAuthorizationService, never()).requireAdmin();
     }

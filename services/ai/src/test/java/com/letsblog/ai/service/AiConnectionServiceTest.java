@@ -198,6 +198,8 @@ class AiConnectionServiceTest {
     @Test
     void 接続拒否ならERRORで理由を返し他の行に影響しない() {
         allConfigured();
+        when(projectAiSettingsService.hasOpenAiApiKey(1L)).thenReturn(true);
+        when(projectAiSettingsService.hasClaudeApiKey(1L)).thenReturn(true);
 
         List<AiConnectionResponse> rows = service(factoryRespondingTo("refused", "ok"), Duration.ofSeconds(3))
                 .listConnections(1L);
@@ -250,7 +252,8 @@ class AiConnectionServiceTest {
     @Test
     void APIキー設定済みならconfiguredでNORMAL_未設定ならWARNINGで実リクエストは送らない() {
         platformReturns(cfg(null, "NONE", false), cfg(null, "NONE", false),
-                cfg(null, "DATABASE", true), cfg(null, "NONE", false));
+                cfg(null, "NONE", false), cfg(null, "NONE", false));
+        when(projectAiSettingsService.hasOpenAiApiKey(1L)).thenReturn(true);
 
         List<AiConnectionResponse> rows = service().listConnections(1L);
 
@@ -259,7 +262,7 @@ class AiConnectionServiceTest {
         assertEquals(Status.NORMAL, openai.status());
         assertNull(openai.detail());
         assertNull(openai.targetUrl());
-        assertEquals(Source.DATABASE, openai.source());
+        assertEquals(Source.PROJECT, openai.source());
         AiConnectionResponse claude = row(rows, Provider.CLAUDE);
         assertFalse(claude.configured());
         assertEquals(Status.WARNING, claude.status());
@@ -370,7 +373,7 @@ class AiConnectionServiceTest {
     }
 
     @Test
-    void ChatGPTはプロジェクトにキーが無ければシステム設定の出所のまま() {
+    void ChatGPTはプロジェクトにキーが無ければplatformがシステム設定を返しても未設定のNONE() {
         platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
                 cfg(null, "DATABASE", true), cfg(null, "NONE", false));
         when(projectAiSettingsService.hasOpenAiApiKey(7L)).thenReturn(false);
@@ -378,7 +381,10 @@ class AiConnectionServiceTest {
         List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
                 .listConnections(7L);
 
-        assertEquals(Source.DATABASE, row(rows, Provider.OPENAI).source());
+        AiConnectionResponse openai = row(rows, Provider.OPENAI);
+        assertEquals(Source.NONE, openai.source());
+        assertFalse(openai.configured());
+        assertEquals(Status.WARNING, openai.status());
     }
 
     @Test
@@ -398,7 +404,7 @@ class AiConnectionServiceTest {
     }
 
     @Test
-    void Claudeはプロジェクトにキーが無ければシステム設定の出所のまま() {
+    void Claudeはプロジェクトにキーが無ければplatformがシステム設定を返しても未設定のNONE() {
         platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
                 cfg(null, "NONE", false), cfg(null, "DATABASE", true));
         when(projectAiSettingsService.hasClaudeApiKey(7L)).thenReturn(false);
@@ -406,6 +412,9 @@ class AiConnectionServiceTest {
         List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
                 .listConnections(7L);
 
-        assertEquals(Source.DATABASE, row(rows, Provider.CLAUDE).source());
+        AiConnectionResponse claude = row(rows, Provider.CLAUDE);
+        assertEquals(Source.NONE, claude.source());
+        assertFalse(claude.configured());
+        assertEquals(Status.WARNING, claude.status());
     }
 }

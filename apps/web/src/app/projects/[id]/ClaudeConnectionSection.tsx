@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AiConnection, ConnectionSource } from "@/lib/apiClient";
+import type { AiConnection } from "@/lib/apiClient";
 import { clearClaudeApiKeyAction, fetchAiConnectionsAction, setClaudeApiKeyAction } from "./actions";
 
 const CLAUDE_CONSOLE_URL = "https://platform.claude.com/settings/keys";
 
-const SOURCE_LABEL: Record<ConnectionSource, string> = {
+// APIキーはプロジェクト単位だけ(issue #1568)。出所は「プロジェクト設定」か「未設定」のどちらか。
+const SOURCE_LABEL: Record<"PROJECT" | "NONE", string> = {
   PROJECT: "プロジェクト設定",
-  DATABASE: "システム設定",
-  ENVIRONMENT: "環境変数既定",
   NONE: "未設定",
 };
 
@@ -100,8 +99,8 @@ export function ClaudeConnectionSection({ projectId }: { projectId: number }) {
     setMessage({ type: "success", text: "接続を解除しました。" });
   }
 
-  const source = row?.source ?? "NONE";
-  const projectKeyStored = source === "PROJECT";
+  const projectKeyStored = row?.source === "PROJECT";
+  const source = projectKeyStored ? "PROJECT" : "NONE";
 
   return (
     <section className="space-y-2 rounded border border-neutral-200 dark:border-neutral-800 p-3 text-sm">
@@ -115,7 +114,7 @@ export function ClaudeConnectionSection({ projectId }: { projectId: number }) {
       {loaded && !loadError && (
         <dl className="grid grid-cols-[8rem_1fr] gap-x-2 gap-y-1">
           <dt className="text-neutral-500 dark:text-neutral-400">接続状態</dt>
-          <dd>{row?.configured ? "接続済み" : "未接続"}</dd>
+          <dd>{projectKeyStored ? "接続済み" : "未接続"}</dd>
           <dt className="text-neutral-500 dark:text-neutral-400">設定の出所</dt>
           <dd>{SOURCE_LABEL[source]}</dd>
         </dl>
@@ -166,7 +165,7 @@ export function ClaudeConnectionSection({ projectId }: { projectId: number }) {
           </button>
         )}
         <p className="w-full text-xs text-neutral-500 dark:text-neutral-400">
-          このプロジェクトのLLM生成(Claude)でだけ使われます。解除するとシステム設定のキーに戻ります。
+          このプロジェクトのLLM生成(Claude)でだけ使われます。解除するとこのプロジェクトでは使えなくなります。
         </p>
       </form>
       {message && (

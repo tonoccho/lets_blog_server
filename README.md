@@ -317,7 +317,7 @@ cd lets_blog_server
 
 `.env` は既に存在する場合は上書きしない。存在しない場合は `.env.example` を土台に、
 値が何でもよい内部の秘密値(DBパスワード・`NEXTAUTH_SECRET` 等)は自動生成して書き込み、
-利用者自身が用意する外部の値(`LLM_API_KEY`・`BRAVE_SEARCH_API_KEY`・`MAIL_PASSWORD` 等)は
+利用者自身が用意する外部の値(`BRAVE_SEARCH_API_KEY`・`MAIL_PASSWORD` 等。ChatGPT / ClaudeのAPIキーは環境変数ではなくプロジェクトごとに設定する)は
 生成せず空のまま残して実行の最後に一覧表示する。それらの機能を使う場合は `.env` を手動で
 編集する。
 

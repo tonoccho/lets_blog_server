@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * プロジェクト単位のChatGPT(OpenAI) APIキー(issue #1506)。値そのものは返さず、設定済みかどうかのみ返す。
  * 保存したキーは{@code CredentialCipher}で暗号化し、そのプロジェクトのLLM生成(プロバイダーOPENAI)で
- * システム設定の{@code llm_api_key}より優先して使われる。認可はBrave Searchキーと同じ
+ * 使われる。システム全体のキーは無い(issue #1568)。認可はBrave Searchキーと同じ
  * {@code requireProjectMemberOrAdmin}。
  */
 @RestController

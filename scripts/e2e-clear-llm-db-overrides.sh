@@ -65,8 +65,8 @@ fi
 
 # AppSettingService が定義するキーのうち、外部サービスへの向き先と資格情報に関わるもの。
 # 追加したキーはここにも足すこと(足し忘れると、そのキーだけDB値が残り実サービスへ出ていく)。
-KEYS="'llm_api_key','llm_base_url','llm_model','llm_available_models',\
-'llm_request_timeout_seconds','llm_provider','llm_claude_api_key','llm_claude_model',\
+KEYS="'llm_base_url','llm_model','llm_available_models',\
+'llm_request_timeout_seconds','llm_provider','llm_claude_model',\
 'llm_ollama_base_url','llm_ollama_model',\
 'llm_ollama_available_models','llm_claude_available_models',\
 'image_llm_base_url',\

@@ -17,6 +17,9 @@ import org.springframework.stereotype.Service;
 public class ProjectConnectionService {
 
     static final String PROJECT_SOURCE = "PROJECT";
+    /** ChatGPT / Claude共通。キーの値は持たない。 */
+    private static final ProviderConnectionConfig PROJECT_KEY = new ProviderConnectionConfig(null, PROJECT_SOURCE, true);
+    private static final ProviderConnectionConfig NO_KEY = new ProviderConnectionConfig(null, "NONE", false);
 
     private final ProjectAiSettingsService projectAiSettingsService;
     private final PlatformServiceClient platformServiceClient;
@@ -46,12 +49,15 @@ public class ProjectConnectionService {
         return get(projectId);
     }
 
-    /** Ollama / ComfyUIにプロジェクトの上書き(null/空は無し)を重ねる。ChatGPT / Claudeは素通し。 */
+    /**
+     * Ollama / ComfyUIにプロジェクトの上書き(null/空は無し)を重ねる。ChatGPT / Claudeのキーはプロジェクト単位
+     * だけなので、プロジェクトにキーが無ければ未設定(issue #1568)。
+     */
     static AiConnectionsConfig applyOverrides(AiConnectionsConfig base, String ollamaOverride, String comfyuiOverride) {
         return applyOverrides(base, ollamaOverride, comfyuiOverride, false);
     }
 
-    /** 上に加え、プロジェクトにChatGPT(OpenAI)のAPIキーがあればChatGPTを設定済み・PROJECTにする(issue #1506)。 */
+    /** 上に加え、プロジェクトにChatGPT(OpenAI)のAPIキーがあればChatGPTを設定済み・PROJECTにする(issue #1506)。無ければ未設定。 */
     static AiConnectionsConfig applyOverrides(
             AiConnectionsConfig base, String ollamaOverride, String comfyuiOverride, boolean hasOpenAiApiKey) {
         return applyOverrides(base, ollamaOverride, comfyuiOverride, hasOpenAiApiKey, false);
@@ -63,13 +69,8 @@ public class ProjectConnectionService {
             boolean hasOpenAiApiKey, boolean hasClaudeApiKey) {
         return new AiConnectionsConfig(
                 override(base.ollama(), ollamaOverride), override(base.comfyui(), comfyuiOverride),
-                hasOpenAiApiKey ? projectKey(base.openai()) : base.openai(),
-                hasClaudeApiKey ? projectKey(base.claude()) : base.claude());
-    }
-
-    /** ChatGPT / Claude共通。キーの値は持たない。接続先(baseUrl)はシステム側の解決結果をそのまま残す。 */
-    private static ProviderConnectionConfig projectKey(ProviderConnectionConfig system) {
-        return new ProviderConnectionConfig(system == null ? null : system.baseUrl(), PROJECT_SOURCE, true);
+                hasOpenAiApiKey ? PROJECT_KEY : NO_KEY,
+                hasClaudeApiKey ? PROJECT_KEY : NO_KEY);
     }
 
     private static ProviderConnectionConfig override(ProviderConnectionConfig system, String override) {

@@ -35,13 +35,11 @@ import java.util.regex.Pattern;
 @Service
 public class AppSettingService {
 
-    static final String LLM_API_KEY = "llm_api_key";
     static final String LLM_BASE_URL = "llm_base_url";
     static final String LLM_MODEL = "llm_model";
     static final String LLM_AVAILABLE_MODELS = "llm_available_models";
     static final String LLM_REQUEST_TIMEOUT_SECONDS = "llm_request_timeout_seconds";
     static final String LLM_PROVIDER = "llm_provider";
-    static final String LLM_CLAUDE_API_KEY = "llm_claude_api_key";
     static final String LLM_CLAUDE_MODEL = "llm_claude_model";
     static final String LLM_OLLAMA_BASE_URL = "llm_ollama_base_url";
     static final String LLM_OLLAMA_MODEL = "llm_ollama_model";
@@ -82,14 +80,12 @@ public class AppSettingService {
 
     private static final List<Definition> DEFINITIONS = List.of(
             new Definition(LLM_PROVIDER, "AIプロバイダー(OLLAMA/OPENAI/CLAUDEのいずれか)", false),
-            new Definition(LLM_API_KEY, "LLM APIキー(OpenAI用)", true),
             new Definition(LLM_BASE_URL, "LLM ベースURL(OpenAI用)", false),
             new Definition(LLM_MODEL, "LLM 既定モデル(OpenAI用)", false),
             new Definition(LLM_AVAILABLE_MODELS, "LLM 選択可能モデル(カンマ区切り、OpenAI用)", false),
             new Definition(LLM_REQUEST_TIMEOUT_SECONDS, "LLM リクエストタイムアウト(秒)", false),
             new Definition(LLM_OLLAMA_BASE_URL, "Ollama ベースURL(OLLAMA用。OpenAI互換の /v1 まで含める)", false),
             new Definition(LLM_OLLAMA_MODEL, "Ollama 既定モデル(OLLAMA用)", false),
-            new Definition(LLM_CLAUDE_API_KEY, "Claude APIキー", true),
             new Definition(LLM_CLAUDE_MODEL, "Claude 既定モデル", false),
             new Definition(LLM_OLLAMA_AVAILABLE_MODELS,
                     "Ollama 選択可能モデル(カンマ区切り、OLLAMA用。未設定なら既定モデルのみ)", false),
@@ -115,13 +111,11 @@ public class AppSettingService {
             SystemSettingRepository repository,
             CredentialCipher credentialCipher,
             AdminAuthorizationService adminAuthorizationService,
-            @Value("${app.llm-api-key:}") String llmApiKeyEnvDefault,
             @Value("${app.llm-base-url}") String llmBaseUrlEnvDefault,
             @Value("${app.llm-model}") String llmModelEnvDefault,
             @Value("${app.llm-available-models}") String llmAvailableModelsEnvDefault,
             @Value("${app.llm-request-timeout-seconds}") String llmRequestTimeoutSecondsEnvDefault,
             @Value("${app.llm-provider:OLLAMA}") String llmProviderEnvDefault,
-            @Value("${app.llm-claude-api-key:}") String llmClaudeApiKeyEnvDefault,
             @Value("${app.llm-claude-model:claude-3-5-haiku-20241022}") String llmClaudeModelEnvDefault,
             @Value("${app.llm-ollama-base-url:http://ollama:11434/v1}") String llmOllamaBaseUrlEnvDefault,
             @Value("${app.llm-ollama-model:qwen2.5:7b-instruct}") String llmOllamaModelEnvDefault,
@@ -139,13 +133,11 @@ public class AppSettingService {
         this.credentialCipher = credentialCipher;
         this.adminAuthorizationService = adminAuthorizationService;
         Map<String, String> defaults = new LinkedHashMap<>();
-        defaults.put(LLM_API_KEY, llmApiKeyEnvDefault);
         defaults.put(LLM_BASE_URL, llmBaseUrlEnvDefault);
         defaults.put(LLM_MODEL, llmModelEnvDefault);
         defaults.put(LLM_AVAILABLE_MODELS, llmAvailableModelsEnvDefault);
         defaults.put(LLM_REQUEST_TIMEOUT_SECONDS, llmRequestTimeoutSecondsEnvDefault);
         defaults.put(LLM_PROVIDER, llmProviderEnvDefault);
-        defaults.put(LLM_CLAUDE_API_KEY, llmClaudeApiKeyEnvDefault);
         defaults.put(LLM_CLAUDE_MODEL, llmClaudeModelEnvDefault);
         defaults.put(LLM_OLLAMA_BASE_URL, llmOllamaBaseUrlEnvDefault);
         defaults.put(LLM_OLLAMA_MODEL, llmOllamaModelEnvDefault);
@@ -189,16 +181,6 @@ public class AppSettingService {
     @Transactional(readOnly = true)
     public SettingSource comfyUiBaseUrlSource() {
         return sourceOf(COMFYUI_BASE_URL);
-    }
-
-    @Transactional(readOnly = true)
-    public SettingSource openAiApiKeySource() {
-        return sourceOf(LLM_API_KEY);
-    }
-
-    @Transactional(readOnly = true)
-    public SettingSource claudeApiKeySource() {
-        return sourceOf(LLM_CLAUDE_API_KEY);
     }
 
     private SettingSource sourceOf(String key) {
@@ -367,11 +349,6 @@ public class AppSettingService {
     }
 
     @Transactional(readOnly = true)
-    public String getLlmApiKey() {
-        return resolve(LLM_API_KEY);
-    }
-
-    @Transactional(readOnly = true)
     public String getLlmBaseUrl() {
         return resolve(LLM_BASE_URL);
     }
@@ -400,11 +377,6 @@ public class AppSettingService {
     public AiProvider getLlmProvider() {
         AiProvider provider = AiProvider.fromString(resolve(LLM_PROVIDER));
         return provider != null ? provider : AiProvider.OPENAI;
-    }
-
-    @Transactional(readOnly = true)
-    public String getLlmClaudeApiKey() {
-        return resolve(LLM_CLAUDE_API_KEY);
     }
 
     @Transactional(readOnly = true)
@@ -501,30 +473,13 @@ public class AppSettingService {
         return getLlmProvider();
     }
 
-    /** システム設定の既定プロバイダーにおける実効baseUrl/apiKey/defaultModel。 */
+    /** システム設定の既定プロバイダーにおける実効baseUrl/defaultModel。APIキーはプロジェクト単位だけ(issue #1568)。 */
     public String baseUrl() {
         return baseUrlFor(provider());
     }
 
-    public String apiKey() {
-        return apiKeyFor(provider());
-    }
-
     public String defaultModel() {
         return defaultModelFor(provider());
-    }
-
-    /**
-     * OLLAMAは自ホスト上のコンテナであり認証を持たない。共用の{@code llm_api_key}(OpenAIのキー)を
-     * 返すとローカルコンテナへ外部サービスのキーを送ることになるため、空を返す(issue #1086 / R4)。
-     * LlmClient側はOLLAMAに限りAPIキー必須判定を免除し、Authorizationヘッダも付けない。
-     */
-    public String apiKeyFor(AiProvider provider) {
-        return switch (provider) {
-            case CLAUDE -> getLlmClaudeApiKey();
-            case OLLAMA -> "";
-            case OPENAI -> getLlmApiKey();
-        };
     }
 
     /**

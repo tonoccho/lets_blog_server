@@ -123,7 +123,7 @@ class ProjectConnectionServiceTest {
     }
 
     @Test
-    void applyOverrides_ollamaとcomfyui以外は素通し() {
+    void applyOverrides_ChatGPTとClaudeはプロジェクトにキーが無ければplatformの値によらず未設定のNONEになる() {
         AiConnectionsConfig base = new AiConnectionsConfig(
                 new ProviderConnectionConfig(SYSTEM_OLLAMA, "ENVIRONMENT", true),
                 new ProviderConnectionConfig(SYSTEM_COMFY, "ENVIRONMENT", true),
@@ -136,8 +136,8 @@ class ProjectConnectionServiceTest {
         assertEquals("PROJECT", merged.ollama().source());
         assertEquals(true, merged.ollama().configured());
         assertEquals("http://c", merged.comfyui().baseUrl());
-        assertEquals(base.openai(), merged.openai());
-        assertEquals(base.claude(), merged.claude());
+        assertEquals(new ProviderConnectionConfig(null, "NONE", false), merged.openai());
+        assertEquals(new ProviderConnectionConfig(null, "NONE", false), merged.claude());
     }
 
     @Test
@@ -175,15 +175,16 @@ class ProjectConnectionServiceTest {
         assertEquals("PROJECT", merged.openai().source());
         assertEquals(true, merged.openai().configured());
         assertEquals(base.ollama(), merged.ollama());
-        assertEquals(base.claude(), merged.claude());
+        assertEquals(new ProviderConnectionConfig(null, "NONE", false), merged.claude());
     }
 
     @Test
-    void applyOverrides_openaiキーが無ければChatGPTは素通しでplatform設定が無くてもキーがあれば設定済み() {
+    void applyOverrides_openaiキーが無ければplatformがDATABASEを返してもChatGPTは未設定でキーがあれば設定済み() {
         AiConnectionsConfig base = new AiConnectionsConfig(
                 null, null, new ProviderConnectionConfig("https://api.openai.com/v1", "DATABASE", true), null);
 
-        assertEquals(base.openai(), ProjectConnectionService.applyOverrides(base, null, null, false).openai());
+        assertEquals(new ProviderConnectionConfig(null, "NONE", false),
+                ProjectConnectionService.applyOverrides(base, null, null, false).openai());
 
         AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(
                 new AiConnectionsConfig(null, null, null, null), null, null, true);
@@ -204,15 +205,16 @@ class ProjectConnectionServiceTest {
         assertEquals("PROJECT", merged.claude().source());
         assertEquals(true, merged.claude().configured());
         assertEquals(base.ollama(), merged.ollama());
-        assertEquals(base.openai(), merged.openai());
+        assertEquals(new ProviderConnectionConfig(null, "NONE", false), merged.openai());
     }
 
     @Test
-    void applyOverrides_claudeキーが無ければClaudeは素通しでplatform設定が無くてもキーがあれば設定済み() {
+    void applyOverrides_claudeキーが無ければplatformがDATABASEを返してもClaudeは未設定でキーがあれば設定済み() {
         AiConnectionsConfig base = new AiConnectionsConfig(
                 null, null, null, new ProviderConnectionConfig("https://api.anthropic.com/v1", "DATABASE", true));
 
-        assertEquals(base.claude(), ProjectConnectionService.applyOverrides(base, null, null, false, false).claude());
+        assertEquals(new ProviderConnectionConfig(null, "NONE", false),
+                ProjectConnectionService.applyOverrides(base, null, null, false, false).claude());
 
         AiConnectionsConfig merged = ProjectConnectionService.applyOverrides(
                 new AiConnectionsConfig(null, null, null, null), null, null, false, true);

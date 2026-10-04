@@ -90,16 +90,26 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
         return AiProvider.fromString(resolveDefault().provider());
     }
 
+    /**
+     * ChatGPT(OpenAI) / Claudeのキーは、{@link #useProject}で宣言されたプロジェクトに保存されたものだけを使う。
+     * システム設定・環境変数のキーは存在しないため、プロジェクトにキーが無い、またはプロジェクト指定の無い
+     * 呼び出し(VSCode拡張など)はエラーにする(issue #1568)。Ollamaは認証を持たず、プラットフォームが返す空のキーをそのまま使う。
+     */
     @Override
     public String apiKeyFor(AiProvider provider) {
+        if (provider == AiProvider.OLLAMA) {
+            return resolveFor(provider).apiKey();
+        }
         String projectKey = projectKeyOfCurrentProject(provider);
-        return projectKey != null ? projectKey : resolveFor(provider).apiKey();
+        if (projectKey == null) {
+            throw new AiServiceException(provider + LlmClient.PROJECT_API_KEY_REQUIRED, null);
+        }
+        return projectKey;
     }
 
     /**
      * {@link #useProject}で宣言されたプロジェクトのChatGPT(OpenAI) / Claude(Anthropic) APIキー(復号済み)。
-     * 無ければ(またはOllamaなどキーを持たないプロバイダーなら)nullで、呼び出し側はシステム設定のキーへ
-     * フォールバックする(issue #1506, #1507)。
+     * 無ければnull(issue #1506, #1507)。
      */
     private String projectKeyOfCurrentProject(AiProvider provider) {
         Long projectId = (Long) request.getAttribute(PROJECT_ATTR);

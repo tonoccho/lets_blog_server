@@ -172,8 +172,6 @@ services:
     environment:
       # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
       LLM_BASE_URL: http://llm-stub:8080
-      # スタブは Authorization を検証しないが、未設定だと呼び出し前に弾かれる経路があるため値を入れる。
-      LLM_API_KEY: e2e-stub-key
       BRAVE_SEARCH_BASE_URL: http://brave-stub:8080
       GITHUB_API_BASE_URL: http://github-stub:8080
     depends_on:
@@ -187,14 +185,14 @@ services:
   platform:
     environment:
       LLM_BASE_URL: http://llm-stub:8080
-      LLM_API_KEY: e2e-stub-key
-      # issue #1086: 既定プロバイダの環境変数既定値は OLLAMA になった。受け入れテスト環境では
-      # ollama コンテナを既定で起動しない(#1090。GPU依存とスタブ方針を崩さないため)ので、AT では
-      # OPENAI に固定してスタブへ向ける。scripts/e2e-clear-llm-db-overrides.sh が DB 上書きを
-      # 消すため、ここで固定しないと環境変数既定の OLLAMA がそのまま効く。
-      LLM_PROVIDER: OPENAI
-      # 上の固定が何かの拍子に外れても(DBに llm_provider=OLLAMA が残っている等)、
-      # 存在しない ollama コンテナではなくスタブへ向くようにしておく。
+      # issue #1568: ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、システム全体のキーも環境変数も無い。
+      # プロジェクト指定の無い呼び出し(VSCode拡張・タグ提案など)がスタブへ向くよう、AT では
+      # 既定プロバイダを、キー不要のOLLAMAに固定してスタブ(下の LLM_OLLAMA_BASE_URL)へ向ける。
+      # OPENAI を使うシナリオは、プロジェクトにスタブ用のキーを設定してそのプロジェクトで選ぶ。
+      # scripts/e2e-clear-llm-db-overrides.sh が DB 上書きを消すため、ここで固定しないと
+      # 環境変数既定がそのまま効く。
+      LLM_PROVIDER: OLLAMA
+      # OLLAMA の接続先は、存在しない ollama コンテナではなくスタブへ向ける。
       LLM_OLLAMA_BASE_URL: http://llm-stub:8080
       LLM_OLLAMA_MODEL: e2e-stub-model
       # media-service は画像生成の接続設定を platform の

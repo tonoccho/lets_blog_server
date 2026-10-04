@@ -13,12 +13,12 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
       "下書き/校正/要約支援・タグ提案・記事プランニングに使用するAIプロバイダーの接続設定です。" +
       "llm_providerでOLLAMA/OPENAI/CLAUDEのいずれかを選択してください。" +
       "接続設定はプロバイダーごとに独立しています(OLLAMAはllm_ollama_base_url/llm_ollama_model、" +
-      "OPENAIはllm_base_url/llm_api_key/llm_model、CLAUDEはllm_claude_api_key/llm_claude_model)。" +
+      "OPENAIはllm_base_url/llm_model、CLAUDEはllm_claude_model)。" +
+      "ChatGPT / ClaudeのAPIキーはシステム全体では持たず、プロジェクトごとにAI・アセットタブで設定します。" +
       "プロジェクトのモデル選択に並ぶ候補はプロバイダーごとの*_available_models(カンマ区切り)で決まり、" +
       "OLLAMA/CLAUDEは未設定なら既定モデルのみが並びます。",
     keys: [
       "llm_provider",
-      "llm_api_key",
       "llm_base_url",
       "llm_model",
       "llm_available_models",
@@ -26,7 +26,6 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
       "llm_ollama_base_url",
       "llm_ollama_model",
       "llm_ollama_available_models",
-      "llm_claude_api_key",
       "llm_claude_model",
       "llm_claude_available_models",
     ],

@@ -1118,10 +1118,10 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | DELETE .../brave-search-api-key | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | GET .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。プロジェクト単位のChatGPT(OpenAI) APIキーの設定有無のみ(値は返さない)(`ProjectOpenAiApiKeyController.java`) |
 | PUT .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。CredentialCipherで暗号化して保存。空キーは400 |
-| DELETE .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。削除後はシステム設定の`llm_api_key`へフォールバック |
+| DELETE .../openai-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1506 で追加**。削除後はそのプロジェクトではChatGPTによる生成ができなくなる(システム設定・環境変数のキーは issue #1568 で廃止、フォールバックしない) |
 | GET .../claude-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1507 で追加**。プロジェクト単位のClaude(Anthropic) APIキーの設定有無のみ(値は返さない)(`ProjectClaudeApiKeyController.java`) |
 | PUT .../claude-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1507 で追加**。CredentialCipherで暗号化して保存。空キーは400 |
-| DELETE .../claude-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1507 で追加**。削除後はシステム設定の`llm_claude_api_key`へフォールバック |
+| DELETE .../claude-api-key | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1507 で追加**。削除後はそのプロジェクトではClaudeによる生成ができなくなる(システム設定・環境変数のキーは issue #1568 で廃止、フォールバックしない) |
 | GET .../google-analytics | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | |
 | PUT .../google-analytics/client | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。GA用OAuthクライアントID/シークレットの保存(旧`PUT .../google-analytics`のサービスアカウントJSON保存は廃止) |
 | POST .../google-analytics/oauth-callback | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1231 で追加**。Next.js側OAuthコールバックからのサーバー間呼び出し(AdSenseと同じ) |

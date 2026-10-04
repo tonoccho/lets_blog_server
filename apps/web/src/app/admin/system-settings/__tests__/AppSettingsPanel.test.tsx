@@ -26,7 +26,6 @@ function setting(overrides: Partial<AppSetting> & { key: string }): AppSetting {
 function allSettings(): AppSetting[] {
   return [
     setting({ key: 'llm_provider', label: 'AIプロバイダー', value: 'OLLAMA' }),
-    setting({ key: 'llm_api_key', label: 'LLM APIキー', secret: true, value: null }),
     setting({ key: 'llm_base_url', label: 'LLM ベースURL', value: 'https://api.openai.com/v1' }),
     setting({ key: 'llm_model', label: 'LLM 既定モデル', value: 'gpt-4o-mini', source: 'DATABASE' }),
     setting({ key: 'llm_available_models', label: 'LLM 選択可能モデル', value: 'gpt-4o-mini' }),
@@ -45,7 +44,6 @@ function allSettings(): AppSetting[] {
     }),
     setting({ key: 'llm_ollama_available_models', label: 'Ollama 選択可能モデル', value: 'qwen2.5:7b-instruct' }),
     setting({ key: 'llm_claude_available_models', label: 'Claude 選択可能モデル', value: 'claude-3-5-haiku-20241022' }),
-    setting({ key: 'llm_claude_api_key', label: 'Claude APIキー', secret: true, configured: false, value: null }),
     setting({ key: 'llm_claude_model', label: 'Claude 既定モデル', value: 'claude-3-5-haiku-20241022' }),
     setting({ key: 'comfyui_base_url', label: 'ComfyUI ベースURL', value: 'http://comfyui:8188' }),
     setting({ key: 'image_llm_base_url', label: '画像生成 ベースURL', value: 'https://api.openai.com/v1' }),
@@ -165,13 +163,30 @@ describe('AppSettingsPanel', () => {
   it('秘匿項目は値を持たないパスワード入力にし、設定状況をプレースホルダで示す', () => {
     render(<AppSettingsPanel settings={allSettings()} />)
 
-    const configured = field('llm_api_key') as HTMLInputElement
-    const notConfigured = field('llm_claude_api_key') as HTMLInputElement
+    const configured = field('mail_password') as HTMLInputElement
 
     expect(configured.type).toBe('password')
     expect(configured.value).toBe('')
     expect(configured.placeholder).toBe('設定済み(変更する場合のみ入力)')
-    expect(notConfigured.placeholder).toBe('未設定')
+  })
+
+  it('ChatGPT / Claude のAPIキーはプロジェクト単位だけなので、サーバーが旧行を返しても入力欄を出さない(issue #1568)', () => {
+    const settings = [
+      ...allSettings(),
+      setting({ key: 'llm_api_key', label: 'LLM APIキー', secret: true, value: null }),
+      setting({ key: 'llm_claude_api_key', label: 'Claude APIキー', secret: true, value: null }),
+    ]
+    render(<AppSettingsPanel settings={settings} />)
+
+    expect(field('llm_api_key')).toBeNull()
+    expect(field('llm_claude_api_key')).toBeNull()
+    // キー以外のLLM設定は残る
+    expect(field('llm_base_url')).not.toBeNull()
+    expect(field('llm_claude_model')).not.toBeNull()
+    const section = field('llm_provider')!.closest('section')
+    const description = section!.querySelector('p')!.textContent ?? ''
+    expect(description).not.toContain('llm_api_key')
+    expect(description).not.toContain('llm_claude_api_key')
   })
 
   it('設定値の取得元をラベル行に表示する', () => {

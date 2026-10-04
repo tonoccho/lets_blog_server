@@ -34,8 +34,6 @@ class InternalPlatformSettingsControllerTest {
         when(appSettingService.ollamaBaseUrlSource()).thenReturn(SettingSource.ENVIRONMENT);
         when(appSettingService.getComfyUiBaseUrl()).thenReturn("http://comfy:8188");
         when(appSettingService.comfyUiBaseUrlSource()).thenReturn(SettingSource.DATABASE);
-        when(appSettingService.openAiApiKeySource()).thenReturn(SettingSource.DATABASE);
-        when(appSettingService.claudeApiKeySource()).thenReturn(SettingSource.NONE);
 
         var response = controller().aiConnectionsConfig();
 
@@ -44,9 +42,10 @@ class InternalPlatformSettingsControllerTest {
         assertTrue(response.ollama().configured());
         assertEquals("http://comfy:8188", response.comfyui().baseUrl());
         assertEquals("DATABASE", response.comfyui().source());
+        // ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、システム側に出所は無い(issue #1568)。
         assertNull(response.openai().baseUrl());
-        assertEquals("DATABASE", response.openai().source());
-        assertTrue(response.openai().configured());
+        assertEquals("NONE", response.openai().source());
+        assertFalse(response.openai().configured());
         assertEquals("NONE", response.claude().source());
         assertFalse(response.claude().configured());
     }
@@ -57,16 +56,11 @@ class InternalPlatformSettingsControllerTest {
         when(appSettingService.ollamaBaseUrlSource()).thenReturn(SettingSource.ENVIRONMENT);
         when(appSettingService.getComfyUiBaseUrl()).thenReturn("http://comfy:8188");
         when(appSettingService.comfyUiBaseUrlSource()).thenReturn(SettingSource.ENVIRONMENT);
-        when(appSettingService.openAiApiKeySource()).thenReturn(SettingSource.DATABASE);
-        when(appSettingService.claudeApiKeySource()).thenReturn(SettingSource.DATABASE);
-        // 万一コントローラがキーを参照しても、この値は応答に現れてはならない。
-        org.mockito.Mockito.lenient().when(appSettingService.getLlmApiKey()).thenReturn("sk-secret-openai");
-        org.mockito.Mockito.lenient().when(appSettingService.getLlmClaudeApiKey()).thenReturn("sk-ant-secret");
 
         String json = new ObjectMapper().writeValueAsString(controller().aiConnectionsConfig());
 
-        assertFalse(json.contains("sk-secret-openai"), json);
-        assertFalse(json.contains("sk-ant-secret"), json);
+        assertFalse(json.contains("sk-"), json);
+        assertFalse(json.toLowerCase().contains("apikey"), json);
     }
 
     @Test
@@ -75,8 +69,6 @@ class InternalPlatformSettingsControllerTest {
         when(appSettingService.ollamaBaseUrlSource()).thenReturn(SettingSource.NONE);
         when(appSettingService.getComfyUiBaseUrl()).thenReturn("");
         when(appSettingService.comfyUiBaseUrlSource()).thenReturn(SettingSource.NONE);
-        when(appSettingService.openAiApiKeySource()).thenReturn(SettingSource.NONE);
-        when(appSettingService.claudeApiKeySource()).thenReturn(SettingSource.NONE);
 
         var response = controller().aiConnectionsConfig();
 
@@ -92,8 +84,6 @@ class InternalPlatformSettingsControllerTest {
         when(appSettingService.ollamaBaseUrlSource()).thenReturn(SettingSource.NONE);
         when(appSettingService.getComfyUiBaseUrl()).thenReturn(null);
         when(appSettingService.comfyUiBaseUrlSource()).thenReturn(SettingSource.NONE);
-        when(appSettingService.openAiApiKeySource()).thenReturn(SettingSource.NONE);
-        when(appSettingService.claudeApiKeySource()).thenReturn(SettingSource.NONE);
 
         var response = controller().aiConnectionsConfig();
 
@@ -112,5 +102,17 @@ class InternalPlatformSettingsControllerTest {
         assertTrue(json.contains("http://comfy:8188"), json);
         assertTrue(json.contains("https://api.openai.com/v1"), json);
         assertFalse(json.toLowerCase().contains("apikey"), json);
+    }
+
+    @Test
+    void llmConfig_システム全体のAPIキーを持たないのでapiKeyは常に空_issue1568() {
+        when(appSettingService.baseUrlFor(com.letsblog.platform.ai.AiProvider.OPENAI)).thenReturn("https://api.openai.com/v1");
+        when(appSettingService.defaultModelFor(com.letsblog.platform.ai.AiProvider.OPENAI)).thenReturn("gpt");
+
+        var response = controller().llmConfig("OPENAI");
+
+        assertEquals("OPENAI", response.provider());
+        assertEquals("https://api.openai.com/v1", response.baseUrl());
+        assertEquals("", response.apiKey());
     }
 }

@@ -48,6 +48,16 @@ async function adminToken(request: APIRequestContext): Promise<string> {
 Given('AI設定用のプロジェクトが用意されている', async ({ ctx, request }) => {
   const token = await adminToken(request);
   const project = await createFixtureProject(request, token, 'at8-1-ai-generation');
+  // issue #1568: ChatGPTのAPIキーはプロジェクト単位だけ。スタブはAuthorizationを検証しないが、
+  // キーが無いとLLM呼び出し前にエラーになるため、スタブ用のキーをこのプロジェクトに設定する。
+  const keyed = await request.put(`/api/projects/${project.id}/api-keys/openai-api-key`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { apiKey: 'e2e-stub-key' },
+  });
+  expect(
+    keyed.ok(),
+    `プロジェクトのChatGPT APIキー設定に失敗しました (status=${keyed.status()}): ${await keyed.text()}`
+  ).toBe(true);
   ctx.aiGenerationProject = { projectId: project.id } satisfies AiProjectFixture;
 });
 

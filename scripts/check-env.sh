@@ -176,7 +176,7 @@ fi
 
 # docker-compose.yml が既定値なしで変数を参照しているのに `.env.example` に無いと、
 # `.env` を正しく作っても compose の警告が出続ける。`.env.example` を契約とみなす以上、
-# 契約そのものの抜けもここで見る(#756 では LLM_CLAUDE_API_KEY / IMAGE_LLM_API_KEY が該当した)。
+# 契約そのものの抜けもここで見る(#756 ではClaude / 画像生成のAPIキーの変数が該当した。いまはどちらもプロジェクト単位のキーで、環境変数を持たない)。
 #
 # 既定値ありの `${VAR:-default}` / `${VAR:+alt}` / `${VAR-default}` は警告にならないので対象外。
 # 拾うのは `${VAR}`、必須指定の `${VAR:?msg}` / `${VAR?msg}`、波括弧なしの `$VAR`。

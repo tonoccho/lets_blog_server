@@ -95,7 +95,7 @@ class ProjectOpenAiApiKeyIntegrationTest {
         // テスト用DBは実行をまたいで残るため、前回実行の保存値を消してから始める。
         mockMvc.perform(delete(path(96001L)).header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN))
                 .andExpect(status().isNoContent());
-        connections(96001L).andExpect(jsonPath("$[?(@.provider=='OPENAI')].source").value("DATABASE"));
+        connections(96001L).andExpect(jsonPath("$[?(@.provider=='OPENAI')].source").value("NONE"));
 
         put(96001L, ADMIN, "{\"apiKey\":\"" + SECRET + "\"}")
                 .andExpect(status().isNoContent())
@@ -111,7 +111,7 @@ class ProjectOpenAiApiKeyIntegrationTest {
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(SECRET))));
 
         // 他プロジェクトには影響しない
-        connections(96002L).andExpect(jsonPath("$[?(@.provider=='OPENAI')].source").value("DATABASE"));
+        connections(96002L).andExpect(jsonPath("$[?(@.provider=='OPENAI')].source").value("NONE"));
     }
 
     @Test
@@ -125,14 +125,14 @@ class ProjectOpenAiApiKeyIntegrationTest {
     }
 
     @Test
-    @DisplayName("AC5: 削除するとシステム設定の出所へ戻る")
-    void 削除するとシステム設定へ戻る() throws Exception {
+    @DisplayName("AC5: 削除すると未設定になる(システム設定へは戻らない、issue #1568)")
+    void 削除すると未設定になる() throws Exception {
         put(96004L, ADMIN, "{\"apiKey\":\"" + SECRET + "\"}").andExpect(status().isNoContent());
 
         mockMvc.perform(delete(path(96004L)).header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN))
                 .andExpect(status().isNoContent());
 
-        connections(96004L).andExpect(jsonPath("$[?(@.provider=='OPENAI')].source").value("DATABASE"));
+        connections(96004L).andExpect(jsonPath("$[?(@.provider=='OPENAI')].source").value("NONE"));
         mockMvc.perform(get(path(96004L)).header(HttpHeaders.AUTHORIZATION, "Bearer " + ADMIN))
                 .andExpect(jsonPath("$.configured").value(false));
     }

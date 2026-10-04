@@ -66,6 +66,21 @@ Then(
   }
 );
 
+// ---- ChatGPT / ClaudeのAPIキー入力欄が無い(issue #1568) ----
+
+Then('システム設定画面にChatGPTとClaudeのAPIキー入力欄が表示されない', async ({ page, request }) => {
+  await expect(page.locator('[name="llm_api_key"]')).toHaveCount(0);
+  await expect(page.locator('[name="llm_claude_api_key"]')).toHaveCount(0);
+  const keys = (await fetchAppSettings(request)).map((s) => s.key);
+  expect(keys, 'アプリ設定の応答にChatGPT / ClaudeのAPIキーの項目が残っています').not.toContain('llm_api_key');
+  expect(keys, 'アプリ設定の応答にChatGPT / ClaudeのAPIキーの項目が残っています').not.toContain('llm_claude_api_key');
+});
+
+Then('システム設定画面にはキー以外のLLM設定が表示される', async ({ page }) => {
+  await expect(page.locator('[name="llm_claude_model"]')).toBeVisible();
+  await expect(page.locator('[name="llm_base_url"]')).toBeVisible();
+});
+
 // ---- LLM接続設定(DB側優先の確認) ----
 
 /**
@@ -118,21 +133,23 @@ async function requestTagSuggestion(request: APIRequestContext) {
 When('システム全体のLLM接続設定を到達不能なURLへ変更する', async ({ ctx, request }) => {
   const settings = await fetchAppSettings(request);
   const provider = settings.find((s) => s.key === 'llm_provider');
-  const baseUrl = settings.find((s) => s.key === 'llm_base_url');
+  const baseUrl = settings.find((s) => s.key === 'llm_ollama_base_url');
   expect(provider, 'llm_providerの設定項目が見つかりません').toBeDefined();
-  expect(baseUrl, 'llm_base_urlの設定項目が見つかりません').toBeDefined();
+  expect(baseUrl, 'llm_ollama_base_urlの設定項目が見つかりません').toBeDefined();
   // DB由来でなければ(=環境変数フォールバック)、復元時は空文字を送ってDB設定を削除し、
   // 環境変数へのフォールバックへ戻す。
   ctx.systemSettingsLlmOriginalProvider = provider!.source === 'DATABASE' ? provider!.value ?? '' : '';
   ctx.systemSettingsLlmOriginalBaseUrl = baseUrl!.source === 'DATABASE' ? baseUrl!.value ?? '' : '';
 
-  await putAppSettings(request, { llm_provider: 'OPENAI', llm_base_url: UNREACHABLE_LLM_BASE_URL });
+  // issue #1568: ChatGPT / Claudeはプロジェクトのキーが無いとLLM呼び出し前に失敗するため、
+  // プロジェクト指定の無い呼び出しで接続先を確かめられるOLLAMAの接続先を書き換える。
+  await putAppSettings(request, { llm_provider: 'OLLAMA', llm_ollama_base_url: UNREACHABLE_LLM_BASE_URL });
 });
 
 When('システム全体のLLM接続設定を元に戻す', async ({ ctx, request }) => {
   await putAppSettings(request, {
     llm_provider: (ctx.systemSettingsLlmOriginalProvider as string) ?? '',
-    llm_base_url: (ctx.systemSettingsLlmOriginalBaseUrl as string) ?? '',
+    llm_ollama_base_url: (ctx.systemSettingsLlmOriginalBaseUrl as string) ?? '',
   });
 });
 

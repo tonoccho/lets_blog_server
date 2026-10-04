@@ -409,7 +409,7 @@ class EnvGeneration(SetupShTestCase):
     def test_fresh_generation_reports_external_keys_still_unset(self):
         r = self._run_source("ensure_env_file")
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertIn("LLM_API_KEY", r.stdout)
+        self.assertNotIn("LLM_API_KEY", r.stdout)  # issue #1568: システム全体のキーは廃止
         self.assertIn("BRAVE_SEARCH_API_KEY", r.stdout)
         self.assertIn("MAIL_PASSWORD", r.stdout)
 

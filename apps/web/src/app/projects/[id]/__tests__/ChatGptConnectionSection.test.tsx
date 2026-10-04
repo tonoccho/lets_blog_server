@@ -61,13 +61,22 @@ describe("ChatGptConnectionSection の表示", () => {
     expect(screen.getByRole("button", { name: "接続を解除" })).toBeInTheDocument();
   });
 
-  it("システム設定のキーでも「接続済み」で出所は「システム設定」、解除ボタンは出さない", async () => {
+  it("システム全体のキーは存在しないので、DATABASEの行が返っても「システム設定」とは表示せず未設定・未接続として扱う(issue #1568)", async () => {
     fetchMock.mockResolvedValue(rows({ source: "DATABASE", status: "NORMAL", detail: null, configured: true }));
     render(<ChatGptConnectionSection projectId={3} />);
 
-    expect(await screen.findByText("接続済み")).toBeInTheDocument();
-    expect(screen.getByText("システム設定")).toBeInTheDocument();
+    expect(await screen.findByText("未接続")).toBeInTheDocument();
+    expect(screen.getByText("未設定")).toBeInTheDocument();
+    expect(screen.queryByText("システム設定")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "接続を解除" })).not.toBeInTheDocument();
+  });
+
+  it("解除の説明はこのプロジェクトのキーの扱いだけを述べ、システム設定のキーへ戻るとは書かない(issue #1568)", async () => {
+    render(<ChatGptConnectionSection projectId={3} />);
+    await screen.findByText("未接続");
+
+    expect(screen.getByText(/このプロジェクトのLLM生成\(ChatGPT\)でだけ使われます/)).toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(/システム設定/);
   });
 
   it("OPENAI行が無い応答では「未接続」のまま表示する", async () => {
@@ -157,15 +166,17 @@ describe("ChatGptConnectionSection の接続・解除", () => {
     expect(screen.getByText("未接続")).toBeInTheDocument();
   });
 
-  it("接続を解除すると削除し、表示がシステム設定へのフォールバックに戻る", async () => {
+  it("接続を解除すると削除し、表示が未接続・未設定に戻る(システム設定へは戻らない)", async () => {
     fetchMock.mockResolvedValue(rows(connected));
     render(<ChatGptConnectionSection projectId={3} />);
     await screen.findByText("プロジェクト設定");
-    fetchMock.mockResolvedValue(rows({ source: "DATABASE", status: "NORMAL", detail: null, configured: true }));
+    fetchMock.mockResolvedValue(rows());
 
     fireEvent.click(screen.getByRole("button", { name: "接続を解除" }));
 
-    expect(await screen.findByText("システム設定")).toBeInTheDocument();
+    expect(await screen.findByText("未接続")).toBeInTheDocument();
+    expect(screen.getByText("未設定")).toBeInTheDocument();
+    expect(screen.queryByText("システム設定")).not.toBeInTheDocument();
     expect(clearMock).toHaveBeenCalledWith(3);
     expect(screen.queryByRole("button", { name: "接続を解除" })).not.toBeInTheDocument();
   });
