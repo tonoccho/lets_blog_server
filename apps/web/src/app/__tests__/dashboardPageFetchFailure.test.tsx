@@ -18,14 +18,14 @@ const SESSION_EXPIRED = "セッションの有効期限が切れました。お�
 const DOWN = new Error("APIエラー (503): Service Unavailable");
 
 const api = {
-  listSites: jest.fn(), listPosts: jest.fn(), listGenerationJobs: jest.fn(),
+  listSites: jest.fn(), listPosts: jest.fn(), listUnifiedOperationLogs: jest.fn(),
   getConnectedServiceStatuses: jest.fn(), getConnectedServiceStatusDetail: jest.fn(),
   getContainerStatuses: jest.fn(), getMyProfile: jest.fn(),
 };
 jest.mock("@/lib/apiClient", () => ({
   listSites: (...a: unknown[]) => api.listSites(...a),
   listPosts: (...a: unknown[]) => api.listPosts(...a),
-  listGenerationJobs: (...a: unknown[]) => api.listGenerationJobs(...a),
+  listUnifiedOperationLogs: (...a: unknown[]) => api.listUnifiedOperationLogs(...a),
   getConnectedServiceStatuses: (...a: unknown[]) => api.getConnectedServiceStatuses(...a),
   getConnectedServiceStatusDetail: (...a: unknown[]) => api.getConnectedServiceStatusDetail(...a),
   getContainerStatuses: (...a: unknown[]) => api.getContainerStatuses(...a),
@@ -43,7 +43,7 @@ describe("ダッシュボードの取得失敗表示(issue #1235)", () => {
     getServerSession.mockResolvedValue({ user: { role: "admin" } });
     api.listSites.mockResolvedValue([]);
     api.listPosts.mockResolvedValue([]);
-    api.listGenerationJobs.mockResolvedValue([]);
+    api.listUnifiedOperationLogs.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 1 });
     api.getConnectedServiceStatuses.mockResolvedValue([]);
     api.getConnectedServiceStatusDetail.mockResolvedValue(null);
     api.getContainerStatuses.mockResolvedValue([]);
@@ -71,5 +71,19 @@ describe("ダッシュボードの取得失敗表示(issue #1235)", () => {
   it("セッション切れの失敗は /login へリダイレクトする", async () => {
     api.listPosts.mockRejectedValue(new Error(SESSION_EXPIRED));
     await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/login");
+  });
+
+  it("AIジョブ数は、リンク先(type=AI_JOB)と同じ統合操作ログの件数(totalElements)を表示する(issue #1595)", async () => {
+    api.listUnifiedOperationLogs.mockResolvedValue({ content: [], totalElements: 7, totalPages: 1, number: 0, size: 1 });
+    const html = renderToStaticMarkup(await DashboardPage());
+    expect(api.listUnifiedOperationLogs).toHaveBeenCalledWith(expect.objectContaining({ type: "AI_JOB" }));
+    expect(html).toContain("AIジョブ数</div><div class=\"mt-1 text-3xl font-semibold\">7</div>");
+  });
+
+  it("AIジョブ件数の取得に失敗したときは0件でなく「-」を表示し、通知を出す(issue #1595)", async () => {
+    api.listUnifiedOperationLogs.mockRejectedValue(DOWN);
+    const html = renderToStaticMarkup(await DashboardPage());
+    expect(html).toContain("AIジョブ数</div><div class=\"mt-1 text-3xl font-semibold\">-</div>");
+    expect(html).toContain("AIジョブ件数を取得できませんでした");
   });
 });

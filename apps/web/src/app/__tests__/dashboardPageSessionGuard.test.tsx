@@ -26,14 +26,14 @@ jest.mock('@/lib/auth', () => ({ authOptions: {} }));
 
 const listSites = jest.fn();
 const listPosts = jest.fn();
-const listGenerationJobs = jest.fn();
+const listUnifiedOperationLogs = jest.fn();
 const getConnectedServiceStatuses = jest.fn();
 const getConnectedServiceStatusDetail = jest.fn();
 const getContainerStatuses = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   listSites: (...a: unknown[]) => listSites(...a),
   listPosts: (...a: unknown[]) => listPosts(...a),
-  listGenerationJobs: (...a: unknown[]) => listGenerationJobs(...a),
+  listUnifiedOperationLogs: (...a: unknown[]) => listUnifiedOperationLogs(...a),
   getConnectedServiceStatuses: (...a: unknown[]) => getConnectedServiceStatuses(...a),
   getConnectedServiceStatusDetail: (...a: unknown[]) => getConnectedServiceStatusDetail(...a),
   getContainerStatuses: (...a: unknown[]) => getContainerStatuses(...a),
@@ -56,7 +56,7 @@ describe('ダッシュボード(/)のセッション判定(issue #1234)', () => 
     // 「リダイレクトされない」という本来見たい失敗理由を覆い隠してしまう。
     listSites.mockResolvedValue([]);
     listPosts.mockResolvedValue([]);
-    listGenerationJobs.mockResolvedValue([]);
+    listUnifiedOperationLogs.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 1 });
     getConnectedServiceStatuses.mockResolvedValue([]);
     getConnectedServiceStatusDetail.mockResolvedValue(null);
     getContainerStatuses.mockResolvedValue([]);
@@ -72,7 +72,7 @@ describe('ダッシュボード(/)のセッション判定(issue #1234)', () => 
 
     expect(listSites).not.toHaveBeenCalled();
     expect(listPosts).not.toHaveBeenCalled();
-    expect(listGenerationJobs).not.toHaveBeenCalled();
+    expect(listUnifiedOperationLogs).not.toHaveBeenCalled();
   });
 
   it('未ログイン(session が null)のときも /login へ送る', async () => {
@@ -86,7 +86,7 @@ describe('ダッシュボード(/)のセッション判定(issue #1234)', () => 
     getServerSession.mockResolvedValue({ user: { role: 'admin' } });
     listSites.mockResolvedValue([{ id: 1 }]);
     listPosts.mockResolvedValue([{ id: 1 }, { id: 2 }]);
-    listGenerationJobs.mockResolvedValue([{ id: 1 }]);
+    listUnifiedOperationLogs.mockResolvedValue({ content: [], totalElements: 1, totalPages: 1, number: 0, size: 1 });
     getConnectedServiceStatuses.mockResolvedValue([]);
     getConnectedServiceStatusDetail.mockResolvedValue([]);
     getContainerStatuses.mockResolvedValue([]);
@@ -96,7 +96,7 @@ describe('ダッシュボード(/)のセッション判定(issue #1234)', () => 
     expect(redirect).not.toHaveBeenCalled();
     expect(listSites).toHaveBeenCalled();
     expect(listPosts).toHaveBeenCalled();
-    expect(listGenerationJobs).toHaveBeenCalled();
+    expect(listUnifiedOperationLogs).toHaveBeenCalled();
   });
 
   it('セッションが有効な非adminのときはリダイレクトせず、サービス詳細は取得しない(退行なし)', async () => {
