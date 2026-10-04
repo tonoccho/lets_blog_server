@@ -28,7 +28,8 @@ public class GeneratedImage {
     @Column(name = "project_id")
     private Long projectId;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    /** プロンプト。アップロード画像(provider=UPLOAD、issue #1599)はnull。 */
+    @Column(columnDefinition = "TEXT")
     private String prompt;
 
     @Column(name = "negative_prompt", columnDefinition = "TEXT")
@@ -80,7 +81,7 @@ public class GeneratedImage {
     @Column(name = "mime_type", nullable = false, length = 100)
     private String mimeType = "image/png";
 
-    /** どの画像生成AIで生成したか(COMFYUI/CHATGPT、issue #531)。 */
+    /** 出所(COMFYUI/CHATGPT=画像生成AI(issue #531)、UPLOAD=利用者がアップロードした画像(issue #1599))。 */
     @Column(nullable = false, length = 20)
     private String provider = "COMFYUI";
 

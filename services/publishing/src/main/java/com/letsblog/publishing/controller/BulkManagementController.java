@@ -16,6 +16,7 @@ import com.letsblog.publishing.dto.TermComparisonPage;
 import com.letsblog.publishing.dto.TermNameRequest;
 import com.letsblog.publishing.dto.UpdatePostStatusRequest;
 import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.AssetImageFormat;
 import com.letsblog.publishing.service.BulkManagementService;
 import com.letsblog.publishing.service.CurrentActorService;
 import com.letsblog.publishing.service.PluginThemeComparisonService;
@@ -126,18 +127,20 @@ public class BulkManagementController {
     /**
      * ComfyUIで生成済みの画像(generated_images、media-serviceが所有。issue #573)を、
      * プロジェクトのlocal/test/production全環境へアセットとしてアップロードする
-     * (プロジェクト管理画面の画像生成パネル用)。画像バイト列はmedia-service経由で取得する
-     * (常にimage/pngとして保存されている前提、既存の挙動を踏襲)。
+     * (プロジェクト管理画面の画像生成パネル用)。画像バイト列はmedia-service経由で取得する。
+     * MIME・拡張子は実際のバイト列から決める(生成画像はPNG、アップロードされた画像はJPEGもある。
+     * issue #1599)。判別できなければ従来どおりimage/png。
      */
     @PostMapping("/{id}/asset-images/{generatedImageId}/upload")
     public List<BulkOperationLogResponse> uploadAssetImage(
             @PathVariable Long id, @PathVariable Long generatedImageId) {
         adminAuthorizationService.requireAdmin();
         byte[] data = mediaGeneratedImageClient.fetchImageFile(generatedImageId);
-        String filename = "comfyui-" + generatedImageId + ".png";
+        AssetImageFormat format = AssetImageFormat.detect(data);
+        String filename = "comfyui-" + generatedImageId + "." + format.extension();
         Long actorId = currentActorService.getCurrentActorId();
         List<BulkOperationLog> logs = bulkManagementService.uploadImageToAllEnvironments(
-                id, data, filename, "image/png", actorId);
+                id, data, filename, format.mimeType(), actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
     }
 

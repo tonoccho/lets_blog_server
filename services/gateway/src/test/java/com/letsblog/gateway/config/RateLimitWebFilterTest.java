@@ -276,6 +276,19 @@ class RateLimitWebFilterTest {
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
     }
 
+    @Test
+    @DisplayName("生成画像ギャラリーへの画像アップロードはupload-endpointバケットを使う(#1599)")
+    void generatedImageUploadUsesUploadBucket() {
+        // upload-endpointバケットを別の経路で枯渇させ、巻き添えで429になることで同じバケットだと確かめる
+        consume(exchangeFor("/api/media/upload"));
+        consume(exchangeFor("/api/media/upload"));
+
+        ServerWebExchange exchange = exchangeFor("/api/generated-images/upload");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
     /**
      * 一括管理アップロード({@code BulkManagementController#runBulkOperationUpload})は
      * 画像ではないが実際のmultipartファイルアップロードであるため、#999でも

@@ -37,7 +37,10 @@ public class GeneratedImageCreationService {
     }
 
     public GeneratedImage create(CreateGeneratedImageRequest request) {
-        String filePath = generatedImageStorageService.store(request.projectId(), request.imageData());
+        // issue #1599: アップロードされたJPEGは.jpgで保存する。それ以外は従来どおり.png。
+        String filePath = "image/jpeg".equalsIgnoreCase(request.mimeType())
+                ? generatedImageStorageService.store(request.projectId(), request.imageData(), "jpg")
+                : generatedImageStorageService.store(request.projectId(), request.imageData());
         GeneratedImage image = new GeneratedImage();
         image.setProjectId(request.projectId());
         image.setPrompt(request.prompt());

@@ -125,6 +125,10 @@ public class RateLimitWebFilter implements WebFilter {
      *
      * <ul>
      *   <li>{@code POST /api/media/upload} — 実際の画像/メディアバイナリのアップロード</li>
+     *   <li>{@code POST /api/generated-images/upload} — 利用者が手元の画像を生成画像ギャラリーへ
+     *       アップロードする(issue #1599、multipart最大20MB。デコード・リサイズを行う重い処理)。
+     *       {@code /api/generated-images}配下の他のAPI(一覧・詳細・タグ等の軽量なメタデータ)を
+     *       巻き込まないよう、完全一致で扱う</li>
      *   <li>{@code POST /api/ai/image} — 実際の画像生成(ComfyUI/ChatGPT呼び出し)。
      *       {@code /api/ai/image-options}(設定の参照)を巻き込まないよう、部分一致ではなく
      *       完全一致で扱う</li>
@@ -140,7 +144,7 @@ public class RateLimitWebFilter implements WebFilter {
      *
      * <p><b>{@code POST /api/users/{id}/avatar}(issue #1241、プロフィール編集画面のアバター
      * アップロード、最大20MB)は意図的にここへ含めない。</b>実バイナリのアップロードという点は
-     * 上の4件と同じだが、upload-endpointは<b>プロセス全体で1バケット</b>(クラスJavadoc参照)
+     * 上の件と同じだが、upload-endpointは<b>プロセス全体で1バケット</b>(クラスJavadoc参照)
      * であり、他ユーザーの操作(記事の画像アップロード等)がこの共有枠を消費していると、
      * 自分のアバター変更が横から巻き込まれて429になる。これはまさに本Issueが要件5の
      * カッコ書きで名指しした#999の実害パターンであり、許可リストに機械的に追加することは
@@ -165,6 +169,7 @@ public class RateLimitWebFilter implements WebFilter {
      */
     private static final Set<String> UPLOAD_BUCKET_EXACT_PATHS = Set.of(
             "/api/media/upload",
+            "/api/generated-images/upload",
             "/api/ai/image");
 
     private static final Pattern ASSET_IMAGE_UPLOAD_PATH_PATTERN =

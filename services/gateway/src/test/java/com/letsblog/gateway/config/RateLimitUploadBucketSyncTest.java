@@ -60,6 +60,8 @@ class RateLimitUploadBucketSyncTest {
             "/api/ai/image",
             "/api/projects/1/asset-images/2/upload",
             "/api/projects/1/bulk-management/upload",
+            // #1599: 生成画像ギャラリーへの画像アップロード(multipart、最大20MB)
+            "/api/generated-images/upload",
             // #1405: 非同期の受理口。受理は軽量でGPU占有は専用Executorが直列化するため、
             // upload-endpointの共有枠には入れずapi-global(クライアント単位)に置く。
             "/api/ai/image/jobs",
@@ -81,6 +83,8 @@ class RateLimitUploadBucketSyncTest {
             "/api/projects/1/bulk-management/uploads",
             "/api/ai/images",
             "/api/media/upload/extra",
+            "/api/generated-images/upload/extra",
+            "/api/generated-images/uploads",
             "/api/projects/1/asset-images/2/uploaded");
 
     @TestFactory

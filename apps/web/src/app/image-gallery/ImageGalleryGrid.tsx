@@ -17,7 +17,15 @@ import { GALLERY_PAGE_SIZE } from "./pageSize";
 const PROVIDER_LABEL: Record<string, string> = {
   COMFYUI: "ComfyUI",
   CHATGPT: "ChatGPT",
+  UPLOAD: "アップロード",
 };
+
+/** アップロード画像(provider=UPLOAD、issue #1599)はpromptを持たないので、代わりに出所を表す名前で呼ぶ。 */
+const UPLOADED_IMAGE_LABEL = "アップロード画像";
+
+function imageLabel(prompt: string | null): string {
+  return prompt ?? UPLOADED_IMAGE_LABEL;
+}
 
 /** id で重複を除いて末尾へ追加する。offset 取得中に画像が作られて境界がずれても同じ画像を2度出さない(issue #1472)。 */
 function appendUnique(current: GeneratedImageSummary[], incoming: GeneratedImageSummary[]): GeneratedImageSummary[] {
@@ -594,7 +602,7 @@ export function ImageGalleryGrid({
             <div key={image.id} className="relative">
               <input
                 type="checkbox"
-                aria-label={`${image.prompt}を選択`}
+                aria-label={`${imageLabel(image.prompt)}を選択`}
                 checked={checkedIds.has(image.id)}
                 onChange={() => toggleChecked(image.id)}
                 className="absolute left-2 top-2 z-10 h-5 w-5"
@@ -606,11 +614,11 @@ export function ImageGalleryGrid({
               >
                 <img
                   src={`/image-gallery/${image.id}/file`}
-                  alt={image.prompt}
+                  alt={imageLabel(image.prompt)}
                   className="aspect-square w-full bg-neutral-100 object-contain group-hover:opacity-80 dark:bg-neutral-800"
                 />
                 <div className="space-y-1 p-2 text-xs">
-                  <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{image.prompt}</p>
+                  <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{imageLabel(image.prompt)}</p>
                   {image.tags && image.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {image.tags.map((tag) => (

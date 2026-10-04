@@ -13,8 +13,14 @@ import {
   fetchImageJobResultAction,
   generateImagePromptAction,
   requestProjectImageJobAction,
+  uploadGeneratedImageAction,
   uploadProjectAssetImageAction,
 } from "./actions";
+
+/** 画像アップロードで選べる形式(issue #1599)。サーバーも中身で同じ判定をする。 */
+const UPLOAD_ACCEPTED_TYPES = ["image/jpeg", "image/png"];
+/** 画像アップロードのファイルサイズ上限(issue #1599。サーバーのmultipart上限と同じ20MB)。 */
+const UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 
 /**
  * パネル外枠のカード。同じ「AI」タブに並ぶ兄弟パネル ProjectAiModelsPanel.tsx と同じ
@@ -113,6 +119,13 @@ export function ProjectAssetGenerationPanel({
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [gallerySelectedId, setGallerySelectedId] = useState<number | null>(null);
   const [galleryUploading, setGalleryUploading] = useState(false);
+
+  // 手元の画像のアップロード(issue #1599)。
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  // 登録後にファイル入力の表示も空へ戻す(同じファイルをもう一度選べるようにする)ための鍵。
+  const [uploadInputKey, setUploadInputKey] = useState(0);
 
   async function handleOpen() {
     setOpen(true);
@@ -289,6 +302,51 @@ export function ProjectAssetGenerationPanel({
     await uploadGeneratedImage(selectedId, setUploading);
   }
 
+  /** ファイルを選んだ時点で、形式とサイズを検査する。送る前に弾くので、無駄な要求がサーバーの枠を消費しない。 */
+  function handleUploadFileChange(file: File | null) {
+    setMessage(null);
+    setUploadFile(null);
+    setUploadError(null);
+    if (!file) return;
+    if (!UPLOAD_ACCEPTED_TYPES.includes(file.type)) {
+      setUploadError("対応していない画像形式です。JPEGまたはPNGを選択してください。");
+      return;
+    }
+    if (file.size > UPLOAD_MAX_BYTES) {
+      setUploadError("ファイルサイズが上限(20MB)を超えています。");
+      return;
+    }
+    setUploadFile(file);
+  }
+
+  async function handleImageUpload() {
+    if (!uploadFile) return;
+    setImageUploading(true);
+    setMessage(null);
+    const formData = new FormData();
+    formData.append("file", uploadFile);
+    const result = await uploadGeneratedImageAction(projectId, formData);
+    setImageUploading(false);
+    if (result.error) {
+      setMessage({ type: "error", text: result.error });
+      return;
+    }
+    setMessage({
+      type: "success",
+      text: `画像を1920x1080に変換し、生成画像ギャラリーに登録しました(画像ID: ${result.imageId})。`,
+    });
+    setUploadFile(null);
+    setUploadInputKey((key) => key + 1);
+    // 一覧を開いて読み込んであるときは、登録した画像がすぐ並ぶよう取得し直す。
+    if (galleryImages) {
+      try {
+        setGalleryImages(await fetchGeneratedImagesAction());
+      } catch (err) {
+        setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  }
+
   /** 生成画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。 */
   async function handleGalleryToggle() {
     setGalleryOpen((v) => !v);
@@ -333,6 +391,35 @@ export function ProjectAssetGenerationPanel({
       </div>
 
       <div className={SUBSECTION_CLASS}>
+        <h3 className="text-sm font-semibold">画像をアップロードしてギャラリーへ登録</h3>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          JPEG/PNG(20MBまで)を1枚選べます。1920x1080に中央で切り抜いて登録します(縦長は上下が切れ、小さい画像は拡大されます)。
+          EXIF/GPSなどのメタ情報は取り除かれます。登録した画像は、生成画像と同じギャラリーに並びます。
+        </p>
+        <input
+          key={uploadInputKey}
+          type="file"
+          accept={UPLOAD_ACCEPTED_TYPES.join(",")}
+          aria-label="アップロードする画像ファイル"
+          onChange={(e) => handleUploadFileChange(e.target.files?.[0] ?? null)}
+          className="block text-xs"
+        />
+        {uploadError && (
+          <p role="alert" className="text-xs text-red-600">
+            {uploadError}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={handleImageUpload}
+          disabled={!uploadFile || imageUploading}
+          className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60"
+        >
+          {imageUploading ? "登録しています…" : "ギャラリーへ登録"}
+        </button>
+      </div>
+
+      <div className={SUBSECTION_CLASS}>
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">生成画像ギャラリーから選択してアップロード</h3>
           <button type="button" onClick={handleGalleryToggle} className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">
@@ -360,7 +447,7 @@ export function ProjectAssetGenerationPanel({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={`/image-gallery/${img.id}/file`}
-                        alt={img.prompt}
+                        alt={img.prompt ?? "アップロード画像"}
                         className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
                       />
                     </button>

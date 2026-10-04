@@ -192,6 +192,33 @@ class BulkManagementControllerTest {
     }
 
     @Test
+    void uploadAssetImage_JPEGの内容ならimage_jpegと拡張子jpgで全環境へアップロードする() {
+        BulkManagementController controller = controller();
+        byte[] jpeg = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x00, 1, 2};
+        when(mediaGeneratedImageClient.fetchImageFile(6L)).thenReturn(jpeg);
+        when(bulkManagementService.uploadImageToAllEnvironments(1L, jpeg, "comfyui-6.jpg", "image/jpeg", 0L))
+                .thenReturn(List.of(buildLog()));
+
+        List<?> response = controller.uploadAssetImage(1L, 6L);
+
+        assertEquals(1, response.size());
+        verify(bulkManagementService).uploadImageToAllEnvironments(1L, jpeg, "comfyui-6.jpg", "image/jpeg", 0L);
+    }
+
+    @Test
+    void uploadAssetImage_PNGの内容ならimage_pngと拡張子pngでアップロードする() {
+        BulkManagementController controller = controller();
+        byte[] png = new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1};
+        when(mediaGeneratedImageClient.fetchImageFile(7L)).thenReturn(png);
+        when(bulkManagementService.uploadImageToAllEnvironments(1L, png, "comfyui-7.png", "image/png", 0L))
+                .thenReturn(List.of(buildLog()));
+
+        controller.uploadAssetImage(1L, 7L);
+
+        verify(bulkManagementService).uploadImageToAllEnvironments(1L, png, "comfyui-7.png", "image/png", 0L);
+    }
+
+    @Test
     void uploadAssetImage_存在しない画像は例外() {
         BulkManagementController controller = controller();
         when(mediaGeneratedImageClient.fetchImageFile(99L))

@@ -10,7 +10,7 @@ import java.nio.file.Path;
 
 /**
  * ComfyUIで生成した画像を app.generated-images-storage-path 配下へ永続化するサービス。
- * 保存パスは {projectIdOrGlobal}/{4桁連番}.png 形式(projectId未指定時は"global")とし、
+ * 保存パスは {projectIdOrGlobal}/{4桁連番}.{拡張子(既定png)} 形式(projectId未指定時は"global")とし、
  * DBのgenerated_images.file_pathにはこの相対パスを記録する。
  * 連番はGeneratedImageSequenceServiceがプロジェクト単位で払い出す。
  */
@@ -28,9 +28,14 @@ public class GeneratedImageStorageService {
     }
 
     public String store(Long projectId, byte[] data) {
+        return store(projectId, data, "png");
+    }
+
+    /** 拡張子を指定して保存する(アップロードされたJPEGを.jpgで保存するため、issue #1599)。 */
+    public String store(Long projectId, byte[] data, String extension) {
         String projectIdOrGlobal = projectId != null ? String.valueOf(projectId) : "global";
         int sequence = nextSequenceWithRetry(projectIdOrGlobal);
-        String relativePath = projectIdOrGlobal + "/" + String.format("%04d", sequence) + ".png";
+        String relativePath = projectIdOrGlobal + "/" + String.format("%04d", sequence) + "." + extension;
         try {
             Path targetFile = storageDir.resolve(relativePath);
             Files.createDirectories(targetFile.getParent());

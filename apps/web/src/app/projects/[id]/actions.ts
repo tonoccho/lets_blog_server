@@ -74,6 +74,7 @@ import {
   startProjectImageJob,
   generateImagePromptFromChat,
   uploadProjectAssetImage,
+  uploadGeneratedImage,
   listGeneratedImages,
   listPostComparison,
   deletePostEverywhere,
@@ -1241,6 +1242,30 @@ export async function updatePostStatusEverywhereAction(
 export async function fetchGeneratedImagesAction(): Promise<GeneratedImageSummary[]> {
   await requireAdminSession();
   return listGeneratedImages();
+}
+
+/**
+ * アセット画像パネルから、手元の画像を生成画像ギャラリーへ登録する(issue #1599)。形式・サイズの
+ * 検査はパネル側(送る前)とサーバー側(中身で判定)の両方が行い、ここでは空のファイルだけを断る。
+ */
+export async function uploadGeneratedImageAction(
+  projectId: number,
+  formData: FormData
+): Promise<{ imageId?: number; error?: string }> {
+  await requireAdminSession();
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "画像ファイルを選択してください。" };
+  }
+
+  try {
+    const image = await uploadGeneratedImage(projectId, file);
+    revalidatePath("/image-gallery");
+    return { imageId: image.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function uploadProjectAssetImageAction(

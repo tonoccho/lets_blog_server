@@ -43,8 +43,9 @@ export interface GenerationJob {
 export interface GeneratedImageSummary {
   id: number;
   projectId: number | null;
-  prompt: string;
-  checkpoint: string;
+  /** アップロード画像(provider=UPLOAD、issue #1599)はprompt・checkpointを持たずnull。 */
+  prompt: string | null;
+  checkpoint: string | null;
   createdAt: string;
   tags: string[];
   provider: string;
@@ -511,6 +512,19 @@ export function listGeneratedImages(
 
 export function getGeneratedImage(id: number): Promise<GeneratedImageDetail> {
   return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}`);
+}
+
+/**
+ * 手元の画像(JPEG/PNG)を生成画像ギャラリーへ登録する(issue #1599)。サーバーが1920x1080(中央切り抜き)へ
+ * 変換し、出所を`UPLOAD`として保存する。`uploadAvatar`と同じくmultipartの`file`で送る。
+ */
+export function uploadGeneratedImage(projectId: number, file: File): Promise<GeneratedImageDetail> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return apiFetch<GeneratedImageDetail>(`/api/generated-images/upload?projectId=${projectId}`, {
+    method: 'POST',
+    body: formData,
+  });
 }
 
 export function deleteGeneratedImage(id: number): Promise<void> {

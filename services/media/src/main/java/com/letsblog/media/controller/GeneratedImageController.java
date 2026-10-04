@@ -215,9 +215,11 @@ public class GeneratedImageController {
     public ResponseEntity<byte[]> getImageFile(@PathVariable Long id) {
         GeneratedImage image = findAuthorized(id);
         byte[] data = generatedImageStorageService.load(image.getFilePath());
+        // 保存しているMIMEで返す(アップロードされたJPEGはimage/jpeg、それ以外は従来どおりPNG。issue #1599)。
+        boolean jpeg = MediaType.IMAGE_JPEG_VALUE.equalsIgnoreCase(image.getMimeType());
         return ResponseEntity.ok()
-                .contentType(MediaType.IMAGE_PNG)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=" + id + ".png")
+                .contentType(jpeg ? MediaType.IMAGE_JPEG : MediaType.IMAGE_PNG)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=" + id + (jpeg ? ".jpg" : ".png"))
                 .body(data);
     }
 

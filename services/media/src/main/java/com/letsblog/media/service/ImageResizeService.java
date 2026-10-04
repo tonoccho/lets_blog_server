@@ -7,7 +7,9 @@ import org.springframework.stereotype.Service;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageReader;
 import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.ImageOutputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -33,6 +35,11 @@ public class ImageResizeService {
     private static final Logger log = LoggerFactory.getLogger(ImageResizeService.class);
     private static final int EXIF_ORIENTATION_TAG = 0x0112;
     private static final float JPEG_QUALITY = 0.85f;
+    /**
+     * {@link #coverTo}がデコードする画像の画素数の上限(6,400万画素)。20MBのPNGは数億画素にも
+     * なりうる(伸長すると数GB)ため、デコードの前にヘッダーの寸法で断る(issue #1599)。
+     */
+    private static final long MAX_COVER_SOURCE_PIXELS = 64_000_000L;
 
     /** リサイズ/エンコード結果。convertOpaquePngToJpeg指定時はmimeTypeが元と変わりうる。 */
     public record ResizeResult(byte[] data, String mimeType) {
@@ -83,6 +90,104 @@ public class ImageResizeService {
             log.warn("画像のリサイズ/メタ情報削除に失敗したため、元のバイト列のままアップロードします: {}", e.getMessage());
             return new ResizeResult(originalBytes, mimeType);
         }
+    }
+
+    /**
+     * 画像を固定解像度へ「中央切り抜き(cover)」で変換する(issue #1599)。EXIF Orientationを反映したうえで、
+     * 目標の縦横比で中央を切り抜き、目標の解像度へ拡縮する(小さい画像は拡大される)。出力にはEXIF/GPS等の
+     * メタ情報が残らない(デコードして新しく書き出すため)。不透明なら品質0.85のJPEG、透過ピクセルがあれば
+     * PNGで書き出す(issue #468と同じ方針。JPEG入力は常にJPEG)。
+     *
+     * <p>{@link #resizeToLongEdge}と違い、失敗時に元のバイト列を返すことはしない。メタ情報を残したまま
+     * 保存してしまうため、デコードできない・画素数が多すぎる画像は{@link InvalidImageUploadException}で断る。
+     */
+    public ResizeResult coverTo(byte[] originalBytes, String mimeType, int targetWidth, int targetHeight) {
+        BufferedImage decoded = decodeWithinPixelLimit(originalBytes);
+        int orientation = isJpeg(mimeType) ? readJpegOrientation(originalBytes) : 1;
+        BufferedImage normalized = applyOrientation(decoded, orientation);
+
+        BufferedImage output = dropUnusedAlpha(scaleTo(centerCrop(normalized, targetWidth, targetHeight),
+                targetWidth, targetHeight));
+        try {
+            ResizeResult encoded = encode(output, mimeType, true);
+            if (encoded == null) {
+                throw new InvalidImageUploadException("画像を変換できませんでした。");
+            }
+            return encoded;
+        } catch (IOException e) {
+            throw new InvalidImageUploadException("画像を変換できませんでした。");
+        }
+    }
+
+    /** ヘッダーの寸法で画素数を確かめてからデコードする。読めない画像は{@link InvalidImageUploadException}。 */
+    private BufferedImage decodeWithinPixelLimit(byte[] bytes) {
+        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) {
+                throw new InvalidImageUploadException("画像として読み込めませんでした。");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(in);
+                if ((long) reader.getWidth(0) * reader.getHeight(0) > MAX_COVER_SOURCE_PIXELS) {
+                    throw new InvalidImageUploadException("画像の画素数が大きすぎます(上限6,400万画素)。");
+                }
+                return reader.read(0);
+            } finally {
+                reader.dispose();
+            }
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof InvalidImageUploadException invalid) {
+                throw invalid;
+            }
+            throw new InvalidImageUploadException("画像として読み込めませんでした。");
+        }
+    }
+
+    /** 目標と同じ縦横比になるよう、中央を切り抜く。 */
+    private BufferedImage centerCrop(BufferedImage src, int targetWidth, int targetHeight) {
+        int width = src.getWidth();
+        int height = src.getHeight();
+        int cropWidth = width;
+        int cropHeight = height;
+        if ((long) width * targetHeight > (long) height * targetWidth) {
+            cropWidth = Math.max(1, (int) Math.round((double) height * targetWidth / targetHeight));
+        } else {
+            cropHeight = Math.max(1, (int) Math.round((double) width * targetHeight / targetWidth));
+        }
+        return src.getSubimage((width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight);
+    }
+
+    /** 目標の解像度へ拡縮する。大きく縮める場合は、粗くならないよう半分ずつ段階的に縮める。 */
+    private BufferedImage scaleTo(BufferedImage src, int targetWidth, int targetHeight) {
+        BufferedImage current = src;
+        while (current.getWidth() > 2 * targetWidth) {
+            current = scale(current,
+                    Math.max(targetWidth, current.getWidth() / 2), Math.max(targetHeight, current.getHeight() / 2));
+        }
+        return scale(current, targetWidth, targetHeight);
+    }
+
+    /** アルファチャンネルを持つが全画素が不透明な画像は、不透明な画像として扱う(JPEGで保存できるように)。 */
+    private BufferedImage dropUnusedAlpha(BufferedImage image) {
+        if (!image.getColorModel().hasAlpha() || hasTransparentPixel(image)) {
+            return image;
+        }
+        return ensureOpaqueRgb(image);
+    }
+
+    private boolean hasTransparentPixel(BufferedImage image) {
+        int width = image.getWidth();
+        int[] row = new int[width];
+        for (int y = 0; y < image.getHeight(); y++) {
+            image.getRGB(0, y, width, 1, row, 0, width);
+            for (int argb : row) {
+                if ((argb >>> 24) != 0xFF) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

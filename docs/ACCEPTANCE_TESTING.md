@@ -1387,13 +1387,13 @@ Playwright spec(`apps/web/e2e/*.spec.ts`)が「既存データを壊さない一
 - **gateway に経路が無いもの**(`/api/render/**`、`/api/comfyui/checkpoints/*`)。
   コンテナ間で直接呼ばれる経路しか無く、公開エンドポイントではない。
   `RouteControllerContractTest` の `NON_GATEWAY_ROUTED_PATHS` と同じ集合
-- **gateway の `upload-endpoint` バケットに入るもの**(実アップロード・実生成の4本)。
-  `POST /api/media/upload`、`POST /api/ai/image`、
+- **gateway の `upload-endpoint` バケットに入るもの**(実アップロード・実生成の5本)。
+  `POST /api/media/upload`、`POST /api/generated-images/upload`(#1599)、`POST /api/ai/image`、
   `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`、
-  `POST /api/projects/{id}/bulk-management/upload` の4本。
-  このバケットは**プロセス全体で1時間に10回**しかない。この4本のために枠を使い切ると、
+  `POST /api/projects/{id}/bulk-management/upload` の5本。
+  このバケットは**プロセス全体で1時間に10回**しかない。この5本のために枠を使い切ると、
   同じ1時間に走る画像アップロード系のシナリオが巻き添えで429になる。
-  この4本の経路は `RouteControllerContractTest` が静的に担保する
+  この5本の経路は `RouteControllerContractTest` が静的に担保する
 
   issue #999 より前は「パスに `/upload` か `/image` を**含む**」という部分一致で判定して
   いたため、`GET /api/projects/{id}/image-settings` のような軽量な設定APIまで巻き込み、

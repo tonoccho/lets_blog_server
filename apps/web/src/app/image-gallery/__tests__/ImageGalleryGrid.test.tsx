@@ -107,7 +107,7 @@ describe('ImageGalleryGrid seedとバッチ内位置の表示 (issue #1101)', ()
   async function openWith(detail: GeneratedImageDetail, summary: GeneratedImageSummary = SUMMARY) {
     ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(detail)
     render(<ImageGalleryGrid images={[summary]} timezone={null} />)
-    fireEvent.click(screen.getByAltText(summary.prompt))
+    fireEvent.click(screen.getByAltText(summary.prompt as string))
     await waitFor(() => {
       expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument()
     })

@@ -9,6 +9,7 @@ import com.letsblog.media.service.FolderHierarchyCycleException;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageFolderNotFoundException;
 import com.letsblog.media.service.InvalidFilterParameterException;
+import com.letsblog.media.service.InvalidImageUploadException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
 import com.letsblog.common.client.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
@@ -22,6 +23,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
  * legacy-apiのGlobalExceptionHandler(#573でmedia-serviceへ移設した機能に対応する部分)を踏襲する。
@@ -94,6 +96,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidFilterParameterException.class)
     public ResponseEntity<ErrorResponse> handleInvalidFilterParameter(InvalidFilterParameterException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1599: アップロードされた画像の形式・サイズ・中身が不正。直せるのは送り手なので400で理由を返す。 */
+    @ExceptionHandler(InvalidImageUploadException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidImageUpload(InvalidImageUploadException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * issue #1599: multipartの上限(spring.servlet.multipart.max-file-size、20MB)超過。コントローラへ届く前に
+     * Springが投げるため、{@link InvalidImageUploadException}では捕まえられない。413で上限つきの理由を返す。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ErrorResponse.of("ファイルサイズが上限(20MB)を超えています。"));
     }
 
     /** issue #1493: 存在しないフォルダの指定。 */

@@ -269,7 +269,7 @@ describe('詳細モーダルからの所属変更', () => {
   async function openDetail(summary: GeneratedImageSummary, folders = FOLDERS) {
     getDetail.mockResolvedValue(detailOf(summary))
     renderGrid([summary], folders)
-    fireEvent.click(screen.getByAltText(summary.prompt))
+    fireEvent.click(screen.getByAltText(summary.prompt as string))
     return screen.findByLabelText('所属フォルダ')
   }
 

@@ -146,15 +146,18 @@ production default is untouched.
 - **Default Limit**: 10 requests per 1 hour, **process-wide** (not partitioned)
 - **Environment Variable**: `UPLOAD_RATE_LIMIT_REQUESTS` (default: 10)
 - **Applies to** (allowlist, issue #999): only the actual heavy upload/generation calls —
-  `POST /api/media/upload`, `POST /api/ai/image` (exact match, so it doesn't catch
-  `/api/ai/image-options`), `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`,
+  `POST /api/media/upload`, `POST /api/generated-images/upload` (issue #1599: a user's own
+  JPEG/PNG registered into the generated-image gallery; exact match, so the lightweight
+  `/api/generated-images/**` metadata endpoints below stay in `api-global`), `POST /api/ai/image`
+  (exact match, so it doesn't catch `/api/ai/image-options`),
+  `POST /api/projects/{id}/asset-images/{generatedImageId}/upload`,
   and `POST /api/projects/{id}/bulk-management/upload` (a real multipart file upload, not an
   image, but resource-intensive in the same way)
 - **Does not apply to**: any other endpoint, including every image-related metadata/settings
   endpoint under `/api/projects/{id}/**` (e.g. `image-settings`,
   `image-content-filter-settings`, `article-image-resize-default`,
-  `ai-models/image/provider[/selection]`) and `/api/generated-images/**` — these use
-  `api-global` instead
+  `ai-models/image/provider[/selection]`) and every other `/api/generated-images/**` path — these
+  use `api-global` instead
 - **Why an allowlist and not a blocklist**: before #999, this was a blocklist (`/upload` or
   `/image` substring match, with a short exception list for known-lightweight paths). Every new
   lightweight image-related endpoint had to be remembered and added to the exception list, and
@@ -226,6 +229,14 @@ and `apps/web/e2e/features/cross-cutting/rate-limit.feature` read the actual con
 the container rather than assuming either the production default or this overlay's value, mirroring
 `gatewayApiGlobalLimit` (#1132) — so this check stays correct even if the chosen value here changes
 later.
+
+**Update (issue #1599)**: `apps/web/e2e/features/media/image-upload.feature` adds **7** calls to
+this bucket per full run (5 successful UI uploads to `POST /api/generated-images/upload`, 1 direct
+non-member upload that is rejected with `403`, and 1 asset add via
+`POST /api/projects/{id}/asset-images/{id}/upload`; the format/size rejections are stopped by the
+panel before any request is sent). A full run now consumes **19**, so the same-hour re-run floor is
+**38** against the overlay's 40 — only 2 calls of headroom. Raise `UPLOAD_RATE_LIMIT_REQUESTS` in
+`docker-compose.e2e-stubs.yml` before adding any further upload-bucket scenario.
 
 #### 4. Operation Log Rate Limiter (`operation-log-endpoint`)
 - **Default Limit**: 300 requests per 1 minute, **process-wide** (not partitioned)
