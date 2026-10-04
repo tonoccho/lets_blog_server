@@ -50,6 +50,10 @@ const LETSBLOG_PV_REFETCH_START = '3daysAgo';
 const LETSBLOG_PV_GAP_SECONDS = 172800;
 const LETSBLOG_PV_PAGE_LIMIT = 10000;
 const LETSBLOG_PV_MAX_PAGES = 50;
+/** PV 達成の告知(issue #1577)。ルール・告知済み(記事×ルール)を保存する option 名と、告知履歴の種類。 */
+const LETSBLOG_OPTION_PV_RULES = 'letsblog_pv_rules';
+const LETSBLOG_OPTION_PV_ANNOUNCED = 'letsblog_pv_announced';
+const LETSBLOG_SNS_KIND_PV = 'PV 達成';
 
 /** 署名付きプレビュー(issue #1561)。URL のクエリ名・一時データの名前・期限切れを掃除するための索引。 */
 const LETSBLOG_PREVIEW_QUERY_VAR = 'letsblog_preview';
@@ -1266,6 +1270,12 @@ function letsblog_pv_fetch(int $now): array
     }
     update_option(LETSBLOG_OPTION_PV_DATA, $data, false);
     letsblog_pv_record_result(true, null, $now);
+    try {
+        // 初回の取得は、それまでの PV が一度に届く。ルールを先に設定していても、過去の達成を告知しない(基準化だけする)。
+        letsblog_pv_evaluate($now, $lastSuccess === false);
+    } catch (Throwable $e) {
+        // 判定の失敗で取得を失敗にしない。
+    }
     return ['ok' => true, 'error' => null];
 }
 
@@ -1313,6 +1323,195 @@ function letsblog_pv_list(int $now): array
         ];
     }
     return $list;
+}
+
+// ---- PV 達成の告知(issue #1577)。ルールは wp letsblog pv rules set で丸ごと置き換える ----
+
+/** 保存済みのルール。各要素は id・period(daily|total)・threshold・added_at(追加した時刻)。 */
+function letsblog_pv_rules(): array
+{
+    $rules = get_option(LETSBLOG_OPTION_PV_RULES, []);
+    return is_array($rules) ? array_values($rules) : [];
+}
+
+/** 告知済み(基準化を含む)の記録。キーは「記事ID:ルールID」。 */
+function letsblog_pv_announced(): array
+{
+    $announced = get_option(LETSBLOG_OPTION_PV_ANNOUNCED, []);
+    return is_array($announced) ? $announced : [];
+}
+
+/**
+ * 標準入力の JSON(ルールの配列、または {"rules": [...]})を検証する。
+ *
+ * @return array{0: ?array, 1: ?string} [ルール(id・period・threshold だけ), エラー]
+ */
+function letsblog_pv_rules_normalize($decoded): array
+{
+    if (is_array($decoded) && !array_is_list($decoded) && array_key_exists('rules', $decoded)) {
+        $decoded = $decoded['rules'];
+    }
+    if (!is_array($decoded) || !array_is_list($decoded)) {
+        return [null, 'ルールの配列(JSON)を渡してください'];
+    }
+    $rules = [];
+    $seen = [];
+    foreach ($decoded as $i => $item) {
+        $n = $i + 1;
+        if (!is_array($item) || array_is_list($item)) {
+            return [null, "{$n} 件目: ルールはオブジェクトにしてください"];
+        }
+        $id = $item['id'] ?? null;
+        if (!is_string($id) || preg_match('/^[A-Za-z0-9_-]{1,64}$/', $id) !== 1) {
+            return [null, "{$n} 件目: id は英数字・ハイフン・アンダースコアの1〜64文字にしてください"];
+        }
+        if (isset($seen[$id])) {
+            return [null, "{$n} 件目: id が重複しています: {$id}"];
+        }
+        $seen[$id] = true;
+        $period = $item['period'] ?? null;
+        if ($period !== 'daily' && $period !== 'total') {
+            return [null, "{$n} 件目: period は daily(1日)か total(累計)にしてください"];
+        }
+        $threshold = $item['threshold'] ?? null;
+        if (!is_int($threshold) || $threshold < 1) {
+            return [null, "{$n} 件目: threshold は正の整数にしてください"];
+        }
+        $rules[] = ['id' => $id, 'period' => $period, 'threshold' => $threshold];
+    }
+    return [$rules, null];
+}
+
+function letsblog_pv_rule_same(array $a, array $b): bool
+{
+    return ($a['id'] ?? null) === ($b['id'] ?? null) && ($a['period'] ?? null) === ($b['period'] ?? null)
+        && ($a['threshold'] ?? null) === ($b['threshold'] ?? null);
+}
+
+/** 記事がルールを達成しているか。累計は公開日以降の合計、1日は(公開日と追加した日の遅いほう)以降の日別 PV で判定する。 */
+function letsblog_pv_rule_achieved(array $rule, array $daily, string $publishDay, string $addedDay): bool
+{
+    if ($rule['period'] === 'total') {
+        $total = 0;
+        foreach ($daily as $day => $views) {
+            if ((string) $day >= $publishDay) {
+                $total += (int) $views;
+            }
+        }
+        return $total >= $rule['threshold'];
+    }
+    $from = max($publishDay, $addedDay);
+    foreach ($daily as $day => $views) {
+        if ((string) $day >= $from && (int) $views >= $rule['threshold']) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** 「1日で100PV」「累計5000PV」のような、達成した内容。 */
+function letsblog_pv_rule_label(array $rule): string
+{
+    return ($rule['period'] === 'daily' ? '1日で' : '累計') . $rule['threshold'] . 'PV';
+}
+
+/**
+ * ルールを丸ごと置き換える。内容が変わらない既存ルールは追加時刻と告知済みの記録を引き継ぎ、消えたルールの記録は捨てる。
+ * 新しいルール(内容が変わったものを含む)は、取得済みの PV ですでに達成している記事を告知済みとして記録する。
+ */
+function letsblog_pv_rules_set(array $rules, int $now): void
+{
+    $old = [];
+    foreach (letsblog_pv_rules() as $rule) {
+        $old[(string) ($rule['id'] ?? '')] = $rule;
+    }
+    $data = letsblog_pv_data();
+    $announced = letsblog_pv_announced();
+    $kept = [];
+    foreach ($announced as $key => $at) {
+        $ruleId = substr((string) $key, (int) strpos((string) $key, ':') + 1);
+        if (isset($old[$ruleId]) && letsblog_pv_rules_has($rules, $old[$ruleId])) {
+            $kept[$key] = $at;
+        }
+    }
+    $stored = [];
+    foreach ($rules as $rule) {
+        $existing = $old[$rule['id']] ?? null;
+        if ($existing !== null && letsblog_pv_rule_same($existing, $rule)) {
+            $rule['added_at'] = (int) ($existing['added_at'] ?? $now);
+            $stored[] = $rule;
+            continue;
+        }
+        $rule['added_at'] = $now;
+        $stored[] = $rule;
+        $addedDay = letsblog_pv_today($now, $data['time_zone']);
+        foreach ($data['daily'] as $postId => $daily) {
+            $publishDay = letsblog_pv_publish_day((int) $postId);
+            if ($publishDay !== null && letsblog_pv_rule_achieved($rule, $daily, $publishDay, $addedDay)) {
+                $kept[$postId . ':' . $rule['id']] = gmdate('c', $now);
+            }
+        }
+    }
+    update_option(LETSBLOG_OPTION_PV_RULES, $stored, false);
+    update_option(LETSBLOG_OPTION_PV_ANNOUNCED, $kept, false);
+}
+
+function letsblog_pv_rules_has(array $rules, array $rule): bool
+{
+    foreach ($rules as $candidate) {
+        if (letsblog_pv_rule_same($candidate, $rule)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 保存済みの PV でルールを判定し、新しく達成した記事を接続済みの全 SNS へ告知する。
+ * 告知済みの印は送る前に付ける(失敗しても再送しない)。接続済みの SNS が無ければ送らず、印も付けない。
+ * $baselineOnly が true なら、達成している組を告知せずに記録だけする。
+ */
+function letsblog_pv_evaluate(int $now, bool $baselineOnly = false): void
+{
+    $rules = letsblog_pv_rules();
+    if ($rules === []) {
+        return;
+    }
+    $snsList = array_keys(letsblog_sns_config_all());
+    if (!$baselineOnly && $snsList === []) {
+        return;
+    }
+    $data = letsblog_pv_data();
+    $ids = array_map('intval', array_keys($data['daily']));
+    sort($ids);
+    foreach ($rules as $rule) {
+        $addedDay = letsblog_pv_today((int) ($rule['added_at'] ?? $now), $data['time_zone']);
+        foreach ($ids as $id) {
+            $key = $id . ':' . $rule['id'];
+            $publishDay = letsblog_pv_publish_day($id);
+            if ($publishDay === null || isset(letsblog_pv_announced()[$key])
+                || !letsblog_pv_rule_achieved($rule, $data['daily'][$id], $publishDay, $addedDay)) {
+                continue;
+            }
+            $announced = letsblog_pv_announced();
+            $announced[$key] = gmdate('c', $now);
+            update_option(LETSBLOG_OPTION_PV_ANNOUNCED, $announced, false);
+            if ($baselineOnly) {
+                continue;
+            }
+            $text = letsblog_sns_default_text(get_post($id)) . "\n" . letsblog_pv_rule_label($rule) . ' を達成しました';
+            foreach ($snsList as $sns) {
+                try {
+                    letsblog_sns_announce((string) $sns, LETSBLOG_SNS_KIND_PV, $id, $text, $now);
+                } catch (Throwable $e) {
+                    letsblog_sns_log_append([
+                        'sns' => (string) $sns, 'kind' => LETSBLOG_SNS_KIND_PV, 'post_id' => $id, 'at' => gmdate('c', $now),
+                        'success' => false, 'error' => '告知中に例外が発生しました: ' . $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+    }
 }
 
 function letsblog_pv_run_scheduled(): void
@@ -1546,7 +1745,8 @@ if (defined('WP_CLI') && WP_CLI) {
          *
          * [<args>...]
          * : `config set`(標準入力に JSON: property_id, client_id, client_secret, refresh_token)、
-         *   `config clear`、`status`、`list --format=json`。
+         *   `config clear`、`status`、`list --format=json`、
+         *   `rules set`(標準入力に JSON: [{id, period: daily|total, threshold}]。受け取った内容でルールを丸ごと置き換える)。
          *
          * [--format=<format>]
          * : `list` の出力形式。json のみ。
@@ -1556,6 +1756,7 @@ if (defined('WP_CLI') && WP_CLI) {
          *     wp letsblog pv config set < ga4.json
          *     wp letsblog pv status
          *     wp letsblog pv list --format=json
+         *     wp letsblog pv rules set < rules.json
          *     wp letsblog pv config clear
          */
         public function pv($args, $assoc_args)
@@ -1582,9 +1783,26 @@ if (defined('WP_CLI') && WP_CLI) {
                     return;
                 }
                 WP_CLI::line(json_encode(letsblog_pv_list($this->now()), JSON_UNESCAPED_UNICODE));
+            } elseif ($sub === 'rules') {
+                $this->pv_rules($args[1] ?? '');
             } else {
-                WP_CLI::error('サブコマンドは config set / config clear / status / list のどれかです');
+                WP_CLI::error('サブコマンドは config set / config clear / status / list / rules set のどれかです');
             }
+        }
+
+        private function pv_rules(string $action): void
+        {
+            if ($action !== 'set') {
+                WP_CLI::error('rules のサブコマンドは set です');
+                return;
+            }
+            [$rules, $error] = letsblog_pv_rules_normalize(json_decode($this->read_stdin(), true));
+            if ($rules === null) {
+                WP_CLI::error((string) $error);
+                return;
+            }
+            letsblog_pv_rules_set($rules, $this->now());
+            WP_CLI::line(json_encode(['rules' => count($rules)]));
         }
 
         private function pv_config(string $action, array $assoc_args): void
