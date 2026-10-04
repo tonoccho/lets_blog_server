@@ -111,6 +111,7 @@ function add_action(string $tag, $callback, int $priority = 10, int $args = 1): 
 function add_filter(string $tag, $callback, int $priority = 10, int $args = 1): bool
 {
     $GLOBALS['letsblog_test_hooks'][] = ['filter', $tag];
+    $GLOBALS['letsblog_test_hook_prio'][] = [$tag, $callback, $priority];
     return true;
 }
 // 投稿を作る API が呼ばれたら数える(プレビューは wp_posts に行を作ってはならない)。
@@ -564,6 +565,123 @@ if (function_exists('letsblog_enqueue_synced_css') && function_exists('letsblog_
         letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered oldpfx">x</div>') === '<div class="lets-blog-rendered oldpfx">x</div>');
     check('wrapper: 本文が文字列でなければそのまま返す', letsblog_rewrite_wrapper_class(null) === null);
 }
+
+// --- issue #1560: 目印付きのカスタムタグを、保存済みのテンプレートで表示時に展開し直す ---
+function letsblog_test_marker(string $name, array $attrs, string $content, string $embedded): string
+{
+    $json = json_encode(['name' => $name, 'attrs' => (object) $attrs, 'content' => $content], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $json = strtr($json, ['-' => '\u002d', '<' => '\u003c', '>' => '\u003e', '[' => '\u005b', ']' => '\u005d']);
+    return '<!-- lbs:tag ' . $json . ' -->' . $embedded . '<!-- /lbs:tag -->';
+}
+$ctPrio = null;
+foreach ($GLOBALS['letsblog_test_hook_prio'] ?? [] as [$t, $cb, $pr]) {
+    if ($t === 'the_content' && $cb === 'letsblog_expand_custom_tags') {
+        $ctPrio = $pr;
+    }
+}
+check('tags: the_content に展開を登録する', function_exists('letsblog_expand_custom_tags') && $ctPrio !== null);
+check('tags: wpautop(優先度 10)より前に処理する', $ctPrio !== null && $ctPrio < 10);
+
+if (function_exists('letsblog_expand_custom_tags')) {
+    $setSync([
+        'cssSelectorPrefix' => 'p',
+        'customTags' => [
+            ['scope' => 'GLOBAL', 'tagName' => 'box', 'tagFormat' => 'BLOCK', 'htmlTemplate' => '<div class="box v2" data-lv="{{attr:level}}">{{content}}</div>', 'cssContent' => ''],
+            ['scope' => 'GLOBAL', 'tagName' => 'my-badge', 'tagFormat' => 'INLINE', 'htmlTemplate' => '<span class="b2">{{content}}</span>', 'cssContent' => ''],
+        ],
+    ]);
+
+    // AC1/AC2: テンプレートが変わると、再投稿なしで新しいテンプレートになる。属性・変換済み本文は保たれる
+    $old = letsblog_test_marker('box', ['level' => 'warn'], '<p>本文<strong>太字</strong></p>', '<div class="box v1" data-lv="warn"><p>本文<strong>太字</strong></p></div>');
+    $out = letsblog_expand_custom_tags('前置き' . "\n" . $old . "\n後書き");
+    check('tags: 同期済みの新しいテンプレートで展開し直す', str_contains($out, '<div class="box v2" data-lv="warn">') && !str_contains($out, 'box v1'));
+    check('tags: 変換済みの {{content}} の HTML が保たれる', str_contains($out, '<p>本文<strong>太字</strong></p></div>'));
+    check('tags: 目印の外の本文は変えない', str_starts_with($out, '前置き' . "\n") && str_ends_with($out, "\n後書き"));
+    check('tags: 展開結果に目印コメントが残らない', !str_contains($out, 'lbs:tag'));
+
+    // ハイフンを含む名前・複数箇所
+    $badge = letsblog_test_marker('my-badge', [], 'NEW', '<span class="b1">NEW</span>');
+    $out = letsblog_expand_custom_tags("a{$badge}b{$badge}c");
+    check('tags: ハイフンを含む名前を展開し、複数箇所を処理する', $out === 'a<span class="b2">NEW</span>b<span class="b2">NEW</span>c');
+
+    // XSS: 属性値はエスケープする。本文の中の {{attr:..}} は差し込まない
+    $xss = letsblog_test_marker('box', ['level' => '"><script>alert(1)</script>'], 'x', 'old');
+    $out = letsblog_expand_custom_tags($xss);
+    check('tags: 属性値の < > " をエスケープする', !str_contains($out, '<script>') && str_contains($out, '&quot;&gt;&lt;script&gt;'));
+    $inj = letsblog_test_marker('box', ['level' => 'L'], '{{attr:level}}', 'old');
+    check('tags: 本文の中のプレースホルダーを属性で置換しない', str_contains(letsblog_expand_custom_tags($inj), '>{{attr:level}}</div>'));
+    $missing = letsblog_test_marker('box', [], 'x', 'old');
+    check('tags: 未指定の属性は空文字', str_contains(letsblog_expand_custom_tags($missing), 'data-lv=""'));
+    $nonStr = '<!-- lbs:tag ' . strtr(json_encode(['name' => 'box', 'attrs' => ['level' => ['a'], 'n' => 5], 'content' => 'x']), ['-' => '\u002d']) . ' -->old<!-- /lbs:tag -->';
+    $out = letsblog_expand_custom_tags($nonStr);
+    check('tags: 文字列でない属性値は空文字として扱う', str_contains($out, 'data-lv=""') && !str_contains($out, 'Array'));
+
+    // AC4: 同期済みの定義にないタグは投稿時点の HTML のまま
+    $gone = letsblog_test_marker('removed', ['a' => 'b'], 'x', '<div class="old">投稿時点</div>');
+    $out = letsblog_expand_custom_tags('前' . $gone . '後');
+    check('tags: 定義にないタグは投稿時点の HTML のまま表示される', str_contains($out, '<div class="old">投稿時点</div>') && str_starts_with($out, '前'));
+    // 壊れた目印も投稿時点の HTML
+    $broken = '<!-- lbs:tag {not json} --><i>keep</i><!-- /lbs:tag -->';
+    check('tags: 壊れた目印は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($broken), '<i>keep</i>'));
+    $badName = '<!-- lbs:tag {"name":5,"attrs":{},"content":"x"} --><i>keep2</i><!-- /lbs:tag -->';
+    check('tags: 名前が文字列でない目印は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($badName), '<i>keep2</i>'));
+    $noContent = '<!-- lbs:tag {"name":"box","attrs":[]} --><i>keep3</i><!-- /lbs:tag -->';
+    check('tags: 本文のない目印は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($noContent), '<i>keep3</i>'));
+    $badAttrs = '<!-- lbs:tag {"name":"box","attrs":"x","content":"c"} --><i>keep4</i><!-- /lbs:tag -->';
+    check('tags: attrs が配列でない目印は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($badAttrs), '<i>keep4</i>'));
+    $unclosed = '<!-- lbs:tag {"name":"box","attrs":{},"content":"c"} --><i>no close</i>';
+    check('tags: 閉じのない目印は触らない', letsblog_expand_custom_tags($unclosed) === $unclosed);
+    $stray = 'a<!-- /lbs:tag -->b';
+    check('tags: 対応のない閉じは触らない', letsblog_expand_custom_tags($stray) === $stray);
+
+    // 入れ子: 外が既知なら外を展開し直す。外が未知なら、中の既知のタグを展開し直す
+    $inner = letsblog_test_marker('my-badge', [], 'IN', '<span class="b1">IN</span>');
+    $outer = letsblog_test_marker('box', ['level' => 'o'], 'c', '<div class="box v1">' . $inner . '</div>');
+    $out = letsblog_expand_custom_tags($outer);
+    check('tags: 外が既知なら外のテンプレートで展開し直す', str_contains($out, 'box v2') && !str_contains($out, 'b1'));
+    $outer2 = letsblog_test_marker('removed', [], 'c', '<div class="old">' . $inner . '</div>');
+    $out = letsblog_expand_custom_tags($outer2);
+    check('tags: 外が未知でも中の既知のタグは展開し直す', str_contains($out, '<div class="old"><span class="b2">IN</span></div>'));
+
+    // 入れ子: 外側の目印の content に内側の目印が入っていても、展開し直した後に目印も生のタグも残らない(レビュー指摘)
+    $innerInContent = letsblog_test_marker('my-badge', [], 'IN', '<span class="b1">IN</span>');
+    $outerNested = letsblog_test_marker('box', ['level' => 'o'], '本文' . $innerInContent . 'です', '<div class="box v1">本文' . $innerInContent . 'です</div>');
+    $out = letsblog_expand_custom_tags($outerNested);
+    check('tags: 外側の content の中の目印も新しいテンプレートで展開し直す',
+        $out === '<div class="box v2" data-lv="o">本文<span class="b2">IN</span>です</div>');
+    $outerRawInner = letsblog_test_marker('box', [], '本文[my-badge]IN[/my-badge]', 'old');
+    check('tags: 展開されなかった生のタグは触らない(Java 側が展開済みで渡す前提)', str_contains(letsblog_expand_custom_tags($outerRawInner), '[my-badge]IN[/my-badge]'));
+
+    // AC5: 目印のない既存記事は変わらない
+    $plain = "<p>既存の記事</p>\n<!-- wp:paragraph --><div class=\"box v1\">x</div>";
+    check('tags: 目印のない本文は一切変えない', letsblog_expand_custom_tags($plain) === $plain);
+    check('tags: 本文が文字列でなければそのまま返す', letsblog_expand_custom_tags(null) === null);
+
+    // 同期前・壊れた同期内容・customTags が配列でない: 投稿時点の HTML のまま
+    $m = letsblog_test_marker('box', [], 'x', '<div class="box v1">old</div>');
+    unset($GLOBALS['letsblog_test_options']['letsblog_sync_payload']);
+    check('tags: 同期前は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($m), 'box v1'));
+    $setSync(['cssSelectorPrefix' => 'p', 'customTags' => 'x']);
+    check('tags: customTags が配列でなければ投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($m), 'box v1'));
+    $setSync(['customTags' => ['x', ['tagName' => 5, 'htmlTemplate' => 't'], ['tagName' => 'box', 'htmlTemplate' => 7]]]);
+    check('tags: 形式の壊れた定義は無視して投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags($m), 'box v1'));
+
+    // 同名はプロジェクト固有を優先する
+    $setSync(['customTags' => [
+        ['scope' => 'GLOBAL', 'tagName' => 'box', 'tagFormat' => 'BLOCK', 'htmlTemplate' => '<g>{{content}}</g>'],
+        ['scope' => 'PROJECT', 'tagName' => 'box', 'tagFormat' => 'BLOCK', 'htmlTemplate' => '<p>{{content}}</p>'],
+    ]]);
+    check('tags: 同名ならプロジェクト固有を優先する', letsblog_expand_custom_tags($m) === '<p>x</p>');
+    $setSync(['customTags' => [
+        ['scope' => 'PROJECT', 'tagName' => 'box', 'tagFormat' => 'BLOCK', 'htmlTemplate' => '<p>{{content}}</p>'],
+        ['scope' => 'GLOBAL', 'tagName' => 'box', 'tagFormat' => 'BLOCK', 'htmlTemplate' => '<g>{{content}}</g>'],
+    ]]);
+    check('tags: 順序が逆でもプロジェクト固有を優先する', letsblog_expand_custom_tags($m) === '<p>x</p>');
+}
+
+// AC3: プラグインを停止すると、目印はコメントなので画面に出ず、投稿時点の HTML が表示される(フックごと消える)。
+check('tags: 目印は HTML コメントだけで、プラグインがなくても画面に出ない',
+    function_exists('letsblog_test_marker') && preg_match('/^<!-- lbs:tag [^>]*? -->.*<!-- \/lbs:tag -->$/s', letsblog_test_marker('a', ['k' => '-->x'], '<p>[x]</p>', 'E')) === 1);
 
 // AC4: 停止すると CSS は読み込まれない。読み込みは全てこのプラグインが登録するフック経由(上の hooks 検査)で、
 // 停止すればフックごと消える。プラグイン外に CSS ファイルを置かない。

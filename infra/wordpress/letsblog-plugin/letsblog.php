@@ -413,6 +413,122 @@ if (function_exists('add_action') && function_exists('add_filter')) {
     add_filter('the_content', 'letsblog_rewrite_wrapper_class');
 }
 
+// ---- カスタムタグの目印を、同期済みのテンプレートで表示時に展開し直す(issue #1560) ----
+// 投稿 HTML には、アプリが `<!-- lbs:tag {JSON} -->投稿時点の展開HTML<!-- /lbs:tag -->` の形で目印を残している。
+// JSON は name・attrs・content(変換済みの {{content}} の HTML)を持つ。目印は HTML コメントなので、
+// プラグインを停止しても画面に出ず、投稿時点の展開 HTML がそのまま表示される。
+
+/** 同期済みのカスタムタグ定義を、タグ名 => htmlTemplate で返す。同名は PROJECT(プロジェクト固有)を優先する。 */
+function letsblog_synced_tag_templates(): array
+{
+    $payload = letsblog_synced_payload();
+    $tags = $payload['customTags'] ?? null;
+    if (!is_array($tags)) {
+        return [];
+    }
+    $templates = [];
+    $isProject = [];
+    foreach ($tags as $tag) {
+        if (!is_array($tag) || !is_string($tag['tagName'] ?? null) || !is_string($tag['htmlTemplate'] ?? null)) {
+            continue;
+        }
+        $name = $tag['tagName'];
+        $project = ($tag['scope'] ?? null) === 'PROJECT';
+        if (!isset($templates[$name]) || ($project && !$isProject[$name])) {
+            $templates[$name] = $tag['htmlTemplate'];
+            $isProject[$name] = $project;
+        }
+    }
+    return $templates;
+}
+
+/**
+ * テンプレートへ本文と属性を差し込む。属性値は HTML エスケープする(XSS)。本文は変換済みの HTML なのでそのまま入れ、
+ * 本文の中のプレースホルダーは置換しない(1 回の走査で置換する)。
+ */
+function letsblog_render_tag_template(string $template, string $content, array $attrs): string
+{
+    return preg_replace_callback(
+        '/\{\{(content|attr:[a-zA-Z0-9_-]+)\}\}/',
+        function (array $m) use ($content, $attrs): string {
+            if ($m[1] === 'content') {
+                return $content;
+            }
+            $value = $attrs[substr($m[1], 5)] ?? '';
+            return is_string($value) ? htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : '';
+        },
+        $template
+    ) ?? $template;
+}
+
+/**
+ * 目印 1 組を、既知のタグなら同期済みのテンプレートで展開し直す。未知・壊れている場合は null
+ * (呼び出し側が投稿時点の HTML を使う)。
+ */
+function letsblog_expand_one_tag(string $json, array $templates): ?string
+{
+    $data = json_decode($json, true);
+    if (!is_array($data) || !is_string($data['name'] ?? null) || !is_array($data['attrs'] ?? null) || !is_string($data['content'] ?? null)) {
+        return null;
+    }
+    if (!isset($templates[$data['name']])) {
+        return null;
+    }
+    // content には、アプリが先に展開した入れ子のタグの目印が入っている。内側も同期済みのテンプレートで展開し直す。
+    $content = letsblog_expand_custom_tags($data['content']);
+    return letsblog_render_tag_template($templates[$data['name']], $content, $data['attrs']);
+}
+
+/** the_content(wpautop より前)で、目印付きのカスタムタグを展開し直す。目印のない本文は変えない。 */
+function letsblog_expand_custom_tags($content)
+{
+    if (!is_string($content) || !str_contains($content, '<!-- lbs:tag ')) {
+        return $content;
+    }
+    if (preg_match_all('/<!-- lbs:tag ([^>]*?) -->|<!-- \/lbs:tag -->/', $content, $tokens, PREG_SET_ORDER | PREG_OFFSET_CAPTURE) === 0) {
+        return $content;
+    }
+    // 入れ子を数えて、最も外側の開始・終了の組を集める。閉じのない開始と、対応のない閉じは触らない。
+    $pairs = [];
+    $stack = [];
+    foreach ($tokens as $token) {
+        if (isset($token[1])) {
+            $stack[] = $token;
+            continue;
+        }
+        if ($stack === []) {
+            continue;
+        }
+        $open = array_pop($stack);
+        if ($stack === []) {
+            $pairs[] = [$open, $token];
+        }
+    }
+    $templates = letsblog_synced_tag_templates();
+    $out = '';
+    $cursor = 0;
+    foreach ($pairs as [$open, $close]) {
+        $openStart = $open[0][1];
+        $openEnd = $openStart + strlen($open[0][0]);
+        $closeStart = $close[0][1];
+        $out .= substr($content, $cursor, $openStart - $cursor);
+        $expanded = letsblog_expand_one_tag($open[1][0], $templates);
+        if ($expanded === null) {
+            $out .= $open[0][0]
+                . letsblog_expand_custom_tags(substr($content, $openEnd, $closeStart - $openEnd))
+                . $close[0][0];
+        } else {
+            $out .= $expanded;
+        }
+        $cursor = $closeStart + strlen($close[0][0]);
+    }
+    return $out . substr($content, $cursor);
+}
+
+if (function_exists('add_filter')) {
+    add_filter('the_content', 'letsblog_expand_custom_tags', 9);
+}
+
 // ---- SNS 告知の土台(issue #1573)。設定は wp-cli で受け取り、REST ルートは作らず、Let's Blog へは通信しない ----
 
 /**
