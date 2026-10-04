@@ -382,13 +382,13 @@ export interface AiConnectionResponse {
   configured?: boolean;
 }
 
+export interface OpenAiApiKeyResponse {
+  apiKey?: string;
+}
+
 export interface ProjectConnectionUrlsResponse {
   ollamaBaseUrl?: string;
   comfyuiBaseUrl?: string;
-}
-
-export interface OpenAiApiKeyResponse {
-  apiKey?: string;
 }
 
 export interface BraveSearchApiKeyStatusResponse {

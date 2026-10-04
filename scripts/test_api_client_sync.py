@@ -128,5 +128,40 @@ class GeneratedClientMatchesCommittedSpecs(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class DirDiffReportsDrift(unittest.TestCase):
+    """`dir_diff` が3種類のドリフトをすべて報告すること(#1604)。
+    比較自体が緩むと、同期テストが生成物のズレを見逃す。"""
+
+    def test_reports_changed_missing_and_extra_files(self):
+        tmp = tempfile.mkdtemp(prefix="dir-diff-")
+        try:
+            left = os.path.join(tmp, "left")
+            right = os.path.join(tmp, "right")
+            for d in (left, right):
+                os.makedirs(os.path.join(d, "sub"))
+            for d, name, body in (
+                (left, "same.ts", "a"),
+                (right, "same.ts", "a"),
+                (left, "changed.ts", "a"),
+                (right, "changed.ts", "b"),
+                (left, os.path.join("sub", "only-left.ts"), "x"),
+                (right, "only-right.ts", "y"),
+            ):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write(body)
+
+            self.assertEqual(
+                [
+                    "changed.ts (内容が一致しない)",
+                    "only-right.ts (コミット済み側にのみ存在)",
+                    "sub/only-left.ts (再生成後にのみ存在)",
+                ],
+                dir_diff(left, right),
+            )
+            self.assertEqual([], dir_diff(left, left))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
