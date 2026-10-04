@@ -68,6 +68,54 @@ function wp_salt(string $scheme = 'auth'): string
     return $GLOBALS['t_salt'] . '-' . $scheme;
 }
 
+
+// ---- WordPress のフック・投稿メタ・cron の差し替え(issue #1575) ----
+$GLOBALS['t_actions'] = [];
+$GLOBALS['t_meta'] = [];
+$GLOBALS['t_cron'] = [];
+$GLOBALS['t_posts'] = [];
+$GLOBALS['t_spawned'] = 0;
+function add_action(string $hook, $callable, int $priority = 10, int $args = 1): bool
+{
+    $GLOBALS['t_actions'][$hook][] = ['fn' => $callable, 'priority' => $priority, 'args' => $args];
+    return true;
+}
+function add_filter(string $hook, $callable, int $priority = 10, int $args = 1): bool
+{
+    return add_action($hook, $callable, $priority, $args);
+}
+function get_post_meta(int $id, string $key, bool $single = false)
+{
+    return $GLOBALS['t_meta'][$id][$key] ?? '';
+}
+function update_post_meta(int $id, string $key, $value): bool
+{
+    $GLOBALS['t_meta'][$id][$key] = $value;
+    return true;
+}
+function wp_schedule_single_event(int $timestamp, string $hook, array $args = []): bool
+{
+    $GLOBALS['t_cron'][] = ['at' => $timestamp, 'hook' => $hook, 'args' => $args];
+    return true;
+}
+function spawn_cron(): void
+{
+    $GLOBALS['t_spawned']++;
+}
+function get_post($id)
+{
+    return $GLOBALS['t_posts'][$id] ?? null;
+}
+function get_the_title($post = 0): string
+{
+    return (string) (is_object($post) ? $post->post_title : ($GLOBALS['t_posts'][$post]->post_title ?? ''));
+}
+function get_permalink($post = 0)
+{
+    $id = is_object($post) ? $post->ID : $post;
+    return 'https://blog.example.test/?p=' . $id;
+}
+
 // ---- X API の差し替え(wp_remote_request) ----
 const X_BASE = 'https://x-stub.test';
 define('LETSBLOG_X_API_BASE_URL', X_BASE);
@@ -352,6 +400,182 @@ check('log: json 以外の形式は失敗', $err !== null);
 // --- 要件6 ---
 $source = (string) file_get_contents(__DIR__ . '/../../letsblog-plugin/letsblog.php');
 check('REST ルートを増やさない', !str_contains($source, 'register_rest_route') && !str_contains($source, 'rest_api_init'));
+
+
+// ============ 公開時の告知(issue #1575) ============
+run_sns('sns', ['config', 'clear']);
+$GLOBALS['t_options'][LETSBLOG_OPTION_SNS_LOG] = [];
+x_reset();
+
+function mkpost(int $id, string $type = 'post', string $password = ''): object
+{
+    $post = (object) ['ID' => $id, 'post_type' => $type, 'post_password' => $password, 'post_title' => '新しい記事', 'post_status' => 'publish'];
+    $GLOBALS['t_posts'][$id] = $post;
+    return $post;
+}
+function announce_meta(int $id)
+{
+    return get_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, true);
+}
+function cron_events(): array
+{
+    return array_values(array_filter($GLOBALS['t_cron'], fn($e) => $e['hook'] === LETSBLOG_CRON_SNS_ANNOUNCE));
+}
+function tweet_count(): int
+{
+    return count(x_tweet_requests());
+}
+function hooked(string $hook, string $fn): bool
+{
+    foreach ($GLOBALS['t_actions'][$hook] ?? [] as $h) {
+        if ($h['fn'] === $fn) {
+            return true;
+        }
+    }
+    return false;
+}
+/** 公開処理の外から見える結果を、例外なしで取り出す。 */
+function survives(callable $fn): bool
+{
+    try {
+        $fn();
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+check('transition_post_status にフックされている', hooked('transition_post_status', 'letsblog_sns_on_transition'));
+check('cron のイベントにフックされている', hooked(LETSBLOG_CRON_SNS_ANNOUNCE, 'letsblog_sns_run_scheduled'));
+check('wp_after_insert_post にフックされている', hooked('wp_after_insert_post', 'letsblog_sns_on_after_insert'));
+check('shutdown にフックされている', hooked('shutdown', 'letsblog_sns_on_shutdown'));
+
+// 要件3: SNS 設定がなければ何もしない
+$p = mkpost(101);
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+check('設定なし: cron を予約せず、メタも書かず、送らない', cron_events() === [] && announce_meta(101) === '' && tweet_count() === 0 && log_entries() === []);
+
+run_sns('sns', ['config', 'set'], [], valid_config());
+
+// AC1/要件4: Web からの公開は即時のシングルイベント。公開処理の中では送らない
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+$events = cron_events();
+check('Web: 即時のシングルイベントを1件予約する', count($events) === 1 && $events[0]['args'] === [101] && $events[0]['at'] <= time());
+check('Web: 公開処理の中では送らない', tweet_count() === 0);
+check('Web: 告知済みメタを立てる', announce_meta(101) !== '');
+$GLOBALS['t_spawned'] = 0;
+letsblog_sns_on_shutdown();
+check('Web: 終了時に cron を起動する', $GLOBALS['t_spawned'] === 1);
+letsblog_sns_on_shutdown();
+check('Web: 起動は1回だけ', $GLOBALS['t_spawned'] === 1);
+letsblog_sns_run_scheduled(101);
+$tweets = x_tweet_requests();
+check('Web: cron の実行で1回だけ投稿される', count($tweets) === 1);
+check('告知文は記事のタイトルとパーマリンク', (json_decode($tweets[0]['args']['body'] ?? '', true)['text'] ?? '') === "新しい記事\nhttps://blog.example.test/?p=101", $tweets[0]['args']['body'] ?? '');
+$entries = log_entries();
+check('告知履歴に kind=publish・post_id・成功で残る', count($entries) === 1 && $entries[0]['kind'] === 'publish' && $entries[0]['post_id'] === 101 && $entries[0]['success'] === true, json_encode($entries));
+
+// 要件2: 告知済みは再告知しない(非公開から再公開しても)
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+check('再公開: 再告知しない(予約も増えない)', count(cron_events()) === 1);
+letsblog_sns_run_scheduled(101);
+check('再公開: cron が二重に呼ばれても二度投稿しない', tweet_count() === 1);
+
+// AC2/要件4: wp-cli(CLI)は、コマンドの終了前にその場で送る
+$p = mkpost(102);
+letsblog_sns_on_transition('publish', 'draft', $p, true);
+check('CLI: cron は予約しない', count(cron_events()) === 1);
+check('CLI: 投稿の保存が終わるまでは送らない', tweet_count() === 1);
+letsblog_sns_on_after_insert(102);
+check('CLI: 保存後に1回だけ送る', tweet_count() === 2);
+letsblog_sns_on_after_insert(102);
+letsblog_sns_on_shutdown();
+check('CLI: 二度目以降は送らない', tweet_count() === 2);
+$p = mkpost(103);
+letsblog_sns_on_transition('publish', 'draft', $p, true);
+letsblog_sns_on_shutdown();
+check('CLI: wp_after_insert_post を通らなくても終了時に送る', tweet_count() === 3);
+
+// AC3: 予約公開は告知しない
+$p = mkpost(104);
+letsblog_sns_on_transition('future', 'new', $p, false);
+check('予約投稿の作成(future)では告知しない', count(cron_events()) === 1 && tweet_count() === 3);
+check('予約投稿には告知しない印が付く', announce_meta(104) !== '');
+letsblog_sns_on_transition('publish', 'future', $p, false);
+letsblog_sns_on_transition('publish', 'future', $p, true);
+letsblog_sns_on_shutdown();
+check('予約時刻の公開(future → publish)では告知しない', count(cron_events()) === 1 && tweet_count() === 3);
+$p = mkpost(105);
+letsblog_sns_on_transition('publish', 'future', $p, false);
+check('印が無くても future → publish は告知しない', count(cron_events()) === 1);
+$p = mkpost(106);
+letsblog_sns_on_transition('future', 'draft', $p, false);
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+letsblog_sns_on_transition('publish', 'draft', $p, true);
+letsblog_sns_on_shutdown();
+check('予約投稿を draft に戻して公開しても告知しない', count(cron_events()) === 1 && tweet_count() === 3);
+
+// 対象外
+foreach ([
+    'パスワード付き' => [mkpost(110, 'post', 'secret'), 'publish', 'draft'],
+    '固定ページ' => [mkpost(111, 'page'), 'publish', 'draft'],
+    'publish → publish(更新)' => [mkpost(112), 'publish', 'publish'],
+    '公開以外への遷移(draft)' => [mkpost(113), 'draft', 'publish'],
+    'private への遷移' => [mkpost(114), 'private', 'draft'],
+] as $label => [$post, $new, $old]) {
+    letsblog_sns_on_transition($new, $old, $post, false);
+    letsblog_sns_on_transition($new, $old, $post, true);
+    letsblog_sns_on_shutdown();
+    check("対象外: {$label}", count(cron_events()) === 1 && tweet_count() === 3);
+}
+
+// AC5: 失敗しても公開は失敗させず、履歴に理由を残す
+$p = mkpost(120);
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+$GLOBALS['x']['force'] = 429;
+check('SNS がエラーでも例外にならない', survives(fn() => letsblog_sns_run_scheduled(120)));
+$last = log_entries()[count(log_entries()) - 1];
+check('失敗と理由が履歴に残る', $last['post_id'] === 120 && $last['success'] === false && str_contains((string) $last['error'], '429'), json_encode($last, JSON_UNESCAPED_UNICODE));
+$GLOBALS['x']['force'] = null;
+$p = mkpost(121);
+letsblog_sns_on_transition('publish', 'draft', $p, true);
+$GLOBALS['x']['force'] = 429;
+check('CLI でも SNS のエラーでコマンドが失敗しない', survives(fn() => letsblog_sns_on_after_insert(121)));
+$last = log_entries()[count(log_entries()) - 1];
+check('CLI: 失敗が履歴に残る', $last['post_id'] === 121 && $last['success'] === false);
+$GLOBALS['x']['force'] = null;
+letsblog_sns_register_sender('boom', ['required' => ['k'], 'send' => function () {
+    throw new RuntimeException('送信処理が壊れた');
+}]);
+$GLOBALS['t_options'][LETSBLOG_OPTION_SNS_CONFIG]['boom'] = ['public' => [], 'secret' => letsblog_sns_encrypt(['k' => 'v']), 'reconnect' => false];
+$p = mkpost(122);
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+check('送信処理が例外を投げても公開は失敗しない', survives(fn() => letsblog_sns_run_scheduled(122)));
+$boom = array_values(array_filter(log_entries(), fn($e) => $e['sns'] === 'boom' && $e['post_id'] === 122));
+check('送信処理の例外が履歴に残る', count($boom) === 1 && $boom[0]['success'] === false && str_contains((string) $boom[0]['error'], '送信処理が壊れた'), json_encode($boom, JSON_UNESCAPED_UNICODE));
+unset($GLOBALS['t_options'][LETSBLOG_OPTION_SNS_CONFIG]['boom']);
+
+// 公開でなくなった記事・消えた記事は、cron 実行時に送らない
+$n = tweet_count();
+$p = mkpost(130);
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+$GLOBALS['t_posts'][130]->post_status = 'draft';
+letsblog_sns_run_scheduled(130);
+letsblog_sns_run_scheduled(99999);
+check('cron 実行時に公開でない/存在しない記事へは送らない', tweet_count() === $n);
+
+// AC4/Out of Scope: SNS 設定前に公開された記事は、下書きに戻して再公開しても告知しない
+run_sns('sns', ['config', 'clear']);
+$p = mkpost(140);
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+letsblog_sns_on_transition('draft', 'publish', $p, false);
+run_sns('sns', ['config', 'set'], [], valid_config());
+$n = tweet_count();
+$c = count(cron_events());
+letsblog_sns_on_transition('publish', 'draft', $p, false);
+letsblog_sns_on_transition('publish', 'draft', $p, true);
+letsblog_sns_on_after_insert(140);
+check('設定前に公開済みの記事は、非公開化→再公開でも告知しない', tweet_count() === $n && count(cron_events()) === $c && announce_meta(140) !== '');
 
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";

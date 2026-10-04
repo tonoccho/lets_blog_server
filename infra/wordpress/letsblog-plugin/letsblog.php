@@ -31,6 +31,11 @@ const LETSBLOG_SNS_TOKEN_SKEW = 60;
 const LETSBLOG_SNS_STATUS_UNSET = '未設定';
 const LETSBLOG_SNS_STATUS_CONNECTED = '接続済み';
 const LETSBLOG_SNS_STATUS_RECONNECT = '要再接続';
+/** 公開時の告知(issue #1575)。告知済み(または告知の対象外)の記事に付ける投稿メタと、即時の告知を実行する cron のフック名。 */
+const LETSBLOG_META_SNS_ANNOUNCED = '_letsblog_sns_announced';
+const LETSBLOG_CRON_SNS_ANNOUNCE = 'letsblog_sns_announce_post';
+/** 送信を始めた記事に付ける印。cron が二重に走っても、再試行しても二度送らない。 */
+const LETSBLOG_META_SNS_SENT = '_letsblog_sns_sent';
 
 /** 署名付きプレビュー(issue #1561)。URL のクエリ名・一時データの名前・期限切れを掃除するための索引。 */
 const LETSBLOG_PREVIEW_QUERY_VAR = 'letsblog_preview';
@@ -820,6 +825,144 @@ letsblog_sns_register_sender('x', [
     'int_fields' => ['expires_at'],
     'send' => 'letsblog_x_send',
 ]);
+
+// ---- 公開時の告知(issue #1575)。公開の検知は WordPress 側で行い、Let's Blog が止まっていても告知できる ----
+
+/** CLI(wp-cli)で実行中か。cron のループバックが期待できないので、CLI ではその場で送る。 */
+function letsblog_sns_is_cli(): bool
+{
+    return defined('WP_CLI') && WP_CLI;
+}
+
+/**
+ * 保存が終わるまで(CLI)・cron を起動するまで(Web)の、実行待ちの状態。
+ *
+ * @return array{cli: int[], spawn: bool}
+ */
+function &letsblog_sns_pending(): array
+{
+    static $pending = ['cli' => [], 'spawn' => false];
+    return $pending;
+}
+
+/** 告知文の既定: 記事のタイトルとパーマリンク。 */
+function letsblog_sns_default_text($post): string
+{
+    $title = html_entity_decode(letsblog_strip_tags((string) get_the_title($post)), ENT_QUOTES, 'UTF-8');
+    return $title . "\n" . (string) get_permalink($post);
+}
+
+function letsblog_strip_tags(string $text): string
+{
+    return function_exists('wp_strip_all_tags') ? wp_strip_all_tags($text) : strip_tags($text);
+}
+
+/**
+ * transition_post_status。post の「publish 以外 → publish」を告知の対象にする。
+ * 予約(future)の作成と future → publish、パスワード付き、告知済みは対象外。SNS の設定がなければ何もしない。
+ * 対象になった記事には告知済みの印を先に付ける(再公開で二重に告知しない。失敗しても再送しない)。
+ *
+ * @param bool|null $cli null なら実行環境から判定する(テスト用の差し替え)
+ */
+function letsblog_sns_on_transition($new_status, $old_status, $post, ?bool $cli = null): bool
+{
+    if (!is_object($post) || ($post->post_type ?? '') !== 'post') {
+        return false;
+    }
+    $id = (int) $post->ID;
+    if ($old_status === 'publish' && $new_status !== 'publish') {
+        // SNS 設定前・機能有効前に公開された記事も、のちの再公開で告知しないよう印を付けておく。
+        if (get_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, true) === '') {
+            update_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, 'published');
+        }
+        return false;
+    }
+    if (letsblog_sns_config_all() === []) {
+        return false;
+    }
+    if ($new_status === 'future') {
+        // Let's Blog の予約投稿(publish_scheduled_at)など。のちに公開されても告知しない。
+        if (get_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, true) === '') {
+            update_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, 'scheduled');
+        }
+        return false;
+    }
+    if ($new_status !== 'publish' || $old_status === 'publish' || $old_status === 'future') {
+        return false;
+    }
+    if (($post->post_password ?? '') !== '' || get_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, true) !== '') {
+        return false;
+    }
+    update_post_meta($id, LETSBLOG_META_SNS_ANNOUNCED, (string) time());
+    $pending = &letsblog_sns_pending();
+    if ($cli ?? letsblog_sns_is_cli()) {
+        $pending['cli'][$id] = $id;
+    } else {
+        wp_schedule_single_event(time(), LETSBLOG_CRON_SNS_ANNOUNCE, [$id]);
+        $pending['spawn'] = true;
+    }
+    return true;
+}
+
+/** 接続済みの SNS すべてへ送り、結果を告知履歴に残す。何があっても例外を外へ出さない(公開を失敗させない)。 */
+function letsblog_sns_announce_post(int $id): void
+{
+    $post = get_post($id);
+    if (!is_object($post) || ($post->post_status ?? '') !== 'publish' || get_post_meta($id, LETSBLOG_META_SNS_SENT, true) !== '') {
+        return;
+    }
+    update_post_meta($id, LETSBLOG_META_SNS_SENT, (string) time());
+    foreach (array_keys(letsblog_sns_config_all()) as $sns) {
+        try {
+            letsblog_sns_announce((string) $sns, 'publish', $id, letsblog_sns_default_text($post), time());
+        } catch (Throwable $e) {
+            letsblog_sns_log_append([
+                'sns' => (string) $sns, 'kind' => 'publish', 'post_id' => $id, 'at' => gmdate('c'),
+                'success' => false, 'error' => '告知中に例外が発生しました: ' . $e->getMessage(),
+            ]);
+        }
+    }
+}
+
+/** cron のイベント(Web からの公開)。 */
+function letsblog_sns_run_scheduled($id): void
+{
+    letsblog_sns_announce_post((int) $id);
+}
+
+/** CLI: 投稿の保存(ターム・メタ)が済んだあとに、その記事を送る。 */
+function letsblog_sns_on_after_insert($post_id): void
+{
+    $pending = &letsblog_sns_pending();
+    $id = (int) $post_id;
+    if (isset($pending['cli'][$id])) {
+        unset($pending['cli'][$id]);
+        letsblog_sns_announce_post($id);
+    }
+}
+
+/** 終了時: CLI で送り残しがあれば送り(wp_after_insert_post を通らない公開経路)、Web で予約したイベントがあれば cron を起動する。 */
+function letsblog_sns_on_shutdown(): void
+{
+    $pending = &letsblog_sns_pending();
+    foreach ($pending['cli'] as $id) {
+        unset($pending['cli'][$id]);
+        letsblog_sns_announce_post((int) $id);
+    }
+    if ($pending['spawn']) {
+        $pending['spawn'] = false;
+        if (function_exists('spawn_cron')) {
+            spawn_cron();
+        }
+    }
+}
+
+if (function_exists('add_action')) {
+    add_action('transition_post_status', 'letsblog_sns_on_transition', 10, 3);
+    add_action(LETSBLOG_CRON_SNS_ANNOUNCE, 'letsblog_sns_run_scheduled', 10, 1);
+    add_action('wp_after_insert_post', 'letsblog_sns_on_after_insert', 10, 1);
+    add_action('shutdown', 'letsblog_sns_on_shutdown');
+}
 
 if (defined('WP_CLI') && WP_CLI) {
     /**
