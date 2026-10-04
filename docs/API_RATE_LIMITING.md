@@ -180,14 +180,17 @@ production default is untouched.
 `docker-compose.e2e-stubs.yml`'s override of `API_RATE_LIMIT_REQUESTS` for `api-global`
 (issue #1132, above) left `upload-endpoint` untouched. `apps/web/e2e/features/media/
 image-generation.feature`'s header comment documents the acceptance-test suite's entire
-consumption of this bucket: `image-batch-count.feature` (5), `asset-image-batch-form.feature`
-(2), `image-generation-chatgpt.feature` (2) and `image-settings.feature` (1) account for the 10
-scenarios that run without `@slow` (`test:at:fast`), and `image-generation.feature` itself adds 2
-more that only run with `@slow` (the full `test:at` / `test:at:clean`). A full run therefore
-consumes exactly **12** against a process-wide bucket whose production default is **10 per
-hour** — 2 over the limit, so whichever of the 12 calls lands last always gets `429`. Re-running
-the same full suite within the same hour lands on the same (not yet refreshed) bucket, so a
-second run needs the same 12 again before the first hour's window rolls over.
+consumption of this bucket: `image-batch-count.feature` (5), `image-generation-chatgpt.feature`
+(3) and `image-settings.feature` (1) account for the 9 scenarios that run without `@slow`
+(`test:at:fast`), and `image-generation.feature` itself adds 2 more that only run with `@slow`
+(the full `test:at` / `test:at:clean`). A full run therefore consumes **11** (it was 12 when this
+section was written: `asset-image-batch-form.feature` consumed 2 until #1408 moved the asset
+panel to the asynchronous `POST /api/ai/image/jobs`, which is `api-global` and not this bucket).
+That is still 1 over a process-wide bucket whose production default is **10 per hour**, so
+whichever call lands last gets `429`, and a second full run within the same hour needs the same
+11 again before the first hour's window rolls over. The figures in the reproduction and "Value
+chosen" below (12, 24, 1.7x) are the state at the time of #1286 and are kept as the record of that
+decision.
 
 Reproduced directly against the running `gateway` container (bypassing Playwright, since the
 bucket is process-wide and does not depend on which caller hits it) on 2026-09-15, with the
@@ -234,8 +237,9 @@ later.
 this bucket per full run (5 successful UI uploads to `POST /api/generated-images/upload`, 1 direct
 non-member upload that is rejected with `403`, and 1 asset add via
 `POST /api/projects/{id}/asset-images/{id}/upload`; the format/size rejections are stopped by the
-panel before any request is sent). A full run now consumes **19**, so the same-hour re-run floor is
-**38** against the overlay's 40 — only 2 calls of headroom. Raise `UPLOAD_RATE_LIMIT_REQUESTS` in
+panel before any request is sent). A full run now consumes **18** (11 + 7, after #1570 corrected the
+base from 12), so the same-hour re-run floor is **36** against the overlay's 40 — 4 calls of
+headroom. Raise `UPLOAD_RATE_LIMIT_REQUESTS` in
 `docker-compose.e2e-stubs.yml` before adding any further upload-bucket scenario.
 
 #### 4. Operation Log Rate Limiter (`operation-log-endpoint`)

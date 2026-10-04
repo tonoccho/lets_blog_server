@@ -34,9 +34,11 @@
   `POST /api/ai/image` は gateway の upload-endpoint バケット(**プロセス全体で1時間に10回**)
   に属する。このフィーチャの消費は2で、いずれも `@slow` なので通常実行(`test:at:fast`)では
   消費しない。`@slow` を除いた通常実行の内訳は `image-batch-count.feature` が5、
-  `asset-image-batch-form.feature` が2、`image-generation-chatgpt.feature` が2、
-  `image-settings.feature` が1で、合計10の**枠ちょうど**である。
-  生成を伴うシナリオをこれ以上足すときは、必ずどこかを減らすこと。
+  `image-generation-chatgpt.feature` が3、`image-settings.feature` が1で、合計9である
+  (`asset-image-batch-form.feature` は #1408 で非同期経路 `POST /api/ai/image/jobs`
+  (api-global)へ移り、この枠を消費しない)。`@slow` を含めると合計11になり、本番の枠(10)を1つ超える(以前は12で2つ超過)。
+  枠を増やしてよいという意味ではない。
+  生成を伴うシナリオをこれ以上足すときは、この内訳を数え直すこと。
 
   シナリオ: プロンプトを指定してComfyUIで画像を生成すると、生成画像の一覧に現れる
     前提 画像生成にComfyUIを使うプロジェクトがある

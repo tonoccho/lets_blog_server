@@ -38,7 +38,7 @@
   ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §9)
 
   各シナリオが `POST /api/ai/image` を1回ずつ叩き、gateway の upload-endpoint 枠
-  (プロセス全体で1時間に10回)を計2つ消費する。枠全体の内訳は
+  (プロセス全体で1時間に10回)を計3つ消費する。枠全体の内訳は
   `image-generation.feature` の冒頭にまとめてある。
 
   ## タグ提案(issue #1077)
