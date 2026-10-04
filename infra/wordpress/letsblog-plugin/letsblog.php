@@ -352,6 +352,67 @@ if (function_exists('add_action') && function_exists('add_filter')) {
     add_filter('pings_open', 'letsblog_preview_comments_open', 10, 2);
 }
 
+// ---- 同期済み CSS の読み込みと、本文の囲みクラスの付け直し(issue #1559) ----
+// 保存済みの内容(wp letsblog sync、issue #1558)だけを使い、Lets Blog サーバーとは通信しない。
+// どちらもこのプラグインのフック経由なので、プラグインを停止すれば CSS は読み込まれない。
+
+/** 保存済みの同期内容(JSON オブジェクト)を配列で返す。未同期・壊れている場合は null。 */
+function letsblog_synced_payload(): ?array
+{
+    $raw = get_option(LETSBLOG_OPTION_SYNC_PAYLOAD, null);
+    if (!is_string($raw)) {
+        return null;
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) && !array_is_list($decoded) ? $decoded : null;
+}
+
+/** 表側の画面で、同期済みの統合 CSS(組み込みタグのデザイン CSS を含む)を読み込む。 */
+function letsblog_enqueue_synced_css(): void
+{
+    $payload = letsblog_synced_payload();
+    $css = $payload['cssBundle'] ?? null;
+    if (!is_string($css) || trim($css) === '') {
+        return;
+    }
+    // インライン CSS から <style> を抜け出せないようにする。
+    $css = str_ireplace('</style', '<\/style', $css);
+    $hash = get_option(LETSBLOG_OPTION_SYNC_HASH, false);
+    wp_register_style('letsblog-synced', false, [], is_string($hash) ? $hash : false);
+    wp_enqueue_style('letsblog-synced');
+    wp_add_inline_style('letsblog-synced', $css);
+}
+
+/**
+ * 本文の囲み(lets-blog-rendered)のプレフィックスクラスを、保存済みの現在の cssSelectorPrefix へ付け直す。
+ * プレフィックスを変えても、投稿に書き込まれた古いクラスのまま CSS が効かなくなることを防ぐ。
+ */
+function letsblog_rewrite_wrapper_class($content)
+{
+    if (!is_string($content)) {
+        return $content;
+    }
+    $payload = letsblog_synced_payload();
+    if ($payload === null || !array_key_exists('cssSelectorPrefix', $payload) || !is_string($payload['cssSelectorPrefix'])) {
+        return $content;
+    }
+    $prefix = trim($payload['cssSelectorPrefix']);
+    if ($prefix !== '' && preg_match('/^[A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*$/', $prefix) !== 1) {
+        return $content;
+    }
+    $class = 'lets-blog-rendered' . ($prefix !== '' ? ' ' . $prefix : '');
+    return preg_replace(
+        '/<div class="lets-blog-rendered(?: [^"]*)?"/',
+        '<div class="' . $class . '"',
+        $content
+    );
+}
+
+if (function_exists('add_action') && function_exists('add_filter')) {
+    add_action('wp_enqueue_scripts', 'letsblog_enqueue_synced_css');
+    add_filter('the_content', 'letsblog_rewrite_wrapper_class');
+}
+
 // ---- SNS 告知の土台(issue #1573)。設定は wp-cli で受け取り、REST ルートは作らず、Let's Blog へは通信しない ----
 
 /**

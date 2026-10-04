@@ -455,6 +455,119 @@ check('プレビュー発行は一時ファイルを必ず削除する', str_con
 check('プレビュー発行は導入処理を走らせない', $prevBlock !== '' && !str_contains($prevBlock, 'ensureLetsblogPlugin(') && !str_contains($prevBlock, 'resolveExistingSitePath('));
 check('プレビュー発行は終了コードと標準出力・標準エラーを返す', str_contains($prevBlock, "'exitCode'") && str_contains($prevBlock, "'stdout'") && str_contains($prevBlock, "'stderr'"));
 
+// --- issue #1559: 同期済み CSS を表側で読み込み、本文の囲みのプレフィックスクラスを表示時に付け直す ---
+$GLOBALS['letsblog_test_styles'] = ['registered' => [], 'enqueued' => [], 'inline' => []];
+function wp_register_style(string $handle, $src, array $deps = [], $ver = false): bool
+{
+    $GLOBALS['letsblog_test_styles']['registered'][$handle] = [$src, $ver];
+    return true;
+}
+function wp_enqueue_style(string $handle, $src = '', array $deps = [], $ver = false): void
+{
+    $GLOBALS['letsblog_test_styles']['enqueued'][] = $handle;
+}
+function wp_add_inline_style(string $handle, string $data): bool
+{
+    $GLOBALS['letsblog_test_styles']['inline'][$handle][] = $data;
+    return true;
+}
+$resetStyles = function (): void {
+    $GLOBALS['letsblog_test_styles'] = ['registered' => [], 'enqueued' => [], 'inline' => []];
+};
+$setSync = function (array $data): void {
+    $GLOBALS['letsblog_test_options']['letsblog_sync_payload'] = json_encode($data);
+};
+$inlineCss = fn() => implode("\n", array_merge(...array_values($GLOBALS['letsblog_test_styles']['inline'] ?: [[]])));
+
+check('css: wp_enqueue_scripts に CSS 読み込みを登録する',
+    in_array(['action', 'wp_enqueue_scripts'], $GLOBALS['letsblog_test_hooks'], true));
+check('css: the_content に囲みクラスの付け直しを登録する',
+    in_array(['filter', 'the_content'], $GLOBALS['letsblog_test_hooks'], true));
+check('css: 読み込み関数が定義されている', function_exists('letsblog_enqueue_synced_css'));
+check('css: 付け直し関数が定義されている', function_exists('letsblog_rewrite_wrapper_class'));
+
+if (function_exists('letsblog_enqueue_synced_css') && function_exists('letsblog_rewrite_wrapper_class')) {
+    // 同期前: 何も読み込まない
+    unset($GLOBALS['letsblog_test_options']['letsblog_sync_payload']);
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: 同期前は何も読み込まない', $GLOBALS['letsblog_test_styles']['enqueued'] === []);
+
+    // 壊れた内容・CSS が空・CSS が文字列でない: 読み込まない
+    $GLOBALS['letsblog_test_options']['letsblog_sync_payload'] = 'not json';
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: 壊れた保存内容では何も読み込まない', $GLOBALS['letsblog_test_styles']['enqueued'] === []);
+    $setSync(['cssSelectorPrefix' => 'p', 'cssBundle' => '']);
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: cssBundle が空なら何も読み込まない', $GLOBALS['letsblog_test_styles']['enqueued'] === []);
+    $setSync(['cssSelectorPrefix' => 'p', 'cssBundle' => ['x']]);
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: cssBundle が文字列でなければ何も読み込まない', $GLOBALS['letsblog_test_styles']['enqueued'] === []);
+    $GLOBALS['letsblog_test_options']['letsblog_sync_payload'] = '[1,2]';
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: JSON の配列では何も読み込まない', $GLOBALS['letsblog_test_styles']['enqueued'] === []);
+
+    // AC1/AC3: 同期済み CSS(組み込みタグのデザイン CSS を含む統合 CSS)を読み込む
+    $bundle = ".pfx .toc{color:red}\n.pfx .blog-card{border:1px solid #000}\n.pfx .amazon{color:#f90}";
+    $setSync(['cssSelectorPrefix' => 'pfx', 'cssBundle' => $bundle]);
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: 統合 CSS を wp_enqueue_style で読み込む', count($GLOBALS['letsblog_test_styles']['enqueued']) === 1);
+    check('css: 統合 CSS をインラインで付ける(組み込みタグのデザイン CSS を含む)',
+        str_contains($inlineCss(), '.pfx .toc{color:red}') && str_contains($inlineCss(), '.pfx .blog-card') && str_contains($inlineCss(), '.pfx .amazon'));
+    $handle = $GLOBALS['letsblog_test_styles']['enqueued'][0] ?? '';
+    check('css: 登録したハンドルにインライン CSS を付ける', isset($GLOBALS['letsblog_test_styles']['inline'][$handle]));
+
+    // AC1: 再同期で CSS が変われば、再投稿なしで次の表示から新しい CSS になる
+    $setSync(['cssSelectorPrefix' => 'pfx', 'cssBundle' => '.pfx .toc{color:blue}']);
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: 再同期後は新しい CSS を読み込む', str_contains($inlineCss(), 'color:blue') && !str_contains($inlineCss(), 'color:red'));
+
+    // </style> でインライン CSS から抜け出せない
+    $setSync(['cssSelectorPrefix' => 'pfx', 'cssBundle' => ".a{}</style><script>alert(1)</script>"]);
+    $resetStyles();
+    letsblog_enqueue_synced_css();
+    check('css: </style> でスタイル要素を閉じさせない', !str_contains(strtolower($inlineCss()), '</style'));
+
+    // AC2: 囲みのプレフィックスクラスを現在のプレフィックスへ付け直す
+    $setSync(['cssSelectorPrefix' => 'newpfx', 'cssBundle' => '.newpfx a{}']);
+    $old = '<div class="lets-blog-rendered oldpfx"><p>本文</p></div>';
+    check('wrapper: 古いプレフィックスを現在のものに付け直す',
+        letsblog_rewrite_wrapper_class($old) === '<div class="lets-blog-rendered newpfx"><p>本文</p></div>', letsblog_rewrite_wrapper_class($old));
+    check('wrapper: すでに現在のプレフィックスならそのまま',
+        letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered newpfx">x</div>') === '<div class="lets-blog-rendered newpfx">x</div>');
+    check('wrapper: プレフィックスが無かった囲みにも付ける',
+        letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered">x</div>') === '<div class="lets-blog-rendered newpfx">x</div>');
+    check('wrapper: 囲みのない本文は変えない', letsblog_rewrite_wrapper_class('<p>手書き</p>') === '<p>手書き</p>');
+    check('wrapper: 他のクラスの div は変えない',
+        letsblog_rewrite_wrapper_class('<div class="other oldpfx">x</div>') === '<div class="other oldpfx">x</div>');
+    check('wrapper: 本文中の囲みの後ろの内容は保つ',
+        str_contains(letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered oldpfx"><div class="inner">a</div></div>'), '<div class="inner">a</div></div>'));
+
+    // プレフィックスが空・同期前・不正な値のとき、囲みは変えない/クラスだけ
+    $setSync(['cssSelectorPrefix' => '', 'cssBundle' => '.a{}']);
+    check('wrapper: プレフィックスが空なら固定クラスだけにする',
+        letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered oldpfx">x</div>') === '<div class="lets-blog-rendered">x</div>');
+    $setSync(['cssSelectorPrefix' => 'a"><script>', 'cssBundle' => '.a{}']);
+    check('wrapper: 不正なプレフィックスでは本文を変えない(注入しない)',
+        letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered oldpfx">x</div>') === '<div class="lets-blog-rendered oldpfx">x</div>');
+    $setSync(['cssBundle' => '.a{}']);
+    check('wrapper: プレフィックスのキーが無ければ本文を変えない',
+        letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered oldpfx">x</div>') === '<div class="lets-blog-rendered oldpfx">x</div>');
+    unset($GLOBALS['letsblog_test_options']['letsblog_sync_payload']);
+    check('wrapper: 同期前は本文を変えない',
+        letsblog_rewrite_wrapper_class('<div class="lets-blog-rendered oldpfx">x</div>') === '<div class="lets-blog-rendered oldpfx">x</div>');
+    check('wrapper: 本文が文字列でなければそのまま返す', letsblog_rewrite_wrapper_class(null) === null);
+}
+
+// AC4: 停止すると CSS は読み込まれない。読み込みは全てこのプラグインが登録するフック経由(上の hooks 検査)で、
+// 停止すればフックごと消える。プラグイン外に CSS ファイルを置かない。
+
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";
     foreach ($failures as $f) {
