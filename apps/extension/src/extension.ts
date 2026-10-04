@@ -35,6 +35,7 @@ import { resolveGitBackend } from './vscodeGit';
 import { PlanPanel } from './planPanel';
 import { ArticleCreationPanel } from './articleCreationPanel';
 import { PreviewMessage, PreviewPanel, SiteOption } from './previewPanel';
+import { showRealSitePreview } from './realSitePreview';
 import { ImageGenPanel } from './imageGenPanel';
 import { ImageGalleryPanel } from './imageGalleryPanel';
 import { DiagramEditorPanel, DIAGRAM_REFERENCE_PATTERN } from './diagramEditorPanel';
@@ -1609,6 +1610,26 @@ async function commandPreviewArticle(
     ): Promise<void> => {
       progress.report({ message: 'Markdownを変換しています…' });
       const html = await api.renderPreviewHtml(apiKey, actor, projectId, markdown);
+
+      // サイトが紐づいている場合は、実サイトのプレビューURL(issue #1562)で表示する。プラグインが必須のため、
+      // 使えないサイトでは旧方式へ落とさず導入の案内を出す。旧方式(以下)はサイト未紐付けの場合だけが通る
+      // (旧経路の削除は#1564)。
+      const shownOnRealSite = await showRealSitePreview({
+        context,
+        apiKey,
+        actor,
+        projectId,
+        site: targetSite,
+        availableSites,
+        onMessage: onPreviewMessage,
+        html,
+        title,
+        categories: article.data.categories,
+        tags: article.data.tags,
+        featuredImageDataUri,
+        report: (message) => progress.report({ message }),
+      });
+      if (shownOnRealSite) return;
 
       progress.report({ message: `${targetSite.siteName} のCSSを取得しています…` });
       let css = '';

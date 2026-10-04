@@ -24,6 +24,7 @@ export function resetMocks(): void {
   workspaceFolders = undefined;
   appliedEdits.length = 0;
   shownInformations.length = 0;
+  openedExternalUrls.length = 0;
   decorationTypes.length = 0;
   progressRuns.length = 0;
   diagnosticCollections.length = 0;
@@ -44,6 +45,17 @@ export const openedDocuments: string[] = [];
  * 実ドキュメントを持たないため、編集を適用せず「何をどこへ書こうとしたか」だけを残す。
  */
 export const appliedEdits: { kind: 'replace' | 'insert'; uri: string; text: string }[] = [];
+
+/** env.openExternal に渡されたURL(外部ブラウザで開いたもの)。 */
+export const openedExternalUrls: string[] = [];
+
+/** vscode.env の最小再現。 */
+export const env = {
+  openExternal(uri: { toString: () => string }): Promise<boolean> {
+    openedExternalUrls.push(uri.toString());
+    return Promise.resolve(true);
+  },
+};
 
 /** showInformationMessage で表示した文言。 */
 export const shownInformations: string[] = [];

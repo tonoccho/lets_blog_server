@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import { logger } from './logger';
-import { buildPreviewCsp, createNonce } from './webviewSecurity';
+import { buildPreviewCsp, buildRealSitePreviewCsp, createNonce } from './webviewSecurity';
 
 /** Webviewからのメッセージ型。 */
-export interface PreviewMessage {
-  type: 'switchSite';
-  siteId: number | null;
+export type PreviewMessage = { type: 'switchSite'; siteId: number | null };
+
+/** 実サイトのプレビュー(issue #1562)で、Webviewが外部ブラウザで開くよう求めるメッセージ。パネル自身が処理する。 */
+interface OpenExternalMessage {
+  type: 'openExternal';
 }
 
 /** プレビューパネル内の環境切り替えセレクトに表示する選択肢。 */
@@ -44,6 +46,8 @@ export class PreviewPanel {
    * ため)。パネルを閉じた際にまとめて削除する({@link dispose}参照)。
    */
   private readonly _previewPostIdsBySiteId = new Map<number, string>();
+  /** 実サイトのプレビューで表示中のURL(外部ブラウザで開く操作の宛先)。旧方式の表示・案内表示ではundefined。 */
+  private _previewUrl: string | undefined;
   private _deletePreviewPost?: (siteId: number, postId: string) => Promise<void>;
 
   /** Webviewからのメッセージハンドラー（環境切り替え等）。 */
@@ -84,22 +88,58 @@ export class PreviewPanel {
       }
       return;
     }
-    PreviewPanel.currentPanel = new PreviewPanel(
-      context, html, css, warning, siteLabel, featuredImageDataUri, onMessage, availableSites, currentSiteId
+    const panel = new PreviewPanel(context, onMessage);
+    PreviewPanel.currentPanel = panel;
+    panel._update(html, css, warning, siteLabel, featuredImageDataUri, availableSites, currentSiteId);
+    panel._deletePreviewPost = deletePreviewPost;
+  }
+
+  /**
+   * 実サイトのプレビューを表示する(issue #1562)。サーバーが発行した署名付きURLをパネル内のiframeで表示する。
+   * 既に開いている場合は同じパネルを新しいURLへ差し替える(再プレビューは毎回新しいURLを取得する)。
+   * 埋め込みがWordPressやWAFに拒否されても外部ブラウザで開けるよう、その操作を常に表示する。
+   */
+  public static showRealSite(context: vscode.ExtensionContext, options: RealSitePreviewOptions): void {
+    const panel = PreviewPanel.openPanel(context, options.onMessage);
+    panel._previewUrl = options.url;
+    panel._setPage(
+      options.siteLabel,
+      renderRealSitePage(options, createNonce())
     );
-    PreviewPanel.currentPanel._deletePreviewPost = deletePreviewPost;
+  }
+
+  /**
+   * letsblogプラグインが使えない(未導入・要更新の)サイトで、プレビューの代わりに導入(更新)の案内を表示する。
+   * プラグインは必須のため、旧方式での代替表示はしない。
+   */
+  public static showPluginGuidance(context: vscode.ExtensionContext, options: PluginGuidanceOptions): void {
+    const panel = PreviewPanel.openPanel(context, options.onMessage);
+    panel._previewUrl = undefined;
+    panel._setPage(options.siteLabel, renderGuidancePage(options, createNonce()));
+  }
+
+  /** 開いているパネルを前面に出して返す。無ければ作る。 */
+  private static openPanel(
+    context: vscode.ExtensionContext,
+    onMessage: ((message: PreviewMessage) => void) | undefined
+  ): PreviewPanel {
+    if (PreviewPanel.currentPanel) {
+      PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
+      PreviewPanel.currentPanel._messageHandler = onMessage;
+      return PreviewPanel.currentPanel;
+    }
+    PreviewPanel.currentPanel = new PreviewPanel(context, onMessage);
+    return PreviewPanel.currentPanel;
+  }
+
+  private _setPage(siteLabel: string | undefined, html: string): void {
+    this._panel.title = siteLabel ? `Article Preview (${siteLabel})` : 'Article Preview';
+    this._panel.webview.html = html;
   }
 
   private constructor(
     context: vscode.ExtensionContext,
-    html: string,
-    css: string,
-    warning: string | undefined,
-    siteLabel?: string,
-    featuredImageDataUri?: string,
-    onMessage?: (message: PreviewMessage) => void,
-    availableSites?: SiteOption[],
-    currentSiteId?: number | null
+    onMessage?: (message: PreviewMessage) => void
   ) {
     this._extensionUri = context.extensionUri;
     this._messageHandler = onMessage;
@@ -115,12 +155,23 @@ export class PreviewPanel {
     );
     this._panel.onDidDispose(() => this.dispose(), null);
     this._panel.webview.onDidReceiveMessage((message) => this._handleMessage(message), null);
-    this._update(html, css, warning, siteLabel, featuredImageDataUri, availableSites, currentSiteId);
   }
 
-  private _handleMessage(message: PreviewMessage): void {
+  private _handleMessage(message: PreviewMessage | OpenExternalMessage): void {
+    if (message.type === 'openExternal') {
+      this._openExternal();
+      return;
+    }
     if (this._messageHandler) {
       this._messageHandler(message);
+    }
+  }
+
+  /** 表示中の実サイトのプレビューURLを外部ブラウザで開く。URLが無い・http(s)でない場合は何もしない。 */
+  private _openExternal(): void {
+    const url = this._previewUrl;
+    if (url && /^https?:\/\//i.test(url)) {
+      void vscode.env.openExternal(vscode.Uri.parse(url));
     }
   }
 
@@ -172,6 +223,7 @@ export class PreviewPanel {
     availableSites?: SiteOption[],
     currentSiteId?: number | null
   ): void {
+    this._previewUrl = undefined;
     // どのサイトのCSSで表示しているかがタブから分かるようにする。
     this._panel.title = siteLabel ? `Article Preview (${siteLabel})` : 'Article Preview';
     this._panel.webview.html =
@@ -288,4 +340,110 @@ function escapeHtml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/** {@link PreviewPanel.showRealSite}の引数。 */
+export interface RealSitePreviewOptions {
+  /** サーバーが発行した署名付きプレビューURL。 */
+  url: string;
+  siteLabel?: string;
+  onMessage?: (message: PreviewMessage) => void;
+  availableSites?: SiteOption[];
+  currentSiteId?: number | null;
+}
+
+/** {@link PreviewPanel.showPluginGuidance}の引数。 */
+export interface PluginGuidanceOptions {
+  /** 要更新(プロトコル非互換)ならtrue、未導入ならfalse。 */
+  needsUpdate: boolean;
+  /** サーバーが返した理由の文言(あれば案内に添える)。 */
+  message?: string;
+  siteLabel?: string;
+  onMessage?: (message: PreviewMessage) => void;
+  availableSites?: SiteOption[];
+  currentSiteId?: number | null;
+}
+
+const BANNER_STYLE =
+  'background:var(--vscode-editorWidget-background,#eee);color:var(--vscode-foreground,#333);padding:6px 12px;margin-bottom:12px;border-radius:4px;font-family:sans-serif;font-size:12px;';
+
+/** 環境切り替えセレクトが無い場合の、静的なサイトラベル表示。 */
+function renderSiteLabel(siteLabel: string | undefined): string {
+  return siteLabel ? `<div style="${BANNER_STYLE}">プレビュー: ${escapeHtml(siteLabel)}</div>` : '';
+}
+
+/**
+ * 1つのスクリプトでacquireVsCodeApiを一度だけ呼び、環境切り替えと外部ブラウザで開く操作を配線する
+ * (acquireVsCodeApiは1ページで1回しか呼べないため、個別のスクリプトに分けない)。
+ */
+const REAL_SITE_SCRIPT = `
+(function () {
+  const vscode = acquireVsCodeApi();
+  const select = document.getElementById('letsblog-site-switcher');
+  if (select) {
+    select.addEventListener('change', () => {
+      const value = select.value;
+      vscode.postMessage({ type: 'switchSite', siteId: value === '' ? null : Number(value) });
+    });
+  }
+  const open = document.getElementById('letsblog-open-external');
+  if (open) {
+    open.addEventListener('click', () => vscode.postMessage({ type: 'openExternal' }));
+  }
+})();
+`;
+
+function renderRealSitePage(options: RealSitePreviewOptions, nonce: string): string {
+  const switcher = renderSiteSwitcher(options.availableSites, options.currentSiteId);
+  const banner = switcher || renderSiteLabel(options.siteLabel);
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${buildRealSitePreviewCsp(nonce, options.url)}">
+<title>Article Preview</title>
+<style>
+body{margin:0;padding:8px;font-family:sans-serif;}
+iframe{width:100%;height:calc(100vh - 120px);border:1px solid var(--vscode-panel-border,#ccc);background:#fff;}
+</style>
+</head>
+<body>
+${banner}
+<div style="${BANNER_STYLE}display:flex;align-items:center;gap:8px;">
+<span>表示されない場合(サイトが埋め込み表示を許可していない場合)は、外部ブラウザで開いてください。</span>
+<button id="letsblog-open-external" type="button">外部ブラウザで開く</button>
+</div>
+<iframe src="${escapeHtml(options.url)}" title="実サイトのプレビュー"></iframe>
+<script nonce="${nonce}">${REAL_SITE_SCRIPT}</script>
+</body>
+</html>`;
+}
+
+function renderGuidancePage(options: PluginGuidanceOptions, nonce: string): string {
+  const switcher = renderSiteSwitcher(options.availableSites, options.currentSiteId);
+  const banner = switcher || renderSiteLabel(options.siteLabel);
+  const headline = options.needsUpdate
+    ? "このサイトの Let's Blog プラグインの更新が必要です。"
+    : "このサイトには Let's Blog プラグインが導入されていません。";
+  const reason = options.message
+    ? `<p style="color:var(--vscode-descriptionForeground,#666);">${escapeHtml(options.message)}</p>`
+    : '';
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'">
+<title>Article Preview</title>
+</head>
+<body style="font-family:sans-serif;padding:8px;">
+${banner}
+<main role="alert">
+<h2>${headline}</h2>
+<p>プレビューは実サイトのプラグインを使って表示するため、プラグインが必要です。</p>
+<p>Let's Blog のサイト画面で「プラグインを再導入」を実行したあと、もう一度プレビューを開いてください。</p>
+${reason}
+</main>
+<script nonce="${nonce}">${REAL_SITE_SCRIPT}</script>
+</body>
+</html>`;
 }

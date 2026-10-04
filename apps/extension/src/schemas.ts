@@ -268,6 +268,12 @@ export const RenderPreviewResultSchema = z.object({
   html: z.string(),
 });
 
+/** 署名付きプレビューURL(POST /api/projects/{projectId}/preview/signed-url、issue #1561)。expiresAtはepoch秒。 */
+export const SignedPreviewUrlSchema = z.object({
+  url: z.string(),
+  expiresAt: z.number(),
+});
+
 /**
  * サイト内の既存記事ページを骨格として流用し、タイトル/本文/アイキャッチを差し替えた
  * HTML断片(/api/projects/{projectId}/preview/skeleton)。

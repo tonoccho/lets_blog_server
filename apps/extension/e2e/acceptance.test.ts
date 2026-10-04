@@ -25,6 +25,7 @@ import './steps/reviewSteps.steps';
 import './steps/publishReview.steps';
 import './steps/rejectionNotification.steps';
 import './steps/previewReview.steps';
+import './steps/previewSignedUrl.steps';
 import './steps/media.steps';
 import './steps/diagrams.steps';
 import './steps/failures.steps';

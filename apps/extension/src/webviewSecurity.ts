@@ -43,3 +43,35 @@ export function buildPreviewCsp(nonce: string): string {
     `script-src 'nonce-${nonce}'`,
   ].join('; ');
 }
+
+/**
+ * 実サイトのプレビュー(署名付きURLをiframeで表示する、issue #1562)向けのCSP。
+ *
+ * `frame-src`にはプレビューURLの**オリジンだけ**を許可する(パス・クエリのトークンは含めない)。
+ * 他のオリジンやワイルドカードは許可せず、リモートのスクリプト・スタイルも読み込ませない。
+ * iframe内のページはそのサイト自身のCSPで動くため、このWebview側は枠を出すだけでよい。
+ * http/https以外や解釈できないURLは、何も許可せず例外にする。
+ */
+export function buildRealSitePreviewCsp(nonce: string, previewUrl: string): string {
+  const origin = httpOriginOf(previewUrl);
+  return [
+    "default-src 'none'",
+    `frame-src ${origin}`,
+    "style-src 'unsafe-inline'",
+    `script-src 'nonce-${nonce}'`,
+  ].join('; ');
+}
+
+/** http/httpsのURLのオリジン(scheme://host[:port])を返す。それ以外は例外。 */
+function httpOriginOf(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('プレビューURLを解釈できません');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('プレビューURLはhttp/httpsのみ表示できます');
+  }
+  return parsed.origin;
+}

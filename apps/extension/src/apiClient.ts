@@ -1063,6 +1063,75 @@ export async function renderPreviewSkeleton(
   );
 }
 
+/** 署名付きプレビューURLの発行依頼(issue #1562)。 */
+export interface SignedPreviewUrlInput {
+  siteId?: number;
+  title: string;
+  contentHtml: string;
+  categories?: string[];
+  tags?: string[];
+  featuredImageDataUri?: string;
+}
+
+/**
+ * 署名付きプレビューURLの発行結果。letsblogプラグインが使えないサイト(未導入・要更新)は、
+ * サーバーが409で拒否する(issue #1557)。それは異常ではなく導入の案内が必要な状態なので、
+ * 例外にせず`pluginUnavailable`として返す。
+ */
+export type SignedPreviewUrlResult =
+  | { kind: 'ready'; url: string; expiresAt: number }
+  | { kind: 'pluginUnavailable'; message: string; needsUpdate: boolean };
+
+/** プラグインが使えないときにサーバーが409の本文へ載せる文言に含まれる目印。 */
+const PLUGIN_UNAVAILABLE_MARKER = 'letsblog プラグイン';
+
+/**
+ * 投稿を作らずに実サイトのテーマで表示する署名付きプレビューURLを発行する(issue #1561)。
+ * URLは短時間で失効するため、プレビューのたびに取得し直す(キャッシュしない)。
+ */
+export async function createSignedPreviewUrl(
+  apiKey: string,
+  actor: Actor | undefined,
+  projectId: number,
+  input: SignedPreviewUrlInput
+): Promise<SignedPreviewUrlResult> {
+  try {
+    const signed = await requestJson(
+      `/api/projects/${projectId}/preview/signed-url`,
+      {
+        label: 'createSignedPreviewUrl',
+        method: 'POST',
+        headers: buildHeaders(apiKey, actor),
+        createBody: jsonBody(input),
+      },
+      schemas.SignedPreviewUrlSchema
+    );
+    return { kind: 'ready', url: signed.url, expiresAt: signed.expiresAt };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409 && err.responseBody.includes(PLUGIN_UNAVAILABLE_MARKER)) {
+      return {
+        kind: 'pluginUnavailable',
+        message: pluginUnavailableMessage(err.responseBody),
+        needsUpdate: err.responseBody.includes('要更新'),
+      };
+    }
+    throw err;
+  }
+}
+
+/** 409の本文(JSONの`message`)から文言を取り出す。JSONでなければ本文をそのまま使う。 */
+function pluginUnavailableMessage(body: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string') {
+      return (parsed as { message: string }).message;
+    }
+  } catch {
+    // JSONでない本文はそのまま使う。
+  }
+  return body;
+}
+
 /**
  * renderPreviewSkeletonがローカル/テスト環境向けに作成した非公開プレビュー投稿を削除する
  * (WordPressの既定挙動でゴミ箱へ移動する)。プレビューパネルを閉じた際に呼ばれる想定。
