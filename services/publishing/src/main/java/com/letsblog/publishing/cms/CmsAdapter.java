@@ -143,6 +143,14 @@ public interface CmsAdapter {
     }
 
     /**
+     * 内容(JSON)をletsblogプラグインへ渡し、投稿を作らずに実テーマで表示する署名付きプレビューURLを返す
+     * (issue #1561)。ttlSecondsがnullならプラグインの規定値。対応しない場合はUnsupportedOperationExceptionを投げる。
+     */
+    default SignedPreview createSignedPreview(CmsCredentials credentials, String payload, Integer ttlSeconds) {
+        throw new UnsupportedOperationException("このCMSは署名付きプレビューURLの発行に対応していません");
+    }
+
+    /**
      * letsblog プラグインが使えるサイトであることを要求する(issue #1557)。導入済み以外(未導入・要更新)なら、
      * 理由と対処(再導入)を示す{@link LetsblogPluginUnavailableException}を投げる。投稿・プレビューが
      * CMSへ何かを書き込む前に呼ぶ。

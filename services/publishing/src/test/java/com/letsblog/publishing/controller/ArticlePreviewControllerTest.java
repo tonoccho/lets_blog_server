@@ -112,4 +112,33 @@ class ArticlePreviewControllerTest {
 
         assertThrows(ForbiddenException.class, () -> controller.deletePreviewPost(1L, 20L, "123"));
     }
+
+    // ---- issue #1561: 署名付きプレビュー URL ----
+
+    @Test
+    void signedUrl_認可後にサービスへ委譲しURLを返す() {
+        ArticlePreviewController controller = controller();
+        com.letsblog.publishing.dto.SignedPreviewUrlRequest request =
+                new com.letsblog.publishing.dto.SignedPreviewUrlRequest(
+                        20L, "題", "<p>本文</p>", java.util.List.of("c"), java.util.List.of("t"),
+                        "data:image/png;base64,AAAA", 600);
+        when(articlePreviewService.createSignedPreviewUrl(1L, request))
+                .thenReturn(new com.letsblog.publishing.dto.SignedPreviewUrlResponse("https://x/?letsblog_preview=t", 9L));
+
+        com.letsblog.publishing.dto.SignedPreviewUrlResponse response = controller.signedUrl(1L, request);
+
+        assertEquals("https://x/?letsblog_preview=t", response.url());
+        assertEquals(9L, response.expiresAt());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void signedUrl_認可拒否ならサービスを呼ばずForbidden() {
+        ArticlePreviewController controller = controller();
+        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller.signedUrl(1L,
+                new com.letsblog.publishing.dto.SignedPreviewUrlRequest(null, "題", "<p>x</p>", null, null, null, null)));
+        org.mockito.Mockito.verifyNoInteractions(articlePreviewService);
+    }
 }

@@ -2047,4 +2047,85 @@ class WordPressSshOperationsTest {
         verify(executor, never()).putFile(any(SshConnectionParams.class), any(byte[].class), any());
         verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
     }
+
+    // ---- issue #1561: wp letsblog preview(投稿を作らない署名付きプレビュー URL をwp-cliだけで発行する) ----
+
+    @Test
+    void createSignedPreview_内容を一時ファイルへ置きwp_letsblog_previewでURLを受け取り後始末する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"url\":\"https://example.com/?letsblog_preview=t\",\"expires_at\":1800000600}"))
+                .thenReturn(ok(""));
+
+        com.letsblog.publishing.cms.SignedPreview preview =
+                operations.createSignedPreview(creds(), "{\"title\":\"T\"}", 600);
+
+        assertEquals("https://example.com/?letsblog_preview=t", preview.url());
+        assertEquals(1800000600L, preview.expiresAt());
+        ArgumentCaptor<String> tmpPath = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> body = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).putFile(any(SshConnectionParams.class), body.capture(), tmpPath.capture());
+        assertArrayEquals("{\"title\":\"T\"}".getBytes(StandardCharsets.UTF_8), body.getValue());
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(true, commands.getAllValues().get(0).contains("letsblog preview"));
+        assertEquals(true, commands.getAllValues().get(0).contains("--file="));
+        assertEquals(true, commands.getAllValues().get(0).contains("--ttl=600"));
+        assertEquals(true, commands.getAllValues().get(0).contains(tmpPath.getValue()));
+        assertEquals(true, commands.getAllValues().get(1).startsWith("rm -f"));
+        assertEquals(true, commands.getAllValues().get(1).contains(tmpPath.getValue()));
+    }
+
+    @Test
+    void createSignedPreview_ttl未指定なら_ttlを渡さない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"url\":\"https://example.com/?letsblog_preview=t\",\"expires_at\":1}"))
+                .thenReturn(ok(""));
+
+        operations.createSignedPreview(creds(), "{}", null);
+
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(false, commands.getAllValues().get(0).contains("--ttl"));
+    }
+
+    @Test
+    void createSignedPreview_wp_cliが失敗しても一時ファイルを消して例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: タイトルがありません"))
+                .thenReturn(ok(""));
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.createSignedPreview(creds(), "{}", null));
+
+        assertEquals(true, e.getMessage().contains("タイトルがありません"));
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void createSignedPreview_stderrが空ならstdoutを例外に含める() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(new SshCommandResult(1, "boom", "", null))
+                .thenReturn(ok(""));
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.createSignedPreview(creds(), "{}", null));
+        assertEquals(true, e.getMessage().contains("boom"));
+    }
+
+    @Test
+    void createSignedPreview_出力がJSONでなければ例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("PHP Fatal error"))
+                .thenReturn(ok(""));
+
+        assertThrows(SshOperationException.class, () -> operations.createSignedPreview(creds(), "{}", null));
+    }
+
+    @Test
+    void createSignedPreview_ttlが範囲外ならシェルへ渡さず拒否する() {
+        assertThrows(IllegalArgumentException.class, () -> operations.createSignedPreview(creds(), "{}", 0));
+        assertThrows(IllegalArgumentException.class, () -> operations.createSignedPreview(creds(), "{}", 86401));
+        verify(executor, never()).putFile(any(SshConnectionParams.class), any(byte[].class), any());
+        verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
+    }
 }

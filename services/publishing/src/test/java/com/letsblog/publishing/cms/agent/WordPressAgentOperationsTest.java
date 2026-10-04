@@ -622,4 +622,75 @@ class WordPressAgentOperationsTest {
 
         assertThrows(AgentOperationException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
     }
+
+    // ---- issue #1561: wp letsblog preview(エージェント経由のwp-cliで署名付きプレビュー URL を発行する) ----
+
+    @Test
+    void createSignedPreview_内容と期限をエージェント経由のwp_cliへ渡しURLを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andExpect(content().json("{\"slug\":\"main\",\"payload\":\"{\\\"title\\\":\\\"T\\\"}\",\"ttl\":600}"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"url\\\":\\\"https://localhost/sites/main/?letsblog_preview=t\\\",\\\"expires_at\\\":1800000600}\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        com.letsblog.publishing.cms.SignedPreview preview =
+                operations.createSignedPreview(creds(), "{\"title\":\"T\"}", 600);
+
+        assertEquals("https://localhost/sites/main/?letsblog_preview=t", preview.url());
+        assertEquals(1800000600L, preview.expiresAt());
+        server.verify();
+    }
+
+    @Test
+    void createSignedPreview_ttl未指定ならttlを送らない() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.ttl").doesNotExist())
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"url\\\":\\\"https://x/?letsblog_preview=t\\\",\\\"expires_at\\\":1}\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        operations.createSignedPreview(creds(), "{}", null);
+        server.verify();
+    }
+
+    @Test
+    void createSignedPreview_wp_cliが失敗したらstderrつきの例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"\",\"stderr\":\"Error: タイトルがありません\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e = assertThrows(AgentOperationException.class,
+                () -> operations.createSignedPreview(creds(), "{}", null));
+        assertTrue(e.getMessage().contains("タイトルがありません"));
+    }
+
+    @Test
+    void createSignedPreview_stderrが空ならstdoutを例外に含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andRespond(withSuccess("{\"exitCode\":1,\"stdout\":\"boom\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e = assertThrows(AgentOperationException.class,
+                () -> operations.createSignedPreview(creds(), "{}", null));
+        assertTrue(e.getMessage().contains("boom"));
+    }
+
+    @Test
+    void createSignedPreview_出力がJSONでなければ例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andRespond(withSuccess("{\"exitCode\":0,\"stdout\":\"PHP Fatal error\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThrows(AgentOperationException.class, () -> operations.createSignedPreview(creds(), "{}", null));
+    }
+
+    @Test
+    void createSignedPreview_エージェントがエラーを返したら例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"サイト 'main' が見つかりません\"}"));
+
+        assertThrows(AgentOperationException.class, () -> operations.createSignedPreview(creds(), "{}", null));
+    }
 }

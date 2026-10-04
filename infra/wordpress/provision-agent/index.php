@@ -1094,6 +1094,38 @@ if ($path === '/wp-cli/letsblog-sync' && $_SERVER['REQUEST_METHOD'] === 'POST') 
     respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
 }
 
+// 署名付きプレビュー URL の発行(issue #1561)。受け取った内容を一時ファイルへ書き、`wp letsblog preview --file=` で
+// プラグインへ渡す(wp-cliだけ。REST APIは使わない)。投稿は作らない。導入済みかどうかの判定はアプリ側で行うため、
+// ここでは導入処理を走らせず、終了コードと出力をそのまま返す。ttl(秒)は省略可。
+if ($path === '/wp-cli/letsblog-preview' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $payload = $input['payload'] ?? null;
+    $ttl = $input['ttl'] ?? null;
+    if (!isValidSlug($slug) || !is_string($payload) || $payload === ''
+        || ($ttl !== null && (!is_int($ttl) || $ttl < 1 || $ttl > 86400))) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $tmpPath = '/tmp/letsblog-preview-' . bin2hex(random_bytes(8)) . '.json';
+    if (file_put_contents($tmpPath, $payload) === false) {
+        respond(500, ['error' => 'プレビュー内容の一時ファイルを書けませんでした']);
+    }
+    $args = ['letsblog', 'preview', "--file=$tmpPath", "--path=$sitePath", '--allow-root'];
+    if ($ttl !== null) {
+        $args[] = "--ttl=$ttl";
+    }
+    try {
+        [$code, $out, $err] = runWp($args);
+    } finally {
+        unlink($tmpPath);
+    }
+    respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
+}
+
 // letsblogプラグインの再導入(issue #1557)。配置済みで内容が同じでも有効化し直す。
 if ($path === '/wp-cli/letsblog-install' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');

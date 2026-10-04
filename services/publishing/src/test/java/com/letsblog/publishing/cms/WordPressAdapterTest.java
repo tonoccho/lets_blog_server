@@ -583,4 +583,32 @@ class WordPressAdapterTest {
         assertThrows(IllegalStateException.class,
                 () -> adapter.syncLetsblogPlugin(unsupportedCredentials(), "{}", "h1"));
     }
+
+    // ---- issue #1561: 署名付きプレビュー URL の発行(wp-cliだけ) ----
+
+    @Test
+    void createSignedPreview_SSHはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        SignedPreview expected = new SignedPreview("https://x/?letsblog_preview=t", 1L);
+        when(sshOperations.createSignedPreview(creds, "{}", 600)).thenReturn(expected);
+
+        assertEquals(expected, adapter.createSignedPreview(creds, "{}", 600));
+        verify(agentOperations, never()).createSignedPreview(any(), any(), any());
+    }
+
+    @Test
+    void createSignedPreview_AGENTはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        SignedPreview expected = new SignedPreview("https://x/?letsblog_preview=t", 1L);
+        when(agentOperations.createSignedPreview(creds, "{}", null)).thenReturn(expected);
+
+        assertEquals(expected, adapter.createSignedPreview(creds, "{}", null));
+        verify(sshOperations, never()).createSignedPreview(any(), any(), any());
+    }
+
+    @Test
+    void createSignedPreview_未対応トランスポートは例外() {
+        assertThrows(IllegalStateException.class,
+                () -> adapter.createSignedPreview(unsupportedCredentials(), "{}", null));
+    }
 }

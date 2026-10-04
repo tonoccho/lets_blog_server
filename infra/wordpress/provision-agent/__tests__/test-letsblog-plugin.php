@@ -67,6 +67,63 @@ function update_option(string $name, $value, $autoload = null): bool
     $GLOBALS['letsblog_test_options'][$name] = $value;
     return true;
 }
+
+// issue #1561: 署名付きプレビューが使う WordPress API の最小スタブ(transient・フック・URL・署名鍵)。
+$GLOBALS['letsblog_test_transients'] = [];
+$GLOBALS['letsblog_test_hooks'] = [];
+$GLOBALS['letsblog_test_inserted_posts'] = 0;
+function set_transient(string $name, $value, int $expiration = 0): bool
+{
+    $GLOBALS['letsblog_test_transients'][$name] = [$value, $expiration];
+    return true;
+}
+function get_transient(string $name)
+{
+    return $GLOBALS['letsblog_test_transients'][$name][0] ?? false;
+}
+function delete_transient(string $name): bool
+{
+    unset($GLOBALS['letsblog_test_transients'][$name]);
+    return true;
+}
+function delete_option(string $name): bool
+{
+    unset($GLOBALS['letsblog_test_options'][$name]);
+    return true;
+}
+function home_url(string $path = ''): string
+{
+    return 'https://example.test' . $path;
+}
+function add_query_arg(string $key, string $value, string $url): string
+{
+    return $url . (str_contains($url, '?') ? '&' : '?') . rawurlencode($key) . '=' . rawurlencode($value);
+}
+function wp_salt(string $scheme = 'auth'): string
+{
+    return 'test-salt-' . $scheme;
+}
+function add_action(string $tag, $callback, int $priority = 10, int $args = 1): bool
+{
+    $GLOBALS['letsblog_test_hooks'][] = ['action', $tag];
+    return true;
+}
+function add_filter(string $tag, $callback, int $priority = 10, int $args = 1): bool
+{
+    $GLOBALS['letsblog_test_hooks'][] = ['filter', $tag];
+    return true;
+}
+// 投稿を作る API が呼ばれたら数える(プレビューは wp_posts に行を作ってはならない)。
+function wp_insert_post($postarr = [], $wp_error = false)
+{
+    $GLOBALS['letsblog_test_inserted_posts']++;
+    return 1;
+}
+function wp_update_post($postarr = [], $wp_error = false)
+{
+    $GLOBALS['letsblog_test_inserted_posts']++;
+    return 1;
+}
 define('WP_CLI', true);
 define('LETSBLOG_PLUGIN_TESTING', true);
 
@@ -143,6 +200,109 @@ if (isset(WP_CLI::$commands['letsblog'])) {
     @unlink($payloadFile);
     @unlink($badFile);
 }
+
+
+// --- issue #1561: wp letsblog preview(投稿を作らずに実テーマで表示する署名付きプレビュー URL) ---
+$GLOBALS['letsblog_test_now'] = 1_800_000_000;
+check('プレビュー: 発行関数が定義されている', function_exists('letsblog_preview_issue'));
+check('プレビュー: 検証関数が定義されている', function_exists('letsblog_preview_resolve'));
+check('プレビュー: 期限切れの削除関数が定義されている', function_exists('letsblog_preview_purge'));
+if (function_exists('letsblog_preview_issue') && function_exists('letsblog_preview_resolve') && function_exists('letsblog_preview_purge')) {
+    $now = $GLOBALS['letsblog_test_now'];
+    $data = ['title' => 'プレビュー題', 'content' => '<p>本文</p>', 'categories' => ['news'], 'tags' => ['a', 'b'], 'featured_image' => 'data:image/png;base64,AAAA'];
+    $issued = letsblog_preview_issue($data, 600, $now);
+    check('プレビュー: 発行するとトークン付きの URL を返す',
+        is_string($issued['url'] ?? null) && str_contains($issued['url'], 'letsblog_preview=') && str_starts_with($issued['url'], 'https://example.test/'), json_encode($issued));
+    check('プレビュー: 期限(epoch秒)を返す', ($issued['expires_at'] ?? null) === $now + 600);
+    parse_str((string) parse_url($issued['url'], PHP_URL_QUERY), $query);
+    $token = (string) ($query['letsblog_preview'] ?? '');
+    check('プレビュー: トークンは推測できない長さ(id 32桁 + 期限 + 署名64桁)',
+        preg_match('/^[0-9a-f]{32}\.\d+\.[0-9a-f]{64}$/', $token) === 1, $token);
+    check('プレビュー: 内容を transient として保存する', count($GLOBALS['letsblog_test_transients']) === 1);
+    check('プレビュー: transient の期限は ttl', array_values($GLOBALS['letsblog_test_transients'])[0][1] === 600);
+
+    $ok = letsblog_preview_resolve($token, $now + 10);
+    check('プレビュー: 有効なトークンは 200 とタイトル・本文を返す',
+        ($ok['status'] ?? null) === 200 && ($ok['data']['title'] ?? null) === 'プレビュー題' && ($ok['data']['content'] ?? null) === '<p>本文</p>');
+    check('プレビュー: カテゴリ・タグ・アイキャッチも返す',
+        ($ok['data']['categories'] ?? null) === ['news'] && ($ok['data']['tags'] ?? null) === ['a', 'b'] && ($ok['data']['featured_image'] ?? null) === 'data:image/png;base64,AAAA');
+
+    [$id, $expires, $sig] = explode('.', $token);
+    $badSig = $id . '.' . $expires . '.' . str_repeat($sig[0] === '0' ? '1' : '0', 64);
+    $tampered = letsblog_preview_resolve($badSig, $now + 10);
+    check('プレビュー: 署名を改ざんしたトークンは 403 で本文を返さない', ($tampered['status'] ?? null) === 403 && ($tampered['data'] ?? null) === null);
+    $extended = letsblog_preview_resolve($id . '.' . ($now + 999999) . '.' . $sig, $now + 10);
+    check('プレビュー: 期限を延ばし書き換えたトークンは 403', ($extended['status'] ?? null) === 403 && ($extended['data'] ?? null) === null);
+    foreach (['', 'garbage', 'a.b.c', $id . '.' . $expires] as $junk) {
+        $r = letsblog_preview_resolve($junk, $now + 10);
+        check("プレビュー: 形式の不正なトークン「{$junk}」は 403", ($r['status'] ?? null) === 403 && ($r['data'] ?? null) === null);
+    }
+    $unknownId = bin2hex(random_bytes(16));
+    $unknownSig = hash_hmac('sha256', $unknownId . '.' . ($now + 600), wp_salt('auth'));
+    $unknown = letsblog_preview_resolve($unknownId . '.' . ($now + 600) . '.' . $unknownSig, $now + 10);
+    check('プレビュー: 署名は正しいが保存されていないトークンは 404', ($unknown['status'] ?? null) === 404 && ($unknown['data'] ?? null) === null);
+
+    $expired = letsblog_preview_resolve($token, $now + 601);
+    check('プレビュー: 期限切れのトークンは 404 で本文を返さない', ($expired['status'] ?? null) === 404 && ($expired['data'] ?? null) === null);
+    check('プレビュー: 期限切れを検証すると保存した一時データが消える', $GLOBALS['letsblog_test_transients'] === []);
+
+    // 期限切れの一時データは、誰も開かなくても次の発行で消える
+    $first = letsblog_preview_issue($data, 60, $now);
+    $second = letsblog_preview_issue($data, 600, $now + 120);
+    check('プレビュー: 次の発行時に期限切れの一時データを消す', count($GLOBALS['letsblog_test_transients']) === 1);
+    letsblog_preview_purge($now + 100000);
+    check('プレビュー: purge は期限切れの一時データをすべて消す', $GLOBALS['letsblog_test_transients'] === []);
+    $idx = get_option('letsblog_preview_index', []);
+    check('プレビュー: purge は索引も空にする', $idx === [] || $idx === false);
+
+    check('プレビュー: 投稿を作る API(wp_insert_post / wp_update_post)を呼ばない', $GLOBALS['letsblog_test_inserted_posts'] === 0);
+    check('プレビュー: 本体のコードも投稿を作る API を使わない', !str_contains($source, 'wp_insert_post') && !str_contains($source, 'wp_update_post'));
+}
+check('preview コマンドが定義されている', isset(WP_CLI::$commands['letsblog']) && method_exists(WP_CLI::$commands['letsblog'], 'preview'));
+if (isset(WP_CLI::$commands['letsblog']) && method_exists(WP_CLI::$commands['letsblog'], 'preview')) {
+    $cmdP = is_string(WP_CLI::$commands['letsblog']) ? new (WP_CLI::$commands['letsblog'])() : WP_CLI::$commands['letsblog'];
+    $runPreview = function (array $assoc) use ($cmdP): ?string {
+        WP_CLI::$lines = [];
+        try {
+            $cmdP->preview([], $assoc);
+        } catch (RuntimeException $e) {
+            return $e->getMessage();
+        }
+        return null;
+    };
+    $pf = sys_get_temp_dir() . '/letsblog-preview-' . bin2hex(random_bytes(4)) . '.json';
+    file_put_contents($pf, json_encode(['title' => 'T', 'content' => '<p>x</p>'], JSON_UNESCAPED_UNICODE));
+    $err = $runPreview(['file' => $pf, 'ttl' => '120']);
+    $out = json_decode(WP_CLI::$lines[0] ?? '', true);
+    check('preview コマンド: 成功すると url と expires_at を JSON で出力する',
+        $err === null && is_array($out) && is_string($out['url'] ?? null) && is_int($out['expires_at'] ?? null), (string) $err . ' ' . (WP_CLI::$lines[0] ?? ''));
+    check('preview コマンド: --ttl を指定しなければ規定値の期限になる', $runPreview(['file' => $pf]) === null
+        && is_int((json_decode(WP_CLI::$lines[0] ?? '', true) ?: [])['expires_at'] ?? null));
+    check('preview コマンド: --file が無ければ失敗する', $runPreview([]) !== null);
+    check('preview コマンド: ファイルが読めなければ失敗する', $runPreview(['file' => '/nonexistent/preview.json']) !== null);
+    check('preview コマンド: ttl が範囲外なら失敗する', $runPreview(['file' => $pf, 'ttl' => '0']) !== null && $runPreview(['file' => $pf, 'ttl' => '999999']) !== null && $runPreview(['file' => $pf, 'ttl' => 'abc']) !== null);
+    file_put_contents($pf, 'not json');
+    check('preview コマンド: JSON でない内容は失敗する', $runPreview(['file' => $pf]) !== null);
+    file_put_contents($pf, json_encode(['content' => '<p>x</p>']));
+    check('preview コマンド: タイトルが無ければ失敗する', $runPreview(['file' => $pf]) !== null);
+    file_put_contents($pf, json_encode(['title' => 'T']));
+    check('preview コマンド: 本文が無ければ失敗する', $runPreview(['file' => $pf]) !== null);
+    file_put_contents($pf, json_encode(['title' => 'T', 'content' => '<p>x</p>', 'categories' => 'news']));
+    check('preview コマンド: categories が配列でなければ失敗する', $runPreview(['file' => $pf]) !== null);
+    foreach (['javascript:alert(1)', 'data:text/html;base64,AAAA', 'https://x/a.png" onerror="x'] as $badImage) {
+        file_put_contents($pf, json_encode(['title' => 'T', 'content' => '<p>x</p>', 'featured_image' => $badImage]));
+        check("preview コマンド: 安全でないアイキャッチ「{$badImage}」は失敗する", $runPreview(['file' => $pf]) !== null);
+    }
+    foreach (['data:image/png;base64,AAAA', 'https://example.com/a.png'] as $goodImage) {
+        file_put_contents($pf, json_encode(['title' => 'T', 'content' => '<p>x</p>', 'featured_image' => $goodImage]));
+        check("preview コマンド: アイキャッチ「{$goodImage}」は受け付ける", $runPreview(['file' => $pf]) === null);
+    }
+    @unlink($pf);
+}
+$hookTags = array_map(fn($h) => $h[1], $GLOBALS['letsblog_test_hooks']);
+check('プレビュー: template_include で単一記事テンプレートを使う', in_array('template_include', $hookTags, true));
+check('プレビュー: メインクエリを差し替えて投稿を DB から読まない(posts_pre_query)', in_array('posts_pre_query', $hookTags, true));
+check('プレビュー: 検索エンジンに載せない(wp_robots)', in_array('wp_robots', $hookTags, true));
 
 // --- AC4: REST API のルートを登録しない(利用者の決定。wp-cli だけで通信する) ---
 check('REST ルートを登録しない', $source !== '' && !str_contains($source, 'register_rest_route') && !str_contains($source, 'rest_api_init'));
@@ -281,6 +441,19 @@ check('同期は一時ファイルを必ず削除する', str_contains($syncBloc
 check('同期は導入処理を走らせない(未導入のサイトへは送らない)',
     $syncBlock !== '' && !str_contains($syncBlock, 'ensureLetsblogPlugin(') && !str_contains($syncBlock, 'resolveExistingSitePath('));
 check('同期は終了コードと標準出力・標準エラーを返す', str_contains($syncBlock, "'exitCode'") && str_contains($syncBlock, "'stdout'") && str_contains($syncBlock, "'stderr'"));
+
+
+// --- issue #1561: /wp-cli/letsblog-preview(payload を一時ファイルへ書き、wp letsblog preview --file で渡す) ---
+check('index.php が /wp-cli/letsblog-preview を持つ', str_contains($index, "'/wp-cli/letsblog-preview'"));
+$prevPos = strpos($index, "\$path === '/wp-cli/letsblog-preview'");
+$prevEnd = $prevPos !== false ? strpos($index, "\nif (\$path === ", $prevPos + 1) : false;
+$prevBlock = $prevPos !== false ? substr($index, $prevPos, $prevEnd !== false ? $prevEnd - $prevPos : 2200) : '';
+check('プレビュー発行は wp letsblog preview を wp-cli で実行する', str_contains($prevBlock, "'letsblog', 'preview'"));
+check('プレビュー発行は内容を --file で渡す', str_contains($prevBlock, '--file='));
+check('プレビュー発行は有効期限を --ttl で渡せる', str_contains($prevBlock, '--ttl='));
+check('プレビュー発行は一時ファイルを必ず削除する', str_contains($prevBlock, 'unlink('));
+check('プレビュー発行は導入処理を走らせない', $prevBlock !== '' && !str_contains($prevBlock, 'ensureLetsblogPlugin(') && !str_contains($prevBlock, 'resolveExistingSitePath('));
+check('プレビュー発行は終了コードと標準出力・標準エラーを返す', str_contains($prevBlock, "'exitCode'") && str_contains($prevBlock, "'stdout'") && str_contains($prevBlock, "'stderr'"));
 
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";

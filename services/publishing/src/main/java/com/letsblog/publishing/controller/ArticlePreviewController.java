@@ -1,6 +1,8 @@
 package com.letsblog.publishing.controller;
 
 import com.letsblog.publishing.dto.RenderSkeletonRequest;
+import com.letsblog.publishing.dto.SignedPreviewUrlRequest;
+import com.letsblog.publishing.dto.SignedPreviewUrlResponse;
 import com.letsblog.publishing.dto.ThemeCssResponse;
 import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import com.letsblog.publishing.service.AdminAuthorizationService;
@@ -60,6 +62,17 @@ public class ArticlePreviewController {
         return articlePreviewService.renderSkeleton(
                 projectId, request.siteId(), request.title(), request.contentHtml(), request.featuredImageDataUri(),
                 request.existingPreviewPostId(), request.slug(), request.categories(), request.tags());
+    }
+
+    /**
+     * 投稿を作らずに実テーマの単一記事テンプレートで表示する、期限付きの署名付きプレビューURLを発行する
+     * (issue #1561)。内容はwp-cliでletsblogプラグインへ渡す。
+     */
+    @PostMapping("/signed-url")
+    public SignedPreviewUrlResponse signedUrl(
+            @PathVariable Long projectId, @Valid @RequestBody SignedPreviewUrlRequest request) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        return articlePreviewService.createSignedPreviewUrl(projectId, request);
     }
 
     /**

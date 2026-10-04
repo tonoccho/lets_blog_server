@@ -1,6 +1,9 @@
 package com.letsblog.publishing.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.publishing.client.ContentServiceClient;
 import com.letsblog.publishing.cms.AuthCookie;
 import com.letsblog.publishing.cms.CmsAdapter;
@@ -12,12 +15,15 @@ import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
 import com.letsblog.publishing.cms.ReferencePost;
+import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.agent.WordPressAgentOperations;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.config.LegacyJacksonRestClientConfig;
 import com.letsblog.publishing.config.StylesheetFetchExecutorConfig;
 import com.letsblog.publishing.domain.Project;
 import com.letsblog.publishing.domain.Site;
+import com.letsblog.publishing.dto.SignedPreviewUrlRequest;
+import com.letsblog.publishing.dto.SignedPreviewUrlResponse;
 import com.letsblog.publishing.dto.ThemeCssResponse;
 import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import org.slf4j.Logger;
@@ -63,6 +69,7 @@ import java.util.regex.Pattern;
 public class ArticlePreviewService {
 
     private static final Logger logger = LoggerFactory.getLogger(ArticlePreviewService.class);
+    private static final ObjectMapper SIGNED_PREVIEW_MAPPER = new ObjectMapper();
     private static final int MAX_STYLESHEETS = 15;
     private static final int MAX_CSS_LENGTH = 3_000_000;
 
@@ -931,6 +938,39 @@ public class ArticlePreviewService {
         String contentType = meta.contains(";") ? meta.substring(0, meta.indexOf(';')) : meta;
         byte[] data = Base64.getDecoder().decode(dataUri.substring(commaIndex + 1));
         return new DecodedDataUri(contentType.isBlank() ? "application/octet-stream" : contentType, data);
+    }
+
+    /**
+     * 投稿を作らずに実テーマで表示する、期限付きの署名付きプレビューURLを発行する(issue #1561)。
+     * タイトル・本文HTML・カテゴリ・タグ・アイキャッチを、wp-cliでletsblogプラグインへ渡す(REST APIは使わない)。
+     * 非公開投稿もメディアも作らないので、本番サイトでも使える。letsblogプラグインが使えないサイトは、
+     * 何も渡さず理由と対処を示して拒否する({@link LetsblogPluginUnavailableException}、409)。
+     *
+     * @throws IllegalStateException 対象サイトを解決できないとき(409)
+     */
+    public SignedPreviewUrlResponse createSignedPreviewUrl(Long projectId, SignedPreviewUrlRequest request) {
+        Project project = projectService.getProjectEntity(projectId);
+        SiteResolution resolution = resolveSiteForPreview(project, request.siteId());
+        if (resolution.site() == null) {
+            throw new IllegalStateException(resolution.errorReason());
+        }
+        CmsCredentials credentials = siteService.getCredentials(resolution.site().getSiteKey());
+        CmsAdapter cmsAdapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        cmsAdapter.requireLetsblogPlugin(credentials);
+
+        ObjectNode payload = SIGNED_PREVIEW_MAPPER.createObjectNode();
+        payload.put("title", request.title());
+        payload.put("content", request.contentHtml());
+        ArrayNode categories = payload.putArray("categories");
+        (request.categories() != null ? request.categories() : List.<String>of()).forEach(categories::add);
+        ArrayNode tags = payload.putArray("tags");
+        (request.tags() != null ? request.tags() : List.<String>of()).forEach(tags::add);
+        if (StringUtils.hasText(request.featuredImageDataUri())) {
+            payload.put("featured_image", request.featuredImageDataUri());
+        }
+
+        SignedPreview preview = cmsAdapter.createSignedPreview(credentials, payload.toString(), request.ttlSeconds());
+        return new SignedPreviewUrlResponse(preview.url(), preview.expiresAt());
     }
 
     /**

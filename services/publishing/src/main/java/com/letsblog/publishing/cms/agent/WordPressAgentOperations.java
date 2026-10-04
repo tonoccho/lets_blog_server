@@ -10,6 +10,7 @@ import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -377,6 +378,40 @@ public class WordPressAgentOperations {
             return savedHash;
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("letsblogプラグインへの同期に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException(accessFailureMessage(e), e);
+        }
+    }
+
+    /**
+     * 内容を`wp letsblog preview`(エージェント経由のwp-cliだけ。REST APIは使わない)でプラグインへ渡し、
+     * 投稿を作らない署名付きプレビューURLを返す(issue #1561)。
+     *
+     * @param ttlSeconds 有効期限(秒)。nullならプラグインの規定値
+     */
+    public SignedPreview createSignedPreview(WordPressCredentials creds, String payload, Integer ttlSeconds) {
+        try {
+            Map<String, Object> request = new java.util.HashMap<>();
+            request.put("slug", creds.wpSlug());
+            request.put("payload", payload);
+            if (ttlSeconds != null) {
+                request.put("ttl", ttlSeconds);
+            }
+            JsonNode body = post("/wp-cli/letsblog-preview", request);
+            String stdout = body.path("stdout").asText("");
+            String stderr = body.path("stderr").asText("");
+            if (body.path("exitCode").asInt(1) != 0) {
+                log.warn("wp letsblog previewが失敗しました (wpSlug={}): {}", creds.wpSlug(), stderr);
+                throw new AgentOperationException("wp letsblog previewの実行に失敗しました: "
+                        + (stderr.isBlank() ? stdout : stderr).strip());
+            }
+            try {
+                return SignedPreview.fromPreviewOutput(stdout);
+            } catch (IllegalArgumentException e) {
+                throw new AgentOperationException(e.getMessage(), e);
+            }
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("署名付きプレビューURLの発行に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException(accessFailureMessage(e), e);
         }

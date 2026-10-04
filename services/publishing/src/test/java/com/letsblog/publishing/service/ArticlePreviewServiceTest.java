@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -2593,5 +2594,122 @@ class ArticlePreviewServiceTest {
         org.mockito.Mockito.verify(cmsAdapter, org.mockito.Mockito.never())
                 .createOrUpdatePost(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
+    }
+
+    // ---- issue #1561: 投稿を作らない署名付きプレビュー URL ----
+
+    private com.letsblog.publishing.dto.SignedPreviewUrlRequest signedRequest(
+            Long siteId, String featuredImage, Integer ttl) {
+        return new com.letsblog.publishing.dto.SignedPreviewUrlRequest(
+                siteId, "プレビュー題", "<p>本文</p>", java.util.List.of("news"), java.util.List.of("a", "b"),
+                featuredImage, ttl);
+    }
+
+    private com.letsblog.publishing.cms.CmsAdapter givenAgentSiteForSignedPreview() {
+        Project project = projectWithMaster("test", 30L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
+        when(siteService.getById(30L)).thenReturn(Optional.of(site));
+        when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        return cmsAdapter;
+    }
+
+    @Test
+    void createSignedPreviewUrl_内容をプラグインへ渡して署名付きURLを返す() throws Exception {
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
+        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.eq(agentCredentials("local-site")),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(600)))
+                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://localhost/sites/local-site/?letsblog_preview=t", 1800000600L));
+
+        com.letsblog.publishing.dto.SignedPreviewUrlResponse response = service.createSignedPreviewUrl(
+                1L, signedRequest(30L, "data:image/png;base64,AAAA", 600));
+
+        assertEquals("https://localhost/sites/local-site/?letsblog_preview=t", response.url());
+        assertEquals(1800000600L, response.expiresAt());
+        org.mockito.ArgumentCaptor<String> payload = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(cmsAdapter).requireLetsblogPlugin(agentCredentials("local-site"));
+        verify(cmsAdapter).createSignedPreview(org.mockito.ArgumentMatchers.any(), payload.capture(),
+                org.mockito.ArgumentMatchers.eq(600));
+        com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload.getValue());
+        assertEquals("プレビュー題", node.path("title").asText());
+        assertEquals("<p>本文</p>", node.path("content").asText());
+        assertEquals("news", node.path("categories").get(0).asText());
+        assertEquals("b", node.path("tags").get(1).asText());
+        assertEquals("data:image/png;base64,AAAA", node.path("featured_image").asText());
+    }
+
+    @Test
+    void createSignedPreviewUrl_カテゴリ_タグ_アイキャッチが無ければ空として渡す() throws Exception {
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
+        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+
+        service.createSignedPreviewUrl(1L, new com.letsblog.publishing.dto.SignedPreviewUrlRequest(
+                30L, "題", "<p>x</p>", null, null, " ", null));
+
+        org.mockito.ArgumentCaptor<String> payload = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(cmsAdapter).createSignedPreview(org.mockito.ArgumentMatchers.any(), payload.capture(),
+                org.mockito.ArgumentMatchers.isNull());
+        com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload.getValue());
+        assertEquals(0, node.path("categories").size());
+        assertEquals(0, node.path("tags").size());
+        assertTrue(node.path("featured_image").isMissingNode());
+    }
+
+    @Test
+    void createSignedPreviewUrl_投稿もメディアも作らない() {
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
+        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+
+        service.createSignedPreviewUrl(1L, signedRequest(30L, "data:image/png;base64,AAAA", null));
+
+        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(cmsAdapter, org.mockito.Mockito.never()).uploadMedia(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        verify(cmsAdapter, org.mockito.Mockito.never()).generateAuthCookie(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void createSignedPreviewUrl_プラグインが使えなければ発行せずに拒否する() {
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
+        org.mockito.Mockito.doThrow(new com.letsblog.publishing.cms.LetsblogPluginUnavailableException(
+                com.letsblog.publishing.cms.LetsblogPluginStatus.notInstalled()))
+                .when(cmsAdapter).requireLetsblogPlugin(org.mockito.ArgumentMatchers.any());
+
+        assertThrows(com.letsblog.publishing.cms.LetsblogPluginUnavailableException.class,
+                () -> service.createSignedPreviewUrl(1L, signedRequest(30L, null, null)));
+        verify(cmsAdapter, org.mockito.Mockito.never()).createSignedPreview(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void createSignedPreviewUrl_プロジェクトに紐づかないサイトは理由つきで拒否する() {
+        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 30L, null));
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> service.createSignedPreviewUrl(1L, signedRequest(999L, null, null)));
+        assertTrue(e.getMessage().contains("紐づいていません"));
+        org.mockito.Mockito.verifyNoInteractions(cmsAdapterFactory);
+    }
+
+    @Test
+    void createSignedPreviewUrl_siteId未指定ならマスター環境のサイトを対象にする() {
+        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
+        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+
+        service.createSignedPreviewUrl(1L, signedRequest(null, null, null));
+
+        verify(cmsAdapter).createSignedPreview(org.mockito.ArgumentMatchers.eq(agentCredentials("local-site")),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull());
     }
 }

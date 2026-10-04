@@ -12,6 +12,7 @@ import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.MediaContentHash;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
 import com.letsblog.publishing.cms.PostResult;
@@ -1430,6 +1431,38 @@ public class WordPressSshOperations {
                     + ")が送った内容のハッシュ(" + expectedHash + ")と一致しません");
         }
         return savedHash;
+    }
+
+    /**
+     * 内容を一時ファイルへ置き、`wp letsblog preview --file=`(wp-cliだけ。REST APIは使わない)でプラグインへ渡して、
+     * 投稿を作らない署名付きプレビューURLを返す(issue #1561)。一時ファイルは成否にかかわらず消す。
+     *
+     * @param ttlSeconds 有効期限(秒、1〜86400)。nullならプラグインの規定値
+     */
+    public SignedPreview createSignedPreview(WordPressCredentials creds, String payload, Integer ttlSeconds) {
+        if (ttlSeconds != null && (ttlSeconds < 1 || ttlSeconds > 86400)) {
+            throw new IllegalArgumentException("有効期限は1〜86400秒で指定してください");
+        }
+        String remotePath = "/tmp/letsblog-preview-" + UUID.randomUUID() + ".json";
+        executor.putFile(connectionParams(creds), payload.getBytes(StandardCharsets.UTF_8), remotePath);
+        SshCommandResult result;
+        try {
+            result = exec(creds, wpCli(creds, "letsblog preview --file=" + ShellQuote.single(remotePath)
+                    + (ttlSeconds == null ? "" : " --ttl=" + ttlSeconds)));
+        } finally {
+            exec(creds, "rm -f " + ShellQuote.single(remotePath));
+        }
+        if (!result.ok()) {
+            log.warn("wp letsblog previewが失敗しました (sshHost={}, wpPath={}): {}",
+                    creds.sshHost(), creds.wpPath(), result.stderr());
+            throw new SshOperationException("wp letsblog previewの実行に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        try {
+            return SignedPreview.fromPreviewOutput(result.stdout());
+        } catch (IllegalArgumentException e) {
+            throw new SshOperationException(e.getMessage(), e);
+        }
     }
 
     private byte[] letsblogPluginSource() {
