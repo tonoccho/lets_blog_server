@@ -45,6 +45,51 @@ const PAGE_ROWS = [
   { path: '/', views: '260' },
 ];
 
+/**
+ * 記事ごとの日別 PV(issue #1576。letsblog プラグインの date + pagePath + hostName)。
+ * host が null の行は「問い合わせたサイトのホスト」の行(絞り込みの値で返す)。他ホストの行は絞り込みで除かれる。
+ */
+const PAGE_DAILY_ROWS = [
+  { date: '20260830', path: '/e2e-stub/first-post', host: null, views: '120' },
+  { date: '20260831', path: '/e2e-stub/first-post', host: null, views: '200' },
+  { date: '20260830', path: '/e2e-stub/second-post', host: null, views: '60' },
+  { date: '20260831', path: '/e2e-stub/second-post', host: null, views: '90' },
+  { date: '20260831', path: '/', host: null, views: '40' },
+  { date: '20260831', path: '/e2e-stub/missing', host: null, views: '7' },
+  { date: '20260831', path: '/e2e-stub/first-post', host: 'other.example.test', views: '999' },
+];
+const DEFAULT_HOST = 'e2e-site.test';
+/** GA プロパティのタイムゾーン。実 API は runReport の metadata.timeZone で返す。 */
+const PROPERTY_TIME_ZONE = 'Asia/Tokyo';
+
+/** hostName の完全一致フィルタの値。無ければ null。 */
+function hostFilterValue(payload) {
+  const f = payload.dimensionFilter && payload.dimensionFilter.filter;
+  if (f && f.fieldName === 'hostName' && f.stringFilter) return f.stringFilter.value;
+  return null;
+}
+
+function pageDailyReport(payload, metrics, dimensions) {
+  const filterHost = hostFilterValue(payload);
+  const rows = PAGE_DAILY_ROWS.map((r) => ({ ...r, host: r.host ?? filterHost ?? DEFAULT_HOST })).filter(
+    (r) => filterHost === null || r.host === filterHost,
+  );
+  const offset = Number(payload.offset) || 0;
+  const limit = Number(payload.limit) || 10000;
+  const dimValue = { date: (r) => r.date, pagePath: (r) => r.path, hostName: (r) => r.host };
+  return {
+    dimensionHeaders: dimensions.map((name) => ({ name })),
+    metricHeaders: metricHeaders(metrics),
+    rows: rows.slice(offset, offset + limit).map((r) => ({
+      dimensionValues: dimensions.map((d) => ({ value: (dimValue[d] || (() => ''))(r) })),
+      metricValues: metrics.map((m) => ({ value: m === 'screenPageViews' ? r.views : (METRIC_VALUES[m] ?? '0') })),
+    })),
+    rowCount: rows.length,
+    metadata: { timeZone: PROPERTY_TIME_ZONE },
+    kind: 'analyticsData#runReport',
+  };
+}
+
 /** リクエストが要求した指標名の配列を取り出す。 */
 function requestedMetrics(payload) {
   return (payload.metrics || []).map((m) => m.name).filter(Boolean);
@@ -71,6 +116,10 @@ function runReport(payload) {
       rowCount: 1,
       kind: 'analyticsData#runReport',
     };
+  }
+
+  if (dimensions.includes('date') && dimensions.includes('pagePath')) {
+    return pageDailyReport(payload, metrics, dimensions);
   }
 
   const source = dimensions[0] === 'date' ? DAILY_ROWS : PAGE_ROWS;

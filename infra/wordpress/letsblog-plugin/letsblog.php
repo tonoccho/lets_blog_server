@@ -37,6 +37,20 @@ const LETSBLOG_CRON_SNS_ANNOUNCE = 'letsblog_sns_announce_post';
 /** 送信を始めた記事に付ける印。cron が二重に走っても、再試行しても二度送らない。 */
 const LETSBLOG_META_SNS_SENT = '_letsblog_sns_sent';
 
+/** GA4 の記事別 PV(issue #1576)。認証情報(秘密は暗号化)・取得済みの日別 PV・取得の状況を保存する option 名と、定期取得の cron フック名。 */
+const LETSBLOG_OPTION_PV_CONFIG = 'letsblog_pv_config';
+const LETSBLOG_OPTION_PV_DATA = 'letsblog_pv_data';
+const LETSBLOG_OPTION_PV_STATUS = 'letsblog_pv_status';
+const LETSBLOG_CRON_PV_FETCH = 'letsblog_pv_fetch';
+/** 初回(と、長く取得できなかった後)に全期間を取る開始日。GA4 の公開日(2020-10-14)より前の日は存在しない。 */
+const LETSBLOG_PV_BACKFILL_START = '2020-10-14';
+/** 2回目以降に取り直す範囲。GA4 の集計は遅れることがあり、直近の値は後から増えるので、数日前から上書きする。GA 側のタイムゾーンで解釈される。 */
+const LETSBLOG_PV_REFETCH_START = '3daysAgo';
+/** 最後の成功からこの秒数を超えて空いたら、直近だけでは足りないので全期間を取り直す。 */
+const LETSBLOG_PV_GAP_SECONDS = 172800;
+const LETSBLOG_PV_PAGE_LIMIT = 10000;
+const LETSBLOG_PV_MAX_PAGES = 50;
+
 /** 署名付きプレビュー(issue #1561)。URL のクエリ名・一時データの名前・期限切れを掃除するための索引。 */
 const LETSBLOG_PREVIEW_QUERY_VAR = 'letsblog_preview';
 const LETSBLOG_PREVIEW_TRANSIENT_PREFIX = 'letsblog_preview_';
@@ -964,6 +978,353 @@ if (function_exists('add_action')) {
     add_action('shutdown', 'letsblog_sns_on_shutdown');
 }
 
+// ---- GA4 の記事別 PV(issue #1576)。プラグインが GA4 Data API へ直接問い合わせる。Let's Blog が止まっていても動く ----
+
+/** OAuth のトークン URL。変えられるのは wp-config.php の定数だけ(e2e でスタブへ向けるため)。アプリから送る設定では変えられない。 */
+function letsblog_ga_oauth_token_url(): string
+{
+    return defined('LETSBLOG_GA_OAUTH_TOKEN_URL') ? (string) LETSBLOG_GA_OAUTH_TOKEN_URL : 'https://oauth2.googleapis.com/token';
+}
+
+/** Data API のベース URL。同じく wp-config.php の定数だけで決まる。 */
+function letsblog_ga_data_api_base(): string
+{
+    return rtrim(defined('LETSBLOG_GA_DATA_API_BASE_URL') ? (string) LETSBLOG_GA_DATA_API_BASE_URL : 'https://analyticsdata.googleapis.com', '/');
+}
+
+function letsblog_pv_config_entry(): ?array
+{
+    $entry = get_option(LETSBLOG_OPTION_PV_CONFIG, null);
+    return is_array($entry) && is_string($entry['secret'] ?? null) ? $entry : null;
+}
+
+/** 復号した認証情報(property_id, client_id, client_secret, refresh_token)。未設定・復号できないときは null。 */
+function letsblog_pv_load_credentials(): ?array
+{
+    $entry = letsblog_pv_config_entry();
+    if ($entry === null) {
+        return null;
+    }
+    $secrets = letsblog_sns_decrypt($entry['secret']);
+    if ($secrets === null) {
+        return null;
+    }
+    return array_merge(is_array($entry['public'] ?? null) ? $entry['public'] : [], $secrets);
+}
+
+/**
+ * config set の入力(JSON のオブジェクト)を検証して、保存する項目だけに絞る。未知の項目(向き先の URL など)は捨てる。
+ *
+ * @return array{0: ?array, 1: ?string} [認証情報, エラー]
+ */
+function letsblog_pv_normalize_input(array $decoded): array
+{
+    $propertyId = $decoded['property_id'] ?? null;
+    if (is_int($propertyId)) {
+        $propertyId = (string) $propertyId;
+    }
+    if (!is_string($propertyId) || preg_match('/^\d{1,20}$/', $propertyId) !== 1) {
+        return [null, 'property_id は数字のプロパティ ID にしてください'];
+    }
+    $cred = ['property_id' => $propertyId];
+    foreach (['client_id', 'client_secret', 'refresh_token'] as $field) {
+        $value = $decoded[$field] ?? null;
+        if (!is_string($value) || $value === '') {
+            return [null, "{$field} が必要です(文字列)"];
+        }
+        $cred[$field] = $value;
+    }
+    return [$cred, null];
+}
+
+function letsblog_pv_save_credentials(array $cred): void
+{
+    $previous = letsblog_pv_config_entry();
+    $previousId = $previous['public']['property_id'] ?? null;
+    update_option(LETSBLOG_OPTION_PV_CONFIG, [
+        'public' => ['property_id' => $cred['property_id'], 'client_id' => $cred['client_id']],
+        'secret' => letsblog_sns_encrypt(['client_secret' => $cred['client_secret'], 'refresh_token' => $cred['refresh_token']]),
+    ], false);
+    if ($previousId !== null && $previousId !== $cred['property_id']) {
+        // 別のプロパティの値を混ぜない。
+        delete_option(LETSBLOG_OPTION_PV_DATA);
+        delete_option(LETSBLOG_OPTION_PV_STATUS);
+    }
+    letsblog_pv_ensure_schedule();
+}
+
+function letsblog_pv_clear_credentials(): void
+{
+    delete_option(LETSBLOG_OPTION_PV_CONFIG);
+    if (function_exists('wp_clear_scheduled_hook')) {
+        wp_clear_scheduled_hook(LETSBLOG_CRON_PV_FETCH);
+    }
+}
+
+/** 設定済みなら1時間ごとの取得を予約する(未設定なら予約しない)。 */
+function letsblog_pv_ensure_schedule(): void
+{
+    if (letsblog_pv_config_entry() === null || !function_exists('wp_next_scheduled') || !function_exists('wp_schedule_event')) {
+        return;
+    }
+    if (!wp_next_scheduled(LETSBLOG_CRON_PV_FETCH)) {
+        wp_schedule_event(time(), 'hourly', LETSBLOG_CRON_PV_FETCH);
+    }
+}
+
+function letsblog_pv_status_all(): array
+{
+    $status = get_option(LETSBLOG_OPTION_PV_STATUS, []);
+    return is_array($status) ? $status : [];
+}
+
+/** 取得の結果を status に残す。成功すると失敗の理由は消え、失敗しても最後の成功の日時は残る。 */
+function letsblog_pv_record_result(bool $ok, ?string $error, int $now): void
+{
+    $status = letsblog_pv_status_all();
+    $status['last_attempt_at'] = gmdate('c', $now);
+    if ($ok) {
+        $status['last_success_at'] = gmdate('c', $now);
+        $status['last_error'] = null;
+    } else {
+        $status['last_failure_at'] = gmdate('c', $now);
+        $status['last_error'] = $error;
+    }
+    update_option(LETSBLOG_OPTION_PV_STATUS, $status, false);
+}
+
+/** 失敗の理由として残す短い説明。秘密の値は取り除く。 */
+function letsblog_ga_describe_failure(string $what, $response, array $secrets): string
+{
+    if (is_wp_error($response)) {
+        return "GA4 に接続できません({$what})";
+    }
+    $code = (int) wp_remote_retrieve_response_code($response);
+    $body = json_decode((string) wp_remote_retrieve_body($response), true);
+    $parts = [];
+    if (is_array($body)) {
+        $candidates = [$body['error'] ?? null, $body['error_description'] ?? null];
+        if (is_array($body['error'] ?? null)) {
+            $candidates = [$body['error']['message'] ?? null];
+        }
+        foreach ($candidates as $text) {
+            if (is_string($text) && $text !== '' && !in_array($text, $parts, true)) {
+                $parts[] = $text;
+            }
+        }
+    }
+    $detail = $parts === [] ? '' : ': ' . mb_substr(implode(' / ', $parts), 0, 200);
+    $message = "GA4 の{$what}に失敗しました(HTTP {$code}{$detail})";
+    foreach ($secrets as $secret) {
+        if (is_string($secret) && $secret !== '') {
+            $message = str_replace($secret, '***', $message);
+        }
+    }
+    return $message;
+}
+
+/** 日別 PV を保存したデータ(記事 ID => [YYYYMMDD => PV])と GA プロパティのタイムゾーン。 */
+function letsblog_pv_data(): array
+{
+    $data = get_option(LETSBLOG_OPTION_PV_DATA, []);
+    $data = is_array($data) ? $data : [];
+    return ['daily' => is_array($data['daily'] ?? null) ? $data['daily'] : [], 'time_zone' => is_string($data['time_zone'] ?? null) ? $data['time_zone'] : 'UTC'];
+}
+
+function letsblog_pv_daily_for_post(int $postId): array
+{
+    return letsblog_pv_data()['daily'][$postId] ?? [];
+}
+
+/** 公開日(YYYYMMDD)。公開済みの記事でなければ null。 */
+function letsblog_pv_publish_day(int $postId): ?string
+{
+    $post = get_post($postId);
+    if (!is_object($post) || ($post->post_status ?? '') !== 'publish') {
+        return null;
+    }
+    $day = str_replace('-', '', substr((string) ($post->post_date ?? ''), 0, 10));
+    return preg_match('/^\d{8}$/', $day) === 1 ? $day : null;
+}
+
+/**
+ * GA4 から記事ごとの日別 PV を取得して保存する。未設定なら GA には問い合わせない。失敗しても保存済みの値は変えず、理由を status に残す。
+ *
+ * @return array{ok: bool, skipped?: bool, error: ?string}
+ */
+function letsblog_pv_fetch(int $now): array
+{
+    if (letsblog_pv_config_entry() === null) {
+        return ['ok' => false, 'skipped' => true, 'error' => null];
+    }
+    $cred = letsblog_pv_load_credentials();
+    if ($cred === null) {
+        $error = 'GA4 の認証情報を復号できません(wp-config.php の salt が変わった可能性があります。wp letsblog pv config set で再設定してください)';
+        letsblog_pv_record_result(false, $error, $now);
+        return ['ok' => false, 'error' => $error];
+    }
+    $secrets = [$cred['client_secret'], $cred['refresh_token']];
+    $token = wp_remote_request(letsblog_ga_oauth_token_url(), [
+        'method' => 'POST',
+        'timeout' => 15,
+        'headers' => ['Content-Type' => 'application/x-www-form-urlencoded'],
+        'body' => http_build_query([
+            'grant_type' => 'refresh_token',
+            'client_id' => $cred['client_id'],
+            'client_secret' => $cred['client_secret'],
+            'refresh_token' => $cred['refresh_token'],
+        ]),
+    ]);
+    $tokenBody = is_wp_error($token) ? null : json_decode((string) wp_remote_retrieve_body($token), true);
+    if (is_wp_error($token) || (int) wp_remote_retrieve_response_code($token) !== 200 || !is_array($tokenBody)
+        || !is_string($tokenBody['access_token'] ?? null) || $tokenBody['access_token'] === '') {
+        $error = letsblog_ga_describe_failure('トークン更新', $token, $secrets);
+        letsblog_pv_record_result(false, $error, $now);
+        return ['ok' => false, 'error' => $error];
+    }
+    $accessToken = $tokenBody['access_token'];
+    $secrets[] = $accessToken;
+
+    $homeParts = parse_url(home_url());
+    $host = (string) ($homeParts['host'] ?? '');
+    $origin = ($homeParts['scheme'] ?? 'https') . '://' . $host . (isset($homeParts['port']) ? ':' . $homeParts['port'] : '');
+
+    $status = letsblog_pv_status_all();
+    $lastSuccess = isset($status['last_success_at']) ? strtotime((string) $status['last_success_at']) : false;
+    $full = $lastSuccess === false || $now - $lastSuccess > LETSBLOG_PV_GAP_SECONDS;
+    $startDate = $full ? LETSBLOG_PV_BACKFILL_START : LETSBLOG_PV_REFETCH_START;
+
+    $fetched = [];
+    $timeZone = null;
+    $offset = 0;
+    for ($page = 0; $page < LETSBLOG_PV_MAX_PAGES; $page++) {
+        $response = wp_remote_request(
+            letsblog_ga_data_api_base() . '/v1beta/properties/' . rawurlencode($cred['property_id']) . ':runReport',
+            [
+                'method' => 'POST',
+                'timeout' => 30,
+                'headers' => ['Authorization' => 'Bearer ' . $accessToken, 'Content-Type' => 'application/json'],
+                'body' => json_encode([
+                    'dateRanges' => [['startDate' => $startDate, 'endDate' => 'today']],
+                    'dimensions' => [['name' => 'date'], ['name' => 'pagePath'], ['name' => 'hostName']],
+                    'metrics' => [['name' => 'screenPageViews']],
+                    'dimensionFilter' => ['filter' => ['fieldName' => 'hostName', 'stringFilter' => ['matchType' => 'EXACT', 'value' => $host]]],
+                    'limit' => LETSBLOG_PV_PAGE_LIMIT,
+                    'offset' => $offset,
+                ]),
+            ]
+        );
+        $body = is_wp_error($response) ? null : json_decode((string) wp_remote_retrieve_body($response), true);
+        if (is_wp_error($response) || (int) wp_remote_retrieve_response_code($response) !== 200 || !is_array($body)) {
+            $error = letsblog_ga_describe_failure('レポート取得', $response, $secrets);
+            letsblog_pv_record_result(false, $error, $now);
+            return ['ok' => false, 'error' => $error];
+        }
+        if (is_string($body['metadata']['timeZone'] ?? null)) {
+            $timeZone = $body['metadata']['timeZone'];
+        }
+        $rows = is_array($body['rows'] ?? null) ? $body['rows'] : [];
+        foreach ($rows as $row) {
+            $fetched[] = $row;
+        }
+        $offset += count($rows);
+        if ($rows === [] || $offset >= (int) ($body['rowCount'] ?? 0)) {
+            break;
+        }
+    }
+
+    // 行を記事ごと・日ごとに合算する(クエリ付きのパスは同じ記事に集まる)。このサイトのホスト以外の行と、記事に対応しない行は捨てる。
+    $sums = [];
+    $postIdByPath = [];
+    foreach ($fetched as $row) {
+        $dims = $row['dimensionValues'] ?? [];
+        $day = (string) ($dims[0]['value'] ?? '');
+        $path = (string) ($dims[1]['value'] ?? '');
+        if (($dims[2]['value'] ?? '') !== $host || preg_match('/^\d{8}$/', $day) !== 1 || $path === '' || $path[0] !== '/') {
+            continue;
+        }
+        if (!array_key_exists($path, $postIdByPath)) {
+            $id = (int) url_to_postid($origin . $path);
+            $postIdByPath[$path] = ($id > 0 && letsblog_pv_publish_day($id) !== null) ? $id : 0;
+        }
+        $id = $postIdByPath[$path];
+        if ($id === 0) {
+            continue;
+        }
+        $sums[$id][$day] = ($sums[$id][$day] ?? 0) + (int) ($row['metricValues'][0]['value'] ?? 0);
+    }
+
+    $data = letsblog_pv_data();
+    foreach ($sums as $id => $days) {
+        foreach ($days as $day => $views) {
+            $data['daily'][$id][$day] = $views;
+        }
+        ksort($data['daily'][$id]);
+    }
+    if ($timeZone !== null) {
+        $data['time_zone'] = $timeZone;
+    }
+    update_option(LETSBLOG_OPTION_PV_DATA, $data, false);
+    letsblog_pv_record_result(true, null, $now);
+    return ['ok' => true, 'error' => null];
+}
+
+/** GA プロパティのタイムゾーンでの、$now の日付(YYYYMMDD)。 */
+function letsblog_pv_today(int $now, string $timeZone): string
+{
+    try {
+        $zone = new DateTimeZone($timeZone);
+    } catch (Exception $e) {
+        $zone = new DateTimeZone('UTC');
+    }
+    return (new DateTime('@' . $now))->setTimezone($zone)->format('Ymd');
+}
+
+/**
+ * 記事ごとの当日 PV・累計 PV(公開日以降の日別 PV の合計)・最終取得日時。公開されていない記事は含めない。
+ *
+ * @return array<int, array{post_id: int, title: string, today_pv: int, total_pv: int, last_fetched_at: ?string}>
+ */
+function letsblog_pv_list(int $now): array
+{
+    $data = letsblog_pv_data();
+    $today = letsblog_pv_today($now, $data['time_zone']);
+    $fetchedAt = letsblog_pv_status_all()['last_success_at'] ?? null;
+    $ids = array_map('intval', array_keys($data['daily']));
+    sort($ids);
+    $list = [];
+    foreach ($ids as $id) {
+        $publishDay = letsblog_pv_publish_day($id);
+        if ($publishDay === null) {
+            continue;
+        }
+        $total = 0;
+        foreach ($data['daily'][$id] as $day => $views) {
+            if ((string) $day >= $publishDay) {
+                $total += (int) $views;
+            }
+        }
+        $list[] = [
+            'post_id' => $id,
+            'title' => get_the_title($id),
+            'today_pv' => ($today >= $publishDay) ? (int) ($data['daily'][$id][$today] ?? 0) : 0,
+            'total_pv' => $total,
+            'last_fetched_at' => $fetchedAt,
+        ];
+    }
+    return $list;
+}
+
+function letsblog_pv_run_scheduled(): void
+{
+    letsblog_pv_fetch(time());
+}
+
+if (function_exists('add_action')) {
+    add_action(LETSBLOG_CRON_PV_FETCH, 'letsblog_pv_run_scheduled');
+    add_action('init', 'letsblog_pv_ensure_schedule');
+}
+
 if (defined('WP_CLI') && WP_CLI) {
     /**
      * Lets Blog 用の wp-cli コマンド。
@@ -1175,6 +1536,87 @@ if (defined('WP_CLI') && WP_CLI) {
             } else {
                 WP_CLI::error('config のサブコマンドは set か clear です');
             }
+        }
+
+        /**
+         * GA4 の記事別 PV の設定・状態・一覧。秘密情報は引数では受け取らず、標準入力の JSON で渡す。
+         * 取得は WP-Cron で1時間ごとに行う(設定すると予約される)。
+         *
+         * ## OPTIONS
+         *
+         * [<args>...]
+         * : `config set`(標準入力に JSON: property_id, client_id, client_secret, refresh_token)、
+         *   `config clear`、`status`、`list --format=json`。
+         *
+         * [--format=<format>]
+         * : `list` の出力形式。json のみ。
+         *
+         * ## EXAMPLES
+         *
+         *     wp letsblog pv config set < ga4.json
+         *     wp letsblog pv status
+         *     wp letsblog pv list --format=json
+         *     wp letsblog pv config clear
+         */
+        public function pv($args, $assoc_args)
+        {
+            $sub = $args[0] ?? '';
+            if ($sub === 'config') {
+                $this->pv_config($args[1] ?? '', $assoc_args);
+            } elseif ($sub === 'status') {
+                $entry = letsblog_pv_config_entry();
+                $status = letsblog_pv_status_all();
+                WP_CLI::line(json_encode([
+                    'configured' => $entry !== null,
+                    'property_id' => $entry['public']['property_id'] ?? null,
+                    'state' => $entry === null ? LETSBLOG_SNS_STATUS_UNSET
+                        : (letsblog_pv_load_credentials() === null ? '要再設定' : LETSBLOG_SNS_STATUS_CONNECTED),
+                    'last_attempt_at' => $status['last_attempt_at'] ?? null,
+                    'last_success_at' => $status['last_success_at'] ?? null,
+                    'last_failure_at' => $status['last_failure_at'] ?? null,
+                    'last_error' => $status['last_error'] ?? null,
+                ], JSON_UNESCAPED_UNICODE));
+            } elseif ($sub === 'list') {
+                if (($assoc_args['format'] ?? 'json') !== 'json') {
+                    WP_CLI::error('--format は json だけです');
+                    return;
+                }
+                WP_CLI::line(json_encode(letsblog_pv_list($this->now()), JSON_UNESCAPED_UNICODE));
+            } else {
+                WP_CLI::error('サブコマンドは config set / config clear / status / list のどれかです');
+            }
+        }
+
+        private function pv_config(string $action, array $assoc_args): void
+        {
+            if ($action === 'set') {
+                if ($assoc_args !== []) {
+                    WP_CLI::error('秘密情報を引数では受け取りません。JSON を標準入力で渡してください');
+                    return;
+                }
+                $decoded = json_decode($this->read_stdin(), true);
+                if (!is_array($decoded) || array_is_list($decoded)) {
+                    WP_CLI::error('標準入力が JSON オブジェクトではありません');
+                    return;
+                }
+                [$cred, $error] = letsblog_pv_normalize_input($decoded);
+                if ($cred === null) {
+                    WP_CLI::error((string) $error);
+                    return;
+                }
+                letsblog_pv_save_credentials($cred);
+                WP_CLI::line(json_encode(['property_id' => $cred['property_id'], 'status' => LETSBLOG_SNS_STATUS_CONNECTED], JSON_UNESCAPED_UNICODE));
+            } elseif ($action === 'clear') {
+                letsblog_pv_clear_credentials();
+                WP_CLI::line(json_encode(['cleared' => true]));
+            } else {
+                WP_CLI::error('config のサブコマンドは set か clear です');
+            }
+        }
+
+        protected function now(): int
+        {
+            return time();
         }
 
         protected function read_stdin(): string

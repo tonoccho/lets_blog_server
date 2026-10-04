@@ -661,6 +661,26 @@ DEFAULT_STEPS = [
         "touches_stack": True,
     },
     {
+        # letsblog プラグインの GA4 記事別 PV(設定・暗号化・定期取得・累計・失敗の記録)のテスト(issue #1576)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "letsblog-pv-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-letsblog-pv.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         "name": "backend-expose-mysql",
         "argv": [
             "docker",
