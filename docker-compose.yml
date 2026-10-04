@@ -726,8 +726,8 @@ services:
       retries: 5
 
   # apiコンテナからダッシュボードのコンテナ稼働状況(issue #280)取得のためだけにDocker Engine APIを
-  # 読み取り専用で中継する。apiコンテナ自体にはdocker.sockを渡さない(コンテナ作成/実行系のPOST操作は
-  # 一切許可しない=侵害時にDockerホストを乗っ取られるリスクを避ける)。
+  # 中継する(読み取りに加え、コンテナのstart/stopだけ許可: #1587)。apiコンテナ自体にはdocker.sockを渡さない
+  # (コンテナ作成/実行系のPOST操作は許可しない=侵害時にDockerホストを乗っ取られるリスクを避ける)。
   # issue #695(C10-3)でアプリコードの呼び出し元をplatform-serviceのみに一本化したが、lbs-net上の
   # 全コンテナが同一フラットネットワークにいたため、環境変数を持たない他コンテナからでも
   # http://docker-socket-proxy:2375 へ到達できてしまっていた(ネットワークレベルの制限は未達成、
@@ -736,17 +736,23 @@ services:
   # Epic #551の方針どおり到達可能なコンテナをplatform-serviceだけに限定する。
   docker-socket-proxy:
     logging: *default-logging
-    image: tecnativa/docker-socket-proxy:latest
+    # v0.5.0。haproxy.cfg.template をイメージ内部のパスへ差し替えるため、:latest ではなく
+    # ダイジェストで固定する(#1587)。更新するときは infra/docker-socket-proxy/haproxy.cfg.template を
+    # 新しいイメージの同ファイルと突き合わせること。
+    image: tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: lbs-docker-socket-proxy
     restart: unless-stopped
     networks:
       - docker-socket-proxy-net
     environment:
       TZ: UTC
-      CONTAINERS: 1
-      POST: 0
+      # 権限は環境変数(CONTAINERS / POST / ALLOW_*)ではなく、下のテンプレートの frontend で決める。
+      # イメージ既定の POST=0 では ALLOW_START / ALLOW_STOP が効かないため(#1587)。
+      # 許可: GET /containers/json、GET /containers/<id>/json、POST /containers/<id>/(start|stop)。
+      # それ以外(create / DELETE / exec / restart / kill / images/create ほか)はすべて 403。
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/docker-socket-proxy/haproxy.cfg.template:/usr/local/etc/haproxy/haproxy.cfg.template:ro
 
   mysql:
     logging: *default-logging

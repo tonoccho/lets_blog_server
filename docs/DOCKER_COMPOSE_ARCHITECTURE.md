@@ -253,6 +253,75 @@ VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後�
   `profiles: ["design-tools"]` を付与し、`docker compose --profile design-tools up -d`
   で明示的に含める形にするのが妥当(別Issueとして起票する)。
 
+## docker-socket-proxy の権限(#1587)
+
+`docker-socket-proxy`(platform-service だけが到達できる `docker-socket-proxy-net` 上)は、
+**`GET /containers/json`、`GET /containers/<id>/json`、`POST /containers/<id>/(start|stop)` だけ**を通し、
+それ以外はすべて 403 にする。#1399(ComfyUI の演算デバイス切り替え)が start / stop を必要とするため。
+
+### なぜ環境変数では足りないか
+
+イメージ(`tecnativa/docker-socket-proxy` v0.5.0)の既定 haproxy 設定は、先頭で
+`http-request deny unless METH_GET || { env(POST) -m bool }` と全 POST を拒否してから `ALLOW_START` /
+`ALLOW_STOP` を評価する。そのため次のとおり、環境変数だけでは「start / stop だけ」を作れない。
+
+| 設定 | 結果 |
+|---|---|
+| `CONTAINERS=1 POST=0 ALLOW_START=1 ALLOW_STOP=1` | start / stop も 403(従来の設定に足しても効かない) |
+| `CONTAINERS=1 POST=1 ALLOW_START=1 ALLOW_STOP=1` | create が 201、restart / kill / exec まで到達 |
+| `CONTAINERS=0 POST=1 ALLOW_START=1 ALLOW_STOP=1` | start / stop だけ通るが `GET /containers/json` も 403 |
+
+### 方式: frontend を差し替えた haproxy.cfg.template をマウントする
+
+- `infra/docker-socket-proxy/haproxy.cfg.template` を保持し、`/usr/local/etc/haproxy/haproxy.cfg.template` へ
+  **read-only** でマウントする。イメージのテンプレートのうち `frontend dockerfrontend` だけを差し替えた
+  もので、global / defaults / backend は同一。許すものを列挙し、最後が無条件の `http-request deny`。
+  環境変数(`CONTAINERS` / `POST` / `ALLOW_*`)には依存しないので、compose からは外した。
+- テンプレートはイメージ内部のパスに依存するので、イメージは `:latest` ではなく**ダイジェスト固定**
+  (`sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459`、ラベル
+  `org.opencontainers.image.version=v0.5.0`)。更新するときは、新しいイメージの同ファイルと差分を取る。
+  ```bash
+  docker run --rm --entrypoint cat <image> /usr/local/etc/haproxy/haproxy.cfg.template
+  ```
+- `GET /containers/<id>/json` を許すのは、`ContainerStatusService` が停止中コンテナの終了コードと
+  再起動ポリシーの判定(ワンショットジョブの「完了」表示)に使っているため。従来の `CONTAINERS=1` でも
+  GET は通っていたので、読み取りの範囲は狭まっても、アプリが使う範囲は変わらない。
+- テスト: `python3 -m unittest scripts.test_docker_socket_proxy`(ダイジェスト固定、read-only マウント、
+  frontend が許可規則 3 本と最後の `deny` だけであること、許可・拒否するリクエストの例)。
+
+### 実機での確認(2026-10-04)
+
+使い捨てのネットワークとコンテナ(`lbs-1587-net` / `lbs-1587-target` / `lbs-1587-proxy`)に、マウント付きで
+proxy を起動し、`curlimages/curl` から叩いた。共有スタックは触っていない。proxy だけが `docker.sock`
+(`:ro`)を持つ。後始末済み(コンテナ 0、ネットワーク 0)。
+
+```bash
+docker network create lbs-1587-net
+docker run -d --name lbs-1587-target --network lbs-1587-net busybox sleep 3600
+docker run -d --name lbs-1587-proxy --network lbs-1587-net \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -v "$PWD/infra/docker-socket-proxy/haproxy.cfg.template":/usr/local/etc/haproxy/haproxy.cfg.template:ro \
+  tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+# 各リクエスト(例): 
+docker run --rm --network lbs-1587-net curlimages/curl -s -o /dev/null -w '%{http_code}\n' \
+  -X POST http://lbs-1587-proxy:2375/containers/lbs-1587-target/stop
+```
+
+| リクエスト | 結果 |
+|---|---|
+| `GET /containers/json?all=true` | 200 |
+| `GET /containers/<id>/json` | 200 |
+| `POST /containers/<id>/stop` | 204 |
+| `POST /containers/<id>/start` | 204 |
+| `POST /containers/create` | 403(コンテナは作られなかった) |
+| `DELETE /containers/<id>` | 403 |
+| `POST /containers/<id>/exec` | 403 |
+| `POST /images/create` | 403 |
+| `POST /containers/<id>/restart` | 403 |
+| `POST /containers/<id>/kill` | 403 |
+| `POST /containers/<id>/pause` | 403 |
+| `GET /containers/<id>/logs`、`GET /images/json` | 403 |
+
 ## コンテナログのサイズ上限(#1247)
 
 Docker の既定 `json-file` ドライバはサイズ無制限でログを書く。2026-09-10 に `lbs-log-writer`
