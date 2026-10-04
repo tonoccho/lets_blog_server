@@ -87,3 +87,15 @@ When('生成画像ギャラリーでその画像の詳細を開いて削除し S
   });
   recordResponseTime(ctx, timing.roundTripMs, '生成画像の削除(Server Action)の往復');
 });
+
+When('生成画像ギャラリーでその画像を選択して一括削除し Server Action の往復を計測する', async ({ page, ctx }) => {
+  const thumbnail = await openGallery(page, ctx);
+  // 検証用の1枚だけを選ぶ(全選択すると他の画像まで消える)。チェックボックスは画像と同じカードにある。
+  await thumbnail.locator('xpath=ancestor::div[contains(@class,"relative")][1]').getByRole('checkbox').check();
+  page.once('dialog', (dialog) => void dialog.accept());
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await page.getByRole('button', { name: '選択した1件を削除' }).click();
+    await expect(page.locator(`img[src="/image-gallery/${ctx[IMAGE_ID_KEY]}/file"]`)).toHaveCount(0, { timeout: 30_000 });
+  });
+  recordResponseTime(ctx, timing.roundTripMs, '生成画像の一括削除(Server Action)の往復');
+});
