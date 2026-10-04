@@ -1638,6 +1638,17 @@ class LetsblogPluginPhpTestStep(unittest.TestCase):
         self.assertTrue(any(m.startswith("%CHECKOUT%/infra/wordpress:") for m in mounts), mounts)
 
 
+class LetsblogSnsPhpTestStep(unittest.TestCase):
+    """issue #1573: SNS 告知の PHP テストもリリース検証で走らせる(手順表に無いと誰も実行しない、#1418)。"""
+
+    def test_step_runs_the_sns_test_through_the_wordpress_image(self):
+        step = next((s for s in rvt.DEFAULT_STEPS if s["name"] == "letsblog-sns-php-test"), None)
+        self.assertIsNotNone(step, "SNS 告知のPHPテストがリリース検証で実行されない")
+        argv = step["argv"]
+        self.assertIn("lets_blog_server-wordpress:latest", argv)
+        self.assertTrue(any(a.endswith("/provision-agent/__tests__/test-letsblog-sns.php") for a in argv), argv)
+
+
 class ProvisionAgentPhpTestsStep(unittest.TestCase):
     """issue #1418: provision-agent の PHP テストをリリース検証で走らせる。
 

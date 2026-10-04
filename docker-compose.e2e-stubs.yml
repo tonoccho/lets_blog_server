@@ -138,6 +138,15 @@ services:
     ports:
       - "127.0.0.1:18086:8080"
 
+  # X API(issue #1573)。letsblog プラグインの X 送信処理(トークン更新・投稿)の向き先。
+  # プラグインは wp-config.php の定数 LETSBLOG_X_API_BASE_URL(http://x-stub:8080)でここへ向ける。
+  x-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-x-stub
+    command: ["node", "/app/x/server.js"]
+    ports:
+      - "127.0.0.1:18088:8080"
+
   # ComfyUI(issue #1106)。実機は NVIDIA ランタイムが要り、1枚あたり数十秒かかるため、
   # batch size 16 の枚数検証も「リピートごとに seed が変わる」ことの確認も実行時間に乗らない。
   # スタブが引き受けるのは枚数と seed の決定的な検証だけで、画像の見た目は再現しない。
