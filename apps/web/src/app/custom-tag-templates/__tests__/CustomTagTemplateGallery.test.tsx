@@ -4,8 +4,11 @@ import { CustomTagTemplateGallery } from "../CustomTagTemplateGallery";
 import {
   applyCustomTagTemplateAction,
   cloneCustomTagTemplateAction,
+  createCustomTagTemplateAction,
+  deleteCustomTagTemplateAction,
   publishCustomTagTemplateAction,
   unpublishCustomTagTemplateAction,
+  updateCustomTagTemplateAction,
 } from "../actions";
 
 const push = jest.fn();
@@ -19,13 +22,19 @@ jest.mock("next/navigation", () => ({
 jest.mock("../actions", () => ({
   applyCustomTagTemplateAction: jest.fn(),
   cloneCustomTagTemplateAction: jest.fn(),
+  createCustomTagTemplateAction: jest.fn(),
+  deleteCustomTagTemplateAction: jest.fn(),
   publishCustomTagTemplateAction: jest.fn(),
   unpublishCustomTagTemplateAction: jest.fn(),
+  updateCustomTagTemplateAction: jest.fn(),
 }));
 
 const publishMock = publishCustomTagTemplateAction as jest.MockedFunction<typeof publishCustomTagTemplateAction>;
 const unpublishMock = unpublishCustomTagTemplateAction as jest.MockedFunction<typeof unpublishCustomTagTemplateAction>;
 const applyMock = applyCustomTagTemplateAction as jest.MockedFunction<typeof applyCustomTagTemplateAction>;
+const createMock = createCustomTagTemplateAction as jest.MockedFunction<typeof createCustomTagTemplateAction>;
+const updateMock = updateCustomTagTemplateAction as jest.MockedFunction<typeof updateCustomTagTemplateAction>;
+const deleteMock = deleteCustomTagTemplateAction as jest.MockedFunction<typeof deleteCustomTagTemplateAction>;
 const cloneMock = cloneCustomTagTemplateAction as jest.MockedFunction<typeof cloneCustomTagTemplateAction>;
 
 function template(overrides: Partial<CustomTagTemplate>): CustomTagTemplate {
@@ -285,5 +294,234 @@ describe("CustomTagTemplateGallery プロジェクトで使う(issue #1131)", ()
 
     expect(await screen.findByText(/\[note\] をProject #99のカスタムタグとして作成しました/)).toBeInTheDocument();
     expect(applyMock).toHaveBeenCalledWith(23, { projectId: 99, tagName: "note" });
+  });
+});
+
+describe("CustomTagTemplateGallery 作成・編集・削除(issue #1550)", () => {
+  const project = (id: number, name: string): Project =>
+    ({ id, name, slug: `p${id}` }) as unknown as Project;
+
+  function renderWith(opts: { templates?: CustomTagTemplate[]; currentProjectId?: number | null } = {}) {
+    return render(
+      <CustomTagTemplateGallery
+        templates={opts.templates ?? [template({ id: 31, templateName: "既存", description: "説明", category: "装飾", cssContent: ".a{}" })]}
+        projects={[project(3, "プロジェクトA")]}
+        currentProjectId={opts.currentProjectId ?? null}
+        showAll={false}
+        mine={false}
+      />
+    );
+  }
+
+  const openCreate = () => fireEvent.click(screen.getByRole("button", { name: "新しいテンプレート" }));
+  const openDetail = () => fireEvent.click(screen.getByRole("heading", { name: "既存", level: 3 }));
+  const fill = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(window, "alert").mockImplementation(() => {});
+  });
+
+  describe("作成", () => {
+    it("全項目を入力して作成すると、入力どおりに作成アクションを呼び、閉じて再取得する", async () => {
+      createMock.mockResolvedValue({ data: template({ id: 40 }) });
+      renderWith();
+      openCreate();
+      fill("テンプレート名", "  新規  ");
+      fill("説明", "d");
+      fill("カテゴリー", "c");
+      fill("HTMLテンプレート", "<p>{{content}}</p>");
+      fill("CSS(任意)", "p{}");
+      fireEvent.change(screen.getByLabelText("スコープ"), { target: { value: "3" } });
+      fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      expect(createMock).toHaveBeenCalledWith({
+        templateName: "新規",
+        description: "d",
+        category: "c",
+        htmlTemplate: "<p>{{content}}</p>",
+        cssContent: "p{}",
+        projectId: 3,
+      });
+      expect(screen.queryByRole("button", { name: "作成" })).not.toBeInTheDocument();
+    });
+
+    it("スコープの既定は表示中のプロジェクト。グローバルを選ぶと projectId を送らない(null)", async () => {
+      createMock.mockResolvedValue({ data: template({ id: 41 }) });
+      renderWith({ currentProjectId: 3 });
+      openCreate();
+      expect(screen.getByLabelText("スコープ")).toHaveValue("3");
+      fireEvent.change(screen.getByLabelText("スコープ"), { target: { value: "" } });
+      fill("テンプレート名", "n");
+      fill("HTMLテンプレート", "<p/>");
+      fireEvent.click(screen.getByRole("button", { name: "作成" }));
+      await waitFor(() => expect(createMock).toHaveBeenCalled());
+      expect(createMock.mock.calls[0][0].projectId).toBeNull();
+    });
+
+    it("名前が空なら送信せず、必須の旨を表示し、入力は残る", () => {
+      renderWith();
+      openCreate();
+      fill("HTMLテンプレート", "<p/>");
+      fireEvent.click(screen.getByRole("button", { name: "作成" }));
+      expect(createMock).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("必須");
+      expect(screen.getByLabelText("HTMLテンプレート")).toHaveValue("<p/>");
+    });
+
+    it("HTMLが空白だけなら送信しない", () => {
+      renderWith();
+      openCreate();
+      fill("テンプレート名", "n");
+      fill("HTMLテンプレート", "   ");
+      fireEvent.click(screen.getByRole("button", { name: "作成" }));
+      expect(createMock).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    it("アクションがエラーを返したら理由を表示し、入力は残り、再取得しない", async () => {
+      createMock.mockResolvedValue({ error: "boom" });
+      renderWith();
+      openCreate();
+      fill("テンプレート名", "n");
+      fill("HTMLテンプレート", "<p/>");
+      fireEvent.click(screen.getByRole("button", { name: "作成" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("作成に失敗しました: boom");
+      expect(screen.getByLabelText("テンプレート名")).toHaveValue("n");
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("アクションが例外を投げても理由を表示する", async () => {
+      createMock.mockRejectedValue(new Error("network"));
+      renderWith();
+      openCreate();
+      fill("テンプレート名", "n");
+      fill("HTMLテンプレート", "<p/>");
+      fireEvent.click(screen.getByRole("button", { name: "作成" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("作成に失敗しました: Error: network");
+    });
+
+    it("キャンセルでフォームを閉じ、何も呼ばない", () => {
+      renderWith();
+      openCreate();
+      fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+      expect(screen.queryByLabelText("テンプレート名")).not.toBeInTheDocument();
+      expect(createMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("編集", () => {
+    it("詳細パネルに名前・説明・カテゴリー・HTML・CSSが入力欄として表示される", () => {
+      renderWith();
+      openDetail();
+      expect(screen.getByLabelText("テンプレート名")).toHaveValue("既存");
+      expect(screen.getByLabelText("説明")).toHaveValue("説明");
+      expect(screen.getByLabelText("カテゴリー")).toHaveValue("装飾");
+      expect(screen.getByLabelText("HTMLテンプレート")).toHaveValue("<div>{{content}}</div>");
+      expect(screen.getByLabelText("CSS(任意)")).toHaveValue(".a{}");
+    });
+
+    it("説明・カテゴリー・CSSが無いテンプレートは空欄で表示される", () => {
+      renderWith({ templates: [template({ id: 32, templateName: "既存" })] });
+      openDetail();
+      expect(screen.getByLabelText("説明")).toHaveValue("");
+      expect(screen.getByLabelText("カテゴリー")).toHaveValue("");
+      expect(screen.getByLabelText("CSS(任意)")).toHaveValue("");
+    });
+
+    it("変更して保存すると、変更後の内容と元のスコープで更新アクションを呼び、閉じて再取得する", async () => {
+      updateMock.mockResolvedValue({ data: template({ id: 31 }) });
+      renderWith({ templates: [template({ id: 31, templateName: "既存", projectId: 3 })] });
+      openDetail();
+      fill("テンプレート名", "変更後");
+      fill("HTMLテンプレート", "<b>{{content}}</b>");
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      expect(updateMock).toHaveBeenCalledWith(31, {
+        templateName: "変更後",
+        description: undefined,
+        category: undefined,
+        htmlTemplate: "<b>{{content}}</b>",
+        cssContent: undefined,
+        projectId: 3,
+      });
+      expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    });
+
+    it("名前かHTMLを空にすると保存せず、必須の旨を表示する", () => {
+      renderWith();
+      openDetail();
+      fill("テンプレート名", " ");
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      expect(updateMock).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("必須");
+      fill("テンプレート名", "x");
+      fill("HTMLテンプレート", "");
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      expect(updateMock).not.toHaveBeenCalled();
+    });
+
+    it("アクションがエラーを返したら理由を表示し、変更した内容は残る", async () => {
+      updateMock.mockResolvedValue({ error: "not found" });
+      renderWith();
+      openDetail();
+      fill("テンプレート名", "変更後");
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("保存に失敗しました: not found");
+      expect(screen.getByLabelText("テンプレート名")).toHaveValue("変更後");
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("アクションが例外を投げても理由を表示する", async () => {
+      updateMock.mockRejectedValue(new Error("network"));
+      renderWith();
+      openDetail();
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("保存に失敗しました: Error: network");
+    });
+  });
+
+  describe("削除", () => {
+    it("確認を承諾すると削除アクションを呼び、閉じて再取得する", async () => {
+      deleteMock.mockResolvedValue({ success: true });
+      const confirm = jest.spyOn(window, "confirm").mockReturnValue(true);
+      renderWith();
+      openDetail();
+      fireEvent.click(screen.getByRole("button", { name: "削除" }));
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      expect(confirm).toHaveBeenCalled();
+      expect(deleteMock).toHaveBeenCalledWith(31);
+    });
+
+    it("確認をキャンセルすると何も呼ばず、パネルは開いたまま", () => {
+      jest.spyOn(window, "confirm").mockReturnValue(false);
+      renderWith();
+      openDetail();
+      fireEvent.click(screen.getByRole("button", { name: "削除" }));
+      expect(deleteMock).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "削除" })).toBeInTheDocument();
+    });
+
+    it("アクションがエラーを返したら理由を表示し、再取得しない", async () => {
+      deleteMock.mockResolvedValue({ error: "forbidden" });
+      jest.spyOn(window, "confirm").mockReturnValue(true);
+      renderWith();
+      openDetail();
+      fireEvent.click(screen.getByRole("button", { name: "削除" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("削除に失敗しました: forbidden");
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("アクションが例外を投げても理由を表示する", async () => {
+      deleteMock.mockRejectedValue(new Error("network"));
+      jest.spyOn(window, "confirm").mockReturnValue(true);
+      renderWith();
+      openDetail();
+      fireEvent.click(screen.getByRole("button", { name: "削除" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("削除に失敗しました: Error: network");
+    });
   });
 });

@@ -6,18 +6,24 @@ import type { CustomTagTemplate, Project } from "@/lib/apiClient";
 import {
   applyCustomTagTemplateAction,
   cloneCustomTagTemplateAction,
+  createCustomTagTemplateAction,
+  deleteCustomTagTemplateAction,
   publishCustomTagTemplateAction,
   unpublishCustomTagTemplateAction,
+  updateCustomTagTemplateAction,
 } from "./actions";
 
 interface TemplateEditorProps {
-  initialHtml: string;
-  initialCss: string;
+  html: string;
+  css: string;
+  onHtmlChange: (value: string) => void;
+  onCssChange: (value: string) => void;
 }
 
-function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
-  const [htmlTemplateValue, setHtmlTemplateValue] = useState(initialHtml);
-  const [cssContentValue, setCssContentValue] = useState(initialCss);
+const FIELD_CLASS = "rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm";
+
+/** HTML / CSS の入力欄とプレビュー。値は親が持つ(作成フォームと詳細パネルの保存対象になる)。 */
+function TemplateEditor({ html: htmlTemplateValue, css: cssContentValue, onHtmlChange, onCssChange }: TemplateEditorProps) {
   const [previewSrcDoc, setPreviewSrcDoc] = useState(() => {
     const html = htmlTemplateValue
       .replaceAll("{{content}}", "サンプルテキストです。ここに本文が入ります。")
@@ -43,7 +49,7 @@ function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
           <textarea
             name="htmlTemplate"
             value={htmlTemplateValue}
-            onChange={(e) => setHtmlTemplateValue(e.target.value)}
+            onChange={(e) => onHtmlChange(e.target.value)}
             required
             rows={6}
             placeholder='<div class="alert">{{content}}</div>'
@@ -55,7 +61,7 @@ function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
           <textarea
             name="cssContent"
             value={cssContentValue}
-            onChange={(e) => setCssContentValue(e.target.value)}
+            onChange={(e) => onCssChange(e.target.value)}
             rows={6}
             placeholder=".alert { color: red; border: 1px solid; padding: 0.5em; }"
             className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"
@@ -75,6 +81,109 @@ function TemplateEditor({ initialHtml, initialCss }: TemplateEditorProps) {
   );
 }
 
+const REQUIRED_MESSAGE = "テンプレート名とHTMLテンプレートは必須です";
+
+interface CreateFormProps {
+  projects: Project[];
+  currentProjectId: number | null;
+  onClose: () => void;
+  onCreated: () => void;
+}
+
+/** 新しいテンプレートの作成フォーム。作成されたテンプレートは未公開で始まる(公開は詳細パネルで行う)。 */
+function CreateTemplateForm({ projects, currentProjectId, onClose, onCreated }: CreateFormProps) {
+  const [templateName, setTemplateName] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
+  const [scope, setScope] = useState(currentProjectId ? String(currentProjectId) : "");
+  const [html, setHtml] = useState("");
+  const [css, setCss] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    if (!templateName.trim() || !html.trim()) {
+      setError(REQUIRED_MESSAGE);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await createCustomTagTemplateAction({
+        templateName: templateName.trim(),
+        description: description || undefined,
+        category: category || undefined,
+        htmlTemplate: html,
+        cssContent: css || undefined,
+        projectId: scope ? Number(scope) : null,
+      });
+      if (result.error) {
+        setError(`作成に失敗しました: ${result.error}`);
+      } else {
+        onCreated();
+      }
+    } catch (err) {
+      setError(`作成に失敗しました: ${err}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white dark:bg-neutral-900 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-auto p-6 space-y-4">
+        <h2 className="text-lg font-semibold">新しいテンプレート</h2>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">テンプレート名</span>
+          <input type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)} className={FIELD_CLASS} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">説明</span>
+          <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} className={FIELD_CLASS} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">カテゴリー</span>
+          <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} className={FIELD_CLASS} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">スコープ</span>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} className={FIELD_CLASS}>
+            <option value="">グローバル</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <TemplateEditor html={html} css={css} onHtmlChange={setHtml} onCssChange={setCss} />
+        {error && (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={saving}
+            className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:bg-neutral-300"
+          >
+            作成
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300"
+          >
+            キャンセル
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface TemplateDetailProps {
   template: CustomTagTemplate;
   projects: Project[];
@@ -82,9 +191,17 @@ interface TemplateDetailProps {
   onClose: () => void;
   onClone: (template: CustomTagTemplate, clonedName: string) => void;
   onPublishChange: () => void;
+  onChanged: () => void;
 }
 
-function TemplateDetailPanel({ template, projects, currentProjectId, onClose, onClone, onPublishChange }: TemplateDetailProps) {
+function TemplateDetailPanel({ template, projects, currentProjectId, onClose, onClone, onPublishChange, onChanged }: TemplateDetailProps) {
+  const [nameValue, setNameValue] = useState(template.templateName);
+  const [descriptionValue, setDescriptionValue] = useState(template.description ?? "");
+  const [categoryValue, setCategoryValue] = useState(template.category ?? "");
+  const [htmlValue, setHtmlValue] = useState(template.htmlTemplate);
+  const [cssValue, setCssValue] = useState(template.cssContent ?? "");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [togglingPublish, setTogglingPublish] = useState(false);
   const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
@@ -111,6 +228,55 @@ function TemplateDetailPanel({ template, projects, currentProjectId, onClose, on
       alert(`プロジェクトでの利用に失敗しました: ${err}`);
     } finally {
       setApplying(false);
+    }
+  };
+
+  // スコープ(projectId)は更新 API が変えないので、元の値をそのまま送る。
+  const handleSave = async () => {
+    if (!nameValue.trim() || !htmlValue.trim()) {
+      setEditError(REQUIRED_MESSAGE);
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const result = await updateCustomTagTemplateAction(template.id, {
+        templateName: nameValue.trim(),
+        description: descriptionValue || undefined,
+        category: categoryValue || undefined,
+        htmlTemplate: htmlValue,
+        cssContent: cssValue || undefined,
+        projectId: template.projectId,
+      });
+      if (result.error) {
+        setEditError(`保存に失敗しました: ${result.error}`);
+      } else {
+        onChanged();
+      }
+    } catch (err) {
+      setEditError(`保存に失敗しました: ${err}`);
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`「${template.templateName}」を削除しますか?`)) {
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const result = await deleteCustomTagTemplateAction(template.id);
+      if (result.error) {
+        setEditError(`削除に失敗しました: ${result.error}`);
+      } else {
+        onChanged();
+      }
+    } catch (err) {
+      setEditError(`削除に失敗しました: ${err}`);
+    } finally {
+      setEditBusy(false);
     }
   };
 
@@ -173,14 +339,18 @@ function TemplateDetailPanel({ template, projects, currentProjectId, onClose, on
         </div>
 
         <div className="space-y-3">
-          <div>
-            <span className="text-sm text-neutral-600 dark:text-neutral-400">説明</span>
-            <p className="text-sm">{template.description || "なし"}</p>
-          </div>
-          <div>
-            <span className="text-sm text-neutral-600 dark:text-neutral-400">カテゴリー</span>
-            <p className="text-sm">{template.category || "なし"}</p>
-          </div>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">テンプレート名</span>
+            <input type="text" value={nameValue} onChange={(e) => setNameValue(e.target.value)} className={FIELD_CLASS} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">説明</span>
+            <input type="text" value={descriptionValue} onChange={(e) => setDescriptionValue(e.target.value)} className={FIELD_CLASS} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-neutral-600 dark:text-neutral-400">カテゴリー</span>
+            <input type="text" value={categoryValue} onChange={(e) => setCategoryValue(e.target.value)} className={FIELD_CLASS} />
+          </label>
           <div>
             <span className="text-sm text-neutral-600 dark:text-neutral-400">スコープ</span>
             <p className="text-sm">
@@ -205,7 +375,31 @@ function TemplateDetailPanel({ template, projects, currentProjectId, onClose, on
           </button>
         </div>
 
-        <TemplateEditor initialHtml={template.htmlTemplate} initialCss={template.cssContent || ""} />
+        <TemplateEditor html={htmlValue} css={cssValue} onHtmlChange={setHtmlValue} onCssChange={setCssValue} />
+
+        {editError && (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {editError}
+          </p>
+        )}
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={editBusy}
+            className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:bg-neutral-300"
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={editBusy}
+            className="flex-1 rounded border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 disabled:text-neutral-400"
+          >
+            削除
+          </button>
+        </div>
 
         <div className="space-y-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -298,6 +492,7 @@ export function CustomTagTemplateGallery({
   const [categoryValue, setCategoryValue] = useState(currentCategory || "");
   const [showAllValue, setShowAllValue] = useState(showAll);
   const [mineValue, setMineValue] = useState(mine);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     const uniqueCategories = Array.from(new Set(templates.map((t) => t.category).filter(Boolean) as string[]));
@@ -347,6 +542,13 @@ export function CustomTagTemplateGallery({
             </select>
           </label>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+            >
+              新しいテンプレート
+            </button>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -453,6 +655,18 @@ export function CustomTagTemplateGallery({
         )}
       </div>
 
+      {creating && (
+        <CreateTemplateForm
+          projects={projects}
+          currentProjectId={currentProjectId}
+          onClose={() => setCreating(false)}
+          onCreated={() => {
+            setCreating(false);
+            router.refresh();
+          }}
+        />
+      )}
+
       {selectedTemplate && (
         <TemplateDetailPanel
           template={selectedTemplate}
@@ -460,6 +674,10 @@ export function CustomTagTemplateGallery({
           currentProjectId={currentProjectId}
           onClose={() => setSelectedTemplate(null)}
           onClone={() => {
+            setSelectedTemplate(null);
+            router.refresh();
+          }}
+          onChanged={() => {
             setSelectedTemplate(null);
             router.refresh();
           }}

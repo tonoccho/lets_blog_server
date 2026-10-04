@@ -307,6 +307,10 @@ API: content `CustomTagController`, `CustomTagTemplateController`, `ProjectCusto
 | AC-TAG-006 | タグ検証API | 貼る前に安全か確かめられる | `POST /api/custom-tags/validate` が `isValid` と理由を返す | `e2e/features/custom-tag/generation.feature` › 危険なHTMLを含むカスタムタグは検証で拒否される、`e2e/features/custom-tag/performance.feature` › カスタムタグの検証APIが所定の時間内に応答する | 検証済 |
 | AC-TAG-007 | CSSバンドルの取得 | 公開先でタグの見た目が再現される | `GET /api/projects/{id}/custom-tags/css-bundle` がタグ定義に対応するCSSを返し、画面から取得できる | `e2e/features/custom-tag/preview-and-css.feature` › プロジェクトの統合CSSに、そのプロジェクトのタグのCSSが含まれる || 検証済(#1283で実測、2026-09-15) |
 | AC-TAG-008 | テンプレートギャラリー (`/custom-tag-templates`) | 他人の作ったタグを再利用できる | ギャラリーの詳細パネルで「プロジェクトで使う」を押すと、対象プロジェクトの `custom_tags` 一覧に、テンプレートのHTML/CSSを持つタグが現れる(`POST /api/custom-tag-templates/{id}/apply`。「複製を作成」= `clone` はテンプレート間の複製で、`custom_tags` は作らない — #1131) | `e2e/features/custom-tag/templates.feature` › テンプレートをプロジェクトで使うと、そのプロジェクトのカスタムタグ一覧にタグが現れる / テンプレートを複製すると、同じプロジェクトに独立したテンプレートの複製が作られる || 実装中(画面のシナリオ。#1045 によりこの開発ホストではブラウザを起動できず未実行。バックエンドは `CustomTagTemplateApplyIntegrationTest` で検証済) |
+| AC-TAG-018 | テンプレートの作成 | 画面からテンプレートを作れる | ギャラリーの「新しいテンプレート」で名前・HTML(必須)・説明・カテゴリー・スコープ・CSS を入力して作成すると、未公開のテンプレートとして一覧(「未公開を含める」)に現れ、詳細パネルに入力した内容が表示される(`createCustomTagTemplateAction`) | `e2e/features/custom-tag/templates.feature` › 「新しいテンプレート」から作成すると、未公開のテンプレートとして一覧に現れ、入力した内容が詳細に表示される | 実装中(#1550) |
+| AC-TAG-019 | テンプレートの編集 | 作ったテンプレートを直せる | 詳細パネルでテンプレート名・説明・カテゴリー・HTML・CSS を変えて「保存」すると、再読み込み後も変更後の内容が表示される。スコープは変更できない(`updateCustomTagTemplateAction`) | `e2e/features/custom-tag/templates.feature` › 詳細パネルで名前とHTMLを変えて保存すると、再読み込み後も変更後の内容が表示される | 実装中(#1550) |
+| AC-TAG-020 | テンプレートの削除 | 不要なテンプレートを消せる | 詳細パネルの「削除」で確認ダイアログを承諾すると一覧から消え、キャンセルすると残る(`deleteCustomTagTemplateAction`) | `e2e/features/custom-tag/templates.feature` › 詳細パネルで削除の確認を承諾すると、テンプレートが一覧から消える / 詳細パネルで削除の確認をキャンセルすると、テンプレートは一覧に残る | 実装中(#1550) |
+| AC-TAG-021 | 作成・保存の入力検証とエラー表示 | 失敗に気付け、入力を失わない | 名前かHTMLが空のときは作成・保存の要求を送らない。Server Action がエラーを返したときは理由を画面に表示し、入力した内容を残す | `e2e/features/custom-tag/templates.feature` › 名前かHTMLが空のままでは作成の要求が送られず、入力した内容も残る / 保存がエラーになると、その理由が画面に表示され、入力した内容は残る | 実装中(#1550) |
 | AC-TAG-016 | プロジェクトで使ったタグ | テンプレート由来のタグを記事で使える | `[tagname]` を本文に書いて描画すると、テンプレートのHTMLで展開される | `e2e/features/custom-tag/templates.feature` › プロジェクトで使ったタグは、記事で [タグ名] として使え、テンプレートのHTMLで描画される | 実装中(#1045 によりブラウザ未実行。同じ挙動を `CustomTagTemplateApplyIntegrationTest` が検証) |
 | AC-TAG-017 | テンプレート適用の名前衝突 | 既存のタグを黙って上書きしない | 対象プロジェクトに同名のタグがあると 409 と「既に登録されています」の理由で拒否され、既存のタグはそのまま残る | `e2e/features/custom-tag/templates.feature` › 同じ名前のタグが既にあるプロジェクトには、テンプレートを適用できない(`@api`) | 実装中(`CustomTagTemplateApplyIntegrationTest` / `CustomTagTemplateServiceTest` で検証済) |
 | AC-TAG-009 | テンプレートの公開・非公開 | 共有範囲を選べる | `publish` / `unpublish` の結果が他利用者から見える一覧に反映される | `e2e/features/custom-tag/templates.feature` › タグをテンプレートとして公開すると、他の利用者からも見えるようになる / 公開をやめると、他の利用者から見えなくなる | 検証済(#1128で実測、2026-09-26。ギャラリーの詳細パネルで切り替え、結果は一般利用者の一覧APIで確認) |
@@ -574,7 +578,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AT-9 (#935) | 記事プランとGitHub Issue連携 | AC-PLAN-001〜012 |
 | AT-10 (#936) | 画像生成・ギャラリー・メディアGC | AC-IMG-001〜013(014 は #1492、015 は #1493 で追加。ギャラリーの一括削除・入れ子フォルダ) |
 | AT-11 (#937) | ダイアグラムとレンダリング | AC-DIAG-001〜007 |
-| AT-12 (#938) | カスタムタグ・テンプレート・コンテンツ設定 | AC-TAG-001〜015 |
+| AT-12 (#938) | カスタムタグ・テンプレート・コンテンツ設定 | AC-TAG-001〜021 |
 | AT-13 (#939) | Analytics | AC-ANA-001〜006 |
 | AT-14 (#940) | システム設定・バックアップ・拡張配布・ダッシュボード | AC-SYS-001〜009 |
 | AT-15 (#941) | ログと非同期経路 | AC-LOG-001〜010(008〜010 は #941 で追加。ログ経路の障害耐性・停止中のログの扱い・閲覧と認可) |
@@ -672,7 +676,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | `/posts` | AC-POST-002, AC-POST-004〜008 |
 | `/sites` | AC-SITE-001〜006 |
 | `/sites/[id]/edit` | AC-SITE-007〜009, AC-SITE-011 |
-| `/custom-tag-templates` | AC-TAG-008〜011 |
+| `/custom-tag-templates` | AC-TAG-008〜011, AC-TAG-018〜021 |
 | `/image-gallery` | AC-IMG-003〜008, AC-IMG-014, AC-IMG-015 |
 | `/operation-logs` | AC-LOG-001〜005, AC-LOG-010 |
 
@@ -796,7 +800,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/admin/roles/actions.ts`<br>`assignRoleAction`<br>`removeRoleAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/admin/ssh-keys/actions.ts`<br>`createSshKeyPairAction`<br>`deleteSshKeyPairAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
-| `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`(受け入れシナリオから到達できない: UI のどこからも呼ばれておらず(画面は公開・複製・プロジェクトで使うだけ。テンプレートの作成・編集・削除は API 直接)画面から起こせない)<br>`updateCustomTagTemplateAction`(受け入れシナリオから到達できない: UI のどこからも呼ばれておらず(画面は公開・複製・プロジェクトで使うだけ。テンプレートの作成・編集・削除は API 直接)画面から起こせない)<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction`(受け入れシナリオから到達できない: UI のどこからも呼ばれておらず(画面は公開・複製・プロジェクトで使うだけ。テンプレートの作成・編集・削除は API 直接)画面から起こせない) | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`<br>`updateCustomTagTemplateAction`<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/image-gallery/actions.ts`<br>`getGeneratedImageAction`<br>`fetchGalleryImagesPageAction`<br>`deleteGeneratedImageAction`<br>`bulkDeleteGeneratedImagesAction`<br>`updateGeneratedImageTagsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
