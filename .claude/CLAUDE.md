@@ -420,7 +420,9 @@ git diff --cached --name-only
 Every path in that list must be on the same side of the line. If it is not, unstage and split.
 
 When a production change makes existing tests stop compiling, commit the production phase, then do
-the mechanical test adaptation as the next test phase. The branch must be green before it is pushed.
+the mechanical test adaptation as the next test phase. The branch must be green before it is pushed —
+enforced by `scripts/git-hooks/pre-push` (see **Enforcement** → Git hook), not per commit: a RED
+test-phase commit is allowed, a push of a red `apps/web` branch is refused.
 
 ## Coverage
 
@@ -808,9 +810,9 @@ as one. Rationale: `docs/WORKFLOW_RULE_RATIONALE.md` → release の直接 push 
 ## Git hook — `scripts/git-hooks/pre-commit`
 
 Bound by `bash scripts/setup-git-hooks.sh` (idempotent; step 1 of the clone procedure in `README.md`),
-which sets `core.hooksPath` to `scripts/git-hooks`. That directory holds two hook scripts, and
-`core.hooksPath` binds the whole directory at once, so both are always bound together — but git
-invokes a **different** one depending on the commit route (`man githooks`), and they do not
+which sets `core.hooksPath` to `scripts/git-hooks`. That directory holds three hook scripts, and
+`core.hooksPath` binds the whole directory at once, so all are always bound together — but git
+invokes a **different** one depending on the route (`man githooks`), and they do not
 enforce the same set of checks:
 
 - **`pre-commit`** — invoked by `git commit`, and by the explicit commit that concludes a
@@ -820,8 +822,11 @@ enforce the same set of checks:
   2. **No test silencing** — nothing that disables a test is added to a test or production file.
   3. **Test-first** — a commit containing production code is refused while the branch has no test
      change at all. Write the failing Gherkin scenario first.
-  4. **`apps/web` coverage floor** (#1040) — any commit touching `apps/web/**` runs
-     `cd apps/web && npm run test:coverage` and is refused if it exits non-zero. It is skipped when
+  4. **`apps/web` coverage floor** (#1040, #1377) — any commit touching `apps/web/**` runs
+     `cd apps/web && npm run test:coverage` and is refused if it exits non-zero, **except** that a
+     test-only commit (every staged path is test code) tolerates failing tests, so a RED test
+     phase can be committed; the floor itself (jest's coverage-threshold message) is refused for
+     every commit. "Green before push" is `pre-push`'s job, below. It is skipped when
      `apps/web/package.json` does not exist, is separate from `scripts/check-changed-coverage.py`
      (which gates only changed-line C1/C2), and resolves `apps/web` from the worktree the commit is
      made in (`git rev-parse --show-toplevel`), not from the hook script's own location.
@@ -847,11 +852,23 @@ enforce the same set of checks:
   **Check 4 is deliberately not run here** (user's decision, #1460, 2026-10-01): the
   `apps/web` coverage floor is not enforced on a conflict-free merge. The layers that still
   cover it are `pre-commit` on every ordinary commit that touches `apps/web`, and
-  `npm run test:coverage` run by hand; there is no `pre-push` hook (#1514 is not in
-  the repository yet), and the `glab mr create` coverage guard checks changed-line C1/C2, not
+  `npm run test:coverage` run by hand; `pre-push` (below) catches a floor broken by the merge
+  at push time, and the `glab mr create` coverage guard checks changed-line C1/C2, not
   this floor. See `scripts/git-hooks/pre-merge-commit`'s own docstring for the reasons, and for
   why a rejection is not a dead end (the merge result stays in the index, so the same commit can
   fix the problem and complete the merge through `pre-commit`).
+
+- **`pre-push`** (#1514) — invoked by `git push` (including the direct pushes of
+  `scripts/release-verify-tag.py`, which only adds time when the verified tip is already green).
+  This is the layer that enforces "the branch must be green before it is pushed" (Test-First
+  Implementation), separately from the per-commit checks. When the pushed range changes
+  `apps/web/**`, it runs `cd apps/web && npm run test:coverage` in the pushing worktree
+  (`git rev-parse --show-toplevel`) and refuses the push on a non-zero exit, printing the tail of
+  the output. It does **not** start `npm` for a range that leaves `apps/web` untouched, for a
+  branch deletion, or when `apps/web/package.json` does not exist. A new branch's range starts at
+  the merge-base with `origin/develop`; an existing branch's at the remote sha. The run checks the
+  worktree's current content, which equals the pushed tip in the normal case of pushing the
+  checked-out branch.
 
 Which checks run on which route:
 
@@ -860,6 +877,7 @@ Which checks run on which route:
 | `git commit` | `pre-commit` | 1–5 |
 | Explicit commit concluding a **conflicted** merge | `pre-commit` | 1–5 (1 exempt; 2 exempt for patterns already on `MERGE_HEAD`, #1125) |
 | **Conflict-free** `git merge` | `pre-merge-commit` | 2 (HEAD-side baseline) and 5 |
+| `git push` | `pre-push` | `apps/web` green (`npm run test:coverage`) when the range touches `apps/web/**` |
 | `git cherry-pick`, `git revert`, `git rebase` (no conflict) | none — git has no hook for these | none |
 
   Rationale for both: `docs/WORKFLOW_RULE_RATIONALE.md` → Unclassified path rejection.

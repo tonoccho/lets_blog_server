@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""push の時点でブランチが green であることを強制する git フック(#1514)。
+
+`CLAUDE.md` → Test-First Implementation は「The branch must be green before it is pushed.」と
+定める。かつては `pre-commit` が**コミット単位で** green を要求していたため、RED のテスト位相を
+コミットできなかった(#1377 がテスト位相の jest 失敗を許容するよう直した)。代わりに green を
+担保するのがこのフックである: コミットは RED でよいが、push は green でなければならない。
+
+検査するもの:
+  push 範囲が `apps/web/**` を変更しているときに限り、push する worktree の `apps/web` で
+  `npm run test:coverage` を実行し、非0終了なら push を拒否する。
+
+走らせない場合(#1040 の「apps/web に触れない限り jest のフル実行を課さない」を push でも保つ):
+  - push 範囲が `apps/web/**` を変更していない
+  - ブランチ削除の push(local sha が全0)
+  - `apps/web/package.json` が無い(実際の npm プロジェクトでない雛形)
+
+push 範囲の求め方(stdin: `<local ref> <local sha> <remote ref> <remote sha>`):
+  - remote sha が全0(新規ブランチ)、または手元に無い: `origin/develop`(無ければ `develop`)との
+    merge-base から local sha まで。基準が無ければ local sha の木全体を範囲とみなす
+    (判断できないときは検査する側に倒す)。
+  - それ以外: remote sha から local sha まで。
+
+注意:
+  - `npm run test:coverage` が検査するのは作業ツリーの現在の内容であって、push する sha そのもの
+    ではない。ブランチの先端を push する通常の使い方では一致する。
+  - `scripts/release-verify-tag.py` の develop / main への直接 push もこのフックを通る。検証済みの
+    先端なら jest は通るが、その分 push に時間がかかる。
+"""
+
+import os
+import subprocess
+import sys
+
+RED = "\033[31m"
+OFF = "\033[0m"
+ZEROS = "0" * 40
+TAIL = 4000
+
+
+def run(args):
+    r = subprocess.run(args, capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def sha_is_all_zero(sha):
+    return set(sha) <= {"0"}
+
+
+def object_exists(sha):
+    return subprocess.run(
+        ["git", "cat-file", "-e", sha + "^{commit}"], capture_output=True
+    ).returncode == 0
+
+
+def nul_paths(out):
+    return [p for p in (out or "").split("\0") if p]
+
+
+def base_for_new_branch(local_sha):
+    for ref in ("origin/develop", "develop"):
+        if run(["git", "rev-parse", "--verify", "--quiet", ref]) is None:
+            continue
+        mb = (run(["git", "merge-base", ref, local_sha]) or "").strip()
+        if mb:
+            return mb
+    return None
+
+
+def changed_files(local_sha, remote_sha):
+    if sha_is_all_zero(remote_sha) or not object_exists(remote_sha):
+        base = base_for_new_branch(local_sha)
+        if base is None:
+            return nul_paths(run(["git", "ls-tree", "-r", "-z", "--name-only", local_sha]))
+    else:
+        base = remote_sha
+    return nul_paths(run(["git", "diff", "--name-only", "-z", base, local_sha]))
+
+
+def fail(title, body):
+    print("%s✗ %s%s\n" % (RED, title, OFF), file=sys.stderr)
+    print(body, file=sys.stderr)
+    print("\n(この検査は CLAUDE.md の規約を強制するものです。--no-verify で回避しないこと。)", file=sys.stderr)
+    sys.exit(1)
+
+
+def main():
+    touches_web = False
+    for line in sys.stdin.read().splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        local_sha, remote_sha = parts[1], parts[3]
+        if sha_is_all_zero(local_sha):
+            continue
+        if any(p.startswith("apps/web/") for p in changed_files(local_sha, remote_sha)):
+            touches_web = True
+            break
+    if not touches_web:
+        return 0
+
+    top = (run(["git", "rev-parse", "--show-toplevel"]) or "").strip()
+    web_dir = os.path.join(top, "apps", "web")
+    if not os.path.isfile(os.path.join(web_dir, "package.json")):
+        return 0
+
+    result = subprocess.run(
+        ["npm", "run", "test:coverage"], cwd=web_dir, capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return 0
+    output = (result.stdout + result.stderr).strip()[-TAIL:]
+    hint = ""
+    if not os.path.isdir(os.path.join(web_dir, "node_modules")):
+        hint = "\n\napps/web に node_modules がありません。`npm install`(または `npm ci`)を実行してください。"
+    fail(
+        "push 前にブランチを green にしてください(apps/web の npm run test:coverage が失敗)",
+        "cd apps/web && npm run test:coverage が非0で終了しました:\n\n%s\n\n"
+        "RED のテスト位相はコミットできますが、push する時点ではブランチが green でなければ"
+        "なりません(CLAUDE.md → Test-First Implementation)。production を直すか、"
+        "テストを直してから push してください。%s" % (output, hint),
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

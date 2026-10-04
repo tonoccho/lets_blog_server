@@ -35,6 +35,7 @@ HOOKS_DIR = "scripts/git-hooks"
 SETUP_SCRIPT = os.path.join(HERE, "setup-git-hooks.sh")
 PRE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-commit")
 PRE_MERGE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-merge-commit")
+PRE_PUSH = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-push")
 
 FAKE_NPM = """#!/bin/bash
 echo "$@" >> "$FAKE_NPM_LOG"
@@ -80,6 +81,11 @@ class TempRepo(unittest.TestCase):
         if os.path.isfile(PRE_MERGE_COMMIT):
             dst = os.path.join(self.tmp, "scripts", "git-hooks", "pre-merge-commit")
             shutil.copy(PRE_MERGE_COMMIT, dst)
+            os.chmod(dst, 0o755)
+        # setup-git-hooks.sh は #1514 で pre-push も束縛の前提にした(HOOK_NAMES)。
+        if os.path.isfile(PRE_PUSH):
+            dst = os.path.join(self.tmp, "scripts", "git-hooks", "pre-push")
+            shutil.copy(PRE_PUSH, dst)
             os.chmod(dst, 0o755)
         shutil.copy(
             os.path.join(REPO_ROOT, ".claude", "hooks", "paths.py"),

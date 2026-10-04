@@ -185,12 +185,18 @@ class OriginFixture:
         write_file(pre_merge_commit_dst, "#!/bin/sh\nexit 0\n")
         os.chmod(pre_merge_commit_dst, 0o755)
 
+        # #1514: setup-git-hooks.sh は pre-push も点検するので、同じくダミーを置く。
+        pre_push_dst = os.path.join(self.seed, "scripts", "git-hooks", "pre-push")
+        write_file(pre_push_dst, "#!/bin/sh\nexit 0\n")
+        os.chmod(pre_push_dst, 0o755)
+
         git(
             [
                 "add",
                 "scripts/setup-git-hooks.sh",
                 "scripts/git-hooks/pre-commit",
                 "scripts/git-hooks/pre-merge-commit",
+                "scripts/git-hooks/pre-push",
             ],
             cwd=self.seed,
         )

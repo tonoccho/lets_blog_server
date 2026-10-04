@@ -48,6 +48,7 @@ HOOKS_DIR = "scripts/git-hooks"
 SETUP_SCRIPT = os.path.join(HERE, "setup-git-hooks.sh")
 PRE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-commit")
 PRE_MERGE_COMMIT = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-merge-commit")
+PRE_PUSH = os.path.join(REPO_ROOT, HOOKS_DIR, "pre-push")
 
 FIX_HINT = "bash scripts/setup-git-hooks.sh"
 
@@ -132,6 +133,11 @@ class TempRepo(unittest.TestCase):
         if os.path.isfile(PRE_MERGE_COMMIT):
             dst = os.path.join(self.tmp, "scripts", "git-hooks", "pre-merge-commit")
             shutil.copy(PRE_MERGE_COMMIT, dst)
+            os.chmod(dst, 0o755)
+        # `pre-push`(#1514)も同様。実装前は存在せず、実装後は本物のクローンと同じ構成にする。
+        if os.path.isfile(PRE_PUSH):
+            dst = os.path.join(self.tmp, "scripts", "git-hooks", "pre-push")
+            shutil.copy(PRE_PUSH, dst)
             os.chmod(dst, 0o755)
         shutil.copy(
             os.path.join(REPO_ROOT, ".claude", "hooks", "paths.py"),
@@ -325,6 +331,45 @@ class PreMergeCommitHookIsChecked(TempRepo):
         r = self.run_setup("--check")
         self.assertNotEqual(0, r.returncode, r.stdout)
         self.assertIn("pre-merge-commit", r.stdout + r.stderr)
+
+
+class PrePushHookIsChecked(TempRepo):
+    """#1514: `--check` は `pre-push`(push 前の green を強制するフック)の存在と実行ビットも点検する。
+
+    `pre-push` が欠けた/実行できない状態を git は黙って飛ばすので、点検が見ていなければ
+    気づく手段が無い。
+    """
+
+    def hook(self):
+        return os.path.join(self.tmp, "scripts", "git-hooks", "pre-push")
+
+    def ensure_present(self):
+        if not os.path.exists(self.hook()):
+            with open(self.hook(), "w", encoding="utf-8") as f:
+                f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(self.hook(), 0o755)
+
+    def test_check_fails_when_pre_push_is_missing(self):
+        self.run_setup()
+        if os.path.exists(self.hook()):
+            os.remove(self.hook())
+        r = self.run_setup("--check")
+        self.assertNotEqual(0, r.returncode, "pre-push が無いのに --check が成功した: " + r.stdout)
+        self.assertIn("pre-push", r.stdout + r.stderr)
+
+    def test_check_fails_when_pre_push_is_not_executable(self):
+        self.ensure_present()
+        os.chmod(self.hook(), 0o644)
+        self.run_setup()
+        r = self.run_setup("--check")
+        self.assertNotEqual(0, r.returncode, r.stdout)
+        self.assertIn("pre-push", r.stdout + r.stderr)
+
+    def test_check_passes_when_pre_push_is_present_and_executable(self):
+        self.ensure_present()
+        self.run_setup()
+        r = self.run_setup("--check")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
 
 class PlainGitEnforcesPhaseSeparation(TempRepo):

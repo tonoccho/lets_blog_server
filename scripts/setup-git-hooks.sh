@@ -37,7 +37,9 @@ HOOK="$HOOKS_DIR/pre-commit"
 # コンフリクトなしの `git merge` は別のフック `pre-merge-commit` の担当で(#1452、
 # `man githooks`)、`core.hooksPath` はディレクトリ単位で束縛されるため個別の設定は
 # 要らないが、実体が欠けている/実行できない状態は個別に点検する必要がある。
-HOOK_NAMES=("pre-commit" "pre-merge-commit")
+# `pre-push`(#1514)は push 前の green を強制する。コミットは RED でよいので、
+# それを担保する層がコミットとは別に要る。欠けても黙って飛ばされるので同様に点検する。
+HOOK_NAMES=("pre-commit" "pre-merge-commit" "pre-push")
 
 MODE="fix"
 case "${1:-}" in
@@ -61,7 +63,7 @@ fi
 
 # フックの実体が無い/実行できない状態で束縛すると、git のあらゆるコミットが
 # 落ちるか、あるいは黙って飛ばされる。どちらも束縛より先に直すべき問題なので、
-# 束縛の前に見る。`pre-commit` と `pre-merge-commit` の両方を点検する(#1452) —
+# 束縛の前に見る。`pre-commit` / `pre-merge-commit` / `pre-push` を点検する(#1452、#1514) —
 # 前者だけを見ていると、後者が欠けている/実行できないことに気づく手段が無い。
 check_hook_file() {
     if [ ! -d "$REPO_ROOT/$HOOKS_DIR" ]; then
@@ -163,4 +165,6 @@ echo "  apps/web カバレッジ床 / 未分類パスの拒否。"
 echo "  コンフリクトなしの git merge(pre-commit を通らない経路)は"
 echo "  $HOOKS_DIR/pre-merge-commit が未分類パスの拒否と、マージ前の HEAD 側に無い"
 echo "  テストの黙殺の拒否だけを別途検査します(#1452、#1460)。"
+echo "  push は $HOOKS_DIR/pre-push が検査します: apps/web を変更する push の前に"
+echo "  npm run test:coverage が green であること(#1514)。"
 echo "  点検: bash scripts/setup-git-hooks.sh --check"
