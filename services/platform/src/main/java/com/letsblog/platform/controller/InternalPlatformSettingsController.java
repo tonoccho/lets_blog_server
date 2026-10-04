@@ -81,7 +81,7 @@ public class InternalPlatformSettingsController {
                 appSettingService.requestTimeoutSeconds());
     }
 
-    public record ImageGenerationConfigResponse(String comfyUiBaseUrl, String chatGptBaseUrl) {
+    public record ImageGenerationConfigResponse(String comfyUiBaseUrl) {
     }
 
     /**
@@ -90,9 +90,7 @@ public class InternalPlatformSettingsController {
      */
     @GetMapping("/api/internal/platform/image-generation-config")
     public ImageGenerationConfigResponse imageGenerationConfig() {
-        return new ImageGenerationConfigResponse(
-                appSettingService.comfyUiBaseUrl(),
-                appSettingService.chatGptBaseUrl());
+        return new ImageGenerationConfigResponse(appSettingService.comfyUiBaseUrl());
     }
 
     /** 接続先URL(APIキー方式のプロバイダーはnull)・設定の出所・設定有無。APIキーの値は含まない。 */

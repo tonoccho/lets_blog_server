@@ -78,8 +78,21 @@ class PlatformServiceClientProjectUrlTest {
     }
 
     @Test
-    void ChatGPTのベースURLはシステム設定から取得する() {
-        assertThat(client.chatGptBaseUrl()).isEqualTo("u");
+    void ChatGPTのベースURLはplatformが別のURLを返しても固定のOpenAIを使う_issue1569() {
+        assertThat(client.chatGptBaseUrl()).isEqualTo("https://api.openai.com/v1");
+    }
+
+    @Test
+    void e2e_stubsプロファイルでだけChatGPT画像生成の接続先がスタブになる_issue1569() {
+        ServiceTokenClient tokens = mock(ServiceTokenClient.class);
+        org.springframework.mock.env.MockEnvironment stubs = new org.springframework.mock.env.MockEnvironment();
+        stubs.setActiveProfiles("e2e-stubs");
+        org.springframework.mock.env.MockEnvironment production = new org.springframework.mock.env.MockEnvironment();
+
+        assertThat(new PlatformServiceClient(RestClient.builder(), "http://x", tokens, aiConnections, stubs)
+                .chatGptBaseUrl()).isEqualTo("http://image-stub:8080");
+        assertThat(new PlatformServiceClient(RestClient.builder(), "http://x", tokens, aiConnections, production)
+                .chatGptBaseUrl()).isEqualTo("https://api.openai.com/v1");
     }
 
     @Test

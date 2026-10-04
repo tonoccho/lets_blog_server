@@ -11,10 +11,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 /**
- * {@link LlmConfigProvider}のai-service向け実装。実際の値(LLM APIキー・ベースURL・モデル名等)は
+ * {@link LlmConfigProvider}のai-service向け実装。実際の値(モデル名・OllamaのベースURL等。ChatGPT/ClaudeのベースURLはコード内の定数)は
  * Web管理画面のシステム設定(issue #403)で決まり、legacy-apiのAppSettingServiceがsystem_settings
  * (platform-serviceがまだ未抽出のためlegacy-apiに残る、ADR-0004)を正として保持し続けるため、
  * ai-serviceは{@link PlatformServiceClient#resolveLlmConfig}経由で都度解決する(issue #574。#583でlegacy-apiの中継を外し、システム設定を所有するplatform-serviceを直接呼ぶよう切り替えた)。
@@ -36,14 +38,39 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
     private final ProjectAiSettingsService projectAiSettingsService;
     private final CredentialCipher credentialCipher;
     private final ConnectionDestinationGuard destinationGuard;
+    private final String openAiBaseUrl;
 
+    /** 受け入れテスト環境(docker-compose.e2e-stubs.yml)だけが有効にするプロファイル。ChatGPTの向き先をスタブにする(issue #1569)。 */
+    static final String E2E_STUBS_PROFILE = "e2e-stubs";
+
+    /** 受け入れテスト環境のLLMスタブ(infra/e2e-stubs)。 */
+    static final String E2E_STUB_OPENAI_BASE_URL = "http://llm-stub:8080";
+
+    /**
+     * ChatGPTの接続先。本番は常に{@link LlmClient#OPENAI_BASE_URL}で、設定では変えられない。
+     * {@value #E2E_STUBS_PROFILE}プロファイルが有効なときだけ(受け入れテスト環境)スタブへ向く(issue #1569)。
+     */
     @Autowired
     public RemoteLlmConfigProvider(
             PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
             HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
+            CredentialCipher credentialCipher, Environment environment) {
+        this(platformServiceClient, currentActorService, request, projectAiSettingsService, credentialCipher,
+                ConnectionDestinationGuard.system(), openAiBaseUrlFor(environment));
+    }
+
+    /** テスト専用: 本番と同じ接続先(OpenAI)で作る。 */
+    RemoteLlmConfigProvider(
+            PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
+            HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
             CredentialCipher credentialCipher) {
         this(platformServiceClient, currentActorService, request, projectAiSettingsService, credentialCipher,
-                ConnectionDestinationGuard.system());
+                ConnectionDestinationGuard.system(), LlmClient.OPENAI_BASE_URL);
+    }
+
+    private static String openAiBaseUrlFor(Environment environment) {
+        return environment.acceptsProfiles(Profiles.of(E2E_STUBS_PROFILE))
+                ? E2E_STUB_OPENAI_BASE_URL : LlmClient.OPENAI_BASE_URL;
     }
 
     /** テスト専用: 名前解決とインタフェース列挙を差し替えた検査を注入する(issue #1547)。 */
@@ -51,6 +78,15 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
             PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
             HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
             CredentialCipher credentialCipher, ConnectionDestinationGuard destinationGuard) {
+        this(platformServiceClient, currentActorService, request, projectAiSettingsService, credentialCipher,
+                destinationGuard, LlmClient.OPENAI_BASE_URL);
+    }
+
+    private RemoteLlmConfigProvider(
+            PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
+            HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
+            CredentialCipher credentialCipher, ConnectionDestinationGuard destinationGuard, String openAiBaseUrl) {
+        this.openAiBaseUrl = openAiBaseUrl;
         this.destinationGuard = destinationGuard;
         this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
@@ -133,6 +169,9 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
     public String baseUrlFor(AiProvider provider) {
         if (provider == AiProvider.CLAUDE) {
             return LlmClient.ANTHROPIC_BASE_URL;
+        }
+        if (provider == AiProvider.OPENAI) {
+            return openAiBaseUrl;
         }
         String projectOverride = provider == AiProvider.OLLAMA ? ollamaOverrideOfCurrentProject() : null;
         return projectOverride != null ? projectOverride : resolveFor(provider).baseUrl();

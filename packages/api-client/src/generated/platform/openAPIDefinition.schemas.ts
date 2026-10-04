@@ -42,7 +42,6 @@ export interface LlmConfigResponse {
 
 export interface ImageGenerationConfigResponse {
   comfyUiBaseUrl?: string;
-  chatGptBaseUrl?: string;
 }
 
 export type ConnectedServiceStatusResponseStatus = typeof ConnectedServiceStatusResponseStatus[keyof typeof ConnectedServiceStatusResponseStatus];

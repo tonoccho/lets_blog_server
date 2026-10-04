@@ -177,10 +177,15 @@ services:
   # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
   # (system_settings の所有者、issue #693)。両方を向けないと、DBに設定が無い環境で
   # platform 側の既定値(本物のエンドポイント)が使われてしまう(#843)。
+  #
+  # ChatGPT(OpenAI)のベースURLは本番では設定項目を持たず常に https://api.openai.com/v1 である(#1569)。
+  # 受け入れテストでだけスタブへ向けるため、ai / media に Spring プロファイル e2e-stubs を有効にする。
+  # このプロファイルは RemoteLlmConfigProvider(ai)/ PlatformServiceClient(media)が見て、
+  # ChatGPT の向き先を llm-stub / image-stub に切り替える。本番の compose はこのプロファイルを有効にしない。
+  # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
   ai:
     environment:
-      # LlmClient は {baseUrl}/chat/completions を叩く(パスはクライアント側が付ける)。
-      LLM_BASE_URL: http://llm-stub:8080
+      SPRING_PROFILES_ACTIVE: e2e-stubs
       BRAVE_SEARCH_BASE_URL: http://brave-stub:8080
       GITHUB_API_BASE_URL: http://github-stub:8080
     depends_on:
@@ -193,7 +198,6 @@ services:
 
   platform:
     environment:
-      LLM_BASE_URL: http://llm-stub:8080
       # issue #1568: ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、システム全体のキーも環境変数も無い。
       # プロジェクト指定の無い呼び出し(VSCode拡張・タグ提案など)がスタブへ向くよう、AT では
       # 既定プロバイダを、キー不要のOLLAMAに固定してスタブ(下の LLM_OLLAMA_BASE_URL)へ向ける。
@@ -206,8 +210,7 @@ services:
       LLM_OLLAMA_MODEL: e2e-stub-model
       # media-service は画像生成の接続設定を platform の
       # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
-      # したがって ChatGPT 画像生成の向き先はここで決まる。
-      IMAGE_LLM_BASE_URL: http://image-stub:8080
+      # ChatGPT 画像生成の向き先は設定項目ではなく、media の e2e-stubs プロファイルで決まる(#1569)。
       # ComfyUI の向き先も同じ経路で決まる(issue #1106)。media-service は
       # ComfyUiClient が呼ぶ都度 platform の image-generation-config から baseUrl を取るので、
       # **ここを向けないと media 側だけ差し替えてもスタブへは届かない**。
@@ -234,6 +237,8 @@ services:
   # 出ていく経路を作らないため。消すと、その変更が黙って実機に向く。
   media:
     environment:
+      # ChatGPT 画像生成の向き先を image-stub にする(#1569)。上のコメント(ai)を参照。
+      SPRING_PROFILES_ACTIVE: e2e-stubs
       COMFYUI_BASE_URL: http://comfyui-stub:8080
     depends_on:
       comfyui-stub:

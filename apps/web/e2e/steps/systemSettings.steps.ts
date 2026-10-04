@@ -78,7 +78,17 @@ Then('システム設定画面にChatGPTとClaudeのAPIキー入力欄が表示�
 
 Then('システム設定画面にはキー以外のLLM設定が表示される', async ({ page }) => {
   await expect(page.locator('[name="llm_claude_model"]')).toBeVisible();
-  await expect(page.locator('[name="llm_base_url"]')).toBeVisible();
+  await expect(page.locator('[name="llm_model"]')).toBeVisible();
+});
+
+// ---- OpenAIのベースURL入力欄が無い(issue #1569) ----
+
+Then('システム設定画面にChatGPTのベースURL入力欄が文章用・画像用とも表示されない', async ({ page, request }) => {
+  await expect(page.locator('[name="llm_base_url"]')).toHaveCount(0);
+  await expect(page.locator('[name="image_llm_base_url"]')).toHaveCount(0);
+  const keys = (await fetchAppSettings(request)).map((s) => s.key);
+  expect(keys, 'アプリ設定の応答にChatGPTのベースURLの項目が残っています').not.toContain('llm_base_url');
+  expect(keys, 'アプリ設定の応答にChatGPTのベースURLの項目が残っています').not.toContain('image_llm_base_url');
 });
 
 // ---- LLM接続設定(DB側優先の確認) ----

@@ -3,7 +3,7 @@ package com.letsblog.media.ai;
 /**
  * ComfyUiClient/ChatGptImageClientが呼び出しの都度参照する画像生成AIの接続設定(issue #531)。
  * 実装はAppSettingServiceが持ち、DB設定(Web管理画面のシステム設定から変更可能)があればそれを優先し、
- * なければ環境変数の値にフォールバックする。LlmConfigProviderと同じ方針で、aiパッケージが
+ * なければ環境変数の値にフォールバックする(ChatGPTの接続先は設定項目を持たず固定、issue #1569)。LlmConfigProviderと同じ方針で、aiパッケージが
  * serviceパッケージへ依存しないようにするため、インターフェースはこちら側で定義しservice側が実装する。
  */
 public interface ImageGenerationConfigProvider {
@@ -29,5 +29,6 @@ public interface ImageGenerationConfigProvider {
      */
     String chatGptApiKey(Long projectId);
 
+    /** ChatGPT画像生成の接続先。常にOpenAI(受け入れテスト環境だけスタブ)。設定では変えられない(issue #1569)。 */
     String chatGptBaseUrl();
 }

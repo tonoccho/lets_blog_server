@@ -110,6 +110,42 @@ class RemoteLlmConfigProviderTest {
         verify(projectSettings, never()).getOllamaBaseUrl(7L);
     }
 
+    // ---- ChatGPT(OPENAI)のベースURLはコード内の定数(issue #1569) ----
+
+    @Test
+    void baseUrlFor_OPENAIはplatformが別のURLを返しても固定のOpenAIを返す() {
+        stubSystemConfig("OPENAI", "https://example.test/v1");
+
+        assertEquals("https://api.openai.com/v1", provider.baseUrlFor(AiProvider.OPENAI));
+        assertEquals("https://api.openai.com/v1", LlmClient.OPENAI_BASE_URL);
+    }
+
+    @Test
+    void targetFor_OPENAIも固定のOpenAIへ向く() {
+        stubSystemConfig("OPENAI", "https://example.test/v1");
+
+        assertEquals("https://api.openai.com/v1", provider.targetFor(AiProvider.OPENAI).baseUrl());
+    }
+
+    // ---- 受け入れテスト環境だけがスタブへ向く(issue #1569) ----
+
+    @Test
+    void e2e_stubsプロファイルでだけOPENAIの接続先がスタブになる() {
+        org.springframework.mock.env.MockEnvironment production = new org.springframework.mock.env.MockEnvironment();
+        org.springframework.mock.env.MockEnvironment stubs = new org.springframework.mock.env.MockEnvironment();
+        stubs.setActiveProfiles("e2e-stubs");
+
+        assertEquals("https://api.openai.com/v1",
+                new RemoteLlmConfigProvider(client, actor, request, projectSettings, cipher, production)
+                        .baseUrlFor(AiProvider.OPENAI));
+        RemoteLlmConfigProvider underStubs =
+                new RemoteLlmConfigProvider(client, actor, request, projectSettings, cipher, stubs);
+        assertEquals("http://llm-stub:8080", underStubs.baseUrlFor(AiProvider.OPENAI));
+        assertEquals("http://llm-stub:8080", underStubs.targetFor(AiProvider.OPENAI).baseUrl());
+        // Claudeはスタブ化しない
+        assertEquals(LlmClient.ANTHROPIC_BASE_URL, underStubs.baseUrlFor(AiProvider.CLAUDE));
+    }
+
     // ---- ChatGPT(OPENAI)のAPIキーのプロジェクト単位上書き(issue #1506) ----
 
     private void stubSystemOpenAiKey(String systemKey) {

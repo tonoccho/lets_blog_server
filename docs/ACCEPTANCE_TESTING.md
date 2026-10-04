@@ -422,11 +422,11 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |
 | --- | --- | --- | --- |
-| `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | `LLM_BASE_URL`(ai / platform) | 18081 |
+| `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | ai の Spring プロファイル `e2e-stubs`(ChatGPT)/ `LLM_OLLAMA_BASE_URL`(platform) | 18081 |
 | `ga-stub` | Google Analytics Data API + Admin API(`accountSummaries`)+ OAuth | `GOOGLE_ANALYTICS_DATA_API_BASE_URL`, `GOOGLE_ANALYTICS_ADMIN_API_BASE_URL`, `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` | 18082 |
 | `adsense-stub` | AdSense Management API(`accounts.list` + `reports:generate`)+ Google OAuth | `ADSENSE_DATA_API_BASE_URL`, `GOOGLE_OAUTH_TOKEN_URI` | 18083 |
 | `brave-stub` | Brave Search API | `BRAVE_SEARCH_BASE_URL` | 18084 |
-| `image-stub` | OpenAI 画像生成(gpt-image-1) | `IMAGE_LLM_BASE_URL`(platform) | 18085 |
+| `image-stub` | OpenAI 画像生成(gpt-image-1) | media の Spring プロファイル `e2e-stubs` | 18085 |
 | `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
 | `comfyui-stub` | ComfyUI(画像生成。**枚数と seed の検証だけ**) | `COMFYUI_BASE_URL`(platform / media) | 18087 |
 | `x-stub` | X API(トークン更新・投稿・自分の情報。#1573) | WordPress の wp-config 定数 `LETSBLOG_X_API_BASE_URL`(letsblog プラグイン) | 18088 |
@@ -905,7 +905,7 @@ Next.js サーバーから gateway へ直接出るため、Playwright の `page.
 LLM と画像生成の接続設定は「DB(`lbs_platform.system_settings`)に値があればDB、
 無ければ環境変数の既定値」という順で解決される(platform-service の `AppSettingService` が正)。
 
-つまり **compose で `LLM_BASE_URL` を差し替えても、システム設定画面で一度でも保存していれば
+つまり **compose で `LLM_OLLAMA_BASE_URL` を差し替えても、システム設定画面で一度でも保存していれば
 実サービスへ出ていく**。実キーが入っていれば課金が発生し、入っていなければテストが不可解に落ちる。
 
 ```bash

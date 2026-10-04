@@ -45,10 +45,10 @@ class AppSettingServiceTest {
     private AppSettingService service() {
         return new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
+                "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
                 "OPENAI", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
-                "http://localhost:8188", "https://api.openai.com/v1",
+                "http://localhost:8188",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
     }
@@ -65,7 +65,6 @@ class AppSettingServiceTest {
         assertTrue(!keys.contains("llm_api_key"), "実際のキー一覧: " + keys);
         assertTrue(!keys.contains("llm_claude_api_key"), "実際のキー一覧: " + keys);
         // 画像生成のキー(#1521)と、キー以外のLLM設定は残る。
-        assertTrue(keys.contains("llm_base_url"), "実際のキー一覧: " + keys);
         assertTrue(keys.contains("llm_claude_model"), "実際のキー一覧: " + keys);
     }
 
@@ -145,12 +144,31 @@ class AppSettingServiceTest {
                 () -> service.updateSettings(Map.of("image_llm_api_key", "sk-system")));
     }
 
-    @Test
-    void chatGptBaseUrl_DB未設定なら環境変数値にフォールバックする() {
-        AppSettingService service = service();
-        when(repository.findById("image_llm_base_url")).thenReturn(Optional.empty());
+    // ---- OpenAIのベースURLはコード内の定数で、設定項目を持たない(issue #1569) ----
 
-        assertEquals("https://api.openai.com/v1", service.chatGptBaseUrl());
+    @Test
+    void OpenAIのベースURLの設定項目は存在せず更新も不明なキーとして拒否される_issue1569() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        List<String> keys = service.getAllSettings().stream().map(AppSettingService.SettingStatus::key).toList();
+        assertTrue(!keys.contains("llm_base_url"), "実際のキー一覧: " + keys);
+        assertTrue(!keys.contains("image_llm_base_url"), "実際のキー一覧: " + keys);
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("llm_base_url", "https://example.test/v1")));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateSettings(Map.of("image_llm_base_url", "https://example.test/v1")));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void baseUrlForのOPENAIはDBに行があっても固定のOpenAIを返す_issue1569() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        lenient().when(repository.findById("llm_base_url")).thenReturn(Optional.of(
+                new SystemSetting("llm_base_url", credentialCipher.encrypt("https://example.test/v1"))));
+
+        assertEquals("https://api.openai.com/v1", service.baseUrlFor(AiProvider.OPENAI));
     }
 
     @Test
@@ -159,14 +177,6 @@ class AppSettingServiceTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.updateSettings(Map.of("comfyui_base_url", "not-a-url")));
-    }
-
-    @Test
-    void updateSettings_image_llm_base_urlはURL形式でなければ例外() {
-        AppSettingService service = service();
-
-        assertThrows(IllegalArgumentException.class,
-                () -> service.updateSettings(Map.of("image_llm_base_url", "not-a-url")));
     }
 
     @Test
@@ -572,10 +582,10 @@ class AppSettingServiceTest {
     private AppSettingService serviceWithoutEnvDefaults() {
         return new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "", "", "", "120",
+                "", "", "120",
                 "", "",
                 "", "",
-                "", "",
+                "",
                 "", "587", "", "", "",
                 "", "10", "");
     }
@@ -607,14 +617,6 @@ class AppSettingServiceTest {
         assertEquals(AppSettingService.SettingSource.DATABASE, status.source());
         assertEquals(null, status.value());
         assertTrue(status.configured());
-    }
-
-    @Test
-    void updateSettings_llm_base_urlはURL形式でなければ例外() {
-        AppSettingService service = service();
-
-        assertThrows(IllegalArgumentException.class,
-                () -> service.updateSettings(Map.of("llm_base_url", "api.openai.com")));
     }
 
     @Test
@@ -826,10 +828,10 @@ class AppSettingServiceTest {
     void availableModelsFor_OPENAIの一覧が空なら空を返す() {
         AppSettingService service = new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "https://api.openai.com/v1", "gpt-4o-mini", "", "120",
+                "gpt-4o-mini", "", "120",
                 "OPENAI", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "qwen2.5:7b-instruct",
-                "http://localhost:8188", "https://api.openai.com/v1",
+                "http://localhost:8188",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
@@ -841,10 +843,10 @@ class AppSettingServiceTest {
     void availableModelsFor_OLLAMAの既定モデルも空なら空を返す() {
         AppSettingService service = new AppSettingService(
                 repository, credentialCipher, adminAuthorizationService,
-                "https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o", "120",
+                "gpt-4o-mini", "gpt-4o", "120",
                 "OPENAI", "claude-3-5-haiku-20241022",
                 "http://ollama:11434/v1", "",
-                "http://localhost:8188", "https://api.openai.com/v1",
+                "http://localhost:8188",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());

@@ -13,13 +13,12 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
       "下書き/校正/要約支援・タグ提案・記事プランニングに使用するAIプロバイダーの接続設定です。" +
       "llm_providerでOLLAMA/OPENAI/CLAUDEのいずれかを選択してください。" +
       "接続設定はプロバイダーごとに独立しています(OLLAMAはllm_ollama_base_url/llm_ollama_model、" +
-      "OPENAIはllm_base_url/llm_model、CLAUDEはllm_claude_model)。" +
+      "OPENAIはllm_model(接続先は常にOpenAI)、CLAUDEはllm_claude_model)。" +
       "ChatGPT / ClaudeのAPIキーはシステム全体では持たず、プロジェクトごとにAI・アセットタブで設定します。" +
       "プロジェクトのモデル選択に並ぶ候補はプロバイダーごとの*_available_models(カンマ区切り)で決まり、" +
       "OLLAMA/CLAUDEは未設定なら既定モデルのみが並びます。",
     keys: [
       "llm_provider",
-      "llm_base_url",
       "llm_model",
       "llm_available_models",
       "llm_request_timeout_seconds",
@@ -33,9 +32,9 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
   {
     title: "画像生成AI連携",
     description:
-      "ComfyUI/ChatGPTのベースURLの接続設定です。" +
+      "ComfyUIのベースURLの接続設定です。ChatGPTの接続先は常にOpenAIです。" +
       "どちらのプロバイダーを使うかはプロジェクト単位の設定(プロジェクト画面のAIモデル管理)で切り替えます。",
-    keys: ["comfyui_base_url", "image_llm_base_url"],
+    keys: ["comfyui_base_url"],
   },
   {
     title: "メール送信",

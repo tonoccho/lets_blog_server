@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.util.function.Consumer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -39,7 +41,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
 
     /**
      * ComfyUiClient/ChatGptImageClientは1回の画像生成処理の中で
-     * {@code comfyUiBaseUrl()}/{@code chatGptBaseUrl()}を複数回
+     * {@code comfyUiBaseUrl()}を複数回
      * (ComfyUiClientは最大4回)独立に呼び出す。都度platform-serviceへHTTP往復すると
      * 画像生成という既に低速な処理をさらに遅くするため、短いTTLで使い回す。
      */
@@ -51,21 +53,55 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
     private volatile CachedImageGenerationConfig cachedImageGenerationConfig;
 
     private final ConnectionDestinationGuard destinationGuard;
+    private final String chatGptBaseUrl;
 
+    /** ChatGPT画像生成の接続先。設定項目は持たず常にここへ向く(issue #1569)。 */
+    static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+    /** 受け入れテスト環境(docker-compose.e2e-stubs.yml)だけが有効にするプロファイル。 */
+    static final String E2E_STUBS_PROFILE = "e2e-stubs";
+
+    /** 受け入れテスト環境の画像生成スタブ(infra/e2e-stubs)。 */
+    static final String E2E_STUB_CHATGPT_BASE_URL = "http://image-stub:8080";
+
+    /**
+     * ChatGPT画像生成の接続先は本番では常に{@link #OPENAI_BASE_URL}。
+     * {@value #E2E_STUBS_PROFILE}プロファイルが有効なときだけ(受け入れテスト環境)スタブへ向ける(issue #1569)。
+     */
     @Autowired
     public PlatformServiceClient(
             RestClient.Builder builder,
             @Value("${app.platform-service-uri}") String platformServiceUri,
             ServiceTokenClient serviceTokenClient,
+            AiServiceConnectionClient aiServiceConnectionClient,
+            Environment environment) {
+        this(builder, platformServiceUri, serviceTokenClient, aiServiceConnectionClient,
+                ConnectionDestinationGuard.system(),
+                environment.acceptsProfiles(Profiles.of(E2E_STUBS_PROFILE))
+                        ? E2E_STUB_CHATGPT_BASE_URL : OPENAI_BASE_URL);
+    }
+
+    /** テスト専用: 本番と同じ接続先(OpenAI)で作る。 */
+    PlatformServiceClient(
+            RestClient.Builder builder, String platformServiceUri, ServiceTokenClient serviceTokenClient,
             AiServiceConnectionClient aiServiceConnectionClient) {
         this(builder, platformServiceUri, serviceTokenClient, aiServiceConnectionClient,
-                ConnectionDestinationGuard.system());
+                ConnectionDestinationGuard.system(), OPENAI_BASE_URL);
     }
 
     /** テスト専用: 名前解決とインタフェース列挙を差し替えた検査を注入する(issue #1547)。 */
     PlatformServiceClient(
             RestClient.Builder builder, String platformServiceUri, ServiceTokenClient serviceTokenClient,
             AiServiceConnectionClient aiServiceConnectionClient, ConnectionDestinationGuard destinationGuard) {
+        this(builder, platformServiceUri, serviceTokenClient, aiServiceConnectionClient, destinationGuard,
+                OPENAI_BASE_URL);
+    }
+
+    private PlatformServiceClient(
+            RestClient.Builder builder, String platformServiceUri, ServiceTokenClient serviceTokenClient,
+            AiServiceConnectionClient aiServiceConnectionClient, ConnectionDestinationGuard destinationGuard,
+            String chatGptBaseUrl) {
+        this.chatGptBaseUrl = chatGptBaseUrl;
         this.destinationGuard = destinationGuard;
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
@@ -75,8 +111,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
         this.aiServiceConnectionClient = aiServiceConnectionClient;
     }
 
-    private record ImageGenerationConfigResponse(
-            String comfyUiBaseUrl, String chatGptBaseUrl) {
+    private record ImageGenerationConfigResponse(String comfyUiBaseUrl) {
     }
 
     private record CachedImageGenerationConfig(ImageGenerationConfigResponse value, Instant expiresAt) {
@@ -116,7 +151,7 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
 
     @Override
     public String chatGptBaseUrl() {
-        return imageGenerationConfig().chatGptBaseUrl();
+        return chatGptBaseUrl;
     }
 
     private synchronized ImageGenerationConfigResponse imageGenerationConfig() {

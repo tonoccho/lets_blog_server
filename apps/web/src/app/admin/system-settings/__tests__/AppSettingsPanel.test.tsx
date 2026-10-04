@@ -83,8 +83,19 @@ describe('AppSettingsPanel', () => {
 
     expect(field('image_llm_api_key')).toBeNull()
     const section = field('comfyui_base_url')!.closest('section')
-    expect(section).toContainElement(field('image_llm_base_url'))
     expect(section!.querySelector('p')!.textContent ?? '').not.toContain('APIキー')
+  })
+
+  it('OpenAIのベースURLは固定なので、サーバーが旧行を返しても文章用・画像用の入力欄を出さない(issue #1569)', () => {
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    expect(field('llm_base_url')).toBeNull()
+    expect(field('image_llm_base_url')).toBeNull()
+    // 他のベースURL(Ollama / ComfyUI)は残る
+    expect(field('llm_ollama_base_url')).not.toBeNull()
+    expect(field('comfyui_base_url')).not.toBeNull()
+    const description = field('llm_provider')!.closest('section')!.querySelector('p')!.textContent ?? ''
+    expect(description).not.toContain('llm_base_url')
   })
 
   it('OLLAMA専用の接続設定キーを外部LLMサービス連携グループに描画する', () => {
@@ -181,7 +192,7 @@ describe('AppSettingsPanel', () => {
     expect(field('llm_api_key')).toBeNull()
     expect(field('llm_claude_api_key')).toBeNull()
     // キー以外のLLM設定は残る
-    expect(field('llm_base_url')).not.toBeNull()
+    expect(field('llm_model')).not.toBeNull()
     expect(field('llm_claude_model')).not.toBeNull()
     const section = field('llm_provider')!.closest('section')
     const description = section!.querySelector('p')!.textContent ?? ''

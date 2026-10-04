@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  * <p>legacy-api側では、実効LLM接続設定(provider/apiKeyFor/defaultModelFor/baseUrlFor/
  * requestTimeoutSeconds)はAiBridgeController#llmConfig経由でPlatformServiceClientが本サービスの
  * 内部エンドポイント({@link com.letsblog.platform.controller.InternalPlatformSettingsController}）
- * を呼び出す形でai-serviceへ公開され続ける。画像生成設定(comfyUiBaseUrl/chatGptBaseUrl。
+ * を呼び出す形でai-serviceへ公開され続ける。画像生成設定(comfyUiBaseUrl。ChatGPTのベースURLはコード内の定数で設定項目を持たない(issue #1569)。
  * ChatGPTのAPIキーはプロジェクト単位だけで、システム設定には持たない(issue #1521))も同様に、legacy-apiに残るChatGptImageClient/ComfyUiClientがPlatformServiceClient
  * (legacy-api側でImageGenerationConfigProviderを実装)経由で取得する。本サービス自体はlegacy-apiの
  * ImageGenerationConfigProviderインターフェースを実装しない(モジュールを跨がないため)。
@@ -35,7 +35,6 @@ import java.util.regex.Pattern;
 @Service
 public class AppSettingService {
 
-    static final String LLM_BASE_URL = "llm_base_url";
     static final String LLM_MODEL = "llm_model";
     static final String LLM_AVAILABLE_MODELS = "llm_available_models";
     static final String LLM_REQUEST_TIMEOUT_SECONDS = "llm_request_timeout_seconds";
@@ -46,7 +45,6 @@ public class AppSettingService {
     static final String LLM_OLLAMA_AVAILABLE_MODELS = "llm_ollama_available_models";
     static final String LLM_CLAUDE_AVAILABLE_MODELS = "llm_claude_available_models";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
-    static final String IMAGE_LLM_BASE_URL = "image_llm_base_url";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
     static final String MAIL_USERNAME = "mail_username";
@@ -80,7 +78,6 @@ public class AppSettingService {
 
     private static final List<Definition> DEFINITIONS = List.of(
             new Definition(LLM_PROVIDER, "AIプロバイダー(OLLAMA/OPENAI/CLAUDEのいずれか)", false),
-            new Definition(LLM_BASE_URL, "LLM ベースURL(OpenAI用)", false),
             new Definition(LLM_MODEL, "LLM 既定モデル(OpenAI用)", false),
             new Definition(LLM_AVAILABLE_MODELS, "LLM 選択可能モデル(カンマ区切り、OpenAI用)", false),
             new Definition(LLM_REQUEST_TIMEOUT_SECONDS, "LLM リクエストタイムアウト(秒)", false),
@@ -92,7 +89,6 @@ public class AppSettingService {
             new Definition(LLM_CLAUDE_AVAILABLE_MODELS,
                     "Claude 選択可能モデル(カンマ区切り、CLAUDE用。未設定なら既定モデルのみ)", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
-            new Definition(IMAGE_LLM_BASE_URL, "画像生成 ベースURL(ChatGPT用)", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
@@ -111,7 +107,6 @@ public class AppSettingService {
             SystemSettingRepository repository,
             CredentialCipher credentialCipher,
             AdminAuthorizationService adminAuthorizationService,
-            @Value("${app.llm-base-url}") String llmBaseUrlEnvDefault,
             @Value("${app.llm-model}") String llmModelEnvDefault,
             @Value("${app.llm-available-models}") String llmAvailableModelsEnvDefault,
             @Value("${app.llm-request-timeout-seconds}") String llmRequestTimeoutSecondsEnvDefault,
@@ -120,7 +115,6 @@ public class AppSettingService {
             @Value("${app.llm-ollama-base-url:http://ollama:11434/v1}") String llmOllamaBaseUrlEnvDefault,
             @Value("${app.llm-ollama-model:qwen2.5:7b-instruct}") String llmOllamaModelEnvDefault,
             @Value("${app.comfyui-base-url}") String comfyUiBaseUrlEnvDefault,
-            @Value("${app.image-llm-base-url:https://api.openai.com/v1}") String imageLlmBaseUrlEnvDefault,
             @Value("${spring.mail.host}") String mailHostEnvDefault,
             @Value("${spring.mail.port}") String mailPortEnvDefault,
             @Value("${spring.mail.username:}") String mailUsernameEnvDefault,
@@ -133,7 +127,6 @@ public class AppSettingService {
         this.credentialCipher = credentialCipher;
         this.adminAuthorizationService = adminAuthorizationService;
         Map<String, String> defaults = new LinkedHashMap<>();
-        defaults.put(LLM_BASE_URL, llmBaseUrlEnvDefault);
         defaults.put(LLM_MODEL, llmModelEnvDefault);
         defaults.put(LLM_AVAILABLE_MODELS, llmAvailableModelsEnvDefault);
         defaults.put(LLM_REQUEST_TIMEOUT_SECONDS, llmRequestTimeoutSecondsEnvDefault);
@@ -144,7 +137,6 @@ public class AppSettingService {
         defaults.put(LLM_OLLAMA_AVAILABLE_MODELS, "");
         defaults.put(LLM_CLAUDE_AVAILABLE_MODELS, "");
         defaults.put(COMFYUI_BASE_URL, comfyUiBaseUrlEnvDefault);
-        defaults.put(IMAGE_LLM_BASE_URL, imageLlmBaseUrlEnvDefault);
         defaults.put(MAIL_HOST, mailHostEnvDefault);
         defaults.put(MAIL_PORT, mailPortEnvDefault);
         defaults.put(MAIL_USERNAME, mailUsernameEnvDefault);
@@ -249,7 +241,7 @@ public class AppSettingService {
         }
         switch (key) {
             case LLM_PROVIDER -> requireValidProvider(key, value);
-            case LLM_BASE_URL, LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL, IMAGE_LLM_BASE_URL ->
+            case LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL ->
                     requireUrl(key, value);
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
@@ -349,11 +341,6 @@ public class AppSettingService {
     }
 
     @Transactional(readOnly = true)
-    public String getLlmBaseUrl() {
-        return resolve(LLM_BASE_URL);
-    }
-
-    @Transactional(readOnly = true)
     public String getLlmModel() {
         return resolve(LLM_MODEL);
     }
@@ -401,11 +388,6 @@ public class AppSettingService {
     @Transactional(readOnly = true)
     public String getComfyUiBaseUrl() {
         return resolve(COMFYUI_BASE_URL);
-    }
-
-    @Transactional(readOnly = true)
-    public String getImageLlmBaseUrl() {
-        return resolve(IMAGE_LLM_BASE_URL);
     }
 
     @Transactional(readOnly = true)
@@ -463,6 +445,9 @@ public class AppSettingService {
      * 固定のエンドポイントを使う(issue #530)。旧ai/LlmClient.ANTHROPIC_BASE_URLと同じ値。
      */
     private static final String ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+
+    /** ChatGPT(OpenAI)の接続先。設定項目は持たず常にここへ向く(issue #1569)。 */
+    private static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
 
     /**
      * legacy-apiのPlatformServiceClient(内部ブリッジInternalPlatformSettingsController経由)が、
@@ -523,7 +508,7 @@ public class AppSettingService {
         return switch (provider) {
             case CLAUDE -> ANTHROPIC_BASE_URL;
             case OLLAMA -> getLlmOllamaBaseUrl();
-            case OPENAI -> getLlmBaseUrl();
+            case OPENAI -> OPENAI_BASE_URL;
         };
     }
 
@@ -538,9 +523,5 @@ public class AppSettingService {
      */
     public String comfyUiBaseUrl() {
         return getComfyUiBaseUrl();
-    }
-
-    public String chatGptBaseUrl() {
-        return getImageLlmBaseUrl();
     }
 }

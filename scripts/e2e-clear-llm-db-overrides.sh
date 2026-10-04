@@ -5,7 +5,7 @@
 # なぜ必要か:
 #   LLM と画像生成の接続設定は「DB(system_settings)があればDB、無ければ環境変数の既定値」
 #   という優先順位で解決される(platform-service の AppSettingService が正)。
-#   したがって docker-compose.e2e-stubs.yml で LLM_BASE_URL を差し替えても、
+#   したがって docker-compose.e2e-stubs.yml で LLM_OLLAMA_BASE_URL を差し替えても、
 #   システム設定画面で一度でも値を保存していると **実サービスへ出ていく**。
 #   実キーが設定されていれば課金が発生し、設定されていなければ受け入れテストが不可解に落ちる。
 #
@@ -65,11 +65,10 @@ fi
 
 # AppSettingService が定義するキーのうち、外部サービスへの向き先と資格情報に関わるもの。
 # 追加したキーはここにも足すこと(足し忘れると、そのキーだけDB値が残り実サービスへ出ていく)。
-KEYS="'llm_base_url','llm_model','llm_available_models',\
+KEYS="'llm_model','llm_available_models',\
 'llm_request_timeout_seconds','llm_provider','llm_claude_model',\
 'llm_ollama_base_url','llm_ollama_model',\
 'llm_ollama_available_models','llm_claude_available_models',\
-'image_llm_base_url',\
 'comfyui_base_url','upload_rate_limit_requests'"
 
 run_sql() {

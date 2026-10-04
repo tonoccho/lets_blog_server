@@ -34,6 +34,9 @@ public class LlmClient {
      */
     public static final String ANTHROPIC_BASE_URL = "https://api.anthropic.com";
 
+    /** ChatGPT(OpenAI)の接続先。設定項目は持たず常にここへ向く(issue #1569)。 */
+    public static final String OPENAI_BASE_URL = "https://api.openai.com/v1";
+
     /**
      * ChatGPT / ClaudeのAPIキーはプロジェクト単位だけ(issue #1568)。キーが無いときのエラー文。
      * 先頭に「{provider}」を付けて使う。
@@ -230,7 +233,7 @@ public class LlmClient {
      *
      * <p>この判定は<b>呼び出し側でOLLAMAに限定する</b>こと。整形後の文言はOllama固有
      * (ollama-model-initのログを見るよう案内する)であり、OpenAI互換エンドポイントは
-     * OpenAI本体に限らずGroq/OpenRouter/自前サーバ等でもよいため({@code LLM_BASE_URL})、
+     * OpenAI本体に限らず自前のOpenAI互換サーバ等でもよいため、
      * それらの404本文に "not found" が含まれると無関係な案内をしてしまう。
      */
     private static boolean isModelNotFound(RestClientResponseException e) {

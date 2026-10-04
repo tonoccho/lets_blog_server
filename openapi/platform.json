@@ -499,9 +499,6 @@
         "properties": {
           "comfyUiBaseUrl": {
             "type": "string"
-          },
-          "chatGptBaseUrl": {
-            "type": "string"
           }
         }
       },
