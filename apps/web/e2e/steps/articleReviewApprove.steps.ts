@@ -77,6 +77,10 @@ async function putFileBase64(head: string, path: string, base64: string): Promis
   expect(res.status, `スタブへのファイル配置に失敗(${path}): ${JSON.stringify(res.json)}`).toBeLessThan(300);
 }
 
+/**
+ * スラッグは固定のため、本文は実行ごとに一意にする(issue #1612)。レビュー完了でスタブの base へマージされた
+ * 記事と同一内容だと、スタブの changedFiles() が「変更なし」とみなして 404 を返し、再実行できなくなる。
+ */
 function articleMarkdown(slug: string, title: string, body: string, options: PrOptions): string {
   return [
     '---',
@@ -236,7 +240,7 @@ async function prepareSubmittedPr(
   expect(created.status, `スタブへのPR作成に失敗: ${JSON.stringify(created.json)}`).toBe(201);
   const body = options.broken
     ? '[recharts]\n| a | b |\n|---|---|\n| x | 1 |\n[/recharts]'
-    : '# 見出し\n\nレビュー完了APIの本文です';
+    : `# 見出し\n\nレビュー完了APIの本文です\n\n<!-- run: ${head} -->`;
   await putFileBase64(
     head, `articles/${slug}/article.md`,
     Buffer.from(articleMarkdown(slug, title, body, options), 'utf8').toString('base64')
