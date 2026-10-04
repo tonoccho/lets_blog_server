@@ -163,5 +163,23 @@ class DirDiffReportsDrift(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class LogWriterSpecCoversStatsEndpoints(unittest.TestCase):
+    """openapi/log-writer.json が OperationLogStatsController の公開面を持つこと(#1610)。
+    仕様が実装より古いと、再生成の一致テストは通ったまま生成クライアントに欠落が残る。"""
+
+    def test_spec_has_operation_log_stats_paths_and_schemas(self):
+        import json
+
+        with open(os.path.join(OPENAPI_DIR, "log-writer.json")) as f:
+            spec = json.load(f)
+        for path in (
+            "/api/operation-logs/stats/routes",
+            "/api/operation-logs/stats/operations",
+        ):
+            self.assertIn(path, spec["paths"])
+        for schema in ("RouteStat", "OperationStat"):
+            self.assertIn(schema, spec["components"]["schemas"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,8 +53,8 @@ export interface OperationLogResponse {
 
 export interface SortObject {
   empty?: boolean;
-  unsorted?: boolean;
   sorted?: boolean;
+  unsorted?: boolean;
 }
 
 export interface PageableObject {
@@ -103,6 +103,23 @@ export interface PageUnifiedLogEntryResponse {
   first?: boolean;
   last?: boolean;
   empty?: boolean;
+}
+
+export interface RouteStat {
+  method?: string;
+  path?: string;
+  count?: number;
+  p50Ms?: number;
+  p95Ms?: number;
+  maxMs?: number;
+}
+
+export interface OperationStat {
+  operationId?: string;
+  totalDurationMs?: number;
+  callCount?: number;
+  startedAt?: string;
+  userId?: number;
 }
 
 export interface FrontendErrorLogResponse {
@@ -179,6 +196,22 @@ q?: string;
 startDate?: string;
 endDate?: string;
 pageable: Pageable;
+};
+
+export type RoutesParams = {
+startDate: string;
+endDate: string;
+sort?: string;
+direction?: string;
+limit?: number;
+};
+
+export type OperationsParams = {
+startDate: string;
+endDate: string;
+sort?: string;
+direction?: string;
+limit?: number;
 };
 
 export type List1Params = {
