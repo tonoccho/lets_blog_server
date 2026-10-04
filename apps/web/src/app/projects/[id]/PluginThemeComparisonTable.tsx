@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ProjectEnvironment, StatusComparisonPage, PluginThemeStatus } from "@/lib/apiClient";
+import type { ProjectEnvironment, StatusComparisonPage, PluginThemeStatus, StatusComparisonRow } from "@/lib/apiClient";
 import {
   applyToEnvironmentAction,
   applyToAllEnvironmentsAction,
