@@ -30,6 +30,15 @@ public interface LlmConfigProvider {
     String baseUrlFor(AiProvider provider);
 
     /**
+     * 実際に接続する先(issue #1547)。プロジェクトの上書き値は接続時に解決後のアドレスを検査し、検査した
+     * アドレスへ固定したURLを返す(拒否なら{@link com.letsblog.common.net.ForbiddenDestinationException})。
+     * 既定は検査なしで{@link #baseUrlFor}をそのまま使う。
+     */
+    default com.letsblog.common.net.GuardedTarget targetFor(AiProvider provider) {
+        return new com.letsblog.common.net.GuardedTarget(baseUrlFor(provider), null);
+    }
+
+    /**
      * 以降のbaseUrl解決の対象プロジェクトを宣言する(issue #1503)。OLLAMAはプロジェクト単位で接続先を
      * 上書きできるため、生成の前に呼ぶ。nullはプロジェクト非依存(システム設定のみ)。既定は何もしない。
      */

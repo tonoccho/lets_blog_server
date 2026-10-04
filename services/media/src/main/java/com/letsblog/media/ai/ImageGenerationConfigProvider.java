@@ -15,6 +15,15 @@ public interface ImageGenerationConfigProvider {
     String comfyUiBaseUrl(Long projectId);
 
     /**
+     * 実際に接続するComfyUIの接続先(issue #1547)。プロジェクトの上書き値は接続時に解決後のアドレスを検査し、
+     * 検査したアドレスへ固定したURLを返す(拒否なら{@link com.letsblog.common.net.ForbiddenDestinationException})。
+     * 既定は検査なしで{@link #comfyUiBaseUrl}をそのまま使う。
+     */
+    default com.letsblog.common.net.GuardedTarget comfyUiTarget(Long projectId) {
+        return new com.letsblog.common.net.GuardedTarget(comfyUiBaseUrl(projectId), null);
+    }
+
+    /**
      * ChatGPT画像生成のAPIキー。そのプロジェクトに設定されたキーだけを返し、無ければ(または
      * {@code projectId}がnullなら)null。システム設定・環境変数へはフォールバックしない(issue #1521)。
      */

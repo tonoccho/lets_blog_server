@@ -3,11 +3,14 @@ package com.letsblog.media.client;
 import com.letsblog.common.auth.ServiceTokenClient;
 import com.letsblog.common.auth.ServiceTokenUnavailableException;
 import com.letsblog.common.client.ServiceAuthHeaders;
+import com.letsblog.common.net.ConnectionDestinationGuard;
+import com.letsblog.common.net.GuardedTarget;
 import com.letsblog.media.ai.ImageGenerationConfigProvider;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Consumer;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -47,11 +50,23 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
     private final AiServiceConnectionClient aiServiceConnectionClient;
     private volatile CachedImageGenerationConfig cachedImageGenerationConfig;
 
+    private final ConnectionDestinationGuard destinationGuard;
+
+    @Autowired
     public PlatformServiceClient(
             RestClient.Builder builder,
             @Value("${app.platform-service-uri}") String platformServiceUri,
             ServiceTokenClient serviceTokenClient,
             AiServiceConnectionClient aiServiceConnectionClient) {
+        this(builder, platformServiceUri, serviceTokenClient, aiServiceConnectionClient,
+                ConnectionDestinationGuard.system());
+    }
+
+    /** テスト専用: 名前解決とインタフェース列挙を差し替えた検査を注入する(issue #1547)。 */
+    PlatformServiceClient(
+            RestClient.Builder builder, String platformServiceUri, ServiceTokenClient serviceTokenClient,
+            AiServiceConnectionClient aiServiceConnectionClient, ConnectionDestinationGuard destinationGuard) {
+        this.destinationGuard = destinationGuard;
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
@@ -78,6 +93,19 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
     public String comfyUiBaseUrl(Long projectId) {
         String override = projectId == null ? null : aiServiceConnectionClient.comfyUiBaseUrlOverride(projectId);
         return override != null ? override : imageGenerationConfig().comfyUiBaseUrl();
+    }
+
+    /**
+     * プロジェクトの上書きは接続時に解決後のアドレスを検査して固定したURLを返す(issue #1547)。
+     * システム設定の既定の接続先は検査しない。
+     */
+    @Override
+    public GuardedTarget comfyUiTarget(Long projectId) {
+        String override = projectId == null ? null : aiServiceConnectionClient.comfyUiBaseUrlOverride(projectId);
+        if (override == null) {
+            return new GuardedTarget(imageGenerationConfig().comfyUiBaseUrl(), null);
+        }
+        return destinationGuard.check("ComfyUI", override);
     }
 
     /** プロジェクトのキー(ai-service所有、issue #1521)だけ。無い・projectId未指定ならnullで、システム設定へは落とさない。 */

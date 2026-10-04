@@ -2,6 +2,7 @@ package com.letsblog.ai.service;
 
 import com.letsblog.ai.domain.ProjectAiSettings;
 import com.letsblog.ai.repository.ProjectAiSettingsRepository;
+import com.letsblog.common.net.DestinationAddressRules;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -299,30 +300,8 @@ public class ProjectAiSettingsService {
         }
     }
 
-    /** 4バイト(IPv4)または16バイト(IPv6)のアドレスが拒否対象か。 */
+    /** 4バイト(IPv4)または16バイト(IPv6)のアドレスが拒否対象か。接続時検査(issue #1547)と共通の規則。 */
     private static boolean isDeniedAddress(byte[] a) {
-        if (a.length == 4) {
-            int first = a[0] & 0xff;
-            boolean unspecified = a[0] == 0 && a[1] == 0 && a[2] == 0 && a[3] == 0;
-            return first == 127 || unspecified || (first == 169 && (a[1] & 0xff) == 254);
-        }
-        boolean allZeroButLast = true;
-        for (int i = 0; i < 15; i++) {
-            allZeroButLast &= a[i] == 0;
-        }
-        boolean unspecifiedOrLoopback = allZeroButLast && (a[15] == 0 || a[15] == 1);
-        boolean linkLocal = (a[0] & 0xff) == 0xfe && (a[1] & 0xc0) == 0x80;
-        boolean ec2Metadata = (a[0] & 0xff) == 0xfd && a[1] == 0x00 && a[2] == 0x0e && (a[3] & 0xff) == 0xc2
-                && isZero(a, 4, 14) && a[14] == 0x02 && (a[15] & 0xff) == 0x54;
-        return unspecifiedOrLoopback || linkLocal || ec2Metadata;
-    }
-
-    private static boolean isZero(byte[] a, int from, int toExclusive) {
-        for (int i = from; i < toExclusive; i++) {
-            if (a[i] != 0) {
-                return false;
-            }
-        }
-        return true;
+        return DestinationAddressRules.isDeniedAddress(a);
     }
 }

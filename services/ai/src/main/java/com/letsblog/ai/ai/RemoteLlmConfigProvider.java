@@ -4,10 +4,13 @@ import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.ProjectAiSettingsService;
 import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.common.net.ConnectionDestinationGuard;
+import com.letsblog.common.net.GuardedTarget;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,11 +35,23 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
     private final HttpServletRequest request;
     private final ProjectAiSettingsService projectAiSettingsService;
     private final CredentialCipher credentialCipher;
+    private final ConnectionDestinationGuard destinationGuard;
 
+    @Autowired
     public RemoteLlmConfigProvider(
             PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
             HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
             CredentialCipher credentialCipher) {
+        this(platformServiceClient, currentActorService, request, projectAiSettingsService, credentialCipher,
+                ConnectionDestinationGuard.system());
+    }
+
+    /** テスト専用: 名前解決とインタフェース列挙を差し替えた検査を注入する(issue #1547)。 */
+    RemoteLlmConfigProvider(
+            PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
+            HttpServletRequest request, ProjectAiSettingsService projectAiSettingsService,
+            CredentialCipher credentialCipher, ConnectionDestinationGuard destinationGuard) {
+        this.destinationGuard = destinationGuard;
         this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
         this.request = request;
@@ -111,6 +126,19 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
         }
         String projectOverride = provider == AiProvider.OLLAMA ? ollamaOverrideOfCurrentProject() : null;
         return projectOverride != null ? projectOverride : resolveFor(provider).baseUrl();
+    }
+
+    /**
+     * プロジェクトのOllama接続先の上書きは、接続時に解決後のアドレスを検査して固定したURLを返す(issue #1547)。
+     * システム設定の既定の接続先と、Ollama以外のプロバイダーは検査しない。
+     */
+    @Override
+    public GuardedTarget targetFor(AiProvider provider) {
+        String projectOverride = provider == AiProvider.OLLAMA ? ollamaOverrideOfCurrentProject() : null;
+        if (projectOverride == null) {
+            return new GuardedTarget(baseUrlFor(provider), null);
+        }
+        return destinationGuard.check("Ollama", projectOverride);
     }
 
     /** {@link #useProject}で宣言されたプロジェクトのOllama接続先の上書き。無い(null/空)ならnull(issue #1503)。 */

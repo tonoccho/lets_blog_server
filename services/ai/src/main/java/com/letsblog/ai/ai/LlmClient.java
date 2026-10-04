@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.letsblog.ai.config.LegacyJacksonRestClientConfig;
+import com.letsblog.common.net.ForbiddenDestinationException;
+import com.letsblog.common.net.GuardedTarget;
+import com.letsblog.common.net.PinnedHttpClients;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -135,11 +138,18 @@ public class LlmClient {
         if (provider == AiProvider.CLAUDE) {
             return generateWithClaude(prompt, model, apiKey);
         }
-        return generateWithOpenAiCompatible(prompt, model, apiKey, configProvider.baseUrlFor(provider), provider);
+        GuardedTarget target;
+        try {
+            target = configProvider.targetFor(provider);
+        } catch (ForbiddenDestinationException e) {
+            // 接続を試みずに失敗させる。メッセージは原因のプロジェクト設定を示す(issue #1547)。
+            throw new AiServiceException(e.getMessage(), e);
+        }
+        return generateWithOpenAiCompatible(prompt, model, apiKey, target, provider);
     }
 
     private String generateWithOpenAiCompatible(
-            String prompt, String modelName, String apiKey, String baseUrl, AiProvider provider) {
+            String prompt, String modelName, String apiKey, GuardedTarget target, AiProvider provider) {
         try {
             ArrayNode messages = JsonNodeFactory.instance.arrayNode();
             messages.add(JsonNodeFactory.instance.objectNode().put("role", "user").put("content", prompt));
@@ -150,7 +160,7 @@ public class LlmClient {
 
             // OLLAMAは自ホスト上のコンテナで認証を持たない。APIキーはそもそも解決されない(空)ため、
             // Authorizationヘッダ自体を付けない(issue #1086 / R4)。
-            JsonNode response = buildClient(baseUrl, provider == AiProvider.OLLAMA ? null : apiKey).post()
+            JsonNode response = buildClient(target, provider == AiProvider.OLLAMA ? null : apiKey).post()
                     .uri("/chat/completions")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -233,13 +243,13 @@ public class LlmClient {
     }
 
     /** apiKeyがnullの場合はAuthorizationヘッダを付けない(認証を持たないOLLAMA向け、issue #1086)。 */
-    private RestClient buildClient(String baseUrl, String apiKey) {
+    private RestClient buildClient(GuardedTarget target, String apiKey) {
         Duration requestTimeout = Duration.ofSeconds(configProvider.requestTimeoutSeconds());
-        JdkClientHttpRequestFactory requestFactory =
-                new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(requestTimeout).build());
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(
+                PinnedHttpClients.builder(target.sniHost(), requestTimeout).build());
         requestFactory.setReadTimeout(requestTimeout);
         RestClient.Builder builder = RestClient.builder()
-                .baseUrl(baseUrl)
+                .baseUrl(target.baseUrl())
                 .requestFactory(requestFactory);
         if (apiKey != null) {
             builder.defaultHeader("Authorization", "Bearer " + apiKey);

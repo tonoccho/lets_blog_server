@@ -2,11 +2,15 @@ package com.letsblog.media.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.letsblog.common.net.ForbiddenDestinationException;
+import com.letsblog.common.net.GuardedTarget;
+import com.letsblog.common.net.PinnedHttpClients;
 import com.letsblog.media.config.LegacyJacksonRestClientConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -14,6 +18,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -99,6 +104,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
     static final int MIN_POLL_ATTEMPTS = 120;
 
     private final RestClient client;
+    private final RestClient.Builder builderTemplate;
     private final ImageGenerationConfigProvider configProvider;
     private final String checkpointName;
     private final int pollIntervalMs;
@@ -118,10 +124,33 @@ public class ComfyUiClient implements ImageGenerationProvider {
     ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider,
                   String checkpointName, int pollIntervalMs) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        this.builderTemplate = builder.clone();
         this.client = builder.build();
         this.configProvider = configProvider;
         this.checkpointName = checkpointName;
         this.pollIntervalMs = pollIntervalMs;
+    }
+
+    /**
+     * 接続先の解決。プロジェクトの上書き値は接続時検査を通ったアドレスへ固定したものが返る。拒否されたら
+     * 接続を試みず、原因のプロジェクト設定を示すメッセージで失敗させる(issue #1547)。
+     */
+    private GuardedTarget targetOf(Long projectId) {
+        try {
+            return configProvider.comfyUiTarget(projectId);
+        } catch (ForbiddenDestinationException e) {
+            throw new AiServiceException(e.getMessage(), e);
+        }
+    }
+
+    /** httpsで元がホスト名だったときだけ、SNIに元のホスト名を載せた専用のクライアントで接続する。 */
+    private RestClient clientFor(GuardedTarget target) {
+        if (target.sniHost() == null) {
+            return client;
+        }
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                PinnedHttpClients.builder(target.sniHost(), Duration.ofSeconds(10)).build());
+        return builderTemplate.clone().requestFactory(factory).build();
     }
 
     /**
@@ -158,15 +187,17 @@ public class ComfyUiClient implements ImageGenerationProvider {
             throw new AiServiceException(
                     "ComfyUIの画像生成にはseedの実値が必要です(呼び出し側で解決してください)", null);
         }
-        String baseUrl = configProvider.comfyUiBaseUrl(params.projectId());
+        GuardedTarget target = targetOf(params.projectId());
+        String baseUrl = target.baseUrl();
+        RestClient http = clientFor(target);
         try {
-            return submitAndCollect(baseUrl, params);
+            return submitAndCollect(http, baseUrl, params);
         } catch (ResourceAccessException e) {
             throw unreachable(baseUrl, e);
         }
     }
 
-    private List<ComfyUiImage> submitAndCollect(String baseUrl, ComfyUiGenerationParams params) {
+    private List<ComfyUiImage> submitAndCollect(RestClient http, String baseUrl, ComfyUiGenerationParams params) {
         String clientId = UUID.randomUUID().toString();
         ObjectNode workflow = buildWorkflow(params);
 
@@ -176,7 +207,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
 
         String promptId;
         try {
-            JsonNode submitResponse = client.post()
+            JsonNode submitResponse = http.post()
                     .uri(baseUrl + "/prompt")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(requestBody)
@@ -187,7 +218,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
             throw new AiServiceException("ComfyUIへのジョブ投入に失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         }
 
-        List<JsonNode> outputImages = pollForResult(baseUrl, promptId, maxPollAttempts(params.batchSize()));
+        List<JsonNode> outputImages = pollForResult(http, baseUrl, promptId, maxPollAttempts(params.batchSize()));
         List<ComfyUiImage> images = new ArrayList<>();
         for (JsonNode outputImage : outputImages) {
             String filename = outputImage.get("filename").asText();
@@ -201,7 +232,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
                     .queryParam("type", type)
                     .build()
                     .toUri();
-            byte[] data = client.get()
+            byte[] data = http.get()
                     .uri(viewUri)
                     .retrieve()
                     .body(byte[].class);
@@ -209,14 +240,14 @@ public class ComfyUiClient implements ImageGenerationProvider {
             images.add(new ComfyUiImage(filename, data, "image/png"));
         }
 
-        clearMemory(baseUrl);
+        clearMemory(http, baseUrl);
 
         return images;
     }
 
-    private List<JsonNode> pollForResult(String baseUrl, String promptId, int maxPollAttempts) {
+    private List<JsonNode> pollForResult(RestClient http, String baseUrl, String promptId, int maxPollAttempts) {
         for (int attempt = 0; attempt < maxPollAttempts; attempt++) {
-            JsonNode history = client.get().uri(baseUrl + "/history/" + promptId).retrieve().body(JsonNode.class);
+            JsonNode history = http.get().uri(baseUrl + "/history/" + promptId).retrieve().body(JsonNode.class);
             JsonNode entry = history != null ? history.get(promptId) : null;
 
             if (entry != null && entry.has("outputs")) {
@@ -243,9 +274,11 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIに現在配置されているチェックポイント一覧を取得する(GET /object_info/CheckpointLoaderSimple)。
      */
     public List<String> listCheckpoints(Long projectId) {
-        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
+        GuardedTarget target = targetOf(projectId);
+        String baseUrl = target.baseUrl();
+        RestClient http = clientFor(target);
         try {
-            JsonNode response = client.get()
+            JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/CheckpointLoaderSimple")
                     .retrieve().body(JsonNode.class);
             List<String> checkpoints = new ArrayList<>();
@@ -269,9 +302,11 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIが対応しているサンプラー名の一覧を取得する(GET /object_info/KSampler)。
      */
     public List<String> listSamplers(Long projectId) {
-        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
+        GuardedTarget target = targetOf(projectId);
+        String baseUrl = target.baseUrl();
+        RestClient http = clientFor(target);
         try {
-            JsonNode response = client.get()
+            JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/KSampler")
                     .retrieve().body(JsonNode.class);
             List<String> samplers = new ArrayList<>();
@@ -295,9 +330,11 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * ComfyUIが対応しているスケジューラー名の一覧を取得する(GET /object_info/KSampler)。
      */
     public List<String> listSchedulers(Long projectId) {
-        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
+        GuardedTarget target = targetOf(projectId);
+        String baseUrl = target.baseUrl();
+        RestClient http = clientFor(target);
         try {
-            JsonNode response = client.get()
+            JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/KSampler")
                     .retrieve().body(JsonNode.class);
             List<String> schedulers = new ArrayList<>();
@@ -322,9 +359,11 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * LoraLoaderノードが未実装のComfyUI環境(HTTPエラー)では空リストを返す。到達できない場合は空リストへ丸めず{@link AiServiceException}(#1126)。
      */
     public List<String> listLoras(Long projectId) {
-        String baseUrl = configProvider.comfyUiBaseUrl(projectId);
+        GuardedTarget target = targetOf(projectId);
+        String baseUrl = target.baseUrl();
+        RestClient http = clientFor(target);
         try {
-            JsonNode response = client.get()
+            JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/LoraLoader")
                     .retrieve().body(JsonNode.class);
             List<String> loras = new ArrayList<>();
@@ -438,11 +477,11 @@ public class ComfyUiClient implements ImageGenerationProvider {
         return graph;
     }
 
-    private void clearMemory(String baseUrl) {
+    private void clearMemory(RestClient http, String baseUrl) {
         try {
             log.debug("Clearing ComfyUI VRAM memory after generation completion");
             ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-            client.post()
+            http.post()
                     .uri(baseUrl + "/api/interrupt")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
