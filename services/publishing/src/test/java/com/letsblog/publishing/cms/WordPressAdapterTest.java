@@ -51,7 +51,7 @@ class WordPressAdapterTest {
     private CmsCredentials.WordPressCredentials unsupportedCredentials() {
         return new CmsCredentials.WordPressCredentials(
                 "http://example.com", "admin",
-                "REST", null, null, null, null, null, null, null);
+                "FTP", null, null, null, null, null, null, null);
     }
 
     @Test

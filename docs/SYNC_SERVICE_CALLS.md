@@ -195,8 +195,7 @@ ai-service へ移設済みのエンドポイントを legacy-api に問い合わ
 ### 対象外(外部システム連携。C12のスコープ外)
 
 Keycloak Admin API(identity-service)、GitHub API(ai-service)、ComfyUI/PlantUMLサーバー/Penpot
-(media-service)、Google Analytics/AdSense API(analytics-service)、WordPress REST API
-(legacy-api)は、いずれも`lets_blog_server`内の別サービスではなく外部システムとの連携であり、
+(media-service)、Google Analytics/AdSense API(analytics-service)、WordPress(wp-cli・プロビジョニングエージェント)は、いずれも`lets_blog_server`内の別サービスではなく外部システムとの連携であり、
 本Issueが対象とする「サービス間(lbs-*間)同期呼び出し」には含めない。
 
 ### 対象外(ルーティング層。#573/#574/#578の既知の逸脱を維持)

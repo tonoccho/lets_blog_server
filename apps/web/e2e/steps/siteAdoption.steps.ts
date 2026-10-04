@@ -169,7 +169,7 @@ async function loginToWordPressAdmin(page: Page, slug: string, adminUser: string
 /**
  * 投稿編集画面(ブロックエディタ)はwp-json REST APIを介して保存するため、
  * `wpApiSettings.nonce`をページから読み取って直接REST APIへ投稿する
- * (project-serviceはアプリケーションパスワードを平文で返さないため、Basic認証は使えない。
+ * (project-serviceは秘匿フィールドを平文で返さないため、Basic認証は使えない。
  * 詳細はsite-adoption.featureの冒頭コメント参照)。
  */
 async function createRealPost(page: Page, slug: string, title: string): Promise<number> {

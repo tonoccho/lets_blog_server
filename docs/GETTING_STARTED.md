@@ -253,27 +253,28 @@ After logging in:
 
 1. Navigate to **Settings** → **Sites** (or Admin > Websites)
 2. Click **Add New Site**
-3. Fill in the following:
+3. Choose how the site is connected. Only these two connection methods exist:
+
+   - **Auto-provisioned (AGENT)** - Let's Blog creates a new WordPress site for you (or adopts one that was
+     already created by it). No credentials need to be entered.
+   - **SSH** - Connect an existing WordPress server with SSH and wp-cli.
+
+4. For an SSH connection, fill in the following:
 
    | Field | Example |
    |-------|---------|
    | **Site Name** | My Personal Blog |
    | **WordPress URL** | https://myblog.example.com |
-   | **Username** | admin |
-   | **App Password** | Generate from WordPress |
-   | **Description** | (Optional) Brief site description |
+   | **SSH Host** | myblog.example.com |
+   | **SSH User** | deploy |
+   | **WordPress Path** | /var/www/html |
+   | **SSH Key** | A saved key pair (or a newly generated one) |
 
-4. Click **Test Connection** to verify credentials
-5. Click **Save Site**
+5. Click **Test Connection** to verify the SSH connection
+6. Click **Save Site**
 
-#### Getting WordPress App Password
-
-1. Log in to your WordPress admin panel
-2. Navigate to **Users** → **Your Profile**
-3. Scroll to **Application Passwords**
-4. Enter an app name (e.g., "Let's Blog Server")
-5. Click **Create Application Password**
-6. Copy the generated password
+Register the public key of the SSH key pair in the `authorized_keys` of the SSH user on the WordPress server
+before testing the connection.
 
 ## Installing the VSCode Extension
 

@@ -994,7 +994,6 @@ async function ensureTokenLifecycleProject(request: APIRequestContext, ctx: Reco
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at1053-tlc-fixture',
-        appPassword: 'at1053-tlc fixture app password',
       },
     },
   });

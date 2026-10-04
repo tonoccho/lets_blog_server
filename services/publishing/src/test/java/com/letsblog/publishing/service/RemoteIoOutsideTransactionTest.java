@@ -114,7 +114,7 @@ class RemoteIoOutsideTransactionTest {
             when(siteService.getById(id)).thenReturn(Optional.of(site));
         }
         when(siteService.getCredentials(anyString())).thenReturn(
-                new CmsCredentials.WordPressCredentials("http://example.invalid", "u", "REST"));
+                new CmsCredentials.WordPressCredentials("http://example.invalid", "u", "AGENT"));
         when(cmsAdapterFactory.resolve(any())).thenReturn(cmsAdapter);
 
         // 「リモート呼び出し」を模した応答。呼ばれた瞬間のトランザクション/コネクション状態を記録する。

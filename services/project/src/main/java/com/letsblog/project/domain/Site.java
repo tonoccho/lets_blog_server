@@ -46,13 +46,6 @@ public class Site {
     @Column(name = "base_url", nullable = false, length = 500)
     private String baseUrl;
 
-    // 既存WordPressサイト向けの後方互換カラム(新規登録サイトはcredentialsEncryptedを使う)
-    @Column(name = "wp_username")
-    private String wpUsername;
-
-    @Column(name = "wp_app_password_encrypted")
-    private byte[] wpAppPasswordEncrypted;
-
     // CMS種別を問わない汎用の暗号化認証情報(JSON化してAES-256-GCMで暗号化)
     @Column(name = "credentials_encrypted")
     private byte[] credentialsEncrypted;

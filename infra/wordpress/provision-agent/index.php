@@ -212,8 +212,8 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // このWordPressインスタンスは常駐wordpressコンテナ内でのみ動作し、外部からは
     // 常にTLS終端済みのreverse-proxy経由、内部からは信頼されたlbs-net経由でのみアクセスされる。
     // 生の(TLS終端前の)HTTPアクセスが発生し得ないため、is_ssl()を常にtrueとして扱ってよい。
-    // これによりApplication Passwords認証(is_ssl()必須)がSpring Boot APIからの
-    // 内部プレーンHTTP呼び出しでも機能する。
+    // これにより、サイトURLがhttpsなのに内部のプレーンHTTPで受けるリクエストでも、
+    // WordPressがhttpsへリダイレクトし続けたり、httpsのURLをhttpで出力したりしない。
     $configPath = "$sitePath/wp-config.php";
     $configContents = file_get_contents($configPath);
     if ($configContents !== false) {
@@ -280,29 +280,18 @@ if ($path === '/provision' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         . "# END WordPress\n";
     file_put_contents("$sitePath/.htaccess", $htaccess);
 
-    [$code, $out, $err] = runWp([
-        'user', 'application-password', 'create',
-        "--path=$sitePath",
-        $adminUser, 'letsblog', '--porcelain', '--allow-root',
-    ]);
-    if ($code !== 0) {
-        cleanupAndRespond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => combinedOutput($out, $err)], $sitePath, $dbName, $dbHost, $rootPassword);
-    }
-    $applicationPassword = $out;
-
     runCommand(['chown', '-R', 'www-data:www-data', $sitePath]);
 
     respond(200, [
         'url' => $siteUrl,
         'adminUser' => $adminUser,
-        'applicationPassword' => $applicationPassword,
     ]);
 }
 
 /**
  * DBには登録されていないが、ディレクトリ・DBとしては既に構築済みのWordPressサイトを
  * 取り込むためのエンドポイント(issue #317)。/provisionと異なり新規構築は行わず、
- * 既存の管理ユーザーに対して新しいApplication Passwordを発行するのみ。
+ * 既存の管理ユーザーが存在することを確認し、接続先のURLと管理ユーザー名を返すのみ。
  */
 if ($path === '/adopt' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
@@ -329,19 +318,9 @@ if ($path === '/adopt' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         respond(404, ['error' => "ユーザー '$adminUser' がサイト '$slug' に見つかりません"]);
     }
 
-    [$code, $out, $err] = runWp([
-        'user', 'application-password', 'create',
-        "--path=$sitePath",
-        $adminUser, 'letsblog', '--porcelain', '--allow-root',
-    ]);
-    if ($code !== 0) {
-        respond(500, ['error' => 'アプリケーションパスワードの発行に失敗しました', 'detail' => combinedOutput($out, $err)]);
-    }
-
     respond(200, [
         'url' => "https://localhost/sites/$slug",
         'adminUser' => $adminUser,
-        'applicationPassword' => $out,
     ]);
 }
 

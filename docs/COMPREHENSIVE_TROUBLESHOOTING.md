@@ -848,11 +848,10 @@ Error: Invalid credentials
 
 **Solutions:**
 
-1. **Verify WordPress app password**
-   - Log in to WordPress admin
-   - **Users** → **Your Profile**
-   - **Application Passwords** section
-   - Verify password hasn't expired or been revoked
+1. **Verify the SSH connection (SSH sites)**
+   - Confirm the site's SSH host, SSH user and WordPress path are correct
+   - Confirm the public key of the site's SSH key pair is still in `authorized_keys` on the server
+   - Confirm `wp` (wp-cli) runs for that user in the WordPress path
 
 2. **Test connection in web panel**
    - Go to **Settings** → **Websites**
@@ -860,11 +859,10 @@ Error: Invalid credentials
    - Click **Test Connection**
    - Should show success or specific error
 
-3. **Regenerate app password**
-   - Delete old password from WordPress
-   - Create new app password
+3. **Replace the SSH key (SSH sites)**
+   - Generate a new SSH key pair and register its public key in `authorized_keys`
    - Update in Let's Blog: **Settings** → **Websites** → **Edit**
-   - Paste new password
+   - Select the new key pair
 
 4. **Check WordPress permissions**
    - Logged-in user must have publish capabilities

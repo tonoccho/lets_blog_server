@@ -176,7 +176,6 @@ Given('そのプロジェクトにサイトが紐付いている', async ({ requ
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at5-1-fixture',
-        appPassword: 'at5-1 fixture app password',
       },
     },
   });

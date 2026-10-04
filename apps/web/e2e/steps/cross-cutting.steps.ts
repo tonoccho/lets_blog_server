@@ -231,7 +231,6 @@ async function registerSiteFixture(request: APIRequestContext): Promise<SiteFixt
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at17-fixture',
-        appPassword: 'at17 fixture app password',
       },
     },
   });

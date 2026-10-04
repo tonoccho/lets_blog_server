@@ -60,7 +60,6 @@ async function bindFixtureSite(
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'mp1069-fixture',
-        appPassword: 'mp1069 fixture app password',
       },
     },
   });

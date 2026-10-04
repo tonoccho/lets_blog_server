@@ -40,10 +40,10 @@
 -- tag_design_settings。V1__create_project_tables.sqlのCREATE TABLE順と同じ)。
 
 INSERT INTO lbs_project.sites
-    (id, name, site_key, cms_type, base_url, wp_username, wp_app_password_encrypted, credentials_encrypted,
+    (id, name, site_key, cms_type, base_url, credentials_encrypted,
      created_at, updated_at, managed_wordpress, wp_slug, wp_db_name)
 SELECT
-    id, name, site_key, cms_type, base_url, wp_username, wp_app_password_encrypted, credentials_encrypted,
+    id, name, site_key, cms_type, base_url, credentials_encrypted,
     created_at, updated_at, managed_wordpress, wp_slug, wp_db_name
 FROM lets_blog.sites;
 

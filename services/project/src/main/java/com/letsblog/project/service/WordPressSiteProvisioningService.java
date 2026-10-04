@@ -77,7 +77,6 @@ public class WordPressSiteProvisioningService {
         Map<String, String> credentials = Map.of(
                 "baseUrl", internalUrl,
                 "username", result.adminUser(),
-                "appPassword", result.applicationPassword(),
                 "transport", "AGENT",
                 "wpSlug", slug);
 
@@ -132,7 +131,6 @@ public class WordPressSiteProvisioningService {
         Map<String, String> credentials = Map.of(
                 "baseUrl", internalUrl,
                 "username", result.adminUser(),
-                "appPassword", result.applicationPassword(),
                 "transport", "AGENT",
                 "wpSlug", slug);
 

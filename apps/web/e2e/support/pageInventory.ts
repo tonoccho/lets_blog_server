@@ -120,7 +120,6 @@ export async function buildPageFixtures(request: APIRequestContext): Promise<Pag
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at18-fixture',
-        appPassword: 'at18 fixture app password',
       },
     },
   });

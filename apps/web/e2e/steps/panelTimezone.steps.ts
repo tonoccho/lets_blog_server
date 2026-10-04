@@ -357,7 +357,6 @@ Given('TZ検証用のサイトが1件登録されている', async ({ ctx, reque
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'e2e-1363-fixture',
-        appPassword: 'e2e-1363 fixture app password',
       },
     },
   });

@@ -66,7 +66,6 @@ async function createFixtureSite(
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at5-2-fixture',
-        appPassword: 'at5-2 fixture app password',
       },
     },
   });

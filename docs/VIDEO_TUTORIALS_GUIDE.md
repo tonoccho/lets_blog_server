@@ -103,8 +103,8 @@ These videos should be watched in order during initial setup.
    - Step-by-step site configuration:
      - Site name
      - WordPress URL
-     - Username
-     - Generate and copy app password from WordPress
+     - Connection method (auto-provisioned or SSH)
+     - SSH host, SSH user, WordPress path and SSH key (SSH connection only)
    - Test connection
    - Verify success
 
@@ -114,7 +114,7 @@ These videos should be watched in order during initial setup.
    - Quick orientation
 
 **Screenshots/Video Segments:**
-- WordPress admin panel (showing app password generation)
+- WordPress admin panel (showing the SSH key pair registration)
 - Form filling with validation
 - Connection success message
 
@@ -354,7 +354,7 @@ These videos cover the main usage patterns.
 3. **WordPress publishing fails** (5 min)
    - Authentication errors
    - Network timeouts
-   - Solution: Verify app password
+   - Solution: Verify the SSH connection settings
    - Solution: Test connection in settings
 
 4. **AI features slow/unavailable** (3 min)

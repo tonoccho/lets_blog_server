@@ -67,7 +67,7 @@ class WordPressSiteProvisioningServiceTest {
     void createManagedSite_成功時にサイトをmanagedWordpressとして更新する() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
         when(provisioningClient.provision(any())).thenReturn(
-                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
                 1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
@@ -93,7 +93,7 @@ class WordPressSiteProvisioningServiceTest {
     void createManagedSite_サイト登録に失敗すればdeprovisionしてロールバックする() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
         when(provisioningClient.provision(any())).thenReturn(
-                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
         when(siteService.register(any())).thenThrow(new IllegalArgumentException("登録失敗"));
 
         CreateManagedWordPressSiteRequest request = new CreateManagedWordPressSiteRequest(
@@ -119,7 +119,7 @@ class WordPressSiteProvisioningServiceTest {
     void createManagedSite_localeが未指定なら既定でjaを使う() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
         when(provisioningClient.provision(any())).thenReturn(
-                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
                 1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
@@ -139,7 +139,7 @@ class WordPressSiteProvisioningServiceTest {
     void createManagedSite_templateSiteId指定時はテンプレートから複製する() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
         when(provisioningClient.provision(any())).thenReturn(
-                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
                 1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
@@ -167,7 +167,7 @@ class WordPressSiteProvisioningServiceTest {
     void createManagedSite_テンプレートが自動構築サイトでなければ例外にしdeprovisionする() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
         when(provisioningClient.provision(any())).thenReturn(
-                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
                 1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
         Site site = new Site();
@@ -265,7 +265,7 @@ class WordPressSiteProvisioningServiceTest {
     void adoptManagedSite_通常のadoptはwp_slugの衝突が無ければ登録されWARNログも出さない() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
         when(provisioningClient.adopt(any())).thenReturn(
-                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin", "app-pw"));
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
                 1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
 
@@ -309,7 +309,7 @@ class WordPressSiteProvisioningServiceTest {
         when(siteRepository.existsBySiteKey("target_key")).thenReturn(false);
         when(provisioningClient.adopt(any())).thenReturn(
                 new WordPressProvisioningClient.ProvisionResult(
-                        "https://localhost/sites/target-key", "admin", "app-pw"));
+                        "https://localhost/sites/target-key", "admin"));
         when(siteService.register(any())).thenReturn(new SiteResponse(
                 2L, "Name", "target_key", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
 
@@ -369,5 +369,45 @@ class WordPressSiteProvisioningServiceTest {
         verify(provisioningClient, never()).deprovision(any(), any());
         verify(siteRepository).delete(site);
         verify(domainEventPublisher).publishSiteDeleted(1L);
+    }
+
+    @Test
+    void createManagedSite_登録する認証情報にappPasswordを含めない_issue1565() {
+        when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
+        when(provisioningClient.provision(any())).thenReturn(
+                new WordPressProvisioningClient.ProvisionResult("https://localhost/sites/my-site", "admin"));
+        when(siteService.register(any())).thenReturn(new SiteResponse(
+                1L, "Name", "my-site", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
+        Site site = new Site();
+        site.setId(1L);
+        site.setSiteKey("my-site");
+        when(siteRepository.findBySiteKey("my-site")).thenReturn(Optional.of(site));
+
+        service().createManagedSite(new CreateManagedWordPressSiteRequest(
+                "Name", "my-site", "Title", "admin", "admin@example.com", "password", "ja", null));
+
+        verify(siteService).register(argThat(req -> !req.credentials().containsKey("appPassword")
+                && "AGENT".equals(req.credentials().get("transport"))
+                && "admin".equals(req.credentials().get("username"))));
+    }
+
+    @Test
+    void adoptManagedSite_登録する認証情報にappPasswordを含めない_issue1565() {
+        when(siteRepository.existsBySiteKey("target_key")).thenReturn(false);
+        when(provisioningClient.adopt(any())).thenReturn(
+                new WordPressProvisioningClient.ProvisionResult(
+                        "https://localhost/sites/target-key", "admin"));
+        when(siteService.register(any())).thenReturn(new SiteResponse(
+                2L, "Name", "target_key", null, null, Instant.now(), Instant.now(), "SUCCESS", false, false, null));
+        Site site = new Site();
+        site.setId(2L);
+        site.setSiteKey("target_key");
+        when(siteRepository.findBySiteKey("target_key")).thenReturn(Optional.of(site));
+
+        service().adoptManagedSite(new com.letsblog.project.dto.AdoptWordPressSiteRequest(
+                "Name", "target_key", "admin"));
+
+        verify(siteService).register(argThat(req -> !req.credentials().containsKey("appPassword")
+                && "AGENT".equals(req.credentials().get("transport"))));
     }
 }

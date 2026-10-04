@@ -33,7 +33,7 @@
   `POST /api/sites/{id}/reprovision`(`SiteService.reprovision`)はカテゴリ・タグ・著者を
   再設定するだけで投稿には触れない。「投稿データが失われない」ことを検証するには実際の
   投稿が必要だが、project-serviceのAPIは(取り込み・構築のいずれでも)WordPressの
-  アプリケーションパスワードを平文で返さない(`SiteService.getDetail`が秘匿フィールドを
+  秘匿フィールドを平文で返さない(`SiteService.getDetail`が秘匿フィールドを
   マスクする)ため、REST APIをBasic認証で直接叩けない。そこで、自分で指定した管理者
   ユーザー・パスワードでWordPress自身のログイン画面(`/sites/{slug}/wp-login.php`、
   project-serviceとは独立したWordPress本体の認証)からCookie認証し、投稿編集画面

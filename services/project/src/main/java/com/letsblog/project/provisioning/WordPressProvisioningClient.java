@@ -108,8 +108,7 @@ public class WordPressProvisioningClient {
 
     public record ProvisionResult(
             String url,
-            String adminUser,
-            String applicationPassword
+            String adminUser
     ) {
     }
 

@@ -24,6 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,7 +71,7 @@ class SiteServiceTest {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(true);
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"), null);
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u"), null);
 
         assertThrows(IllegalArgumentException.class, () -> service().register(request));
     }
@@ -86,7 +87,7 @@ class SiteServiceTest {
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"), null);
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u"), null);
 
         SiteResponse response = service().register(request);
 
@@ -143,9 +144,70 @@ class SiteServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service().register(request));
     }
 
+    private static Map<String, String> agentCredentialsWithoutAppPassword() {
+        return Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u");
+    }
+
+    @Test
+    void register_AGENTはappPasswordなしで登録できる_issue1565() {
+        when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
+        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
+        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com")))
+                .thenReturn(new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null));
+        when(bridgeClient.testConnection(eq("WORDPRESS"), any()))
+                .thenReturn(new ConnectionCheckResult(true, null, null, null));
+        when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SiteResponse response = service().register(new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
+                agentCredentialsWithoutAppPassword(), null));
+
+        assertEquals("my-site", response.siteKey());
+    }
+
+    @Test
+    void register_AGENTでusernameが空なら例外_issue1565() {
+        SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", ""), null);
+
+        assertThrows(IllegalArgumentException.class, () -> service().register(request));
+    }
+
+    @Test
+    void register_AGENTとSSH以外のtransportは拒否し何も保存しない_issue1565() {
+        for (String transport : new String[] {"REST", "rest", "FTP"}) {
+            SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
+                    Map.of("baseUrl", "https://example.com", "transport", transport, "username", "u",
+                            "appPassword", "p", "sshHost", "h", "sshUser", "u", "wpPath", "/var/www"), null);
+
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> service().register(request), transport);
+            assertTrue(e.getMessage().contains("AGENT"), e.getMessage());
+        }
+
+        verify(siteRepository, never()).save(any());
+        verifyNoInteractions(provisioningService, bridgeClient);
+    }
+
+    @Test
+    void update_transportをRESTへ変更する更新は拒否し保存しない_issue1565() {
+        Site site = new Site();
+        site.setId(5L);
+        site.setSiteKey("ssh-site");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setCredentialsEncrypted(credentialCipher.encrypt(
+                "{\"baseUrl\":\"https://x.example.com\",\"transport\":\"SSH\",\"sshHost\":\"h\","
+                        + "\"sshUser\":\"u\",\"wpPath\":\"/w\",\"sshKeyPairId\":\"1\"}"));
+        when(siteRepository.findById(5L)).thenReturn(Optional.of(site));
+
+        SiteUpdateRequest request = new SiteUpdateRequest(null, Map.of("transport", "REST"), null);
+
+        assertThrows(IllegalArgumentException.class, () -> service().update(5L, request));
+        verify(siteRepository, never()).save(any());
+    }
+
     private SiteRegisterRequest registerRequestWithAdminPath(String adminPath) {
         return new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u", "appPassword", "p"),
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u"),
                 adminPath);
     }
 
@@ -329,6 +391,24 @@ class SiteServiceTest {
         siteWithAdminPath("secret-login");
 
         assertEquals("secret-login", service().getDetail(1L).adminPath());
+    }
+
+    @Test
+    void getDetail_旧appPasswordが残っていても可視値にも設定済み秘匿項目にも含めない_issue1565() {
+        Site site = new Site();
+        site.setId(7L);
+        site.setSiteKey("legacy");
+        site.setCmsType(CmsType.WORDPRESS);
+        site.setCredentialsEncrypted(credentialCipher.encrypt(
+                "{\"baseUrl\":\"https://x.example.com\",\"transport\":\"SSH\","
+                        + "\"appPassword\":\"legacy-secret\"}"));
+        when(siteRepository.findById(7L)).thenReturn(Optional.of(site));
+
+        var detail = service().getDetail(7L);
+
+        assertFalse(detail.credentials().containsKey("appPassword"));
+        assertFalse(detail.configuredSecretFields().contains("appPassword"));
+        assertEquals("https://x.example.com", detail.credentials().get("baseUrl"));
     }
 
     @Test

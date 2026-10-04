@@ -194,7 +194,6 @@ Then('管理者はサイトの登録と削除を完了できる', async ({ reque
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at17-fixture',
-        appPassword: 'at17 fixture app password',
       },
     },
   });

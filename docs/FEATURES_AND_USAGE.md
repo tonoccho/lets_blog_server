@@ -131,11 +131,11 @@ The dashboard provides an overview of your blog system:
 
 1. Navigate to **Settings** → **Websites**
 2. Click **Add Website**
-3. Fill in:
+3. Choose the connection method (auto-provisioned, or SSH) and fill in:
    - **Site Name** - Friendly name for reference
    - **WordPress URL** - Full URL of WordPress installation
-   - **Username** - WordPress admin username
-   - **Application Password** - Generated from WordPress
+   - **SSH Host / SSH User / WordPress Path / SSH Key** - Connection details for an SSH site
+     (not needed for an auto-provisioned site)
 4. Click **Test Connection**
 5. Click **Save**
 

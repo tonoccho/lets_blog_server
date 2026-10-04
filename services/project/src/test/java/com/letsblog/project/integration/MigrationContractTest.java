@@ -5,10 +5,12 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * project-service の Flyway マイグレーションの契約テスト(issue #914)。
@@ -33,6 +35,24 @@ class MigrationContractTest {
 
     @Autowired
     private Flyway flyway;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Test
+    @DisplayName("sitesテーブルに廃止済みのREST接続用の列(wp_username / wp_app_password_encrypted)がない(issue #1565)")
+    void sitesに旧REST列がない() {
+        Integer legacyColumns = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+                        + "AND table_name = 'sites' AND column_name IN ('wp_username', 'wp_app_password_encrypted')",
+                Integer.class);
+        assertEquals(0, legacyColumns);
+        Integer credentialsColumn = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() "
+                        + "AND table_name = 'sites' AND column_name = 'credentials_encrypted'",
+                Integer.class);
+        assertEquals(1, credentialsColumn);
+    }
 
     @Test
     @DisplayName("2回目のマイグレーションは0件(冪等である)")

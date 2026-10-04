@@ -224,18 +224,20 @@ public class SiteService {
         }
     }
 
-    /** サイトの認証情報を復号し、生のMapとして返す(汎用列を優先し、Phase2以前のレガシー列にフォールバック)。 */
+    /** サイトの認証情報を復号し、生のMapとして返す。 */
     private Map<String, String> getRawCredentials(Site site) {
         Map<String, String> credentials;
         if (site.getCredentialsEncrypted() != null) {
             credentials = readCredentialsJson(credentialCipher.decrypt(site.getCredentialsEncrypted()));
-        } else if (site.getWpUsername() != null && site.getWpAppPasswordEncrypted() != null) {
-            credentials = new HashMap<>();
-            credentials.put("baseUrl", site.getBaseUrl());
-            credentials.put("username", site.getWpUsername());
-            credentials.put("appPassword", credentialCipher.decrypt(site.getWpAppPasswordEncrypted()));
         } else {
             throw new IllegalStateException("サイト '" + site.getSiteKey() + "' の認証情報が無効です");
+        }
+
+        // 廃止したREST接続の appPassword が起動時掃除(LegacyAppPasswordCleanup)前に残っていても、
+        // 詳細表示などへ出さない (#1565)。
+        if (credentials.containsKey("appPassword")) {
+            credentials = new HashMap<>(credentials);
+            credentials.remove("appPassword");
         }
 
         if (site.isManagedWordpress()) {
@@ -346,10 +348,10 @@ public class SiteService {
     }
 
     private static final Set<String> SECRET_CREDENTIAL_KEYS =
-            Set.of("appPassword", "sshPrivateKeyPem", "apiKey", "managementApiKey");
+            Set.of("sshPrivateKeyPem", "apiKey", "managementApiKey");
 
     /**
-     * サイト管理画面表示用に、現在の設定値を返す。appPassword等のシークレットは値を返さず、
+     * サイト管理画面表示用に、現在の設定値を返す。sshPrivateKeyPem等のシークレットは値を返さず、
      * どのキーが設定済みかのみをconfiguredSecretFieldsとして返す。
      */
     @Transactional(readOnly = true)
@@ -455,6 +457,9 @@ public class SiteService {
     }
 
     private void validateCredentials(CmsType cmsType, Map<String, String> credentials) {
+        if (cmsType == CmsType.WORDPRESS && !isAgentTransport(credentials) && !isSshTransport(credentials)) {
+            throw new IllegalArgumentException(cmsType + ": transport は AGENT または SSH のいずれかを指定してください");
+        }
         for (String key : requiredCredentialKeys(cmsType, credentials)) {
             if (!StringUtils.hasText(credentials.get(key))) {
                 throw new IllegalArgumentException(cmsType + ": " + key + " は必須です");
@@ -468,7 +473,7 @@ public class SiteService {
     private List<String> requiredCredentialKeys(CmsType cmsType, Map<String, String> credentials) {
         return switch (cmsType) {
             case WORDPRESS -> isAgentTransport(credentials)
-                    ? List.of("baseUrl", "username", "appPassword")
+                    ? List.of("baseUrl", "username")
                     : List.of("baseUrl", "transport", "sshHost", "sshUser", "wpPath");
         };
     }

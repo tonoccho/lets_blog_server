@@ -416,7 +416,6 @@ Chromiumがそのまま参照するため、Linuxのような追加ツールは�
   紐付けているサイトも指定できる(issue #511、`ProjectEnvironmentSyncService#syncFromSshManagedSite`)。
   ただし同期元がSSH管理サイトの場合、同期できる対象はDB・メディア・テーマに限られ、
   プラグインは同期できない(`SSH_SOURCE_SUPPORTED_TARGETS`)。
-- REST接続で紐付けているプロジェクトを同期元にする経路は、現時点では未対応(将来の拡張予定)。
 
 **手順**:
 

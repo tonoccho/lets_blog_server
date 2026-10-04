@@ -182,7 +182,6 @@ async function createAnalyticsProject(
         transport: 'AGENT',
         baseUrl: 'http://wordpress',
         username: 'at13-fixture',
-        appPassword: 'at13 fixture app password',
       },
     },
   });
