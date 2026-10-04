@@ -64,6 +64,8 @@ class ImageGenerationServiceBatchTest {
     @Mock
     private ProhibitedContentFilterService prohibitedContentFilterService;
     @Mock
+    private ReferenceImageService referenceImageService;
+    @Mock
     private HttpServletRequest request;
 
     private ImageGenerationService service;
@@ -74,7 +76,7 @@ class ImageGenerationServiceBatchTest {
                 aiGenerationClient, comfyUiClient, chatGptImageClient, imageModelService, comfyUiModelService,
                 generatedImageCreationService, generationJobClient, new ObjectMapper(), defaultsResolver,
                 prohibitedContentFilterService, new SafetyNegativePromptService("a", "b", "c"),
-                new SeedResolver(), request);
+                new SeedResolver(), referenceImageService, request);
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("g.safetensors");
         when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":[]}");

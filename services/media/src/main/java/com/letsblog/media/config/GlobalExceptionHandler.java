@@ -15,7 +15,9 @@ import com.letsblog.common.client.GenerationJobBridgeException;
 import com.letsblog.media.service.IdentityServiceUnavailableException;
 import com.letsblog.media.service.InvalidPagingParameterException;
 import com.letsblog.media.service.ProhibitedContentException;
+import com.letsblog.media.service.InvalidReferenceImageException;
 import com.letsblog.media.service.UnsupportedBatchSizeException;
+import com.letsblog.media.service.UnsupportedReferenceImageException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -61,6 +63,23 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(UnsupportedBatchSizeException.class)
     public ResponseEntity<ErrorResponse> handleUnsupportedBatchSize(UnsupportedBatchSizeException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * issue #1601: 参照画像が使えない(削除済み・他プロジェクト・プロジェクト未指定)。要求の誤りなので400。
+     * ジョブを作る前に投げるため、生成は始まらない。
+     */
+    @ExceptionHandler(InvalidReferenceImageException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidReferenceImage(InvalidReferenceImageException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * issue #1601: 選択中の画像生成AIが参照画像付き生成に未対応(ChatGPT。対応は#1602)。400で理由を返す。
+     */
+    @ExceptionHandler(UnsupportedReferenceImageException.class)
+    public ResponseEntity<ErrorResponse> handleUnsupportedReferenceImage(UnsupportedReferenceImageException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 

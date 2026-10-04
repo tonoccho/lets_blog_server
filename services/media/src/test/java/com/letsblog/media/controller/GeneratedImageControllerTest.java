@@ -206,6 +206,27 @@ class GeneratedImageControllerTest {
         assertEquals(1, result.batchIndex());
     }
 
+    /** issue #1601: img2imgで生成した画像は、詳細で参照元の画像IDを返す。 */
+    @Test
+    void get_参照元の画像IDを詳細で返す() {
+        GeneratedImage image = buildImage(1L, "a cat", null);
+        image.setSourceImageId(5L);
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+
+        GeneratedImageDetailResponse result = controller.get(1L);
+
+        assertEquals(5L, result.sourceImageId());
+    }
+
+    /** issue #1601: 参照画像を使っていない画像の参照元はnull。 */
+    @Test
+    void get_参照元が無い画像はsourceImageIdがnull() {
+        GeneratedImage image = buildImage(1L, "a cat", null);
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+
+        assertNull(controller.get(1L).sourceImageId());
+    }
+
     /** issue #1101: CHATGPT由来の画像はseedを持たないため、詳細でもNULLのまま返る。 */
     @Test
     void get_CHATGPT由来の画像はseedがnullのまま返る() {

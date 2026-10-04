@@ -5,6 +5,7 @@
  * media-service の `ComfyUiClient` は ComfyUI を「キューへ投入して結果をポーリングする」
  * 非同期APIとして扱う。スタブが実装するのは、そのクライアントが実際に叩く経路だけである。
  *
+ *   POST /upload/image                        参照画像のアップロード(img2img、issue #1601) → {name, subfolder, type}
  *   POST /prompt                              ワークフロー投入 → prompt_id
  *   GET  /history/{promptId}                  outputs.images(枚数ぶん)
  *   GET  /view?filename=&subfolder=&type=     画像バイト列(PNG)
@@ -79,8 +80,25 @@ const MAX_BATCH_SIZE = 64;
 /** 投入されたワークフローの記録。prompt_id 順(古い順)。 */
 let prompts = [];
 
+/**
+ * `/upload/image` で受け取った参照画像の記録(issue #1601)。画像の中身は保持しない
+ * (ファイル名と、受信したバイト数の目安だけ)。受け入れテストが「参照画像が実際に送られたか」と
+ * 「LoadImage が指すファイル名が送られたものと一致するか」を確かめるために使う。
+ */
+let uploads = [];
+/** 受け取った累計。`uploads` は上限で切り詰めるため、増減の比較にはこちらを使う。 */
+let uploadCount = 0;
+
 function resetPrompts() {
   prompts = [];
+  uploads = [];
+  uploadCount = 0;
+}
+
+/** multipart の `filename="..."` を取り出す。無ければ null。 */
+function uploadedFilename(body) {
+  const match = /filename="([^"]+)"/.exec(body || '');
+  return match ? match[1] : null;
 }
 
 /** キーを再帰的にソートした JSON。オブジェクトのキー順が違うだけで別物にならないようにする。 */
@@ -121,9 +139,12 @@ function describe(workflow, promptId) {
   const sampler = inputsOf(workflow, 'KSampler');
   const checkpoint = inputsOf(workflow, 'CheckpointLoaderSimple');
   const lora = inputsOf(workflow, 'LoraLoader');
+  const loadImage = inputsOf(workflow, 'LoadImage');
+  const scaleNode = nodeOf(workflow, 'ImageScale');
   const positive = nodeOf(workflow, 'CLIPTextEncode');
 
-  const requested = Number(latent.batch_size);
+  const repeat = inputsOf(workflow, 'RepeatLatentBatch');
+  const requested = Number(latent.batch_size ?? repeat.amount);
   const batchSize = Number.isFinite(requested) && requested > 0
     ? Math.min(MAX_BATCH_SIZE, Math.floor(requested))
     : 1;
@@ -141,6 +162,15 @@ function describe(workflow, promptId) {
     scheduler: sampler.scheduler ?? null,
     checkpoint: checkpoint.ckpt_name ?? null,
     loraName: lora.lora_name ?? null,
+    // img2img(issue #1601)。参照画像を読み込むワークフローなら LoadImage が指すファイル名、無ければ null。
+    referenceImage: loadImage.image ?? null,
+    denoise: sampler.denoise === undefined ? null : Number(sampler.denoise),
+    // txt2img は空の潜在画像(EmptyLatentImage)から始まり、img2img は始まらない。
+    hasEmptyLatent: nodeOf(workflow, 'EmptyLatentImage') !== null,
+    // 参照画像を生成サイズへ合わせるリサイズ(ImageScale)。無ければ null。
+    scale: scaleNode && scaleNode.inputs
+      ? { width: Number(scaleNode.inputs.width), height: Number(scaleNode.inputs.height) }
+      : null,
     prompt: positive && positive.inputs ? (positive.inputs.text ?? null) : null,
   };
 }
@@ -248,12 +278,27 @@ createStub({
   /** 投入の記録を `/__control/state` から読めるようにする(#1106 Requirements 3)。 */
   extraState: () => ({
     prompts: prompts.map(({ images, ...rest }) => ({ ...rest, images: images.length })),
+    uploads,
+    uploadCount,
     lastSeed: prompts.length > 0 ? prompts[prompts.length - 1].seed : null,
   }),
   async handle({ method, pathname, query, body, res, sendJson, sendBinary }) {
     // ComfyUI は同じAPIを `/api` 付きでも公開している。クライアントは `/prompt` を使うが、
     // どちらで来ても同じ扱いにする。
     const path = pathname.replace(/^\/api(?=\/)/, '');
+
+    if (method === 'POST' && path === '/upload/image') {
+      const name = uploadedFilename(body);
+      if (!name) {
+        sendJson(res, 400, { error: { type: 'invalid_upload', message: 'image パートがありません' } });
+        return true;
+      }
+      uploadCount += 1;
+      uploads.push({ name, bytes: body.length });
+      if (uploads.length > MAX_PROMPTS) uploads = uploads.slice(-MAX_PROMPTS);
+      sendJson(res, 200, { name, subfolder: '', type: 'input' });
+      return true;
+    }
 
     if (method === 'POST' && path === '/prompt') {
       let workflow = null;

@@ -25,6 +25,8 @@ public record GeneratedImageDetailResponse(
         List<String> tags,
         String provider,
         /** 所属フォルダ(issue #1493)。nullは未分類。 */
-        Long folderId
+        Long folderId,
+        /** img2imgの参照元の画像ID(issue #1601)。参照画像を使っていない画像はnull。 */
+        Long sourceImageId
 ) {
 }

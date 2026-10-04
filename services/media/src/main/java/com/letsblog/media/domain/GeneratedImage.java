@@ -96,6 +96,10 @@ public class GeneratedImage {
     @Column(name = "folder_id")
     private Long folderId;
 
+    /** img2imgの参照元の画像ID(issue #1601)。参照画像を使っていない画像はnull。参照元が削除されても残る。 */
+    @Column(name = "source_image_id")
+    private Long sourceImageId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

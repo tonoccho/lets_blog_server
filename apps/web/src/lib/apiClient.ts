@@ -96,6 +96,8 @@ export interface GeneratedImageDetail extends GeneratedImageSummary {
   batchIndex: number | null;
   loraName: string | null;
   loraWeight: number | null;
+  /** img2imgの参照元の画像ID(issue #1601)。参照画像を使っていない画像はnull。 */
+  sourceImageId?: number | null;
 }
 
 export interface SiteRegisterInput {
@@ -645,6 +647,10 @@ export interface AiImageGenerationParams {
   loraName?: string;
   loraWeight?: number;
   projectId?: number;
+  /** img2imgの参照画像(同じプロジェクトのギャラリー画像のID、issue #1601)。省略するとtxt2img。 */
+  referenceImageId?: number;
+  /** img2imgの変化の強さ(0〜1、issue #1601)。参照画像があるときだけ使われ、省略すると0.6。 */
+  denoise?: number;
 }
 
 /**

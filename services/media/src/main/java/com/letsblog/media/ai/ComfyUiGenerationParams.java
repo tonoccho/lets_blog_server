@@ -20,15 +20,28 @@ public record ComfyUiGenerationParams(
         String loraName,
         Double loraWeight,
         /** 接続先(ComfyUI)をプロジェクト単位で解決するためのプロジェクト。nullならシステム設定(issue #1503)。 */
-        Long projectId
+        Long projectId,
+        /** img2imgの参照画像(issue #1601)。nullならtxt2img(従来どおり)。 */
+        ReferenceImage referenceImage,
+        /** img2imgの変化の強さ(0〜1)。参照画像があるときだけ使う。nullなら既定の0.6。 */
+        Double denoise
 ) {
+    /** 参照画像を持たない呼び出し(txt2img)向け。 */
+    public ComfyUiGenerationParams(
+            String prompt, String negativePrompt, Integer steps, Double cfgScale, String samplerName,
+            String scheduler, Long seed, Integer width, Integer height, Integer batchSize, String checkpoint,
+            String loraName, Double loraWeight, Long projectId) {
+        this(prompt, negativePrompt, steps, cfgScale, samplerName, scheduler, seed, width, height, batchSize,
+                checkpoint, loraName, loraWeight, projectId, null, null);
+    }
+
     /** projectIdを持たない呼び出し(システム設定の接続先を使う)向け。 */
     public ComfyUiGenerationParams(
             String prompt, String negativePrompt, Integer steps, Double cfgScale, String samplerName,
             String scheduler, Long seed, Integer width, Integer height, Integer batchSize, String checkpoint,
             String loraName, Double loraWeight) {
         this(prompt, negativePrompt, steps, cfgScale, samplerName, scheduler, seed, width, height, batchSize,
-                checkpoint, loraName, loraWeight, null);
+                checkpoint, loraName, loraWeight, null, null, null);
     }
 
     public static ComfyUiGenerationParams withDefaults(String prompt) {

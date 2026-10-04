@@ -51,6 +51,8 @@ const DEFAULTS = {
   batchSize: 4,
   batchCount: 1,
   loraWeight: 1.0,
+  // 参照画像(img2img)の変化の強さ。サーバーの既定と同じ(issue #1601)。
+  denoise: 0.6,
 };
 
 /** 空文字列は空欄のまま保持する。Number("") は0になり、入力欄が勝手に「0」へ書き換わるため(#1115)。 */
@@ -120,6 +122,11 @@ export function ProjectAssetGenerationPanel({
   const [gallerySelectedId, setGallerySelectedId] = useState<number | null>(null);
   const [galleryUploading, setGalleryUploading] = useState(false);
 
+  // img2imgの参照画像(issue #1601)。選択肢はギャラリーの一覧(gallery*)を共用する。
+  const [referenceOpen, setReferenceOpen] = useState(false);
+  const [referenceId, setReferenceId] = useState<number | null>(null);
+  const [denoise, setDenoise] = useState<number | "">(DEFAULTS.denoise);
+
   // 手元の画像のアップロード(issue #1599)。
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -169,6 +176,9 @@ export function ProjectAssetGenerationPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageJobId]);
 
+  // 参照画像にできるのは、このプロジェクトのギャラリー画像だけ(別プロジェクトの画像はサーバーが拒否する)。
+  const referenceCandidates = galleryImages?.filter((img) => img.projectId === projectId) ?? null;
+
   const effectiveBatchSize = batchSize === "" ? DEFAULTS.batchSize : batchSize;
   const effectiveBatchCount = batchCount === "" ? DEFAULTS.batchCount : batchCount;
 
@@ -176,6 +186,16 @@ export function ProjectAssetGenerationPanel({
     if (!prompt.trim()) {
       setMessage({ type: "error", text: "promptを入力してください。" });
       return;
+    }
+    // 参照画像を選んでいるときだけ、参照画像IDと変化の強さを送る(選ばなければ従来のtxt2img)。
+    let referenceParams: { referenceImageId?: number; denoise?: number } = {};
+    if (referenceId != null) {
+      const effectiveDenoise = denoise === "" ? DEFAULTS.denoise : denoise;
+      if (effectiveDenoise < 0 || effectiveDenoise > 1) {
+        setMessage({ type: "error", text: "denoiseは0〜1の範囲で指定してください。" });
+        return;
+      }
+      referenceParams = { referenceImageId: referenceId, denoise: effectiveDenoise };
     }
     setMessage(null);
     const result = await requestProjectImageJobAction(projectId, {
@@ -193,6 +213,7 @@ export function ProjectAssetGenerationPanel({
       checkpoint: checkpoint || undefined,
       loraName: loraName || undefined,
       loraWeight: loraName ? (loraWeight === "" ? DEFAULTS.loraWeight : loraWeight) : undefined,
+      ...referenceParams,
     });
     if (result.error) {
       setMessage({ type: "error", text: result.error });
@@ -347,9 +368,8 @@ export function ProjectAssetGenerationPanel({
     }
   }
 
-  /** 生成画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。 */
-  async function handleGalleryToggle() {
-    setGalleryOpen((v) => !v);
+  /** 生成画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。読み込み済みなら何もしない。 */
+  async function loadGalleryImages() {
     if (galleryImages || galleryLoading) return;
     setGalleryLoading(true);
     try {
@@ -360,6 +380,17 @@ export function ProjectAssetGenerationPanel({
     } finally {
       setGalleryLoading(false);
     }
+  }
+
+  async function handleGalleryToggle() {
+    setGalleryOpen((v) => !v);
+    await loadGalleryImages();
+  }
+
+  /** 参照画像の選択肢を開閉する(issue #1601)。開くときにギャラリーの一覧を読み込む。 */
+  async function handleReferenceToggle() {
+    setReferenceOpen((v) => !v);
+    await loadGalleryImages();
   }
 
   async function handleGalleryUpload() {
@@ -546,6 +577,87 @@ export function ProjectAssetGenerationPanel({
                   </button>
                 </div>
                 {chatError && <p className="text-xs text-red-600">{chatError}</p>}
+              </>
+            )}
+          </div>
+          <div data-testid="reference-image-section" className={SUBSECTION_CLASS}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">参照画像(img2img)</h3>
+              <button
+                type="button"
+                onClick={handleReferenceToggle}
+                className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline"
+              >
+                {referenceOpen ? "閉じる" : "参照画像を選ぶ"}
+              </button>
+            </div>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              このプロジェクトのギャラリーの画像を1枚選ぶと、その構図・雰囲気を残して生成します(ComfyUIのみ)。
+            </p>
+            {referenceId != null && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/image-gallery/${referenceId}/file`}
+                    alt={`参照画像 ${referenceId}`}
+                    className="h-16 w-16 rounded bg-neutral-100 object-contain dark:bg-neutral-800"
+                  />
+                  <span className="text-xs">選択中の参照画像: ID {referenceId}</span>
+                  <button
+                    type="button"
+                    onClick={() => setReferenceId(null)}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    参照画像を解除
+                  </button>
+                </div>
+                <div>
+                  <label htmlFor="asset-denoise" className="block text-sm font-medium">
+                    denoise(変化の強さ 0〜1、大きいほど参照画像から離れる)
+                  </label>
+                  <input
+                    id="asset-denoise"
+                    type="number"
+                    step={0.05}
+                    min={0}
+                    max={1}
+                    className="mt-1 w-32 rounded border border-neutral-300 dark:border-neutral-700 p-2 text-sm"
+                    value={denoise}
+                    onChange={(e) => setDenoise(toNumberOrEmpty(e.target.value))}
+                  />
+                </div>
+              </div>
+            )}
+            {referenceOpen && (
+              <>
+                {galleryLoading && <p className="text-xs text-neutral-500 dark:text-neutral-400">読み込んでいます…</p>}
+                {referenceCandidates && referenceCandidates.length === 0 && (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    このプロジェクトのギャラリーに参照できる画像がありません。
+                  </p>
+                )}
+                {referenceCandidates && referenceCandidates.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                    {referenceCandidates.map((img) => (
+                      <button
+                        type="button"
+                        key={img.id}
+                        onClick={() => setReferenceId(img.id)}
+                        className={`rounded border-2 p-1 ${
+                          referenceId === img.id ? "border-blue-600" : "border-transparent"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/image-gallery/${img.id}/file`}
+                          alt={img.prompt ?? "アップロード画像"}
+                          className="aspect-square w-full rounded bg-neutral-100 object-contain dark:bg-neutral-800"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>

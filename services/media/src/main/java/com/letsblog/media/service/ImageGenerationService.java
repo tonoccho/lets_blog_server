@@ -8,6 +8,7 @@ import com.letsblog.media.ai.ComfyUiGenerationParams;
 import com.letsblog.media.ai.ComfyUiImage;
 import com.letsblog.media.ai.ImageGenerationProvider;
 import com.letsblog.media.ai.ImageProvider;
+import com.letsblog.media.ai.ReferenceImage;
 import com.letsblog.media.ai.SeedResolver;
 import com.letsblog.media.client.AiGenerationClient;
 import com.letsblog.common.client.GenerationJobClient;
@@ -90,6 +91,7 @@ public class ImageGenerationService {
     private final ProhibitedContentFilterService prohibitedContentFilterService;
     private final SafetyNegativePromptService safetyNegativePromptService;
     private final SeedResolver seedResolver;
+    private final ReferenceImageService referenceImageService;
     private final HttpServletRequest request;
 
     public ImageGenerationService(
@@ -105,6 +107,7 @@ public class ImageGenerationService {
             ProhibitedContentFilterService prohibitedContentFilterService,
             SafetyNegativePromptService safetyNegativePromptService,
             SeedResolver seedResolver,
+            ReferenceImageService referenceImageService,
             HttpServletRequest request) {
         this.aiGenerationClient = aiGenerationClient;
         this.comfyUiClient = comfyUiClient;
@@ -118,6 +121,7 @@ public class ImageGenerationService {
         this.prohibitedContentFilterService = prohibitedContentFilterService;
         this.safetyNegativePromptService = safetyNegativePromptService;
         this.seedResolver = seedResolver;
+        this.referenceImageService = referenceImageService;
         this.request = request;
     }
 
@@ -144,6 +148,7 @@ public class ImageGenerationService {
         // ジョブを作る前に判定する。プロバイダが受け付けない枚数は生成が1枚も始まらないので、
         // 履歴に「失敗したジョブ」を残す意味が無い(受入基準「生成は開始されない」)。
         requireBatchSizeWithinProviderLimit(provider, batchSize);
+        requireReferenceImageAcceptable(provider, imageRequest);
         Long jobId = startJob(
                 provider == ImageProvider.CHATGPT ? "chatgpt_image" : "comfyui_image",
                 Map.of("prompt", imageRequest.prompt()));
@@ -169,6 +174,7 @@ public class ImageGenerationService {
         ImageProvider provider = imageModelService.getSelectedProvider(imageRequest.projectId());
         requireBatchSizeWithinProviderLimit(
                 provider, imageRequest.batchSize() != null ? imageRequest.batchSize() : 1);
+        requireReferenceImageAcceptable(provider, imageRequest);
         return provider;
     }
 
@@ -215,8 +221,12 @@ public class ImageGenerationService {
         boolean blockDiscriminatory = defaultsResolver.resolveBlockDiscriminatoryContent(imageRequest.projectId());
         prohibitedContentFilterService.check(prompt, blockSexual, blockViolent, blockDiscriminatory);
         String tagsJson = suggestImageTagsJson(prompt);
+        // 参照画像(img2img、issue #1601)はリピート間で変わらないので、1回だけ読み込んで使い回す。
+        ReferenceImage referenceImage = provider == ImageProvider.COMFYUI && imageRequest.referenceImageId() != null
+                ? referenceImageService.load(imageRequest.projectId(), imageRequest.referenceImageId())
+                : null;
         ComfyUiGenerationParams baseParams = resolveParams(
-                imageRequest, prompt, provider, blockSexual, blockViolent, blockDiscriminatory);
+                imageRequest, prompt, provider, blockSexual, blockViolent, blockDiscriminatory, referenceImage);
         List<AiImageResponse> responses = new ArrayList<>();
         RuntimeException firstFailure = null;
         int consecutiveFailures = 0;
@@ -295,13 +305,29 @@ public class ImageGenerationService {
                     params.cfgScale(), params.samplerName(), params.scheduler(), params.seed(),
                     params.width(), params.height(), params.batchSize(), batchIndex, params.checkpoint(),
                     params.loraName(), params.loraWeight(), image.mimeType(), provider.name(), tagsJson,
-                    image.data())).getId();
+                    image.data(), imageRequest.referenceImageId())).getId();
             String base64 = includeImageData ? Base64.getEncoder().encodeToString(image.data()) : null;
             responses.add(new AiImageResponse(
                     savedId, image.fileName(), base64, image.mimeType(), params.seed(), batchIndex));
             batchIndex++;
         }
         return responses;
+    }
+
+    /**
+     * 参照画像(img2img、issue #1601)を受け付けられるか、ジョブを作る前に判定する。ChatGPTは未対応
+     * (対応は#1602)。ComfyUIでは、参照画像が同じプロジェクトに存在することを確かめる。
+     * 参照画像の無い要求は何も確かめない。
+     */
+    private void requireReferenceImageAcceptable(ImageProvider provider, AiImageRequest imageRequest) {
+        if (imageRequest.referenceImageId() == null) {
+            return;
+        }
+        if (provider == ImageProvider.CHATGPT) {
+            throw new UnsupportedReferenceImageException(
+                    "画像生成AI " + provider.name() + " は参照画像付きの生成に未対応です。");
+        }
+        referenceImageService.requireUsable(imageRequest.projectId(), imageRequest.referenceImageId());
     }
 
     /**
@@ -405,7 +431,8 @@ public class ImageGenerationService {
             ImageProvider provider,
             boolean blockSexual,
             boolean blockViolent,
-            boolean blockDiscriminatory) {
+            boolean blockDiscriminatory,
+            ReferenceImage referenceImage) {
         String checkpoint = imageRequest.checkpoint() != null && !imageRequest.checkpoint().isBlank()
                 ? imageRequest.checkpoint()
                 : comfyUiModelService.getSelectedCheckpointOrGlobalDefault(imageRequest.projectId());
@@ -434,7 +461,9 @@ public class ImageGenerationService {
                 checkpoint,
                 imageRequest.loraName(),
                 imageRequest.loraWeight(),
-                imageRequest.projectId()
+                imageRequest.projectId(),
+                referenceImage,
+                referenceImage != null ? imageRequest.denoise() : null
         );
     }
 
@@ -472,7 +501,9 @@ public class ImageGenerationService {
                 baseParams.checkpoint(),
                 baseParams.loraName(),
                 baseParams.loraWeight(),
-                baseParams.projectId());
+                baseParams.projectId(),
+                baseParams.referenceImage(),
+                baseParams.denoise());
     }
 
     /**

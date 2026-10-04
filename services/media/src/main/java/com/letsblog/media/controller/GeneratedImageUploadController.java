@@ -61,6 +61,6 @@ public class GeneratedImageUploadController {
                 image.getWidth(), image.getHeight(), image.getBatchSize(), image.getBatchIndex(),
                 image.getCheckpoint(), image.getLoraName(), null,
                 UtcDateTimes.toInstant(image.getCreatedAt()), List.of(), image.getProvider(),
-                image.getFolderId());
+                image.getFolderId(), image.getSourceImageId());
     }
 }

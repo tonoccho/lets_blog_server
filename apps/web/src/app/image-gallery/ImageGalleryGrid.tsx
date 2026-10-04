@@ -815,6 +815,24 @@ export function ImageGalleryGrid({
                   <dd className="text-neutral-600 dark:text-neutral-400">
                     {detail.loraName ? `${detail.loraName} (weight: ${detail.loraWeight})` : "-"}
                   </dd>
+                  {/*
+                    issue #1601: 参照画像を使って(img2img)生成した画像は、参照元の画像IDとサムネイルを示す。
+                    参照元が後から削除されていてもIDは残る(サムネイルだけ読み込めなくなる)。
+                  */}
+                  {detail.sourceImageId != null && (
+                    <>
+                      <dt className="font-semibold">参照元の画像</dt>
+                      <dd className="space-y-1 text-neutral-600 dark:text-neutral-400">
+                        <span className="block">ID {detail.sourceImageId}</span>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/image-gallery/${detail.sourceImageId}/file`}
+                          alt={`参照元の画像 ${detail.sourceImageId}`}
+                          className="h-24 w-24 rounded bg-neutral-100 object-contain dark:bg-neutral-800"
+                        />
+                      </dd>
+                    </>
+                  )}
                   <dt className="font-semibold">作成日時</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">
                     {timezone

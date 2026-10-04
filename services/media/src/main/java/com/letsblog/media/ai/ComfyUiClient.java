@@ -10,8 +10,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -30,12 +35,19 @@ import java.util.UUID;
  * baseUrlはImageGenerationConfigProviderから呼び出しの都度取得する(issue #531でWeb管理画面の
  * システム設定から変更可能になったため、LlmClientと同様に構築時に固定値として保持しない)。
  * seedの実値は決めない(issue #1101)。渡されたparams.seed()をそのままワークフローへ埋め込む。
+ *
+ * <p>参照画像(params.referenceImage())があるときはimg2imgで生成する(issue #1601)。参照画像を
+ * {@code /upload/image}でComfyUIへ送り、LoadImage → ImageScale(生成サイズへリサイズ) → VAEEncode →
+ * KSampler(denoise指定)の経路を組む。参照画像が無ければ従来のtxt2img(EmptyLatentImage・denoise 1.0)のまま。
  */
 @Component
 @Slf4j
 public class ComfyUiClient implements ImageGenerationProvider {
 
     private static final int POLL_INTERVAL_MS = 1000;
+
+    /** img2imgで変化の強さを指定されなかったときのdenoise(issue #1601、利用者承認済み)。 */
+    static final double DEFAULT_REFERENCE_DENOISE = 0.6;
 
     /**
      * 投入したバッチの枚数によらず必要な待ち時間(秒相当の回数)。キュー待ち・モデルのロード・
@@ -199,7 +211,10 @@ public class ComfyUiClient implements ImageGenerationProvider {
 
     private List<ComfyUiImage> submitAndCollect(RestClient http, String baseUrl, ComfyUiGenerationParams params) {
         String clientId = UUID.randomUUID().toString();
-        ObjectNode workflow = buildWorkflow(params);
+        String referenceName = params.referenceImage() != null
+                ? uploadReferenceImage(http, baseUrl, params.referenceImage())
+                : null;
+        ObjectNode workflow = buildWorkflow(params, referenceName);
 
         ObjectNode requestBody = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
         requestBody.set("prompt", workflow);
@@ -243,6 +258,45 @@ public class ComfyUiClient implements ImageGenerationProvider {
         clearMemory(http, baseUrl);
 
         return images;
+    }
+
+    /**
+     * 参照画像をComfyUIの入力ディレクトリへ送る({@code POST /upload/image})。LoadImageノードに渡す
+     * ファイル名(サブフォルダがあれば{@code subfolder/name})を返す。
+     */
+    private String uploadReferenceImage(RestClient http, String baseUrl, ReferenceImage reference) {
+        String extension = "image/jpeg".equalsIgnoreCase(reference.mimeType()) ? "jpg" : "png";
+        String filename = "letsblog_ref_" + UUID.randomUUID() + "." + extension;
+        HttpHeaders imageHeaders = new HttpHeaders();
+        imageHeaders.setContentType(MediaType.parseMediaType(reference.mimeType()));
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        parts.add("image", new HttpEntity<>(new ByteArrayResource(reference.data()) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        }, imageHeaders));
+        parts.add("type", "input");
+        parts.add("overwrite", "true");
+        JsonNode response;
+        try {
+            response = http.post()
+                    .uri(baseUrl + "/upload/image")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(parts)
+                    .retrieve()
+                    .body(JsonNode.class);
+        } catch (RestClientResponseException e) {
+            throw new AiServiceException(
+                    "ComfyUIへの参照画像のアップロードに失敗しました: " + e.getStatusCode() + " "
+                            + e.getResponseBodyAsString(), e);
+        }
+        String name = response != null ? response.path("name").asText("") : "";
+        if (name.isBlank()) {
+            throw new AiServiceException("ComfyUIへの参照画像のアップロード応答にファイル名がありません", null);
+        }
+        String subfolder = response.path("subfolder").asText("");
+        return subfolder.isBlank() ? name : subfolder + "/" + name;
     }
 
     private List<JsonNode> pollForResult(RestClient http, String baseUrl, String promptId, int maxPollAttempts) {
@@ -394,7 +448,10 @@ public class ComfyUiClient implements ImageGenerationProvider {
         return new ComfyUiUnreachableException(message, e);
     }
 
-    private ObjectNode buildWorkflow(ComfyUiGenerationParams params) {
+    /**
+     * @param referenceName アップロード済みの参照画像のファイル名。nullならtxt2img、あればimg2img(issue #1601)。
+     */
+    private ObjectNode buildWorkflow(ComfyUiGenerationParams params, String referenceName) {
         var factory = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance;
         ObjectNode graph = factory.objectNode();
 
@@ -405,13 +462,56 @@ public class ComfyUiClient implements ImageGenerationProvider {
         checkpointLoader.putObject("inputs").put("ckpt_name", checkpoint);
         graph.set("4", checkpointLoader);
 
-        ObjectNode latentImage = factory.objectNode();
-        latentImage.put("class_type", "EmptyLatentImage");
-        ObjectNode latentInputs = latentImage.putObject("inputs");
-        latentInputs.put("width", params.width());
-        latentInputs.put("height", params.height());
-        latentInputs.put("batch_size", params.batchSize());
-        graph.set("5", latentImage);
+        String latentRef;
+        double denoise;
+        if (referenceName == null) {
+            ObjectNode latentImage = factory.objectNode();
+            latentImage.put("class_type", "EmptyLatentImage");
+            ObjectNode latentInputs = latentImage.putObject("inputs");
+            latentInputs.put("width", params.width());
+            latentInputs.put("height", params.height());
+            latentInputs.put("batch_size", params.batchSize());
+            graph.set("5", latentImage);
+            latentRef = "5";
+            denoise = 1.0;
+        } else {
+            // img2img(issue #1601): 参照画像を生成サイズへリサイズしてからVAEで潜在画像にする。
+            ObjectNode loadImage = factory.objectNode();
+            loadImage.put("class_type", "LoadImage");
+            loadImage.putObject("inputs").put("image", referenceName);
+            graph.set("11", loadImage);
+
+            ObjectNode scale = factory.objectNode();
+            scale.put("class_type", "ImageScale");
+            ObjectNode scaleInputs = scale.putObject("inputs");
+            scaleInputs.putArray("image").add("11").add(0);
+            scaleInputs.put("upscale_method", "lanczos");
+            scaleInputs.put("width", params.width());
+            scaleInputs.put("height", params.height());
+            scaleInputs.put("crop", "center");
+            graph.set("12", scale);
+
+            ObjectNode encode = factory.objectNode();
+            encode.put("class_type", "VAEEncode");
+            ObjectNode encodeInputs = encode.putObject("inputs");
+            encodeInputs.putArray("pixels").add("12").add(0);
+            encodeInputs.putArray("vae").add("4").add(2);
+            graph.set("13", encode);
+            latentRef = "13";
+
+            // VAEEncodeの潜在画像は1枚分。batch size枚を生成するには枚数分に複製する。
+            int batchSize = params.batchSize() != null ? params.batchSize() : 1;
+            if (batchSize > 1) {
+                ObjectNode repeat = factory.objectNode();
+                repeat.put("class_type", "RepeatLatentBatch");
+                ObjectNode repeatInputs = repeat.putObject("inputs");
+                repeatInputs.putArray("samples").add("13").add(0);
+                repeatInputs.put("amount", batchSize);
+                graph.set("14", repeat);
+                latentRef = "14";
+            }
+            denoise = params.denoise() != null ? params.denoise() : DEFAULT_REFERENCE_DENOISE;
+        }
 
         String clipRef = "4";
         String modelRef = "4";
@@ -453,11 +553,11 @@ public class ComfyUiClient implements ImageGenerationProvider {
         samplerInputs.put("cfg", params.cfgScale());
         samplerInputs.put("sampler_name", params.samplerName());
         samplerInputs.put("scheduler", params.scheduler());
-        samplerInputs.put("denoise", 1.0);
+        samplerInputs.put("denoise", denoise);
         samplerInputs.putArray("model").add(modelRef).add(0);
         samplerInputs.putArray("positive").add("6").add(0);
         samplerInputs.putArray("negative").add("7").add(0);
-        samplerInputs.putArray("latent_image").add("5").add(0);
+        samplerInputs.putArray("latent_image").add(latentRef).add(0);
         graph.set("3", sampler);
 
         ObjectNode vaeDecode = factory.objectNode();

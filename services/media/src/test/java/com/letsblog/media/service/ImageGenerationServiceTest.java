@@ -89,6 +89,8 @@ class ImageGenerationServiceTest {
     @Mock
     private ProhibitedContentFilterService prohibitedContentFilterService;
     @Mock
+    private ReferenceImageService referenceImageService;
+    @Mock
     private HttpServletRequest request;
 
     /**
@@ -107,7 +109,8 @@ class ImageGenerationServiceTest {
         service = new ImageGenerationService(
                 aiGenerationClient, comfyUiClient, chatGptImageClient, imageModelService, comfyUiModelService,
                 generatedImageCreationService, generationJobClient, new ObjectMapper(), defaultsResolver,
-                prohibitedContentFilterService, safetyNegativePromptService, new SeedResolver(), request);
+                prohibitedContentFilterService, safetyNegativePromptService, new SeedResolver(),
+                referenceImageService, request);
 
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
         when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("global.safetensors");

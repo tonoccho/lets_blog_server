@@ -31,5 +31,18 @@ public record CreateGeneratedImageRequest(
         @NotBlank String mimeType,
         @NotBlank String provider,
         String tagsJson,
-        @NotNull byte[] imageData) {
+        @NotNull byte[] imageData,
+        /** img2imgの参照元の画像ID(issue #1601)。参照画像を使っていない画像はnull。 */
+        Long sourceImageId) {
+
+    /** 参照元を持たない保存(txt2img・アップロード・VSCode拡張等)向け。 */
+    public CreateGeneratedImageRequest(
+            Long projectId, String prompt, String negativePrompt, Integer steps, Double cfgScale,
+            String samplerName, String scheduler, Long seed, Integer width, Integer height, Integer batchSize,
+            Integer batchIndex, String checkpoint, String loraName, Double loraWeight, String mimeType,
+            String provider, String tagsJson, byte[] imageData) {
+        this(projectId, prompt, negativePrompt, steps, cfgScale, samplerName, scheduler, seed, width, height,
+                batchSize, batchIndex, checkpoint, loraName, loraWeight, mimeType, provider, tagsJson, imageData,
+                null);
+    }
 }

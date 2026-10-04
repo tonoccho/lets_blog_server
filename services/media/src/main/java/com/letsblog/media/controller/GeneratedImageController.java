@@ -269,7 +269,7 @@ public class GeneratedImageController {
                 image.getCheckpoint(),
                 image.getLoraName(), image.getLoraWeight() != null ? image.getLoraWeight().doubleValue() : null,
                 UtcDateTimes.toInstant(image.getCreatedAt()), parseTags(image.getTagsJson()), image.getProvider(),
-                image.getFolderId());
+                image.getFolderId(), image.getSourceImageId());
     }
 
     /**

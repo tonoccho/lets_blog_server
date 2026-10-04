@@ -62,6 +62,8 @@ public class GeneratedImageCreationService {
         image.setMimeType(request.mimeType());
         image.setProvider(request.provider());
         image.setTagsJson(request.tagsJson());
+        // issue #1601: img2imgの参照元。参照画像を使っていなければnull。
+        image.setSourceImageId(request.sourceImageId());
         GeneratedImage saved = generatedImageRepository.save(image);
         domainEventPublisher.publishImageGenerated(saved.getId(), saved.getProjectId());
         return saved;

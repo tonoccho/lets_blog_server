@@ -7,7 +7,9 @@ import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.ImageGenerationJobStarter;
 import com.letsblog.media.service.ImageGenerationService;
+import com.letsblog.media.service.InvalidReferenceImageException;
 import com.letsblog.media.service.UnsupportedBatchSizeException;
+import com.letsblog.media.service.UnsupportedReferenceImageException;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -96,5 +98,48 @@ class ImageGenerationJobsControllerTest {
         mvc.perform(post("/api/ai/image/jobs").header("Authorization", "Bearer t")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"prompt\":\"a cat\",\"batchSize\":11}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 使えない参照画像は400で返る() throws Exception {
+        when(starter.start(any(), any())).thenThrow(new InvalidReferenceImageException("参照画像を使えません"));
+
+        mvc.perform(post("/api/ai/image/jobs").header("Authorization", "Bearer t")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"a cat\",\"projectId\":1,\"referenceImageId\":5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void ChatGPTの参照画像付き要求は未対応として400で返る() throws Exception {
+        when(starter.start(any(), any()))
+                .thenThrow(new UnsupportedReferenceImageException("参照画像付き生成は未対応です"));
+
+        mvc.perform(post("/api/ai/image/jobs").header("Authorization", "Bearer t")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"a cat\",\"projectId\":1,\"referenceImageId\":5}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void denoiseが範囲外なら400で返り受理しない() throws Exception {
+        mvc.perform(post("/api/ai/image/jobs").header("Authorization", "Bearer t")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"a cat\",\"projectId\":1,\"referenceImageId\":5,\"denoise\":1.5}"))
+                .andExpect(status().isBadRequest());
+
+        verify(starter, never()).start(any(), any());
+    }
+
+    @Test
+    void 参照画像の要求はそのプロジェクトのメンバーであることを先に確かめる() throws Exception {
+        doThrow(new ForbiddenException("not a member")).when(authorization).requireProjectMemberOrAdmin(1L);
+
+        mvc.perform(post("/api/ai/image/jobs").header("Authorization", "Bearer t")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"a cat\",\"projectId\":1,\"referenceImageId\":5}"))
+                .andExpect(status().isForbidden());
+
+        verify(starter, never()).start(any(), any());
     }
 }

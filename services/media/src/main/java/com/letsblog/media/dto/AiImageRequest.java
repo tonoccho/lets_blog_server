@@ -45,8 +45,21 @@ public record AiImageRequest(
         String checkpoint,
         String loraName,
         @DecimalMin("0.0") @DecimalMax("2.0") Double loraWeight,
-        Long projectId
+        Long projectId,
+        /** img2imgの参照画像(同じプロジェクトのギャラリー画像のID、issue #1601)。nullならtxt2img。 */
+        Long referenceImageId,
+        /** img2imgの変化の強さ(0〜1)。参照画像があるときだけ使い、未指定なら0.6(issue #1601)。 */
+        @DecimalMin("0.0") @DecimalMax("1.0") Double denoise
 ) {
+    /** 参照画像を持たない要求(txt2img)向け。 */
+    public AiImageRequest(
+            String prompt, String negativePrompt, Integer steps, Double cfgScale, String samplerName,
+            String scheduler, Long seed, Integer width, Integer height, Integer batchSize, Integer batchCount,
+            String checkpoint, String loraName, Double loraWeight, Long projectId) {
+        this(prompt, negativePrompt, steps, cfgScale, samplerName, scheduler, seed, width, height, batchSize,
+                batchCount, checkpoint, loraName, loraWeight, projectId, null, null);
+    }
+
     public static AiImageRequest withDefaults(String prompt) {
         return new AiImageRequest(
                 prompt, null, null, null, null, null, null, null, null, null, null, null, null, null, null);

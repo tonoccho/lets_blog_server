@@ -411,3 +411,44 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
     })
   })
 })
+
+/**
+ * issue #1601: img2imgで生成した画像の詳細には、参照元の画像(IDとサムネイル)を出す。
+ * 参照元を持たない画像には、この行自体を出さない。
+ */
+describe('ImageGalleryGrid 参照元の画像の表示 (issue #1601)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
+  })
+
+  async function openWith(detail: GeneratedImageDetail) {
+    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(detail)
+    render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
+    fireEvent.click(screen.getByAltText('a cute cat'))
+    await waitFor(() => {
+      expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument()
+    })
+  }
+
+  it('参照元があれば、そのIDとサムネイルを表示する', async () => {
+    await openWith({ ...DETAIL, sourceImageId: 7 })
+
+    expect(screen.getByText('参照元の画像')).toBeInTheDocument()
+    expect(screen.getByText('ID 7')).toBeInTheDocument()
+    const thumbnail = screen.getByAltText('参照元の画像 7') as HTMLImageElement
+    expect(thumbnail.getAttribute('src')).toBe('/image-gallery/7/file')
+  })
+
+  it('参照元が無ければ、参照元の行を出さない', async () => {
+    await openWith({ ...DETAIL, sourceImageId: null })
+
+    expect(screen.queryByText('参照元の画像')).not.toBeInTheDocument()
+  })
+
+  it('参照元の項目を持たない応答でも、参照元の行を出さない', async () => {
+    await openWith({ ...DETAIL })
+
+    expect(screen.queryByText('参照元の画像')).not.toBeInTheDocument()
+  })
+})
