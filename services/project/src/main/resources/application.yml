@@ -105,3 +105,10 @@ app:
 keycloak:
   jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
   issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # サービス間のClient Credentials認証(#567)。サイト自動構築ジョブ(issue #1479)の進捗・完了・失敗を
+  # ai-serviceの内部ブリッジへ反映するときに、このサービス自身のトークンを使う(#1083。
+  # ユーザーのBearerは数分で失効するため、数分かかるジョブの途中で切れる)。ServiceTokenClientConfig参照。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}

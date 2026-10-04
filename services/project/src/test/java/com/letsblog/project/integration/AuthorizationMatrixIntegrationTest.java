@@ -77,6 +77,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- SiteController --
                 new Endpoint("POST", "/api/sites"),
                 new Endpoint("POST", "/api/sites/managed-wordpress"),
+                new Endpoint("POST", "/api/sites/managed-wordpress/jobs"),
                 new Endpoint("POST", "/api/sites/managed-wordpress/adopt"),
                 new Endpoint("GET", "/api/sites"),
                 new Endpoint("GET", "/api/sites/1"),

@@ -37,4 +37,13 @@ class ServiceUriDefaultsTest {
             }
         });
     }
+
+    @Test
+    @DisplayName("ジョブ更新のClient Credentials用 keycloak.admin.* が定義されている(issue #1479)")
+    void keycloakServiceCredentialsAreConfigured() {
+        Properties props = load();
+        assertThat(props.getProperty("keycloak.admin.token-uri")).contains("KEYCLOAK_TOKEN_URI");
+        assertThat(props.getProperty("keycloak.admin.client-id")).contains("KEYCLOAK_SERVICES_CLIENT_ID");
+        assertThat(props.getProperty("keycloak.admin.client-secret")).contains("KEYCLOAK_SERVICES_CLIENT_SECRET");
+    }
 }

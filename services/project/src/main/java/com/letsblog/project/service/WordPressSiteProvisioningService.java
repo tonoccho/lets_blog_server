@@ -16,6 +16,7 @@ import com.letsblog.project.repository.SiteRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -108,6 +109,100 @@ public class WordPressSiteProvisioningService {
                 UtcDateTimes.toInstant(site.getCreatedAt()), UtcDateTimes.toInstant(site.getUpdatedAt()),
                 response.connectionCheckStatus(), true, false,
                 site.getAdminPath());
+    }
+
+    /**
+     * {@link #createManagedSite}のジョブ用(issue #1479)。{@code @Async}のランナーから呼ぶ。
+     *
+     * <p>同期版との違いは2点。(1) <b>メソッド全体を{@code @Transactional}で包まない</b>。
+     * 数分かかるprovision-agent呼び出しをトランザクションの中に置くと、バックグラウンドスレッドが
+     * HikariCPの接続を掴み続ける({@code TermComparisonService}のjavadocが禁じる#1122〜#1124の障害)。
+     * {@link SiteService#register}と{@code siteRepository}の呼び出しはそれぞれ短い自前の
+     * トランザクションになる。(2) そのため同期版ではトランザクションのロールバックが担っていた
+     * 登録済みサイトレコードの後始末を明示的に行う(登録後に失敗したらdeprovisionに加えてレコードも消す)。
+     * 監査ログ({@code WORDPRESS_PROVISIONED})は同じ{@code @AuditLog}で残り、操作者は呼び出し側が
+     * {@link CurrentActorService#runAs}で束縛したものが使われる。
+     *
+     * <p>同期版の本体は変えていない(リクエスト形式・応答・トランザクション境界・既存テストを保つため)。
+     * 構築と登録の中身が重複するが、境界の異なる2経路を1つの本体へ畳むと同期版の挙動を変える
+     * リスクがあるので、同期API廃止(#1478要件4)までは並べて持つ。
+     *
+     * @param phaseListener 進行段階({@code provisioning} → {@code registering})の通知先。nullなら通知しない。
+     */
+    @AuditLog(action = AuditLogAction.WORDPRESS_PROVISIONED, resourceType = "SITE")
+    public SiteResponse createManagedSiteForJob(
+            CreateManagedWordPressSiteRequest request, Consumer<String> phaseListener) {
+        if (siteRepository.existsBySiteKey(request.siteKey())) {
+            throw new DuplicateSiteKeyException("siteKey '" + request.siteKey() + "' は既に登録されています");
+        }
+
+        String slug = normalizeSlug(request.siteKey());
+        String dbName = "wp_" + slug;
+        String locale = (request.locale() != null && !request.locale().isBlank()) ? request.locale() : "ja";
+
+        // 同期版と違い、複製元の存在は構築を始める前に確かめる。構築・登録の後で見つからないと、
+        // コミット済みのサイトレコードとWordPressの実体が取り残される(cloneFromTemplateの
+        // 後始末は「テンプレートが自動構築サイトでない」と複製失敗のときだけ)。
+        if (request.templateSiteId() != null && siteRepository.findById(request.templateSiteId()).isEmpty()) {
+            throw new SiteNotFoundException(
+                    "id " + request.templateSiteId() + " のテンプレートサイトは登録されていません");
+        }
+
+        notifyPhase(phaseListener, "provisioning");
+        WordPressProvisioningClient.ProvisionResult result;
+        try {
+            result = provisioningClient.provision(
+                    new WordPressProvisioningClient.ProvisionCommand(
+                            slug, dbName, request.title(), request.adminUser(), request.adminEmail(),
+                            request.adminPassword(), locale));
+        } catch (ProvisioningException e) {
+            provisioningClient.deprovision(slug, dbName);
+            throw e;
+        }
+
+        notifyPhase(phaseListener, "registering");
+        Site site;
+        SiteResponse response;
+        try {
+            Map<String, String> credentials = Map.of(
+                    "baseUrl", "http://wordpress/sites/" + slug,
+                    "username", result.adminUser(),
+                    "transport", "AGENT",
+                    "wpSlug", slug);
+            response = siteService.register(new SiteRegisterRequest(
+                    request.name(), request.siteKey(), CmsType.WORDPRESS, credentials, null));
+
+            site = siteRepository.findBySiteKey(request.siteKey())
+                    .orElseThrow(() -> new SiteNotFoundException(
+                            "siteKey '" + request.siteKey() + "' は登録されていません"));
+            site.setManagedWordpress(true);
+            site.setWpSlug(slug);
+            site.setWpDbName(dbName);
+            site.setBaseUrl(result.url());
+            siteRepository.save(site);
+        } catch (RuntimeException e) {
+            provisioningClient.deprovision(slug, dbName);
+            // registerが自前のトランザクションごと戻した場合は何も残っていない。登録後に落ちた場合だけ消す。
+            siteRepository.findBySiteKey(request.siteKey()).ifPresent(siteRepository::delete);
+            throw e;
+        }
+
+        if (request.templateSiteId() != null) {
+            // 複製に失敗したときのdeprovision・レコード削除は、同期版と共通のここが1度だけ行う。
+            cloneFromTemplate(request.templateSiteId(), site, slug, dbName);
+        }
+
+        return new SiteResponse(
+                site.getId(), site.getName(), site.getSiteKey(), site.getCmsType(), site.getBaseUrl(),
+                UtcDateTimes.toInstant(site.getCreatedAt()), UtcDateTimes.toInstant(site.getUpdatedAt()),
+                response.connectionCheckStatus(), true, false,
+                site.getAdminPath());
+    }
+
+    private static void notifyPhase(Consumer<String> phaseListener, String phase) {
+        if (phaseListener != null) {
+            phaseListener.accept(phase);
+        }
     }
 
     /**

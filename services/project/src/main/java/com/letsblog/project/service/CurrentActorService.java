@@ -4,6 +4,7 @@ import com.letsblog.project.client.ActorProfile;
 import com.letsblog.project.client.IdentityClient;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -24,6 +25,12 @@ public class CurrentActorService {
 
     private static final String PROFILE_CACHE_ATTR = CurrentActorService.class.getName() + ".profile";
 
+    /**
+     * {@code @Async}のジョブのスレッドへ引き継いだ操作者(issue #1479)。束縛されている間は、
+     * リクエストにもセキュリティコンテキストにも触れず、こちらの値を返す。
+     */
+    private static final ThreadLocal<ActorSnapshot> BOUND = new ThreadLocal<>();
+
     private final HttpServletRequest request;
     private final IdentityClient identityClient;
 
@@ -37,6 +44,10 @@ public class CurrentActorService {
      * JWTが提示されていない場合はnullを返す。
      */
     public String getCurrentActorKeycloakSub() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.keycloakSub();
+        }
         if (!(SecurityContextHolder.getContext().getAuthentication() instanceof JwtAuthenticationToken token)) {
             return null;
         }
@@ -50,10 +61,18 @@ public class CurrentActorService {
      * 呼び出し自体が失敗した場合は{@link IdentityServiceUnavailableException}を伝播させる。
      */
     public Long getCurrentActorId() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.userId();
+        }
         return resolveProfile().map(ActorProfile::id).orElse(null);
     }
 
     public boolean isAdmin() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.admin();
+        }
         return resolveProfile().map(ActorProfile::isAdmin).orElse(false);
     }
 
@@ -62,6 +81,10 @@ public class CurrentActorService {
      * ローカルUserのメールアドレスを返す。JWTが提示されていない場合はnull。
      */
     public String getCurrentActorEmail() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.email();
+        }
         return resolveProfile().map(ActorProfile::email).orElse(null);
     }
 
@@ -72,11 +95,19 @@ public class CurrentActorService {
      * 転送するために公開する。ヘッダーが無ければnull。
      */
     public String getAuthorizationHeader() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.authorization();
+        }
         return request.getHeader(HttpHeaders.AUTHORIZATION);
     }
 
     /** 監査ログ(AuditLogAspect)向け。X-Forwarded-Forがあればそちらを優先する。 */
     public String getRemoteIp() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.remoteIp();
+        }
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {
             return forwardedFor;
@@ -86,7 +117,35 @@ public class CurrentActorService {
 
     /** 監査ログ(AuditLogAspect)向け。 */
     public String getUserAgent() {
+        ActorSnapshot bound = BOUND.get();
+        if (bound != null) {
+            return bound.userAgent();
+        }
         return request.getHeader("User-Agent");
+    }
+
+    /**
+     * 今のリクエストの操作者を写し取る(issue #1479)。<b>リクエストスレッドで</b>呼ぶこと。
+     * {@code @Async}のジョブへ渡し、ジョブ側で{@link #runAs}して使う。
+     */
+    public ActorSnapshot snapshot() {
+        return new ActorSnapshot(
+                getCurrentActorId(), getCurrentActorKeycloakSub(), getCurrentActorEmail(),
+                getRemoteIp(), getUserAgent(), getAuthorizationHeader(), isAdmin());
+    }
+
+    /**
+     * {@code actor}を、このスレッドの操作者として{@code action}の間だけ束縛する(issue #1479)。
+     * 監査ログ(AuditLogAspect)とサイト登録の著者解決が、リクエストの無いジョブのスレッドでも
+     * 従来どおり操作者を参照できる。終わったら(例外でも)必ず外す。
+     */
+    public <T> T runAs(ActorSnapshot actor, Supplier<T> action) {
+        BOUND.set(actor);
+        try {
+            return action.get();
+        } finally {
+            BOUND.remove();
+        }
     }
 
     @SuppressWarnings("unchecked")

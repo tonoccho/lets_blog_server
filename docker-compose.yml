@@ -511,6 +511,9 @@ services:
       # 起動時の依存関係(depends_on)には含めず、実行時呼び出し先としてのみ設定する。
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       WP_PROVISION_TOKEN: ${WP_PROVISION_TOKEN}
+      # サイト自動構築ジョブ(issue #1479)の進捗・完了・失敗をai-serviceの内部ブリッジへ反映するための
+      # Client Credentials(ServiceTokenClientConfig)。media-serviceと同じ資格情報。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
     depends_on:
       mysql:
         condition: service_healthy

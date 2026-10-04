@@ -5,6 +5,7 @@ import com.letsblog.project.cms.WpCliInstallResult;
 import com.letsblog.project.crypto.SshKeyGenerationService;
 import com.letsblog.project.dto.AdoptWordPressSiteRequest;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
+import com.letsblog.project.dto.GenerationJobResponse;
 import com.letsblog.project.dto.SiteConnectionCheckResult;
 import com.letsblog.project.dto.SiteDetailResponse;
 import com.letsblog.project.dto.SiteRegisterRequest;
@@ -15,6 +16,7 @@ import com.letsblog.project.dto.SshKeyPairResponse;
 import com.letsblog.project.dto.LetsblogSyncState;
 import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.LetsblogSyncService;
+import com.letsblog.project.service.ManagedSiteProvisioningJobStarter;
 import com.letsblog.project.service.ProvisioningService;
 import com.letsblog.project.service.ProjectService;
 import com.letsblog.project.service.SiteService;
@@ -52,6 +54,7 @@ public class SiteController {
     private final SshKeyGenerationService sshKeyGenerationService;
     private final ProjectService projectService;
     private final LetsblogSyncService letsblogSyncService;
+    private final ManagedSiteProvisioningJobStarter managedSiteProvisioningJobStarter;
 
     public SiteController(
             SiteService siteService,
@@ -59,13 +62,15 @@ public class SiteController {
             WordPressSiteProvisioningService wordPressSiteProvisioningService,
             SshKeyGenerationService sshKeyGenerationService,
             ProjectService projectService,
-            LetsblogSyncService letsblogSyncService) {
+            LetsblogSyncService letsblogSyncService,
+            ManagedSiteProvisioningJobStarter managedSiteProvisioningJobStarter) {
         this.siteService = siteService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.wordPressSiteProvisioningService = wordPressSiteProvisioningService;
         this.sshKeyGenerationService = sshKeyGenerationService;
         this.projectService = projectService;
         this.letsblogSyncService = letsblogSyncService;
+        this.managedSiteProvisioningJobStarter = managedSiteProvisioningJobStarter;
     }
 
     @Operation(summary = "WordPress サイトを登録", description = "既存のWordPressサイトを登録します")
@@ -87,6 +92,24 @@ public class SiteController {
         adminAuthorizationService.requireAdmin();
         SiteResponse response = wordPressSiteProvisioningService.createManagedSite(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * サイト自動構築を非同期ジョブとして受理する(issue #1479)。構築の完了を待たずにジョブIDを返し、
+     * 進行段階と結果(作成されたサイトのID)は{@code GET /api/generation-jobs/{id}}で引く。
+     * 同期の{@link #createManagedWordPress}は変えない。認可は同じ(admin限定)。
+     *
+     * <p>パスを分けたのは画像生成の{@code POST /api/ai/image/jobs}(#1405)に揃えるため。gatewayには明示ルートを置く。
+     */
+    @Operation(summary = "マネージドWordPressサイトの作成をジョブとして要求",
+            description = "構築の完了を待たずにジョブIDを返します。状態と結果は GET /api/generation-jobs/{id} で取得します")
+    @ApiResponse(responseCode = "202", description = "ジョブとして受理されました")
+    @PostMapping("/managed-wordpress/jobs")
+    public ResponseEntity<GenerationJobResponse> createManagedWordPressJob(
+            @Valid @RequestBody CreateManagedWordPressSiteRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(managedSiteProvisioningJobStarter.start(request)));
     }
 
     @Operation(summary = "既存のマネージドWordPressサイトを取り込む",

@@ -62,11 +62,13 @@ class SiteControllerTest {
     private ProjectService projectService;
     @Mock
     private com.letsblog.project.service.LetsblogSyncService letsblogSyncService;
+    @Mock
+    private com.letsblog.project.service.ManagedSiteProvisioningJobStarter managedSiteProvisioningJobStarter;
 
     private SiteController controller() {
         return new SiteController(
                 siteService, adminAuthorizationService, wordPressSiteProvisioningService, sshKeyGenerationService,
-                projectService, letsblogSyncService);
+                projectService, letsblogSyncService, managedSiteProvisioningJobStarter);
     }
 
     private SiteResponse buildResponse() {
@@ -202,7 +204,7 @@ class SiteControllerTest {
                 new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32])), new ObjectMapper(),
                 null, null, null, null);
         SiteController real = new SiteController(realService, adminAuthorizationService,
-                wordPressSiteProvisioningService, sshKeyGenerationService, projectService, letsblogSyncService);
+                wordPressSiteProvisioningService, sshKeyGenerationService, projectService, letsblogSyncService, managedSiteProvisioningJobStarter);
         return MockMvcBuilders.standaloneSetup(real).setControllerAdvice(new GlobalExceptionHandler()).build();
     }
 
@@ -343,5 +345,40 @@ class SiteControllerTest {
 
         assertThrows(ForbiddenException.class, () -> controller().resyncLetsblog(1L));
         verifyNoInteractions(letsblogSyncService);
+    }
+
+    // ---- issue #1479: サイト自動構築の非同期受理 ----
+
+    private static com.letsblog.project.dto.CreateManagedWordPressSiteRequest jobRequest() {
+        return new com.letsblog.project.dto.CreateManagedWordPressSiteRequest(
+                "Name", "my-site", "Title", "admin", "admin@example.com", "pw", "ja", null);
+    }
+
+    @Test
+    void createManagedWordPressJob_adminなら202とジョブIDを返し構築は待たない() {
+        java.time.LocalDateTime now = java.time.LocalDateTime.of(2026, 10, 5, 1, 2, 3);
+        when(managedSiteProvisioningJobStarter.start(jobRequest())).thenReturn(
+                new com.letsblog.common.client.GenerationJobSummary(11L, "site_provisioning", "running", now, now));
+
+        ResponseEntity<com.letsblog.project.dto.GenerationJobResponse> response =
+                controller().createManagedWordPressJob(jobRequest());
+
+        assertEquals(202, response.getStatusCode().value());
+        assertEquals(11L, response.getBody().id());
+        assertEquals("site_provisioning", response.getBody().type());
+        assertEquals("running", response.getBody().status());
+        // 日時はZ終端のUTC(issue #1539と同じ)。
+        assertEquals("2026-10-05T01:02:03Z", String.valueOf(response.getBody().createdAt()));
+        verify(adminAuthorizationService).requireAdmin();
+        verifyNoInteractions(wordPressSiteProvisioningService);
+    }
+
+    @Test
+    void createManagedWordPressJob_admin以外は拒否しジョブを作らない() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().createManagedWordPressJob(jobRequest()));
+        verifyNoInteractions(managedSiteProvisioningJobStarter);
     }
 }

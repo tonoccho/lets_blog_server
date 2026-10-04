@@ -361,6 +361,15 @@ app:
         paths:
           - /api/sites/managed-wordpress
         response-timeout: 300s
+      # issue #1479: サイト自動構築を非同期ジョブとして受理する口(POST /api/sites/managed-wordpress/jobs)。
+      # 上のproject-site-managed-wordpressは完全一致なのでこのパスは巻き込まれない。受理はジョブを
+      # 1件作って即座に返すだけなので、構築本体用の長いresponse-timeoutは与えず既定値を使う
+      # (#1405のai-image-jobsと同じ)。明示ルートにするのは、新パスをここで意図して受けていることを
+      # 示し、下の汎用projectルートより前で固定するため(AiImageJobsRouteTest相当のテストあり)。
+      - id: project-site-managed-wordpress-jobs
+        uri: ${PROJECT_SERVICE_URI:http://project:8080}
+        paths:
+          - /api/sites/managed-wordpress/jobs
       - id: project
         uri: ${PROJECT_SERVICE_URI:http://project:8080}
         paths:
