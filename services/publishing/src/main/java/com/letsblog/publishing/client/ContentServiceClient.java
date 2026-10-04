@@ -1,7 +1,5 @@
 package com.letsblog.publishing.client;
 
-import com.letsblog.common.auth.ServiceTokenClient;
-import com.letsblog.common.client.ServiceAuthHeaders;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
@@ -24,9 +22,8 @@ import org.springframework.web.client.RestClientResponseException;
  * クライアント。legacy-apiの{@code ContentServiceClient}から、publishing-serviceへ移設した
  * PostPublishService/PostDeleteServiceが実際に使うメソッドのみを移設した(issue #707、#575設計判断1)。
  *
- * <p>issue #712(Epic #551 C6-6)でArticlePreviewServiceが本サービスへ移設されたのに伴い、
- * テーマ骨格取得(Playwrightを持つのはcontent-service。{@code InternalPreviewSkeletonController})
- * 向けの{@link #fetchAndSplice}/{@link #fetchRealPost}も同じlegacy-api版から移設した。
+ * <p>テーマ骨格取得(旧プレビュー経路。Playwrightを持つcontent-serviceの内部ブリッジ)向けの
+ * メソッドは、プレビューを実サイトの署名付きURLへ一本化した issue #1564 で削除した。
  */
 @Component
 public class ContentServiceClient {
@@ -37,24 +34,17 @@ public class ContentServiceClient {
     // (legacy-api版と同じ値)。
     private static final Duration RENDER_READ_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
-    // Playwrightによる実ページナビゲーション(PreviewSkeletonFetcher)は最大30秒程度かかりうる
-    // (REAL_POST_NAVIGATION_TIMEOUT_MS参照)ため、それより余裕を持たせる(legacy-api版と同じ値)。
-    private static final Duration PREVIEW_SKELETON_READ_TIMEOUT = Duration.ofSeconds(40);
 
     private final RestClient renderRestClient;
     private final RestClient restClient;
-    private final RestClient previewSkeletonRestClient;
     private final HttpServletRequest request;
-    private final ServiceTokenClient serviceTokenClient;
 
     public ContentServiceClient(
             RestClient.Builder builder, @Value("${app.content-service-uri}") String contentServiceUri,
-            HttpServletRequest request, ServiceTokenClient serviceTokenClient) {
+            HttpServletRequest request) {
         this.renderRestClient = build(builder, contentServiceUri, RENDER_READ_TIMEOUT);
         this.restClient = build(builder, contentServiceUri, READ_TIMEOUT);
-        this.previewSkeletonRestClient = build(builder, contentServiceUri, PREVIEW_SKELETON_READ_TIMEOUT);
         this.request = request;
-        this.serviceTokenClient = serviceTokenClient;
     }
 
     private RestClient build(RestClient.Builder builder, String baseUrl, Duration readTimeout) {
@@ -212,77 +202,6 @@ public class ContentServiceClient {
                     .toBodilessEntity();
         } catch (RestClientException e) {
             throw new IllegalStateException("content-serviceの投稿削除反映呼び出しに失敗しました: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * @param unreadableStylesheets content-serviceのPlaywrightが{@code cssRules}を読めなかった
-     *             stylesheetのhref(issue #1370)。cssには含まれない。古いcontent-serviceの応答ではnull。
-     */
-    public record ThemeSkeletonBridgeResponse(String html, boolean available, String reason,
-            boolean eyecatchSpliced, String css, java.util.List<String> unreadableStylesheets) {
-    }
-
-    /**
-     * ArticlePreviewService#renderSkeletonが使う。Playwrightを持つのはcontent-serviceのため
-     * (issue #576の注記)、CMS/Site認証情報の解決は本サービス側で済ませた上で、navigateUrl・
-     * 差し替え内容のみを渡してPreviewSkeletonFetcher#fetchAndSpliceを実行してもらう。
-     *
-     * <p><b>認証(issue #1207で変更)</b>: このエンドポイントはnavigateUrl・差し替え内容を受け取って
-     * Playwrightを動かすだけで、利用者単位の認可を一切行わない。以前は他の内部ブリッジ呼び出しと
-     * 同じく呼び出し元ユーザーのBearerトークンをそのまま転送していた({@code forwardedBearer})が、
-     * これは呼び出し完了までそのトークンが有効であることに暗黙に依存し、WordPressエージェント投稿
-     * (WordPressAgentOperations)からの一連の同期呼び出しの終盤で行われるこの呼び出しでは不必要な
-     * 失敗要因になっていた。media-serviceのGenerationJobClient(issue #1083、同種の判断)と同じく、
-     * 本サービス自身のClient Credentialsトークン({@link ServiceTokenClient}、issue #567)へ切り替えた
-     * (docs/SYNC_SERVICE_CALLS.md「認証」節参照)。
-     */
-    public ThemeSkeletonBridgeResponse fetchAndSplice(
-            String url, String titleRendered, String contentRendered, String ourTitle, String ourContentHtml,
-            String featuredImageDataUri) {
-        try {
-            Map<String, Object> body = new java.util.LinkedHashMap<>();
-            body.put("url", url);
-            body.put("titleRendered", titleRendered);
-            body.put("contentRendered", contentRendered);
-            body.put("ourTitle", ourTitle);
-            body.put("ourContentHtml", ourContentHtml);
-            body.put("featuredImageDataUri", featuredImageDataUri);
-            ThemeSkeletonBridgeResponse result = previewSkeletonRestClient.post()
-                    .uri("/api/internal/content/preview-skeleton/fetch-and-splice")
-                    .headers(ServiceAuthHeaders.clientCredentials(serviceTokenClient))
-                    .body(body)
-                    .retrieve()
-                    .body(ThemeSkeletonBridgeResponse.class);
-            if (result == null) {
-                throw new IllegalStateException("content-serviceから空の応答を受け取りました");
-            }
-            return result;
-        } catch (RestClientException e) {
-            throw new IllegalStateException("content-serviceのテーマ骨格取得呼び出しに失敗しました: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * ArticlePreviewService#renderRealPrivatePostが使う。
-     *
-     * <p>認証方式は{@link #fetchAndSplice}と同じ理由(issue #1207)でclientCredentialsを使う。
-     */
-    public ThemeSkeletonBridgeResponse fetchRealPost(String url, String cookieName, String cookieValue) {
-        try {
-            Map<String, Object> body = Map.of("url", url, "cookieName", cookieName, "cookieValue", cookieValue);
-            ThemeSkeletonBridgeResponse result = previewSkeletonRestClient.post()
-                    .uri("/api/internal/content/preview-skeleton/fetch-real-post")
-                    .headers(ServiceAuthHeaders.clientCredentials(serviceTokenClient))
-                    .body(body)
-                    .retrieve()
-                    .body(ThemeSkeletonBridgeResponse.class);
-            if (result == null) {
-                throw new IllegalStateException("content-serviceから空の応答を受け取りました");
-            }
-            return result;
-        } catch (RestClientException e) {
-            throw new IllegalStateException("content-serviceのテーマ骨格取得呼び出しに失敗しました: " + e.getMessage(), e);
         }
     }
 

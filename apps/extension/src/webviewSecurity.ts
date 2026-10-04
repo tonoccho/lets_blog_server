@@ -29,22 +29,6 @@ export function buildScriptedCsp(nonce: string): string {
 }
 
 /**
- * 記事プレビューWebview向けのCSP。
- * 投稿先サイトのCSSと画像、テーマCSSが参照するWebフォントを読み込むため、それらを許可する。
- * スクリプトはコードブロックのシンタックスハイライト(拡張機能に同梱したPrism.js)の実行に限定するため、
- * nonce付きのものだけを許可する(リモートのテーマJSは実行しない)。
- */
-export function buildPreviewCsp(nonce: string): string {
-  return [
-    "default-src 'none'",
-    'img-src data: https: http:',
-    "style-src 'unsafe-inline'",
-    'font-src data: https: http:',
-    `script-src 'nonce-${nonce}'`,
-  ].join('; ');
-}
-
-/**
  * 実サイトのプレビュー(署名付きURLをiframeで表示する、issue #1562)向けのCSP。
  *
  * `frame-src`にはプレビューURLの**オリジンだけ**を許可する(パス・クエリのトークンは含めない)。

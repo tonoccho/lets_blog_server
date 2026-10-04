@@ -1,8 +1,5 @@
 package com.letsblog.publishing.controller;
 
-import com.letsblog.publishing.dto.RenderSkeletonRequest;
-import com.letsblog.publishing.dto.ThemeCssResponse;
-import com.letsblog.publishing.dto.ThemeSkeletonResponse;
 import com.letsblog.publishing.service.AdminAuthorizationService;
 import com.letsblog.publishing.service.ArticlePreviewService;
 import com.letsblog.publishing.service.ForbiddenException;
@@ -10,16 +7,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * publishing-serviceのArticlePreviewController(theme-css/skeleton/preview-post)を検証する。
- * legacy-apiから移設したテストをそのまま引き継いだもの(issue #712、Epic #551 C6-6)。
+ * publishing-serviceのArticlePreviewController(署名付きプレビューURL、issue #1561)を検証する。
+ * 旧プレビュー経路(theme-css/skeleton/preview-post)は issue #1564 で削除し、存在しないことを固定する。
  * 記事本文レンダリング(/render)はcontent-serviceが持つため、その振る舞いはcontent-service側の
  * ArticlePreviewControllerTestで検証する。
  */
@@ -36,81 +39,22 @@ class ArticlePreviewControllerTest {
         return new ArticlePreviewController(articlePreviewService, adminAuthorizationService);
     }
 
+    // issue #1564: 旧プレビュー経路(テーマCSS取得・骨組み差し込み・一時投稿の削除)は存在しない。
+    // 標準の MockMvc は静的リソースのハンドラを持たないので、マッピングが無ければ 404 になる。
     @Test
-    void themeCss_認可後にサービスへ委譲する() {
-        ArticlePreviewController controller = controller();
-        when(articlePreviewService.fetchThemeCss(1L, null))
-                .thenReturn(new ThemeCssResponse("body{}", true, null));
+    void 旧プレビュー経路のthemeCss_skeleton_previewPostはマッピングが無く404() throws Exception {
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller()).build();
 
-        ThemeCssResponse response = controller.themeCss(1L, null);
-
-        assertEquals("body{}", response.css());
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-    }
-
-    @Test
-    void themeCss_siteId指定時はそのサイトのCSSを返す() {
-        ArticlePreviewController controller = controller();
-        when(articlePreviewService.fetchThemeCss(1L, 20L))
-                .thenReturn(new ThemeCssResponse("body{color:red}", true, null));
-
-        ThemeCssResponse response = controller.themeCss(1L, 20L);
-
-        assertEquals("body{color:red}", response.css());
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-    }
-
-    @Test
-    void themeCss_認可拒否ならForbidden() {
-        ArticlePreviewController controller = controller();
-        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-
-        assertThrows(ForbiddenException.class, () -> controller.themeCss(1L, null));
-    }
-
-    @Test
-    void skeleton_認可後にサービスへ委譲する() {
-        ArticlePreviewController controller = controller();
-        RenderSkeletonRequest request =
-                new RenderSkeletonRequest(
-                        "タイトル", "<p>本文</p>", "data:image/png;base64,abc", 20L, null, null, null, null);
-        when(articlePreviewService.renderSkeleton(
-                        1L, 20L, "タイトル", "<p>本文</p>", "data:image/png;base64,abc", null, null, null, null))
-                .thenReturn(new ThemeSkeletonResponse("<article>spliced</article>", true, null, true, ""));
-
-        ThemeSkeletonResponse response = controller.skeleton(1L, request);
-
-        assertEquals("<article>spliced</article>", response.html());
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-    }
-
-    @Test
-    void skeleton_認可拒否ならForbidden() {
-        ArticlePreviewController controller = controller();
-        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-
-        assertThrows(ForbiddenException.class,
-                () -> controller.skeleton(1L,
-                        new RenderSkeletonRequest("タイトル", "<p>本文</p>", null, null, null, null, null, null)));
-    }
-
-    // issue #568: 認可マトリクス整備に伴う、requireProjectMemberOrAdmin()を呼ぶ全メソッドのForbiddenパス網羅
-    @Test
-    void deletePreviewPost_認可後にサービスへ委譲する() {
-        ArticlePreviewController controller = controller();
-
-        controller.deletePreviewPost(1L, 20L, "123");
-
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-        verify(articlePreviewService).deletePreviewPost(1L, 20L, "123");
-    }
-
-    @Test
-    void deletePreviewPost_認可拒否ならForbidden() {
-        ArticlePreviewController controller = controller();
-        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
-
-        assertThrows(ForbiddenException.class, () -> controller.deletePreviewPost(1L, 20L, "123"));
+        mockMvc.perform(get("/api/projects/1/preview/theme-css").param("siteId", "20"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/projects/1/preview/skeleton")
+                        .contentType("application/json")
+                        .content("{\"title\":\"t\",\"contentHtml\":\"<p>x</p>\",\"siteId\":20}"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/projects/1/preview/preview-post")
+                        .param("siteId", "20").param("postId", "123"))
+                .andExpect(status().isNotFound());
+        org.mockito.Mockito.verifyNoInteractions(articlePreviewService, adminAuthorizationService);
     }
 
     // ---- issue #1561: 署名付きプレビュー URL ----

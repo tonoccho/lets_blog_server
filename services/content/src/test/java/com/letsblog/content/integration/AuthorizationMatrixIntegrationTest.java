@@ -129,10 +129,6 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/internal/content/render/pre-image"),
                 new Endpoint("POST", "/api/internal/content/render/finalize-html"),
 
-                // -- 内部ブリッジ(InternalPreviewSkeletonController) --
-                new Endpoint("POST", "/api/internal/content/preview-skeleton/fetch-and-splice"),
-                new Endpoint("POST", "/api/internal/content/preview-skeleton/fetch-real-post"),
-
                 // -- 内部ブリッジ(InternalProjectContentSettingsController) --
                 new Endpoint("GET", "/api/internal/content/projects/1/content-settings"),
                 new Endpoint("PUT", "/api/internal/content/projects/1/content-settings"),

@@ -1,9 +1,8 @@
 // content-service (#576): 記事本文(posts)・カスタムタグ・Markdownレンダリング・記事プレビュー・
 // ブログカード/Amazonタグのコンテンツキャッシュをlegacy-apiから抽出した。公開パイプラインと
 // プレビューの両方から使われる中核ドメイン。スキーマ分離(lbs_content)により他サービスから独立する。
-// [blogcard]/[amazon]タグのスクレイピング(ContentCacheService)、記事プレビューのテーマ骨格取得
-// (PreviewSkeletonFetcher)にヘッドレスChromium(Playwright)を使うため、legacy-apiと同じ
-// Playwright依存を持つ(Playwrightを持つのはcontent-serviceになった。issueの注記参照)。
+// [blogcard]/[amazon]タグのスクレイピング(ContentCacheService)にヘッドレスChromium(Playwright)を
+// 使うため、legacy-apiと同じPlaywright依存を持つ(Playwrightを持つのはcontent-serviceになった。issueの注記参照)。
 plugins {
     id 'java'
     id 'org.springframework.boot' version '4.1.0'
@@ -44,8 +43,8 @@ dependencies {
     // Markdown->HTML変換(MarkdownRenderer)。legacy-apiと同一バージョン。
     implementation 'com.vladsch.flexmark:flexmark-all:0.64.8'
 
-    // [blogcard]/[amazon]組み込みタグのスクレイピング(PlaywrightPageFetcher)、記事プレビューの
-    // テーマ骨格取得(PreviewSkeletonFetcher)に使うヘッドレスChromium。legacy-apiと同一バージョン。
+    // [blogcard]/[amazon]組み込みタグのスクレイピング(PlaywrightPageFetcher)に使うヘッドレスChromium。
+    // legacy-apiと同一バージョン。(記事プレビューのテーマ骨格取得はissue #1564で削除した。)
     implementation 'com.microsoft.playwright:playwright:1.62.0'
 
     // OGPメタデータ/Amazon商品ページのHTML解析(OgpMetadataParser/AmazonProductParser)。legacy-apiと

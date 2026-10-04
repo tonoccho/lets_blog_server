@@ -153,9 +153,9 @@ API: content `PostController` / publishing `PostController`, `ArticlePreviewCont
 | AC-POST-006 | 予約公開 | 書いた日と公開日を分けられる | 予約した記事は指定時刻まで公開されず、時刻到来後に公開される | `features/publishing/publish-status.feature` › 予約投稿すると、指定日時が設定された状態でWordPressに登録される(issue #1172 / AT-6-2、親issue #932の親シナリオ6。本番サイトへ`publishScheduledAt`付きで投稿し、WordPress側がfutureステータスかつ指定日時(`post_date_gmt`)で登録されることをwp-cliで確認する)。**対象外**: 指定時刻到来後の自動公開そのもの(WordPress標準のcronに委ねる)は未検証 | 検証済(`@slow`。future登録までを検証) |
 | AC-POST-007 | 記事の削除 | 誤って出した記事を取り下げられる | `DELETE /api/posts/{site}/{wpPostId}` 後、公開先で記事が閲覧できなくなる | `features/publishing/publish-status.feature` › 公開済み記事を取り下げると、WordPress側からも消え、投稿履歴の状態が更新される(issue #1172 / AT-6-2、親issue #932の親シナリオ4。取り下げ後のWordPress側のpost_statusがtrashになること、および`GET /api/posts/{site}/by-slug/{slug}`が返す投稿履歴の状態もtrashに更新されることをそれぞれ確認する) | 検証済(`@slow`) |
 | AC-POST-008 | スラッグによる記事取得 | 公開済み記事を一意に特定できる | `GET /api/posts/{site}/by-slug/{slug}` が該当記事を返す | `features/publishing/publish-lifecycle.feature` › 同じ記事を更新して再公開すると、新規作成されずに既存記事が更新される(issue #1171 / AT-6-1。VSCode拡張と同じ経路で`GET /api/posts/{site}/by-slug/{slug}`から既存投稿のwpPostIdを解決してから再公開する) | 検証済(`@slow`) |
-| AC-POST-009 | プレビュー(骨組み+差し込み) | 公開前に実際の見た目を確認できる | `POST /api/projects/{projectId}/preview/skeleton` と `/render` で、公開先テーマ相当の見た目が得られる | `features/publishing/preview.feature` › プレビューを生成すると公開せずに実テーマの見た目を確認できる | 検証済 |
-| AC-POST-010 | プレビュー用テーマCSSの取得 | プレビューが公開先の見た目と一致する | `GET /api/projects/{projectId}/preview/theme-css` が公開先のCSSを返す | `features/publishing/preview.feature` › プレビューを生成すると公開せずに実テーマの見た目を確認できる | 検証済 |
-| AC-POST-011 | プレビュー投稿の後始末 | プレビューの残骸が公開先に残らない | `DELETE /api/projects/{projectId}/preview/preview-post` 後、公開先にプレビュー記事が残らない | `features/publishing/preview.feature` › プレビュー用の一時投稿はプレビュー終了時にWordPress側に残らない | 検証済 |
+| AC-POST-009 | プレビュー(実サイトの署名付きURL) | 公開前に実際の見た目を確認できる | `POST /api/projects/{projectId}/preview/signed-url` が期限付きの署名付きURLを返し、開くと実テーマで表示される。投稿(`wp_posts`)は作られない。旧プレビュー経路(`/skeleton`・`/theme-css`・`/preview-post`)は #1564 で削除し、404になる | `features/publishing/preview-signed-url.feature` › URL を開くと実テーマでタイトルと本文が表示される / 発行と表示の前後で wp_posts の行数が変わらない(issue #1561)。削除した旧経路が存在しないことは `features/publishing/preview.feature`(issue #1564) | 検証済 |
+| AC-POST-010 | プレビュー用テーマCSSの取得 | (廃止) | `GET /api/projects/{projectId}/preview/theme-css` は #1564 で削除した | `features/publishing/preview.feature` › 旧プレビュー経路の「GET」「theme-css」は存在せず、サイトに投稿も作られない | 対象外(プラグイン必須化に伴い旧プレビュー経路ごと削除。実サイトの署名付きURL(AC-POST-009)に置き換わった。#1564) |
+| AC-POST-011 | プレビュー投稿の後始末 | (廃止) | プレビュー用の一時投稿は作らなくなったため後始末も無い。`DELETE /api/projects/{projectId}/preview/preview-post` は #1564 で削除した | `features/publishing/preview.feature` › 旧プレビュー経路の「DELETE」「preview-post」は存在せず、サイトに投稿も作られない | 対象外(一時投稿そのものを作らなくなったため。#1564) |
 | AC-POST-012 | カテゴリ・タグの解決 | 記事に付けた分類が公開先で正しく紐付く | `POST /api/taxonomy/resolve` が既存分類に解決し、無ければ作成する | `features/publishing/taxonomy.feature` › 既にあるカテゴリ・タグは大文字小文字を無視した完全一致で解決される / 存在しないカテゴリ・タグを指定すると新規作成される | 検証済 |
 | AC-POST-013 | プロジェクトダッシュボード (`/projects/[id]/dashboard`) | プロジェクトの状況を一目で掴める | 記事数・公開状況・Analytics サマリが表示される | — | 未着手 |
 | AC-POST-014 | 複数サイトへの同時公開と一部失敗時の挙動 | 2サイトに出せる。片方が落ちても成功した側は出て、失敗が握り潰されない | 2サイトへ公開すると両方に記事が作成される。片方のサイトが到達不能なとき、成功した側は公開され、失敗した側はエラー応答として利用者に示される(全体が巻き戻ることも、失敗が握り潰されることもない) | `features/publishing/multi-site-publish.feature` › 2つのサイトを選んで公開すると、両方のサイトに記事が作成される / 片方のサイトが到達不能なとき、成功した側は公開され失敗した側は失敗として示される(issue #1173 / AT-6-3、親issue #932の親シナリオ8・9。`POST /api/posts/publish`はサイトごとの単発呼び出しであり、公開APIはサイトを跨いだトランザクションを持たない) | 検証済(`@slow`) |
@@ -505,7 +505,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AC-INT-004 | `/api/internal/ai/projects/{id}/existing-categories`, `/existing-tags` | ai → publishing | AC-PLAN-012 |
 | AC-INT-005 | `/api/internal/analytics/projects/{id}/google-analytics`, `/adsense` | 各サービス → analytics | AC-ANA-001〜006 |
 | AC-INT-006 | `/api/internal/content/posts` 系 | publishing → content | AC-POST-004〜008 |
-| AC-INT-007 | `/api/internal/content/preview-skeleton/**` | publishing → content | AC-POST-009 |
+| AC-INT-007 | `/api/internal/content/preview-skeleton/**`(#1564 で削除) | publishing → content | (旧 AC-POST-009) |
 | AC-INT-008 | `/api/internal/content/projects/{id}/content-settings` | 各サービス → content | AC-TAG-013 |
 | AC-INT-009 | `/api/internal/content/render/**` | publishing → content | AC-POST-004, AC-IMG-001 |
 | AC-INT-010 | `/api/internal/identity/**` | 各サービス → identity | AC-USR-008, AC-LOG-007 |
@@ -591,18 +591,18 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 ## 6. 集計
 
-§2 に列挙した機能ID: **218**。うち1件(AC-EXT-019)は §4 で対象外としたので、
-受け入れテストの対象は **217**。
+§2 に列挙した機能ID: **218**。うち3件(AC-EXT-019、AC-POST-010・011)は対象外としたので、
+受け入れテストの対象は **215**。
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 161 |
+| `検証済` | 159 |
 | `部分的に検証` | 3 |
 | `実装中` | 8 |
 | `実装済み` | 21 |
 | `既存spec` / `既存spec(部分)` | 3 |
 | `未着手` | 21 |
-| `対象外`(§2 に行を持つもの) | 1 |
+| `対象外`(§2 に行を持つもの) | 3 |
 | **§2 合計** | **218** |
 
 `実装済み` は §1 の状態の定義に無い。`AC-AI-*` の全20行がこの語を使っており、§1 の
@@ -835,7 +835,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 ### 10.6 一覧に載せない操作(予算対象外)
 
 Server Action でも画面でもないため、上の表には行を持たないが、利用者の判断(2026-09-29)で分類を確定した操作:
-記事プレビュー(`/api/preview/skeleton`)・実WordPressへの記事公開(`/api/posts/publish`、実測 4,188ms)は
+記事プレビュー(旧 `/api/preview/skeleton`。現在は署名付きURLの発行 `/signed-url`)・実WordPressへの記事公開(`/api/posts/publish`、実測 4,188ms)は
 VSCode拡張専用で**予算対象外**、WordPressへの大容量アップロードは wp-admin 自身の画面での操作で**予算対象外**
 (理由は §10.1 の表)。一括管理の環境間比較は §10.4 の `/projects/[id]` と、§10.5 の
 `fetch*ComparisonAction` の**予算対象**として扱う。

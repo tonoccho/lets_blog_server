@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { logger } from './logger';
-import { buildPreviewCsp, buildRealSitePreviewCsp, createNonce } from './webviewSecurity';
+import { buildRealSitePreviewCsp, createNonce } from './webviewSecurity';
 
 /** Webviewからのメッセージ型。 */
 export type PreviewMessage = { type: 'switchSite'; siteId: number | null };
@@ -19,80 +18,21 @@ export interface SiteOption {
   siteName: string;
 }
 
-/** 拡張機能に同梱しているPrism.jsバンドル(コードブロックのシンタックスハイライト用)の配置パス。 */
-const PRISM_ASSET_PATH = ['webviews', 'vendor', 'prism', 'prism-bundle.min.js'];
 /**
- * 拡張機能に同梱しているPrism.jsのline-numbersプラグインの配置パス。公開先WordPressテーマ(JIN:R)が
- * コードブロックに行番号ガターを表示するため、プレビューでも同様に再現する(Issue #334)。
- */
-const PRISM_LINE_NUMBERS_ASSET_PATH = ['webviews', 'vendor', 'prism', 'prism-line-numbers.min.js'];
-
-/**
- * 記事プレビュー用のシングルトンWebviewパネル。マスター環境サイトのCSSを<style>として埋め込み、
- * 変換済みHTMLをそのまま表示する。パネル内から環境を切り替えてCSS/骨格を再取得できる。
- * コードブロックは公開先テーマと同様にPrism.js(拡張機能へバンドル済み、nonce付きで実行)で
- * シンタックスハイライトする。公開先テーマ(JIN:R)がline-numbersプラグインで行番号ガターを
- * 表示しているため、プレビューでも同プラグインを読み込み、コードブロックの`<pre>`へ
- * `line-numbers`クラスを付与して再現する(Issue #334)。
+ * 記事プレビュー用のシングルトンWebviewパネル。実サイトの署名付きプレビューURL(issue #1562)をiframeで
+ * 表示するか、表示できないとき(プラグインが使えない・サイトが紐づいていない)に案内を表示する。
+ * テーマCSSの埋め込みやPrism.jsによる見た目の再現(旧方式)は、プラグイン必須化に伴い issue #1564 で削除した。
+ * パネル内から環境を切り替えて、その環境のプレビューを再取得できる。
  */
 export class PreviewPanel {
   /** 開いているプレビューパネル。プレビューは常に1枚に保つ。 */
   public static currentPanel: PreviewPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
-  private readonly _extensionUri: vscode.Uri;
-  /**
-   * renderPreviewSkeletonがローカル/テスト環境向けに作成した非公開プレビュー投稿のID(環境=siteIdごと)。
-   * 環境を切り替えても削除せず保持し、次回同じ環境を選んだ際に更新して使い回す(投稿を積み上げない
-   * ため)。パネルを閉じた際にまとめて削除する({@link dispose}参照)。
-   */
-  private readonly _previewPostIdsBySiteId = new Map<number, string>();
-  /** 実サイトのプレビューで表示中のURL(外部ブラウザで開く操作の宛先)。旧方式の表示・案内表示ではundefined。 */
+  /** 実サイトのプレビューで表示中のURL(外部ブラウザで開く操作の宛先)。案内表示ではundefined。 */
   private _previewUrl: string | undefined;
-  private _deletePreviewPost?: (siteId: number, postId: string) => Promise<void>;
 
   /** Webviewからのメッセージハンドラー（環境切り替え等）。 */
   private _messageHandler: ((message: PreviewMessage) => void) | undefined;
-
-  /**
-   * プレビューを表示する。既に開いている場合は内容を差し替える。
-   * @param context 拡張機能のコンテキスト(同梱資材のURI解決に使う)
-   * @param html サーバーで変換済みの記事HTML
-   * @param css 適用するテーマCSS(取得できなかった場合は空文字)
-   * @param warning CSSを取得できなかった場合などの警告文
-   * @param siteLabel 適用中のCSSの取得元(例: "本番 / example.com")
-   * @param featuredImageDataUri front matterのfeatured_imageのdata URI(未設定/未検出の場合はundefined)
-   * @param onMessage パネル内での環境切り替え等のメッセージハンドラー
-   * @param availableSites パネル内の環境切り替えセレクトに表示する選択肢(2つ以上の場合のみセレクトを表示)
-   * @param currentSiteId 現在表示中のサイトID(サイト未紐付けの場合はnull)
-   * @param deletePreviewPost ローカル/テスト環境向けの非公開プレビュー投稿を削除するコールバック。
-   *                          パネルを閉じた際、記録済みの投稿すべてに対して呼ばれる。
-   */
-  public static createOrShow(
-    context: vscode.ExtensionContext,
-    html: string,
-    css: string,
-    warning: string | undefined,
-    siteLabel?: string,
-    featuredImageDataUri?: string,
-    onMessage?: (message: PreviewMessage) => void,
-    availableSites?: SiteOption[],
-    currentSiteId?: number | null,
-    deletePreviewPost?: (siteId: number, postId: string) => Promise<void>
-  ): void {
-    if (PreviewPanel.currentPanel) {
-      PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
-      PreviewPanel.currentPanel._messageHandler = onMessage;
-      PreviewPanel.currentPanel._update(html, css, warning, siteLabel, featuredImageDataUri, availableSites, currentSiteId);
-      if (deletePreviewPost) {
-        PreviewPanel.currentPanel._deletePreviewPost = deletePreviewPost;
-      }
-      return;
-    }
-    const panel = new PreviewPanel(context, onMessage);
-    PreviewPanel.currentPanel = panel;
-    panel._update(html, css, warning, siteLabel, featuredImageDataUri, availableSites, currentSiteId);
-    panel._deletePreviewPost = deletePreviewPost;
-  }
 
   /**
    * 実サイトのプレビューを表示する(issue #1562)。サーバーが発行した署名付きURLをパネル内のiframeで表示する。
@@ -118,6 +58,16 @@ export class PreviewPanel {
     panel._setPage(options.siteLabel, renderGuidancePage(options, createNonce()));
   }
 
+  /**
+   * プロジェクトにサイトが1つも紐づいていないとき、プレビューの代わりにサイトを紐づける案内を表示する。
+   * プレビューは実サイトで表示するため、サイトが無ければ表示できない(旧方式のCSSなし表示はしない)。
+   */
+  public static showNoSite(context: vscode.ExtensionContext): void {
+    const panel = PreviewPanel.openPanel(context, undefined);
+    panel._previewUrl = undefined;
+    panel._setPage(undefined, renderNoSitePage(createNonce()));
+  }
+
   /** 開いているパネルを前面に出して返す。無ければ作る。 */
   private static openPanel(
     context: vscode.ExtensionContext,
@@ -141,7 +91,6 @@ export class PreviewPanel {
     context: vscode.ExtensionContext,
     onMessage?: (message: PreviewMessage) => void
   ) {
-    this._extensionUri = context.extensionUri;
     this._messageHandler = onMessage;
     this._panel = vscode.window.createWebviewPanel(
       'letsBlog.articlePreview',
@@ -149,8 +98,8 @@ export class PreviewPanel {
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
-        // コードハイライト用に同梱したPrism.js以外のローカル資材は読み込ませない。
-        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'webviews', 'vendor', 'prism')],
+        // ローカル資材は読み込ませない(実サイトのiframeと、拡張自身のインラインスクリプトだけを使う)。
+        localResourceRoots: [],
       }
     );
     this._panel.onDidDispose(() => this.dispose(), null);
@@ -175,30 +124,9 @@ export class PreviewPanel {
     }
   }
 
-  /** siteId(環境)に紐づく、作成済みのプレビュー用非公開投稿IDを返す(未作成ならundefined)。 */
-  public getPreviewPostId(siteId: number): string | undefined {
-    return this._previewPostIdsBySiteId.get(siteId);
-  }
-
-  /** siteId(環境)に紐づくプレビュー用非公開投稿IDを記録する。 */
-  public recordPreviewPostId(siteId: number, postId: string): void {
-    this._previewPostIdsBySiteId.set(siteId, postId);
-  }
-
   private dispose(): void {
     PreviewPanel.currentPanel = undefined;
     this._panel.dispose();
-    // onDidDisposeはVS Code側でawaitされないため、削除はfire-and-forgetで行う
-    // (失敗してもUIをブロックしない。非公開投稿のため残っても実害は小さい)。
-    if (this._deletePreviewPost) {
-      const deletePreviewPost = this._deletePreviewPost;
-      for (const [siteId, postId] of this._previewPostIdsBySiteId) {
-        deletePreviewPost(siteId, postId).catch((err: unknown) => {
-          logger.debug(`プレビュー用投稿の削除に失敗しました: siteId=${siteId}, postId=${postId}`, { err });
-        });
-      }
-      this._previewPostIdsBySiteId.clear();
-    }
   }
 
   /**
@@ -213,105 +141,11 @@ export class PreviewPanel {
     PreviewPanel.currentPanel._panel.reveal(vscode.ViewColumn.Beside);
     void vscode.commands.executeCommand('workbench.action.webview.openDeveloperTools');
   }
-
-  private _update(
-    html: string,
-    css: string,
-    warning: string | undefined,
-    siteLabel?: string,
-    featuredImageDataUri?: string,
-    availableSites?: SiteOption[],
-    currentSiteId?: number | null
-  ): void {
-    this._previewUrl = undefined;
-    // どのサイトのCSSで表示しているかがタブから分かるようにする。
-    this._panel.title = siteLabel ? `Article Preview (${siteLabel})` : 'Article Preview';
-    this._panel.webview.html =
-      this._getHtmlContent(html, css, warning, siteLabel, featuredImageDataUri, availableSites, currentSiteId);
-  }
-
-  private _getHtmlContent(
-    html: string,
-    css: string,
-    warning: string | undefined,
-    siteLabel?: string,
-    featuredImageDataUri?: string,
-    availableSites?: SiteOption[],
-    currentSiteId?: number | null
-  ): string {
-    const warningBlock = warning
-      ? `<div role="alert" style="background:#fff3cd;color:#664d03;padding:8px 12px;margin-bottom:16px;border-radius:4px;font-family:sans-serif;font-size:13px;">${escapeHtml(warning)}</div>`
-      : '';
-    const nonce = createNonce();
-    // パネル内から環境(ローカル/テスト/本番)を切り替えられるセレクトを表示する。
-    // 選択肢が2つ未満(サイトが1つしか紐づいていない等)の場合は切り替える意味がないため表示しない。
-    const siteSwitcher = renderSiteSwitcher(availableSites, currentSiteId);
-    // 適用中のCSSの出所を明示する。どのサイトの見た目を見ているのか分からないと
-    // 環境間の差分確認という目的を果たせないため。
-    const siteBanner = siteSwitcher
-      ? siteSwitcher
-      : siteLabel
-        ? `<div style="background:var(--vscode-editorWidget-background,#eee);color:var(--vscode-foreground,#333);padding:6px 12px;margin-bottom:12px;border-radius:4px;font-family:sans-serif;font-size:12px;">適用中のCSS: ${escapeHtml(siteLabel)}</div>`
-        : '';
-    // 投稿先サイトのテーマは記事に紐づくアイキャッチ画像を表示するため、プレビューでも
-    // 同様に本文の先頭に表示する(テーマのDOM構造までは再現せず、単に画像を出すのみ)。
-    const eyecatchBlock = featuredImageDataUri
-      ? `<div class="letsblog-preview-eyecatch" style="margin:0 0 16px;"><img src="${escapeHtml(featuredImageDataUri)}" alt="" style="max-width:100%;height:auto;display:block;"></div>`
-      : '';
-    const prismUri = this._panel.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, ...PRISM_ASSET_PATH)
-    );
-    const prismLineNumbersUri = this._panel.webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, ...PRISM_LINE_NUMBERS_ASSET_PATH)
-    );
-    return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="${buildPreviewCsp(nonce)}">
-<title>Article Preview</title>
-<style>
-${css}
-</style>
-</head>
-<body>
-${siteBanner}
-${warningBlock}
-<main>
-${eyecatchBlock}
-${html}
-</main>
-<script nonce="${nonce}" src="${prismUri}"></script>
-<script nonce="${nonce}" src="${prismLineNumbersUri}"></script>
-<script nonce="${nonce}">
-document.querySelectorAll('pre > code').forEach((code) => code.parentElement.classList.add('line-numbers'));
-Prism.highlightAll();
-${siteSwitcher ? SITE_SWITCHER_SCRIPT : ''}
-</script>
-</body>
-</html>`;
-  }
 }
 
 /**
- * 環境切り替えセレクトのchangeを拾い、拡張機能側へ`switchSite`メッセージを送る。
- * インラインのonchange属性はCSPのscript-srcで許可できないため、addEventListenerで配線する。
- */
-const SITE_SWITCHER_SCRIPT = `
-(function () {
-  const select = document.getElementById('letsblog-site-switcher');
-  if (!select) return;
-  const vscode = acquireVsCodeApi();
-  select.addEventListener('change', () => {
-    const value = select.value;
-    vscode.postMessage({ type: 'switchSite', siteId: value === '' ? null : Number(value) });
-  });
-})();
-`;
-
-/**
  * パネル内の環境切り替えセレクトを描画する。選択肢が2つ未満の場合は切り替える意味がないため
- * 描画しない(呼び出し側で従来の静的なサイトラベル表示にフォールバックする)。
+ * 描画しない(呼び出し側で静的なサイトラベル表示にフォールバックする)。
  */
 function renderSiteSwitcher(
   availableSites: SiteOption[] | undefined,
@@ -329,7 +163,7 @@ function renderSiteSwitcher(
     })
     .join('');
   return `<div style="display:flex;align-items:center;gap:8px;background:var(--vscode-editorWidget-background,#eee);color:var(--vscode-foreground,#333);padding:6px 12px;margin-bottom:12px;border-radius:4px;font-family:sans-serif;font-size:12px;">
-<label for="letsblog-site-switcher">適用中のCSS:</label>
+<label for="letsblog-site-switcher">プレビューするサイト:</label>
 <select id="letsblog-site-switcher">${options}</select>
 </div>`;
 }
@@ -442,6 +276,25 @@ ${banner}
 <p>プレビューは実サイトのプラグインを使って表示するため、プラグインが必要です。</p>
 <p>Let's Blog のサイト画面で「プラグインを再導入」を実行したあと、もう一度プレビューを開いてください。</p>
 ${reason}
+</main>
+<script nonce="${nonce}">${REAL_SITE_SCRIPT}</script>
+</body>
+</html>`;
+}
+
+function renderNoSitePage(nonce: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'">
+<title>Article Preview</title>
+</head>
+<body style="font-family:sans-serif;padding:8px;">
+<main role="alert">
+<h2>このプロジェクトにはサイトが紐づいていません。</h2>
+<p>プレビューは実サイトで表示するため、プロジェクトにサイトを紐づける必要があります。</p>
+<p>Let's Blog のプロジェクト設定でサイトを紐づけたあと、もう一度プレビューを開いてください。</p>
 </main>
 <script nonce="${nonce}">${REAL_SITE_SCRIPT}</script>
 </body>

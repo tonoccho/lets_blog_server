@@ -851,19 +851,18 @@ platform-service所有(issue #693)。未認証401はplatform-serviceの`Security
 | GET .../tags | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST .../issues/{issueNumber}/assign | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | |
 
-## ArticlePreviewController (4エンドポイント、ベースパス `/api/projects/{projectId}/preview`)
+## ArticlePreviewController (2エンドポイント、ベースパス `/api/projects/{projectId}/preview`)
 
-認可チェックの内容は変わらないが、実装の所有サービスは分割済み。`POST .../render` はcontent-service
-(issue #576)、残る3つはpublishing-service(issue #712、Epic #551 C6-6)が持つ。いずれも
-requireProjectMemberOrAdmin をコントローラ側で呼ぶ点は同じ(プロジェクトメンバー判定は、
-`project_user` を所有するlegacy-apiへの内部ブリッジ経由)。
+実装の所有サービスは分割済み。`POST .../render` はcontent-service(issue #576)、
+`POST .../signed-url` はpublishing-service(issue #1561)が持つ。いずれも
+requireProjectMemberOrAdmin をコントローラ側で呼ぶ点は同じ。旧プレビュー経路の
+`GET .../theme-css`・`POST .../skeleton`・`DELETE .../preview-post` は issue #1564 で削除した
+(削除後は404。認可の対象となるエンドポイントが無い)。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST .../render | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | content-service所有(#576) |
-| GET .../theme-css | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#712) |
-| POST .../skeleton | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#712) |
-| DELETE .../preview-post | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#712) |
+| POST .../signed-url | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#1561) |
 
 ## ArticleReviewController (1エンドポイント、ベースパス `/api/projects/{projectId}/article-review`)
 

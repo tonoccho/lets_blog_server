@@ -73,10 +73,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/taxonomy/resolve"),
 
                 // -- ArticlePreviewController --
-                new Endpoint("GET", "/api/projects/1/preview/theme-css"),
-                new Endpoint("POST", "/api/projects/1/preview/skeleton"),
                 new Endpoint("POST", "/api/projects/1/preview/signed-url"),
-                new Endpoint("DELETE", "/api/projects/1/preview/preview-post"),
 
                 // -- ArticleReviewController --
                 new Endpoint("GET", "/api/projects/1/article-review/pull-requests"),

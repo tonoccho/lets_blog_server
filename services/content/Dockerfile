@@ -32,8 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /workspace/services/content/build/libs/*.jar app.jar
-# [blogcard]/[amazon]組み込みタグのスクレイピング(PlaywrightPageFetcher)、記事プレビューのテーマ
-# 骨格取得(PreviewSkeletonFetcher)用にChromiumと、それが動作するために必要なOS共有ライブラリ
+# [blogcard]/[amazon]組み込みタグのスクレイピング(PlaywrightPageFetcher)用にChromiumと、
+# それが動作するために必要なOS共有ライブラリ
 # (--with-deps)をインストールする(legacy-apiのDockerfileと同じ理由。#576でPlaywrightを持つのは
 # content-serviceになった)。
 COPY --from=build /workspace/services/content/build/runtime-libs ./runtime-libs

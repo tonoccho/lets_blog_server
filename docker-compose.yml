@@ -557,12 +557,6 @@ services:
       # (起動時の依存関係(depends_on)には含めない。循環しない実行時呼び出し先としてのみ設定する)。
       # CurrentActorService の自分自身の userId 解決も同じ宛先。
       IDENTITY_SERVICE_URI: http://identity:8080
-      # サービス間のClient Credentials認証(#567)。issue #1207で、テーマ骨格取得ブリッジ
-      # (ContentServiceClientのfetch-and-splice/fetch-real-post)がforwardedBearerから
-      # 本サービス自身のトークンへ切り替わったため追加した。他の値(token-uri等)はコンテナ間の
-      # 既定URLで足りるためservices/publishing/src/main/resources/application.ymlの既定値に
-      # 委ねる(media/identity-serviceと同じ方針)。
-      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       # 投稿画像リサイズのプロジェクト別デフォルト(project_image_settings、MediaSettingsBridgeClient)は
       # issue #583 で media-service が所有するようになったため、下の MEDIA_SERVICE_URI 経由で解決する。
       # [plantuml]/```plantumlの埋め込み(PlantUmlEmbedService/PlantUmlTagRenderService)の実際の
@@ -655,8 +649,8 @@ services:
       # 投稿の公開(POST /api/posts/publish)・削除(DELETE /api/posts/*/*)のルーティング先
       # (issue #707、posts-publish-legacy/posts-delete-legacyルート)。一括管理・taxonomy解決
       # (issue #708、project-bulk-management-legacy/project-asset-images-legacy/publishingルート)、
-      # 記事プレビューのテーマCSS取得/骨格差し替え/プレビュー用投稿削除(issue #712、
-      # project-preview-legacyルート。/renderのみcontent-serviceのまま)もここへ向ける。
+      # 記事プレビューの署名付きURL発行(issue #1561、project-previewルート。/renderのみ
+      # content-serviceのまま)もここへ向ける。
       PUBLISHING_SERVICE_URI: http://publishing:8080
     depends_on:
       identity:

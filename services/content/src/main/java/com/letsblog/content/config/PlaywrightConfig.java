@@ -11,8 +11,8 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * [blogcard]/[amazon] 組み込みタグ向けスクレイピング(PlaywrightPageFetcher)、記事プレビューの
- * テーマ骨格取得(PreviewSkeletonFetcher)で使うヘッドレスChromiumを、実際に必要になったタイミングで
+ * [blogcard]/[amazon] 組み込みタグ向けスクレイピング(PlaywrightPageFetcher)で使う
+ * ヘッドレスChromiumを、実際に必要になったタイミングで
  * 1つ起動し、以後のリクエストで使い回す(Browser起動はプロセス生成を伴い数百ms〜数秒かかるため)。
  * legacy-apiのPlaywrightConfigと同一の実装(#576でPlaywrightを持つのはcontent-serviceになった)。
  *
@@ -22,9 +22,8 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p><b>ここの{@code @Lazy}だけでは足りない(issue #1046)。</b>Bean定義側の{@code @Lazy}は、
  * eagerな消費者が{@link Browser}を直接注入した時点で効かなくなる。実際、
- * {@link com.letsblog.content.contentcache.PlaywrightPageFetcher}と
- * {@link com.letsblog.content.service.PreviewSkeletonFetcher}(どちらもeager singleton)が
- * コンストラクタで素の{@code Browser}を受け取っていたため、Chromiumの無いホストでは
+ * {@link com.letsblog.content.contentcache.PlaywrightPageFetcher}と、当時あった記事プレビューの
+ * 骨格取得(どちらもeager singleton)がコンストラクタで素の{@code Browser}を受け取っていたため、Chromiumの無いホストでは
  * {@code @SpringBootTest}が248件中53件全滅していた。<b>新たに{@code Browser}/{@code Playwright}を
  * 使うBeanを足すときは、その注入点にも{@code @Lazy}を付けること。</b>
  * media-serviceで先に同じ欠陥を直している(#1020)。付け忘れは
@@ -49,12 +48,10 @@ public class PlaywrightConfig {
      * という前提であり、複数スレッドからの同時アクセスはそもそも想定されていない。
      *
      * <p><b>なぜクラスごとの{@code synchronized(this)}ではなく共有ロックBeanなのか。</b>
-     * content-serviceには{@link Browser}の消費者が{@code PlaywrightPageFetcher}と
-     * {@code PreviewSkeletonFetcher}の<b>2クラス</b>あり、どちらも同じ{@code Browser}Bean
-     * (= 同じ{@code Connection})を注入される。片方のクラス内だけ{@code synchronized}にしても、
-     * もう片方のクラスの呼び出しと同時に来れば競合は残る(media-serviceは消費者が
-     * {@code RechartsRenderer}1クラスのみなので、{@code synchronized(this)}で足りている)。
-     * したがって<b>クラスをまたいで共有できる1個のロック</b>が要る。
+     * issue #1047の時点では、content-serviceに{@link Browser}の消費者が{@code PlaywrightPageFetcher}と
+     * 記事プレビューの骨格取得(issue #1564で削除)の<b>2クラス</b>あり、どちらも同じ{@code Browser}Bean
+     * (= 同じ{@code Connection})を注入されていた。クラスをまたいで共有できる1個のロックにしたのは
+     * そのためで、消費者を増やすときもこのロックを共有すること。
      *
      * <p>{@code @Lazy}な{@link Browser}への注入点は、Spring側の実装により<b>注入点ごとに
      * 異なるプロキシオブジェクト</b>が作られる(実測: 2つの{@code @Lazy Browser}注入点で
@@ -65,16 +62,14 @@ public class PlaywrightConfig {
      * Chromiumの無いホストでもアプリ起動に影響しない)。
      *
      * <p><b>スループットへの影響。</b>直列化により、{@code [blogcard]}/{@code [amazon]}の
-     * スクレイピングと記事プレビューの骨格取得が同時に来ると待ち行列に積まれる。
-     * 1回の取得は数百ms〜数秒(ナビゲーションタイムアウトは最大30秒)だが、いずれも
-     * 高頻度・大量並行が常態の経路ではない(記事保存時・プレビュー表示時の単発呼び出し)ため、
+     * スクレイピングが同時に来ると待ち行列に積まれる。
+     * 1回の取得は数百ms〜数秒(ナビゲーションタイムアウトは最大30秒)だが、
+     * 高頻度・大量並行が常態の経路ではない(記事保存時の単発呼び出し)ため、
      * 許容範囲と判断した。将来問題になった場合は、{@code Browser}/{@code BrowserContext}を
      * 複数プールする設計への変更を検討すること(issue #1047のGoal参照。プーリング自体は
      * 本Issueのスコープ外)。
      *
-     * <p>回帰テスト: {@code PlaywrightPageFetcherConcurrentAccessTest}・
-     * {@code PreviewSkeletonFetcherConcurrentAccessTest}・{@code PlaywrightSharedBrowserAccessTest}
-     * (クラスをまたいだ排他を検証する)。
+     * <p>回帰テスト: {@code PlaywrightPageFetcherConcurrentAccessTest}。
      */
     @Bean
     public ReentrantLock browserAccessLock() {

@@ -146,7 +146,7 @@ Chromium の実行バイナリが無いホストでは ApplicationContext の生
 
 `com.microsoft.playwright` を使うサービスは media だけではない。content-service は
 `[blogcard]`/`[amazon]` 組み込みタグのスクレイピング(`PlaywrightPageFetcher`)と、記事
-プレビューのテーマ骨格取得(`PreviewSkeletonFetcher`)で同じ `PlaywrightConfig` を使っており、
+プレビューのテーマ骨格取得(`PreviewSkeletonFetcher`。#1564 で削除)で同じ `PlaywrightConfig` を使っており、
 **同じ形で `./gradlew :services:content:test` が 248件中53件失敗していた**(内訳は media と
 同じ顔ぶれ — 認可マトリクス #772 が41件、AdminAuthorization #644 が6件、Flyway 契約 #914 が
 3件、内部ブリッジが3件)。対処も同じで、**両方の注入点に `@Lazy` を付けた**。

@@ -73,47 +73,6 @@ Then('プレビューHTMLに見出しと本文が含まれる', (world) => {
   }
 });
 
-// ------------------------------------------------------------------ プレビュー用アイキャッチ(issue #1240)
-
-/**
- * 非公開投稿としてプレビューを実表示する経路(renderPreviewSkeleton)へ、front matter相当の
- * アイキャッチをdata URIとして渡す。managed WordPressのSSH/agentトランスポート限定の経路のため、
- * サイトは「公開先のマネージドWordPressサイトが用意されている」で用意したものを使う。
- */
-When('PNGのアイキャッチ画像付きでタイトル {string} の記事をプレビューする', async (world, title) => {
-  const scope = w(world);
-  const featuredImageDataUri = `data:image/png;base64,${FIXTURE_PNG_BASE64}`;
-  const skeleton = await apiClient.renderPreviewSkeleton(
-    scope.token,
-    scope.actor,
-    scope.project.id,
-    scope.site.id,
-    title,
-    '<p>受け入れテストで作成した記事本文です。</p>',
-    featuredImageDataUri,
-    undefined
-  );
-  (scope as { skeleton?: unknown }).skeleton = skeleton;
-});
-
-Then('プレビュー結果にアイキャッチの警告が含まれない', (world) => {
-  const skeleton = (world as { skeleton?: { available: boolean; warning?: string | null } }).skeleton;
-  if (!skeleton?.available) {
-    throw new Error(`プレビューが利用できません: ${JSON.stringify(skeleton)}`);
-  }
-  if (skeleton.warning) {
-    throw new Error(`アイキャッチの警告が返りました: ${skeleton.warning}`);
-  }
-});
-
-Then('プレビューHTMLにアップロードした画像が表示される', (world) => {
-  const skeleton = (world as { skeleton?: { html?: string | null } }).skeleton;
-  const html = skeleton?.html ?? '';
-  if (!/wp-content\/uploads\/[^"']*\.png/i.test(html)) {
-    throw new Error(`アップロードした画像(.png)がプレビューHTMLに見つかりません: ${html}`);
-  }
-});
-
 interface PublishOptions {
   status?: string;
   scheduledAt?: string;

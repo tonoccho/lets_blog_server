@@ -145,10 +145,10 @@ Keycloakへ直接行うようになりました(`src/deviceAuth.ts`、上記「�
 | メソッド | パス | 関数 | リトライ | キャッシュ | 説明 |
 | --- | --- | --- | --- | --- | --- |
 | POST | `/api/projects/{id}/preview/render` | `renderPreviewHtml` | ○ | - | Markdown→HTML変換(カスタムタグ展開を含む) |
-| GET | `/api/projects/{id}/preview/theme-css?siteId=` | `getThemeCss` | ○ | ○ | テーマCSSの取得。`siteId` 省略時はマスター環境サイト。 |
+| POST | `/api/projects/{id}/preview/signed-url` | `createSignedPreviewUrl` | - | - | 実サイトで表示する期限付きの署名付きプレビューURLの発行(issue #1561)。letsblogプラグインが使えないサイトは409で、`kind: 'pluginUnavailable'` として返す。 |
 
-`ThemeCssResult` は `available=false` のとき `reason` に取得できなかった理由が入ります
-(サイト未紐付け・WordPress以外・接続失敗など)。
+旧プレビュー経路(`/preview/theme-css`・`/preview/skeleton`・`/preview/preview-post`)は、
+プラグイン必須化に伴い issue #1564 で削除しました。
 
 ---
 

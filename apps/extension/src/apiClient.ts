@@ -291,7 +291,6 @@ import type {
   SourceReference,
   SuggestMetadataResult,
   SuggestStructureResult,
-  ThemeCssResult,
 } from './schemas';
 
 export type {
@@ -317,7 +316,6 @@ export type {
   SourceReference,
   SuggestMetadataResult,
   SuggestStructureResult,
-  ThemeCssResult,
 };
 
 /** 投稿(publishPost)へ渡すパラメータ。front matterと本文から組み立てる。 */
@@ -1024,45 +1022,6 @@ export async function renderPreviewHtml(
   return data.html;
 }
 
-/**
- * サイト内の既存記事ページを骨格として流用し、実テーマのDOM構造(タイトル/カテゴリ/日付/
- * アイキャッチ等)を保ったままプレビュー対象記事の内容へ差し替えたHTML断片を取得する。
- * 参照記事が無い・差し替え位置を特定できない等の場合はavailable:falseが返る
- * (呼び出し側は従来のプレーンな表示へフォールバックすること)。
- *
- * ローカル/テスト環境(managed WordPress)では、差し替えの代わりに実際に非公開(private)投稿を
- * 作成/更新してその実ページを返す経路が使われることがある。existingPreviewPostIdに前回の
- * ThemeSkeletonResult.previewPostIdを渡すと新規作成せず更新し、返り値のpreviewPostIdを
- * 次回呼び出しへ渡すことでプレビュー用の投稿を積み上げずに済む
- * (投稿の作成/更新という副作用を伴うため再試行はしない)。
- */
-export async function renderPreviewSkeleton(
-  apiKey: string,
-  actor: Actor | undefined,
-  projectId: number,
-  siteId: number | undefined,
-  title: string,
-  contentHtml: string,
-  featuredImageDataUri: string | undefined,
-  existingPreviewPostId: string | undefined,
-  slug?: string,
-  categories?: string[],
-  tags?: string[]
-): Promise<schemas.ThemeSkeletonResult> {
-  return requestJson(
-    `/api/projects/${projectId}/preview/skeleton`,
-    {
-      label: 'renderPreviewSkeleton',
-      method: 'POST',
-      headers: buildHeaders(apiKey, actor),
-      createBody: jsonBody({
-        title, contentHtml, featuredImageDataUri, siteId, existingPreviewPostId, slug, categories, tags,
-      }),
-    },
-    schemas.ThemeSkeletonResultSchema
-  );
-}
-
 /** 署名付きプレビューURLの発行依頼(issue #1562)。 */
 export interface SignedPreviewUrlInput {
   siteId?: number;
@@ -1130,47 +1089,6 @@ function pluginUnavailableMessage(body: string): string {
     // JSONでない本文はそのまま使う。
   }
   return body;
-}
-
-/**
- * renderPreviewSkeletonがローカル/テスト環境向けに作成した非公開プレビュー投稿を削除する
- * (WordPressの既定挙動でゴミ箱へ移動する)。プレビューパネルを閉じた際に呼ばれる想定。
- */
-export async function deletePreviewPost(
-  apiKey: string,
-  actor: Actor | undefined,
-  projectId: number,
-  siteId: number,
-  postId: string
-): Promise<void> {
-  await request(
-    `/api/projects/${projectId}/preview/preview-post?siteId=${siteId}&postId=${encodeURIComponent(postId)}`,
-    {
-      label: 'deletePreviewPost',
-      method: 'DELETE',
-      headers: buildHeaders(apiKey, actor),
-    }
-  );
-}
-
-/**
- * プレビューに適用するテーマCSSを取得する。siteIdを指定するとそのサイト、
- * 省略時はプロジェクトのマスター環境サイトのCSSを返す。
- * サイトのCSSは短時間で変わるものではないため、サイトごとにキャッシュする。
- */
-export async function getThemeCss(
-  apiKey: string,
-  actor: Actor | undefined,
-  projectId: number,
-  siteId?: number
-): Promise<ThemeCssResult> {
-  const query = siteId != null ? `?siteId=${siteId}` : '';
-  return cachedRequestJson(
-    `project:${projectId}:theme-css:${siteId ?? 'master'}`,
-    `/api/projects/${projectId}/preview/theme-css${query}`,
-    { label: 'getThemeCss', headers: buildHeaders(apiKey, actor) },
-    schemas.ThemeCssResultSchema
-  );
 }
 
 /**

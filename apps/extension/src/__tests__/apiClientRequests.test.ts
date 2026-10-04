@@ -329,17 +329,13 @@ describe('apiClientが解釈するレスポンス', () => {
     expect(filled).toBe('本文');
   });
 
-  it('テーマCSSはsiteIdの有無でURLを変える', async () => {
-    respondWith({ css: 'body{}', available: true });
-
-    await apiClient.getThemeCss('token', undefined, 7, 3);
-    await apiClient.getThemeCss('token', undefined, 7);
-
-    expect(recorded.map((r) => r.url)).toEqual([
-      'https://stack.test/api/projects/7/preview/theme-css?siteId=3',
-      'https://stack.test/api/projects/7/preview/theme-css',
-    ]);
-  });
+  // issue #1564: 旧プレビュー経路(テーマCSS取得・骨組み差し込み・一時投稿の削除)のAPI呼び出しは持たない。
+  it.each(['getThemeCss', 'renderPreviewSkeleton', 'deletePreviewPost'])(
+    '旧プレビュー経路の%sは公開していない',
+    (name) => {
+      expect(apiClient).not.toHaveProperty(name);
+    }
+  );
 
   it('issueの割り当てはContent-Typeヘッダを付けて送る', async () => {
     respondWith({ issueNumber: 3, htmlUrl: 'https://x/3', assignedLogin: 'me' });

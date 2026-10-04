@@ -31,7 +31,7 @@ export interface RealSitePreviewParams {
  * サイトが紐づいている場合に、実サイトの署名付きプレビューURL(issue #1562)で表示する。
  * プラグインが使えないサイトでは旧方式へ落とさず導入の案内を出す。
  *
- * @returns 表示(または案内)を行ったらtrue。サイトが未紐付けで何もしなかったらfalse(旧経路が扱う)。
+ * @returns 表示(または案内)を行ったらtrue。サイトが未紐付けで何もしなかったらfalse(旧経路は#1564で削除した。呼び出し側はサイトが無いとき案内を出す)。
  */
 export async function showRealSitePreview(params: RealSitePreviewParams): Promise<boolean> {
   const { site } = params;

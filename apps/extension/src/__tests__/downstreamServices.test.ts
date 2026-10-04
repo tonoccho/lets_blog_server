@@ -32,9 +32,9 @@ describe('downstreamServiceFor', () => {
     // publishing-service(issue #707/#712)
     ['/api/posts/publish', 'publishing'],
     ['/api/posts/mysite/12345', 'publishing'],
-    ['/api/projects/3/preview/skeleton', 'publishing'],
-    ['/api/projects/3/preview/theme-css?siteId=1', 'publishing'],
-    ['/api/projects/3/preview/preview-post?siteId=1&postId=9', 'publishing'],
+    ['/api/projects/3/preview/signed-url', 'publishing'],
+    // issue #1564: 削除した旧プレビュー経路は publishing-service へ転送されない(project-service の catch-all)。
+    ['/api/projects/3/preview/theme-css?siteId=1', 'project'],
     // content-service(issue #576)
     ['/api/projects/3/preview/render', 'content'],
     ['/api/posts/mysite/by-slug/my-article', 'content'],

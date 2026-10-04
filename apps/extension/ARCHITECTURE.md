@@ -188,9 +188,9 @@ front matterの`wp_post_ids`は**サイトキーごとに投稿IDを持ちます
 本文
   → inlineLocalImages()   ローカル画像をdata URIへ置換(サーバー側では解決できないため)
   → renderPreviewHtml()   サーバーでMarkdown→HTML変換(カスタムタグ展開を含む)
-  → CSSの取得元サイトを選択
-  → getThemeCss()         そのサイトのテーマCSSを取得
-  → PreviewPanelで表示
+  → プレビューするサイトを選択(紐づくサイトが無ければ案内を表示)
+  → createSignedPreviewUrl()  実サイトの署名付きプレビューURLを取得(issue #1561/#1562)
+  → PreviewPanelでiframe表示(プラグインが使えないサイトは導入の案内を表示)
 ```
 
 ---

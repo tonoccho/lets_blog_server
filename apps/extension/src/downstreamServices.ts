@@ -49,10 +49,11 @@ interface Route {
  * application.yml と同じ順序(先勝ち)。拡張が呼ぶパスに関係するルートのみを写している。
  */
 const ROUTES: Route[] = [
-  // 記事プレビュー: /render のみ content-service、それ以外(theme-css/skeleton/preview-post)は
-  // publishing-service(issue #712)。
+  // 記事プレビュー: /render は content-service、署名付きURLの発行(/signed-url、issue #1561)は
+  // publishing-service。旧プレビュー経路(theme-css/skeleton/preview-post)は#1564で削除し、
+  // gatewayの専用ルートも無いため下の project-service(catch-all)へ落ちる。
   { pattern: '/api/projects/*/preview/render', service: CONTENT },
-  { pattern: '/api/projects/*/preview/**', service: PUBLISHING },
+  { pattern: '/api/projects/*/preview/signed-url', service: PUBLISHING },
   // 投稿の公開・削除は publishing-service(issue #707)。
   { pattern: '/api/posts/publish', service: PUBLISHING },
   { pattern: '/api/posts/*/*', service: PUBLISHING },

@@ -239,13 +239,6 @@ export const AssignIssueResultSchema = z.object({
 });
 export type AssignIssueResult = z.infer<typeof AssignIssueResultSchema>;
 
-export const ThemeCssResultSchema = z.object({
-  css: z.string(),
-  available: z.boolean(),
-  reason: z.string().nullish(),
-});
-export type ThemeCssResult = z.infer<typeof ThemeCssResultSchema>;
-
 /**
  * URLペースト時のカード形式判定・組み込みタグ用情報取得API(/api/content-cache)のレスポンス。
  * dataはtypeに応じてキーが異なる(BLOGCARD: title/description/imageUrl/siteName/url,
@@ -273,35 +266,6 @@ export const SignedPreviewUrlSchema = z.object({
   url: z.string(),
   expiresAt: z.number(),
 });
-
-/**
- * サイト内の既存記事ページを骨格として流用し、タイトル/本文/アイキャッチを差し替えた
- * HTML断片(/api/projects/{projectId}/preview/skeleton)。
- * cssは骨格として実際にナビゲートした投稿ページで読み込まれていたスタイルシートを連結したもの。
- * 本文の差し替え位置を特定できずavailableがfalseの場合でも、ナビゲーション自体に成功していれば
- * 含まれることがある(トップページ限定のCSS取得(getThemeCss)では拾えない、is_single()等で
- * 投稿ページ限定で読み込まれるCSSを補うため)。呼び出し側でgetThemeCssの結果とマージすること。
- */
-export const ThemeSkeletonResultSchema = z.object({
-  html: z.string().nullish(),
-  available: z.boolean(),
-  reason: z.string().nullish(),
-  eyecatchSpliced: z.boolean(),
-  css: z.string().nullish(),
-  /**
-   * ローカル/テスト環境で非公開投稿として実表示した場合の、作成/更新したWordPress投稿ID。
-   * 次回のrenderPreviewSkeleton呼び出し時にexistingPreviewPostIdへ渡すことで同じ投稿を更新でき、
-   * プレビュー用の投稿を積み上げずに済む。また、プレビュー終了時にこのIDで投稿を削除できる。
-   * 従来のスクレイピング&スプライス経路(本番環境等)ではnull。
-   */
-  previewPostId: z.string().nullish(),
-  /**
-   * html自体は取得できた(available=true)ものの、アイキャッチのアップロード失敗等
-   * 付随処理の一部が失敗した場合の非致命的な警告文。呼び出し側でプレビューへ表示する。
-   */
-  warning: z.string().nullish(),
-});
-export type ThemeSkeletonResult = z.infer<typeof ThemeSkeletonResultSchema>;
 
 /** 既存カテゴリ名の一覧。サイト未紐付け時は空配列。 */
 export const CategoryNameListSchema = z.array(z.string());

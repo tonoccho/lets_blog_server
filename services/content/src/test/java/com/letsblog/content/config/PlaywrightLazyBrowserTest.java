@@ -2,7 +2,6 @@ package com.letsblog.content.config;
 
 import com.letsblog.content.contentcache.OutboundUrlGuard;
 import com.letsblog.content.contentcache.PlaywrightPageFetcher;
-import com.letsblog.content.service.PreviewSkeletonFetcher;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Playwright;
 import org.junit.jupiter.api.DisplayName;
@@ -42,10 +41,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 内部ブリッジという、スクレイピングともプレビューとも無関係なテストばかりで、ローカルでは
  * 常に赤のまま誰も読まない状態になっていた。
  *
- * <p><b>media と違い、content の eager な消費者は2つある</b>
- * ({@link PlaywrightPageFetcher} と {@link PreviewSkeletonFetcher})。片方だけ遅延にしても
- * 症状は残るので、下のラチェットは「今分かっている2つ」ではなく
- * {@code com.letsblog.content} 全体を走査する。
+ * <p>content の eager な消費者は {@link PlaywrightPageFetcher} だけになった
+ * (もう1つだった記事プレビューの骨格取得は issue #1564 で削除した)。別のクラスが後から
+ * {@code Browser} を注入すれば症状は再発するので、下のラチェットは「今分かっている消費者」
+ * ではなく {@code com.letsblog.content} 全体を走査する。
  *
  * <p>このテストは Chromium も DB も要らない。
  */
@@ -66,19 +65,16 @@ class PlaywrightLazyBrowserTest {
      * 遅延が壊れていれば起動自体は成功してしまうため、例外の有無だけでは検知できない。
      */
     @Test
-    @DisplayName("両方の消費者を含むコンテキストを起動してもbrowser/playwrightは実体化されない")
+    @DisplayName("消費者を含むコンテキストを起動してもbrowser/playwrightは実体化されない")
     void コンテキスト起動時にChromiumは起動されない() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
             context.register(PlaywrightConfig.class, OutboundUrlGuard.class,
-                    PlaywrightPageFetcher.class, PreviewSkeletonFetcher.class);
+                    PlaywrightPageFetcher.class);
 
             context.refresh();
 
             assertThat(context.getBean(PlaywrightPageFetcher.class))
                     .as("PlaywrightPageFetcher自体は従来どおり eager singleton として生成される")
-                    .isNotNull();
-            assertThat(context.getBean(PreviewSkeletonFetcher.class))
-                    .as("PreviewSkeletonFetcher自体は従来どおり eager singleton として生成される")
                     .isNotNull();
             ConfigurableListableBeanFactory beanFactory = context.getBeanFactory();
             for (String beanName : PLAYWRIGHT_BEANS) {
@@ -129,7 +125,7 @@ class PlaywrightLazyBrowserTest {
         assertThat(scanned)
                 .as("ラチェットの走査対象パッケージが空、または content を指していません。"
                         + " このままでは何も検知しない緑のテストになります(#994と同型)")
-                .contains(PlaywrightPageFetcher.class.getName(), PreviewSkeletonFetcher.class.getName());
+                .contains(PlaywrightPageFetcher.class.getName());
     }
 
     private static List<String> scanComponentNames(String basePackage) {

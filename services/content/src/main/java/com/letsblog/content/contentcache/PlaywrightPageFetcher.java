@@ -29,8 +29,7 @@ public class PlaywrightPageFetcher {
      * {@link Browser}(= 共有Connection)への排他アクセス用ロック(issue #1047)。
      * {@link com.letsblog.content.config.PlaywrightConfig#browserAccessLock()}のJavadoc参照
      * (なぜ{@code synchronized(this)}ではなく共有Beanなのか、なぜ{@code synchronized(browser)}
-     * を採らないのか)。{@link com.letsblog.content.service.PreviewSkeletonFetcher}と<b>同じ
-     * インスタンス</b>が注入される。
+を採らないのか)。Browserを使うクラスが増えたときも、<b>同じインスタンス</b>を共有すること。
      */
     private final ReentrantLock browserAccessLock;
 
@@ -52,9 +51,8 @@ public class PlaywrightPageFetcher {
      * ため、Chromiumを持つコンテナでの{@code [blogcard]}/{@code [amazon]}のスクレイピングは
      * 従来どおり動く。
      *
-     * <p><b>content-serviceにはeagerな消費者が2つある。</b>もう一方は
-     * {@link com.letsblog.content.service.PreviewSkeletonFetcher}で、片方だけ遅延にしても
-     * 症状は残る。採らなかった案(クラス自体を{@code @Lazy}にする / プロファイル分離 /
+     * <p><b>eagerな消費者が1つでも残れば症状は残る。</b>(issue #1046の時点では、記事プレビューの
+     * 骨格取得という2つ目の消費者があった。issue #1564で削除した。)採らなかった案(クラス自体を{@code @Lazy}にする / プロファイル分離 /
      * ホストへ依存パッケージを導入する)は{@code docs/TEST_DOCUMENTATION.md}に記録がある。
      *
      * <p>この不変条件は{@code PlaywrightLazyBrowserTest}のラチェットが検査する。
@@ -70,8 +68,7 @@ public class PlaywrightPageFetcher {
         // 最初のURLはブラウザを起こす前に弾く(明確なエラーを返すため)。
         outboundUrlGuard.requireAllowed(url);
         // issue #1047: newPage()からclose()までを丸ごとロックで直列化する(理由は
-        // PlaywrightConfig#browserAccessLock()のJavadoc参照。PreviewSkeletonFetcherと
-        // 同じロックを共有し、クラスをまたいだ排他にする)。
+        // PlaywrightConfig#browserAccessLock()のJavadoc参照)。
         browserAccessLock.lock();
         try (Page page = browser.newPage()) {
             // リダイレクト・サブリソースも含め、ブラウザが実際に接続する直前に毎回検査する。

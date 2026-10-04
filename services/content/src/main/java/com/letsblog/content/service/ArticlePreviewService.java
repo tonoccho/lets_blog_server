@@ -9,14 +9,8 @@ import org.springframework.web.util.HtmlUtils;
  * 行う(issue #576)。legacy-apiのArticlePreviewServiceのうち、renderHtml(記事本文のレンダリング
  * パイプライン。CMSへの依存を持たない)のみをcontent-serviceへ移設する。
  *
- * <p>fetchThemeCss/renderSkeleton/deletePreviewPost(サイトの実テーマCSS取得・骨格差し替え)は、
- * CmsAdapter/WordPressAgentOperations/WordPressSshOperations/Project/Site(project-service/
- * publishing-serviceがまだ抽出されていないドメイン)への深い依存があり、そのまま移設すると
- * content-serviceがCMSアダプタ一式を持つ必要が生じてしまうため、legacy-apiに残した
- * (legacy-api側のArticlePreviewServiceはfetchThemeCss/renderSkeleton/deletePreviewPostのみを
- * 残す形に縮小し、Playwrightを使うテーマ骨格取得部分(PreviewSkeletonFetcher)は本サービスへの
- * 内部ブリッジ経由に書き換えている。Playwrightを持つのはcontent-serviceになった、というissueの
- * 注記どおり)。
+ * <p>サイトの実テーマCSS取得・骨格差し替え(旧プレビュー経路)は、プレビューを実サイトの署名付きURL
+ * (publishing-service、issue #1561)へ一本化した issue #1564 で削除した。
  */
 @Service
 public class ArticlePreviewService {

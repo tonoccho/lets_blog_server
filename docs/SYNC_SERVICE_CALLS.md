@@ -190,7 +190,6 @@ ai-service へ移設済みのエンドポイントを legacy-api に問い合わ
 |---|---|---|---|---|---|---|
 | legacy-api(`ContentServiceClient`) | `/api/internal/content/posts/by-site/{siteId}`・`/projects/{id}/content-settings` | (未移行、既存はメソッドごとに個別timeout) | - | - | (未整理) | 未 |
 | publishing(`ContentServiceClient`) | `/api/internal/content/render/**`・`/posts/**` | (未移行、既存はメソッドごとに個別timeout。render系60秒/その他10秒) | - | - | (未整理、現状は明確なエラー) | 未(issue #707でlegacy-apiから移設) |
-| publishing(`ContentServiceClient`) | `/api/internal/content/preview-skeleton/fetch-and-splice`・`fetch-real-post`(Playwrightによる実ページナビゲーション) | (未移行、既存は読み取り40秒固定。`RENDER`(30秒)ではナビゲーションのタイムアウト(最大30秒)に足りないため) | - | - | 機能縮退(取得失敗時はavailable=falseを返し、拡張機能側が従来のプレーン表示へフォールバックする) | 未(issue #712でArticlePreviewServiceと共にlegacy-apiから移設) |
 
 ### 対象外(外部システム連携。C12のスコープ外)
 
