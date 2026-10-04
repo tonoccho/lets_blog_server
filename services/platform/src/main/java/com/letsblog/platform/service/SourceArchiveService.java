@@ -92,10 +92,16 @@ public class SourceArchiveService {
             }
         }
         String fileName = relative.getFileName().toString();
-        if (fileName.equals(".env") || fileName.endsWith(".log")) {
+        if (isSecretEnvFile(fileName) || fileName.equals(".DS_Store") || fileName.endsWith(".log")) {
             return false;
         }
         return !(relative.getNameCount() == 1 && excludedRootFiles.contains(fileName));
+    }
+
+    /** {@code .env}と{@code .env.*}は秘密を含みうるので除く。{@code setup.sh}が使う{@code .env.example}だけ残す。 */
+    private static boolean isSecretEnvFile(String fileName) {
+        return fileName.equals(".env")
+                || (fileName.startsWith(".env.") && !fileName.equals(".env.example"));
     }
 
     private static String toZipPath(Path relative) {

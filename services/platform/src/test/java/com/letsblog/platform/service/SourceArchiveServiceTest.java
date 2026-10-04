@@ -107,6 +107,28 @@ class SourceArchiveServiceTest {
     }
 
     @Test
+    void env系の秘密ファイルとDS_Storeは含めずenv_exampleは含める() throws IOException {
+        SourceArchiveService service = service();
+        write(mcp, ".env.local", "SECRET=1");
+        write(mcp, ".env.production", "SECRET=2");
+        write(mcp, ".DS_Store", "mac");
+        write(mcp, "src/.DS_Store", "mac");
+        write(penpot, ".env.local", "SECRET=3");
+        write(penpot, ".env.example", "A=1");
+
+        List<String> mcpNames = entries(service.mcpServer());
+        assertFalse(mcpNames.contains("letsblog-mcp-server/.env.local"));
+        assertFalse(mcpNames.contains("letsblog-mcp-server/.env.production"));
+        assertFalse(mcpNames.contains("letsblog-mcp-server/.DS_Store"));
+        assertFalse(mcpNames.contains("letsblog-mcp-server/src/.DS_Store"));
+        assertTrue(mcpNames.contains("letsblog-mcp-server/.env.example"));
+
+        List<String> penpotNames = entries(service.penpotPlugin());
+        assertFalse(penpotNames.contains("letsblog-penpot-plugin/.env.local"));
+        assertTrue(penpotNames.contains("letsblog-penpot-plugin/.env.example"));
+    }
+
+    @Test
     void ソースのディレクトリが無ければ明確なエラーにする() {
         SourceArchiveService service = new SourceArchiveService(
                 tempDir.resolve("missing-a").toString(), tempDir.resolve("missing-b").toString());
