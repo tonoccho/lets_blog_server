@@ -1,5 +1,5 @@
 # language: ja
-@response-budget @slow
+@response-budget @retries:2 @slow
 機能: プロジェクトのガベージコレクションの Server Action が3秒の予算内に返る
 
   `docs/ACCEPTANCE_CRITERIA.md` §10.5 の `app/projects/[id]/actions.ts` のうち、ガベージコレクション

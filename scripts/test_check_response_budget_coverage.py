@@ -359,6 +359,55 @@ class Main(unittest.TestCase):
         root = self._repo(DOC, {"p.feature": self.PAGES_FEATURE, "notes.txt": "@budget-page:/ghost"})
         code, _ = self._run(root, "--pages-only")
         self.assertEqual(code, 0)
+    def test_main_fails_when_budget_feature_lacks_retries(self):
+        root = self._repo(DOC, {"p.feature": "@response-budget\n" + self.PAGES_FEATURE})
+        code, out = self._run(root, "--pages-only")
+        self.assertEqual(code, 1, out)
+        self.assertIn("@retries:2", out)
+
+    def test_main_passes_when_budget_feature_has_retries(self):
+        root = self._repo(DOC, {"p.feature": "@response-budget @retries:2\n" + self.PAGES_FEATURE})
+        code, out = self._run(root, "--pages-only")
+        self.assertEqual(code, 0, out)
+
+
+class RetriesTag(unittest.TestCase):
+    """#1554: `@response-budget` の feature だけが feature 単位の `@retries:2` を持つ。"""
+
+    def scan(self, text, path="f.feature"):
+        return crb.check_retries_text(text, path)
+
+    def test_budget_feature_with_retries_2_is_ok(self):
+        self.assertEqual([], self.scan("# language: ja\n@response-budget @retries:2\n機能: x\n"))
+
+    def test_tags_on_separate_lines_are_ok(self):
+        self.assertEqual([], self.scan("@response-budget\n@retries:2\n機能: x\n"))
+
+    def test_budget_feature_without_retries_fails(self):
+        problems = self.scan("@response-budget\n機能: x\n")
+        self.assertEqual(1, len(problems))
+        self.assertIn("f.feature", problems[0])
+        self.assertIn("@retries:2", problems[0])
+
+    def test_budget_feature_with_other_retries_value_fails(self):
+        self.assertEqual(1, len(self.scan("@response-budget @retries:3\n機能: x\n")))
+
+    def test_non_budget_feature_with_retries_fails(self):
+        problems = self.scan("@retries:2\n機能: x\n")
+        self.assertEqual(1, len(problems))
+        self.assertIn("@response-budget", problems[0])
+
+    def test_scenario_level_retries_fails_in_any_feature(self):
+        self.assertEqual(1, len(self.scan("機能: x\n\n  @retries:2\n  シナリオ: a\n    もし x\n")))
+        self.assertEqual(
+            1, len(self.scan("@response-budget @retries:2\n機能: x\n\n  @retries:1\n  シナリオ: a\n    もし x\n"))
+        )
+
+    def test_scenario_tag_response_budget_alone_does_not_make_a_budget_feature(self):
+        self.assertEqual([], self.scan("機能: x\n\n  @response-budget\n  シナリオ: a\n    もし x\n"))
+
+    def test_plain_feature_is_ok(self):
+        self.assertEqual([], self.scan("@slow\n機能: x\n"))
 
 
 class RealRepository(unittest.TestCase):
@@ -369,6 +418,17 @@ class RealRepository(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             code = crb.main(["--pages-only"], repo_root=REPO_ROOT)
         self.assertEqual(code, 0, buf.getvalue())
+
+    def test_every_real_response_budget_feature_has_retries_2_and_no_other_feature_has_a_retries_tag(self):
+        problems, _ = [], None
+        root = os.path.join(REPO_ROOT, crb.FEATURES_DIR)
+        for directory, _dirs, files in os.walk(root):
+            for name in files:
+                if name.endswith(".feature"):
+                    full = os.path.join(directory, name)
+                    with open(full, encoding="utf-8") as fh:
+                        problems += crb.check_retries_text(fh.read(), os.path.relpath(full, REPO_ROOT))
+        self.assertEqual([], problems)
 
     def test_the_real_list_has_all_24_pages_all_budget_targets(self):
         with open(os.path.join(REPO_ROOT, "docs", "ACCEPTANCE_CRITERIA.md"), encoding="utf-8") as fh:

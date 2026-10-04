@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: プロジェクトのメンバー管理の Server Action が3秒の予算内に返る
 
   `docs/ACCEPTANCE_CRITERIA.md` §10.5 の `app/projects/[id]/actions.ts` のうち、メンバーの追加・ロール変更・

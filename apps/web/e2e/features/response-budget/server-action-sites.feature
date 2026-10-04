@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: サイトの Server Action が3秒の予算内に返る
 
   `docs/ACCEPTANCE_CRITERIA.md` §10.5 の `app/sites/[id]/edit/actions.ts` と `app/sites/actions.ts`(issue #1477)。書式と計り方は

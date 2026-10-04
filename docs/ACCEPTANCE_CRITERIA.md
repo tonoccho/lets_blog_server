@@ -862,3 +862,17 @@ VSCode拡張専用で**予算対象外**、WordPressへの大容量アップロ�
   `click-response-budget.feature`)。書式の説明は `page-first-display.feature` の冒頭にもある。
   `custom-tag/performance.feature` の「タグ画面のページロード」(AC-PERF-003)は独立した先行ゲートで、
   宣言を付けていない(§10.4 の `/projects/[id]/tags` は `page-first-display.feature` が持つ)。
+
+### 10.8 再試行で通れば合格とする例外(#1554)
+
+利用者の決定(2026-10-02): **3秒予算のシナリオは、再試行で通れば合格とみなす。** ホストのメモリ逼迫や
+並行する受け入れテストで、一度だけ偶発的に3秒を超えることがあるため。
+
+- **範囲**: `@response-budget` を持つ feature だけ。ほかのシナリオの再試行・flaky の扱い(ゼロ許容)は変えない。
+- **再試行の回数**: 最大2回(feature 単位の `@retries:2`)。閾値(3000ms)・判定・手順は変えない。
+  最初の試行と2回の再試行のすべてで超えた場合は、これまでどおり失敗(`unexpected`)になる。
+- **付け忘れの検出**: `scripts/check-response-budget-coverage.py` が、`@response-budget` の feature に
+  `@retries:2` が無い・ほかの feature やシナリオ単位に `@retries:` がある、を失敗にする。
+- **記録先**: リリース検証(`scripts/release-verify-tag.py`)の実行ログと要約、タグの注釈に、再試行で通った
+  予算シナリオの feature のパス・シナリオ名・失敗した試行の計測値(ms)を全件出す(0件なら0件)。
+  `docs/ACCEPTANCE_TESTING.md` の「ゼロ許容」も参照。

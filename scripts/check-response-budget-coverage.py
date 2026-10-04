@@ -21,6 +21,12 @@
 1つのシナリオが複数を宣言してよい。機能(`機能:`)・背景・`例:` の直前のタグは宣言として
 数えず、置き間違いとして失敗にする(効かない宣言を黙って受け付けない)。
 
+## 再試行タグ(#1554)
+
+利用者の決定(2026-10-02)で、3秒予算のシナリオは再試行で通れば合格とする。再試行は
+`@response-budget` を持つ feature だけに、feature 単位の `@retries:2` で付ける。付け忘れ、
+値の違い、ほかの feature やシナリオ単位への `@retries:` はいずれも失敗にする。
+
 ## 使い方
 
     python3 scripts/check-response-budget-coverage.py                 # 既定: 画面と Server Action の両方
@@ -118,6 +124,63 @@ def collect_declarations(features_root: str, repo_root: str = REPO_ROOT):
     return declarations, errors
 
 
+_RETRIES_TAG = re.compile(r"^@retries:(.*)$")
+RETRIES_TAG = "@retries:2"
+BUDGET_FEATURE_TAG = "@response-budget"
+
+
+def check_retries_text(text: str, path: str) -> list[str]:
+    """1つの `.feature` の再試行タグを検査し、問題の文言のリストを返す(空なら適合)。
+
+    - `@response-budget` を feature 単位で持つのに `@retries:2` が無い
+    - `@retries:` の値が 2 でない、または `@response-budget` の無い feature にある
+    - シナリオ単位の `@retries:`(playwright-bdd では効かない置き場所)
+    """
+    feature_tags: list[str] = []
+    scenario_retries: list[tuple[int, str]] = []
+    pending: list[tuple[int, str]] = []
+    seen_feature = False
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("@"):
+            pending += [(lineno, t) for t in line.split() if t.startswith("@")]
+            continue
+        if not seen_feature and _starts_with_keyword(line, ("機能", "Feature")):
+            seen_feature = True
+            feature_tags = [t for _, t in pending]
+        else:
+            scenario_retries += [(n, t) for n, t in pending if _RETRIES_TAG.match(t)]
+        pending = []
+    scenario_retries += [(n, t) for n, t in pending if _RETRIES_TAG.match(t)]
+
+    problems: list[str] = []
+    is_budget = BUDGET_FEATURE_TAG in feature_tags
+    retries = [t for t in feature_tags if _RETRIES_TAG.match(t)]
+    if is_budget and not retries:
+        problems.append(f"{path}: {BUDGET_FEATURE_TAG} の feature に feature 単位の {RETRIES_TAG} がありません")
+    if not is_budget and retries:
+        problems.append(f"{path}: {BUDGET_FEATURE_TAG} を持たない feature に {', '.join(retries)} があります(再試行は予算シナリオだけ)")
+    if is_budget:
+        problems += [f"{path}: {t} は {RETRIES_TAG} ではありません(再試行は最大2回)" for t in retries if t != RETRIES_TAG]
+    problems += [
+        f"{path}:{n}: {t} はシナリオ単位にあります(再試行は feature 単位の {RETRIES_TAG} だけ)" for n, t in scenario_retries
+    ]
+    return problems
+
+
+def collect_retries_problems(features_root: str, repo_root: str = REPO_ROOT) -> list[str]:
+    problems: list[str] = []
+    for directory, _dirs, files in sorted(os.walk(features_root)):
+        for name in sorted(files):
+            if name.endswith(".feature"):
+                full = os.path.join(directory, name)
+                with open(full, encoding="utf-8") as fh:
+                    problems += check_retries_text(fh.read(), os.path.relpath(full, repo_root))
+    return problems
+
+
 _SCOPES = {"all": ("page", "action"), "pages": ("page",), "actions": ("action",)}
 _LABEL = {"page": "画面", "action": "Server Action"}
 
@@ -175,6 +238,7 @@ def main(argv=None, repo_root: str = REPO_ROOT) -> int:
 
     declarations, problems = collect_declarations(os.path.join(repo_root, FEATURES_DIR), repo_root)
     problems += check(rows, declarations, args.scope)
+    problems += collect_retries_problems(os.path.join(repo_root, FEATURES_DIR), repo_root)
     if problems:
         print(f"3秒予算の対象一覧とシナリオが一致しません({len(problems)}件):")
         for problem in problems:

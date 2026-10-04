@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: プロジェクトの作成・環境・設定の Server Action が3秒の予算内に返る
 
   `docs/ACCEPTANCE_CRITERIA.md` §10.5 の `app/projects/actions.ts` と `app/projects/[id]/actions.ts` のうち、

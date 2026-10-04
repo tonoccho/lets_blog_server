@@ -1,5 +1,5 @@
 # language: ja
-@response-budget @slow
+@response-budget @retries:2 @slow
 機能: プロジェクトの一括管理の比較取得の Server Action が3秒の予算内に返る
 
   `docs/ACCEPTANCE_CRITERIA.md` §10.5 の `app/projects/[id]/actions.ts` のうち、一括管理の環境間比較の取得

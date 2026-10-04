@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: 後から追加された画面と Server Action も3秒の予算内に収まる
 
   `docs/ACCEPTANCE_CRITERIA.md` §10 の対象一覧に後から載せた画面・Server Action のうち、

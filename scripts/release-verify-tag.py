@@ -766,11 +766,72 @@ def parse_jest_json_counts(checkout_dir, source):
     }
 
 
+BUDGET_TAG = "response-budget"
+_BUDGET_MS = re.compile(r"実測\s*(\d+)\s*ms")
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+FEATURES_REL = "apps/web/e2e/features"
+
+
+def _iter_playwright_specs(suite):
+    for spec in suite.get("specs", []):
+        yield spec
+    for child in suite.get("suites", []):
+        yield from _iter_playwright_specs(child)
+
+
+def _spec_feature_path(spec):
+    """生成物のパス(`<dir>/<name>.feature.spec.js`)を `.feature` のリポジトリ相対パスへ戻す。"""
+    f = re.sub(r"\.spec\.[cm]?[jt]s$", "", spec.get("file", "") or "")
+    return "%s/%s" % (FEATURES_REL, f) if f and not f.startswith(FEATURES_REL) else f
+
+
+def _is_budget_spec(spec):
+    tags = [str(t).lstrip("@") for t in spec.get("tags", []) or []]
+    return BUDGET_TAG in tags or ("@" + BUDGET_TAG) in (spec.get("title") or "").split()
+
+
+def find_budget_flaky(data):
+    """#1554: レポートの `suites` をたどり、`flaky`(再試行で通った)の `@response-budget` を集める。
+
+    各要素は feature のパス、シナリオ名、失敗した試行のエラーメッセージにある計測値(ms,
+    `formatBudgetMessage` の「実測 NNNms」)。
+    """
+    found = []
+    for top in data.get("suites", []) or []:
+        for spec in _iter_playwright_specs(top):
+            if not _is_budget_spec(spec):
+                continue
+            for test in spec.get("tests", []):
+                if test.get("status") != "flaky":
+                    continue
+                ms = []
+                for res in test.get("results", []):
+                    if res.get("status") in ("passed", "skipped"):
+                        continue
+                    for err in res.get("errors", []) or []:
+                        ms += [int(m) for m in _BUDGET_MS.findall(_ANSI.sub("", err.get("message", "") or ""))]
+                found.append({"feature": _spec_feature_path(spec), "scenario": spec.get("title", ""), "ms": ms})
+    return found
+
+
+def format_budget_flaky_lines(budget_flaky):
+    """再試行で通った予算シナリオの記録行。0件のときも0件と明示する(#1554)。"""
+    if not budget_flaky:
+        return ["  0 件(再試行で通った予算シナリオはありません)"]
+    lines = ["  %d 件" % len(budget_flaky)]
+    for rec in budget_flaky:
+        ms = ", ".join("%dms" % m for m in rec["ms"]) or "計測値なし"
+        lines.append("  - %s :: %s :: %s" % (rec["feature"], rec["scenario"], ms))
+    return lines
+
+
 def parse_playwright_json_counts(checkout_dir, source):
     """playwright `--reporter=...,json` の出力(`stats`)から件数を抽出する。
 
     flaky も要件5のゼロ許容の対象なので、`failed`/`skipped`とは別に`flaky`として保持する
-    (`StepResult.ok`が見る)。
+    (`StepResult.ok`が見る)。ただし #1554(利用者の決定 2026-10-02)で、`@response-budget` の
+    flaky(再試行で通った)は合格とし、`flaky` から除いて `budget_flaky` に記録する。
+    `@response-budget` 以外の flaky はゼロ許容のまま。
     """
     path = os.path.join(checkout_dir, source)
     if not os.path.exists(path):
@@ -778,12 +839,14 @@ def parse_playwright_json_counts(checkout_dir, source):
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     stats = data.get("stats", {})
+    budget_flaky = find_budget_flaky(data)
     return {
         "passed": stats.get("expected", 0),
         "failed": stats.get("unexpected", 0),
         "skipped": stats.get("skipped", 0),
         "did_not_run": 0,
-        "flaky": stats.get("flaky", 0),
+        "flaky": max(0, stats.get("flaky", 0) - len(budget_flaky)),
+        "budget_flaky": budget_flaky,
     }
 
 
@@ -886,6 +949,7 @@ def run_step(step, checkout_dir, log_dir, credential_env=None):
             counts = {"passed": 0, "failed": 1, "skipped": 0, "did_not_run": 0, "flaky": 0}
         else:
             counts.setdefault("flaky", 0)
+            counts.setdefault("budget_flaky", [])
     elif counts_file:
         counts_path = os.path.join(checkout_dir, counts_file)
         if os.path.exists(counts_path):
@@ -1046,6 +1110,11 @@ def do_merge_and_check_tree(checkout_dir, main_tip, pinned_sha):
     return merge_commit, match
 
 
+def collect_budget_flaky(step_results):
+    """全手順の「再試行で通った予算シナリオ」(#1554)。"""
+    return [rec for res in step_results for rec in res.counts.get("budget_flaky", [])]
+
+
 def build_tag_message(
     p_sha, r_sha, main_before, merge_commit, tree_id, start_time, end_time, step_results,
     excluded_scenarios=(),
@@ -1073,6 +1142,9 @@ def build_tag_message(
     lines.append("")
     lines.append("@requires-gpu 除外(#1318):")
     lines.extend(format_requires_gpu_exclusion_lines(excluded_scenarios))
+    lines.append("")
+    lines.append("再試行で通った予算シナリオ(#1554):")
+    lines.extend(format_budget_flaky_lines(collect_budget_flaky(step_results)))
     return "\n".join(lines)
 
 
@@ -1256,6 +1328,10 @@ def main(argv=None):
                 res = run_step(step, checkout_dir, log_dir, credential_env=credential_env)
                 step_results.append(res)
                 out.write("    rc=%s %s (%.1fs)\n" % (res.returncode, res.summary(), res.duration))
+                if "budget_flaky" in res.counts:
+                    out.write("    再試行で通った予算シナリオ(#1554):\n")
+                    for line in format_budget_flaky_lines(res.counts["budget_flaky"]):
+                        out.write("    " + line + "\n")
                 if not res.ok:
                     overall_ok = False
                     failing = res
@@ -1263,6 +1339,11 @@ def main(argv=None):
         finally:
             # 手順の外(事前確認・本番のマージ、push)では束縛しない(上記コメント参照)。
             git(["config", "--unset", "core.hooksPath"], cwd=checkout_dir, check=False)
+
+        # #1554: 失敗しても成功しても、最後の要約に再試行で通った予算シナリオを全件出す。
+        out.write("==> 再試行で通った予算シナリオ(合格として数える。#1554)\n")
+        for line in format_budget_flaky_lines(collect_budget_flaky(step_results)):
+            out.write(line + "\n")
 
         if not overall_ok:
             fail(

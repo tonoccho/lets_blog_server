@@ -1795,6 +1795,20 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 要件5のとおり、既知の失敗も含めて1件でも failed / skipped / did not run / flaky があれば
 リリースを作らない。「ほぼ通った」を許容する経路は無い。
 
+**唯一の例外: 3秒予算のシナリオ(`@response-budget`)は、再試行で通れば合格とする**
+(利用者の決定、2026-10-02、#1554)。
+
+- **範囲**: `@response-budget` を持つ feature(`e2e/features/response-budget/*.feature`)だけ。
+  そのほかのシナリオの flaky は従来どおりゼロ許容で、1件でもあればリリースを作らない。
+  failed(`unexpected`)・skipped・did not run の扱いも変わらない。
+- **再試行の回数**: 最大2回。feature 単位の `@retries:2` で付ける(`playwright.config.ts` の全体の
+  `retries` は変えない)。最初の試行と2回の再試行のすべてで3秒を超えたシナリオは `unexpected` で、失敗になる。
+  閾値(3000ms)と判定は変えない。付け忘れ・ほかの feature への `@retries:` は
+  `scripts/check-response-budget-coverage.py` が失敗にする。
+- **記録先**: `release-verify-tag.py` は Playwright の JSON を `suites` からたどり、flaky の予算シナリオを
+  実行ログ(手順ごとと最後の要約)とタグの注釈に全件出す。feature のパス、シナリオ名、失敗した試行の
+  計測値(ms)を出し、0件のときも「0 件」と出す。
+
 ### main へのマージ・develop への次期開発版数コミットが Issue の MR ではなく直接 push である理由
 
 `.claude/CLAUDE.md` の squash / `ff` の規則(**Where squash is enforced**)は develop へ

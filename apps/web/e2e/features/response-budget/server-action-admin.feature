@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: 管理画面の Server Action が3秒の予算内に返る
 
   利用者の要望「すべてのクリックに対する応答を3秒以内にする」(issue #1476)の展開(issue #1477)。

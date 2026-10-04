@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: クリックに対する応答が3秒の予算内に収まる
 
   利用者の要望は「すべてのクリックに対する応答を3秒以内にする」(issue #1476)。

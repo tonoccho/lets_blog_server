@@ -1,5 +1,5 @@
 # language: ja
-@response-budget
+@response-budget @retries:2
 機能: 全ページの初回表示が3秒の予算内に収まる
 
   利用者の要望は「すべてのクリックに対する応答を3秒以内にする」(issue #1476)。
