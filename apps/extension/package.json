@@ -127,6 +127,14 @@
         "title": "Let's Blog: 指摘チェックリストを表示"
       },
       {
+        "command": "letsBlog.resubmitArticle",
+        "title": "Let's Blog: 再提出(差し戻された記事を提出し直す)"
+      },
+      {
+        "command": "letsBlog.showRejectionFindings",
+        "title": "Let's Blog: 指摘事項を表示"
+      },
+      {
         "command": "letsBlog.checkRejections",
         "title": "Let's Blog: 差し戻しを今すぐ確認"
       }

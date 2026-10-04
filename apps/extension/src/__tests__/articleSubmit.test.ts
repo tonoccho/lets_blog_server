@@ -269,6 +269,7 @@ describe('submitArticle', () => {
       isClean: async () => true,
       resolveBaseRef: async () => 'main',
       branchExists: async () => false,
+      listBranches: async () => [],
       createBranch: async () => undefined,
       checkout: async () => undefined,
       deleteBranch: async () => undefined,

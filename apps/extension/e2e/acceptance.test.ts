@@ -24,6 +24,7 @@ import './steps/ai.steps';
 import './steps/reviewSteps.steps';
 import './steps/publishReview.steps';
 import './steps/rejectionNotification.steps';
+import './steps/rejectionEdit.steps';
 import './steps/previewReview.steps';
 import './steps/previewSignedUrl.steps';
 import './steps/media.steps';

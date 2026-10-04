@@ -45,6 +45,7 @@ import { AskAiPanel } from './askAiPanel';
 import { resolveSectionContext } from './headingContext';
 import { buildSourcesSection } from './markdownSources';
 import { logger } from './logger';
+import { articleSlugOfPath, EDIT_ACTION, editRejectedArticle, formatFindings, RejectionFindings } from './rejectionEdit';
 import { checkRejections, RejectionCheckDeps, RejectionPoller, resolvePollIntervalMs } from './rejectionNotifier';
 import { CancelledError, messageOf, reportError } from './errorHandler';
 import { buildSmartCardTag, buildStandardLink, parseHttpUrl } from './urlPaste';
@@ -113,6 +114,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('letsBlog.selectSite', () => commandSelectSite(context)),
     vscode.commands.registerCommand('letsBlog.publish', () => commandPublish(context, proofreadController)),
     vscode.commands.registerCommand('letsBlog.submitArticle', () => commandSubmitArticle(context)),
+    vscode.commands.registerCommand('letsBlog.resubmitArticle', () => commandSubmitArticle(context)),
+    vscode.commands.registerCommand('letsBlog.showRejectionFindings', () => commandShowRejectionFindings(context)),
     vscode.commands.registerCommand('letsBlog.checkRejections', () => commandCheckRejections(rejectionDeps)),
     vscode.commands.registerCommand('letsBlog.deletePost', () => commandDeletePost(context)),
     vscode.commands.registerCommand('letsBlog.askAi', () => commandAskAi(context)),
@@ -205,9 +208,79 @@ function createRejectionCheckDeps(context: vscode.ExtensionContext): RejectionCh
       get: (key) => context.globalState.get<string[]>(key),
       update: (key, value) => context.globalState.update(key, value),
     },
-    notify: (message) => void vscode.window.showWarningMessage(message),
+    notify: (message, review) =>
+      void vscode.window.showWarningMessage(message, EDIT_ACTION).then((choice) => {
+        if (choice === EDIT_ACTION) {
+          void commandEditRejectedArticle(context, review);
+        }
+      }),
     reportError: (message) => void vscode.window.showErrorMessage(message),
   };
+}
+
+const RESUBMIT_ACTION = '再提出';
+let findingsChannel: vscode.OutputChannel | undefined;
+
+function rejectionFindings(context: vscode.ExtensionContext): RejectionFindings {
+  return new RejectionFindings({
+    get: (key) => context.globalState.get<Record<string, string>>(key),
+    update: (key, value) => context.globalState.update(key, value),
+  });
+}
+
+/** 指摘事項を出力チャネル「Let's Blog: 指摘事項」へ出して表示する(専用のWebViewは使わない)。 */
+function showFindingsChannel(slug: string, comment: string): void {
+  findingsChannel ??= vscode.window.createOutputChannel("Let's Blog: 指摘事項");
+  findingsChannel.clear();
+  findingsChannel.appendLine(formatFindings(slug, comment));
+  findingsChannel.show(true);
+}
+
+/**
+ * 差し戻し通知の「編集」(issue #1348)。記事のブランチへ切り替えて article.md を通常のエディタで開き、
+ * 指摘事項を出力チャネルへ出す。情報メッセージの「再提出」で #1342 の提出処理へ進める。
+ */
+async function commandEditRejectedArticle(
+  context: vscode.ExtensionContext,
+  review: { articleSlug: string; rejectComment?: string | null }
+): Promise<void> {
+  try {
+    const root = requireWorkspaceRoot();
+    const result = await editRejectedArticle({
+      root,
+      review,
+      backend: await resolveGitBackend(root),
+      findings: rejectionFindings(context),
+      openArticle: async (articlePath) => {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(articlePath));
+      },
+      showFindings: showFindingsChannel,
+    });
+    if (result.status !== 'opened') {
+      void vscode.window.showWarningMessage(result.reason);
+      return;
+    }
+    const choice = await vscode.window.showInformationMessage(
+      `記事「${review.articleSlug}」の指摘事項を「Let's Blog: 指摘事項」に表示しました。修正したら「${RESUBMIT_ACTION}」を選んでください。`,
+      RESUBMIT_ACTION
+    );
+    if (choice === RESUBMIT_ACTION) {
+      await commandSubmitArticle(context);
+    }
+  } catch (err) {
+    reportError('記事を開けませんでした', err);
+  }
+}
+
+/** 編集中の記事の指摘事項を、出力チャネルへもう一度表示する(issue #1348)。 */
+function commandShowRejectionFindings(context: vscode.ExtensionContext): void {
+  const slug = articleSlugOfPath(vscode.window.activeTextEditor?.document.uri.fsPath ?? '');
+  const comment = slug === undefined ? undefined : rejectionFindings(context).get(slug);
+  if (slug === undefined || comment === undefined) {
+    void vscode.window.showInformationMessage('この記事に対する指摘事項は保存されていません。');
+    return;
+  }
+  showFindingsChannel(slug, comment);
 }
 
 /** 間隔を待たずに差し戻しを確認する(issue #1347)。 */

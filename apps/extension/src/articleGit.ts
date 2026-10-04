@@ -16,6 +16,8 @@ export interface GitBackend {
   /** 新しいブランチの起点にする参照。既定ブランチの最新を指す。 */
   resolveBaseRef(): Promise<string>;
   branchExists(name: string): Promise<boolean>;
+  /** prefix で始まるローカルブランチ名(辞書順)。 */
+  listBranches(prefix: string): Promise<string[]>;
   /** baseRef から name を作り、チェックアウトする。 */
   createBranch(name: string, baseRef: string): Promise<void>;
   checkout(name: string): Promise<void>;
@@ -106,6 +108,11 @@ export class CliGitBackend implements GitBackend {
 
   branchExists(name: string): Promise<boolean> {
     return this.refExists(`refs/heads/${name}`);
+  }
+
+  async listBranches(prefix: string): Promise<string[]> {
+    const out = await this.run(['for-each-ref', '--format=%(refname:short)', `refs/heads/${prefix}`], this.root);
+    return out.split('\n').filter((name) => name !== '');
   }
 
   async createBranch(name: string, baseRef: string): Promise<void> {
