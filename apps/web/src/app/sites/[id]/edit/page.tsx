@@ -6,6 +6,7 @@ import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SiteEditForm } from "./SiteEditForm";
 import { LetsblogPluginPanel } from "./LetsblogPluginPanel";
+import { LetsblogSyncPanel } from "./LetsblogSyncPanel";
 import { StaticContentPanel } from "./StaticContentPanel";
 
 export default async function SiteEditPage({
@@ -53,6 +54,7 @@ export default async function SiteEditPage({
         <SiteEditForm site={site} sshKeyPairs={sshKeyPairs.data} defaultAdminPath={defaultAdminPath.data?.path ?? null} />
       )}
       <LetsblogPluginPanel siteId={site.id} />
+      <LetsblogSyncPanel siteId={site.id} />
       {!staticContents.failed && <StaticContentPanel siteId={site.id} initialContents={staticContents.data} />}
     </div>
   );

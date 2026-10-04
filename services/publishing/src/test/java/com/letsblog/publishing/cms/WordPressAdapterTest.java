@@ -557,4 +557,30 @@ class WordPressAdapterTest {
                 assertThrows(LetsblogPluginUnavailableException.class, () -> adapter.requireLetsblogPlugin(creds));
         assertEquals(LetsblogPluginStatus.State.NEEDS_UPDATE, e.getStatus().state());
     }
+
+    // ---- issue #1558: letsblogプラグインへの同期(wp-cliだけ) ----
+
+    @Test
+    void syncLetsblogPlugin_SSHはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.syncLetsblogPlugin(creds, "{}", "h1")).thenReturn("h1");
+
+        assertEquals("h1", adapter.syncLetsblogPlugin(creds, "{}", "h1"));
+        verify(agentOperations, never()).syncLetsblogPlugin(any(), any(), any());
+    }
+
+    @Test
+    void syncLetsblogPlugin_AGENTはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.syncLetsblogPlugin(creds, "{}", "h1")).thenReturn("h1");
+
+        assertEquals("h1", adapter.syncLetsblogPlugin(creds, "{}", "h1"));
+        verify(sshOperations, never()).syncLetsblogPlugin(any(), any(), any());
+    }
+
+    @Test
+    void syncLetsblogPlugin_未対応トランスポートは例外() {
+        assertThrows(IllegalStateException.class,
+                () -> adapter.syncLetsblogPlugin(unsupportedCredentials(), "{}", "h1"));
+    }
 }

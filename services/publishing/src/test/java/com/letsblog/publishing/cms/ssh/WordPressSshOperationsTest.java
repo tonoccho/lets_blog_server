@@ -1971,4 +1971,80 @@ class WordPressSshOperationsTest {
         assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NOT_INSTALLED,
                 operations.letsblogPluginStatus(creds()).state());
     }
+
+    // ---- issue #1558: wp letsblog sync(wp-cliだけで同期する) ----
+
+    @Test
+    void syncLetsblogPlugin_内容を一時ファイルへ置きwp_letsblog_syncで同期して後始末する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"sync_hash\":\"h1\"}")) // wp letsblog sync
+                .thenReturn(ok("")); // rm -f
+
+        String hash = operations.syncLetsblogPlugin(creds(), "{\"a\":1}", "h1");
+
+        assertEquals("h1", hash);
+        ArgumentCaptor<String> tmpPath = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> body = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).putFile(any(SshConnectionParams.class), body.capture(), tmpPath.capture());
+        assertArrayEquals("{\"a\":1}".getBytes(StandardCharsets.UTF_8), body.getValue());
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(true, commands.getAllValues().get(0).contains("letsblog sync"));
+        assertEquals(true, commands.getAllValues().get(0).contains("--file="));
+        assertEquals(true, commands.getAllValues().get(0).contains("--hash=h1"));
+        assertEquals(true, commands.getAllValues().get(0).contains(tmpPath.getValue()));
+        assertEquals(true, commands.getAllValues().get(1).startsWith("rm -f"));
+        assertEquals(true, commands.getAllValues().get(1).contains(tmpPath.getValue()));
+    }
+
+    @Test
+    void syncLetsblogPlugin_wp_cliが失敗しても一時ファイルを消して例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: ハッシュが一致しません")) // wp letsblog sync
+                .thenReturn(ok("")); // rm -f
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+
+        assertEquals(true, e.getMessage().contains("ハッシュが一致しません"));
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
+    void syncLetsblogPlugin_stderrが空ならstdoutを例外に含める() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(new SshCommandResult(1, "boom", "", null))
+                .thenReturn(ok(""));
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+        assertEquals(true, e.getMessage().contains("boom"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_返ったハッシュが期待と違えば例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("{\"sync_hash\":\"other\"}"))
+                .thenReturn(ok(""));
+
+        assertThrows(SshOperationException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_出力がJSONでなければ例外() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(ok("PHP Fatal error"))
+                .thenReturn(ok(""));
+
+        assertThrows(SshOperationException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_ハッシュが不正ならシェルへ渡さず拒否する() {
+        assertThrows(IllegalArgumentException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", null));
+        assertThrows(IllegalArgumentException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1; rm -rf /"));
+        assertThrows(IllegalArgumentException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", ""));
+        verify(executor, never()).putFile(any(SshConnectionParams.class), any(byte[].class), any());
+        verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
+    }
 }

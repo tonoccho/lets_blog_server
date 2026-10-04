@@ -1067,6 +1067,33 @@ if ($path === '/wp-cli/letsblog-status' && $_SERVER['REQUEST_METHOD'] === 'POST'
     respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
 }
 
+// letsblogプラグインへの同期(issue #1558)。受け取った内容を一時ファイルへ書き、`wp letsblog sync --file=` で
+// プラグインへ渡す(wp-cliだけ。REST APIは使わない)。判定(導入済みか・ハッシュが一致したか)はアプリ側で行うため、
+// ここでは導入処理を走らせず(未導入のサイトへは送らない)、終了コードと出力をそのまま返す。
+if ($path === '/wp-cli/letsblog-sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $payload = $input['payload'] ?? null;
+    $hash = (string) ($input['hash'] ?? '');
+    if (!isValidSlug($slug) || !is_string($payload) || $payload === '' || preg_match('/^[0-9a-f]{64}$/', $hash) !== 1) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $tmpPath = '/tmp/letsblog-sync-' . bin2hex(random_bytes(8)) . '.json';
+    if (file_put_contents($tmpPath, $payload) === false) {
+        respond(500, ['error' => '同期内容の一時ファイルを書けませんでした']);
+    }
+    try {
+        [$code, $out, $err] = runWp(['letsblog', 'sync', "--file=$tmpPath", "--hash=$hash", "--path=$sitePath", '--allow-root']);
+    } finally {
+        unlink($tmpPath);
+    }
+    respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
+}
+
 // letsblogプラグインの再導入(issue #1557)。配置済みで内容が同じでも有効化し直す。
 if ($path === '/wp-cli/letsblog-install' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');

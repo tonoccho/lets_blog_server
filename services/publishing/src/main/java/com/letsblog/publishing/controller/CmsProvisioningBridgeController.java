@@ -6,9 +6,11 @@ import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.LetsblogSyncResult;
 import com.letsblog.publishing.cms.WpCliInstallResult;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.dto.CmsBridgeConnectionCheckResponse;
+import com.letsblog.publishing.dto.CmsBridgeLetsblogSyncRequest;
 import com.letsblog.publishing.dto.CmsBridgeCredentialsRequest;
 import com.letsblog.publishing.dto.CmsBridgeExportDatabaseResponse;
 import com.letsblog.publishing.dto.CmsBridgeProvisionRequest;
@@ -83,6 +85,14 @@ public class CmsProvisioningBridgeController {
         CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
         CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
         return adapter.installLetsblogPlugin(credentials);
+    }
+
+    /** タグ定義・統合CSS等のletsblogプラグインへの同期(wp-cliだけ)。保存されたハッシュを返す(issue #1558)。 */
+    @PostMapping("/api/internal/project/cms/sync-letsblog-plugin")
+    public LetsblogSyncResult syncLetsblogPlugin(@Valid @RequestBody CmsBridgeLetsblogSyncRequest request) {
+        CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
+        CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        return new LetsblogSyncResult(adapter.syncLetsblogPlugin(credentials, request.payload(), request.hash()));
     }
 
     @PostMapping("/api/internal/project/cms/has-author-capability")

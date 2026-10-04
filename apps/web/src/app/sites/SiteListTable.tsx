@@ -206,6 +206,15 @@ export function SiteListTable({
                         自動構築
                       </span>
                     )}
+                    {site.letsblogSync?.status === "FAILED" && (
+                      <span
+                        data-testid="letsblog-sync-failed"
+                        title={site.letsblogSync.error ?? undefined}
+                        className="ml-1 inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800"
+                      >
+                        同期失敗
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     {projectInfo ? (

@@ -7,6 +7,7 @@ import com.letsblog.project.dto.SaveTagDesignSettingRequest;
 import com.letsblog.project.dto.TagDesignSettingResponse;
 import com.letsblog.project.dto.TagDesignSettingsOverviewResponse;
 import com.letsblog.project.service.AdminAuthorizationService;
+import com.letsblog.project.service.LetsblogSyncService;
 import com.letsblog.project.service.TagDesignGenerationService;
 import com.letsblog.project.service.TagDesignSettingService;
 import jakarta.validation.Valid;
@@ -41,11 +42,14 @@ public class GlobalTagDesignSettingController {
     private final TagDesignSettingService tagDesignSettingService;
     private final TagDesignGenerationService tagDesignGenerationService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final LetsblogSyncService letsblogSyncService;
 
     public GlobalTagDesignSettingController(
             TagDesignSettingService tagDesignSettingService,
             TagDesignGenerationService tagDesignGenerationService,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            LetsblogSyncService letsblogSyncService) {
+        this.letsblogSyncService = letsblogSyncService;
         this.tagDesignSettingService = tagDesignSettingService;
         this.tagDesignGenerationService = tagDesignGenerationService;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -62,7 +66,10 @@ public class GlobalTagDesignSettingController {
             @PathVariable EmbedTagType tagType,
             @Valid @RequestBody SaveTagDesignSettingRequest request) {
         adminAuthorizationService.requireAdmin();
-        return tagDesignSettingService.save(null, tagType, request);
+        TagDesignSettingResponse saved = tagDesignSettingService.save(null, tagType, request);
+        // グローバル既定のデザインの変更は、すべてのプロジェクトのサイトへ同期し直す(issue #1558)。
+        letsblogSyncService.requestAllSync();
+        return saved;
     }
 
     @PostMapping("/{tagType}/generate")

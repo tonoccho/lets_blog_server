@@ -8,6 +8,7 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
+@EntityListeners(com.letsblog.content.service.CustomTagChangeListener.class)
 @Table(name = "custom_tags")
 @Getter
 @Setter

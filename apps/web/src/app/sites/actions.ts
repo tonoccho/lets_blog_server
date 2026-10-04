@@ -9,9 +9,12 @@ import {
   generateSshKeyPair,
   generateStaticContent,
   getLetsblogPluginStatus,
+  getLetsblogSync,
   installLetsblogPlugin,
   installWpCli,
   LetsblogPluginStatus,
+  LetsblogSyncState,
+  resyncLetsblog,
   registerSite,
   SiteConnectionCheckResult,
   StaticContent,
@@ -195,6 +198,18 @@ export async function getLetsblogPluginStatusAction(id: number): Promise<Letsblo
 export async function installLetsblogPluginAction(id: number): Promise<LetsblogPluginStatus> {
   await requireAdminSession();
   return installLetsblogPlugin(id);
+}
+
+/** サイトの letsblog プラグインへの同期の状態を返す(admin 限定、issue #1558)。未同期なら null。 */
+export async function getLetsblogSyncAction(id: number): Promise<LetsblogSyncState | null> {
+  await requireAdminSession();
+  return getLetsblogSync(id);
+}
+
+/** letsblog プラグインへ再同期し、同期後の状態を返す(admin 限定、issue #1558)。 */
+export async function resyncLetsblogAction(id: number): Promise<LetsblogSyncState> {
+  await requireAdminSession();
+  return resyncLetsblog(id);
 }
 
 export interface GenerateStaticContentResult {

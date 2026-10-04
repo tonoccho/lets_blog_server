@@ -35,8 +35,31 @@ class ProjectContentSettingsServiceTest {
     @Mock
     private CurrentActorService currentActorService;
 
+    @Mock
+    private LetsblogSyncNotifier letsblogSyncNotifier;
+
     private ProjectContentSettingsService service() {
-        return new ProjectContentSettingsService(repository, projectBridgeClient, currentActorService);
+        return new ProjectContentSettingsService(repository, projectBridgeClient, currentActorService, letsblogSyncNotifier);
+    }
+
+    @Test
+    void updateCssSelectorPrefix_保存したらそのプロジェクトのサイトへの同期を依頼する() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+        when(repository.save(any(ProjectContentSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().updateCssSelectorPrefix(1L, "custom-prefix");
+
+        org.mockito.Mockito.verify(letsblogSyncNotifier).notifyProjectChanged(1L);
+    }
+
+    @Test
+    void getOrCreate_だけでは同期を依頼しない() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
+        when(repository.save(any(ProjectContentSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service().getOrCreate(1L);
+
+        verifyNoInteractions(letsblogSyncNotifier);
     }
 
     @Test

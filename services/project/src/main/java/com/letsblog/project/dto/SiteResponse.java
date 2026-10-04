@@ -15,8 +15,17 @@ public record SiteResponse(
         String connectionCheckStatus,
         boolean managedWordpress,
         boolean sshConfigured,
-        String adminPath
+        String adminPath,
+        LetsblogSyncState letsblogSync
 ) {
+    public SiteResponse(
+            Long id, String name, String siteKey, CmsType cmsType, String baseUrl, Instant createdAt,
+            Instant updatedAt, String connectionCheckStatus, boolean managedWordpress, boolean sshConfigured,
+            String adminPath) {
+        this(id, name, siteKey, cmsType, baseUrl, createdAt, updatedAt, connectionCheckStatus, managedWordpress,
+                sshConfigured, adminPath, null);
+    }
+
     public static SiteResponse from(Site site) {
         return from(site, null, false);
     }
@@ -37,7 +46,8 @@ public record SiteResponse(
                 connectionOk == null ? null : (connectionOk ? "SUCCESS" : "FAILED"),
                 site.isManagedWordpress(),
                 sshConfigured,
-                site.getAdminPath()
+                site.getAdminPath(),
+                LetsblogSyncState.from(site)
         );
     }
 }

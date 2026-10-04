@@ -135,6 +135,14 @@ public interface CmsAdapter {
     }
 
     /**
+     * タグ定義・統合CSS等をletsblogプラグインへ送り、プラグインが保存した内容のハッシュを返す(issue #1558)。
+     * 送信は wp-cli だけで行う。対応しない場合はUnsupportedOperationExceptionを投げる。
+     */
+    default String syncLetsblogPlugin(CmsCredentials credentials, String payload, String expectedHash) {
+        throw new UnsupportedOperationException("このCMSはletsblogプラグインへの同期に対応していません");
+    }
+
+    /**
      * letsblog プラグインが使えるサイトであることを要求する(issue #1557)。導入済み以外(未導入・要更新)なら、
      * 理由と対処(再導入)を示す{@link LetsblogPluginUnavailableException}を投げる。投稿・プレビューが
      * CMSへ何かを書き込む前に呼ぶ。

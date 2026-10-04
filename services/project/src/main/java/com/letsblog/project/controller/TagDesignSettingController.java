@@ -7,6 +7,7 @@ import com.letsblog.project.dto.SaveTagDesignSettingRequest;
 import com.letsblog.project.dto.TagDesignSettingResponse;
 import com.letsblog.project.dto.TagDesignSettingsOverviewResponse;
 import com.letsblog.project.service.AdminAuthorizationService;
+import com.letsblog.project.service.LetsblogSyncService;
 import com.letsblog.project.service.TagDesignGenerationService;
 import com.letsblog.project.service.TagDesignSettingService;
 import jakarta.validation.Valid;
@@ -28,11 +29,14 @@ public class TagDesignSettingController {
     private final TagDesignSettingService tagDesignSettingService;
     private final TagDesignGenerationService tagDesignGenerationService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final LetsblogSyncService letsblogSyncService;
 
     public TagDesignSettingController(
             TagDesignSettingService tagDesignSettingService,
             TagDesignGenerationService tagDesignGenerationService,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            LetsblogSyncService letsblogSyncService) {
+        this.letsblogSyncService = letsblogSyncService;
         this.tagDesignSettingService = tagDesignSettingService;
         this.tagDesignGenerationService = tagDesignGenerationService;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -50,7 +54,10 @@ public class TagDesignSettingController {
             @PathVariable EmbedTagType tagType,
             @Valid @RequestBody SaveTagDesignSettingRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return tagDesignSettingService.save(projectId, tagType, request);
+        TagDesignSettingResponse saved = tagDesignSettingService.save(projectId, tagType, request);
+        // 組み込みタグのデザインは統合CSSに含まれるため、そのプロジェクトのサイトへ同期し直す(issue #1558)。
+        letsblogSyncService.requestProjectSync(projectId);
+        return saved;
     }
 
     @PostMapping("/{tagType}/generate")

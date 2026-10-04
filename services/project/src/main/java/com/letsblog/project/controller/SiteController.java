@@ -12,7 +12,9 @@ import com.letsblog.project.dto.SiteResponse;
 import com.letsblog.project.dto.SiteUpdateRequest;
 import com.letsblog.project.dto.SshKeyPairRequest;
 import com.letsblog.project.dto.SshKeyPairResponse;
+import com.letsblog.project.dto.LetsblogSyncState;
 import com.letsblog.project.service.AdminAuthorizationService;
+import com.letsblog.project.service.LetsblogSyncService;
 import com.letsblog.project.service.ProvisioningService;
 import com.letsblog.project.service.ProjectService;
 import com.letsblog.project.service.SiteService;
@@ -49,18 +51,21 @@ public class SiteController {
     private final WordPressSiteProvisioningService wordPressSiteProvisioningService;
     private final SshKeyGenerationService sshKeyGenerationService;
     private final ProjectService projectService;
+    private final LetsblogSyncService letsblogSyncService;
 
     public SiteController(
             SiteService siteService,
             AdminAuthorizationService adminAuthorizationService,
             WordPressSiteProvisioningService wordPressSiteProvisioningService,
             SshKeyGenerationService sshKeyGenerationService,
-            ProjectService projectService) {
+            ProjectService projectService,
+            LetsblogSyncService letsblogSyncService) {
         this.siteService = siteService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.wordPressSiteProvisioningService = wordPressSiteProvisioningService;
         this.sshKeyGenerationService = sshKeyGenerationService;
         this.projectService = projectService;
+        this.letsblogSyncService = letsblogSyncService;
     }
 
     @Operation(summary = "WordPress サイトを登録", description = "既存のWordPressサイトを登録します")
@@ -185,6 +190,23 @@ public class SiteController {
     public LetsblogPluginStatus installLetsblogPlugin(@Parameter(description = "サイトID") @PathVariable Long id) {
         adminAuthorizationService.requireAdmin();
         return siteService.installLetsblogPlugin(id);
+    }
+
+    @Operation(summary = "letsblog プラグインへの同期の状態を取得",
+            description = "タグ定義・統合CSS等を最後にプラグインへ送った結果(同期済み / 失敗 / 見送り)を返します。"
+                    + "一度も同期していなければ空です")
+    @GetMapping("/{id}/letsblog-sync")
+    public LetsblogSyncState letsblogSync(@Parameter(description = "サイトID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return letsblogSyncService.getState(id);
+    }
+
+    @Operation(summary = "letsblog プラグインへ再同期",
+            description = "そのサイトが属するプロジェクトのタグ定義・統合CSS等をwp-cliでプラグインへ送り直し、結果の状態を返します")
+    @PostMapping("/{id}/letsblog-sync")
+    public LetsblogSyncState resyncLetsblog(@Parameter(description = "サイトID") @PathVariable Long id) {
+        adminAuthorizationService.requireAdmin();
+        return letsblogSyncService.syncSiteNow(id);
     }
 
     @Operation(summary = "サイトを再プロビジョニング", description = "サイトのカテゴリ・タグ・著者情報を再設定します")

@@ -60,11 +60,13 @@ class SiteControllerTest {
     private SshKeyGenerationService sshKeyGenerationService;
     @Mock
     private ProjectService projectService;
+    @Mock
+    private com.letsblog.project.service.LetsblogSyncService letsblogSyncService;
 
     private SiteController controller() {
         return new SiteController(
                 siteService, adminAuthorizationService, wordPressSiteProvisioningService, sshKeyGenerationService,
-                projectService);
+                projectService, letsblogSyncService);
     }
 
     private SiteResponse buildResponse() {
@@ -200,7 +202,7 @@ class SiteControllerTest {
                 new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32])), new ObjectMapper(),
                 null, null, null, null);
         SiteController real = new SiteController(realService, adminAuthorizationService,
-                wordPressSiteProvisioningService, sshKeyGenerationService, projectService);
+                wordPressSiteProvisioningService, sshKeyGenerationService, projectService, letsblogSyncService);
         return MockMvcBuilders.standaloneSetup(real).setControllerAdvice(new GlobalExceptionHandler()).build();
     }
 
@@ -307,5 +309,39 @@ class SiteControllerTest {
 
         assertThrows(ForbiddenException.class, () -> controller().installLetsblogPlugin(1L));
         verifyNoInteractions(siteService);
+    }
+
+    // ---- issue #1558: letsblogプラグインへの同期状態と再同期 ----
+
+    private com.letsblog.project.dto.LetsblogSyncState failedState() {
+        return new com.letsblog.project.dto.LetsblogSyncState(
+                com.letsblog.project.domain.LetsblogSyncStatus.FAILED, "接続失敗", null, Instant.now());
+    }
+
+    @Test
+    void letsblogSync_admin権限で同期状態を返す() {
+        when(letsblogSyncService.getState(1L)).thenReturn(failedState());
+
+        assertEquals(failedState().status(), controller().letsblogSync(1L).status());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void resyncLetsblog_admin権限で再同期し結果の状態を返す() {
+        com.letsblog.project.dto.LetsblogSyncState synced = new com.letsblog.project.dto.LetsblogSyncState(
+                com.letsblog.project.domain.LetsblogSyncStatus.SYNCED, null, "h1", Instant.now());
+        when(letsblogSyncService.syncSiteNow(1L)).thenReturn(synced);
+
+        assertEquals(synced, controller().resyncLetsblog(1L));
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void resyncLetsblog_admin以外は拒否する() {
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
+                .when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().resyncLetsblog(1L));
+        verifyNoInteractions(letsblogSyncService);
     }
 }

@@ -119,6 +119,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/preview/render"),
 
                 // -- 内部ブリッジ(InternalPostBridgeController) --
+                new Endpoint("GET", "/api/internal/content/projects/1/letsblog-sync-payload"),
                 new Endpoint("GET", "/api/internal/content/posts"),
                 new Endpoint("PUT", "/api/internal/content/posts"),
                 new Endpoint("POST", "/api/internal/content/posts/mark-trashed"),

@@ -87,6 +87,8 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/sites/1/install-wp-cli"),
                 new Endpoint("GET", "/api/sites/1/letsblog-plugin"),
                 new Endpoint("POST", "/api/sites/1/letsblog-plugin/install"),
+                new Endpoint("GET", "/api/sites/1/letsblog-sync"),
+                new Endpoint("POST", "/api/sites/1/letsblog-sync"),
                 new Endpoint("POST", "/api/sites/1/reprovision"),
 
                 // -- SiteStaticContentController --
@@ -114,6 +116,7 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- 内部ブリッジ(ProjectInternalController) --
                 new Endpoint("GET", "/api/internal/project/projects/1"),
+                new Endpoint("POST", "/api/internal/project/letsblog-sync"),
                 new Endpoint("GET", "/api/internal/project/projects/1/github-token"),
                 new Endpoint("PUT", "/api/internal/project/projects/1/github-token"),
                 new Endpoint("DELETE", "/api/internal/project/projects/1/github-token"),

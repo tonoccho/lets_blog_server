@@ -157,4 +157,16 @@ class CmsProvisioningBridgeControllerTest {
 
         assertEquals(status, controller().installLetsblogPlugin(agentRequest()));
     }
+
+    @Test
+    void syncLetsblogPlugin_内容とハッシュをアダプターへ渡し保存されたハッシュを返す() {
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.syncLetsblogPlugin(any(), eq("{\"a\":1}"), eq("h1"))).thenReturn("h1");
+
+        com.letsblog.publishing.dto.CmsBridgeLetsblogSyncRequest request =
+                new com.letsblog.publishing.dto.CmsBridgeLetsblogSyncRequest(
+                        "WORDPRESS", agentRequest().credentials(), "{\"a\":1}", "h1");
+
+        assertEquals("h1", controller().syncLetsblogPlugin(request).syncHash());
+    }
 }

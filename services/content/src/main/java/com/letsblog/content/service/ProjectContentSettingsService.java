@@ -18,14 +18,17 @@ public class ProjectContentSettingsService {
     private final ProjectContentSettingsRepository repository;
     private final ProjectBridgeClient projectBridgeClient;
     private final CurrentActorService currentActorService;
+    private final LetsblogSyncNotifier letsblogSyncNotifier;
 
     public ProjectContentSettingsService(
             ProjectContentSettingsRepository repository,
             ProjectBridgeClient projectBridgeClient,
-            CurrentActorService currentActorService) {
+            CurrentActorService currentActorService,
+            LetsblogSyncNotifier letsblogSyncNotifier) {
         this.repository = repository;
         this.projectBridgeClient = projectBridgeClient;
         this.currentActorService = currentActorService;
+        this.letsblogSyncNotifier = letsblogSyncNotifier;
     }
 
     @Transactional(readOnly = true)
@@ -48,7 +51,10 @@ public class ProjectContentSettingsService {
     public ProjectContentSettings updateCssSelectorPrefix(Long projectId, String cssSelectorPrefix) {
         ProjectContentSettings settings = getOrCreate(projectId);
         settings.setCssSelectorPrefix(cssSelectorPrefix);
-        return repository.save(settings);
+        ProjectContentSettings saved = repository.save(settings);
+        // プレフィックスは統合CSSのセレクタに付くため、変えたらそのプロジェクトのサイトへ同期し直す(issue #1558)。
+        letsblogSyncNotifier.notifyProjectChanged(projectId);
+        return saved;
     }
 
     /**

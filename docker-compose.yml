@@ -492,6 +492,9 @@ services:
       # 所有していたが、issue #710でpublishing-serviceへ移管した(Epic #551 C6-4。起動時の
       # 依存関係(depends_on)には含めない、理由は上のLEGACY_API_URIと同じ)。
       PUBLISHING_SERVICE_URI: http://publishing:8080
+      # WordPress の letsblog プラグインへ送るタグ定義・統合CSS等(ContentBridgeClient)の取得先(issue #1558)。
+      # 起動時の依存関係(depends_on)には含めない(同期は後から非同期で行うため)。
+      CONTENT_SERVICE_URI: http://content:8080
       # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
       AI_SERVICE_URI: http://ai:8080
       # AdminAuthorizationServiceのrequireAdmin/requireProjectMemberOrAdmin・自分自身のuserId解決の

@@ -502,4 +502,22 @@ class SiteServiceTest {
         assertThrows(SiteNotFoundException.class, () -> service().installLetsblogPlugin(9L));
         verify(bridgeClient, never()).installLetsblogPlugin(anyString(), any());
     }
+
+    // ---- issue #1558: letsblogプラグインへの同期 ----
+
+    @Test
+    void syncLetsblogPlugin_内容とハッシュをブリッジへ渡し保存されたハッシュを返す() {
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
+        when(bridgeClient.syncLetsblogPlugin(eq("WORDPRESS"), any(), eq("{\"a\":1}"), eq("h1")))
+                .thenReturn(new com.letsblog.project.cms.LetsblogSyncResult("h1"));
+
+        assertEquals("h1", service().syncLetsblogPlugin(1L, "{\"a\":1}", "h1"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_未登録のサイトはSiteNotFound() {
+        when(siteRepository.findById(9L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service().syncLetsblogPlugin(9L, "{}", "h"));
+    }
 }

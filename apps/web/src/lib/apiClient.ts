@@ -18,6 +18,18 @@ export interface Site {
   connectionCheckStatus: "SUCCESS" | "FAILED" | null;
   managedWordpress: boolean;
   sshConfigured: boolean;
+  /** letsblog プラグインへの同期の状態(issue #1558)。一度も同期していなければ null。 */
+  letsblogSync?: LetsblogSyncState | null;
+}
+
+/** letsblog プラグインへの同期の結果(issue #1558)。 */
+export type LetsblogSyncStatus = "SYNCED" | "FAILED" | "SKIPPED";
+
+export interface LetsblogSyncState {
+  status: LetsblogSyncStatus;
+  error: string | null;
+  hash: string | null;
+  syncedAt: string | null;
 }
 
 export interface PostSummary {
@@ -405,6 +417,14 @@ export function getLetsblogPluginStatus(id: number): Promise<LetsblogPluginStatu
 
 export function installLetsblogPlugin(id: number): Promise<LetsblogPluginStatus> {
   return apiFetch<LetsblogPluginStatus>(`/api/sites/${id}/letsblog-plugin/install`, { method: 'POST' });
+}
+
+export function getLetsblogSync(id: number): Promise<LetsblogSyncState | null> {
+  return apiFetch<LetsblogSyncState | null>(`/api/sites/${id}/letsblog-sync`);
+}
+
+export function resyncLetsblog(id: number): Promise<LetsblogSyncState> {
+  return apiFetch<LetsblogSyncState>(`/api/sites/${id}/letsblog-sync`, { method: 'POST' });
 }
 
 export type StaticContentType = "PRIVACY_POLICY" | "OPERATOR_INFO" | "TERMS_OF_SERVICE";

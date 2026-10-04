@@ -77,6 +77,9 @@ app:
   # issue #710でCmsProvisioningBridgeController/ProvisioningServiceの所有権がpublishing-serviceへ
   # 移ったため、CmsProvisioningBridgeClientの向き先をこちらへ切り替えた(Epic #551 C6-4)。
   publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
+  # WordPress の letsblog プラグインへ送るタグ定義・統合CSS・プレフィックス等を読む内部ブリッジ
+  # (/api/internal/content/projects/{id}/letsblog-sync-payload、ContentBridgeClient参照。issue #1558)。
+  content-service-uri: ${CONTENT_SERVICE_URI:http://content:8080}
   # identity-serviceが所有するドメイン(project_users のメンバー判定・所属プロジェクトID、
   # 利用者個人のGitHubトークン)への内部ブリッジ(IdentityBridgeClient)と、
   # 操作者解決(CurrentActorService)の呼び出し先。issue #583で project_users の所有権が

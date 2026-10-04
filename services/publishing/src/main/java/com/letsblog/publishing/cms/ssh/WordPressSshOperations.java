@@ -1393,6 +1393,45 @@ public class WordPressSshOperations {
         return letsblogPluginStatus(creds);
     }
 
+    /**
+     * タグ定義・統合CSS等を `wp letsblog sync` でプラグインへ渡す(issue #1558)。送信は wp-cli だけで行う
+     * (REST APIは使わない)。内容は一時ファイルへ置いて `--file` で渡し、終わったら必ず消す。
+     * 導入処理は走らせない(未導入のサイトへは送らない)。
+     *
+     * @return プラグインが保存した内容のハッシュ。期待ハッシュと違えば例外
+     */
+    public String syncLetsblogPlugin(WordPressCredentials creds, String payload, String expectedHash) {
+        if (expectedHash == null || !expectedHash.matches("[A-Za-z0-9]{1,128}")) {
+            throw new IllegalArgumentException("ハッシュの形式が不正です");
+        }
+        String remotePath = "/tmp/letsblog-sync-" + UUID.randomUUID() + ".json";
+        executor.putFile(connectionParams(creds), payload.getBytes(StandardCharsets.UTF_8), remotePath);
+        SshCommandResult result;
+        try {
+            result = exec(creds, wpCli(creds,
+                    "letsblog sync --file=" + ShellQuote.single(remotePath) + " --hash=" + expectedHash));
+        } finally {
+            exec(creds, "rm -f " + ShellQuote.single(remotePath));
+        }
+        if (!result.ok()) {
+            log.warn("wp letsblog syncが失敗しました (sshHost={}, wpPath={}): {}",
+                    creds.sshHost(), creds.wpPath(), result.stderr());
+            throw new SshOperationException("wp letsblog syncの実行に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        String savedHash;
+        try {
+            savedHash = LetsblogPluginStatus.syncHashFromSyncOutput(result.stdout());
+        } catch (IllegalArgumentException e) {
+            throw new SshOperationException(e.getMessage(), e);
+        }
+        if (!savedHash.equals(expectedHash)) {
+            throw new SshOperationException("プラグインが保存したハッシュ(" + savedHash
+                    + ")が送った内容のハッシュ(" + expectedHash + ")と一致しません");
+        }
+        return savedHash;
+    }
+
     private byte[] letsblogPluginSource() {
         try {
             return new org.springframework.core.io.ClassPathResource("wordpress-plugin/letsblog.php")

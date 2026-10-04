@@ -431,6 +431,18 @@ public class SiteService {
         return bridgeClient.installLetsblogPlugin(site.getCmsType().name(), credentials);
     }
 
+    /**
+     * タグ定義・統合CSS等をletsblogプラグインへ送り(wp-cliだけ)、プラグインが保存した内容のハッシュを返す
+     * (issue #1558)。送ってよいか(導入済みか)の判断は呼び出し側({@link LetsblogSyncService})が行う。
+     */
+    @Transactional(readOnly = true)
+    public String syncLetsblogPlugin(Long id, String payload, String hash) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        Map<String, String> credentials = resolveSshKeyMaterial(getRawCredentials(site));
+        return bridgeClient.syncLetsblogPlugin(site.getCmsType().name(), credentials, payload, hash).syncHash();
+    }
+
     private Boolean resolveHasAdminCapability(ConnectionCheckResult connectionCheckResult, Site site,
             Map<String, String> rawCredentials) {
         if (!connectionCheckResult.ok() || site.getCmsType() != CmsType.WORDPRESS) {

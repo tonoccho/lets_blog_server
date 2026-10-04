@@ -149,6 +149,29 @@ public class ProjectBridgeClient {
         }
     }
 
+    /** {@link #requestLetsblogSync}のリクエストボディ。projectIdがnullならすべてのプロジェクトが対象。 */
+    private record LetsblogSyncRequest(Long projectId) {
+    }
+
+    /**
+     * タグ・CSS・プレフィックスの変更を伝え、WordPress のサイトへの同期を依頼する(issue #1558)。
+     * project-serviceは受け付けて直ちに返し(202)、同期は後で行う。projectIdがnull(グローバルタグの変更)なら
+     * すべてのプロジェクトのサイトが対象。
+     */
+    public void requestLetsblogSync(Long projectId, String bearerToken) {
+        try {
+            restClient.post()
+                    .uri("/api/internal/project/letsblog-sync")
+                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .body(new LetsblogSyncRequest(projectId))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            throw new IdentityServiceUnavailableException(
+                    "project-serviceへのletsblog同期の依頼に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
     /** サイトの基本情報。project-serviceの{@code SiteBridgeResponse}のうち必要な3項目だけを受ける。 */
     public record SiteSummary(Long id, String siteKey, String name) {
     }

@@ -36,9 +36,12 @@ class TagDesignSettingControllerTest {
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
+    @Mock
+    private com.letsblog.project.service.LetsblogSyncService letsblogSyncService;
+
     private TagDesignSettingController controller() {
         return new TagDesignSettingController(
-                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService);
+                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService, letsblogSyncService);
     }
 
     @Test
@@ -108,5 +111,30 @@ class TagDesignSettingControllerTest {
 
         assertThrows(ForbiddenException.class, () -> controller.generate(1L, EmbedTagType.TOC, request));
         verify(tagDesignGenerationService, org.mockito.Mockito.never()).generate(any(), any(), any(), any());
+    }
+
+    // ---- issue #1558: デザインの変更をそのプロジェクトのサイトへ同期する ----
+
+    @Test
+    void save_保存したらそのプロジェクトのサイトへの同期を依頼する() {
+        com.letsblog.project.dto.SaveTagDesignSettingRequest request =
+                new com.letsblog.project.dto.SaveTagDesignSettingRequest("default", "#fff", "#000", "#f00", null, null);
+        TagDesignSettingResponse saved = new TagDesignSettingResponse(
+                com.letsblog.project.domain.EmbedTagType.TOC, "default", "#fff", "#000", "#f00", null, null);
+        when(tagDesignSettingService.save(1L, com.letsblog.project.domain.EmbedTagType.TOC, request)).thenReturn(saved);
+
+        assertEquals(saved, controller().save(1L, com.letsblog.project.domain.EmbedTagType.TOC, request));
+
+        verify(letsblogSyncService).requestProjectSync(1L);
+    }
+
+    @Test
+    void save_認可に失敗したら同期を依頼しない() {
+        doThrow(new ForbiddenException("x")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller().save(1L,
+                com.letsblog.project.domain.EmbedTagType.TOC,
+                new com.letsblog.project.dto.SaveTagDesignSettingRequest("default", "#fff", "#000", "#f00", null, null)));
+        org.mockito.Mockito.verifyNoInteractions(letsblogSyncService);
     }
 }

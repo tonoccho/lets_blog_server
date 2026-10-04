@@ -49,6 +49,23 @@ class WP_CLI
     {
         self::$lines[] = $text;
     }
+
+    public static function error(string $message): void
+    {
+        throw new RuntimeException($message);
+    }
+}
+
+// WordPress の options API の最小スタブ(プラグインは受け取った内容をDBのoptionに保存する。issue #1558)。
+$GLOBALS['letsblog_test_options'] = [];
+function get_option(string $name, $default = false)
+{
+    return array_key_exists($name, $GLOBALS['letsblog_test_options']) ? $GLOBALS['letsblog_test_options'][$name] : $default;
+}
+function update_option(string $name, $value, $autoload = null): bool
+{
+    $GLOBALS['letsblog_test_options'][$name] = $value;
+    return true;
 }
 define('WP_CLI', true);
 define('LETSBLOG_PLUGIN_TESTING', true);
@@ -70,6 +87,61 @@ if (isset(WP_CLI::$commands['letsblog'])) {
         is_array($decoded) && ($decoded['plugin_version'] ?? null) === LETSBLOG_PLUGIN_VERSION);
     check('status がプロトコルのバージョンを返す',
         is_array($decoded) && ($decoded['protocol_version'] ?? null) === LETSBLOG_PROTOCOL_VERSION);
+}
+
+// --- issue #1558: wp letsblog sync(wp-cli だけで受け取り、DB に保存し、status でハッシュを返す) ---
+if (isset(WP_CLI::$commands['letsblog'])) {
+    $cmd = is_string(WP_CLI::$commands['letsblog']) ? new (WP_CLI::$commands['letsblog'])() : WP_CLI::$commands['letsblog'];
+    $statusSync = function () use ($cmd): array {
+        WP_CLI::$lines = [];
+        $cmd->status([], []);
+        return json_decode(WP_CLI::$lines[0] ?? '', true) ?: [];
+    };
+    $runSync = function (array $assoc) use ($cmd): ?string {
+        WP_CLI::$lines = [];
+        try {
+            $cmd->sync([], $assoc);
+        } catch (RuntimeException $e) {
+            return $e->getMessage();
+        }
+        return null;
+    };
+
+    check('sync: 同期前の status の sync_hash は null', array_key_exists('sync_hash', $statusSync()) && $statusSync()['sync_hash'] === null);
+
+    $payload = json_encode(['cssSelectorPrefix' => 'demo', 'cssBundle' => '.demo .a{color:red}', 'customTags' => []], JSON_UNESCAPED_UNICODE);
+    $payloadFile = sys_get_temp_dir() . '/letsblog-sync-' . bin2hex(random_bytes(4)) . '.json';
+    file_put_contents($payloadFile, $payload);
+    $expected = hash('sha256', $payload);
+
+    $err = $runSync(['file' => $payloadFile, 'hash' => $expected]);
+    check('sync: 正しいハッシュ付きで成功する', $err === null, (string) $err);
+    $out = json_decode(WP_CLI::$lines[0] ?? '', true);
+    check('sync: 保存したハッシュを JSON で返す', is_array($out) && ($out['sync_hash'] ?? null) === $expected, WP_CLI::$lines[0] ?? '');
+    check('sync: 受け取った内容を DB の option に保存する', get_option('letsblog_sync_payload') === $payload);
+    check('sync: status が保存した内容のハッシュを返す', ($statusSync()['sync_hash'] ?? null) === $expected);
+    check('sync: ハッシュは保存済み内容の sha256 と一致する', hash('sha256', (string) get_option('letsblog_sync_payload')) === ($statusSync()['sync_hash'] ?? ''));
+
+    $err = $runSync(['file' => $payloadFile, 'hash' => str_repeat('0', 64)]);
+    check('sync: 期待ハッシュと内容が食い違えば失敗する', $err !== null);
+    check('sync: ハッシュ不一致のとき保存済みの内容を変えない', get_option('letsblog_sync_payload') === $payload && ($statusSync()['sync_hash'] ?? null) === $expected);
+
+    $badFile = sys_get_temp_dir() . '/letsblog-sync-bad-' . bin2hex(random_bytes(4)) . '.json';
+    file_put_contents($badFile, 'not json');
+    check('sync: JSON でない内容は失敗する', $runSync(['file' => $badFile]) !== null);
+    file_put_contents($badFile, '[1,2,3]');
+    check('sync: JSON オブジェクトでない内容は失敗する', $runSync(['file' => $badFile]) !== null);
+    check('sync: 不正な内容のとき保存済みの内容を変えない', get_option('letsblog_sync_payload') === $payload);
+    check('sync: --file が無ければ失敗する', $runSync([]) !== null);
+    check('sync: ファイルが読めなければ失敗する', $runSync(['file' => '/nonexistent/letsblog-sync.json']) !== null);
+
+    $payload2 = json_encode(['cssSelectorPrefix' => 'demo', 'cssBundle' => '.demo .b{color:blue}', 'customTags' => [['tagName' => 'x']]], JSON_UNESCAPED_UNICODE);
+    file_put_contents($payloadFile, $payload2);
+    $err = $runSync(['file' => $payloadFile]);
+    check('sync: --hash 省略でも成功し、内容を更新する', $err === null && get_option('letsblog_sync_payload') === $payload2);
+    check('sync: 再同期で status のハッシュが新しい内容のものになる', ($statusSync()['sync_hash'] ?? null) === hash('sha256', $payload2));
+    @unlink($payloadFile);
+    @unlink($badFile);
 }
 
 // --- AC4: REST API のルートを登録しない(利用者の決定。wp-cli だけで通信する) ---
@@ -195,6 +267,20 @@ check('状態の判定は導入処理を走らせない(停止したサイトを
     $statusBlock !== '' && !str_contains($statusBlock, 'ensureLetsblogPlugin(') && !str_contains($statusBlock, 'resolveExistingSitePath('));
 $installBlock = $installPos !== false ? substr($index, $installPos, 1500) : '';
 check('再導入は force 付きで導入処理を実行する', str_contains($installBlock, 'ensureLetsblogPlugin($sitePath, null, LETSBLOG_PLUGIN_SOURCE_DIR, true)'));
+
+// --- issue #1558: /wp-cli/letsblog-sync(payload を一時ファイルへ書き、wp letsblog sync --file で渡す) ---
+check('index.php が /wp-cli/letsblog-sync を持つ', str_contains($index, "'/wp-cli/letsblog-sync'"));
+$syncPos = strpos($index, "\$path === '/wp-cli/letsblog-sync'");
+// ブロックの終わり(次の `if ($path === ...` の直前)まで。固定長で切ると次のブロックの内容を拾ってしまう。
+$syncEnd = $syncPos !== false ? strpos($index, "\nif (\$path === ", $syncPos + 1) : false;
+$syncBlock = $syncPos !== false ? substr($index, $syncPos, $syncEnd !== false ? $syncEnd - $syncPos : 2200) : '';
+check('同期は wp letsblog sync を wp-cli で実行する', str_contains($syncBlock, "'letsblog', 'sync'"));
+check('同期は内容を --file で渡す', str_contains($syncBlock, '--file='));
+check('同期は期待ハッシュを --hash で渡す', str_contains($syncBlock, '--hash='));
+check('同期は一時ファイルを必ず削除する', str_contains($syncBlock, 'unlink('));
+check('同期は導入処理を走らせない(未導入のサイトへは送らない)',
+    $syncBlock !== '' && !str_contains($syncBlock, 'ensureLetsblogPlugin(') && !str_contains($syncBlock, 'resolveExistingSitePath('));
+check('同期は終了コードと標準出力・標準エラーを返す', str_contains($syncBlock, "'exitCode'") && str_contains($syncBlock, "'stdout'") && str_contains($syncBlock, "'stderr'"));
 
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";

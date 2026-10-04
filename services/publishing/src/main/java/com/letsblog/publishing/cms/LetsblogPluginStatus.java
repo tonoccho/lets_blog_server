@@ -10,8 +10,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * @param state           導入済み / 未導入 / 要更新(プロトコル非互換)
  * @param version         プラグイン自体のバージョン。未導入ならnull
  * @param protocolVersion プラグインが話すプロトコルのバージョン。未導入や取得できなければnull
+ * @param syncHash        プラグインが保存している同期済みの内容のハッシュ(issue #1558)。まだ同期されていなければnull
  */
-public record LetsblogPluginStatus(State state, String version, Integer protocolVersion) {
+public record LetsblogPluginStatus(State state, String version, Integer protocolVersion, String syncHash) {
+
+    public LetsblogPluginStatus(State state, String version, Integer protocolVersion) {
+        this(state, version, protocolVersion, null);
+    }
 
     /** このアプリが話せるプロトコルのバージョン。プラグイン側の LETSBLOG_PROTOCOL_VERSION と一致すれば互換。 */
     public static final int SUPPORTED_PROTOCOL_VERSION = 1;
@@ -25,7 +30,7 @@ public record LetsblogPluginStatus(State state, String version, Integer protocol
     }
 
     public static LetsblogPluginStatus notInstalled() {
-        return new LetsblogPluginStatus(State.NOT_INSTALLED, null, null);
+        return new LetsblogPluginStatus(State.NOT_INSTALLED, null, null, null);
     }
 
     /** 導入済み(プロトコルも互換)で、投稿・プレビューの対象にできるか。 */
@@ -62,7 +67,27 @@ public record LetsblogPluginStatus(State state, String version, Integer protocol
         Integer protocol = node.path("protocol_version").isInt() ? node.path("protocol_version").asInt() : null;
         State state = protocol != null && protocol == SUPPORTED_PROTOCOL_VERSION
                 ? State.INSTALLED : State.NEEDS_UPDATE;
-        return new LetsblogPluginStatus(state, version, protocol);
+        String syncHash = node.path("sync_hash").isTextual() ? node.path("sync_hash").asText() : null;
+        return new LetsblogPluginStatus(state, version, protocol, syncHash);
+    }
+
+    /**
+     * `wp letsblog sync` が正常終了したときの標準出力から、プラグインが保存した内容のハッシュを取り出す(issue #1558)。
+     *
+     * @throws IllegalArgumentException 出力がJSONオブジェクトでない、またはsync_hashが無いとき
+     */
+    public static String syncHashFromSyncOutput(String stdout) {
+        JsonNode node;
+        try {
+            node = stdout == null ? null : OBJECT_MAPPER.readTree(stdout.strip());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("wp letsblog syncの出力を解釈できません: " + abbreviate(stdout), e);
+        }
+        if (node == null || !node.isObject() || !node.path("sync_hash").isTextual()
+                || node.path("sync_hash").asText().isEmpty()) {
+            throw new IllegalArgumentException("wp letsblog syncの出力を解釈できません: " + abbreviate(stdout));
+        }
+        return node.path("sync_hash").asText();
     }
 
     private static String abbreviate(String text) {

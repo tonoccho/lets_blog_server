@@ -348,6 +348,41 @@ public class WordPressAgentOperations {
     }
 
     /**
+     * エージェント経由で `wp letsblog sync` を実行し、タグ定義・統合CSS等をプラグインへ渡す(issue #1558)。
+     * 送信は wp-cli だけで行う(REST APIは使わない)。導入処理は走らせない(未導入のサイトへは送らない)。
+     *
+     * @return プラグインが保存した内容のハッシュ。期待ハッシュと違えば例外
+     */
+    public String syncLetsblogPlugin(WordPressCredentials creds, String payload, String expectedHash) {
+        try {
+            JsonNode body = post("/wp-cli/letsblog-sync",
+                    Map.of("slug", creds.wpSlug(), "payload", payload, "hash", expectedHash));
+            String stdout = body.path("stdout").asText("");
+            String stderr = body.path("stderr").asText("");
+            if (body.path("exitCode").asInt(1) != 0) {
+                log.warn("wp letsblog syncが失敗しました (wpSlug={}): {}", creds.wpSlug(), stderr);
+                throw new AgentOperationException("wp letsblog syncの実行に失敗しました: "
+                        + (stderr.isBlank() ? stdout : stderr).strip());
+            }
+            String savedHash;
+            try {
+                savedHash = LetsblogPluginStatus.syncHashFromSyncOutput(stdout);
+            } catch (IllegalArgumentException e) {
+                throw new AgentOperationException(e.getMessage(), e);
+            }
+            if (!savedHash.equals(expectedHash)) {
+                throw new AgentOperationException("プラグインが保存したハッシュ(" + savedHash
+                        + ")が送った内容のハッシュ(" + expectedHash + ")と一致しません");
+            }
+            return savedHash;
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("letsblogプラグインへの同期に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException(accessFailureMessage(e), e);
+        }
+    }
+
+    /**
      * 記事プレビュー(非公開投稿の実表示)向けに、サイト管理者としてログイン済みと同等のCookieを発行する。
      */
     public AuthCookie generateAuthCookie(WordPressCredentials creds) {

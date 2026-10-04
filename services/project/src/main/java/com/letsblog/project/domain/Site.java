@@ -71,6 +71,20 @@ public class Site {
     @Column(name = "admin_path", length = 200)
     private String adminPath;
 
+    // letsblogプラグインへの同期の状態(issue #1558)。statusがnullならまだ一度も同期していない。
+    @Column(name = "letsblog_sync_status", length = 20)
+    @Enumerated(EnumType.STRING)
+    private LetsblogSyncStatus letsblogSyncStatus;
+
+    @Column(name = "letsblog_sync_error", columnDefinition = "TEXT")
+    private String letsblogSyncError;
+
+    @Column(name = "letsblog_sync_hash", length = 64)
+    private String letsblogSyncHash;
+
+    @Column(name = "letsblog_synced_at")
+    private LocalDateTime letsblogSyncedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

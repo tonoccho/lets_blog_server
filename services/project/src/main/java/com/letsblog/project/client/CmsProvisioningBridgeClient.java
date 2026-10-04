@@ -3,6 +3,7 @@ package com.letsblog.project.client;
 import com.letsblog.project.cms.ConnectionCheckResult;
 import com.letsblog.project.cms.DatabaseExport;
 import com.letsblog.project.cms.LetsblogPluginStatus;
+import com.letsblog.project.cms.LetsblogSyncResult;
 import com.letsblog.project.cms.ProvisioningResult;
 import com.letsblog.project.cms.WpCliInstallResult;
 import jakarta.servlet.http.HttpServletRequest;
@@ -85,6 +86,18 @@ public class CmsProvisioningBridgeClient {
                 LetsblogPluginStatus.class);
     }
 
+    /**
+     * タグ定義・統合CSS等をletsblogプラグインへ送る(issue #1558)。送信は wp-cli だけで行う。
+     * プラグインが保存した内容のハッシュを返す。
+     */
+    public LetsblogSyncResult syncLetsblogPlugin(
+            String cmsType, Map<String, String> credentials, String payload, String hash) {
+        Map<String, Object> body = credentialsBody(cmsType, credentials);
+        body.put("payload", payload);
+        body.put("hash", hash);
+        return post("/api/internal/project/cms/sync-letsblog-plugin", body, LetsblogSyncResult.class);
+    }
+
     public boolean hasAuthorProvisioningCapability(String cmsType, Map<String, String> credentials) {
         Boolean result = post(
                 "/api/internal/project/cms/has-author-capability", credentialsBody(cmsType, credentials), Boolean.class);
@@ -161,7 +174,9 @@ public class CmsProvisioningBridgeClient {
     }
 
     private void setAuthorization(HttpHeaders headers) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
+        // 非同期の同期処理(issue #1558)には現在のリクエストが無いため、取り置いたトークンを優先する。
+        String bearerToken = BearerScope.current() != null
+                ? BearerScope.current() : request.getHeader(HttpHeaders.AUTHORIZATION);
         if (bearerToken != null && !bearerToken.isBlank()) {
             headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
         }

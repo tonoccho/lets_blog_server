@@ -49,9 +49,12 @@ class GlobalTagDesignSettingControllerTest {
     @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
+    @Mock
+    private com.letsblog.project.service.LetsblogSyncService letsblogSyncService;
+
     private GlobalTagDesignSettingController controller() {
         return new GlobalTagDesignSettingController(
-                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService);
+                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService, letsblogSyncService);
     }
 
     @Test
@@ -127,5 +130,20 @@ class GlobalTagDesignSettingControllerTest {
 
         verify(tagDesignGenerationService, org.mockito.Mockito.never())
                 .generate(any(), any(), any(), any());
+    }
+
+    // ---- issue #1558: グローバルのデザイン変更はすべてのプロジェクトのサイトへ同期する ----
+
+    @Test
+    void save_保存したらすべてのプロジェクトのサイトへの同期を依頼する() {
+        SaveTagDesignSettingRequest request =
+                new SaveTagDesignSettingRequest("default", "#fff", "#000", "#f00", null, null);
+        TagDesignSettingResponse saved =
+                new TagDesignSettingResponse(EmbedTagType.TOC, "default", "#fff", "#000", "#f00", null, null);
+        when(tagDesignSettingService.save(isNull(), any(), any())).thenReturn(saved);
+
+        assertEquals(saved, controller().save(EmbedTagType.TOC, request));
+
+        verify(letsblogSyncService).requestAllSync();
     }
 }

@@ -89,4 +89,49 @@ class LetsblogPluginStatusTest {
         assertTrue(e.getMessage().contains("…"));
         assertTrue(e.getMessage().length() < 300);
     }
+
+    // ---- issue #1558: status が同期済みの内容のハッシュを返す ----
+
+    @Test
+    void statusの出力のsync_hashを同期ハッシュとして持つ() {
+        LetsblogPluginStatus status = LetsblogPluginStatus.fromStatusOutput(
+                "{\"plugin_version\":\"1.0.0\",\"protocol_version\":1,\"sync_hash\":\"abc123\"}");
+
+        assertEquals("abc123", status.syncHash());
+        assertEquals(LetsblogPluginStatus.State.INSTALLED, status.state());
+    }
+
+    @Test
+    void sync_hashがnullや無しなら同期ハッシュはnull() {
+        assertNull(LetsblogPluginStatus.fromStatusOutput(
+                "{\"plugin_version\":\"1.0.0\",\"protocol_version\":1,\"sync_hash\":null}").syncHash());
+        assertNull(LetsblogPluginStatus.fromStatusOutput(
+                "{\"plugin_version\":\"1.0.0\",\"protocol_version\":1}").syncHash());
+        assertNull(LetsblogPluginStatus.notInstalled().syncHash());
+    }
+
+    @Test
+    void wp_letsblog_syncの出力からハッシュを取り出す() {
+        assertEquals("deadbeef", LetsblogPluginStatus.syncHashFromSyncOutput("{\"sync_hash\":\"deadbeef\"}"));
+    }
+
+    @Test
+    void wp_letsblog_syncの出力が解釈できなければ例外() {
+        assertThrows(IllegalArgumentException.class, () -> LetsblogPluginStatus.syncHashFromSyncOutput("Success"));
+        assertThrows(IllegalArgumentException.class, () -> LetsblogPluginStatus.syncHashFromSyncOutput(null));
+        assertThrows(IllegalArgumentException.class, () -> LetsblogPluginStatus.syncHashFromSyncOutput("{\"x\":1}"));
+        assertThrows(IllegalArgumentException.class, () -> LetsblogPluginStatus.syncHashFromSyncOutput("{\"sync_hash\":\"\"}"));
+    }
+
+    @Test
+    void wp_letsblog_syncの出力がJSONオブジェクトでなければ例外() {
+        assertThrows(IllegalArgumentException.class, () -> LetsblogPluginStatus.syncHashFromSyncOutput("[1]"));
+        assertThrows(IllegalArgumentException.class, () -> LetsblogPluginStatus.syncHashFromSyncOutput("{\"sync_hash\":5}"));
+    }
+
+    @Test
+    void sync_hashが文字列でなければ同期ハッシュはnull() {
+        assertNull(LetsblogPluginStatus.fromStatusOutput(
+                "{\"plugin_version\":\"1.0.0\",\"protocol_version\":1,\"sync_hash\":5}").syncHash());
+    }
 }

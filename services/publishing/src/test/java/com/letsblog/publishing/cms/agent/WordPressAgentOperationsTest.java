@@ -557,4 +557,69 @@ class WordPressAgentOperationsTest {
 
         assertThrows(AgentOperationException.class, () -> operations.letsblogPluginStatus(creds()));
     }
+
+    // ---- issue #1558: wp letsblog sync(wp-cliだけで同期する) ----
+
+    @Test
+    void syncLetsblogPlugin_内容とハッシュをエージェント経由のwp_cliへ渡し保存されたハッシュを返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sync"))
+                .andExpect(content().json("{\"slug\":\"main\",\"payload\":\"{\\\"a\\\":1}\",\"hash\":\"h1\"}"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"sync_hash\\\":\\\"h1\\\"}\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals("h1", operations.syncLetsblogPlugin(creds(), "{\"a\":1}", "h1"));
+        server.verify();
+    }
+
+    @Test
+    void syncLetsblogPlugin_wp_cliが失敗したらstderrつきの例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sync"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"\",\"stderr\":\"Error: ハッシュが一致しません\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e = assertThrows(AgentOperationException.class,
+                () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+        assertTrue(e.getMessage().contains("ハッシュが一致しません"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_stderrが空ならstdoutを例外に含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sync"))
+                .andRespond(withSuccess("{\"exitCode\":1,\"stdout\":\"boom\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e = assertThrows(AgentOperationException.class,
+                () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+        assertTrue(e.getMessage().contains("boom"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_返ったハッシュが期待と違えば例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sync"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"sync_hash\\\":\\\"other\\\"}\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThrows(AgentOperationException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_出力がJSONでなければ例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sync"))
+                .andRespond(withSuccess("{\"exitCode\":0,\"stdout\":\"PHP Fatal error\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThrows(AgentOperationException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+    }
+
+    @Test
+    void syncLetsblogPlugin_エージェントがエラーを返したら例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sync"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"サイト 'main' が見つかりません\"}"));
+
+        assertThrows(AgentOperationException.class, () -> operations.syncLetsblogPlugin(creds(), "{}", "h1"));
+    }
 }
