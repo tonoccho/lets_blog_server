@@ -234,6 +234,26 @@ describe('SiteListTable', () => {
       expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
     })
 
+    it('両アイコンリンクに遷移先 URL を title として付ける(issue #1531)', () => {
+      renderTable()
+      expect(screen.getByRole('link', { name: 'Test Site 1 のサイトを開く' })).toHaveAttribute('title', 'https://test1.example.com')
+      expect(screen.getByRole('link', { name: 'Test Site 2 の管理画面を開く' })).toHaveAttribute(
+        'title',
+        'https://test2.example.com/wp-admin'
+      )
+    })
+
+    it('両アイコンリンクに可視のフォーカスリングのクラスが付く(issue #1531)', () => {
+      renderTable()
+      for (const name of ['Test Site 1 のサイトを開く', 'Test Site 1 の管理画面を開く']) {
+        expect(screen.getByRole('link', { name })).toHaveClass(
+          'focus-visible:outline-2',
+          'focus-visible:outline-offset-2',
+          'focus-visible:outline-blue-500'
+        )
+      }
+    })
+
     it('管理画面パスが別オリジンを指して解決できないときは管理画面リンクだけ描画しない', () => {
       renderTable('https://evil.example.com/wp-admin')
       expect(screen.queryByRole('link', { name: /管理画面を開く/ })).not.toBeInTheDocument()

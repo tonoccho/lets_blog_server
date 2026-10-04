@@ -110,6 +110,38 @@ Then(
   }
 );
 
+Then('テスト環境のスロットの両アイコンリンクのツールチップに遷移先のURLが入っている', async ({ ctx, page }) => {
+  const base = (ctx.slotLinkSiteBaseUrl as string).replace(/\/$/, '');
+  await expect(slot(page).getByRole('link', { name: `${ctx.slotLinkSiteName} のサイトを開く` })).toHaveAttribute(
+    'title',
+    ctx.slotLinkSiteBaseUrl as string
+  );
+  await expect(slot(page).getByRole('link', { name: `${ctx.slotLinkSiteName} の管理画面を開く` })).toHaveAttribute(
+    'title',
+    `${base}/wp-admin`
+  );
+});
+
+Then(
+  'テスト環境のスロットの両アイコンリンクにTabキーでフォーカスでき可視のフォーカスリングが出る',
+  async ({ ctx, page }) => {
+    for (const label of ['サイトを開く', '管理画面を開く']) {
+      const link = slot(page).getByRole('link', { name: `${ctx.slotLinkSiteName} の${label}` });
+      await link.focus();
+      await expect(link).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await expect(link).toBeFocused();
+      const outline = await link.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth) };
+      });
+      expect(outline.style).not.toBe('none');
+      expect(outline.width).toBeGreaterThan(0);
+    }
+  }
+);
+
 When('テスト環境のスロットの「切離し」を押す', async ({ page }) => {
   await slot(page).getByRole('button', { name: '切離し' }).click();
 });

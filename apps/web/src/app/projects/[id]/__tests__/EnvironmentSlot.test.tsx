@@ -125,6 +125,30 @@ describe("EnvironmentSlot", () => {
     expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("両アイコンリンクに遷移先 URL を title として付け、フォーカスリングのクラスを付ける(issue #1531)", () => {
+    render(
+      <EnvironmentSlot
+        projectId={1}
+        environment="test"
+        site={buildSite({ name: "テストサイト", baseUrl: "https://example.com" })}
+        candidateSites={[]}
+        adminPath="wp-admin"
+      />
+    );
+
+    const site = screen.getByRole("link", { name: "テストサイト のサイトを開く" });
+    const admin = screen.getByRole("link", { name: "テストサイト の管理画面を開く" });
+    expect(site).toHaveAttribute("title", "https://example.com");
+    expect(admin).toHaveAttribute("title", "https://example.com/wp-admin");
+    for (const link of [site, admin]) {
+      expect(link).toHaveClass(
+        "focus-visible:outline-2",
+        "focus-visible:outline-offset-2",
+        "focus-visible:outline-blue-500"
+      );
+    }
+  });
+
   it("管理画面を開くリンクは <公開URL>/<管理画面パス> を新しいタブで開く(issue #1530)", () => {
     render(
       <EnvironmentSlot

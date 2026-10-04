@@ -92,6 +92,36 @@ Then('そのサイトの行にサイト名を含む「サイトを開く」と�
   await expect(r.getByRole('link', { name: `${ctx.linkSiteName} の管理画面を開く` })).toHaveCount(1);
 });
 
+Then('そのサイトの両アイコンリンクのツールチップに遷移先のURLが入っている', async ({ ctx, page }) => {
+  const r = row(ctx, page);
+  const base = (ctx.linkSiteBaseUrl as string).replace(/\/$/, '');
+  await expect(r.getByRole('link', { name: `${ctx.linkSiteName} のサイトを開く` })).toHaveAttribute(
+    'title',
+    ctx.linkSiteBaseUrl as string
+  );
+  await expect(r.getByRole('link', { name: `${ctx.linkSiteName} の管理画面を開く` })).toHaveAttribute(
+    'title',
+    `${base}/wp-admin`
+  );
+});
+
+Then('そのサイトの両アイコンリンクにTabキーでフォーカスでき可視のフォーカスリングが出る', async ({ ctx, page }) => {
+  for (const label of ['サイトを開く', '管理画面を開く']) {
+    const link = row(ctx, page).getByRole('link', { name: `${ctx.linkSiteName} の${label}` });
+    await link.focus();
+    await expect(link).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(link).toBeFocused();
+    const outline = await link.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth) };
+    });
+    expect(outline.style).not.toBe('none');
+    expect(outline.width).toBeGreaterThan(0);
+  }
+});
+
 Then('そのサイトの行が一覧に表示される', async ({ ctx, page }) => {
   await expect(row(ctx, page)).toBeVisible();
 });

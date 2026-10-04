@@ -236,6 +236,7 @@ export function SiteListTable({
                     <span className="inline-flex items-center gap-3">
                       <a
                         href={site.baseUrl}
+                        title={site.baseUrl}
                         target="_blank"
                         rel="noreferrer"
                         aria-label={`${site.name} のサイトを開く`}
@@ -246,6 +247,7 @@ export function SiteListTable({
                       {adminUrl && (
                         <a
                           href={adminUrl}
+                          title={adminUrl}
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`${site.name} の管理画面を開く`}
