@@ -1269,6 +1269,21 @@ project-service所有(issue #1578)。プロジェクト設定画面の「SNS 告
 | POST /api/internal/project/projects/{projectId}/sns/pv/sync | requireProjectMemberOrAdmin | `ProjectPvInternalController`。analytics-service が GA のプロパティ選択の完了を知らせ、本番サイトへ GA4 の認証情報とルールを送らせる |
 | GET /api/internal/analytics/projects/{projectId}/google-analytics/credentials | requireProjectMemberOrAdmin | analytics-service の `InternalAnalyticsProjectSettingsController`。復号済みの GA4 認証情報を project-service へ返す。秘密を返すため、他の内部ブリッジと違って呼び出し元ユーザーの権限を検査する |
 
+## ProjectSnsThreadsController (5エンドポイント、ベースパス `/api/projects/{projectId}/sns/threads`)
+
+project-service所有(issue #1579)。プロジェクト設定画面の「Threads」欄(公式 Threads アカウントの接続・切断)向けAPI。
+`ProjectSnsController`(X)と同じ方式で、OAuth の長期トークンは本番サイトの letsblog プラグインへ送るだけで、
+アプリは保存せず、どの応答にも載せない。アプリのシークレットは認可の間だけメモリに持つ。コールバックは認可を始めた本人・
+同じプロジェクトだけを受け付ける(`SnsThreadsService#completeAuthorization`)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/sns/threads | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 接続状態・接続できない理由・告知履歴。本番サイトに届かないときは「取得できない」として返す |
+| POST /api/projects/{projectId}/sns/threads/authorize | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 認可の開始。Threads の認可画面の URL を返す |
+| POST /api/projects/{projectId}/sns/threads/callback | requireAdmin | 401 | 403 | 認可OK | 現状維持 | Next.js 側コールバックからのサーバー間呼び出し。アカウント名だけを返す |
+| POST /api/projects/{projectId}/sns/threads/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
+| DELETE /api/projects/{projectId}/sns/threads | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 切断。本番サイトのプラグインから Threads の設定を消す |
+
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |

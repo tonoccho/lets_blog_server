@@ -286,6 +286,8 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 "image-stub",
                 "github-stub",
                 "x-stub",
+                # Threads API のスタブ(#1579)。
+                "threads-stub",
                 # ComfyUI スタブ(#1106)。GPU を持たないホストでも画像生成の経路を
                 # 検証できるようにするため、7本目として追加した。
                 "comfyui-stub",

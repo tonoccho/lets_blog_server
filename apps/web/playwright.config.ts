@@ -67,7 +67,8 @@ const atProvision = defineBddProject({
   ...BDD_COMMON,
   name: 'at-provision',
   outputDir: '.features-gen/at-provision',
-  tags: '@stage:provision',
+  // `@stub-isolation:threads`(下の at-threads-exclusive、issue #1579)は専用レーンへ集めるので除く。
+  tags: '@stage:provision and not @stub-isolation:threads',
 });
 
 /**
@@ -318,6 +319,22 @@ const atPreviewExclusive = defineBddProject({
 });
 
 /**
+ * issue #1579: Threads の告知(`project/project-sns-threads.feature`)の専用レーン。
+ *
+ * 全シナリオが `threads-stub` の単一のグローバル状態を開始時に初期化し、投稿・更新の記録を
+ * 検証する。既定の並列度(fullyParallel)だと、シナリオ同士が互いの記録を消す/混ぜるため、
+ * `@mode:serial`(シナリオ単位の指定で直列化にならない)では防げない。`workers: 1` の専用
+ * プロジェクトへ集めて直列化する(`at-analytics-exclusive` と同型)。シナリオは `@stage:provision`
+ * なので、at-provision からは `not @stub-isolation:threads` で除き、ここだけが走らせる。
+ */
+const atThreadsExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-threads-exclusive',
+  outputDir: '.features-gen/at-threads-exclusive',
+  tags: '@stub-isolation:threads' + excludeRequiresGpu,
+});
+
+/**
  * 段階5: `@destructive` のシナリオ(issue #929)。
  *
  * 環境の状態を壊すシナリオを**最後に、それだけで**実行する。
@@ -542,12 +559,19 @@ export default defineConfig({
       workers: 1,
     },
     {
+      // at-main とは並列に走る。threads-stub の共有状態に触れるため、at-destructive はこれの完了も待つ(issue #1579)。
+      ...atThreadsExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-provision'],
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
       // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive /
       // at-timezone-exclusive / at-analytics-exclusive も共有状態に触れるため、at-main と
       // 同様に完了を待ってから始める(issue #1188、issue #1374、issue #1372)。
-      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive'],
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive', 'at-threads-exclusive'],
       // この段階の**内部**も直列化する(issue #1387)。dependencies は他プロジェクトの
       // 完了しか担保せず、24シナリオ同士は既定の並列度でそのまま走っていた。それぞれが
       // 別のサービスを止めるため互いの停止に巻き込まれ、2026-09-23 のリリース検証で

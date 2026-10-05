@@ -721,6 +721,26 @@ DEFAULT_STEPS = [
         "touches_stack": True,
     },
     {
+        # letsblog プラグインの Threads 送信処理(長期トークンの更新条件・投稿・告知履歴)のテスト(issue #1579)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "letsblog-threads-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-letsblog-threads.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         "name": "backend-expose-mysql",
         "argv": [
             "docker",

@@ -87,8 +87,16 @@ public class SnsXService {
         this.clock = clock;
     }
 
-    /** 画面に出す接続状態。本番サイトに届かなくても例外にしない。 */
+    /** 画面に出す X の接続状態。本番サイトに届かなくても例外にしない。 */
     public XConnectionView view(Long projectId) {
+        return view(projectId, SNS);
+    }
+
+    /**
+     * 画面に出す、指定した SNS の接続状態と告知履歴。本番サイトに届かなくても例外にしない。
+     * 状態・履歴の読み取りは SNS に依らない処理なので、Threads({@link SnsThreadsService}、issue #1579)も使う。
+     */
+    public XConnectionView view(Long projectId, String sns) {
         Project project = findProject(projectId);
         Optional<Site> site = productionSite(project);
         if (site.isEmpty()) {
@@ -109,7 +117,7 @@ public class SnsXService {
         if (plugin.state() != LetsblogPluginStatus.State.INSTALLED) {
             return new XConnectionView(false, reasonPlugin(plugin), siteName, null, null);
         }
-        return new XConnectionView(true, null, siteName, readStatus(siteId), readLog(siteId));
+        return new XConnectionView(true, null, siteName, readStatus(siteId, sns), readLog(siteId, sns));
     }
 
     /** 認可を始め、X の認可画面の URL を返す。接続できない状態では始めない。 */
@@ -161,11 +169,16 @@ public class SnsXService {
         return new XConnectResult(projectId, accountName);
     }
 
-    /** テスト投稿。失敗してもプラグインが履歴に残すので、理由を返すだけ。 */
+    /** X へのテスト投稿。失敗してもプラグインが履歴に残すので、理由を返すだけ。 */
     public XTestResult test(Long projectId) {
+        return test(projectId, SNS);
+    }
+
+    /** 指定した SNS へのテスト投稿(Threads も使う。issue #1579)。 */
+    public XTestResult test(Long projectId, String sns) {
         Long siteId = requireConnectableSite(findProject(projectId));
         try {
-            siteService.runLetsblogSns(siteId, "test", SNS, null);
+            siteService.runLetsblogSns(siteId, "test", sns, null);
             return new XTestResult(true, null);
         } catch (RuntimeException e) {
             return new XTestResult(false, e.getMessage());
@@ -197,7 +210,11 @@ public class SnsXService {
         return siteId == null ? Optional.empty() : siteRepository.findById(siteId);
     }
 
-    /** 接続操作ができる本番サイトのID。できないなら理由つきで例外。 */
+    /** 接続操作ができる本番サイトのID(Threads の接続・切断も使う。issue #1579)。できないなら理由つきで例外。 */
+    public Long requireConnectableSiteId(Long projectId) {
+        return requireConnectableSite(findProject(projectId));
+    }
+
     private Long requireConnectableSite(Project project) {
         Optional<Site> site = productionSite(project);
         if (site.isEmpty()) {
@@ -244,9 +261,9 @@ public class SnsXService {
         }
     }
 
-    private XConnectionView.Status readStatus(Long siteId) {
+    private XConnectionView.Status readStatus(Long siteId, String sns) {
         try {
-            JsonNode x = objectMapper.readTree(siteService.runLetsblogSns(siteId, "status", SNS, null)).path(SNS);
+            JsonNode x = objectMapper.readTree(siteService.runLetsblogSns(siteId, "status", sns, null)).path(sns);
             XConnectionView.State state = switch (x.path("status").asText("")) {
                 case STATUS_CONNECTED -> XConnectionView.State.CONNECTED;
                 case STATUS_UNSET -> XConnectionView.State.UNSET;
@@ -259,15 +276,15 @@ public class SnsXService {
         }
     }
 
-    private XConnectionView.Log readLog(Long siteId) {
+    private XConnectionView.Log readLog(Long siteId, String sns) {
         try {
-            JsonNode all = objectMapper.readTree(siteService.runLetsblogSns(siteId, "log", SNS, null));
+            JsonNode all = objectMapper.readTree(siteService.runLetsblogSns(siteId, "log", sns, null));
             if (!all.isArray()) {
                 throw new IllegalStateException("告知履歴を解釈できません");
             }
             List<XConnectionView.Entry> entries = new ArrayList<>();
             for (JsonNode item : all) {
-                if (SNS.equals(item.path("sns").asText())) {
+                if (sns.equals(item.path("sns").asText())) {
                     entries.add(new XConnectionView.Entry(
                             item.path("kind").asText(), item.path("success").asBoolean(false),
                             item.path("error").asText(null), item.path("at").asText(null)));

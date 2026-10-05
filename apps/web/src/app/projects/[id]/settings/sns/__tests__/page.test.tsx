@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import ProjectSnsSettingsPage from "../page";
-import { getProject, getProjectPvRules, getProjectXConnection } from "@/lib/apiClient";
+import { getProject, getProjectPvRules, getProjectThreadsConnection, getProjectXConnection } from "@/lib/apiClient";
 
 /**
  * issue #1574: SNS 告知の設定ページ(サーバーコンポーネント)。接続状態の取得に失敗しても画面全体は落とさず、
@@ -9,6 +9,7 @@ import { getProject, getProjectPvRules, getProjectXConnection } from "@/lib/apiC
 jest.mock("@/lib/apiClient", () => ({
   getProject: jest.fn(),
   getProjectXConnection: jest.fn(),
+  getProjectThreadsConnection: jest.fn(),
   getProjectPvRules: jest.fn(),
 }));
 jest.mock("@/lib/session", () => ({ requireAdminSession: jest.fn() }));
@@ -23,6 +24,14 @@ jest.mock("../../../ProjectSnsXSection", () => ({
   ProjectSnsXSection: (props: unknown) => {
     sectionProps(props);
     return <div data-testid="sns-section" />;
+  },
+}));
+
+const threadsSectionProps = jest.fn();
+jest.mock("../../../ProjectSnsThreadsSection", () => ({
+  ProjectSnsThreadsSection: (props: unknown) => {
+    threadsSectionProps(props);
+    return <div data-testid="threads-section" />;
   },
 }));
 
@@ -43,7 +52,7 @@ const pvView = {
 
 const view = { connectable: true, reason: null, siteName: "本番", status: null, log: null };
 
-async function renderPage(searchParams: { connected?: string; error?: string } = {}) {
+async function renderPage(searchParams: { connected?: string; error?: string; sns?: string } = {}) {
   render(
     await ProjectSnsSettingsPage({
       params: Promise.resolve({ id: "5" }),
@@ -60,6 +69,7 @@ describe("ProjectSnsSettingsPage", () => {
     process.env.NEXTAUTH_URL = "https://localhost";
     (getProject as jest.Mock).mockResolvedValue({ id: 5, name: "テストプロジェクト" });
     (getProjectXConnection as jest.Mock).mockResolvedValue(view);
+    (getProjectThreadsConnection as jest.Mock).mockResolvedValue(view);
     (getProjectPvRules as jest.Mock).mockResolvedValue(pvView);
   });
 
@@ -119,5 +129,51 @@ describe("ProjectSnsSettingsPage", () => {
     (getProject as jest.Mock).mockRejectedValue(new Error("404"));
 
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
+  });
+  describe("Threads の欄(issue #1579)", () => {
+    it("取得した Threads の接続状態と Threads 用のコールバックURLを Threads 欄へ渡す", async () => {
+      await renderPage();
+
+      expect(screen.getByTestId("threads-section")).toBeInTheDocument();
+      expect(threadsSectionProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 5,
+          view,
+          callbackUrl: "https://localhost/connect/threads/callback",
+          connectedBanner: false,
+          errorBanner: undefined,
+        })
+      );
+    });
+
+    it("Threads の接続完了(connected=threads)は Threads 欄にだけバナーを出す", async () => {
+      await renderPage({ connected: "threads" });
+
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: true }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+    });
+
+    it("Threads の失敗(sns=threads)は Threads 欄にだけ理由を出し、X 欄には出さない", async () => {
+      await renderPage({ error: "access_denied", sns: "threads" });
+
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "access_denied" }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("X の失敗は X 欄にだけ理由を出す", async () => {
+      await renderPage({ error: "invalid_state" });
+
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "invalid_state" }));
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("Threads の接続状態を取得できなくても画面は描き、Threads 欄へはnullを渡す", async () => {
+      (getProjectThreadsConnection as jest.Mock).mockRejectedValue(new Error("502"));
+
+      await renderPage();
+
+      expect(screen.getByTestId("sns-section")).toBeInTheDocument();
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
+    });
   });
 });

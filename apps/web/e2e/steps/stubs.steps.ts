@@ -76,6 +76,12 @@ const PROBES: Record<StubName, { path: string; method: string; body?: unknown; h
     method: 'GET',
     headers: { Authorization: 'Bearer e2e-x-access-valid' },
   },
+  // Threads API(#1579)。トークンは固定値で状態を持たないので、同じ呼び出しは常に同じ応答になる。
+  threads: {
+    path: '/v1.0/me?fields=id,username',
+    method: 'GET',
+    headers: { Authorization: 'Bearer e2e-threads-long' },
+  },
 };
 
 async function callProbe(

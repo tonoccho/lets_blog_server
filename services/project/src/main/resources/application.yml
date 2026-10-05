@@ -104,6 +104,10 @@ app:
   # 遷移させる認可画面の URL。受け入れテストでは x-stub へ向ける(docker-compose.e2e-stubs.yml)。
   x-api-base-url: ${X_API_BASE_URL:https://api.x.com}
   x-authorize-url: ${X_AUTHORIZE_URL:https://x.com/i/oauth2/authorize}
+  # プロジェクトの公式 Threads アカウントの接続(issue #1579、ThreadsApiClient)。API のベース URL と、利用者の
+  # ブラウザを遷移させる認可画面の URL。受け入れテストでは threads-stub へ向ける(docker-compose.e2e-stubs.yml)。
+  threads-api-base-url: ${THREADS_API_BASE_URL:https://graph.threads.net}
+  threads-authorize-url: ${THREADS_AUTHORIZE_URL:https://threads.net/oauth/authorize}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-serviceの
 # SecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と

@@ -1826,6 +1826,47 @@ export function resendProjectPvRules(projectId: number): Promise<PvRulesView> {
   return apiFetch<PvRulesView>(`/api/projects/${projectId}/sns/pv/resend`, { method: 'POST' });
 }
 
+/**
+ * プロジェクト設定画面の Threads 接続(issue #1579)。応答の形は X と同じ(トークンもアプリの秘密も含まない)。
+ */
+export function getProjectThreadsConnection(projectId: number): Promise<XConnectionView> {
+  return apiFetch<XConnectionView>(`/api/projects/${projectId}/sns/threads`);
+}
+
+/** アプリの情報は認可の間だけバックエンドのメモリに置かれる(保存されない)。 */
+export function startProjectThreadsAuthorization(
+  projectId: number,
+  input: { clientId: string; clientSecret: string; redirectUri: string }
+): Promise<{ authorizeUrl: string }> {
+  return apiFetch<{ authorizeUrl: string }>(`/api/projects/${projectId}/sns/threads/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function completeProjectThreadsAuthorization(
+  projectId: number,
+  input: { state: string; code: string }
+): Promise<{ projectId: number; accountName: string }> {
+  return apiFetch<{ projectId: number; accountName: string }>(`/api/projects/${projectId}/sns/threads/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function testProjectThreadsPost(projectId: number): Promise<{ success: boolean; error: string | null }> {
+  return apiFetch<{ success: boolean; error: string | null }>(`/api/projects/${projectId}/sns/threads/test`, {
+    method: 'POST',
+  });
+}
+
+/** 切断。本番サイトのプラグインから Threads の設定を消す。 */
+export function disconnectProjectThreads(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/sns/threads`, { method: 'DELETE' });
+}
+
 export interface GoogleAnalyticsDailyDataPoint {
   date: string;
   sessions: number;

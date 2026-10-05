@@ -55,6 +55,11 @@ import {
   startProjectXAuthorization,
   completeProjectXAuthorization,
   testProjectXPost,
+  getProjectThreadsConnection,
+  startProjectThreadsAuthorization,
+  completeProjectThreadsAuthorization,
+  testProjectThreadsPost,
+  disconnectProjectThreads,
   getProjectPvRules,
   addProjectPvRule,
   deleteProjectPvRule,
@@ -851,5 +856,71 @@ describe('プロジェクトの PV 達成ルール(issue #1578)', () => {
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/pv/resend')
     expect(init.method).toBe('POST')
+  })
+})
+
+describe('プロジェクトの Threads 接続(issue #1579)', () => {
+  it('getProjectThreadsConnectionは接続状態を取得する', async () => {
+    const view = { connectable: true, reason: null, siteName: '本番', status: null, log: null }
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectThreadsConnection(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/threads')
+    expect(url).not.toContain('/sns/x')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('startProjectThreadsAuthorizationはアプリの情報とリダイレクト先をPOSTし認可URLを受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ authorizeUrl: 'https://threads.example/authorize' }))
+
+    const result = await startProjectThreadsAuthorization(7, {
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      redirectUri: 'https://localhost/connect/threads/callback',
+    })
+
+    expect(result).toEqual({ authorizeUrl: 'https://threads.example/authorize' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/threads/authorize')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      redirectUri: 'https://localhost/connect/threads/callback',
+    })
+  })
+
+  it('completeProjectThreadsAuthorizationはstateとコードをPOSTしアカウント名を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, accountName: 'lets_blog' }))
+
+    const result = await completeProjectThreadsAuthorization(7, { state: '7.abc', code: 'the-code' })
+
+    expect(result).toEqual({ projectId: 7, accountName: 'lets_blog' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/threads/callback')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ state: '7.abc', code: 'the-code' })
+  })
+
+  it('testProjectThreadsPostはテスト投稿をPOSTし結果を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, error: null }))
+
+    await expect(testProjectThreadsPost(7)).resolves.toEqual({ success: true, error: null })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/threads/test')
+    expect(init.method).toBe('POST')
+  })
+
+  it('disconnectProjectThreadsはDELETEで切断する', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await disconnectProjectThreads(7)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/threads')
+    expect(init.method).toBe('DELETE')
   })
 })

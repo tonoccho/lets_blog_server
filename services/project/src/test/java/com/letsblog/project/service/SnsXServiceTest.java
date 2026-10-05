@@ -569,4 +569,48 @@ class SnsXServiceTest {
 
         verify(siteService).runLetsblogSns(5L, "config-clear", null, null);
     }
+
+    // ---- issue #1579: 状態・履歴・テスト投稿・接続可否の判定は SNS を指定して Threads でも使う ----
+
+    @Test
+    void view_SNSを指定するとその状態と履歴だけを返す() {
+        connectableSite();
+        when(siteService.runLetsblogSns(3L, "status", "threads", null))
+                .thenReturn("{\"x\":{\"status\":\"未設定\",\"account_name\":null},"
+                        + "\"threads\":{\"status\":\"接続済み\",\"account_name\":\"th_user\"}}");
+        when(siteService.runLetsblogSns(3L, "log", "threads", null)).thenReturn(
+                "[{\"sns\":\"x\",\"kind\":\"test\",\"at\":\"a\",\"success\":true,\"error\":null},"
+                        + "{\"sns\":\"threads\",\"kind\":\"publish\",\"at\":\"b\",\"success\":false,\"error\":\"期限が切れています\"}]");
+
+        XConnectionView view = service.view(7L, "threads");
+
+        assertEquals(XConnectionView.State.CONNECTED, view.status().state());
+        assertEquals("th_user", view.status().accountName());
+        assertEquals(1, view.log().entries().size());
+        assertEquals("publish", view.log().entries().get(0).kind());
+        assertEquals("期限が切れています", view.log().entries().get(0).error());
+    }
+
+    @Test
+    void test_SNSを指定してテスト投稿する() {
+        connectableSite();
+        when(siteService.runLetsblogSns(3L, "test", "threads", null)).thenReturn("{}");
+
+        assertTrue(service.test(7L, "threads").success());
+    }
+
+    @Test
+    void requireConnectableSiteId_接続できるサイトのIDを返す() {
+        connectableSite();
+
+        assertEquals(3L, service.requireConnectableSiteId(7L));
+    }
+
+    @Test
+    void requireConnectableSiteId_本番サイトが無ければ理由つきで例外() {
+        projectWithProductionSite(null);
+
+        assertTrue(assertThrows(IllegalStateException.class, () -> service.requireConnectableSiteId(7L))
+                .getMessage().contains("本番サイト"));
+    }
 }

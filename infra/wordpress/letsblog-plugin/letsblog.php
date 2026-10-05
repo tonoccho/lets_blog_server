@@ -1033,6 +1033,154 @@ letsblog_sns_register_sender('x', [
     'send' => 'letsblog_x_send',
 ]);
 
+// ---- Threads(issue #1579。長期トークン 1 本だけを持つ。更新に client_secret は要らない) ----
+
+/** 長期トークンは、期限のこの秒数前から更新する(1 日 1 回も使われないサイトでも、期限切れの前に更新できるように)。 */
+const LETSBLOG_THREADS_REFRESH_WINDOW = 7 * 86400;
+/** Threads は、発行から 24 時間未満のトークンを更新できない。 */
+const LETSBLOG_THREADS_MIN_REFRESH_AGE = 86400;
+/** Threads の投稿の上限(文字数)。 */
+const LETSBLOG_THREADS_TEXT_LIMIT = 500;
+
+/** API のベース URL。変えられるのは wp-config.php の定数だけ(e2e でスタブへ向けるため)。アプリから送る設定では変えられない。 */
+function letsblog_threads_api_base(): string
+{
+    return rtrim(defined('LETSBLOG_THREADS_API_BASE_URL') ? (string) LETSBLOG_THREADS_API_BASE_URL : 'https://graph.threads.net', '/');
+}
+
+/** 失敗の理由として履歴に残す短い説明。秘密は含まない(応答の本文の error.message だけを使う)。 */
+function letsblog_threads_describe_failure(string $what, $response): string
+{
+    if (is_wp_error($response)) {
+        return "Threads に接続できません({$what})";
+    }
+    $code = (int) wp_remote_retrieve_response_code($response);
+    $body = json_decode((string) wp_remote_retrieve_body($response), true);
+    $message = is_array($body) && is_array($body['error'] ?? null) && is_string($body['error']['message'] ?? null)
+        ? ': ' . mb_substr($body['error']['message'], 0, 200)
+        : '';
+    return "Threads の{$what}に失敗しました(HTTP {$code}{$message})";
+}
+
+/**
+ * 長期トークンを更新する(GET /refresh_access_token)。更新できるのは、期限前で、発行から 24 時間以上たったものだけ。
+ * 呼び出し側(letsblog_threads_send)がその条件を先に確かめ、満たさなければここへ来ない。
+ *
+ * @return array{ok: bool, error: ?string, cred: array, needs_reconnect: bool}
+ */
+function letsblog_threads_refresh(array $cred, int $now): array
+{
+    $response = wp_remote_request(
+        letsblog_threads_api_base() . '/refresh_access_token?' . http_build_query(['grant_type' => 'th_refresh_token', 'access_token' => $cred['access_token']]),
+        ['method' => 'GET', 'timeout' => 15]
+    );
+    $code = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+    $body = is_wp_error($response) ? null : json_decode((string) wp_remote_retrieve_body($response), true);
+    if ($code !== 200 || !is_array($body) || !is_string($body['access_token'] ?? null) || $body['access_token'] === '') {
+        return [
+            'ok' => false,
+            'error' => letsblog_threads_describe_failure('トークン更新', $response),
+            'cred' => $cred,
+            'needs_reconnect' => $code === 400 || $code === 401,
+        ];
+    }
+    $cred['access_token'] = $body['access_token'];
+    $cred['issued_at'] = $now;
+    $cred['expires_at'] = $now + (int) ($body['expires_in'] ?? 5184000);
+    return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
+}
+
+/** 告知文を Threads の上限に収める。超えるときは、最後の行(パーマリンク)を残して手前を「…」で切り詰める。 */
+function letsblog_threads_fit_text(string $text): string
+{
+    if (mb_strlen($text) <= LETSBLOG_THREADS_TEXT_LIMIT) {
+        return $text;
+    }
+    $break = mb_strrpos($text, "\n");
+    $tail = $break === false ? '' : mb_substr($text, $break);
+    $head = $break === false ? $text : mb_substr($text, 0, $break);
+    $room = LETSBLOG_THREADS_TEXT_LIMIT - mb_strlen($tail) - 1;
+    if ($break === false || $room < 1) {
+        return mb_substr($text, 0, LETSBLOG_THREADS_TEXT_LIMIT);
+    }
+    return mb_substr($head, 0, $room) . '…' . $tail;
+}
+
+/** @return array{ok: bool, error: ?string, cred: array, needs_reconnect: bool} */
+function letsblog_threads_publish(array $cred, string $text): array
+{
+    $headers = ['Authorization' => 'Bearer ' . $cred['access_token'], 'Content-Type' => 'application/x-www-form-urlencoded'];
+    $userBase = letsblog_threads_api_base() . '/v1.0/' . rawurlencode((string) $cred['user_id']);
+    $fail = function (string $what, $response) use ($cred): array {
+        $code = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+        return ['ok' => false, 'error' => letsblog_threads_describe_failure($what, $response), 'cred' => $cred, 'needs_reconnect' => $code === 401];
+    };
+    $created = wp_remote_request($userBase . '/threads', [
+        'method' => 'POST',
+        'timeout' => 15,
+        'headers' => $headers,
+        'body' => http_build_query(['media_type' => 'TEXT', 'text' => letsblog_threads_fit_text($text)]),
+    ]);
+    $createdBody = is_wp_error($created) ? null : json_decode((string) wp_remote_retrieve_body($created), true);
+    if (is_wp_error($created) || (int) wp_remote_retrieve_response_code($created) !== 200
+        || !is_array($createdBody) || !is_string($createdBody['id'] ?? null) || $createdBody['id'] === '') {
+        return $fail('投稿の作成', $created);
+    }
+    $published = wp_remote_request($userBase . '/threads_publish', [
+        'method' => 'POST',
+        'timeout' => 15,
+        'headers' => $headers,
+        'body' => http_build_query(['creation_id' => $createdBody['id']]),
+    ]);
+    if (is_wp_error($published) || (int) wp_remote_retrieve_response_code($published) !== 200) {
+        return $fail('投稿の公開', $published);
+    }
+    return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
+}
+
+/**
+ * Threads へ投稿する。トークンの期限が近い(または切れている)ときは、先に延長する。
+ * 延長できるのは「期限前」かつ「発行から 24 時間以上」のものだけ。満たさなければ投稿せず、理由を返す(履歴に残る)。
+ */
+function letsblog_threads_send(array $cred, string $text, int $now): array
+{
+    $expiresAt = (int) ($cred['expires_at'] ?? 0);
+    if ($expiresAt <= $now) {
+        return [
+            'ok' => false,
+            'error' => 'Threads のトークンの期限が切れています(更新できるのは期限前だけです。Threads を再接続してください)',
+            'cred' => $cred,
+            'needs_reconnect' => true,
+        ];
+    }
+    if ($expiresAt - $now <= LETSBLOG_THREADS_REFRESH_WINDOW) {
+        if ($now - (int) ($cred['issued_at'] ?? 0) < LETSBLOG_THREADS_MIN_REFRESH_AGE) {
+            return [
+                'ok' => false,
+                'error' => 'Threads のトークンを更新できません(更新できるのは発行から24時間以上たったものだけです)',
+                'cred' => $cred,
+                'needs_reconnect' => false,
+            ];
+        }
+        $refresh = letsblog_threads_refresh($cred, $now);
+        $cred = $refresh['cred'];
+        if (!$refresh['ok']) {
+            return $refresh;
+        }
+    }
+    $result = letsblog_threads_publish($cred, $text);
+    $result['cred'] = $cred;
+    return $result;
+}
+
+letsblog_sns_register_sender('threads', [
+    'secret_fields' => ['access_token'],
+    'required' => ['access_token', 'user_id', 'expires_at'],
+    'optional' => ['issued_at'],
+    'int_fields' => ['expires_at', 'issued_at'],
+    'send' => 'letsblog_threads_send',
+]);
+
 // ---- 公開時の告知(issue #1575)。公開の検知は WordPress 側で行い、Let's Blog が止まっていても告知できる ----
 
 /** CLI(wp-cli)で実行中か。cron のループバックが期待できないので、CLI ではその場で送る。 */

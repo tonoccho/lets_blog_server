@@ -80,6 +80,13 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/sns/x/callback"),
                 new Endpoint("POST", "/api/projects/1/sns/x/test"),
 
+                // -- ProjectSnsThreadsController(issue #1579) --
+                new Endpoint("GET", "/api/projects/1/sns/threads"),
+                new Endpoint("POST", "/api/projects/1/sns/threads/authorize"),
+                new Endpoint("POST", "/api/projects/1/sns/threads/callback"),
+                new Endpoint("POST", "/api/projects/1/sns/threads/test"),
+                new Endpoint("DELETE", "/api/projects/1/sns/threads"),
+
                 // -- ProjectSnsPvController(issue #1578) --
                 new Endpoint("GET", "/api/projects/1/sns/pv"),
                 new Endpoint("POST", "/api/projects/1/sns/pv/rules"),
