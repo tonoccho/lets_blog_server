@@ -128,6 +128,9 @@ The uniqueness check does not catch a transition that skips stages (#1031).
 | Rollback | `Ready → Backlog` | `work-next` Step 4 |
 | Rollback | `Review → Backlog` | `review-issue` REQUIREMENT CLARIFICATION |
 | Rollback | `In Progress → Ready` | re-assessment after two rollbacks in one cycle (see **Implementation runs on Sonnet**) |
+| Marker-gated | `Inbox → Done` | `close-epic`, only while its read-only stage marker is set (#1625) |
+
+A transition limited to one read-only stage's marker is not in `LEGAL_STATUS_TRANSITIONS`; `guard.py` keeps it in a separate constant, `MARKER_GATED_STATUS_TRANSITIONS` (`{("Inbox", "Done"): "close-epic"}`), and `check_status_label_integrity(command, payload)` allows it only when `read_stage(payload)` equals the named skill. The marker lives until the user's next plain message (unchanged).
 
 Every skill that changes a `status::` label was checked against this table. **Default is
 reject, not warn**: an unlisted transition is refused by `guard.py`. A new transition goes here and
@@ -248,7 +251,7 @@ Resulting assignments:
 
 - `haiku` — `git-workflow`, `triage-backlog`, `ready-issue`
 - `sonnet` — `merge-request`, `work-next`, `review-issue`, `qa-issue`, `complete-issue`,
-  `implement-issue`; the `reviewer`, `qa` and `implementer` agents
+  `implement-issue`, `close-epic`; the `reviewer`, `qa` and `implementer` agents
 - `opus` — `plan-issue`, `discover-issues`, `report-bug`
 
 Two deliberate exceptions:
@@ -304,10 +307,10 @@ Otherwise, do not halt the workflow short of a merged Merge Request and a `Done`
 
 # Read-Only Stages
 
-This is the single definition of "read-only"; `discover-issues`, `triage-backlog`, `ready-issue`, `report-bug`
+This is the single definition of "read-only"; `discover-issues`, `triage-backlog`, `ready-issue`, `report-bug`, `close-epic`
 and every agent they spawn defer to it. A second definition in `.claude/` is a bug to fix.
 
-These four stages never change the repository. They read the codebase and the Issue tracker,
+These stages never change the repository. They read the codebase and the Issue tracker,
 form a judgment, and record that judgment in GitLab. That is their entire output.
 
 ## What must not change
@@ -339,6 +342,7 @@ Only GitLab Issue state, and only the mutations listed for that stage:
 | `triage-backlog` | Move `Inbox → Backlog`; set `Priority` on each Issue it moves |
 | `ready-issue` | Move `Backlog → Ready`; post the Readiness Report as a comment; rewrite Epic shorthand in the Issue body to `#<number>` (required by **Dependency Resolution** → Recording dependencies) |
 | `report-bug` | Create exactly one Issue directly in `status::Backlog` with `user-request`, `bug`, `priority::P0`, `hotfix` — see **How to change status** for the Inbox-skip exception this row grants |
+| `close-epic` | Move an `epic` Issue `Inbox → Done` (one call: `remove_labels=status::Inbox`, `add_labels=status::Done`) and close it, only for Epics the user named in their own `/close-epic close #<n>` slash command and that re-read as CLOSABLE just before; see **Legal Transitions** for the marker-gated transition |
 
 Anything else is out of bounds — including closing an Issue, which stays the user's call.
 

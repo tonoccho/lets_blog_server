@@ -4353,5 +4353,108 @@ class AgentHookRegistration(unittest.TestCase):
         self.assertTrue(any("guard.py" in c and c.rstrip().endswith("agent") for c in commands))
 
 
+class CloseEpicMarkerGatedTransition(unittest.TestCase):
+    """#1625: `Inbox -> Done` は `close-epic` のマーカーがあるときだけ許される。
+
+    無条件の `LEGAL_STATUS_TRANSITIONS` には足さず、マーカーで限定する遷移は
+    `MARKER_GATED_STATUS_TRANSITIONS` が別に持つ。
+    """
+
+    SESSION = "close-epic-test-session"
+    PUT = "glab api projects/:id/issues/1300 --method PUT "
+    INBOX_TO_DONE = (
+        PUT + '-f "remove_labels=status::Inbox" -f "add_labels=status::Done"'
+    )
+
+    @staticmethod
+    def _guard_module():
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("guard_under_test", HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _bash(self, command, root):
+        return _run_in_root("bash", {"command": command}, root, self.SESSION)
+
+    def _prompt(self, text, root):
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook(
+                "prompt", {"prompt": text, "session_id": self.SESSION, "cwd": root}
+            )
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    def test_close_epic_is_a_read_only_skill(self):
+        self.assertIn("close-epic", self._guard_module().READ_ONLY_SKILLS)
+
+    def test_marker_gated_constant_maps_inbox_done_to_close_epic(self):
+        self.assertEqual(
+            self._guard_module().MARKER_GATED_STATUS_TRANSITIONS,
+            {("Inbox", "Done"): "close-epic"},
+        )
+
+    def test_inbox_to_done_is_not_in_unconditional_transitions(self):
+        self.assertNotIn(
+            ("Inbox", "Done"), self._guard_module().LEGAL_STATUS_TRANSITIONS
+        )
+
+    def test_denied_without_marker(self):
+        reason = run_hook("bash", bash_payload(self.INBOX_TO_DONE))
+        self.assertIsNotNone(reason, "マーカー無しで Inbox→Done が許可された")
+
+    def test_denied_with_other_stage_marker(self):
+        for skill in ("report-bug", "ready-issue", "triage-backlog", "discover-issues"):
+            with self.subTest(skill=skill):
+                root, _ = _stage_root(skill, self.SESSION)
+                self.assertIsNotNone(self._bash(self.INBOX_TO_DONE, root))
+
+    def test_allowed_with_close_epic_marker(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        self.assertIsNone(self._bash(self.INBOX_TO_DONE, root))
+
+    def test_allowed_with_close_epic_marker_when_wrapped(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        self.assertIsNone(self._bash("timeout 60 " + self.INBOX_TO_DONE, root))
+
+    def test_denied_after_plain_prompt_clears_marker(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        self._prompt("はい、閉じてください", root)
+        self.assertIsNotNone(self._bash(self.INBOX_TO_DONE, root))
+
+    def test_slash_command_with_arguments_sets_the_marker(self):
+        root = tempfile.mkdtemp()
+        self._prompt("/close-epic close #1300", root)
+        self.assertIsNone(self._bash(self.INBOX_TO_DONE, root))
+
+    def test_marker_does_not_allow_one_sided_changes(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        self.assertIsNotNone(self._bash(self.PUT + "-f add_labels=status::Done", root))
+        self.assertIsNotNone(
+            self._bash(self.PUT + "-f remove_labels=status::Inbox", root)
+        )
+        self.assertIsNotNone(
+            self._bash(self.PUT + "-f labels=status::Done", root)
+        )
+
+    def test_marker_does_not_allow_other_skipped_transitions(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        for frm, to in (("Ready", "Done"), ("Inbox", "In Progress"), ("Backlog", "Done")):
+            with self.subTest(frm=frm, to=to):
+                cmd = self.PUT + '-f "remove_labels=status::%s" -f "add_labels=status::%s"' % (frm, to)
+                self.assertIsNotNone(self._bash(cmd, root))
+
+    def test_existing_transitions_unchanged_with_close_epic_marker(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        for frm, to in StatusTransitionValidity.FORWARD_EDGES + StatusTransitionValidity.ROLLBACK_EDGES:
+            with self.subTest(frm=frm, to=to):
+                self.assertIsNone(
+                    self._bash(StatusTransitionValidity.transition(frm, to), root)
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

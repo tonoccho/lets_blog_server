@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import classify, is_production, is_test, strip_worktree  # noqa: E402
 from silencers import SILENCERS  # noqa: E402
 
-READ_ONLY_SKILLS = {"discover-issues", "triage-backlog", "ready-issue", "report-bug"}
+READ_ONLY_SKILLS = {"discover-issues", "triage-backlog", "ready-issue", "report-bug", "close-epic"}
 
 # 読み取り専用ステージ中に禁止するコマンド。**コマンド名で判定する**(#986)。
 # 旧実装は生の文字列に `\b(rm|mv|cp|tee|patch|truncate)\b` をかけていたため、
@@ -1404,7 +1404,14 @@ LEGAL_STATUS_TRANSITIONS = {
 }
 
 
-def check_status_label_integrity(command):
+# read-only stage のマーカーが指定のスキルのときだけ許す遷移(#1625)。無条件の
+# LEGAL_STATUS_TRANSITIONS には足さない(CLAUDE.md → Legal Transitions)。
+MARKER_GATED_STATUS_TRANSITIONS = {
+    ("Inbox", "Done"): "close-epic",
+}
+
+
+def check_status_label_integrity(command, payload=None):
     """CLAUDE.md → How to change status: ステータスは常にちょうど1つ(#1023)。
 
     GitHub Projects の Status は単一選択フィールドで、2つ持つことは構造的に不可能
@@ -1460,6 +1467,9 @@ def check_status_label_integrity(command):
         # 「両方が status:: を含む(実際の遷移)」のどちらか。後者だけを遷移表で検証する。
         old_status = _status_name(removed)
         new_status = _status_name(added)
+        gate = MARKER_GATED_STATUS_TRANSITIONS.get((old_status, new_status))
+        if gate and payload is not None and read_stage(payload) == gate:
+            continue
         if old_status and new_status and (old_status, new_status) not in LEGAL_STATUS_TRANSITIONS:
             emit_deny(
                 "`status::%s → status::%s` は正当な遷移として定義されていません"
@@ -1854,7 +1864,7 @@ def cmd_bash(payload):
     check_read_only(payload, command)
     check_unknown_wrapper_flag(command)
     check_merge_flags(command)
-    check_status_label_integrity(command)
+    check_status_label_integrity(command, payload)
     check_hotfix_label_immutability(command)
     check_hotfix_creation(payload, command)
     check_issue_creation_requires_status(command)
