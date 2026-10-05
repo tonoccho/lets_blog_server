@@ -741,6 +741,26 @@ DEFAULT_STEPS = [
         "touches_stack": True,
     },
     {
+        # letsblog プラグインの Facebook ページ送信処理(ページのフィードへの投稿・理由の履歴)のテスト(issue #1580)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "letsblog-facebook-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-letsblog-facebook.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         "name": "backend-expose-mysql",
         "argv": [
             "docker",

@@ -1181,6 +1181,95 @@ letsblog_sns_register_sender('threads', [
     'send' => 'letsblog_threads_send',
 ]);
 
+// ---- Facebook ページ(issue #1580。ページのトークン 1 本だけを持つ。個人アカウントには投稿しない) ----
+
+/** API のベース URL。変えられるのは wp-config.php の定数だけ(e2e でスタブへ向けるため)。アプリから送る設定では変えられない。 */
+function letsblog_facebook_api_base(): string
+{
+    return rtrim(defined('LETSBLOG_FACEBOOK_API_BASE_URL') ? (string) LETSBLOG_FACEBOOK_API_BASE_URL : 'https://graph.facebook.com/v21.0', '/');
+}
+
+/** Graph API の応答の本文から error.code を取り出す(取れなければ null)。 */
+function letsblog_facebook_error_code($response): ?int
+{
+    $body = is_wp_error($response) ? null : json_decode((string) wp_remote_retrieve_body($response), true);
+    return is_array($body) && is_array($body['error'] ?? null) && is_int($body['error']['code'] ?? null) ? $body['error']['code'] : null;
+}
+
+/** 失敗の理由として履歴に残す短い説明。秘密は含まない(応答の本文の error.message だけを使う)。 */
+function letsblog_facebook_describe_failure(string $what, $response): string
+{
+    if (is_wp_error($response)) {
+        return "Facebook に接続できません({$what})";
+    }
+    $code = (int) wp_remote_retrieve_response_code($response);
+    $body = json_decode((string) wp_remote_retrieve_body($response), true);
+    $message = is_array($body) && is_array($body['error'] ?? null) && is_string($body['error']['message'] ?? null)
+        ? ': ' . mb_substr($body['error']['message'], 0, 200)
+        : '';
+    return "Facebook の{$what}に失敗しました(HTTP {$code}{$message})";
+}
+
+/**
+ * 告知文を Facebook のフィードの message と link に分ける。最後の行が URL なら link に、残りを message にする
+ * (URL が無ければ message だけ。URL だけなら link だけ)。
+ *
+ * @return array{message: ?string, link: ?string}
+ */
+function letsblog_facebook_split_text(string $text): array
+{
+    $text = trim($text);
+    $break = mb_strrpos($text, "\n");
+    $last = $break === false ? $text : trim(mb_substr($text, $break + 1));
+    if (preg_match('#^https?://\S+$#', $last) !== 1) {
+        return ['message' => $text === '' ? null : $text, 'link' => null];
+    }
+    $message = $break === false ? '' : trim(mb_substr($text, 0, $break));
+    return ['message' => $message === '' ? null : $message, 'link' => $last];
+}
+
+/**
+ * ページのフィードへ投稿する(POST /{page_id}/feed、ページのトークン)。投稿先は必ず選んだページで、個人のフィードではない。
+ * ページが選ばれていなければ送らず、理由を返す(履歴に残る)。トークンの失効(HTTP 401 / error.code 190)は要再接続にする。
+ */
+function letsblog_facebook_send(array $cred, string $text, int $now): array
+{
+    $pageId = (string) ($cred['page_id'] ?? '');
+    if ($pageId === '') {
+        return [
+            'ok' => false,
+            'error' => 'Facebook の投稿先のページが選ばれていません(Facebook を再接続してページを選んでください)',
+            'cred' => $cred,
+            'needs_reconnect' => false,
+        ];
+    }
+    $parts = letsblog_facebook_split_text($text);
+    $response = wp_remote_request(letsblog_facebook_api_base() . '/' . rawurlencode($pageId) . '/feed', [
+        'method' => 'POST',
+        'timeout' => 15,
+        'headers' => ['Authorization' => 'Bearer ' . $cred['access_token'], 'Content-Type' => 'application/x-www-form-urlencoded'],
+        'body' => http_build_query(array_filter($parts, fn($v) => $v !== null)),
+    ]);
+    $body = is_wp_error($response) ? null : json_decode((string) wp_remote_retrieve_body($response), true);
+    if (is_wp_error($response) || (int) wp_remote_retrieve_response_code($response) !== 200
+        || !is_array($body) || !is_string($body['id'] ?? null) || $body['id'] === '') {
+        $status = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+        return [
+            'ok' => false,
+            'error' => letsblog_facebook_describe_failure('投稿', $response),
+            'cred' => $cred,
+            'needs_reconnect' => $status === 401 || letsblog_facebook_error_code($response) === 190,
+        ];
+    }
+    return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
+}
+
+letsblog_sns_register_sender('facebook', [
+    'secret_fields' => ['access_token'],
+    'required' => ['access_token', 'page_id'],
+    'send' => 'letsblog_facebook_send',
+]);
+
 // ---- 公開時の告知(issue #1575)。公開の検知は WordPress 側で行い、Let's Blog が止まっていても告知できる ----
 
 /** CLI(wp-cli)で実行中か。cron のループバックが期待できないので、CLI ではその場で送る。 */

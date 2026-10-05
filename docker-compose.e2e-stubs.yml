@@ -157,6 +157,16 @@ services:
     ports:
       - "127.0.0.1:18090:8080"
 
+  # Facebook(Graph API)(issue #1580)。letsblog プラグインの Facebook ページ送信処理(ページのフィードへの投稿)と、
+  # project-service の Facebook 接続(認可画面・コード交換・長期トークン化・管理しているページの一覧)の向き先。
+  # プラグインは wp-config.php の定数 LETSBLOG_FACEBOOK_API_BASE_URL(http://facebook-stub:8080)でここへ向ける。
+  facebook-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-facebook-stub
+    command: ["node", "/app/facebook/server.js"]
+    ports:
+      - "127.0.0.1:18091:8080"
+
   # ComfyUI(issue #1106)。実機は NVIDIA ランタイムが要り、1枚あたり数十秒かかるため、
   # batch size 16 の枚数検証も「リピートごとに seed が変わる」ことの確認も実行時間に乗らない。
   # スタブが引き受けるのは枚数と seed の決定的な検証だけで、画像の見た目は再現しない。
@@ -287,10 +297,15 @@ services:
       # Threads の接続(#1579)も同じ方式。認可画面はホストから見える 127.0.0.1:18090 の threads-stub へ向ける。
       THREADS_API_BASE_URL: http://threads-stub:8080
       THREADS_AUTHORIZE_URL: http://127.0.0.1:18090/oauth/authorize
+      # Facebook の接続(#1580)も同じ方式。認可画面はホストから見える 127.0.0.1:18091 の facebook-stub へ向ける。
+      FACEBOOK_API_BASE_URL: http://facebook-stub:8080
+      FACEBOOK_AUTHORIZE_URL: http://127.0.0.1:18091/dialog/oauth
     depends_on:
       x-stub:
         condition: service_healthy
       threads-stub:
+        condition: service_healthy
+      facebook-stub:
         condition: service_healthy
 
   # publishing-service も GitHub の Pull Request / contents / comments API を使う(#1333)。

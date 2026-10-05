@@ -60,6 +60,13 @@ import {
   completeProjectThreadsAuthorization,
   testProjectThreadsPost,
   disconnectProjectThreads,
+  getProjectFacebookConnection,
+  startProjectFacebookAuthorization,
+  completeProjectFacebookAuthorization,
+  getProjectFacebookPages,
+  selectProjectFacebookPage,
+  testProjectFacebookPost,
+  disconnectProjectFacebook,
   getProjectPvRules,
   addProjectPvRule,
   deleteProjectPvRule,
@@ -938,6 +945,93 @@ describe('プロジェクトの Threads 接続(issue #1579)', () => {
 
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/threads')
+    expect(init.method).toBe('DELETE')
+  })
+})
+
+describe('プロジェクトの Facebook ページ接続(issue #1580)', () => {
+  it('getProjectFacebookConnectionは接続状態を取得する', async () => {
+    const view = { connectable: true, reason: null, siteName: '本番', status: null, log: null }
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectFacebookConnection(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook')
+    expect(url).not.toContain('/sns/x')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('startProjectFacebookAuthorizationはアプリの情報とリダイレクト先をPOSTし認可URLを受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ authorizeUrl: 'https://facebook.example/dialog/oauth' }))
+
+    const result = await startProjectFacebookAuthorization(7, {
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      redirectUri: 'https://localhost/connect/facebook/callback',
+    })
+
+    expect(result).toEqual({ authorizeUrl: 'https://facebook.example/dialog/oauth' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook/authorize')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      redirectUri: 'https://localhost/connect/facebook/callback',
+    })
+  })
+
+  it('completeProjectFacebookAuthorizationはstateとコードをPOSTし選べるページの一覧を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, pages: [{ id: '100', name: 'ページA' }] }))
+
+    const result = await completeProjectFacebookAuthorization(7, { state: '7.abc', code: 'the-code' })
+
+    expect(result).toEqual({ projectId: 7, pages: [{ id: '100', name: 'ページA' }] })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook/callback')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ state: '7.abc', code: 'the-code' })
+  })
+
+  it('getProjectFacebookPagesはstateを付けて選べるページの一覧を取得する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, pages: [{ id: '100', name: 'ページA' }] }))
+
+    await expect(getProjectFacebookPages(7, '7.a b')).resolves.toEqual({ projectId: 7, pages: [{ id: '100', name: 'ページA' }] })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook/pages?state=7.a%20b')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('selectProjectFacebookPageはstateとページIDをPOSTしページ名を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, accountName: 'ページA' }))
+
+    await expect(selectProjectFacebookPage(7, { state: '7.abc', pageId: '100' })).resolves.toEqual({ projectId: 7, accountName: 'ページA' })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook/page')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ state: '7.abc', pageId: '100' })
+  })
+
+  it('testProjectFacebookPostはテスト投稿をPOSTし結果を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, error: null }))
+
+    await expect(testProjectFacebookPost(7)).resolves.toEqual({ success: true, error: null })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook/test')
+    expect(init.method).toBe('POST')
+  })
+
+  it('disconnectProjectFacebookはDELETEで切断する', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await disconnectProjectFacebook(7)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/facebook')
     expect(init.method).toBe('DELETE')
   })
 })

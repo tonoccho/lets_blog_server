@@ -1284,6 +1284,25 @@ project-service所有(issue #1579)。プロジェクト設定画面の「Threads
 | POST /api/projects/{projectId}/sns/threads/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
 | DELETE /api/projects/{projectId}/sns/threads | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 切断。本番サイトのプラグインから Threads の設定を消す |
 
+## ProjectSnsFacebookController (7エンドポイント、ベースパス `/api/projects/{projectId}/sns/facebook`)
+
+project-service所有(issue #1580)。プロジェクト設定画面の「Facebook」欄(公式 Facebook ページの接続・切断)向けAPI。
+`ProjectSnsController`(X)と同じ方式で、OAuth のトークン(ユーザー・ページ)は本番サイトの letsblog プラグインへ送るだけで、
+アプリは保存せず、どの応答にも載せない。個人アカウントには投稿しないため、認可のあとに投稿先のページを選ぶ
+(`/pages` で選べるページの ID と名前だけを返し、`/page` で選んだページのトークンだけを本番サイトへ送る)。
+ページのトークンは選ぶまでの間だけメモリに持つ(`FacebookPageSelectionStore`、期限10分)。コールバック・一覧・選択は、
+認可を始めた本人・同じプロジェクトだけを受け付ける(`SnsFacebookService`)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/sns/facebook | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 接続状態・接続できない理由・告知履歴。本番サイトに届かないときは「取得できない」として返す |
+| POST /api/projects/{projectId}/sns/facebook/authorize | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 認可の開始。Facebook の認可画面の URL を返す |
+| POST /api/projects/{projectId}/sns/facebook/callback | requireAdmin | 401 | 403 | 認可OK | 現状維持 | Next.js 側コールバックからのサーバー間呼び出し。選べるページの一覧(ID と名前)だけを返す |
+| GET /api/projects/{projectId}/sns/facebook/pages | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 認可のあとに選べるページの一覧(state が必要)。トークンは返さない |
+| POST /api/projects/{projectId}/sns/facebook/page | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 投稿先のページを選ぶ。そのページのトークンだけを本番サイトへ送り、ページ名だけを返す |
+| POST /api/projects/{projectId}/sns/facebook/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
+| DELETE /api/projects/{projectId}/sns/facebook | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 切断。本番サイトのプラグインから Facebook の設定を消す |
+
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |

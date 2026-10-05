@@ -432,6 +432,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 | `comfyui-stub` | ComfyUI(画像生成。**枚数と seed の検証だけ**) | `COMFYUI_BASE_URL`(platform / media) | 18087 |
 | `x-stub` | X API(認可画面・トークン交換/更新・投稿・自分の情報。#1573、#1574) | WordPress の wp-config 定数 `LETSBLOG_X_API_BASE_URL`(letsblog プラグイン)、`X_API_BASE_URL` / `X_AUTHORIZE_URL`(project) | 18088 |
 | `threads-stub` | Threads API(認可画面・トークン交換・長期トークン化と更新・投稿(作成→公開)・自分の情報。#1579) | WordPress の wp-config 定数 `LETSBLOG_THREADS_API_BASE_URL`(letsblog プラグイン)、`THREADS_API_BASE_URL` / `THREADS_AUTHORIZE_URL`(project) | 18090 |
+| `facebook-stub` | Facebook(Graph API)(認可画面・コード交換・長期ユーザートークン化・管理しているページの一覧・ページのフィードへの投稿。個人アカウントには投稿できない。#1580) | WordPress の wp-config 定数 `LETSBLOG_FACEBOOK_API_BASE_URL`(letsblog プラグイン)、`FACEBOOK_API_BASE_URL` / `FACEBOOK_AUTHORIZE_URL`(project) | 18091 |
 
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
@@ -989,13 +990,14 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
                                                         ├─→ at-timezone-exclusive ─┤
                                                         ├─→ at-preview-exclusive ──┤
                                                         ├─→ at-threads-exclusive ──┤
+                                                        ├─→ at-facebook-exclusive ─┤
                                                         └─→ at-llm-exclusive ──────┤
                                                               └─→ at-analytics-exclusive ─┘
 ```
 
 `at-main` / `at-timezone-exclusive` / `at-llm-exclusive` は `at-provision` にのみ依存し、互いに
 並行して走る。`at-analytics-exclusive` は `at-llm-exclusive` の完了を待ち(`at-provision` ではない)、
-`at-destructive` は `at-main` と5つの専用レーンすべての完了を待つ
+`at-destructive` は `at-main` と6つの専用レーンすべての完了を待つ
 (`apps/web/playwright.config.ts` の `projects[].dependencies`)。
 
 | 段階 | 中身 | 担当 |
@@ -1010,7 +1012,8 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 | `at-analytics-exclusive` | `@stub-isolation:analytics` のシナリオ。`ga-stub` / `adsense-stub` の共有状態に触れるため `workers: 1` の専用レーンに集約。詳細は [§9 エラー注入](#エラー注入) | #1372 |
 | `at-preview-exclusive` | `@site-isolation:preview` のシナリオ。プレビュー検証用の共有サイト(`at65previewprobe`)を別プロジェクトへ紐づけるため、別ファイルの背景と並列だと紐付けが409で落ちる。`workers: 1` の専用レーンに集約 | #1632 |
 | `at-threads-exclusive` | `@stub-isolation:threads` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`threads-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1579 |
-| `at-destructive` | `@destructive` のシナリオ。`at-main` と5つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
+| `at-facebook-exclusive` | `@stub-isolation:facebook` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`facebook-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1580 |
+| `at-destructive` | `@destructive` のシナリオ。`at-main` と6つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
 
 ### なぜ `@destructive` を別段階にするか(#929)
 

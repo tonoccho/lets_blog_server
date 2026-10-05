@@ -82,6 +82,12 @@ const PROBES: Record<StubName, { path: string; method: string; body?: unknown; h
     method: 'GET',
     headers: { Authorization: 'Bearer e2e-threads-long' },
   },
+  // Facebook(Graph API)(#1580)。トークンは固定値で状態を持たないので、同じ呼び出しは常に同じ応答になる。
+  facebook: {
+    path: '/me/accounts?fields=id,name,access_token',
+    method: 'GET',
+    headers: { Authorization: 'Bearer e2e-facebook-user-long' },
+  },
 };
 
 async function callProbe(

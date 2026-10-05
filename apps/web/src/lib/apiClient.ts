@@ -1876,6 +1876,72 @@ export function disconnectProjectThreads(projectId: number): Promise<void> {
   return apiFetch<void>(`/api/projects/${projectId}/sns/threads`, { method: 'DELETE' });
 }
 
+/**
+ * プロジェクト設定画面の Facebook ページ接続(issue #1580)。応答の形は X と同じ(トークンもアプリの秘密も含まない)。
+ * 個人アカウントには投稿しないので、認可のあとに投稿先のページを選ぶ(pages / page)。
+ */
+export function getProjectFacebookConnection(projectId: number): Promise<XConnectionView> {
+  return apiFetch<XConnectionView>(`/api/projects/${projectId}/sns/facebook`);
+}
+
+/** アプリの情報は認可の間だけバックエンドのメモリに置かれる(保存されない)。 */
+export function startProjectFacebookAuthorization(
+  projectId: number,
+  input: { clientId: string; clientSecret: string; redirectUri: string }
+): Promise<{ authorizeUrl: string }> {
+  return apiFetch<{ authorizeUrl: string }>(`/api/projects/${projectId}/sns/facebook/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export interface FacebookPagesView {
+  projectId: number;
+  pages: { id: string; name: string }[];
+}
+
+/** 認可から戻ったときに、選べるページの一覧(ID と名前だけ)を受け取る。 */
+export function completeProjectFacebookAuthorization(
+  projectId: number,
+  input: { state: string; code: string }
+): Promise<FacebookPagesView> {
+  return apiFetch<FacebookPagesView>(`/api/projects/${projectId}/sns/facebook/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function getProjectFacebookPages(projectId: number, state: string): Promise<FacebookPagesView> {
+  return apiFetch<FacebookPagesView>(
+    `/api/projects/${projectId}/sns/facebook/pages?state=${encodeURIComponent(state)}`
+  );
+}
+
+/** 投稿先のページを選ぶ。そのページのトークンだけが本番サイトへ送られる。 */
+export function selectProjectFacebookPage(
+  projectId: number,
+  input: { state: string; pageId: string }
+): Promise<{ projectId: number; accountName: string }> {
+  return apiFetch<{ projectId: number; accountName: string }>(`/api/projects/${projectId}/sns/facebook/page`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function testProjectFacebookPost(projectId: number): Promise<{ success: boolean; error: string | null }> {
+  return apiFetch<{ success: boolean; error: string | null }>(`/api/projects/${projectId}/sns/facebook/test`, {
+    method: 'POST',
+  });
+}
+
+/** 切断。本番サイトのプラグインから Facebook の設定を消す。 */
+export function disconnectProjectFacebook(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/sns/facebook`, { method: 'DELETE' });
+}
+
 export interface GoogleAnalyticsDailyDataPoint {
   date: string;
   sessions: number;

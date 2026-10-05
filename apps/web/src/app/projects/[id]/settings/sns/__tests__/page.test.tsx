@@ -1,6 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import ProjectSnsSettingsPage from "../page";
-import { getProject, getProjectPvRules, getProjectThreadsConnection, getProjectXConnection } from "@/lib/apiClient";
+import {
+  getProject,
+  getProjectFacebookConnection,
+  getProjectFacebookPages,
+  getProjectPvRules,
+  getProjectThreadsConnection,
+  getProjectXConnection,
+} from "@/lib/apiClient";
 
 /**
  * issue #1574: SNS 告知の設定ページ(サーバーコンポーネント)。接続状態の取得に失敗しても画面全体は落とさず、
@@ -10,6 +17,8 @@ jest.mock("@/lib/apiClient", () => ({
   getProject: jest.fn(),
   getProjectXConnection: jest.fn(),
   getProjectThreadsConnection: jest.fn(),
+  getProjectFacebookConnection: jest.fn(),
+  getProjectFacebookPages: jest.fn(),
   getProjectPvRules: jest.fn(),
 }));
 jest.mock("@/lib/session", () => ({ requireAdminSession: jest.fn() }));
@@ -35,6 +44,14 @@ jest.mock("../../../ProjectSnsThreadsSection", () => ({
   },
 }));
 
+const facebookSectionProps = jest.fn();
+jest.mock("../../../ProjectSnsFacebookSection", () => ({
+  ProjectSnsFacebookSection: (props: unknown) => {
+    facebookSectionProps(props);
+    return <div data-testid="facebook-section" />;
+  },
+}));
+
 const pvSectionProps = jest.fn();
 jest.mock("../../../ProjectPvRulesSection", () => ({
   ProjectPvRulesSection: (props: unknown) => {
@@ -52,7 +69,7 @@ const pvView = {
 
 const view = { connectable: true, reason: null, siteName: "本番", status: null, log: null };
 
-async function renderPage(searchParams: { connected?: string; error?: string; sns?: string } = {}) {
+async function renderPage(searchParams: { connected?: string; error?: string; sns?: string; facebookState?: string } = {}) {
   render(
     await ProjectSnsSettingsPage({
       params: Promise.resolve({ id: "5" }),
@@ -70,6 +87,7 @@ describe("ProjectSnsSettingsPage", () => {
     (getProject as jest.Mock).mockResolvedValue({ id: 5, name: "テストプロジェクト" });
     (getProjectXConnection as jest.Mock).mockResolvedValue(view);
     (getProjectThreadsConnection as jest.Mock).mockResolvedValue(view);
+    (getProjectFacebookConnection as jest.Mock).mockResolvedValue(view);
     (getProjectPvRules as jest.Mock).mockResolvedValue(pvView);
   });
 
@@ -174,6 +192,87 @@ describe("ProjectSnsSettingsPage", () => {
 
       expect(screen.getByTestId("sns-section")).toBeInTheDocument();
       expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
+    });
+  });
+
+  describe("Facebook ページの欄(issue #1580)", () => {
+    it("取得した Facebook の接続状態と Facebook 用のコールバックURLを Facebook 欄へ渡す", async () => {
+      await renderPage();
+
+      expect(screen.getByTestId("facebook-section")).toBeInTheDocument();
+      expect(facebookSectionProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 5,
+          view,
+          callbackUrl: "https://localhost/connect/facebook/callback",
+          connectedBanner: false,
+          errorBanner: undefined,
+          pageSelection: null,
+        })
+      );
+      expect(getProjectFacebookPages).not.toHaveBeenCalled();
+    });
+
+    it("Facebook の接続完了(connected=facebook)は Facebook 欄にだけバナーを出す", async () => {
+      await renderPage({ connected: "facebook" });
+
+      expect(facebookSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: true }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+    });
+
+    it("Facebook の失敗(sns=facebook)は Facebook 欄にだけ理由を出す", async () => {
+      await renderPage({ error: "access_denied", sns: "facebook" });
+
+      expect(facebookSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "access_denied" }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("X の失敗は Facebook 欄には出さない", async () => {
+      await renderPage({ error: "invalid_state" });
+
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "invalid_state" }));
+      expect(facebookSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("認可から戻った(facebookState)ときは、選べるページを取得して Facebook 欄へ渡す", async () => {
+      const pages = { projectId: 5, pages: [{ id: "100", name: "ページA" }] };
+      (getProjectFacebookPages as jest.Mock).mockResolvedValue(pages);
+
+      await renderPage({ facebookState: "5.abc" });
+
+      expect(getProjectFacebookPages).toHaveBeenCalledWith(5, "5.abc");
+      expect(facebookSectionProps).toHaveBeenCalledWith(
+        expect.objectContaining({ pageSelection: { state: "5.abc", pages: pages.pages } })
+      );
+    });
+
+    it("選べるページを取得できなければ(期限切れ等)、選択欄は出さず理由を Facebook 欄に出す", async () => {
+      (getProjectFacebookPages as jest.Mock).mockRejectedValue(new Error("認可の有効期限が切れました"));
+
+      await renderPage({ facebookState: "5.abc" });
+
+      expect(facebookSectionProps).toHaveBeenCalledWith(
+        expect.objectContaining({ pageSelection: null, errorBanner: "認可の有効期限が切れました" })
+      );
+    });
+
+    it("Errorでない失敗も文字列にして Facebook 欄に出す", async () => {
+      (getProjectFacebookPages as jest.Mock).mockRejectedValue("boom");
+
+      await renderPage({ facebookState: "5.abc" });
+
+      expect(facebookSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "boom" }));
+    });
+
+    it("Facebook の接続状態を取得できなくても画面は描き、Facebook 欄へはnullを渡す", async () => {
+      (getProjectFacebookConnection as jest.Mock).mockRejectedValue(new Error("502"));
+
+      await renderPage();
+
+      expect(screen.getByTestId("sns-section")).toBeInTheDocument();
+      expect(facebookSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
     });
   });
 });

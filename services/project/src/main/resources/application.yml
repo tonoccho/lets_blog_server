@@ -108,6 +108,10 @@ app:
   # ブラウザを遷移させる認可画面の URL。受け入れテストでは threads-stub へ向ける(docker-compose.e2e-stubs.yml)。
   threads-api-base-url: ${THREADS_API_BASE_URL:https://graph.threads.net}
   threads-authorize-url: ${THREADS_AUTHORIZE_URL:https://threads.net/oauth/authorize}
+  # プロジェクトの公式 Facebook ページの接続(issue #1580、FacebookApiClient)。Graph API のベース URL と、利用者の
+  # ブラウザを遷移させる認可画面の URL。受け入れテストでは facebook-stub へ向ける(docker-compose.e2e-stubs.yml)。
+  facebook-api-base-url: ${FACEBOOK_API_BASE_URL:https://graph.facebook.com/v21.0}
+  facebook-authorize-url: ${FACEBOOK_AUTHORIZE_URL:https://www.facebook.com/v21.0/dialog/oauth}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-serviceの
 # SecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と

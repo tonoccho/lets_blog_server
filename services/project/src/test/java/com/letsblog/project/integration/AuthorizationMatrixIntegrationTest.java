@@ -87,6 +87,15 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/sns/threads/test"),
                 new Endpoint("DELETE", "/api/projects/1/sns/threads"),
 
+                // -- ProjectSnsFacebookController(issue #1580) --
+                new Endpoint("GET", "/api/projects/1/sns/facebook"),
+                new Endpoint("POST", "/api/projects/1/sns/facebook/authorize"),
+                new Endpoint("POST", "/api/projects/1/sns/facebook/callback"),
+                new Endpoint("GET", "/api/projects/1/sns/facebook/pages"),
+                new Endpoint("POST", "/api/projects/1/sns/facebook/page"),
+                new Endpoint("POST", "/api/projects/1/sns/facebook/test"),
+                new Endpoint("DELETE", "/api/projects/1/sns/facebook"),
+
                 // -- ProjectSnsPvController(issue #1578) --
                 new Endpoint("GET", "/api/projects/1/sns/pv"),
                 new Endpoint("POST", "/api/projects/1/sns/pv/rules"),
