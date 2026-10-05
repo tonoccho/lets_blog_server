@@ -3,7 +3,7 @@
 # 1コマンドで進める初回セットアップスクリプト(issue #960)。
 #
 # 使い方:
-#   git clone -b develop ssh://git@server.tonoccho.local:2222/seiji/lets_blog_server.git
+#   git clone -b develop https://github.com/tonoccho/lets_blog_server.git
 #   cd lets_blog_server
 #   ./setup.sh
 #

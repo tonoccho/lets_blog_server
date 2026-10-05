@@ -307,7 +307,7 @@ sudo snap install code --classic
 TLS証明書生成・全サービス起動・healthy確認まで一括で行う)。
 
 ```bash
-git clone -b develop <このリポジトリのURL>
+git clone -b develop https://github.com/tonoccho/lets_blog_server.git
 cd lets_blog_server
 ./setup.sh
 ```

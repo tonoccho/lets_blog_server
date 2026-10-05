@@ -85,9 +85,25 @@ GitHub の squash merge とは結果が違い、`develop` の線形履歴が崩�
 
 決定4（CI 不稼働）は「`.github/` を削除した」理由が「CI が動かないため」であって、GitHub の
 存在自体を否定するものではなかった。移行元の GitHub リポジトリ `tonoccho/lets_blog_server`
-（private）は削除せず、**GitLab → GitHub の一方向 push ミラー**として維持することにした
-（#1256）。
+は削除せず、**GitLab → GitHub の一方向 push ミラー**として維持することにした
+（#1256）。当初は private だったが、第三者が認証なしで clone できるよう、利用者が
+**遅くとも 2026-10-01 に public へ公開した**（#1251 の note 12613: 同日の資格情報なしの API で
+`private: false`）。2026-10-05 に再確認した。
 
+- **公開範囲はコードとコミット履歴のみ（#1251）。** GitHub 側の Issue・Wiki・Projects・
+  Discussions・Pull Request は公開しない。これらは機能を無効化して実現している
+  （`has_issues` / `has_wiki` / `has_projects` / `has_discussions` はすべて false、PR の
+  API は 404）。無効化はデータを削除しないため、移行前の Issue は GitHub 上に保全されている
+  （#1032）。2026-10-05 の再確認で、資格情報なしの API が `visibility: public`、資格情報なしの
+  `git clone` が成功することを確かめた。
+- **公開が先行し、秘密情報スキャンは公開後に実施した。** 2026-10-01 のスキャン（note 12619、
+  gitleaks）で実資格情報2件（Keycloak クライアントシークレット letsblog-services /
+  letsblog-web と E2E アカウントのパスワード）が露出していると判明し、同日ローテーションした
+  （note 12711）。2026-10-05 に全 ref を再スキャンした（note 14803、訂正 note 14806、
+  gitleaks v8.30.1）。検出 216 件はすべて資格情報ではなく、稼働中の値との一致は 0 件。
+  露出した実資格情報はローテーション済みで、現在未解決の検出は 0 件である。
+- **GitLab は引き続き source of truth であり、非公開のままである。** 公開したのは GitHub の
+  ミラーだけで、GitLab の Issue・MR・CI は公開していない。
 - **GitHub はコードとタグの副本にとどまる。** Issue・Merge Request・CI は GitLab に一本化
   したまま変えない。GitHub 側で Issue・PR・Actions を運用することはしない。
 - ミラー対象は `main` / `develop` の2ブランチ（`only_protected_branches: true`）とタグ全件
@@ -150,7 +166,8 @@ GitHub の squash merge とは結果が違い、`develop` の線形履歴が崩�
 
 取得には `gh` の一時的な再認証が要る。**作業後は必ず `gh auth logout` すること** — 認証が
 通った `gh` は、スキルが移行元を誤って読み書きする事故の温床である（#1025）。移行元は
-private のまま現存している。
+現存している（遅くとも 2026-10-01 以降は public で、コードとコミット履歴のみを公開している。
+上記決定7）。
 
 ### 将来 CI を持つ場合に再発明しないこと
 

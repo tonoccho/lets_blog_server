@@ -235,11 +235,19 @@ glab api "projects/:id" | jq '{merge_method, squash_option}'
 
 ## 7. GitHub へのミラー
 
-移行元の GitHub リポジトリ `tonoccho/lets_blog_server`（private、削除していない）を、
+移行元の GitHub リポジトリ `tonoccho/lets_blog_server`（削除していない。遅くとも 2026-10-01 から public で、2026-10-05 に再確認した）を、
 **GitLab → GitHub の一方向 push ミラー**として維持する（#1256）。GitLab がコード・Issue・
 MR の source of truth であることは変わらない。GitHub 側の変更が GitLab へ戻ることはなく、
 GitHub 上での Issue・PR・CI の運用も行わない（[ADR-0010](adr/0010-github-to-gitlab-migration.md)
 決定4・決定7）。
+
+公開範囲はコードとコミット履歴のみである（#1251）。GitHub 側の Issue・Wiki・Projects・
+Discussions・Pull Request は機能を無効化して公開しない（無効化はデータを削除しないので、
+移行前の Issue は保全される。#1032）。公開が先行し、秘密情報スキャンは公開後に実施した。
+露出していた実資格情報2件（Keycloak クライアントシークレットと E2E アカウントのパスワード）は
+2026-10-01 にローテーション済みで、2026-10-05 の再スキャン（gitleaks v8.30.1、#1251 の
+note 14803・14806）の未解決の検出は 0 件である。2026-10-05 に資格情報なしの `git clone` の
+成功も再確認した。GitLab は引き続き source of truth で、非公開のままである。
 
 ### 7.1 前提: `main` を保護ブランチにする
 
