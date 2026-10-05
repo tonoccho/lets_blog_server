@@ -7,9 +7,12 @@ import { fetchLlmModelsAction, selectLlmModelAction } from "./actions";
 export function LlmModelPanel({
   projectId,
   initialData,
+  onSaved,
 }: {
   projectId: number;
   initialData: LlmModelListResponse;
+  /** モデルの保存に成功したとき(進行中の古い再取得結果で作り直さないため、issue #1644)。 */
+  onSaved?: () => void;
 }) {
   const [data, setData] = useState(initialData);
   const [modelName, setModelName] = useState(initialData.selected);
@@ -39,6 +42,7 @@ export function LlmModelPanel({
     if (result.error) {
       setMessage({ type: "error", text: result.error });
     } else {
+      onSaved?.();
       setMessage({ type: "success", text: "保存しました。" });
       await refresh();
     }

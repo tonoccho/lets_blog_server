@@ -317,11 +317,12 @@ public class AiAssistService {
      */
     public String generateForBridge(Long projectId, String prompt, String providerOverride) {
         llmClient.useProject(projectId);
-        String model = projectId != null ? llmModelService.getSelectedModel(projectId) : null;
         AiProvider provider = AiProvider.fromString(providerOverride);
         if (provider == null && projectId != null) {
             provider = llmModelService.getSelectedProvider(projectId);
         }
+        // モデルは実際に使うプロバイダー(上書き先を含む)について決める(issue #1644)。
+        String model = projectId != null ? llmModelService.getSelectedModel(projectId, provider) : null;
         return llmClient.generate(prompt, model, provider);
     }
 

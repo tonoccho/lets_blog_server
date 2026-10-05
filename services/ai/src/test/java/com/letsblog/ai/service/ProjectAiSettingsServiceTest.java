@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.domain.ProjectAiSettings;
 import com.letsblog.ai.repository.ProjectAiSettingsRepository;
 import org.junit.jupiter.api.Test;
@@ -36,33 +37,79 @@ class ProjectAiSettingsServiceTest {
     void getLlmModel_未設定なら行が無くてもnullを返す() {
         when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
 
-        assertNull(service().getLlmModel(1L));
+        assertNull(service().getLlmModel(1L, AiProvider.OPENAI));
     }
 
     @Test
-    void setLlmModel_行が無ければ新規作成して保存する() {
+    void getLlmModel_プロバイダーごとの値を返す() {
+        ProjectAiSettings s = new ProjectAiSettings(1L);
+        s.setLlmModelOllama("qwen");
+        s.setLlmModelOpenai("gpt-a");
+        s.setLlmModelClaude("claude-b");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(s));
+
+        assertEquals("qwen", service().getLlmModel(1L, AiProvider.OLLAMA));
+        assertEquals("gpt-a", service().getLlmModel(1L, AiProvider.OPENAI));
+        assertEquals("claude-b", service().getLlmModel(1L, AiProvider.CLAUDE));
+    }
+
+    @Test
+    void getLlmModel_プロバイダー別の値が無ければ全プロバイダー共通の旧値を返す() {
+        ProjectAiSettings s = new ProjectAiSettings(1L);
+        s.setLlmModel("legacy");
+        s.setLlmModelOpenai("gpt-a");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(s));
+
+        assertEquals("gpt-a", service().getLlmModel(1L, AiProvider.OPENAI));
+        assertEquals("legacy", service().getLlmModel(1L, AiProvider.CLAUDE));
+    }
+
+    @Test
+    void getLlmModel_プロバイダー別の値が空白なら旧値へフォールバックする() {
+        ProjectAiSettings s = new ProjectAiSettings(1L);
+        s.setLlmModel("legacy");
+        s.setLlmModelOllama(" ");
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(s));
+
+        assertEquals("legacy", service().getLlmModel(1L, AiProvider.OLLAMA));
+    }
+
+    @Test
+    void getLlmModel_旧値もプロバイダー別の値も無ければnull() {
+        when(repository.findByProjectId(1L)).thenReturn(Optional.of(new ProjectAiSettings(1L)));
+
+        assertNull(service().getLlmModel(1L, AiProvider.CLAUDE));
+    }
+
+    @Test
+    void setLlmModel_行が無ければ新規作成してそのプロバイダーの列へ保存する() {
         when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
         when(repository.save(any(ProjectAiSettings.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        service().setLlmModel(1L, "gpt-4o");
+        service().setLlmModel(1L, AiProvider.OPENAI, "gpt-4o");
 
         ArgumentCaptor<ProjectAiSettings> captor = ArgumentCaptor.forClass(ProjectAiSettings.class);
         verify(repository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
         ProjectAiSettings saved = captor.getValue();
         assertEquals(1L, saved.getProjectId());
-        assertEquals("gpt-4o", saved.getLlmModel());
+        assertEquals("gpt-4o", saved.getLlmModelOpenai());
+        assertNull(saved.getLlmModelClaude());
+        assertNull(saved.getLlmModelOllama());
     }
 
     @Test
-    void setLlmModel_既存行があれば更新する() {
+    void setLlmModel_プロバイダーごとに別の列を更新し他のプロバイダーの値は変えない() {
         ProjectAiSettings existing = new ProjectAiSettings(1L);
-        existing.setLlmModel("old-model");
+        existing.setLlmModelOpenai("gpt-a");
         when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
         when(repository.save(any(ProjectAiSettings.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        service().setLlmModel(1L, "new-model");
+        service().setLlmModel(1L, AiProvider.CLAUDE, "claude-b");
+        service().setLlmModel(1L, AiProvider.OLLAMA, "qwen");
 
-        assertEquals("new-model", existing.getLlmModel());
+        assertEquals("gpt-a", existing.getLlmModelOpenai());
+        assertEquals("claude-b", existing.getLlmModelClaude());
+        assertEquals("qwen", existing.getLlmModelOllama());
     }
 
     @Test

@@ -4,6 +4,8 @@ import { ProjectAiModelsPanel } from "../ProjectAiModelsPanel";
 import {
   fetchLlmModelsAction,
   fetchLlmProviderAction,
+  selectLlmProviderAction,
+  selectLlmModelAction,
   fetchReviewStepSettingsAction,
   fetchImageProviderAction,
   fetchComfyUiCheckpointsAction,
@@ -229,5 +231,102 @@ describe("ProjectAiModelsPanel の接続情報セクション(issue #1504)", () 
 
     expect(screen.queryByText("Ollamaの接続情報")).not.toBeInTheDocument();
     expect(fetchAiConnectionsMock).not.toHaveBeenCalled();
+  });
+});
+
+/** issue #1644: プロバイダーを切り替えると、再読み込みなしで切り替え先のモデル(選択中・入力欄・候補)へ変わる。 */
+describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", () => {
+  const selectProviderMock = selectLlmProviderAction as jest.MockedFunction<typeof selectLlmProviderAction>;
+
+  beforeEach(() => {
+    fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    selectProviderMock.mockReset().mockResolvedValue({});
+    fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
+    fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
+    fetchProjectConnectionsMock.mockReset().mockResolvedValue({
+      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+      comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
+    });
+  });
+
+  it("プロバイダーを切り替えると、切り替え先のモデルが選択中・入力欄・候補チップに表示される", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+
+    fetchLlmModelsMock.mockResolvedValue({
+      selected: "claude-3-5-haiku-20241022",
+      availableModels: ["claude-3-5-haiku-20241022", "claude-opus"],
+    });
+    fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), {
+      target: { value: "CLAUDE" },
+    });
+
+    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("claude-3-5-haiku-20241022"));
+    expect(screen.getByText("選択中のモデル:").parentElement).toHaveTextContent("claude-3-5-haiku-20241022");
+    expect(screen.getByRole("button", { name: "claude-opus" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "gpt-4o" })).not.toBeInTheDocument();
+  });
+
+  it("プロバイダーの保存に失敗したときはモデルを再取得しない", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    selectProviderMock.mockResolvedValue({ error: "失敗" });
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+    fetchLlmModelsMock.mockClear();
+
+    fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), {
+      target: { value: "CLAUDE" },
+    });
+
+    await screen.findByText("失敗");
+    expect(fetchLlmModelsMock).not.toHaveBeenCalled();
+  });
+
+  it("プロバイダー切り替え後のモデル再取得の最中に保存したモデルは、遅れて届いた古い取得結果で上書きされない", async () => {
+    const { fireEvent, act } = await import("@testing-library/react");
+    const selectModelMock = selectLlmModelAction as jest.MockedFunction<typeof selectLlmModelAction>;
+    selectModelMock.mockReset().mockResolvedValue({});
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+
+    let resolveStale!: (v: LlmModelListResponse) => void;
+    fetchLlmModelsMock.mockReset();
+    fetchLlmModelsMock.mockImplementationOnce(() => new Promise((r) => (resolveStale = r)));
+    fetchLlmModelsMock.mockResolvedValue({ selected: "gpt-4o", availableModels: ["gpt-4o-mini", "gpt-4o"] });
+
+    fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
+    await waitFor(() => expect(resolveStale).toBeDefined());
+
+    fireEvent.change(screen.getByPlaceholderText("gpt-4o-mini"), { target: { value: "gpt-4o" } });
+    fireEvent.submit(screen.getByPlaceholderText("gpt-4o-mini").closest("form")!);
+    await waitFor(() => expect(selectModelMock).toHaveBeenCalledWith(1, "gpt-4o"));
+    await waitFor(() => expect(screen.getByText("選択中のモデル:").parentElement).toHaveTextContent(/gpt-4o$/));
+
+    await act(async () => {
+      resolveStale({ selected: "gpt-4o-mini", availableModels: ["gpt-4o-mini", "gpt-4o"] });
+    });
+
+    expect(screen.getByText("選択中のモデル:").parentElement).toHaveTextContent(/gpt-4o$/);
+    expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o");
+  });
+
+  it("プロバイダーの「保存しました。」は、モデルの再取得が完了してから表示する(ATが古い画面で先へ進まないように)", async () => {
+    const { fireEvent, act } = await import("@testing-library/react");
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+
+    let resolveRefetch!: (v: LlmModelListResponse) => void;
+    fetchLlmModelsMock.mockReset();
+    fetchLlmModelsMock.mockImplementationOnce(() => new Promise((r) => (resolveRefetch = r)));
+    fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
+    await waitFor(() => expect(resolveRefetch).toBeDefined());
+    expect(screen.queryByText("保存しました。")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveRefetch(llmModelData());
+    });
+    expect(await screen.findByText("保存しました。")).toBeInTheDocument();
   });
 });

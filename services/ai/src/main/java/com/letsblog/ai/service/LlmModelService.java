@@ -34,20 +34,30 @@ public class LlmModelService {
     }
 
     public LlmModelListResponse listModelsForProject(Long projectId) {
+        AiProvider provider = getSelectedProvider(projectId);
         return new LlmModelListResponse(
-                llmConfigProvider.availableModelsFor(getSelectedProvider(projectId)), getSelectedModel(projectId));
+                llmConfigProvider.availableModelsFor(provider), getSelectedModel(projectId, provider));
+    }
+
+    /** プロジェクトの選択中プロバイダーで使うモデルを返す(issue #1644)。 */
+    public String getSelectedModel(Long projectId) {
+        return getSelectedModel(projectId, getSelectedProvider(projectId));
     }
 
     /**
-     * プロジェクトの選択中モデルを返す。未選択(null)ならグローバルデフォルトにフォールバックする。
+     * 指定プロバイダーで使うモデルを返す(issue #1644)。そのプロバイダーに対するプロジェクトの指定を優先し、
+     * 無ければそのプロバイダーのシステム既定モデルにフォールバックする。providerがnull(プロジェクトの
+     * プロバイダー解決が空)のときは、システム既定プロバイダーの既定モデルを使う。
      */
-    public String getSelectedModel(Long projectId) {
-        String selected = projectAiSettingsService.getLlmModel(projectId);
-        return selected == null || selected.isBlank() ? llmConfigProvider.defaultModel() : selected;
+    public String getSelectedModel(Long projectId, AiProvider provider) {
+        AiProvider effective = provider != null ? provider : llmConfigProvider.provider();
+        String selected = projectAiSettingsService.getLlmModel(projectId, effective);
+        return selected == null || selected.isBlank() ? llmConfigProvider.defaultModelFor(effective) : selected;
     }
 
+    /** プロジェクトの選択中プロバイダーのモデルとして保存する(issue #1644)。 */
     public LlmModelListResponse selectModel(Long projectId, String modelName) {
-        projectAiSettingsService.setLlmModel(projectId, modelName);
+        projectAiSettingsService.setLlmModel(projectId, getSelectedProvider(projectId), modelName);
         return listModelsForProject(projectId);
     }
 

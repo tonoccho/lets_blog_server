@@ -1,6 +1,6 @@
-import type { APIRequestContext, APIResponse } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
 import { Then, When } from './fixtures';
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken, loginAsAdmin } from '../support';
 import { STUB_URLS } from '../support/stubs';
 
 /**
@@ -236,3 +236,82 @@ Then(/^「(.+)」の依頼はAPIキー未設定のエラーになる$/, async ({
   const body = (await response.json()) as { error: string };
   expect(body.error, `${feature}のエラー: ${body.error}`).toContain('APIキーが設定されていません');
 });
+
+// --------------------------------------------------------------- 画面でのプロバイダー別モデル(issue #1644)
+
+/** 画面で保存したモデル名(feature上の名前 → 一意なsuffix付きの実際の名前)。 */
+function savedUiModels(ctx: Record<string, unknown>): Record<string, string> {
+  if (!ctx.uiSavedModels) {
+    ctx.uiSavedModels = {};
+  }
+  return ctx.uiSavedModels as Record<string, string>;
+}
+
+function selectedModelLine(page: Page) {
+  return page.locator('p', { hasText: '選択中のモデル:' });
+}
+
+/** 「AI・アセット」タブを開き、LLMのモデル入力欄が見えるまでクリックを再試行する(ハイドレーション前のクリック取りこぼし対策)。 */
+When('プロジェクト詳細の「AI・アセット」のLLM画面を開く', async ({ ctx, page }) => {
+  await loginAsAdmin(page);
+  await page.goto(`/projects/${currentProjectId(ctx)}`, { waitUntil: 'commit' });
+  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
+  await expect(aiTab).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    await aiTab.click();
+    await expect(selectedModelLine(page)).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+When(/^画面でAIプロバイダーを「(.+)」に切り替える$/, async ({ page }, provider: string) => {
+  const select = page.getByLabel('AIプロバイダー(このプロジェクトの既定)');
+  await expect(select).toBeEnabled({ timeout: 30_000 });
+  await select.selectOption(provider);
+  // 保存完了(select の再有効化)を待つ。切り替え後のモデル表示はそのあとの確認ステップが待つ。
+  await expect(select).toBeEnabled({ timeout: 30_000 });
+  await expect(page.getByText('保存しました。').first()).toBeVisible({ timeout: 30_000 });
+});
+
+When(/^画面でモデル名「(.+)」を保存する$/, async ({ ctx, page }, name: string) => {
+  const actual = `${name}-${unique()}`;
+  savedUiModels(ctx)[name] = actual;
+  const input = page.getByLabel('モデル名(例: gpt-4o-mini)');
+  await expect(input).toBeVisible({ timeout: 30_000 });
+  await input.fill(actual);
+  const submit = input.locator('xpath=ancestor::form[1]').getByRole('button', { name: '保存', exact: true });
+  await expect(submit).toBeEnabled({ timeout: 30_000 });
+  await submit.click();
+  await expect(selectedModelLine(page)).toContainText(actual, { timeout: 30_000 });
+});
+
+Then(/^画面の選択中のモデルが「(.+)」になっている$/, async ({ ctx, page }, name: string) => {
+  const actual = savedUiModels(ctx)[name];
+  expect(actual, `画面で保存していないモデル名です: ${name}`).toBeDefined();
+  await expect(selectedModelLine(page)).toContainText(actual, { timeout: 30_000 });
+  await expect(page.getByLabel('モデル名(例: gpt-4o-mini)')).toHaveValue(actual, { timeout: 30_000 });
+});
+
+Then('画面の選択中のモデルがシステム既定のClaudeモデルになっている', async ({ page, request }) => {
+  const response = await request.get('/api/system-settings/app-settings', {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+  });
+  expect(response.ok(), `アプリ設定の取得に失敗しました (status=${response.status()})`).toBe(true);
+  const settings = (await response.json()) as { key: string; value: string | null }[];
+  const claudeDefault = settings.find((s) => s.key === 'llm_claude_model')?.value;
+  expect(claudeDefault, 'llm_claude_model の値が取得できません').toBeTruthy();
+  await expect(selectedModelLine(page)).toContainText(claudeDefault as string, { timeout: 30_000 });
+  await expect(page.getByLabel('モデル名(例: gpt-4o-mini)')).toHaveValue(claudeDefault as string, { timeout: 30_000 });
+});
+
+Then(
+  /^LLMスタブが受け取った直近のリクエストに、画面で保存した「(.+)」を使ったものが含まれる$/,
+  async ({ ctx }, name: string) => {
+    const actual = savedUiModels(ctx)[name];
+    expect(actual, `画面で保存していないモデル名です: ${name}`).toBeDefined();
+    const recentModels = await fetchLlmStubRecentModels();
+    expect(
+      recentModels,
+      `LLMスタブが受け取った直近のリクエストのmodel一覧=${JSON.stringify(recentModels)}、保存したモデル=${actual}`
+    ).toContain(actual);
+  }
+);

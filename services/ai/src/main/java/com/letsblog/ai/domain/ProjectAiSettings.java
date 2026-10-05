@@ -1,5 +1,6 @@
 package com.letsblog.ai.domain;
 
+import com.letsblog.ai.ai.AiProvider;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,8 +27,24 @@ public class ProjectAiSettings {
     @Column(name = "project_id", nullable = false, unique = true)
     private Long projectId;
 
+    /**
+     * 全プロバイダー共通の旧値(issue #1644)。プロバイダー別の列ができる前に保存された値のうち、プロバイダーが
+     * 未保存だったプロジェクトのものだけが残る。プロバイダー別の値が無いときだけ使う。
+     */
     @Column(name = "llm_model", length = 255)
     private String llmModel;
+
+    /** プロジェクトがOllamaで使うモデル名(issue #1644)。 */
+    @Column(name = "llm_model_ollama", length = 255)
+    private String llmModelOllama;
+
+    /** プロジェクトがChatGPT(OpenAI)で使うモデル名(issue #1644)。 */
+    @Column(name = "llm_model_openai", length = 255)
+    private String llmModelOpenai;
+
+    /** プロジェクトがClaudeで使うモデル名(issue #1644)。 */
+    @Column(name = "llm_model_claude", length = 255)
+    private String llmModelClaude;
 
     /**
      * プロジェクト単位のAIプロバイダー既定値(OLLAMA/OPENAI/CLAUDE、issue #530)。未設定時はシステム設定の

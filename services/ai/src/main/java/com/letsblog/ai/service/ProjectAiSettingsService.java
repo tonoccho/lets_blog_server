@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.domain.ProjectAiSettings;
 import com.letsblog.ai.repository.ProjectAiSettingsRepository;
 import com.letsblog.common.net.DestinationAddressRules;
@@ -65,15 +66,30 @@ public class ProjectAiSettingsService {
                 .orElseGet(() -> repository.save(new ProjectAiSettings(projectId)));
     }
 
+    /**
+     * 指定プロバイダーに対するプロジェクトのモデル名。プロバイダー別の値が無ければ全プロバイダー共通の旧値
+     * (issue #1644)、それも無ければnull。
+     */
     @Transactional(readOnly = true)
-    public String getLlmModel(Long projectId) {
-        return findByProjectId(projectId).map(ProjectAiSettings::getLlmModel).orElse(null);
+    public String getLlmModel(Long projectId, AiProvider provider) {
+        return findByProjectId(projectId).map(s -> {
+            String perProvider = switch (provider) {
+                case OLLAMA -> s.getLlmModelOllama();
+                case OPENAI -> s.getLlmModelOpenai();
+                case CLAUDE -> s.getLlmModelClaude();
+            };
+            return perProvider == null || perProvider.isBlank() ? s.getLlmModel() : perProvider;
+        }).orElse(null);
     }
 
     @Transactional
-    public void setLlmModel(Long projectId, String llmModel) {
+    public void setLlmModel(Long projectId, AiProvider provider, String llmModel) {
         ProjectAiSettings settings = getOrCreate(projectId);
-        settings.setLlmModel(llmModel);
+        switch (provider) {
+            case OLLAMA -> settings.setLlmModelOllama(llmModel);
+            case OPENAI -> settings.setLlmModelOpenai(llmModel);
+            case CLAUDE -> settings.setLlmModelClaude(llmModel);
+        }
         repository.save(settings);
     }
 

@@ -67,6 +67,23 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
     }
   }
 
+  // LlmModelPanelは初期値をstateへ取り込むため、プロバイダー切り替えで取得し直したデータへ作り直させる
+  // (key を変える)。再読み込みなしで切り替え先のモデルが選択中・入力欄・候補チップに出る(issue #1644)。
+  const [llmModelVersion, setLlmModelVersion] = useState(0);
+
+  // モデルの保存回数。プロバイダー切り替え後の再取得の最中に保存されたら、その取得結果は古いので捨てる。
+  const modelSaveCountRef = useRef(0);
+
+  async function handleProviderChanged() {
+    const savesBefore = modelSaveCountRef.current;
+    const fresh = await fetchLlmModelsAction(projectId);
+    if (modelSaveCountRef.current !== savesBefore) {
+      return;
+    }
+    setLlmData(fresh);
+    setLlmModelVersion((v) => v + 1);
+  }
+
   // 初回マウント時に、デフォルト表示のLLMタブ分だけ取得しておく
   useEffect(() => {
     if (fetchedProjectIdRef.current === projectId) {
@@ -105,8 +122,15 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
             <AiConnectionSection projectId={projectId} provider="OLLAMA" />
             <ChatGptConnectionSection projectId={projectId} />
             <ClaudeConnectionSection projectId={projectId} />
-            {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} />}
-            <LlmModelPanel projectId={projectId} initialData={llmData} />
+            {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} onChanged={handleProviderChanged} />}
+            <LlmModelPanel
+              key={llmModelVersion}
+              projectId={projectId}
+              initialData={llmData}
+              onSaved={() => {
+                modelSaveCountRef.current += 1;
+              }}
+            />
             {reviewStepData && <ReviewStepSettingsPanel projectId={projectId} initialData={reviewStepData} />}
           </div>
         ) : (

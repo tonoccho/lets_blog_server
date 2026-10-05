@@ -90,7 +90,7 @@ class AiAssistServiceTest {
 
     @Test
     void generateForBridge_projectId指定時は選択中モデルを使う() {
-        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmModelService.getSelectedModel(1L, AiProvider.CLAUDE)).thenReturn("llama3");
         when(llmClient.generate("プロンプト", "llama3", AiProvider.CLAUDE)).thenReturn("結果");
 
         String result = service.generateForBridge(1L, "プロンプト", "CLAUDE");
@@ -105,7 +105,7 @@ class AiAssistServiceTest {
         service.generateForBridge(null, "プロンプト", null);
         org.mockito.Mockito.verify(llmClient).useProject(null);
 
-        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmModelService.getSelectedModel(1L, AiProvider.OLLAMA)).thenReturn("llama3");
         when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OLLAMA);
         when(llmClient.generate("プロンプト", "llama3", AiProvider.OLLAMA)).thenReturn("結果");
 
@@ -123,12 +123,12 @@ class AiAssistServiceTest {
         String result = service.generateForBridge(null, "プロンプト", null);
 
         assertEquals("結果", result);
-        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any());
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any(), any());
     }
 
     @Test
     void generateForBridge_providerOverride未指定でprojectId指定時はプロジェクトの選択中プロバイダーを使う() {
-        when(llmModelService.getSelectedModel(1L)).thenReturn("llama3");
+        when(llmModelService.getSelectedModel(1L, AiProvider.OPENAI)).thenReturn("llama3");
         when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OPENAI);
         when(llmClient.generate("プロンプト", "llama3", AiProvider.OPENAI)).thenReturn("結果");
 
@@ -136,6 +136,17 @@ class AiAssistServiceTest {
 
         assertEquals("結果", result);
         org.mockito.Mockito.verify(llmModelService).getSelectedProvider(1L);
+    }
+
+    @Test
+    void generateForBridge_プロバイダー上書き時は上書き先のプロバイダーで解決したモデルを渡す() {
+        when(llmModelService.getSelectedModel(1L, AiProvider.CLAUDE)).thenReturn("claude-b");
+        when(llmClient.generate("プロンプト", "claude-b", AiProvider.CLAUDE)).thenReturn("結果");
+
+        String result = service.generateForBridge(1L, "プロンプト", "CLAUDE");
+
+        assertEquals("結果", result);
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(1L);
     }
 
     // ---- 画像入力付き生成(issue #1600) ----
@@ -1260,7 +1271,7 @@ class AiAssistServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
     void 執筆支援_projectId指定かつprovider未指定ならプロジェクトの選択中モデルとプロバイダーを使う(String feature) {
-        when(llmModelService.getSelectedModel(7L)).thenReturn("project-model");
+        when(llmModelService.getSelectedModel(7L, AiProvider.OPENAI)).thenReturn("project-model");
         when(llmModelService.getSelectedProvider(7L)).thenReturn(AiProvider.OPENAI);
         when(llmClient.generate(anyString(), eq("project-model"), eq(AiProvider.OPENAI))).thenReturn("[]");
 
@@ -1272,7 +1283,7 @@ class AiAssistServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
     void 執筆支援_provider指定はプロジェクトの選択中プロバイダーより優先される(String feature) {
-        when(llmModelService.getSelectedModel(7L)).thenReturn("project-model");
+        when(llmModelService.getSelectedModel(7L, AiProvider.CLAUDE)).thenReturn("project-model");
         when(llmClient.generate(anyString(), eq("project-model"), eq(AiProvider.CLAUDE))).thenReturn("[]");
 
         invokeFeature(feature, 7L, "CLAUDE");
@@ -1290,7 +1301,7 @@ class AiAssistServiceTest {
 
         org.mockito.Mockito.verify(llmClient).generate(anyString(), org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.isNull());
-        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any());
+        org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedModel(any(), any());
         org.mockito.Mockito.verify(llmModelService, org.mockito.Mockito.never()).getSelectedProvider(any());
     }
 
@@ -1308,7 +1319,7 @@ class AiAssistServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"ask", "draft", "section", "tags", "proofread"})
     void 執筆支援_プロジェクトで未選択ならプロバイダー解決結果のnullをそのまま渡す(String feature) {
-        when(llmModelService.getSelectedModel(7L)).thenReturn("default-model");
+        when(llmModelService.getSelectedModel(7L, null)).thenReturn("default-model");
         when(llmModelService.getSelectedProvider(7L)).thenReturn(null);
         when(llmClient.generate(anyString(), eq("default-model"), org.mockito.ArgumentMatchers.isNull()))
                 .thenReturn("[]");

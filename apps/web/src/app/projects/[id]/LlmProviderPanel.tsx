@@ -17,9 +17,12 @@ const PROVIDER_LABEL: Record<string, string> = {
 export function LlmProviderPanel({
   projectId,
   initialData,
+  onChanged,
 }: {
   projectId: number;
   initialData: LlmProviderListResponse;
+  /** プロバイダーの保存に成功したとき(モデル表示を切り替え先の値へ更新させるため、issue #1644)。 */
+  onChanged?: () => void | Promise<void>;
 }) {
   const [data, setData] = useState(initialData);
   const [provider, setProvider] = useState(initialData.selected ?? "");
@@ -37,6 +40,9 @@ export function LlmProviderPanel({
       return;
     }
     setData(await fetchLlmProviderAction(projectId));
+    // モデル表示の再取得が終わってから成功を示す(それ以前に表示すると、利用者が古いモデル画面のまま
+    // 続けて操作し、その保存を再取得結果が上書きしうる。issue #1644)。
+    await onChanged?.();
     setMessage({ type: "success", text: "保存しました。" });
   }
 

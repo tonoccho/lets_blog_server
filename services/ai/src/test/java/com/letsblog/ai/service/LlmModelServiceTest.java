@@ -34,24 +34,59 @@ class LlmModelServiceTest {
     }
 
     @Test
-    void getSelectedModel_未選択ならグローバルデフォルトを返す() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
-        when(llmConfigProvider.defaultModel()).thenReturn("gpt-4o-mini");
+    void getSelectedModel_プロバイダー指定で未選択ならそのプロバイダーのシステム既定を返す() {
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.CLAUDE)).thenReturn(null);
+        when(llmConfigProvider.defaultModelFor(AiProvider.CLAUDE)).thenReturn("claude-3-5-haiku-20241022");
 
-        assertEquals("gpt-4o-mini", service().getSelectedModel(1L));
+        assertEquals("claude-3-5-haiku-20241022", service().getSelectedModel(1L, AiProvider.CLAUDE));
     }
 
     @Test
-    void getSelectedModel_選択済みならその値を返す() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn("gpt-4o");
+    void getSelectedModel_プロバイダー指定で空白ならそのプロバイダーのシステム既定を返す() {
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.CLAUDE)).thenReturn("  ");
+        when(llmConfigProvider.defaultModelFor(AiProvider.CLAUDE)).thenReturn("claude-3-5-haiku-20241022");
 
-        assertEquals("gpt-4o", service().getSelectedModel(1L));
+        assertEquals("claude-3-5-haiku-20241022", service().getSelectedModel(1L, AiProvider.CLAUDE));
     }
 
     @Test
-    void listModelsForProject_プロジェクトのproviderに対応する一覧を返す() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn("gpt-4o");
+    void getSelectedModel_プロバイダー指定で選択済みならその値を返す() {
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.OPENAI)).thenReturn("gpt-4o");
+
+        assertEquals("gpt-4o", service().getSelectedModel(1L, AiProvider.OPENAI));
+    }
+
+    @Test
+    void getSelectedModel_プロバイダーがnullならシステム既定プロバイダーで解決する() {
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.OLLAMA)).thenReturn(null);
+        when(llmConfigProvider.defaultModelFor(AiProvider.OLLAMA)).thenReturn("qwen2.5:7b-instruct");
+
+        assertEquals("qwen2.5:7b-instruct", service().getSelectedModel(1L, null));
+    }
+
+    @Test
+    void getSelectedModel_プロバイダー未指定ならプロジェクトの選択中プロバイダーのモデルを返す() {
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("CLAUDE");
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.CLAUDE)).thenReturn("claude-opus");
+
+        assertEquals("claude-opus", service().getSelectedModel(1L));
+    }
+
+    @Test
+    void getSelectedModel_プロバイダー未指定で未選択ならシステム既定プロバイダーの既定モデルを返す() {
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn(null);
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.OLLAMA)).thenReturn(null);
+        when(llmConfigProvider.defaultModelFor(AiProvider.OLLAMA)).thenReturn("qwen2.5:7b-instruct");
+
+        assertEquals("qwen2.5:7b-instruct", service().getSelectedModel(1L));
+    }
+
+    @Test
+    void listModelsForProject_プロジェクトのproviderに対応する一覧とそのproviderのモデルを返す() {
         when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("OPENAI");
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.OPENAI)).thenReturn("gpt-4o");
         when(llmConfigProvider.availableModelsFor(AiProvider.OPENAI)).thenReturn(List.of("gpt-4o-mini", "gpt-4o"));
 
         LlmModelListResponse response = service().listModelsForProject(1L);
@@ -61,46 +96,38 @@ class LlmModelServiceTest {
     }
 
     @Test
-    void listModelsForProject_OLLAMA上書きならOllamaの一覧を返しOpenAIのモデル名を含まない() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
-        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("OLLAMA");
-        when(llmConfigProvider.defaultModel()).thenReturn("qwen2.5:7b-instruct");
-        when(llmConfigProvider.availableModelsFor(AiProvider.OLLAMA)).thenReturn(List.of("qwen2.5:7b-instruct"));
+    void listModelsForProject_CLAUDE上書きで未指定ならClaudeの既定モデルを選択中として返す() {
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("CLAUDE");
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.CLAUDE)).thenReturn(null);
+        when(llmConfigProvider.defaultModelFor(AiProvider.CLAUDE)).thenReturn("claude-3-5-haiku-20241022");
+        when(llmConfigProvider.availableModelsFor(AiProvider.CLAUDE)).thenReturn(List.of("claude-3-5-haiku-20241022"));
 
         LlmModelListResponse response = service().listModelsForProject(1L);
 
-        assertEquals(List.of("qwen2.5:7b-instruct"), response.availableModels());
-    }
-
-    @Test
-    void listModelsForProject_CLAUDE上書きならClaudeの一覧を返す() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
-        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("CLAUDE");
-        when(llmConfigProvider.defaultModel()).thenReturn("claude-3-5-haiku-20241022");
-        when(llmConfigProvider.availableModelsFor(AiProvider.CLAUDE)).thenReturn(List.of("claude-3-5-haiku-20241022"));
-
-        assertEquals(List.of("claude-3-5-haiku-20241022"), service().listModelsForProject(1L).availableModels());
+        assertEquals(List.of("claude-3-5-haiku-20241022"), response.availableModels());
+        assertEquals("claude-3-5-haiku-20241022", response.selected());
     }
 
     @Test
     void listModelsForProject_上書きなしならシステム既定providerの一覧を返す() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn(null);
         when(projectAiSettingsService.getLlmProvider(1L)).thenReturn(null);
         when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
-        when(llmConfigProvider.defaultModel()).thenReturn("qwen2.5:7b-instruct");
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.OLLAMA)).thenReturn(null);
+        when(llmConfigProvider.defaultModelFor(AiProvider.OLLAMA)).thenReturn("qwen2.5:7b-instruct");
         when(llmConfigProvider.availableModelsFor(AiProvider.OLLAMA)).thenReturn(List.of("qwen2.5:7b-instruct"));
 
         assertEquals(List.of("qwen2.5:7b-instruct"), service().listModelsForProject(1L).availableModels());
     }
 
     @Test
-    void selectModel_ProjectAiSettingsServiceへ保存する() {
-        when(projectAiSettingsService.getLlmModel(1L)).thenReturn("gpt-4o");
+    void selectModel_プロジェクトの選択中プロバイダーのモデルとして保存する() {
+        when(projectAiSettingsService.getLlmProvider(1L)).thenReturn("CLAUDE");
+        when(projectAiSettingsService.getLlmModel(1L, AiProvider.CLAUDE)).thenReturn("claude-opus");
 
-        LlmModelListResponse response = service().selectModel(1L, "gpt-4o");
+        LlmModelListResponse response = service().selectModel(1L, "claude-opus");
 
-        org.mockito.Mockito.verify(projectAiSettingsService).setLlmModel(1L, "gpt-4o");
-        assertEquals("gpt-4o", response.selected());
+        org.mockito.Mockito.verify(projectAiSettingsService).setLlmModel(1L, AiProvider.CLAUDE, "claude-opus");
+        assertEquals("claude-opus", response.selected());
     }
 
     @Test
