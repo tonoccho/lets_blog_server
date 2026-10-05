@@ -26,17 +26,25 @@ public class GeneratedImageCreationService {
     private final GeneratedImageRepository generatedImageRepository;
     private final GeneratedImageStorageService generatedImageStorageService;
     private final DomainEventPublisher domainEventPublisher;
+    private final ReferenceImageService referenceImageService;
 
     public GeneratedImageCreationService(
             GeneratedImageRepository generatedImageRepository,
             GeneratedImageStorageService generatedImageStorageService,
-            DomainEventPublisher domainEventPublisher) {
+            DomainEventPublisher domainEventPublisher,
+            ReferenceImageService referenceImageService) {
         this.generatedImageRepository = generatedImageRepository;
         this.generatedImageStorageService = generatedImageStorageService;
         this.domainEventPublisher = domainEventPublisher;
+        this.referenceImageService = referenceImageService;
     }
 
     public GeneratedImage create(CreateGeneratedImageRequest request) {
+        // issue #1624: 参照元は生成要求と同じ基準(同一プロジェクトの未削除画像)で検証する。
+        // 違反はInvalidReferenceImageException(4xx)。ファイル保存より前に弾く。
+        if (request.sourceImageId() != null) {
+            referenceImageService.requireUsable(request.projectId(), request.sourceImageId());
+        }
         // issue #1599: アップロードされたJPEGは.jpgで保存する。それ以外は従来どおり.png。
         String filePath = "image/jpeg".equalsIgnoreCase(request.mimeType())
                 ? generatedImageStorageService.store(request.projectId(), request.imageData(), "jpg")

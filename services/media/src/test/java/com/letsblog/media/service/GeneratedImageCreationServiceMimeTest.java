@@ -40,7 +40,8 @@ class GeneratedImageCreationServiceMimeTest {
     void jpegはjpgで保存() {
         when(storage.store(7L, new byte[] {1}, "jpg")).thenReturn("7/0001.jpg");
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        GeneratedImageCreationService service = new GeneratedImageCreationService(repository, storage, publisher);
+        GeneratedImageCreationService service = new GeneratedImageCreationService(
+                repository, storage, publisher, org.mockito.Mockito.mock(ReferenceImageService.class));
 
         service.create(request("image/jpeg"));
 
@@ -57,7 +58,8 @@ class GeneratedImageCreationServiceMimeTest {
     void pngは従来どおり() {
         when(storage.store(7L, new byte[] {1})).thenReturn("7/0001.png");
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        GeneratedImageCreationService service = new GeneratedImageCreationService(repository, storage, publisher);
+        GeneratedImageCreationService service = new GeneratedImageCreationService(
+                repository, storage, publisher, org.mockito.Mockito.mock(ReferenceImageService.class));
 
         service.create(request("image/png"));
 

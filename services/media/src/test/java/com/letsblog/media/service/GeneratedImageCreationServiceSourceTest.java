@@ -15,8 +15,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,12 +34,14 @@ class GeneratedImageCreationServiceSourceTest {
     private GeneratedImageStorageService storage;
     @Mock
     private DomainEventPublisher publisher;
+    @Mock
+    private ReferenceImageService referenceImageService;
 
     private GeneratedImageCreationService service;
 
     @BeforeEach
     void setUp() {
-        service = new GeneratedImageCreationService(repository, storage, publisher);
+        service = new GeneratedImageCreationService(repository, storage, publisher, referenceImageService);
         lenient().when(storage.store(any(), any())).thenReturn("1/0001.png");
         lenient().when(repository.save(any(GeneratedImage.class))).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -50,6 +55,7 @@ class GeneratedImageCreationServiceSourceTest {
     @Test
     void 参照元の画像IDを行に保存する() {
         service.create(request(5L));
+        verify(referenceImageService).requireUsable(1L, 5L);
 
         ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
         verify(repository).save(captor.capture());
@@ -63,6 +69,19 @@ class GeneratedImageCreationServiceSourceTest {
         ArgumentCaptor<GeneratedImage> captor = ArgumentCaptor.forClass(GeneratedImage.class);
         verify(repository).save(captor.capture());
         assertNull(captor.getValue().getSourceImageId());
+        verifyNoInteractions(referenceImageService);
+    }
+
+    @Test
+    void 別プロジェクト_削除済み_存在しない参照元は拒否し保存もイベントもしない() {
+        when(referenceImageService.requireUsable(1L, 9L))
+                .thenThrow(new InvalidReferenceImageException("参照画像(id: 9)はこのプロジェクトに存在しません"));
+
+        assertThrows(InvalidReferenceImageException.class, () -> service.create(request(9L)));
+
+        verify(repository, never()).save(any());
+        verify(storage, never()).store(any(), any());
+        verifyNoInteractions(publisher);
     }
 
     @Test

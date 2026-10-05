@@ -48,7 +48,8 @@ class GeneratedImageCreationServiceTest {
     @BeforeEach
     void setUp() {
         service = new GeneratedImageCreationService(
-                generatedImageRepository, generatedImageStorageService, domainEventPublisher);
+                generatedImageRepository, generatedImageStorageService, domainEventPublisher,
+                org.mockito.Mockito.mock(ReferenceImageService.class));
     }
 
     @Test
