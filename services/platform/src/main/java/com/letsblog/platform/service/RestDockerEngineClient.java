@@ -88,6 +88,22 @@ public class RestDockerEngineClient implements DockerEngineClient {
     }
 
     @Override
+    public ContainerInspection inspectContainer(String id) {
+        JsonNode response;
+        try {
+            response = client.get().uri("/containers/{id}/json", id).retrieve().body(JsonNode.class);
+        } catch (RestClientException e) {
+            throw new DockerEngineException("コンテナの詳細を取得できませんでした: " + e.getMessage(), e);
+        }
+        if (response == null) {
+            return new ContainerInspection("", "");
+        }
+        return new ContainerInspection(
+                response.path("HostConfig").path("Runtime").asText(""),
+                response.path("State").path("Health").path("Status").asText(""));
+    }
+
+    @Override
     public void startContainer(String id) {
         post(id, "start");
     }

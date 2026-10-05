@@ -22,7 +22,8 @@ jest.mock("@/lib/apiClient", () => ({
 }));
 jest.mock("../AppSettingsPanel", () => ({ AppSettingsPanel: () => "SETTINGS_PANEL" }));
 jest.mock("../ComputeDevicePanel", () => ({
-  ComputeDevicePanel: ({ status }: { status: { currentDevice: string } }) => `DEVICE_PANEL:${status.currentDevice}`,
+  ComputeDevicePanel: ({ status }: { status: { target: string; currentDevice: string } }) =>
+    `DEVICE_PANEL:${status.target}:${status.currentDevice}`,
 }));
 import Page from "../page";
 
@@ -37,13 +38,41 @@ describe("システム設定画面の演算デバイス欄(issue #1399)", () => 
   afterEach(() => errorSpy.mockRestore());
 
   it("管理者には「保存する設定」とは別に演算デバイス欄を表示する", async () => {
-    api.getComputeDeviceStatus.mockResolvedValue({ currentDevice: "GPU" });
+    api.getComputeDeviceStatus.mockImplementation(async (target: string) => ({
+      target,
+      currentDevice: target === "comfyui" ? "GPU" : "CPU",
+    }));
 
     const html = renderToStaticMarkup(await Page());
 
     expect(html).toContain("SETTINGS_PANEL");
-    expect(html).toContain("DEVICE_PANEL:GPU");
+    expect(html).toContain("DEVICE_PANEL:comfyui:GPU");
     expect(api.getComputeDeviceStatus).toHaveBeenCalledWith("comfyui");
+  });
+
+  it("ComfyUIとは別にOllamaの欄も表示する(issue #1585)", async () => {
+    api.getComputeDeviceStatus.mockImplementation(async (target: string) => ({
+      target,
+      currentDevice: target === "comfyui" ? "GPU" : "CPU",
+    }));
+
+    const html = renderToStaticMarkup(await Page());
+
+    expect(html).toContain("DEVICE_PANEL:ollama:CPU");
+    expect(api.getComputeDeviceStatus).toHaveBeenCalledWith("ollama");
+  });
+
+  it("Ollamaの状態だけ取得に失敗してもComfyUIの欄は表示し、Ollamaの通知を出す(issue #1585)", async () => {
+    api.getComputeDeviceStatus.mockImplementation(async (target: string) => {
+      if (target === "ollama") throw new Error("APIエラー (503): down");
+      return { target, currentDevice: "GPU" };
+    });
+
+    const html = renderToStaticMarkup(await Page());
+
+    expect(html).toContain("DEVICE_PANEL:comfyui:GPU");
+    expect(html).not.toContain("DEVICE_PANEL:ollama");
+    expect(html).toContain("演算デバイス(Ollama)の状態を取得できませんでした");
   });
 
   it("状態の取得に失敗しても通知を出し、保存する設定は表示し続ける", async () => {
@@ -51,7 +80,7 @@ describe("システム設定画面の演算デバイス欄(issue #1399)", () => 
 
     const html = renderToStaticMarkup(await Page());
 
-    expect(html).toContain("演算デバイスの状態を取得できませんでした");
+    expect(html).toContain("演算デバイス(ComfyUI)の状態を取得できませんでした");
     expect(html).not.toContain("DEVICE_PANEL");
     expect(html).toContain("SETTINGS_PANEL");
   });

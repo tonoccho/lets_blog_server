@@ -5,6 +5,7 @@
  * platform-service の演算デバイス切り替え(`RestDockerEngineClient`)が実際に叩く経路だけを実装する。
  *
  *   GET  /containers/json?all=true      コンテナ一覧(このプロジェクトのラベル付き)
+ *   GET  /containers/{id}/json          詳細(HostConfig.Runtime と State.Health.Status。issue #1585)
  *   POST /containers/{id}/start         起動(204)。拒否・稼働しないふるまいはシナリオで指定する
  *   POST /containers/{id}/stop          停止(204)
  *
@@ -25,7 +26,9 @@
  *       "containers": { "lbs-comfyui": "running", "lbs-comfyui-cpu": "exited" },   キーが無ければ「存在しない」
  *       "rejectStart": ["lbs-comfyui-cpu"],     start を 403 で拒否する
  *       "neverRunning": ["lbs-comfyui-cpu"],    start は 204 だが running にならない
- *       "runningAfterMs": 3000                  start から running になるまでの遅延
+ *       "neverHealthy": ["lbs-ollama-cpu"],      start で running にはなるが、ヘルスチェックが healthy にならない
+ *       "runningAfterMs": 3000,                 start から running になるまでの遅延
+ *       "runtimes": { "lbs-ollama": "nvidia" }  HostConfig.Runtime(無いコンテナは空文字 = 既定ランタイム)
  *     }
  *
  * `GET /__control/state` は `containers`(現在の状態)と `calls`(start / stop の呼び出し記録)を返す。
@@ -42,7 +45,9 @@ function defaults() {
     containers: { 'lbs-comfyui': 'running', 'lbs-comfyui-cpu': 'exited' },
     rejectStart: [],
     neverRunning: [],
+    neverHealthy: [],
     runningAfterMs: 0,
+    runtimes: {},
   };
 }
 
@@ -111,6 +116,24 @@ createStub({
         Labels: { [PROJECT_LABEL]: PROJECT },
       }));
       sendJson(res, 200, items);
+      return true;
+    }
+
+    const inspect = /^\/containers\/([^/]+)\/json$/.exec(pathname);
+    if (method === 'GET' && inspect) {
+      settle();
+      const name = nameOf(decodeURIComponent(inspect[1]));
+      if (!name || scenario.containers[name] === undefined) {
+        sendJson(res, 404, { message: `No such container: ${inspect[1]}` });
+        return true;
+      }
+      const running = scenario.containers[name] === 'running';
+      sendJson(res, 200, {
+        Id: idOf(name),
+        Name: `/${name}`,
+        HostConfig: { Runtime: (scenario.runtimes || {})[name] || '' },
+        State: { Status: scenario.containers[name], Health: { Status: running && !(scenario.neverHealthy || []).includes(name) ? 'healthy' : 'starting' } },
+      });
       return true;
     }
 

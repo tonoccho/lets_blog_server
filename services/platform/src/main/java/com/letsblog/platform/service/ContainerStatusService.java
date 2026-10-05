@@ -45,9 +45,9 @@ public class ContainerStatusService {
     static final String STANDBY_STATE = "standby";
     /**
      * 代替構成の組(issue #1584)。片方が稼働している間、もう片方は意図的に停止している。
-     * 組を足すときは {@link #ALTERNATIVE_PAIRS} に1行足す(例: {@code {"ollama", "ollama-cpu"}})。
+     * 組を足すときは {@link #ALTERNATIVE_PAIRS} に1行足す(ollama は #1585)。
      */
-    private static final String[][] ALTERNATIVE_PAIRS = {{"comfyui", "comfyui-cpu"}};
+    private static final String[][] ALTERNATIVE_PAIRS = {{"comfyui", "comfyui-cpu"}, {"ollama", "ollama-cpu"}};
     private static final Map<String, String> ALTERNATIVE_OF = alternativeOf();
 
     private static Map<String, String> alternativeOf() {

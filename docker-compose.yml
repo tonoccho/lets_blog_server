@@ -1076,6 +1076,44 @@ services:
       retries: 5
       start_period: 20s
 
+  # 管理画面から Ollama の演算デバイスを GPU / CPU で切り替えるための CPU 構成(issue #1585)。
+  #
+  # `ollama`(上)は runtime がコンテナ作成時に固定されるため、platform-service の start / stop だけでは
+  # GPU と CPU を行き来できない。両構成のコンテナを事前に作っておき、アプリは start / stop だけを行う
+  # (comfyui / comfyui-cpu の #1399 と同じ機構)。
+  #
+  # `profiles: ["ollama-cpu"]` であり、`cpu` には入れない。`cpu` に入れると、GPU の無いホストで
+  # `COMPOSE_PROFILES=cpu` にしたとき `ollama`(runtime 空 = CPU)と二重に起動してしまう。
+  # 待機側の作成は運用手順(GPU ホストで一度だけ):
+  #   docker compose --profile ollama-cpu create ollama-cpu
+  # `runtime` は指定しない(Docker の既定ランタイム = CPU)。`ollama` と同時には稼働させない
+  # (ネットワークエイリアス ollama が重複する)。接続先 http://ollama:11434 は不変。
+  # モデルは ollama_models を共有するので、GPU 構成で取得済みのモデルがそのまま使える。
+  ollama-cpu:
+    logging: *default-logging
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    container_name: lbs-ollama-cpu
+    profiles: ["ollama-cpu"]
+    <<: *common-service
+    networks:
+      lbs-net:
+        aliases:
+          - ollama
+          - ollama-cpu
+    environment:
+      TZ: UTC
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   # 既定モデルの初回取得(issue #1086 / R3)。取得済みなら即座に終了する冪等なワンショット。
   # x-common-service は使わない。restart: unless-stopped が付くと ContainerStatusService
   # (#725)が「正常に完了したワンショットジョブ」と見なせず、ダッシュボードが常時赤くなる。

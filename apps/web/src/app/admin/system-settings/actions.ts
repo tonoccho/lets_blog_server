@@ -49,7 +49,7 @@ export interface ApplyComputeDeviceFormState {
 }
 
 /**
- * ComfyUIの演算デバイス(GPU / CPU)を切り替える(issue #1399)。platform-serviceは要求を受け付けたら
+ * ComfyUI・Ollamaの演算デバイス(GPU / CPU)を切り替える(issue #1399 / #1585)。対象はフォームの `target`。platform-serviceは要求を受け付けたら
  * すぐ返し、切り替えは裏で進む(進行は画面が再取得して表示する)。そのためこの操作は§10.5の
  * 3秒予算の対象である。
  */
@@ -64,8 +64,13 @@ export async function applyComputeDeviceAction(
     return { error: "切り替え先として GPU か CPU を選んでください。" };
   }
 
+  const target = formData.get("target");
+  if (target !== "comfyui" && target !== "ollama") {
+    return { error: "切り替える対象(ComfyUI か Ollama)が不明です。" };
+  }
+
   try {
-    await applyComputeDevice(device);
+    await applyComputeDevice(device, target);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

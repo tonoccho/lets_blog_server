@@ -154,4 +154,59 @@ class RestDockerEngineClientTest {
 
         assertEquals(List.of(new ContainerRef("z9", "lbs-x", "running")), client.listContainers());
     }
+
+    // ---- issue #1585: GET /containers/{id}/json(HostConfig.Runtime と State.Health.Status) ----
+
+    @Test
+    void inspectはHostConfigのRuntimeとヘルスチェックの状態を返す() {
+        server.expect(requestTo(URL + "/containers/a1/json")).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"HostConfig\":{\"Runtime\":\"nvidia\"},"
+                        + "\"State\":{\"Health\":{\"Status\":\"healthy\"}}}", MediaType.APPLICATION_JSON));
+
+        DockerEngineClient.ContainerInspection inspection = client.inspectContainer("a1");
+
+        assertEquals("nvidia", inspection.runtime());
+        assertTrue(inspection.nvidia());
+        assertTrue(inspection.healthy());
+        server.verify();
+    }
+
+    @Test
+    void inspect_ヘルスチェックが無い_Runtimeが空なら_nvidiaでもhealthyでもない() {
+        server.expect(requestTo(URL + "/containers/a1/json"))
+                .andRespond(withSuccess("{\"HostConfig\":{\"Runtime\":\"\"},\"State\":{}}",
+                        MediaType.APPLICATION_JSON));
+
+        DockerEngineClient.ContainerInspection inspection = client.inspectContainer("a1");
+
+        assertEquals("", inspection.runtime());
+        assertFalse(inspection.nvidia());
+        assertFalse(inspection.healthy());
+    }
+
+    @Test
+    void inspect_starting中はhealthyではない() {
+        server.expect(requestTo(URL + "/containers/a1/json"))
+                .andRespond(withSuccess("{\"HostConfig\":{\"Runtime\":\"runc\"},"
+                        + "\"State\":{\"Health\":{\"Status\":\"starting\"}}}", MediaType.APPLICATION_JSON));
+
+        assertFalse(client.inspectContainer("a1").healthy());
+    }
+
+    @Test
+    void inspect_本文が無ければ空の結果() {
+        server.expect(requestTo(URL + "/containers/a1/json")).andRespond(withNoContent());
+
+        DockerEngineClient.ContainerInspection inspection = client.inspectContainer("a1");
+
+        assertFalse(inspection.nvidia());
+        assertFalse(inspection.healthy());
+    }
+
+    @Test
+    void inspectの取得に失敗したらDockerEngineException() {
+        server.expect(requestTo(URL + "/containers/a1/json")).andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        assertThrows(DockerEngineException.class, () -> client.inspectContainer("a1"));
+    }
 }

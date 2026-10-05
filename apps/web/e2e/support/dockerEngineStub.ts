@@ -15,6 +15,8 @@ export const DOCKER_ENGINE_STUB_URL = 'http://127.0.0.1:18089';
 
 export const GPU_CONTAINER = 'lbs-comfyui';
 export const CPU_CONTAINER = 'lbs-comfyui-cpu';
+export const OLLAMA_GPU_CONTAINER = 'lbs-ollama';
+export const OLLAMA_CPU_CONTAINER = 'lbs-ollama-cpu';
 
 export interface DockerEngineScenario {
   /** コンテナ名 → 状態。キーが無いコンテナは「存在しない」。 */
@@ -23,8 +25,12 @@ export interface DockerEngineScenario {
   rejectStart?: string[];
   /** start は 204 を返すが running にならないコンテナ名。 */
   neverRunning?: string[];
+  /** start で running にはなるが、ヘルスチェックが healthy にならないコンテナ名(issue #1585)。 */
+  neverHealthy?: string[];
   /** start から running になるまでの遅延(ms)。 */
   runningAfterMs?: number;
+  /** コンテナ名 → HostConfig.Runtime(issue #1585)。無いコンテナは空文字(Docker の既定ランタイム)。 */
+  runtimes?: Record<string, string>;
 }
 
 export interface DockerEngineState {
@@ -71,4 +77,15 @@ export async function getDockerEngineState(): Promise<DockerEngineState> {
 /** 両構成があり、GPU 構成が稼働中・CPU 構成が停止中の既定の状態。 */
 export const BOTH_CONFIGURATIONS: DockerEngineScenario = {
   containers: { [GPU_CONTAINER]: 'running', [CPU_CONTAINER]: 'exited' },
+};
+
+/** ComfyUI と Ollama の両方に、GPU 構成が稼働中・CPU 構成が停止中の両構成がある状態(issue #1585)。Ollama は runtime が nvidia。 */
+export const BOTH_TARGETS_BOTH_CONFIGURATIONS: DockerEngineScenario = {
+  containers: {
+    [GPU_CONTAINER]: 'running',
+    [CPU_CONTAINER]: 'exited',
+    [OLLAMA_GPU_CONTAINER]: 'running',
+    [OLLAMA_CPU_CONTAINER]: 'exited',
+  },
+  runtimes: { [OLLAMA_GPU_CONTAINER]: 'nvidia' },
 };

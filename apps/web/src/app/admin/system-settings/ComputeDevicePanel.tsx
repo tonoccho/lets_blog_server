@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ComputeDevice, ComputeDeviceStatus } from "@/lib/apiClient";
 import { applyComputeDeviceAction, type ApplyComputeDeviceFormState } from "./actions";
@@ -11,6 +11,16 @@ const initialState: ApplyComputeDeviceFormState = {};
 const POLL_INTERVAL_MS = 2000;
 
 const DEVICES: ComputeDevice[] = ["GPU", "CPU"];
+
+/** 切り替え対象ごとの見出しの名前と説明(issue #1585)。未知の対象は対象名をそのまま使う。 */
+const TARGET_LABELS: Record<string, { name: string; description: string }> = {
+  comfyui: { name: "ComfyUI", description: "画像生成(ComfyUI)" },
+  ollama: { name: "Ollama", description: "ローカル LLM(Ollama)" },
+};
+
+function targetLabel(target: string): { name: string; description: string } {
+  return TARGET_LABELS[target] ?? { name: target, description: target };
+}
 
 function currentLabel(status: ComputeDeviceStatus): string {
   switch (status.currentDevice) {
@@ -56,7 +66,7 @@ function ApplyStateView({ status }: { status: ComputeDeviceStatus }) {
 }
 
 /**
- * ComfyUIの演算デバイス(GPU / CPU)の欄(issue #1399)。`AppSettingsPanel` の「保存する設定」とは別の
+ * ComfyUI・Ollama の演算デバイス(GPU / CPU)の欄(issue #1399 / #1585)。対象ごとに1欄で、互いに独立している。`AppSettingsPanel` の「保存する設定」とは別の
  * 「適用する操作」である。現在の構成は実際に動いているコンテナから判定した値を表示する。
  * 適用中は一定間隔でサーバーコンポーネントを再取得して進行状態を更新する。
  */
@@ -64,6 +74,8 @@ export function ComputeDevicePanel({ status }: { status: ComputeDeviceStatus }) 
   const [state, formAction, pending] = useActionState(applyComputeDeviceAction, initialState);
   const { refresh } = useRouter();
   const applying = status.apply.state === "APPLYING";
+  const headingId = useId();
+  const label = targetLabel(status.target);
   const [selected, setSelected] = useState<ComputeDevice | null>(
     () => DEVICES.find((d) => isSelectable(status, d) && d !== status.currentDevice) ?? null
   );
@@ -77,17 +89,23 @@ export function ComputeDevicePanel({ status }: { status: ComputeDeviceStatus }) 
   }, [applying, refresh]);
 
   return (
-    <section className="space-y-3 rounded border border-neutral-200 p-4 dark:border-neutral-800">
-      <h2 className="text-lg font-semibold">演算デバイス(ComfyUI)</h2>
+    <section
+      aria-labelledby={headingId}
+      className="space-y-3 rounded border border-neutral-200 p-4 dark:border-neutral-800"
+    >
+      <h2 id={headingId} className="text-lg font-semibold">
+        演算デバイス({label.name})
+      </h2>
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        画像生成(ComfyUI)を GPU と CPU のどちらで動かすかを切り替えます。保存する設定ではなく、
-        コンテナの起動・停止を伴う操作です。適用中は画像生成が失敗することがあり、成功しなかった場合は
+        {label.description}を GPU と CPU のどちらで動かすかを切り替えます。保存する設定ではなく、
+        コンテナの起動・停止を伴う操作です。適用中は{label.name}を使う機能が失敗することがあり、成功しなかった場合は
         元の構成へ戻ります。
       </p>
       <p data-testid="compute-device-current" className="text-sm font-medium">
         現在の構成: {currentLabel(status)}
       </p>
       <form action={formAction} className="space-y-3">
+        <input type="hidden" name="target" value={status.target} />
         <div role="radiogroup" aria-label="演算デバイス" className="space-y-2">
           {DEVICES.map((device) => {
             const reason = unavailableReason(status, device);

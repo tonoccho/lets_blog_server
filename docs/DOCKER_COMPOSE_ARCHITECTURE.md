@@ -503,6 +503,40 @@ nvidia デバイス予約は変数展開でもマージでも消せない(上記
 - 接続先を別ホストの ComfyUI に向けている場合(システム設定の `comfyui_base_url`)は対象外。切り替えるのは
   同じ compose で同梱しているコンテナだけである。
 
+### Ollama の演算デバイス切り替え(#1585)
+
+ComfyUI と同じ機構(上記)を、独立した 2 つ目の対象 `ollama` として使う。API は
+`/api/system-settings/compute-devices/ollama`(参照)と `.../ollama/apply`(適用)。
+管理画面では「演算デバイス(ComfyUI)」と「演算デバイス(Ollama)」の 2 欄が並び、互いのコンテナには触れない。
+
+- **CPU 構成は別サービス `ollama-cpu`**(`container_name: lbs-ollama-cpu`)。`ollama` の runtime は
+  コンテナ作成時に固定されるため、`comfyui-cpu` と同様に別サービスにする。`runtime` は指定せず、
+  環境変数・ヘルスチェック(`ollama list`)・イメージは `ollama` と同じ。ネットワークエイリアス `ollama` を持つので
+  接続先 `http://ollama:11434` は不変。`ollama_models` ボリュームを共有するため、GPU 構成で取得済みの
+  モデルはそのまま使える(`ollama-model-init` は CPU 構成では走らせない)。
+- **`profiles: ["ollama-cpu"]` であり、`cpu` には入れない**。`cpu` に入れると、GPU の無いホストで
+  `COMPOSE_PROFILES=cpu` にしたとき `ollama`(runtime 空 = CPU)と二重に起動する。
+- **待機側コンテナの作成は運用手順**(アプリは実行しない)。GPU ホスト(`GPU_RUNTIME=nvidia`)で、
+  `docker compose up -d` の後に一度だけ次を実行する(`.env.example` にも同じ手順を書いた)。起動はしない。
+
+  ```bash
+  docker compose --profile ollama-cpu create ollama-cpu
+  ```
+
+- **GPU 構成の有無は `lbs-ollama` の `HostConfig.Runtime` が `nvidia` かで判定する**(`GET /containers/{id}/json`。
+  docker-socket-proxy が既に通している読み取り)。`GPU_RUNTIME` が空のホストでも `lbs-ollama` は存在する
+  (CPU 実行。#1396)ため、ComfyUI のようにコンテナの存在では判別できない。nvidia でなければ CPU 固定
+  (画面は「CPU(固定)」と理由を表示し、API への GPU 適用も拒否してコンテナを start / stop しない)。
+  このとき `lbs-ollama` 自身が CPU 構成として扱われる。`lbs-ollama-cpu` が無いときは、CPU を選べない理由として
+  上の作成手順を表示する。
+- **成功判定は「目的のコンテナが `running` かつヘルスチェックが `healthy`」**(`GET /containers/{id}/json` の
+  `State.Health.Status`)。Ollama のイメージには curl が無く、URL の疎通ではなくコンテナのヘルスチェックを使う。
+  切り替え・進行表示・失敗時の復帰・認可・上限時間(`COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS`)は ComfyUI と同じ。
+- ダッシュボードのコンテナ一覧(#1584)は `ollama` ↔ `ollama-cpu` を待機中の組として扱い、
+  稼働していない側を異常に数えない(`ContainerStatusService` の `ALTERNATIVE_PAIRS`)。
+- 検証: `scripts/test_ollama_cpu_profile.py`(compose 契約)、`features/platform/compute-device.feature`
+  (Ollama のシナリオ)。実機で LLM 要求が成功することの確認は #1402 の範囲である。
+
 ### docker-socket-proxy の権限(start / stop だけを開ける)— 未確定(#1587)
 
 Epic #551 / #701 の方針(docker socket へ到達できるのは platform-service だけ)のうち、コンテナの

@@ -38,6 +38,8 @@ import java.util.concurrent.RejectedExecutionException;
  * <h2>GPUの有無</h2>
  * proxyの読み取り権限ではホストのGPUを直接調べられないため、GPU構成のコンテナ({@code lbs-comfyui})が
  * 存在するかで判定する。GPU構成のコンテナはGPUホストでしか作らない運用である。無ければCPUに固定する。
+ * Ollama(#1585)は{@code GPU_RUNTIME}が空のホストでも{@code lbs-ollama}が存在する(CPU実行)ため、存在ではなく
+ * {@code HostConfig.Runtime}が{@code nvidia}かで判定する。成功判定もURLではなくコンテナのヘルスチェックを使う。
  *
  * <h2>適用</h2>
  * 要求を受け付けたら即座に返し、裏で「他方を停止 → 選んだ構成を起動 → 成功判定」を進める。成功は
@@ -85,7 +87,8 @@ public class ComputeDeviceService {
             @Value("${app.compute-device.apply-timeout-seconds:180}") long timeoutSeconds,
             @Value("${app.compute-device.poll-interval-millis:2000}") long pollIntervalMillis) {
         this(docker, probe,
-                List.of(new ComputeTarget("comfyui", "lbs-comfyui", "lbs-comfyui-cpu", comfyUiHealthUrl)),
+                List.of(new ComputeTarget("comfyui", "lbs-comfyui", "lbs-comfyui-cpu", comfyUiHealthUrl),
+                        new ComputeTarget("ollama", "Ollama", "lbs-ollama", "lbs-ollama-cpu", null, true, "ollama-cpu")),
                 Executors.newCachedThreadPool(runnable -> {
                     Thread thread = new Thread(runnable, "compute-device-apply");
                     thread.setDaemon(true);
@@ -139,12 +142,17 @@ public class ComputeDeviceService {
     }
 
     private static String gpuUnavailableReason(ComputeTarget target) {
-        return "このホストには GPU 構成の ComfyUI(" + target.gpuContainerName() + ")が無いため、CPU 固定です。";
+        if (target.gpuByRuntime()) {
+            return "このホストの " + target.displayName() + "(" + target.gpuContainerName()
+                    + ")は GPU ランタイム(nvidia)で作られていないため、CPU 固定です。";
+        }
+        return "このホストには GPU 構成の " + target.displayName() + "(" + target.gpuContainerName()
+                + ")が無いため、CPU 固定です。";
     }
 
     private static String cpuUnavailableReason(ComputeTarget target) {
         return "CPU 構成のコンテナ(" + target.cpuContainerName() + ")がまだ作成されていません。"
-                + "ホストで「docker compose --profile cpu create " + target.id() + "-cpu」を一度だけ実行してください。";
+                + "ホストで「" + target.cpuCreateCommand() + "」を一度だけ実行してください。";
     }
 
     // ---- 適用 ----
@@ -227,7 +235,7 @@ public class ComputeDeviceService {
         boolean running = false;
         while (true) {
             running = isRunning(wanted.name());
-            if (running && probe.isHealthy(target.healthUrl())) {
+            if (running && isHealthy(target, wanted)) {
                 return;
             }
             if (!clock.instant().isBefore(deadline)) {
@@ -236,9 +244,24 @@ public class ComputeDeviceService {
             sleep(stage);
         }
         String condition = running
-                ? target.healthUrl() + " が HTTP 200 を返す"
+                ? (target.usesContainerHealth()
+                        ? "コンテナ " + wanted.name() + " のヘルスチェックが healthy になる"
+                        : target.healthUrl() + " が HTTP 200 を返す")
                 : "コンテナ " + wanted.name() + " が running になる";
         throw new StageFailure(stage, timeout.toSeconds() + "秒以内に " + condition + " 状態になりませんでした");
+    }
+
+    /** 成功判定。URLを持つ対象はその疎通で、持たない対象(Ollama)はコンテナのヘルスチェックで判定する。 */
+    private boolean isHealthy(ComputeTarget target, ContainerRef wanted) {
+        if (!target.usesContainerHealth()) {
+            return probe.isHealthy(target.healthUrl());
+        }
+        try {
+            return docker.inspectContainer(wanted.id()).healthy();
+        } catch (DockerEngineException e) {
+            // 一時的な取得失敗は「まだ健全でない」として扱い、上限時間まで待つ。
+            return false;
+        }
     }
 
     private void sleep(String stage) {
@@ -367,7 +390,22 @@ public class ComputeDeviceService {
             throw new ComputeDeviceException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Docker Engine API(docker-socket-proxy)に到達できません: " + e.getMessage());
         }
-        return new Snapshot(find(containers, target.gpuContainerName()), find(containers, target.cpuContainerName()));
+        ContainerRef gpu = find(containers, target.gpuContainerName());
+        ContainerRef cpu = find(containers, target.cpuContainerName());
+        if (target.gpuByRuntime() && gpu != null && !runtimeIsNvidia(gpu)) {
+            // GPU_RUNTIME が空のホストの lbs-ollama は CPU で動く(#1396)。GPU構成は無く、これが CPU 構成そのもの。
+            return new Snapshot(null, gpu);
+        }
+        return new Snapshot(gpu, cpu);
+    }
+
+    private boolean runtimeIsNvidia(ContainerRef container) {
+        try {
+            return docker.inspectContainer(container.id()).nvidia();
+        } catch (DockerEngineException e) {
+            throw new ComputeDeviceException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Docker Engine API(docker-socket-proxy)に到達できません: " + e.getMessage());
+        }
     }
 
     private static ContainerRef find(List<ContainerRef> containers, String name) {

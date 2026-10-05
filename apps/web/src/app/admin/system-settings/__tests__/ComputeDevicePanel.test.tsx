@@ -220,4 +220,49 @@ describe('ComputeDevicePanel(issue #1399)', () => {
 
     expect(screen.queryByTestId('compute-device-apply-state')).toBeNull()
   })
+
+  // ---- issue #1585: Ollama も同じ欄で、ComfyUI とは独立に切り替える ----
+
+  it('Ollamaの欄は見出しと説明がOllama向けで、対象をフォームへ載せて送る', async () => {
+    actionMock.mockResolvedValue({ success: true })
+    render(<ComputeDevicePanel status={status({ target: 'ollama' })} />)
+
+    expect(screen.getByRole('heading', { name: '演算デバイス(Ollama)' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '演算デバイス(Ollama)' })).toBeInTheDocument()
+    expect(screen.getByText(/ローカル LLM\(Ollama\)/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '適用する' }))
+
+    await waitFor(() => expect(actionMock).toHaveBeenCalled())
+    const form = actionMock.mock.calls[0][1] as FormData
+    expect(form.get('target')).toBe('ollama')
+    expect(form.get('device')).toBe('CPU')
+  })
+
+  it('ComfyUIの欄も対象comfyuiを送る', async () => {
+    actionMock.mockResolvedValue({ success: true })
+    render(<ComputeDevicePanel status={status()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '適用する' }))
+
+    await waitFor(() => expect(actionMock).toHaveBeenCalled())
+    expect((actionMock.mock.calls[0][1] as FormData).get('target')).toBe('comfyui')
+  })
+
+  it('2つの欄を並べても、それぞれ自分の対象の見出しで区別できる', () => {
+    render(
+      <>
+        <ComputeDevicePanel status={status()} />
+        <ComputeDevicePanel status={status({ target: 'ollama', currentDevice: 'CPU', cpuFixed: true })} />
+      </>,
+    )
+
+    expect(screen.getByRole('region', { name: '演算デバイス(ComfyUI)' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '演算デバイス(Ollama)' })).toBeInTheDocument()
+  })
+
+  it('未知の対象は対象名をそのまま見出しに使う', () => {
+    render(<ComputeDevicePanel status={status({ target: 'other' })} />)
+
+    expect(screen.getByRole('heading', { name: '演算デバイス(other)' })).toBeInTheDocument()
+  })
 })

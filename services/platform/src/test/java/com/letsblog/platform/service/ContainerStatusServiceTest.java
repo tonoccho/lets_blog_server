@@ -446,4 +446,37 @@ class ContainerStatusServiceTest {
 
         assertEquals(2, containers.size(), "プロジェクト名が無ければ絞り込まない");
     }
+
+    // issue #1585: ollama <-> ollama-cpu も代替構成の組にする。
+    @ParameterizedTest
+    @ValueSource(strings = {"created", "exited"})
+    void testListAll_ollamaの相方がrunningなら停止側は待機中の正常にする(String standbyState) {
+        expectList("[" + entry("ollama", "running", "Up 1 hour (healthy)") + ","
+                + entry("ollama-cpu", standbyState, "Exited (0) 1 minute ago") + "]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals("standby", find(containers, "ollama-cpu").state());
+        assertEquals(Status.NORMAL, find(containers, "ollama-cpu").status());
+    }
+
+    @Test
+    void testListAll_ollamaがCPU構成で動いていればGPU側が待機中になる() {
+        expectList("[" + entry("ollama", "exited", "Exited (0) 1 minute ago") + ","
+                + entry("ollama-cpu", "running", "Up 1 hour (healthy)") + "]");
+
+        assertEquals("standby", find(service.listAll(), "ollama").state());
+    }
+
+    @Test
+    void testListAll_ollamaとcomfyuiの組は互いに影響しない() {
+        expectList("[" + entry("ollama", "running", "Up 1 hour") + ","
+                + entry("comfyui", "created", "Created") + ","
+                + entry("ollama-cpu", "exited", "Exited (0) 1 minute ago") + "]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(Status.ERROR, find(containers, "comfyui").status());
+        assertEquals("standby", find(containers, "ollama-cpu").state());
+    }
 }

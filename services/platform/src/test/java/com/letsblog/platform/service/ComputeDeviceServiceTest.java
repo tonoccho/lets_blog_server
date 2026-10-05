@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,6 +47,11 @@ class ComputeDeviceServiceTest {
         final Set<String> rejectStop = new HashSet<>();
         final Set<String> neverRunning = new HashSet<>();
         boolean unreachable;
+        /** コンテナ名 -> HostConfig.Runtime。既定は空(Dockerの既定ランタイム)。 */
+        final Map<String, String> runtimes = new HashMap<>();
+        /** ヘルスチェックが healthy にならないコンテナ(running でも starting のまま)。 */
+        final Set<String> unhealthy = new HashSet<>();
+        final Set<String> inspectFails = new HashSet<>();
 
         FakeDocker with(String name, String state) {
             states.put(name, state);
@@ -60,6 +66,16 @@ class ComputeDeviceServiceTest {
             List<ContainerRef> refs = new ArrayList<>();
             states.forEach((name, state) -> refs.add(new ContainerRef("id-" + name, name, state)));
             return refs;
+        }
+
+        @Override
+        public ContainerInspection inspectContainer(String id) {
+            String name = id.substring(3);
+            if (inspectFails.contains(name)) {
+                throw new DockerEngineException("inspect " + name + " に失敗しました");
+            }
+            boolean healthy = "running".equals(states.get(name)) && !unhealthy.contains(name);
+            return new ContainerInspection(runtimes.getOrDefault(name, ""), healthy ? "healthy" : "starting");
         }
 
         @Override
@@ -608,5 +624,194 @@ class ComputeDeviceServiceTest {
         String message = service.getStatus("comfyui").apply().message();
         assertTrue(message.contains("docker start lbs-comfyui-cpu"), message);
         assertFalse(message.contains("docker start lbs-comfyui "), message);
+    }
+
+    // ---- Ollama(issue #1585)。ComfyUIとは独立した2つ目の対象 ----
+
+    private static final String OLLAMA_GPU = "lbs-ollama";
+    private static final String OLLAMA_CPU = "lbs-ollama-cpu";
+
+    private static ComputeTarget ollamaTarget() {
+        return new ComputeTarget("ollama", "Ollama", OLLAMA_GPU, OLLAMA_CPU, null, true, "ollama-cpu");
+    }
+
+    private ComputeDeviceService both(java.util.concurrent.Executor executor) {
+        ComputeDeviceHealthProbe probe = url -> {
+            probedUrls.add(url);
+            return healthy;
+        };
+        return new ComputeDeviceService(docker, probe,
+                List.of(new ComputeTarget("comfyui", GPU, CPU, HEALTH_URL), ollamaTarget()),
+                executor, clock, d -> clock.advance(d), TIMEOUT, POLL);
+    }
+
+    private void ollamaOnNvidiaHost(String gpuState, String cpuState) {
+        docker.with(OLLAMA_GPU, gpuState).with(OLLAMA_CPU, cpuState);
+        docker.runtimes.put(OLLAMA_GPU, "nvidia");
+    }
+
+    @Test
+    void Ollama_runtimeがnvidiaで両構成があればどちらも選べる() {
+        ollamaOnNvidiaHost("running", "exited");
+
+        ComputeDeviceStatusResponse status = both(Runnable::run).getStatus("ollama");
+
+        assertEquals("ollama", status.target());
+        assertEquals(CurrentDevice.GPU, status.currentDevice());
+        assertTrue(status.gpuSelectable());
+        assertTrue(status.cpuSelectable());
+        assertFalse(status.cpuFixed());
+        assertNull(status.gpuUnavailableReason());
+        assertNull(status.cpuUnavailableReason());
+    }
+
+    @Test
+    void Ollama_runtimeがnvidiaでなければCPU固定でGPUは選べず理由を返す() {
+        docker.with(OLLAMA_GPU, "running");
+        docker.runtimes.put(OLLAMA_GPU, "");
+
+        ComputeDeviceStatusResponse status = both(Runnable::run).getStatus("ollama");
+
+        assertTrue(status.cpuFixed());
+        assertFalse(status.gpuSelectable());
+        assertEquals(CurrentDevice.CPU, status.currentDevice());
+        assertTrue(status.gpuUnavailableReason().contains("nvidia"), status.gpuUnavailableReason());
+    }
+
+    @Test
+    void Ollama_runtimeがnvidiaでないホストでGPUへの適用は拒否され_どのコンテナも操作されない() {
+        docker.with(OLLAMA_GPU, "running").with(OLLAMA_CPU, "exited");
+        docker.runtimes.put(OLLAMA_GPU, "runc");
+
+        ComputeDeviceException e = rejected(() -> both(Runnable::run).apply("ollama", ComputeDevice.GPU));
+
+        assertEquals(HttpStatus.CONFLICT, e.status());
+        assertTrue(docker.calls.isEmpty());
+    }
+
+    @Test
+    void Ollama_lbs_ollamaが無くCPU構成だけでもCPU固定と判定する() {
+        docker.with(OLLAMA_CPU, "running");
+
+        ComputeDeviceStatusResponse status = both(Runnable::run).getStatus("ollama");
+
+        assertTrue(status.cpuFixed());
+        assertEquals(CurrentDevice.CPU, status.currentDevice());
+        assertFalse(status.gpuSelectable());
+    }
+
+    @Test
+    void Ollama_CPU構成が無ければCPUを選べない理由に作成手順を示す() {
+        ollamaOnNvidiaHost("running", "exited");
+        docker.states.remove(OLLAMA_CPU);
+
+        ComputeDeviceStatusResponse status = both(Runnable::run).getStatus("ollama");
+
+        assertFalse(status.cpuSelectable());
+        assertTrue(status.cpuUnavailableReason()
+                .contains("docker compose --profile ollama-cpu create ollama-cpu"), status.cpuUnavailableReason());
+        assertTrue(rejected(() -> both(Runnable::run).apply("ollama", ComputeDevice.CPU)).getMessage()
+                .contains("docker compose --profile ollama-cpu create ollama-cpu"));
+    }
+
+    @Test
+    void Ollama_GPUからCPUへ切り替えると選んだ構成だけがrunningかつhealthyになる() {
+        ollamaOnNvidiaHost("running", "exited");
+        ComputeDeviceService service = both(Runnable::run);
+
+        service.apply("ollama", ComputeDevice.CPU);
+
+        assertEquals(List.of("stop:" + OLLAMA_GPU, "start:" + OLLAMA_CPU), docker.calls);
+        ComputeDeviceStatusResponse done = service.getStatus("ollama");
+        assertEquals(ApplyState.SUCCEEDED, done.apply().state());
+        assertEquals(CurrentDevice.CPU, done.currentDevice());
+        assertTrue(probedUrls.isEmpty(), "Ollamaの成功判定はURLではなくコンテナのヘルスチェックで行う");
+    }
+
+    @Test
+    void Ollama_CPUからGPUへも切り替えられる() {
+        ollamaOnNvidiaHost("exited", "running");
+        ComputeDeviceService service = both(Runnable::run);
+
+        service.apply("ollama", ComputeDevice.GPU);
+
+        assertEquals(List.of("stop:" + OLLAMA_CPU, "start:" + OLLAMA_GPU), docker.calls);
+        assertEquals(CurrentDevice.GPU, service.getStatus("ollama").currentDevice());
+    }
+
+    @Test
+    void Ollama_healthyにならなければ上限後に失敗し_元の構成が_runningに戻る() {
+        ollamaOnNvidiaHost("running", "exited");
+        docker.unhealthy.add(OLLAMA_CPU);
+        ComputeDeviceService service = both(Runnable::run);
+
+        service.apply("ollama", ComputeDevice.CPU);
+
+        ComputeDeviceStatusResponse status = service.getStatus("ollama");
+        assertEquals(ApplyState.FAILED, status.apply().state());
+        assertTrue(status.apply().message().contains("healthy"), status.apply().message());
+        assertTrue(status.apply().message().contains("30秒以内"), status.apply().message());
+        assertTrue(status.apply().message().contains("元の構成(GPU)に戻しました"), status.apply().message());
+        assertEquals("running", docker.states.get(OLLAMA_GPU));
+        assertEquals("exited", docker.states.get(OLLAMA_CPU));
+    }
+
+    @Test
+    void Ollama_起動確認中のinspect失敗は健全でないものとして待ち続け_回復すれば成功する() {
+        ollamaOnNvidiaHost("running", "exited");
+        docker.inspectFails.add(OLLAMA_CPU);
+        ComputeDeviceService service = new ComputeDeviceService(docker, url -> true,
+                List.of(ollamaTarget()), Runnable::run, clock,
+                d -> {
+                    clock.advance(d);
+                    docker.inspectFails.clear();
+                }, TIMEOUT, POLL);
+
+        service.apply("ollama", ComputeDevice.CPU);
+
+        assertEquals(ApplyState.SUCCEEDED, service.getStatus("ollama").apply().state());
+    }
+
+    @Test
+    void Ollama_状態取得中のinspect失敗は503() {
+        ollamaOnNvidiaHost("running", "exited");
+        docker.inspectFails.add(OLLAMA_GPU);
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                rejected(() -> both(Runnable::run).getStatus("ollama")).status());
+    }
+
+    @Test
+    void ComfyUIを切り替えてもOllamaのコンテナは操作されず_逆も同じ() {
+        docker.with(GPU, "running").with(CPU, "exited");
+        ollamaOnNvidiaHost("running", "exited");
+        ComputeDeviceService service = both(Runnable::run);
+
+        service.apply("comfyui", ComputeDevice.CPU);
+
+        assertEquals(List.of("stop:" + GPU, "start:" + CPU), docker.calls);
+        assertEquals("running", docker.states.get(OLLAMA_GPU));
+        assertEquals(ApplyState.IDLE, service.getStatus("ollama").apply().state());
+
+        docker.calls.clear();
+        service.apply("ollama", ComputeDevice.CPU);
+
+        assertEquals(List.of("stop:" + OLLAMA_GPU, "start:" + OLLAMA_CPU), docker.calls);
+        assertEquals("running", docker.states.get(CPU));
+    }
+
+    @Test
+    void 片方の対象が適用中でももう一方の適用は拒否されない() {
+        docker.with(GPU, "running").with(CPU, "exited");
+        ollamaOnNvidiaHost("running", "exited");
+        ComputeDeviceService service = both(queued::add);
+
+        service.apply("comfyui", ComputeDevice.CPU);
+        ComputeDeviceStatusResponse accepted = service.apply("ollama", ComputeDevice.CPU);
+
+        assertEquals(ApplyState.APPLYING, accepted.apply().state());
+        assertEquals(2, queued.size());
+        assertEquals(HttpStatus.CONFLICT,
+                rejected(() -> service.apply("ollama", ComputeDevice.GPU)).status());
     }
 }
