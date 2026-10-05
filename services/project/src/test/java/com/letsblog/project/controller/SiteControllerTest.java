@@ -202,7 +202,7 @@ class SiteControllerTest {
     private MockMvc mockMvcWithRealService(SiteRepository siteRepository) {
         SiteService realService = new SiteService(siteRepository,
                 new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32])), new ObjectMapper(),
-                null, null, null, null);
+                null, null, null, null, null);
         SiteController real = new SiteController(realService, adminAuthorizationService,
                 wordPressSiteProvisioningService, sshKeyGenerationService, projectService, letsblogSyncService, managedSiteProvisioningJobStarter);
         return MockMvcBuilders.standaloneSetup(real).setControllerAdvice(new GlobalExceptionHandler()).build();

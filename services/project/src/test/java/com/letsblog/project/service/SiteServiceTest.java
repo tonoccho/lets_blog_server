@@ -22,6 +22,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,8 +65,22 @@ class SiteServiceTest {
 
     private SiteService service() {
         return new SiteService(siteRepository, credentialCipher, objectMapper, bridgeClient, provisioningService,
-                sshKeyPairRepository, currentActorService);
+                sshKeyPairRepository, currentActorService, transactionOperations);
     }
+
+    /** トランザクション内かどうかを記録する(#1628)。 */
+    private final boolean[] inTransaction = {false};
+    private final TransactionOperations transactionOperations = new TransactionOperations() {
+        @Override
+        public <T> T execute(TransactionCallback<T> action) {
+            inTransaction[0] = true;
+            try {
+                return action.doInTransaction(null);
+            } finally {
+                inTransaction[0] = false;
+            }
+        }
+    };
 
     @Test
     void register_既にsiteKeyがあればIllegalArgument() {
@@ -74,6 +90,32 @@ class SiteServiceTest {
                 Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u"), null);
 
         assertThrows(IllegalArgumentException.class, () -> service().register(request));
+    }
+
+    @Test
+    void register_リモート呼び出しの間はトランザクションを持たず保存だけをトランザクション内で行う() {
+        when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
+        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
+        boolean[] seenInTx = new boolean[3];
+        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com"))).thenAnswer(inv -> {
+            seenInTx[0] = inTransaction[0];
+            return new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null);
+        });
+        when(bridgeClient.testConnection(eq("WORDPRESS"), any())).thenAnswer(inv -> {
+            seenInTx[1] = inTransaction[0];
+            return new ConnectionCheckResult(true, null, null, null);
+        });
+        when(siteRepository.save(any())).thenAnswer(inv -> {
+            seenInTx[2] = inTransaction[0];
+            return inv.getArgument(0);
+        });
+
+        service().register(new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
+                Map.of("baseUrl", "https://example.com", "transport", "AGENT", "username", "u"), null));
+
+        assertFalse(seenInTx[0], "provisionSite はトランザクション外");
+        assertFalse(seenInTx[1], "疎通確認はトランザクション外");
+        assertTrue(seenInTx[2], "保存はトランザクション内");
     }
 
     @Test

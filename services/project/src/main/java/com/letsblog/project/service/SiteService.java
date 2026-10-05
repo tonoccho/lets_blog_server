@@ -30,6 +30,7 @@ import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.util.StringUtils;
 
 /**
@@ -57,10 +58,12 @@ public class SiteService {
     private final ProvisioningService provisioningService;
     private final SshKeyPairRepository sshKeyPairRepository;
     private final CurrentActorService currentActorService;
+    private final TransactionOperations transactionOperations;
 
     public SiteService(SiteRepository siteRepository, CredentialCipher credentialCipher, ObjectMapper objectMapper,
             CmsProvisioningBridgeClient bridgeClient, ProvisioningService provisioningService,
-            SshKeyPairRepository sshKeyPairRepository, CurrentActorService currentActorService) {
+            SshKeyPairRepository sshKeyPairRepository, CurrentActorService currentActorService,
+            TransactionOperations transactionOperations) {
         this.siteRepository = siteRepository;
         this.credentialCipher = credentialCipher;
         this.objectMapper = objectMapper;
@@ -68,15 +71,18 @@ public class SiteService {
         this.provisioningService = provisioningService;
         this.sshKeyPairRepository = sshKeyPairRepository;
         this.currentActorService = currentActorService;
+        this.transactionOperations = transactionOperations;
     }
 
     /**
      * サイトを登録する。保存前にCMS側へのプロビジョニング(デフォルトカテゴリ・タグ・著者の作成)を実行し、
      * 致命的な失敗の場合は登録自体を行わない。登録後に疎通確認も行うが、こちらは失敗しても登録自体は
      * 取り消さず、結果をレスポンスのconnectionCheckStatusで通知する。
+     *
+     * <p>CMSブリッジへのリモート呼び出し中はDB接続を保持しないよう、メソッド全体はトランザクションにせず、
+     * 保存だけを{@link TransactionOperations}で短いトランザクションにする(#1628)。
      */
     @AuditLog(action = AuditLogAction.SITE_REGISTERED, resourceType = "SITE")
-    @Transactional
     public SiteResponse register(SiteRegisterRequest request) {
         // adminPathは副作用(プロビジョニング・保存)の前に検証する。更新(update)と同じ規則(#1081/#1533)。
         String adminPath = request.adminPath() == null || request.adminPath().isEmpty() ? null : request.adminPath();
@@ -115,7 +121,7 @@ public class SiteService {
         site.setBaseUrl(resolveDisplayBaseUrl(request.cmsType(), request.credentials()));
         site.setCredentialsEncrypted(credentialCipher.encrypt(writeCredentialsJson(credentialsToStore)));
 
-        Site saved = siteRepository.save(site);
+        Site saved = transactionOperations.execute(status -> siteRepository.save(site));
 
         return SiteResponse.from(saved, connectionResult.ok());
     }
