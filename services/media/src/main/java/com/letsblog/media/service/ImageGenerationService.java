@@ -222,7 +222,7 @@ public class ImageGenerationService {
         prohibitedContentFilterService.check(prompt, blockSexual, blockViolent, blockDiscriminatory);
         String tagsJson = suggestImageTagsJson(prompt);
         // 参照画像(img2img、issue #1601)はリピート間で変わらないので、1回だけ読み込んで使い回す。
-        ReferenceImage referenceImage = provider == ImageProvider.COMFYUI && imageRequest.referenceImageId() != null
+        ReferenceImage referenceImage = imageRequest.referenceImageId() != null
                 ? referenceImageService.load(imageRequest.projectId(), imageRequest.referenceImageId())
                 : null;
         ComfyUiGenerationParams baseParams = resolveParams(
@@ -315,17 +315,13 @@ public class ImageGenerationService {
     }
 
     /**
-     * 参照画像(img2img、issue #1601)を受け付けられるか、ジョブを作る前に判定する。ChatGPTは未対応
-     * (対応は#1602)。ComfyUIでは、参照画像が同じプロジェクトに存在することを確かめる。
+     * 参照画像(img2img、issue #1601 / ChatGPTのimages/edits、issue #1602)を受け付けられるか、
+     * ジョブを作る前に判定する。どちらのプロバイダでも、参照画像が同じプロジェクトに存在することを確かめる。
      * 参照画像の無い要求は何も確かめない。
      */
     private void requireReferenceImageAcceptable(ImageProvider provider, AiImageRequest imageRequest) {
         if (imageRequest.referenceImageId() == null) {
             return;
-        }
-        if (provider == ImageProvider.CHATGPT) {
-            throw new UnsupportedReferenceImageException(
-                    "画像生成AI " + provider.name() + " は参照画像付きの生成に未対応です。");
         }
         referenceImageService.requireUsable(imageRequest.projectId(), imageRequest.referenceImageId());
     }

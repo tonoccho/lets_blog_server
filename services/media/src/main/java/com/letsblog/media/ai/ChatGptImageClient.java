@@ -4,8 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.letsblog.media.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -19,6 +24,10 @@ import java.util.List;
  * ComfyUiGenerationParamsのうちprompt/width/height/batchSizeのみを使用し、ComfyUI固有の
  * steps/cfgScale/samplerName/scheduler/checkpoint/loraName/loraWeight/negativePrompt/seedは
  * ChatGPT画像生成APIが対応していないため無視する。
+ *
+ * <p>参照画像({@link ComfyUiGenerationParams#referenceImage()})があるときは、編集指示型の
+ * POST {baseUrl}/images/edits へmultipart(image/prompt/model/n/size)で送る(issue #1602)。
+ * 変化の強さ(denoise)はgpt-image-1に無いので送らない。参照画像が無いときは従来どおりgenerationsを呼ぶ。
  */
 @Component
 public class ChatGptImageClient implements ImageGenerationProvider {
@@ -48,21 +57,34 @@ public class ChatGptImageClient implements ImageGenerationProvider {
                     "ChatGPTのAPIキーが設定されていません。このプロジェクトでAPIキーを設定してください。", null);
         }
 
+        boolean edit = params.referenceImage() != null;
         int batchSize = params.batchSize() != null ? params.batchSize() : 1;
-        JsonNode body = JsonNodeFactory.instance.objectNode()
-                .put("model", MODEL)
-                .put("prompt", params.prompt())
-                .put("n", batchSize)
-                .put("size", resolveSize(params.width(), params.height()));
+        String size = resolveSize(params.width(), params.height());
 
         try {
-            JsonNode response = client.post()
-                    .uri(configProvider.chatGptBaseUrl() + "/images/generations")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
+            JsonNode response;
+            if (edit) {
+                response = client.post()
+                        .uri(configProvider.chatGptBaseUrl() + "/images/edits")
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .header("Authorization", "Bearer " + apiKey)
+                        .body(editForm(params, batchSize, size))
+                        .retrieve()
+                        .body(JsonNode.class);
+            } else {
+                JsonNode body = JsonNodeFactory.instance.objectNode()
+                        .put("model", MODEL)
+                        .put("prompt", params.prompt())
+                        .put("n", batchSize)
+                        .put("size", size);
+                response = client.post()
+                        .uri(configProvider.chatGptBaseUrl() + "/images/generations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + apiKey)
+                        .body(body)
+                        .retrieve()
+                        .body(JsonNode.class);
+            }
 
             List<ComfyUiImage> images = new ArrayList<>();
             int index = 1;
@@ -74,11 +96,43 @@ public class ChatGptImageClient implements ImageGenerationProvider {
             return images;
         } catch (RestClientResponseException e) {
             throw new AiServiceException(
-                    "ChatGPT画像生成の呼び出しに失敗しました: " + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
+                    "ChatGPT画像" + (edit ? "編集(images/edits)" : "生成") + "の呼び出しに失敗しました: "
+                            + e.getStatusCode() + " " + e.getResponseBodyAsString(), e);
         } catch (Exception e) {
             throw new AiServiceException(
-                    "ChatGPT画像生成中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: " + e.getMessage(), e);
+                    "ChatGPT画像" + (edit ? "編集(images/edits)" : "生成")
+                            + "中にエラーが発生しました（タイムアウトまたはネットワークエラーの可能性があります）: "
+                            + e.getMessage(), e);
         }
+    }
+
+    /** /images/editsのmultipartフォーム。画像はファイルパートとして、型と拡張子を添えて送る。 */
+    private MultiValueMap<String, Object> editForm(ComfyUiGenerationParams params, int batchSize, String size) {
+        ReferenceImage reference = params.referenceImage();
+        String mimeType = reference.mimeType() != null ? reference.mimeType() : "image/png";
+        String filename = "reference." + extensionOf(mimeType);
+        HttpHeaders imageHeaders = new HttpHeaders();
+        imageHeaders.setContentType(MediaType.parseMediaType(mimeType));
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("image", new HttpEntity<>(new ByteArrayResource(reference.data()) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        }, imageHeaders));
+        form.add("prompt", params.prompt());
+        form.add("model", MODEL);
+        form.add("n", String.valueOf(batchSize));
+        form.add("size", size);
+        return form;
+    }
+
+    private static String extensionOf(String mimeType) {
+        return switch (mimeType) {
+            case "image/jpeg" -> "jpg";
+            case "image/webp" -> "webp";
+            default -> "png";
+        };
     }
 
     /**

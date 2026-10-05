@@ -276,10 +276,6 @@ Then('参照画像付きの画像生成の要求は4xxで拒否される', async
   expect(status, `応答本文: ${body}`).toBeLessThan(500);
 });
 
-Then('拒否の理由に参照画像付き生成が未対応である旨が示される', async ({ ctx }) => {
-  expect(run(ctx).body).toContain('未対応');
-});
-
 Then('その要求のジョブは作られていない', async ({ ctx, request }) => {
   const headers = { Authorization: `Bearer ${await adminToken(request)}` };
   const list = await request.get('/api/generation-jobs', { headers });

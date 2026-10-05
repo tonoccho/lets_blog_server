@@ -41,7 +41,7 @@ import static org.mockito.Mockito.when;
 /**
  * 参照画像付き(img2img)生成のオーケストレーション(issue #1601)。
  *
- * <p>参照画像は、ジョブを作る前に検証する(削除済み・他プロジェクトは拒否、ChatGPTは未対応で拒否)。
+ * <p>参照画像は、ジョブを作る前に検証する(削除済み・他プロジェクトは拒否、ChatGPTも同じ検証で受理)。
  * 受理された要求では、参照画像のバイト列とdenoiseがComfyUIへ渡り、生成した各画像の行に
  * 参照元の画像IDが残る。参照画像が無い要求は従来と同じ(参照・denoiseとも空)。
  *
@@ -165,15 +165,45 @@ class ImageGenerationServiceReferenceTest {
     }
 
     @Test
-    void ChatGPTでの参照画像付き要求は未対応として拒否しジョブを作らない_同期() {
+    void ChatGPTでの参照画像付き要求は拒否せず参照画像のバイト列をChatGPTへ渡し参照元IDを保存する_同期() {
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> List.of(
+                new ComfyUiImage("chatgpt_1.png", new byte[] {1}, "image/png")));
 
-        UnsupportedReferenceImageException e = assertThrows(UnsupportedReferenceImageException.class,
+        service.generateImage(withReference(1L, 5L, null));
+
+        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
+        verify(chatGptImageClient).generateImage(captor.capture());
+        assertSame(REFERENCE, captor.getValue().referenceImage());
+        assertEquals(5L, savedRequest().sourceImageId());
+        verify(referenceImageService).requireUsable(1L, 5L);
+        verify(comfyUiClient, never()).generateImage(any());
+    }
+
+    @Test
+    void ChatGPTでも使えない参照画像はジョブを作らず拒否する_同期() {
+        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        when(referenceImageService.requireUsable(1L, 5L)).thenThrow(new InvalidReferenceImageException("x"));
+
+        assertThrows(InvalidReferenceImageException.class,
                 () -> service.generateImage(withReference(1L, 5L, null)));
 
-        assertTrue(e.getMessage().contains("未対応"), e.getMessage());
         verify(generationJobClient, never()).create(anyString(), anyString(), any());
         verify(chatGptImageClient, never()).generateImage(any());
+    }
+
+    @Test
+    void ChatGPTで参照画像が無い要求は従来どおり参照画像を読み込まない() {
+        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> List.of(
+                new ComfyUiImage("chatgpt_1.png", new byte[] {1}, "image/png")));
+
+        service.generateImage(withReference(1L, null, null));
+
+        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
+        verify(chatGptImageClient).generateImage(captor.capture());
+        assertNull(captor.getValue().referenceImage());
+        verify(referenceImageService, never()).load(any(), any());
     }
 
     @Test
@@ -193,13 +223,13 @@ class ImageGenerationServiceReferenceTest {
     }
 
     @Test
-    void 非同期の受理前検証でChatGPTの参照画像付き要求は未対応で拒否する() {
+    void 非同期の受理前検証でChatGPTの参照画像付き要求も参照画像を確かめて受理する() {
         when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
 
-        assertThrows(UnsupportedReferenceImageException.class,
-                () -> service.requireAcceptable(withReference(1L, 5L, null)));
+        ImageProvider provider = service.requireAcceptable(withReference(1L, 5L, null));
 
-        verify(referenceImageService, never()).requireUsable(any(), any());
+        assertEquals(ImageProvider.CHATGPT, provider);
+        verify(referenceImageService).requireUsable(1L, 5L);
     }
 
     @Test
