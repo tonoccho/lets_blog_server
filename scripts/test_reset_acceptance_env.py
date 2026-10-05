@@ -71,6 +71,7 @@ case "$1" in
     exit 0
     ;;
   compose)
+    echo "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-<unset>} $*" >> "$FAKE_COMPOSE_LOG"
     exit 0
     ;;
 esac
@@ -107,12 +108,15 @@ class ResetNotRunningContainerTest(unittest.TestCase):
         write_exec(os.path.join(self.bin, "docker"), FAKE_DOCKER)
         write_exec(os.path.join(self.bin, "curl"), FAKE_CURL)
         self.log = os.path.join(self.tmp, "docker.log")
+        self.compose_log = os.path.join(self.tmp, "compose.log")
 
     def run_script(self, not_running):
         env = dict(os.environ)
         env["PATH"] = self.bin + os.pathsep + env["PATH"]
         env["FAKE_DOCKER_LOG"] = self.log
         env["FAKE_NOT_RUNNING"] = not_running
+        env["FAKE_COMPOSE_LOG"] = self.compose_log
+        env.pop("COMPOSE_PROJECT_NAME", None)
         return subprocess.run(
             ["bash", os.path.join(self.repo, "scripts", SCRIPT_NAME), "--yes"],
             env=env, capture_output=True, text=True, timeout=60,
@@ -146,6 +150,21 @@ class ResetNotRunningContainerTest(unittest.TestCase):
         self.assertTrue(any(c.startswith("exec lbs-media") for c in calls))
         self.assertTrue(any(c.startswith("exec lbs-comfyui") for c in calls))
         self.assertNotIn("未起動のためスキップ", r.stdout)
+
+    def test_compose_restart_pins_the_shared_stack_project_name(self):
+        # worktree(ディレクトリ名が lets_blog_server でない)から実行しても、
+        # compose が別プロジェクトを選ばず共有スタックを再起動する(#1635)。
+        r = self.run_script("none")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(self.compose_log, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        restarts = [l for l in lines if " restart " in l]
+        self.assertTrue(restarts, "docker compose restart が呼ばれていない")
+        for l in restarts:
+            self.assertTrue(
+                l.startswith("COMPOSE_PROJECT_NAME=lets_blog_server "),
+                "プロジェクト名が固定されていない: " + l,
+            )
 
 
 if __name__ == "__main__":

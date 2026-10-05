@@ -47,6 +47,9 @@ readonly RABBITMQ_CONTAINER="lbs-rabbitmq"
 readonly MEDIA_CONTAINER="lbs-media"
 readonly COMFYUI_CONTAINER="lbs-comfyui"
 readonly KEYCLOAK_REALM="letsblog"
+# compose のプロジェクト名。git worktree(ディレクトリ名が違う)から実行しても
+# 共有スタックのコンテナへ restart が効くよう固定する(#1635)。
+readonly COMPOSE_PROJECT="lets_blog_server"
 # このドメインのアカウントだけを削除対象にする。実アカウントを守るための境界。
 readonly SYNTHETIC_EMAIL_DOMAIN="@letsblog.local"
 readonly SERVICE_SCHEMAS=(
@@ -289,10 +292,10 @@ fi
 # ---------------------------------------------------------------- 6. Flyway 再作成
 
 step "サービスを再起動し、Flyway に空スキーマからマイグレーションさせます"
-(cd "$REPO_ROOT" && docker compose restart "${RESTART_SERVICES[@]}" >/dev/null 2>&1)
+(cd "$REPO_ROOT" && COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" docker compose restart "${RESTART_SERVICES[@]}" >/dev/null 2>&1)
 log "  再起動しました: ${RESTART_SERVICES[*]}"
 log "  healthy になるまで待ちます"
-(cd "$REPO_ROOT" && ./scripts/wait-for-stack-healthy.sh >/dev/null) \
+(cd "$REPO_ROOT" && COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" ./scripts/wait-for-stack-healthy.sh >/dev/null) \
   && log "  OK: 全サービスが healthy です" \
   || { echo "エラー: 再起動後に healthy になりませんでした。docker compose logs を確認してください" >&2; exit 1; }
 
