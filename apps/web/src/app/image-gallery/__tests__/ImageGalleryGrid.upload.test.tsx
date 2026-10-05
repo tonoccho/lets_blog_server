@@ -54,7 +54,7 @@ describe('ImageGalleryGrid アップロード画像の表示(issue #1599)', () =
   it('詳細では画像生成AIの欄が「アップロード」になる', async () => {
     render(<ImageGalleryGrid images={[UPLOADED]} timezone={null} />)
 
-    fireEvent.click(screen.getByAltText('アップロード画像'))
+    fireEvent.click(screen.getByRole('button', { name: 'アップロード画像の詳細を表示' }))
 
     await waitFor(() => {
       expect(screen.getByText('アップロード', { selector: 'dd' })).toBeInTheDocument()

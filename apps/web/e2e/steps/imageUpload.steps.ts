@@ -1,6 +1,7 @@
 import zlib from 'node:zlib';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
+import { galleryCardOf } from '../support/galleryCard';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -183,7 +184,7 @@ When('21MBのPNG画像ファイルをアップロード対象に選ぶ', async (
 Then('その画像は生成画像ギャラリーにアップロード画像として表示される', async ({ page, ctx }) => {
   const id = ctx.uploadedImageId as number;
   await page.goto('/image-gallery', { waitUntil: 'commit' });
-  const card = page.locator(`button:has(img[src="/image-gallery/${id}/file"])`);
+  const card = galleryCardOf(page.locator(`img[src="/image-gallery/${id}/file"]`));
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card).toContainText('アップロード画像');
 });

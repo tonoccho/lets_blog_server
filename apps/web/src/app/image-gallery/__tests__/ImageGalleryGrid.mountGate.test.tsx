@@ -77,7 +77,7 @@ describe("ImageGalleryGrid(マウント前)", () => {
   it("個人設定TZが未設定のとき、マウント前は詳細ダイアログの作成日時にも固定プレースホルダーを表示する(issue #1363)", async () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />);
 
-    fireEvent.click(screen.getByAltText("a cute cat"));
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }));
 
     let createdAtLabel: HTMLElement;
     await waitFor(() => {

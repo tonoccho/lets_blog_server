@@ -1,6 +1,7 @@
 import type { APIRequestContext, APIResponse, BrowserContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import type { ScenarioContext } from './fixtures';
+import { galleryCardOf } from '../support/galleryCard';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -322,7 +323,7 @@ Then(
     expect(persisted, `生成画像(id=${imageId})が一覧に見つかりません`).toBeTruthy();
     const createdAt = (persisted as { createdAt: string }).createdAt;
 
-    const card = tzPage.locator(`button:has(img[src="/image-gallery/${imageId}/file"])`);
+    const card = galleryCardOf(tzPage.locator(`img[src="/image-gallery/${imageId}/file"]`));
     await expect(card).toBeVisible({ timeout: 10_000 });
     const displayed = (await card.locator('p.text-neutral-400').textContent())?.trim() ?? '';
 

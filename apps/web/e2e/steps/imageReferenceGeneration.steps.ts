@@ -9,6 +9,7 @@ import {
   fetchAccessToken,
 } from '../support';
 import { STUB_URLS } from '../support/stubs';
+import { magnifierOf } from '../support/galleryCard';
 
 /**
  * 参照画像付き(img2img)生成(issue #1601)のステップ定義。
@@ -306,7 +307,7 @@ When('生成画像ギャラリーで参照付きで生成された画像の詳�
   await expect(thumbnail).toBeVisible({ timeout: 30_000 });
   // ハイドレーション前のクリックは取りこぼされるので、詳細が開くまで再試行する(#1284)。
   await expect(async () => {
-    await thumbnail.click();
+    await magnifierOf(thumbnail).click();
     await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
 });

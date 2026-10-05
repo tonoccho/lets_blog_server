@@ -609,8 +609,19 @@ export function ImageGalleryGrid({
               />
               <button
                 type="button"
+                aria-label={`${imageLabel(image.prompt)}の詳細を表示`}
                 onClick={() => openDetail(image.id)}
-                className="group w-full overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-left"
+                className="absolute right-2 top-2 z-10 rounded-full bg-white/90 p-1 text-neutral-700 shadow hover:bg-white dark:bg-neutral-900/90 dark:text-neutral-200 dark:hover:bg-neutral-900"
+              >
+                <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                  <circle cx="8.5" cy="8.5" r="5.5" />
+                  <path d="M12.5 12.5L18 18" strokeLinecap="round" />
+                </svg>
+              </button>
+              {/* カード本体のクリックは選択の切り替え。チェックボックスと同じ toggleChecked を通す(issue #1614)。 */}
+              <div
+                onClick={() => toggleChecked(image.id)}
+                className="group w-full cursor-pointer overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-left"
               >
                 <img
                   src={`/image-gallery/${image.id}/file`}
@@ -639,7 +650,7 @@ export function ImageGalleryGrid({
                         : TIMEZONE_PENDING_PLACEHOLDER}
                   </p>
                 </div>
-              </button>
+              </div>
             </div>
           ))}
         </div>

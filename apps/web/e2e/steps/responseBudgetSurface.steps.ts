@@ -167,7 +167,7 @@ When(
 When(
   /^ギャラリーをタグ「([^」]+)」で絞り込んで Server Action の往復を計測する$/,
   async ({ page, ctx }, tag: string) => {
-    await expect(page.locator('button img[src^="/image-gallery/"]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('div.grid.gap-4 img[src^="/image-gallery/"]').first()).toBeVisible({ timeout: 30_000 });
     const chip = page.getByRole('button', { name: tag, exact: true });
     // 選択状態(黒地)になるまでクリックし直す(media.steps.ts のタグ絞り込みと同じ)。計測するのは
     // 実際に送られた Server Action の往復だけで、空振りは含まれない。

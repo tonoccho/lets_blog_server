@@ -212,7 +212,7 @@ describe('ImageGalleryGrid 複数選択と一括削除 (issue #1492)', () => {
     check(1)
     expect(screen.getByText('1件選択中')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByAltText('prompt-1'))
+    fireEvent.click(screen.getByRole('button', { name: 'prompt-1の詳細を表示' }))
     await waitFor(() => expect(screen.getByText('削除')).toBeInTheDocument())
     fireEvent.click(screen.getByText('削除'))
 

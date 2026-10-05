@@ -3,6 +3,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
 import { STUB_URLS } from '../support/stubs';
+import { magnifierOf } from '../support/galleryCard';
 import { GPS_MARKER, LANDSCAPE_JPEG_BASE64, jpegWithGps } from './imageUpload.steps';
 
 /**
@@ -115,7 +116,7 @@ async function openDetail(page: Page, ctx: Record<string, unknown>): Promise<voi
   await expect(thumbnail).toBeVisible({ timeout: 30_000 });
   // ハイドレーション前のクリックは効かないので、詳細が開くまで押し直す(media.steps.ts と同じ作法)。
   await expect(async () => {
-    await thumbnail.click();
+    await magnifierOf(thumbnail).click();
     await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
 }

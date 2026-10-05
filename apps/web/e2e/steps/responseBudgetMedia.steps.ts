@@ -1,6 +1,7 @@
 import { Given, When } from './fixtures';
 import { expect } from '../support';
 import { measureServerActionRoundTrip, recordResponseTime } from '../support/responseBudget';
+import { magnifierOf } from '../support/galleryCard';
 import {
   adminHeaders,
   createSolidPng,
@@ -57,7 +58,7 @@ async function openGallery(page: import('@playwright/test').Page, ctx: Record<st
 When('生成画像ギャラリーでその画像を開いて Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
   const timing = await measureServerActionRoundTrip(page, async () => {
-    await thumbnail.click();
+    await magnifierOf(thumbnail).click();
     await expect(page.locator('dt:text-is("prompt") + dd')).toBeVisible({ timeout: 30_000 });
   });
   recordResponseTime(ctx, timing.roundTripMs, '生成画像の詳細の取得(Server Action)の往復');
@@ -65,7 +66,7 @@ When('生成画像ギャラリーでその画像を開いて Server Action の�
 
 When('生成画像ギャラリーでその画像の詳細を開いてタグを追加し Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
-  await thumbnail.click();
+  await magnifierOf(thumbnail).click();
   await expect(page.locator('dt:text-is("prompt") + dd')).toBeVisible({ timeout: 30_000 });
   const tag = `e2e1477${uniqueSuffix()}`;
   await page.getByPlaceholder('タグを追加').fill(tag);
@@ -78,7 +79,7 @@ When('生成画像ギャラリーでその画像の詳細を開いてタグを�
 
 When('生成画像ギャラリーでその画像の詳細を開いて削除し Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
-  await thumbnail.click();
+  await magnifierOf(thumbnail).click();
   await expect(page.locator('dt:text-is("prompt") + dd')).toBeVisible({ timeout: 30_000 });
   page.once('dialog', (dialog) => void dialog.accept());
   const timing = await measureServerActionRoundTrip(page, async () => {

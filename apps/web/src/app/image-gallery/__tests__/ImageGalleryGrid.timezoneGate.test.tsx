@@ -66,7 +66,7 @@ describe("ImageGalleryGrid 個人設定TZあり(issue #1363)", () => {
   it("詳細ダイアログの作成日時もformatDateTimeに個人設定TZを渡す", async () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone="Asia/Tokyo" />);
 
-    fireEvent.click(screen.getByAltText("a cute cat"));
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }));
 
     await waitFor(() => {
       expect(screen.getByText("作成日時")).toBeInTheDocument();

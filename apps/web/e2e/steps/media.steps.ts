@@ -10,6 +10,7 @@ import {
   loginViaKeycloak,
 } from '../support';
 import { STUB_URLS, forceStubStatus, resetStub, stubRequestCount } from '../support/stubs';
+import { magnifierOf, selectedCountText } from '../support/galleryCard';
 
 /**
  * 生成画像ギャラリーのseed表示のステップ定義(issue #1101)。
@@ -111,7 +112,7 @@ Given('seedを持たないChatGPT画像がギャラリーにある', async ({ ct
 });
 
 /**
- * サムネイルの `<button>`(`ImageGalleryGrid`)はクライアントコンポーネントで、SSRされた
+ * 虫眼鏡の `<button>`(`ImageGalleryGrid`、issue #1614)はクライアントコンポーネントで、SSRされた
  * 直後はまだハイドレーションが完了しておらず `onClick` が紐付いていない。実ブラウザの
  * ホストではヘッドレスCIよりハイドレーションが遅く、その間にクリックすると取りこぼされ、
  * 詳細ダイアログが開かないまま `toBeVisible` がタイムアウトする(issue #1284、#1283と同種)。
@@ -123,7 +124,7 @@ When('生成画像ギャラリーでその画像の詳細を開く', async ({ ct
   await expect(thumbnail).toBeVisible({ timeout: 30_000 });
 
   await expect(async () => {
-    await thumbnail.click();
+    await magnifierOf(thumbnail).click();
     await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
 
@@ -1181,6 +1182,51 @@ When(
   }
 );
 
+// ---- ギャラリーの虫眼鏡ボタンとカードのクリック選択(issue #1614) ----
+
+When(
+  /^ギャラリーでプロンプト「([^」]+)」の画像の虫眼鏡ボタンを押す$/,
+  async ({ page }, prompt: string) => {
+    const button = page.getByRole('button', { name: `${prompt}の詳細を表示` });
+    await expect(button).toBeVisible({ timeout: 30_000 });
+    // ハイドレーション前のクリックは取りこぼされるので、詳細が開くまで再試行する(#1284)。
+    await expect(async () => {
+      await button.click();
+      await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+  }
+);
+
+When(
+  /^ギャラリーでプロンプト「([^」]+)」の画像のサムネイルをクリックする$/,
+  async ({ ctx, page }, prompt: string) => {
+    const thumbnail = page.getByAltText(prompt, { exact: true });
+    await expect(thumbnail).toBeVisible({ timeout: 30_000 });
+    // ハイドレーション完了前のクリックは何も起こさない。「N件選択中」が増えるまで再試行する。
+    const before = selectedImageIds(ctx).length;
+    await expect(async () => {
+      if (!(await selectedCountText(page, before + 1).isVisible())) {
+        await thumbnail.click();
+      }
+      await expect(selectedCountText(page, before + 1)).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
+    selectedImageIds(ctx).push(galleryImageIds(ctx)[prompt]);
+  }
+);
+
+Then(
+  /^ギャラリーのプロンプト「([^」]+)」の画像のチェックボックスは(オン|オフ)である$/,
+  async ({ page }, prompt: string, state: string) => {
+    const checkbox = page.getByLabel(`${prompt}を選択`);
+    if (state === 'オン') await expect(checkbox).toBeChecked({ timeout: 15_000 });
+    else await expect(checkbox).not.toBeChecked({ timeout: 15_000 });
+  }
+);
+
+Then('詳細モーダルは開いていない', async ({ page }) => {
+  await expect(page.getByText('生成画像の詳細')).toHaveCount(0);
+});
+
 Then(/^ギャラリーの選択件数に「([^」]+)」が表示される$/, async ({ page }, text: string) => {
   await expect(page.getByText(text, { exact: true })).toBeVisible({ timeout: 15_000 });
 });
@@ -2133,9 +2179,9 @@ Then(
 /** ギャラリーの1ページぶんの件数。`apps/web/src/app/image-gallery/page.tsx` の GALLERY_PAGE_SIZE と一致させる。 */
 const GALLERY_PAGE_SIZE = 24;
 
-/** 一覧のサムネイル(詳細ダイアログの画像ではなくグリッドの画像)。 */
+/** 一覧のサムネイル(詳細モーダルの画像ではなくカードグリッド(`div.grid.gap-4`)の画像)。 */
 function galleryThumbnails(page: Page): Locator {
-  return page.locator('button img[src^="/image-gallery/"]');
+  return page.locator('div.grid.gap-4 img[src^="/image-gallery/"]');
 }
 
 /** 画面上のサムネイルのIDを、重複を残したまま取り出す。 */

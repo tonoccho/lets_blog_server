@@ -47,7 +47,7 @@ describe('ImageGalleryGrid この画像の設定をコピー (issue #437)', () =
 
   async function openDetail() {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => {
       expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument()
     })
@@ -107,7 +107,7 @@ describe('ImageGalleryGrid seedとバッチ内位置の表示 (issue #1101)', ()
   async function openWith(detail: GeneratedImageDetail, summary: GeneratedImageSummary = SUMMARY) {
     ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(detail)
     render(<ImageGalleryGrid images={[summary]} timezone={null} />)
-    fireEvent.click(screen.getByAltText(summary.prompt as string))
+    fireEvent.click(screen.getByRole('button', { name: `${summary.prompt as string}の詳細を表示` }))
     await waitFor(() => {
       expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument()
     })
@@ -198,7 +198,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     ;(actions.getGeneratedImageAction as jest.Mock).mockRejectedValue(new Error('取得できません'))
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
 
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
 
     await waitFor(() => {
       expect(screen.getByText('取得できません')).toBeInTheDocument()
@@ -215,7 +215,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
       tags: [],
     })
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
 
     await waitFor(() => {
       expect(screen.getByText('UNKNOWN_AI')).toBeInTheDocument()
@@ -229,7 +229,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
       clipboard: { writeText: jest.fn().mockRejectedValue(new Error('クリップボードが使えません')) },
     })
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('この画像の設定をコピー'))
@@ -242,7 +242,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
   it('タグを追加すると保存し、重複タグは追加しない', async () => {
     ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['猫'] })
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
 
     const input = screen.getByPlaceholderText('タグを追加')
@@ -262,7 +262,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
 
   it('空白だけのタグは追加しない', async () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
 
     const input = screen.getByPlaceholderText('タグを追加')
@@ -277,7 +277,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['猫', '動物'] })
     ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['動物'] })
     render(<ImageGalleryGrid images={[{ ...SUMMARY, tags: ['猫', '動物'] }]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByLabelText('タグ「猫」を削除')).toBeInTheDocument())
 
     fireEvent.click(screen.getByLabelText('タグ「猫」を削除'))
@@ -290,7 +290,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
   it('タグ保存に失敗したらエラーを表示する', async () => {
     ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockRejectedValue(new Error('保存できません'))
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
 
     fireEvent.change(screen.getByPlaceholderText('タグを追加'), { target: { value: '新タグ' } })
@@ -305,7 +305,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     ;(actions.deleteGeneratedImageAction as jest.Mock).mockResolvedValue(undefined)
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('削除')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('削除'))
@@ -323,7 +323,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     ;(actions.deleteGeneratedImageAction as jest.Mock).mockRejectedValue(new Error('削除できません'))
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('削除')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('削除'))
@@ -336,7 +336,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
 
   it('背景をクリックすると詳細を閉じ、中身のクリックでは閉じない', async () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('生成画像の詳細')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('生成画像の詳細'))
@@ -362,7 +362,7 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
     ;(actions.getGeneratedImageAction as jest.Mock).mockRejectedValue('詳細を取得できません')
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
 
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
 
     await waitFor(() => {
       expect(screen.getByText('詳細を取得できません')).toBeInTheDocument()
@@ -373,7 +373,7 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
     ;(actions.deleteGeneratedImageAction as jest.Mock).mockRejectedValue('削除できません')
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('削除')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('削除'))
@@ -387,7 +387,7 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
   it('タグ保存がError以外で落ちてもメッセージを表示する', async () => {
     ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockRejectedValue('保存できません')
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
 
     fireEvent.change(screen.getByPlaceholderText('タグを追加'), { target: { value: '新タグ' } })
@@ -401,7 +401,7 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
   it('クリップボードがError以外で落ちてもメッセージを表示する', async () => {
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockRejectedValue('コピーできません') } })
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('この画像の設定をコピー'))
@@ -425,7 +425,7 @@ describe('ImageGalleryGrid 参照元の画像の表示 (issue #1601)', () => {
   async function openWith(detail: GeneratedImageDetail) {
     ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(detail)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    fireEvent.click(screen.getByAltText('a cute cat'))
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => {
       expect(screen.getByText('この画像の設定をコピー')).toBeInTheDocument()
     })

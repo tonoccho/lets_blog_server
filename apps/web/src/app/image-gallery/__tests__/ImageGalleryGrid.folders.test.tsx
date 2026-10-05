@@ -269,7 +269,7 @@ describe('詳細モーダルからの所属変更', () => {
   async function openDetail(summary: GeneratedImageSummary, folders = FOLDERS) {
     getDetail.mockResolvedValue(detailOf(summary))
     renderGrid([summary], folders)
-    fireEvent.click(screen.getByAltText(summary.prompt as string))
+    fireEvent.click(screen.getByRole('button', { name: `${summary.prompt as string}の詳細を表示` }))
     return screen.findByLabelText('所属フォルダ')
   }
 
@@ -313,7 +313,7 @@ describe('詳細モーダルからの所属変更', () => {
     renderGrid([image(1, 1)])
     chooseFolder('風景')
     await waitFor(() => expect(treeItem('風景')).toHaveAttribute('aria-selected', 'true'))
-    fireEvent.click(screen.getByAltText('prompt-1'))
+    fireEvent.click(screen.getByRole('button', { name: 'prompt-1の詳細を表示' }))
     const select = await screen.findByLabelText('所属フォルダ')
     setFolder.mockResolvedValue(detailOf(image(1, 3)))
     fetchPage.mockResolvedValueOnce([])
@@ -342,7 +342,7 @@ describe('詳細モーダルからの所属変更', () => {
     fireEvent.click(screen.getByRole('button', { name: 'フォルダを作成' }))
     await waitFor(() => expect(createFolder).toHaveBeenCalled())
 
-    fireEvent.click(screen.getByAltText('prompt-1'))
+    fireEvent.click(screen.getByRole('button', { name: 'prompt-1の詳細を表示' }))
     const select = await screen.findByLabelText('所属フォルダ')
 
     expect(within(select).getByRole('option', { name: '海' })).toBeInTheDocument()

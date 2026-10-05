@@ -294,7 +294,7 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
     jest.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ImageGalleryGrid images={[image(5, ['猫']), image(4)]} timezone={null} />)
 
-    fireEvent.click(screen.getByAltText('prompt-5'))
+    fireEvent.click(screen.getByRole('button', { name: 'prompt-5の詳細を表示' }))
     fireEvent.click(await screen.findByRole('button', { name: '削除' }))
 
     await waitFor(() => expect(screen.queryByAltText('prompt-5')).not.toBeInTheDocument())
@@ -308,7 +308,7 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
     fetchPage.mockResolvedValue([])
     render(<ImageGalleryGrid images={page(200, GALLERY_PAGE_SIZE)} timezone={null} />)
 
-    fireEvent.click(screen.getByAltText('prompt-200'))
+    fireEvent.click(screen.getByRole('button', { name: 'prompt-200の詳細を表示' }))
     fireEvent.click(await screen.findByRole('button', { name: '削除' }))
     await waitFor(() => expect(screen.queryByAltText('prompt-200')).not.toBeInTheDocument())
     await scrollToEnd()
@@ -321,7 +321,7 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
     ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['猫', '新'] })
     render(<ImageGalleryGrid images={[image(5, ['猫']), image(4)]} timezone={null} />)
 
-    fireEvent.click(screen.getByAltText('prompt-5'))
+    fireEvent.click(screen.getByRole('button', { name: 'prompt-5の詳細を表示' }))
     fireEvent.change(await screen.findByPlaceholderText('タグを追加'), { target: { value: '新' } })
     fireEvent.click(screen.getByRole('button', { name: '追加' }))
 
