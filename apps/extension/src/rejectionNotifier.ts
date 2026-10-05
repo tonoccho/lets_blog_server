@@ -43,7 +43,24 @@ export type CheckOutcome =
 
 /** 同じ差し戻しかどうかを識別するキー。再度差し戻されると `rejectedAt` が変わり、別の差し戻しになる。 */
 export function notifiedKey(review: MyReview): string {
-  return `${review.prNumber}|${review.rejectedAt}`;
+  return `${review.prNumber}|${normalizeTimestamp(String(review.rejectedAt))}`;
+}
+
+const NO_OFFSET = /^\d{4}-\d{2}-\d{2}T[\d:.]+$/;
+
+/**
+ * 時刻を実時刻のISO 8601(UTC, Z終端)へ揃える。オフセットの無い旧形式(#1611前)はUTCとして扱う。
+ * 時刻として解釈できない値はそのまま返す。
+ */
+function normalizeTimestamp(value: string): string {
+  const ms = Date.parse(NO_OFFSET.test(value) ? `${value}Z` : value);
+  return Number.isNaN(ms) ? value : new Date(ms).toISOString();
+}
+
+/** 保存済みの `prNumber|rejectedAt` キーを、現行の形式へ揃える(旧形式のキーとも一致させる)。 */
+function normalizeKey(key: string): string {
+  const sep = key.indexOf('|');
+  return sep < 0 ? key : `${key.slice(0, sep)}|${normalizeTimestamp(key.slice(sep + 1))}`;
 }
 
 /**
@@ -84,7 +101,7 @@ export async function checkRejections(
     return { status: 'failed' };
   }
 
-  const known = deps.state.get(NOTIFIED_REJECTIONS_STATE) ?? [];
+  const known = (deps.state.get(NOTIFIED_REJECTIONS_STATE) ?? []).map(normalizeKey);
   const fresh = reviews.filter(
     (review) =>
       review.state === 'CHANGES_REQUESTED' && review.rejectedAt != null && !known.includes(notifiedKey(review))

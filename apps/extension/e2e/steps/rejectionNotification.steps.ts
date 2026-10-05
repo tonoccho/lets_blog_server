@@ -61,9 +61,9 @@ Given('サーバーは記事 {string} が差し戻され、指摘事項が {stri
       prNumber: 7,
       articleSlug: slug,
       state: 'CHANGES_REQUESTED',
-      submittedAt: '2026-10-01T00:00:00',
+      submittedAt: '2026-10-01T00:00:00Z',
       rejectComment: comment,
-      rejectedAt: '2026-10-02T03:04:05',
+      rejectedAt: '2026-10-02T03:04:05Z',
     },
   ];
 });
@@ -74,7 +74,7 @@ Given('サーバーは記事 {string} が提出済みで、差し戻されてい
       prNumber: 7,
       articleSlug: slug,
       state: 'SUBMITTED',
-      submittedAt: '2026-10-01T00:00:00',
+      submittedAt: '2026-10-01T00:00:00Z',
       rejectComment: null,
       rejectedAt: null,
     },

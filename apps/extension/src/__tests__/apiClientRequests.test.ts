@@ -531,8 +531,8 @@ describe('自分のレビュー一覧の取得(issue #1347)', () => {
     setConfiguration('letsBlog.serverUrl', 'https://stack.test');
     setConfiguration('letsBlog.allowInsecureTls', true);
     const payload = [
-      { prNumber: 7, articleSlug: 'my-post', state: 'CHANGES_REQUESTED', submittedAt: '2026-10-01T00:00:00', rejectComment: '直す', rejectedAt: '2026-10-02T00:00:00' },
-      { prNumber: 8, articleSlug: 'other', state: 'SUBMITTED', submittedAt: '2026-10-01T00:00:00', rejectComment: null, rejectedAt: null },
+      { prNumber: 7, articleSlug: 'my-post', state: 'CHANGES_REQUESTED', submittedAt: '2026-10-01T00:00:00Z', rejectComment: '直す', rejectedAt: '2026-10-02T00:00:00Z' },
+      { prNumber: 8, articleSlug: 'other', state: 'SUBMITTED', submittedAt: '2026-10-01T00:00:00Z', rejectComment: null, rejectedAt: null },
     ];
     let url = '';
     let method = '';

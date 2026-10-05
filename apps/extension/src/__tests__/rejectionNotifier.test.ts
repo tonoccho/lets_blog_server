@@ -18,9 +18,9 @@ const rejected = (over: Partial<MyReview> = {}): MyReview => ({
   prNumber: 7,
   articleSlug: 'my-post',
   state: 'CHANGES_REQUESTED',
-  submittedAt: '2026-10-01T00:00:00',
+  submittedAt: '2026-10-01T00:00:00Z',
   rejectComment: '見出しを直してください',
-  rejectedAt: '2026-10-02T03:04:05',
+  rejectedAt: '2026-10-02T03:04:05Z',
   ...over,
 });
 
@@ -63,8 +63,19 @@ describe('formatRejectionMessage', () => {
 
 describe('notifiedKey', () => {
   it('prNumberとrejectedAtで識別する', () => {
-    expect(notifiedKey(rejected())).toBe('7|2026-10-02T03:04:05');
-    expect(notifiedKey(rejected({ rejectedAt: '2026-10-03T00:00:00' }))).not.toBe(notifiedKey(rejected()));
+    expect(notifiedKey(rejected())).toBe('7|2026-10-02T03:04:05.000Z');
+    expect(notifiedKey(rejected({ rejectedAt: '2026-10-03T00:00:00Z' }))).not.toBe(notifiedKey(rejected()));
+  });
+
+  it('オフセットの有無・表記の違いに関わらず同じ時刻は同じキーになる(#1627)', () => {
+    const legacy = notifiedKey(rejected({ rejectedAt: '2026-10-02T03:04:05' }));
+    expect(legacy).toBe(notifiedKey(rejected()));
+    expect(notifiedKey(rejected({ rejectedAt: '2026-10-02T12:04:05+09:00' }))).toBe(legacy);
+    expect(notifiedKey(rejected({ rejectedAt: '2026-10-02T03:04:05.000Z' }))).toBe(legacy);
+  });
+
+  it('時刻として解釈できない値はそのままキーにする', () => {
+    expect(notifiedKey(rejected({ rejectedAt: 'not-a-date' }))).toBe('7|not-a-date');
   });
 });
 
@@ -75,7 +86,7 @@ describe('checkRejections', () => {
     expect(outcome).toEqual({ status: 'checked', notified: 1 });
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain('見出しを直してください');
-    expect(stored.get(NOTIFIED_REJECTIONS_STATE)).toEqual(['7|2026-10-02T03:04:05']);
+    expect(stored.get(NOTIFIED_REJECTIONS_STATE)).toEqual(['7|2026-10-02T03:04:05.000Z']);
   });
 
   it('2回目の確認では同じ差し戻しを通知しない', async () => {
@@ -86,11 +97,35 @@ describe('checkRejections', () => {
     expect(notices).toHaveLength(1);
   });
 
+  it('旧形式(オフセットなし)で保存済みのキーがあれば、Z終端の同じ差し戻しを再通知しない(#1627)', async () => {
+    const { deps, notices, stored } = makeDeps();
+    stored.set(NOTIFIED_REJECTIONS_STATE, ['7|2026-10-02T03:04:05']);
+    const outcome = await checkRejections(deps);
+    expect(outcome).toEqual({ status: 'checked', notified: 0 });
+    expect(notices).toHaveLength(0);
+  });
+
+  it('旧形式のキーが残っていても、別の差し戻しは通知し、保存するキーは正規化する(#1627)', async () => {
+    const { deps, notices, stored } = makeDeps({ reviews: [rejected({ prNumber: 8 })] });
+    stored.set(NOTIFIED_REJECTIONS_STATE, ['7|2026-10-02T03:04:05']);
+    await checkRejections(deps);
+    expect(notices).toHaveLength(1);
+    expect(stored.get(NOTIFIED_REJECTIONS_STATE)).toEqual(['7|2026-10-02T03:04:05.000Z', '8|2026-10-02T03:04:05.000Z']);
+  });
+
+  it('区切りの無い壊れた保存済みキーがあっても落ちず、そのまま保持する(#1627)', async () => {
+    const { deps, notices, stored } = makeDeps();
+    stored.set(NOTIFIED_REJECTIONS_STATE, ['broken-key']);
+    await checkRejections(deps);
+    expect(notices).toHaveLength(1);
+    expect(stored.get(NOTIFIED_REJECTIONS_STATE)).toEqual(['broken-key', '7|2026-10-02T03:04:05.000Z']);
+  });
+
   it('同じ記事が再度差し戻されたとき(rejectedAtが違う)は再び通知する', async () => {
     let reviews = [rejected()];
     const { deps, notices } = makeDeps({ fetchMyReviews: async () => reviews });
     await checkRejections(deps);
-    reviews = [rejected({ rejectedAt: '2026-10-05T00:00:00' })];
+    reviews = [rejected({ rejectedAt: '2026-10-05T00:00:00Z' })];
     await checkRejections(deps);
     expect(notices).toHaveLength(2);
   });
@@ -154,7 +189,7 @@ describe('checkRejections', () => {
     await checkRejections(deps);
     const keys = stored.get(NOTIFIED_REJECTIONS_STATE) as string[];
     expect(keys).toHaveLength(200);
-    expect(keys[199]).toBe('205|2026-10-02T03:04:05');
+    expect(keys[199]).toBe('205|2026-10-02T03:04:05.000Z');
   });
 });
 
