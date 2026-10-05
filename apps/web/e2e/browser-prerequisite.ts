@@ -240,6 +240,34 @@ export function resolveExecutedProjects(
   return projects.filter((project) => project.name !== undefined && included.has(project.name));
 }
 
+/**
+ * CLI 引数に `--no-deps` があるか(#1634)。
+ *
+ * `--no-deps` は Playwright が `dependencies` の先行実行を行わない指定で、選択した
+ * プロジェクトだけが走る。`--no-deps=...` のような別トークンとは区別して完全一致で見る。
+ */
+export function parseNoDepsFromArgv(argv: readonly string[]): boolean {
+  return argv.includes('--no-deps');
+}
+
+/**
+ * CLI 引数から、実際に実行されるプロジェクトを解決する(#1634)。
+ *
+ * `--no-deps` が付いているときは依存先を辿らず、`--project` で選んだ段階だけを返す。
+ * 付いていなければ {@link resolveExecutedProjects} と同じく依存先を推移的に含める。
+ * `--project` 未指定なら(`--no-deps` の有無によらず)全プロジェクト。
+ */
+export function resolveExecutedProjectsFromArgv(
+  projects: readonly ProjectBrowserSelection[],
+  argv: readonly string[]
+): ProjectBrowserSelection[] {
+  const selected = parseProjectSelectionFromArgv(argv);
+  if (selected !== null && parseNoDepsFromArgv(argv)) {
+    return projects.filter((project) => project.name !== undefined && selected.includes(project.name));
+  }
+  return resolveExecutedProjects(projects, selected);
+}
+
 /** `--project` の値の1つ分。`--project=X` / `--project X` の両方をここに正規化する。 */
 const PROJECT_FLAG_RE = /^--project(?:=(.*))?$/;
 

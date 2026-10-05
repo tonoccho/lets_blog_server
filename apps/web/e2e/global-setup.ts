@@ -1,14 +1,28 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { request, type FullConfig } from '@playwright/test';
+import { request, type APIRequestContext, type FullConfig } from '@playwright/test';
+import {
+  describeMissingAccounts,
+  executesSeedStage,
+  findMissingAccounts,
+  resolveAcceptanceResetMode,
+  shouldCheckSyntheticAccounts,
+  type AccountCheckResult,
+} from './acceptance-accounts';
+import { withAccountLock } from './account-lock';
 import { acquireAcceptanceTestLock } from './at-lock';
 import {
   checkBrowsersLaunchable,
-  parseProjectSelectionFromArgv,
   requiredBrowserNames,
-  resolveExecutedProjects,
+  resolveExecutedProjectsFromArgv,
 } from './browser-prerequisite';
-import { waitForServicesHealthy } from './helpers';
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  E2E_TEST_EMAIL,
+  E2E_TEST_PASSWORD,
+  waitForServicesHealthy,
+} from './helpers';
 
 /**
  * E2E開始前の前提確認(issue #588)。
@@ -39,8 +53,9 @@ import { waitForServicesHealthy } from './helpers';
  * 常に全プロジェクトのブラウザ(chromium/firefox/webkit)を確認していたため、
  * chromium しか使わない `npm run test:at:fast`(`--project=at-main`)まで firefox / webkit
  * の共有ライブラリ不足で落ちていた。ここでは `process.argv` から `--project` を自分で
- * 解析し(`parseProjectSelectionFromArgv`)、選択されたプロジェクトとその依存先だけに
- * 絞ってから(`resolveExecutedProjects`)必要ブラウザを求める。`--project` が指定されない
+ * 解析し、選択されたプロジェクトとその依存先だけに
+ * 絞ってから(`resolveExecutedProjectsFromArgv`。`--no-deps` なら依存先は含めず、
+ * 選択した段階だけ。#1634)必要ブラウザを求める。`--project` が指定されない
  * 実行(全プロジェクトを回す)では、これまで通り全プロジェクトを確認する。
  *
  * issue #1187: 受け入れテストはMySQL・Keycloakの合成アカウント・infra/e2e-stubsのエラー注入
@@ -58,7 +73,15 @@ import { waitForServicesHealthy } from './helpers';
  * プロダクションコードを変更しているか」を確認する。判定ロジックはそこが唯一の実装であり、
  * ここに書き写さない。
  *
+ * issue #1634: at-seed を含まない実行で合成アカウント(e2e-test@ / e2e-admin@)が欠けていると、
+ * 個々のシナリオが `invalid_grant` 等で散発的に落ち原因が埋もれる。接続確認の後で、
+ * `needsSetup:false` のときだけ両アカウントのトークン取得を確認し、欠けていれば名指しして落とす。
+ * 判定は ./acceptance-accounts.ts。`ACCEPTANCE_RESET=data` は scripts/run-at-setup.sh が使う
+ * データ層リセットで、ロック取得の内側で reset-acceptance-env.sh を実行する。
+ *
  * 環境変数:
+ *   ACCEPTANCE_RESET=data  : scripts/reset-acceptance-env.sh --yes(データ層のみ、約30秒)を実行してから始める
+ *                            (入口は scripts/run-at-setup.sh。破壊的)
  *   ACCEPTANCE_RESET=1     : scripts/rebuild-acceptance-env.sh --yes を実行してから始める
  *                            (compose プロジェクトを撤去し、Docker ボリュームを破棄し、
  *                             ソースからビルドして起動し直す。破壊的)
@@ -75,6 +98,7 @@ import { waitForServicesHealthy } from './helpers';
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
+  const executedProjects = resolveExecutedProjectsFromArgv(config.projects, process.argv);
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
 
   // 作業ツリーの一致確認は全ての前に置く。ここで拒否された場合、後続のブラウザ確認・
@@ -98,8 +122,6 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   if (process.env.E2E_SKIP_BROWSER_CHECK === '1') {
     console.log('[e2e] E2E_SKIP_BROWSER_CHECK=1 のため Playwright のブラウザ起動確認をスキップします');
   } else {
-    const selectedProjectNames = parseProjectSelectionFromArgv(process.argv);
-    const executedProjects = resolveExecutedProjects(config.projects, selectedProjectNames);
     const browsers = requiredBrowserNames(executedProjects);
     console.log(`[e2e] Playwright のブラウザが起動できることを確認します (${browsers.join(', ')})`);
     await checkBrowsersLaunchable(browsers);
@@ -115,6 +137,13 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
       cwd: repoRoot,
       stdio: 'inherit',
       timeout: 5_400_000,
+    });
+  } else if (resolveAcceptanceResetMode(process.env.ACCEPTANCE_RESET) === 'data') {
+    console.log('[e2e] ACCEPTANCE_RESET=data: データ層を初期化します(破壊的。ロックの内側)');
+    execFileSync(path.join(repoRoot, 'scripts', 'reset-acceptance-env.sh'), ['--yes'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      timeout: 600_000,
     });
   }
 
@@ -141,9 +170,66 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
           'docker compose の keycloak / reverse-proxy を確認してください。'
       );
     }
+
+    await verifySyntheticAccounts(context, executedProjects);
   } finally {
     await context.dispose();
   }
 
   console.log('[e2e] 前提確認OK: ブラウザ起動、全サービスhealthy、公開URLとKeycloakへ疎通');
+}
+
+/**
+ * 合成アカウントがパスワードグラントでトークンを取得できるか確認する(#1634)。
+ *
+ * `fetchAccessToken`(token-cache.ts)は5分間のキャッシュを持つため、リセットで消えた直後の
+ * アカウントを「取得できた」と誤判定しうる。確認の目的は「今 Keycloak にいるか」なので、
+ * キャッシュを経由せず直接グラントを送る。ブルートフォース検知(#1295)を避けるため、
+ * 他の経路と同じアカウント単位ロックの内側で送る。
+ */
+async function verifySyntheticAccounts(
+  context: APIRequestContext,
+  executedProjects: Parameters<typeof executesSeedStage>[0]
+): Promise<void> {
+  const setupStatus = await context.get('/api/auth/setup-status');
+  let needsSetup: boolean | undefined;
+  if (setupStatus.ok()) {
+    try {
+      const body = (await setupStatus.json()) as { needsSetup?: unknown };
+      if (typeof body.needsSetup === 'boolean') needsSetup = body.needsSetup;
+    } catch {
+      needsSetup = undefined;
+    }
+  }
+
+  if (!shouldCheckSyntheticAccounts({ executesSeed: executesSeedStage(executedProjects), needsSetup })) {
+    return;
+  }
+
+  console.log('[e2e] at-seed を含まない実行のため、E2E 合成アカウントの存在を確認します');
+  const accounts = [
+    { email: E2E_TEST_EMAIL, password: E2E_TEST_PASSWORD },
+    { email: E2E_ADMIN_EMAIL, password: E2E_ADMIN_PASSWORD },
+  ];
+  const results: AccountCheckResult[] = [];
+  for (const account of accounts) {
+    const ok = await withAccountLock(account.email, async () => {
+      // e2e-login-guard:locked — withAccountLock の内側(#1295)。
+      const response = await context.post('/auth/realms/letsblog/protocol/openid-connect/token', {
+        form: {
+          grant_type: 'password',
+          client_id: 'letsblog-e2e',
+          username: account.email,
+          password: account.password,
+        },
+      });
+      return response.ok();
+    });
+    results.push({ email: account.email, ok });
+  }
+
+  const missing = findMissingAccounts(results);
+  if (missing.length > 0) {
+    throw new Error(describeMissingAccounts(missing));
+  }
 }

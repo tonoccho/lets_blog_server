@@ -22,7 +22,11 @@
 #
 #   ~/.config/lets-blog-e2e.env(モード600、リポジトリ外)から次を export しておくこと。
 #     E2E_TEST_PASSWORD / E2E_ADMIN_PASSWORD
-#     E2E_PROVISION_ADMIN_EMAIL / E2E_PROVISION_ADMIN_PASSWORD
+#     E2E_PROVISION_ADMIN_EMAIL / E2E_PROVISION_ADMIN_PASSWORD(任意)
+#   後ろの2つが未設定なら、apps/web/e2e/steps/auth.steps.ts(初回セットアップの
+#   シナリオ)と同じ規則で e2e-admin@letsblog.local / E2E_ADMIN_PASSWORD を使う(#1634)。
+#   at-setup が作る最初の管理者は同じ規則で決まるため、ここで別の相手を要求すると
+#   「at-setup は通るがシードが落ちる」状態になる。
 #
 # ■ 使い方
 #
@@ -38,13 +42,23 @@ REPO_ROOT="$SCRIPT_DIR/.."
 readonly BASE_URL="https://localhost"
 readonly KEYCLOAK_CONTAINER="lbs-keycloak"
 readonly KEYCLOAK_REALM="letsblog"
-readonly SETUP_ADMIN_EMAIL="${E2E_PROVISION_ADMIN_EMAIL:-}"
-readonly SETUP_ADMIN_PASSWORD="${E2E_PROVISION_ADMIN_PASSWORD:-}"
+
+# 管理者の資格情報のフォールバック(#1634)。auth.steps.ts の SETUP_ADMIN_EMAIL /
+# SETUP_ADMIN_PASSWORD と同じ規則にそろえること。子プロセス
+# (provision-e2e-keycloak-users.sh)は同じ2変数を必須にしているため export する。
+if [ -z "${E2E_PROVISION_ADMIN_EMAIL:-}" ]; then
+  export E2E_PROVISION_ADMIN_EMAIL="e2e-admin@letsblog.local"
+fi
+if [ -z "${E2E_PROVISION_ADMIN_PASSWORD:-}" ]; then
+  export E2E_PROVISION_ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-}"
+fi
+readonly SETUP_ADMIN_EMAIL="$E2E_PROVISION_ADMIN_EMAIL"
+readonly SETUP_ADMIN_PASSWORD="$E2E_PROVISION_ADMIN_PASSWORD"
 
 log()  { printf '%s\n' "$*"; }
 step() { printf '\n--- %s ---\n' "$*"; }
 
-for var in E2E_TEST_PASSWORD E2E_ADMIN_PASSWORD E2E_PROVISION_ADMIN_EMAIL E2E_PROVISION_ADMIN_PASSWORD; do
+for var in E2E_TEST_PASSWORD E2E_ADMIN_PASSWORD; do
   if [ -z "${!var:-}" ]; then
     echo "エラー: $var が未設定です。~/.config/lets-blog-e2e.env を source してください" >&2
     exit 1

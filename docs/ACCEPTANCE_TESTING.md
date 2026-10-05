@@ -1094,6 +1094,42 @@ I/O error on POST request for "http://content:8080/api/internal/content/render/p
 単一ドメインのテストを回すために `at-setup` を通さず実行したときのための逃げ道であり、
 通常の全実行では `setup-status` が `needsSetup: false` を返してスキップされる。
 
+### `at-setup` だけを検証するとき(#1634)
+
+`at-setup` を単体で流して確かめたいときは、**必ず入口 `npm run test:at:setup`**
+(実体は `scripts/run-at-setup.sh`)を使う。
+
+```bash
+source ~/.config/lets-blog-e2e.env
+cd apps/web
+npm run test:at:setup                 # データ層リセット → at-setup → 必ずシード
+```
+
+リセットと `--project=at-setup` を手で組み合わせてはいけない。リセット
+(`reset-acceptance-env.sh`)は `*@letsblog.local` をすべて消し、`at-setup` は最初の管理者
+`e2e-admin@` しか作らない。`e2e-test@` を作り直すのは `at-seed` だけなので、手で組み合わせて
+終わると共有スタックに `e2e-test@` が無いまま残り、後続の AT がすべて落ちる(2026-10-04、#1553 の QA)。
+かといって `--project=at-seed` でシードを呼ぶのも誤りで、依存先の `at-setup` が再実行され
+「ユーザーが既に存在します」で必ず落ち、`at-seed` がスキップされる。
+
+入口は次の順で動く。
+
+1. `ACCEPTANCE_RESET=data` で `globalSetup` にデータ層リセットを任せ、同じ実行で `at-setup` を流す。
+   リセットは AT の排他ロック(#1187)の内側で行われる(`ACCEPTANCE_RESET=1` のゼロ構築と同じ位置)。
+2. `at-setup` の成否にかかわらず、同じロックを取り直して `scripts/seed-acceptance-env.sh` を直接実行する。
+3. 終了コードは `at-setup` の結果を反映する。`at-setup` が通ってもシードが失敗したら非ゼロ。
+
+`E2E_PROVISION_ADMIN_EMAIL` / `E2E_PROVISION_ADMIN_PASSWORD` が未設定のとき、シードは
+`e2e-admin@letsblog.local` / `E2E_ADMIN_PASSWORD` を使う(初回セットアップのシナリオと同じ規則)。
+
+`at-seed` を含まない実行とは、`--no-deps` 付きで at-seed 以外を選んだ実行(`--project=at-main --no-deps`
+など)である。`globalSetup` は `process.argv` の `--no-deps` を見て、実行集合を選択した段階だけにする
+(`resolveExecutedProjectsFromArgv`)。`--no-deps` が無い `--project=at-main` は依存先の at-seed まで
+実行するため、この確認の対象外になる。この条件で、`setup-status` が
+`needsSetup: false` なのに `e2e-test@` / `e2e-admin@` がトークンを取得できない場合、
+`globalSetup` はシナリオを1件も始めずに、欠けているアカウント名と
+`scripts/seed-acceptance-env.sh` を示して失敗する。
+
 ### 破棄するボリューム / 保全するボリューム
 
 ゼロ構築(`scripts/rebuild-acceptance-env.sh`)は、**消す対象を列挙して個別に消す**のではなく

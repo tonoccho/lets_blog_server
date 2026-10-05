@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import { missingSeedEnv } from '../acceptance-accounts';
 import { prefetchAccessTokensForAllE2eAccounts } from '../helpers';
 
 /**
@@ -32,12 +33,9 @@ test('受け入れテスト環境にシードを投入する', async ({ request 
   // 30秒では終わらないことがある。
   test.setTimeout(180_000);
 
-  const missing = [
-    'E2E_TEST_PASSWORD',
-    'E2E_ADMIN_PASSWORD',
-    'E2E_PROVISION_ADMIN_EMAIL',
-    'E2E_PROVISION_ADMIN_PASSWORD',
-  ].filter((name) => !process.env[name]);
+  // E2E_PROVISION_ADMIN_* は seed-acceptance-env.sh が e2e-admin@ / E2E_ADMIN_PASSWORD へ
+  // フォールバックするので必須にしない(#1634)。ここで再チェックするとスクリプトより厳しくなる。
+  const missing = missingSeedEnv(process.env);
 
   expect(
     missing,
