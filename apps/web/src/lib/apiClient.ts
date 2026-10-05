@@ -548,8 +548,8 @@ export function getGeneratedImage(id: number): Promise<GeneratedImageDetail> {
 }
 
 /**
- * 手元の画像(JPEG/PNG)を生成画像ギャラリーへ登録する(issue #1599)。サーバーが1920x1080(中央切り抜き)へ
- * 変換し、出所を`UPLOAD`として保存する。`uploadAvatar`と同じくmultipartの`file`で送る。
+ * 手元の画像(JPEG/PNG)を生成画像ギャラリーへ登録する(issue #1599)。サーバーは切り抜き・拡縮せず元の解像度のまま
+ * (メタ情報は除去)、出所を`UPLOAD`として保存する(issue #1654)。`uploadAvatar`と同じくmultipartの`file`で送る。
  */
 export function uploadGeneratedImage(projectId: number, file: File): Promise<GeneratedImageDetail> {
   const formData = new FormData();

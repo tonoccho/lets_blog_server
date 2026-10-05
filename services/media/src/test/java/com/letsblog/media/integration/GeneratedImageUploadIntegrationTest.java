@@ -43,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * issue #1599: 画像アップロード({@code POST /api/generated-images/upload})を、実DBと実コントローラ経由で検証する。
- * prompt NULL許可のマイグレーション、1920x1080への変換、メタ情報除去、拒否時に何も残らないこと、認可を確かめる。
+ * prompt NULL許可のマイグレーション、元の解像度のままの登録、メタ情報除去、拒否時に何も残らないこと、認可を確かめる。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -111,7 +111,7 @@ class GeneratedImageUploadIntegrationTest {
     }
 
     @Test
-    @DisplayName("メンバーがJPEGをアップロードすると、UPLOADとして1920x1080で登録され、ファイルが取得できる")
+    @DisplayName("メンバーがJPEGをアップロードすると、UPLOADとして元の解像度で登録され、ファイルが取得できる")
     void アップロードして取得できる() throws Exception {
         byte[] src = UploadImageFixtures.jpeg(UploadImageFixtures.solid(4000, 3000, Color.RED, false));
 
@@ -128,8 +128,13 @@ class GeneratedImageUploadIntegrationTest {
                 .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/jpeg"))
                 .andReturn();
         BufferedImage image = ImageIO.read(new ByteArrayInputStream(file.getResponse().getContentAsByteArray()));
-        assertThat(image.getWidth()).isEqualTo(1920);
-        assertThat(image.getHeight()).isEqualTo(1080);
+        assertThat(image.getWidth()).isEqualTo(4000);
+        assertThat(image.getHeight()).isEqualTo(3000);
+        mockMvc.perform(get("/api/generated-images/" + id)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.width").value(4000))
+                .andExpect(jsonPath("$.height").value(3000));
 
         mockMvc.perform(get("/api/generated-images").param("projectId", String.valueOf(PROJECT_ID))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
@@ -139,10 +144,10 @@ class GeneratedImageUploadIntegrationTest {
     }
 
     @Test
-    @DisplayName("縦長PNG・小さなPNGも1920x1080になる")
+    @DisplayName("縦長PNG・小さなPNGも元の画素数・PNGのまま登録され、width/heightが一致する")
     void 縦長と小さい画像() throws Exception {
         for (BufferedImage src : new BufferedImage[] {
-                UploadImageFixtures.verticalBands(1080, 1920),
+                UploadImageFixtures.verticalBands(700, 1400),
                 UploadImageFixtures.solid(320, 180, Color.BLUE, false)}) {
             MvcResult created = upload("admin-jwt", PROJECT_ID, "a.png", "image/png", UploadImageFixtures.png(src));
             assertThat(created.getResponse().getStatus()).isEqualTo(201);
@@ -150,9 +155,14 @@ class GeneratedImageUploadIntegrationTest {
                     .longValue();
             MvcResult file = mockMvc.perform(get("/api/generated-images/" + id + "/file")
                     .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt")).andReturn();
+            assertThat(file.getResponse().getContentType()).isEqualTo("image/png");
             BufferedImage image = ImageIO.read(new ByteArrayInputStream(file.getResponse().getContentAsByteArray()));
-            assertThat(image.getWidth()).isEqualTo(1920);
-            assertThat(image.getHeight()).isEqualTo(1080);
+            assertThat(image.getWidth()).isEqualTo(src.getWidth());
+            assertThat(image.getHeight()).isEqualTo(src.getHeight());
+            mockMvc.perform(get("/api/generated-images/" + id)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt"))
+                    .andExpect(jsonPath("$.width").value(src.getWidth()))
+                    .andExpect(jsonPath("$.height").value(src.getHeight()));
         }
     }
 

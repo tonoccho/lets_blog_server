@@ -1,7 +1,7 @@
 import zlib from 'node:zlib';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
-import { galleryCardOf } from '../support/galleryCard';
+import { galleryCardOf, magnifierOf } from '../support/galleryCard';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -12,7 +12,7 @@ import {
 } from '../support';
 
 /**
- * issue #1599: 手元の画像を1920x1080に変換して画像ギャラリーへ登録する、のステップ定義。
+ * issue #1599 / #1654: 手元の画像を元の解像度のまま画像ギャラリーへ登録する、のステップ定義。
  *
  * 後始末は `media.steps.ts` の `@media` After が `ctx.mediaProjectId` のプロジェクトごと行う
  * (画面・API から作ったアップロード画像はプロジェクトに紐づく)。
@@ -189,9 +189,41 @@ Then('その画像は画像ギャラリーにアップロード画像として�
   await expect(card).toContainText('アップロード画像');
 });
 
-Then(/^保存された画像は(\d+)x(\d+)である$/, async ({ page, ctx }, width: string, height: string) => {
-  const dimensions = readDimensions(await fetchStoredImage(page, ctx));
-  expect(dimensions).toEqual({ width: Number(width), height: Number(height) });
+Then(
+  /^保存された画像は(\d+)x(\d+)の(PNG|JPEG)である$/,
+  async ({ page, ctx }, width: string, height: string, format: string) => {
+    const bytes = await fetchStoredImage(page, ctx);
+    expect(readDimensions(bytes)).toEqual({ width: Number(width), height: Number(height) });
+    const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
+    expect(isPng ? 'PNG' : 'JPEG').toBe(format);
+  }
+);
+
+Then(/^画像の詳細にサイズ(\d+)x(\d+)が表示される$/, async ({ page, ctx }, width: string, height: string) => {
+  const id = ctx.uploadedImageId as number;
+  await page.goto('/image-gallery', { waitUntil: 'commit' });
+  const thumbnail = page.locator(`img[src="/image-gallery/${id}/file"]`);
+  await expect(thumbnail).toBeVisible({ timeout: 30_000 });
+  // ハイドレーション前のクリックでは詳細ダイアログが開かない(media.steps.ts と同じ再試行)。
+  await expect(async () => {
+    await magnifierOf(thumbnail).click();
+    await expect(page.getByText('生成画像の詳細')).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+  await expect(page.getByText(`${width}x${height}`, { exact: true })).toBeVisible({ timeout: 30_000 });
+});
+
+Then('アップロード欄の説明に1920x1080の文言は無く、元の解像度のまま登録される旨が示される', async ({ page }) => {
+  const description = page
+    .getByRole('heading', { name: '画像をアップロードしてギャラリーへ登録' })
+    .locator('xpath=following-sibling::p[1]');
+  await expect(description).toContainText('元の解像度のまま');
+  await expect(description).not.toContainText('1920x1080');
+});
+
+Then('アップロード成功の表示に1920x1080の文言は無く、元の解像度のまま登録した旨が示される', async ({ page }) => {
+  const success = page.getByText(/画像ギャラリーに登録しました\(画像ID: \d+\)/);
+  await expect(success).toContainText('元の解像度のまま');
+  await expect(success).not.toContainText('1920x1080');
 });
 
 Then('保存された画像にEXIFもGPS情報も残っていない', async ({ page, ctx }) => {

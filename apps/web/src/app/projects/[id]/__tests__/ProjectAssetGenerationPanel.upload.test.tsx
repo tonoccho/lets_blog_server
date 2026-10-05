@@ -66,10 +66,22 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
     await waitFor(() => {
       expect(screen.getByText(/画像ギャラリーに登録しました/)).toBeInTheDocument()
     })
+    const success = screen.getByText(/画像ギャラリーに登録しました/)
+    expect(success.textContent).toContain('元の解像度のまま')
+    expect(success.textContent).not.toContain('1920x1080')
     const [projectId, formData] = (actions.uploadGeneratedImageAction as jest.Mock).mock.calls[0]
     expect(projectId).toBe(5)
     expect((formData as FormData).get('file')).toBeInstanceOf(File)
     expect(((formData as FormData).get('file') as File).name).toBe('photo.jpg')
+  })
+
+  it('アップロード欄の説明に1920x1080の文言は無く、元の解像度のまま登録される旨が示される', async () => {
+    await openPanel()
+
+    const description = screen.getByText(/JPEG\/PNG\(20MBまで\)を1枚選べます/)
+    expect(description.textContent).toContain('元の解像度のまま')
+    expect(description.textContent).not.toContain('1920x1080')
+    expect(description.textContent).not.toContain('中央で切り抜')
   })
 
   it('PNGも受け付ける', async () => {

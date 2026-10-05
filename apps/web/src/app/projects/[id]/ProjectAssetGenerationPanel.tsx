@@ -354,7 +354,7 @@ export function ProjectAssetGenerationPanel({
     }
     setMessage({
       type: "success",
-      text: `画像を1920x1080に変換し、画像ギャラリーに登録しました(画像ID: ${result.imageId})。`,
+      text: `画像を元の解像度のまま、画像ギャラリーに登録しました(画像ID: ${result.imageId})。`,
     });
     setUploadFile(null);
     setUploadInputKey((key) => key + 1);
@@ -424,7 +424,7 @@ export function ProjectAssetGenerationPanel({
       <div className={SUBSECTION_CLASS}>
         <h3 className="text-sm font-semibold">画像をアップロードしてギャラリーへ登録</h3>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          JPEG/PNG(20MBまで)を1枚選べます。1920x1080に中央で切り抜いて登録します(縦長は上下が切れ、小さい画像は拡大されます)。
+          JPEG/PNG(20MBまで)を1枚選べます。切り抜き・拡大・縮小はせず、元の解像度のまま登録します。
           EXIF/GPSなどのメタ情報は取り除かれます。登録した画像は、生成画像と同じギャラリーに並びます。
         </p>
         <input

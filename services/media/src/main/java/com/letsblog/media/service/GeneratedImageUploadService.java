@@ -7,13 +7,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * 利用者が手元からアップロードした画像を検証し、1920x1080(中央切り抜き)へ変換して
- * 生成画像ギャラリーへ登録する(issue #1599)。
+ * 利用者が手元からアップロードした画像を検証し、切り抜き・拡縮せず元の解像度のまま
+ * 生成画像ギャラリーへ登録する(issue #1599、解像度の扱いは#1654で変更)。
  *
  * <p>対応形式はJPEG/PNGのみ。形式は申告されたContent-Typeではなく先頭のバイト列(マジックナンバー)で
- * 判定する。上限は20MB(multipart上限と同じ)。元の画像は保持せず、変換後のものだけを保存する。
+ * 判定する。上限は20MB(multipart上限と同じ)。元の画像は保持せず、メタ情報を除いて再エンコードしたものだけを保存する(形式は維持)。
  * 拒否した場合は何も保存しない(検証と変換が終わってから初めて保存する)。
- * 登録後、変換済みの画像でAIタグ付けを非同期に依頼する(issue #1600、{@link UploadedImageTagService})。
+ * 登録後、再エンコード済みの画像でAIタグ付けを非同期に依頼する(issue #1600、{@link UploadedImageTagService})。
  *
  * <p>認可はこのクラスでは行わない。呼び出し元のコントローラが先に判定する。
  */
@@ -24,10 +24,6 @@ public class GeneratedImageUploadService {
 
     /** アップロードできるファイルサイズの上限(20MB)。 */
     public static final int MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-
-    /** 保存画像の解像度。 */
-    static final int TARGET_WIDTH = 1920;
-    static final int TARGET_HEIGHT = 1080;
 
     /** 出所の値。generated_images.provider に入る。 */
     static final String PROVIDER_UPLOAD = "UPLOAD";
@@ -56,23 +52,23 @@ public class GeneratedImageUploadService {
             throw new InvalidImageUploadException("対応していない画像形式です。JPEGまたはPNGを選択してください。");
         }
 
-        ImageResizeService.ResizeResult converted =
-                imageResizeService.coverTo(data, mimeType, TARGET_WIDTH, TARGET_HEIGHT);
+        ImageResizeService.ReencodedImage converted =
+                imageResizeService.reencodeKeepingResolution(data, mimeType);
 
         GeneratedImage saved = generatedImageCreationService.create(new CreateGeneratedImageRequest(
                 projectId, null, null, null, null, null, null, null,
-                TARGET_WIDTH, TARGET_HEIGHT, null, null, null, null, null,
+                converted.width(), converted.height(), null, null, null, null, null,
                 converted.mimeType(), PROVIDER_UPLOAD, null, converted.data()));
         requestAiTagging(saved, projectId, converted);
         return saved;
     }
 
     /**
-     * 保存した<b>変換後</b>の画像(1920x1080、EXIF/GPS除去済み。元ファイルではない)でAIタグ付けを依頼する
+     * 保存した<b>再エンコード後</b>の画像(EXIF/GPS除去済み。元ファイルではない)でAIタグ付けを依頼する
      * (issue #1600)。タグ付けは応答の後に非同期で行う補助機能なので、依頼の失敗(スレッドプール満杯など)で
      * アップロードを失敗させない。
      */
-    private void requestAiTagging(GeneratedImage saved, Long projectId, ImageResizeService.ResizeResult converted) {
+    private void requestAiTagging(GeneratedImage saved, Long projectId, ImageResizeService.ReencodedImage converted) {
         try {
             uploadedImageTagService.tagAsync(saved.getId(), projectId, converted.mimeType(), converted.data());
         } catch (RuntimeException e) {

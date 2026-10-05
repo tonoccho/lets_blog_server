@@ -55,7 +55,7 @@ class GeneratedImageUploadServiceTest {
     }
 
     @Test
-    @DisplayName("JPEGは1920x1080のJPEGとして、provider=UPLOAD・promptなしで登録される")
+    @DisplayName("JPEGは元の画素数のJPEGとして、provider=UPLOAD・promptなしで登録される")
     void JPEGを登録する() throws IOException {
         GeneratedImage saved = new GeneratedImage();
         when(creationService.create(any())).thenReturn(saved);
@@ -69,20 +69,38 @@ class GeneratedImageUploadServiceTest {
         assertEquals("UPLOAD", request.provider());
         assertNull(request.prompt());
         assertEquals("image/jpeg", request.mimeType());
-        assertEquals(1920, request.width());
-        assertEquals(1080, request.height());
+        assertEquals(4000, request.width());
+        assertEquals(3000, request.height());
         BufferedImage stored = ImageIO.read(new ByteArrayInputStream(request.imageData()));
-        assertEquals(1920, stored.getWidth());
-        assertEquals(1080, stored.getHeight());
+        assertEquals(4000, stored.getWidth());
+        assertEquals(3000, stored.getHeight());
     }
 
     @Test
-    @DisplayName("不透明PNGはJPEGに、透過PNGはPNGのまま登録される")
+    @DisplayName("不透明PNGもPNGのまま、縦長でも元の画素数で登録される")
     void PNGの保存形式() {
         when(creationService.create(any())).thenReturn(new GeneratedImage());
 
-        service.upload(7L, UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, Color.RED, false)));
-        assertEquals("image/jpeg", captureRequest().mimeType());
+        service.upload(7L, UploadImageFixtures.png(UploadImageFixtures.solid(700, 1400, Color.RED, false)));
+
+        CreateGeneratedImageRequest request = captureRequest();
+        assertEquals("image/png", request.mimeType());
+        assertEquals(700, request.width());
+        assertEquals(1400, request.height());
+    }
+
+    @Test
+    @DisplayName("Orientation=6のJPEGは、向きを反映した画素数がwidth/heightに記録される")
+    void Orientationを反映した寸法を記録する() {
+        when(creationService.create(any())).thenReturn(new GeneratedImage());
+        byte[] src = UploadImageFixtures.withExif(
+                UploadImageFixtures.jpeg(UploadImageFixtures.solid(800, 600, Color.RED, false)), 6);
+
+        service.upload(7L, src);
+
+        CreateGeneratedImageRequest request = captureRequest();
+        assertEquals(600, request.width());
+        assertEquals(800, request.height());
     }
 
     @Test
@@ -173,12 +191,13 @@ class GeneratedImageUploadServiceTest {
     }
 
     @Test
-    @DisplayName("登録後に、変換・メタ情報除去済みの保存画像をAIタグ付けへ渡す(元ファイルは渡さない)")
+    @DisplayName("登録後に、メタ情報除去済みの保存画像をAIタグ付けへ渡す(元ファイルは渡さない)")
     void 保存した画像でタグ付けを依頼する() {
         GeneratedImage saved = new GeneratedImage();
         saved.setId(42L);
         when(creationService.create(any())).thenReturn(saved);
-        byte[] src = UploadImageFixtures.jpeg(UploadImageFixtures.solid(4000, 3000, Color.RED, false));
+        byte[] src = UploadImageFixtures.withExif(
+                UploadImageFixtures.jpeg(UploadImageFixtures.solid(800, 600, Color.RED, false)), 1);
 
         service.upload(7L, src);
 
@@ -186,7 +205,9 @@ class GeneratedImageUploadServiceTest {
         ArgumentCaptor<byte[]> sent = ArgumentCaptor.forClass(byte[].class);
         verify(tagService).tagAsync(eq(42L), eq(7L), eq("image/jpeg"), sent.capture());
         org.junit.jupiter.api.Assertions.assertArrayEquals(request.imageData(), sent.getValue());
-        org.junit.jupiter.api.Assertions.assertNotEquals(src.length, sent.getValue().length);
+        org.junit.jupiter.api.Assertions.assertFalse(
+                new String(sent.getValue(), java.nio.charset.StandardCharsets.ISO_8859_1)
+                        .contains(UploadImageFixtures.GPS_MARKER));
     }
 
     @Test

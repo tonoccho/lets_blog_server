@@ -35,11 +35,17 @@ public class ImageResizeService {
     private static final Logger log = LoggerFactory.getLogger(ImageResizeService.class);
     private static final int EXIF_ORIENTATION_TAG = 0x0112;
     private static final float JPEG_QUALITY = 0.85f;
+    /** アップロード画像(issue #1654)はサイズを変えないので、画質の劣化を抑えるため高めにする。 */
+    private static final float UPLOAD_JPEG_QUALITY = 0.95f;
     /**
-     * {@link #coverTo}がデコードする画像の画素数の上限(6,400万画素)。20MBのPNGは数億画素にも
+     * {@link #reencodeKeepingResolution}がデコードする画像の画素数の上限(6,400万画素)。20MBのPNGは数億画素にも
      * なりうる(伸長すると数GB)ため、デコードの前にヘッダーの寸法で断る(issue #1599)。
      */
-    private static final long MAX_COVER_SOURCE_PIXELS = 64_000_000L;
+    private static final long MAX_DECODE_SOURCE_PIXELS = 64_000_000L;
+
+    /** {@link #reencodeKeepingResolution}の結果。width/heightは出力画像の実際の画素数。 */
+    public record ReencodedImage(byte[] data, String mimeType, int width, int height) {
+    }
 
     /** リサイズ/エンコード結果。convertOpaquePngToJpeg指定時はmimeTypeが元と変わりうる。 */
     public record ResizeResult(byte[] data, String mimeType) {
@@ -93,27 +99,23 @@ public class ImageResizeService {
     }
 
     /**
-     * 画像を固定解像度へ「中央切り抜き(cover)」で変換する(issue #1599)。EXIF Orientationを反映したうえで、
-     * 目標の縦横比で中央を切り抜き、目標の解像度へ拡縮する(小さい画像は拡大される)。出力にはEXIF/GPS等の
-     * メタ情報が残らない(デコードして新しく書き出すため)。不透明なら品質0.85のJPEG、透過ピクセルがあれば
-     * PNGで書き出す(issue #468と同じ方針。JPEG入力は常にJPEG)。
+     * 画像を切り抜き・拡大・縮小せず、元の解像度のまま再エンコードする(issue #1654)。EXIF Orientationを
+     * 反映したうえで書き出すため、画素数は反映後の向きで数える。出力にはEXIF/GPS等のメタ情報が残らない
+     * (デコードして新しく書き出すため)。形式は維持する: JPEG入力は品質0.95のJPEG、PNG入力は(不透明でも)PNG。
      *
      * <p>{@link #resizeToLongEdge}と違い、失敗時に元のバイト列を返すことはしない。メタ情報を残したまま
      * 保存してしまうため、デコードできない・画素数が多すぎる画像は{@link InvalidImageUploadException}で断る。
      */
-    public ResizeResult coverTo(byte[] originalBytes, String mimeType, int targetWidth, int targetHeight) {
+    public ReencodedImage reencodeKeepingResolution(byte[] originalBytes, String mimeType) {
         BufferedImage decoded = decodeWithinPixelLimit(originalBytes);
         int orientation = isJpeg(mimeType) ? readJpegOrientation(originalBytes) : 1;
-        BufferedImage normalized = applyOrientation(decoded, orientation);
-
-        BufferedImage output = dropUnusedAlpha(scaleTo(centerCrop(normalized, targetWidth, targetHeight),
-                targetWidth, targetHeight));
+        BufferedImage output = applyOrientation(decoded, orientation);
         try {
-            ResizeResult encoded = encode(output, mimeType, true);
+            ResizeResult encoded = encode(output, mimeType, false, UPLOAD_JPEG_QUALITY);
             if (encoded == null) {
                 throw new InvalidImageUploadException("画像を変換できませんでした。");
             }
-            return encoded;
+            return new ReencodedImage(encoded.data(), encoded.mimeType(), output.getWidth(), output.getHeight());
         } catch (IOException e) {
             throw new InvalidImageUploadException("画像を変換できませんでした。");
         }
@@ -129,7 +131,7 @@ public class ImageResizeService {
             ImageReader reader = readers.next();
             try {
                 reader.setInput(in);
-                if ((long) reader.getWidth(0) * reader.getHeight(0) > MAX_COVER_SOURCE_PIXELS) {
+                if ((long) reader.getWidth(0) * reader.getHeight(0) > MAX_DECODE_SOURCE_PIXELS) {
                     throw new InvalidImageUploadException("画像の画素数が大きすぎます(上限6,400万画素)。");
                 }
                 return reader.read(0);
@@ -142,52 +144,6 @@ public class ImageResizeService {
             }
             throw new InvalidImageUploadException("画像として読み込めませんでした。");
         }
-    }
-
-    /** 目標と同じ縦横比になるよう、中央を切り抜く。 */
-    private BufferedImage centerCrop(BufferedImage src, int targetWidth, int targetHeight) {
-        int width = src.getWidth();
-        int height = src.getHeight();
-        int cropWidth = width;
-        int cropHeight = height;
-        if ((long) width * targetHeight > (long) height * targetWidth) {
-            cropWidth = Math.max(1, (int) Math.round((double) height * targetWidth / targetHeight));
-        } else {
-            cropHeight = Math.max(1, (int) Math.round((double) width * targetHeight / targetWidth));
-        }
-        return src.getSubimage((width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight);
-    }
-
-    /** 目標の解像度へ拡縮する。大きく縮める場合は、粗くならないよう半分ずつ段階的に縮める。 */
-    private BufferedImage scaleTo(BufferedImage src, int targetWidth, int targetHeight) {
-        BufferedImage current = src;
-        while (current.getWidth() > 2 * targetWidth) {
-            current = scale(current,
-                    Math.max(targetWidth, current.getWidth() / 2), Math.max(targetHeight, current.getHeight() / 2));
-        }
-        return scale(current, targetWidth, targetHeight);
-    }
-
-    /** アルファチャンネルを持つが全画素が不透明な画像は、不透明な画像として扱う(JPEGで保存できるように)。 */
-    private BufferedImage dropUnusedAlpha(BufferedImage image) {
-        if (!image.getColorModel().hasAlpha() || hasTransparentPixel(image)) {
-            return image;
-        }
-        return ensureOpaqueRgb(image);
-    }
-
-    private boolean hasTransparentPixel(BufferedImage image) {
-        int width = image.getWidth();
-        int[] row = new int[width];
-        for (int y = 0; y < image.getHeight(); y++) {
-            image.getRGB(0, y, width, 1, row, 0, width);
-            for (int argb : row) {
-                if ((argb >>> 24) != 0xFF) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     /**
@@ -215,9 +171,15 @@ public class ImageResizeService {
     }
 
     private ResizeResult encode(BufferedImage image, String mimeType, boolean convertOpaquePngToJpeg) throws IOException {
+        return encode(image, mimeType, convertOpaquePngToJpeg, JPEG_QUALITY);
+    }
+
+    private ResizeResult encode(
+            BufferedImage image, String mimeType, boolean convertOpaquePngToJpeg, float jpegQuality)
+            throws IOException {
         boolean useJpeg = isJpeg(mimeType) || (convertOpaquePngToJpeg && !image.getColorModel().hasAlpha());
         if (useJpeg) {
-            byte[] data = encodeJpeg(image);
+            byte[] data = encodeJpeg(image, jpegQuality);
             return data != null ? new ResizeResult(data, "image/jpeg") : null;
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -225,7 +187,7 @@ public class ImageResizeService {
         return written ? new ResizeResult(out.toByteArray(), "image/png") : null;
     }
 
-    private byte[] encodeJpeg(BufferedImage image) throws IOException {
+    private byte[] encodeJpeg(BufferedImage image, float quality) throws IOException {
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
         if (!writers.hasNext()) {
             return null;
@@ -234,7 +196,7 @@ public class ImageResizeService {
         try {
             ImageWriteParam param = writer.getDefaultWriteParam();
             param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-            param.setCompressionQuality(JPEG_QUALITY);
+            param.setCompressionQuality(quality);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {
                 writer.setOutput(ios);
