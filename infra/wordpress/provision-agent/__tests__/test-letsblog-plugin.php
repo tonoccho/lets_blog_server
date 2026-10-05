@@ -697,6 +697,141 @@ if (function_exists('letsblog_expand_custom_tags')) {
     check('tags: 順序が逆でもプロジェクト固有を優先する', letsblog_expand_custom_tags($m) === '<p>x</p>');
 }
 
+// --- issue #1563: 組み込みタグ(ブログカード・Amazon・目次)の目印を、保存済みのデザインで表示時に展開し直す ---
+function letsblog_test_embed(string $type, array $data, string $embedded): string
+{
+    $json = json_encode(['type' => $type, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    // 文字列の中だけをエスケープする(配列の [ ] は JSON の構造なのでそのまま)。アプリ(EmbedMarker)と同じ。
+    $json = preg_replace_callback('/"(?:[^"\\\\]|\\\\.)*"/s', function (array $m): string {
+        return strtr($m[0], ['-' => '\\u002d', '<' => '\\u003c', '>' => '\\u003e', '[' => '\\u005b', ']' => '\\u005d']);
+    }, $json);
+    return '<!-- lbs:embed ' . $json . ' -->' . $embedded . '<!-- /lbs:embed -->';
+}
+function letsblog_test_strip(string $html): string
+{
+    return preg_replace('/<!-- \\/?lbs:(?:tag|embed)[^>]*? -->/', '', $html);
+}
+$design = function (string $type, ?string $template): array {
+    return ['tagType' => $type, 'backgroundColor' => '#fff', 'textColor' => '#000', 'accentColor' => '#f00', 'customCss' => null, 'htmlTemplate' => $template];
+};
+$card = ['title' => 'タイトル', 'description' => '説明', 'siteName' => 'サイト', 'url' => 'https://example.com/a?x=1&y=2', 'imageUrl' => 'https://example.com/og.png'];
+
+if (function_exists('letsblog_expand_custom_tags')) {
+    // AC1: ブログカードのデザインテンプレートが変わると、再投稿なしで新しいテンプレートで表示される
+    $setSync(['tagDesigns' => [$design('BLOGCARD', '<section class="bc2"><h3>{{title}}</h3><p>{{description}}</p><i>{{siteName}}</i><a href="{{url}}"><img src="{{imageUrl}}"></a></section>')]]);
+    $old = letsblog_test_embed('BLOGCARD', $card, '<a class="lb-blogcard" href="https://example.com/a">OLD</a>');
+    $out = letsblog_expand_custom_tags('前' . "\n\n" . $old . "\n\n" . '後');
+    check('embed: ブログカードを同期済みのテンプレートで展開し直す', str_contains($out, '<section class="bc2"><h3>タイトル</h3><p>説明</p><i>サイト</i>') && !str_contains($out, 'OLD'));
+    check('embed: URL の & は HTML エスケープして差し込む', str_contains($out, 'href="https://example.com/a?x=1&amp;y=2"') && str_contains($out, 'src="https://example.com/og.png"'));
+    check('embed: 展開結果に目印コメントが残らず、目印の外の本文は変わらない', !str_contains($out, 'lbs:embed') && str_starts_with($out, "前\n\n") && str_ends_with($out, "\n\n後"));
+
+    // XSS: 取得したデータの < > " ' はエスケープする。本文の中のプレースホルダーは再置換しない
+    $xss = letsblog_test_embed('BLOGCARD', ['title' => '"><script>alert(1)</script>', 'description' => '{{title}}', 'siteName' => "'", 'url' => 'https://e.com/', 'imageUrl' => ''], 'OLD');
+    $out = letsblog_expand_custom_tags($xss);
+    check('embed: 取得したデータの < > " をエスケープする', !str_contains($out, '<script>') && str_contains($out, '&quot;&gt;&lt;script&gt;'));
+    check('embed: データの中のプレースホルダーを再置換しない', str_contains($out, '<p>{{title}}</p>'));
+    $jsUrl = letsblog_test_embed('BLOGCARD', ['title' => 't', 'description' => '', 'siteName' => '', 'url' => 'javascript:alert(1)', 'imageUrl' => ''], '<b class="posted">投稿時点</b>');
+    check('embed: http(s) でない URL のデータは展開せず投稿時点の HTML のまま', letsblog_test_strip(letsblog_expand_custom_tags($jsUrl)) === '<b class="posted">投稿時点</b>');
+    $jsImg = letsblog_test_embed('BLOGCARD', ['title' => 't', 'description' => '', 'siteName' => '', 'url' => 'https://e.com/', 'imageUrl' => 'javascript:alert(2)'], 'OLD');
+    check('embed: http(s) でない画像 URL は空にして展開する', !str_contains(letsblog_expand_custom_tags($jsImg), 'javascript:'));
+
+    // テンプレートなし(既定の見た目): 既定のブログカードを組み立てる。画像なしなら thumb を出さない
+    $setSync(['tagDesigns' => [$design('BLOGCARD', null)]]);
+    $out = letsblog_expand_custom_tags($old);
+    check('embed: テンプレートが外れたら既定のブログカードで展開し直す',
+        $out === '<a class="lb-blogcard" href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer"><div class="lb-blogcard-thumb" style="background-image:url(\'https://example.com/og.png\')"></div><div class="lb-blogcard-body"><div class="lb-blogcard-title">タイトル</div><div class="lb-blogcard-description">説明</div><div class="lb-blogcard-site">サイト</div></div></a>');
+    $noImg = letsblog_test_embed('BLOGCARD', ['title' => 't', 'description' => 'd', 'siteName' => 's', 'url' => 'https://e.com/', 'imageUrl' => ''], 'OLD');
+    check('embed: 画像がなければ既定のカードに thumb を出さない', !str_contains(letsblog_expand_custom_tags($noImg), 'lb-blogcard-thumb'));
+
+    // AC2: Amazon
+    $amz = ['productName' => '商品 & 名', 'price' => '￥1,000', 'summary' => '概要', 'productUrl' => 'https://amazon.co.jp/dp/x', 'imageUrl' => 'https://m.media-amazon.com/i.jpg', 'priceTimestamp' => '2026/09/08 20:03時点の価格です'];
+    $setSync(['tagDesigns' => [$design('AMAZON', '<div class="az2">{{productName}}|{{price}}|{{summary}}|{{priceTimestamp}}|<a href="{{productUrl}}"></a><img src="{{imageUrl}}"></div>')]]);
+    $oldAmz = letsblog_test_embed('AMAZON', $amz, '<a class="lb-amazon-card">OLD</a>');
+    $out = letsblog_expand_custom_tags($oldAmz);
+    check('embed: Amazon を同期済みのテンプレートで展開し直す',
+        str_contains($out, '<div class="az2">商品 &amp; 名|￥1,000|概要|2026/09/08 20:03時点の価格です|<a href="https://amazon.co.jp/dp/x"></a><img src="https://m.media-amazon.com/i.jpg"></div>') && !str_contains($out, 'OLD'));
+    $nonProd = $amz;
+    $nonProd['productUrl'] = '';
+    check('embed: 非本番サイトで投稿した Amazon は商品 URL を空のまま展開する', str_contains(letsblog_expand_custom_tags(letsblog_test_embed('AMAZON', $nonProd, 'OLD')), '<a href=""></a>'));
+    $setSync(['tagDesigns' => [$design('AMAZON', null)]]);
+    $out = letsblog_expand_custom_tags($oldAmz);
+    check('embed: Amazon の既定の見た目(本番サイト)', $out === '<a class="lb-amazon-card" href="https://amazon.co.jp/dp/x" target="_blank" rel="noopener noreferrer nofollow sponsored"><div class="lb-amazon-card-thumb" style="background-image:url(\'https://m.media-amazon.com/i.jpg\')"></div><div class="lb-amazon-card-body"><div class="lb-amazon-card-name">商品 &amp; 名</div><div class="lb-amazon-card-summary">概要</div><div class="lb-amazon-card-price">￥1,000</div><div class="lb-amazon-card-timestamp">2026/09/08 20:03時点の価格です</div><div class="lb-amazon-card-cta">Amazonで見る</div></div></a>');
+    $bare = letsblog_test_embed('AMAZON', ['productName' => 'N', 'price' => '', 'summary' => '', 'productUrl' => '', 'imageUrl' => '', 'priceTimestamp' => ''], 'OLD');
+    check('embed: Amazon の既定の見た目(非本番・項目なし)は div で、空の項目を出さない',
+        letsblog_expand_custom_tags($bare) === '<div class="lb-amazon-card"><div class="lb-amazon-card-body"><div class="lb-amazon-card-name">N</div><div class="lb-amazon-card-cta">Amazonで見る</div></div></div>');
+    $badAmzUrl = $amz;
+    $badAmzUrl['productUrl'] = 'javascript:x';
+    check('embed: Amazon の http(s) でない商品 URL は展開せず投稿時点の HTML のまま', letsblog_test_strip(letsblog_expand_custom_tags(letsblog_test_embed('AMAZON', $badAmzUrl, 'KEEP'))) === 'KEEP');
+
+    // AC3: 目次
+    $items = [['text' => '第一章 <1>', 'href' => '#a', 'children' => [['text' => '節', 'href' => '#b', 'children' => []]]], ['text' => '第二章', 'href' => '#c', 'children' => []]];
+    $oldToc = letsblog_test_embed('TOC', ['items' => $items], '<ul class="lb-toc-list"><li>OLD</li></ul>');
+    $setSync(['tagDesigns' => [$design('TOC', '<nav class="toc2">{{toc}}</nav>')]]);
+    $out = letsblog_expand_custom_tags($oldToc);
+    check('embed: 目次を同期済みのテンプレートで展開し直す',
+        $out === '<nav class="toc2"><ul class="lb-toc-list"><li><a href="#a">第一章 &lt;1&gt;</a><ul><li><a href="#b">節</a></li></ul></li><li><a href="#c">第二章</a></li></ul></nav>');
+    $setSync(['tagDesigns' => [$design('TOC', null)]]);
+    check('embed: 目次のテンプレートが外れたら既定の目次で展開し直す',
+        letsblog_expand_custom_tags($oldToc) === '<ul class="lb-toc-list"><li><a href="#a">第一章 &lt;1&gt;</a><ul><li><a href="#b">節</a></li></ul></li><li><a href="#c">第二章</a></li></ul>');
+    $deep = function (int $n) use (&$deep): array {
+        return [['text' => (string) $n, 'href' => '#' . $n, 'children' => $n > 1 ? $deep($n - 1) : []]];
+    };
+    $badToc = [
+        'items 欠落' => ['x' => 1],
+        '空の items' => ['items' => []],
+        '項目が配列でない' => ['items' => ['x']],
+        'text が文字列でない' => ['items' => [['text' => 5, 'href' => '#a', 'children' => []]]],
+        'href が # で始まらない' => ['items' => [['text' => 't', 'href' => 'javascript:x', 'children' => []]]],
+        'children が配列でない' => ['items' => [['text' => 't', 'href' => '#a', 'children' => 'x']]],
+        '深すぎる入れ子' => ['items' => $deep(7)],
+    ];
+    foreach ($badToc as $label => $data) {
+        check("embed: 壊れた目次データ($label)は投稿時点の HTML のまま", letsblog_test_strip(letsblog_expand_custom_tags(letsblog_test_embed('TOC', $data, 'KEEP'))) === 'KEEP');
+    }
+
+    // AC5/互換: 同期されていない種別、壊れた目印、閉じのない目印は投稿時点の HTML のまま
+    $setSync(['tagDesigns' => [$design('TOC', 'x{{toc}}')]]);
+    check('embed: 同期済みのデザインにない種別は投稿時点の HTML のまま', letsblog_test_strip(letsblog_expand_custom_tags(letsblog_test_embed('BLOGCARD', $card, 'KEEP'))) === 'KEEP');
+    check('embed: 知らない種別は投稿時点の HTML のまま', letsblog_test_strip(letsblog_expand_custom_tags(letsblog_test_embed('UNKNOWN', [], 'KEEP'))) === 'KEEP');
+    check('embed: 壊れた目印は投稿時点の HTML のまま', letsblog_expand_custom_tags('<!-- lbs:embed {not json} -->KEEP<!-- /lbs:embed -->') === '<!-- lbs:embed {not json} -->KEEP<!-- /lbs:embed -->');
+    check('embed: 種別が文字列でない目印は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags('<!-- lbs:embed {"type":5,"data":{}} -->KEEP<!-- /lbs:embed -->'), 'KEEP'));
+    check('embed: data が配列でない目印は投稿時点の HTML のまま', str_contains(letsblog_expand_custom_tags('<!-- lbs:embed {"type":"TOC","data":"x"} -->KEEP<!-- /lbs:embed -->'), 'KEEP'));
+    $unclosed = letsblog_test_embed('TOC', ['items' => $items], 'KEEP');
+    $unclosed = str_replace('<!-- /lbs:embed -->', '', $unclosed);
+    check('embed: 閉じのない目印は触らない', letsblog_expand_custom_tags($unclosed) === $unclosed);
+    unset($GLOBALS['letsblog_test_options']['letsblog_sync_payload']);
+    check('embed: 同期前は投稿時点の HTML のまま', letsblog_expand_custom_tags($oldToc) === $oldToc);
+    $setSync(['tagDesigns' => 'x']);
+    check('embed: tagDesigns が配列でなければ投稿時点の HTML のまま', letsblog_expand_custom_tags($oldToc) === $oldToc);
+    $setSync(['tagDesigns' => ['x', ['tagType' => 5], ['tagType' => 'TOC', 'htmlTemplate' => 7]]]);
+    check('embed: 形式の壊れたデザインは無視する(テンプレートが文字列でなければ既定の見た目)', str_contains(letsblog_expand_custom_tags($oldToc), '<ul class="lb-toc-list"><li><a href="#a">'));
+
+    // 目印のない既存記事は変わらない
+    $plain = '<p>既存</p><!-- lbs:embedX --><a class="lb-blogcard">x</a>';
+    $setSync(['tagDesigns' => [$design('BLOGCARD', '<i>{{title}}</i>')]]);
+    check('embed: 目印のない本文は一切変えない', letsblog_expand_custom_tags($plain) === $plain);
+
+    // 入れ子: 未知のカスタムタグの投稿時点の HTML の中の組み込みタグも展開し直す。
+    // 既知のカスタムタグの content に組み込みタグの生の記法が残っていれば、生のまま画面に出さず投稿時点の HTML を使う(#1560 のレビュー指摘)。
+    $setSync([
+        'customTags' => [['scope' => 'GLOBAL', 'tagName' => 'box', 'tagFormat' => 'BLOCK', 'htmlTemplate' => '<div class="box v2">{{content}}</div>']],
+        'tagDesigns' => [$design('BLOGCARD', '<section class="bc2">{{title}}</section>')],
+    ]);
+    $inEmbed = letsblog_test_embed('BLOGCARD', $card, 'OLDCARD');
+    $unknownOuter = letsblog_test_marker('removed', [], 'c', '<div class="old">' . $inEmbed . '</div>');
+    check('embed: 未知のカスタムタグの中の組み込みタグも展開し直す', letsblog_test_strip(letsblog_expand_custom_tags($unknownOuter)) === '<div class="old"><section class="bc2">タイトル</section></div>');
+    $outerRaw = letsblog_test_marker('box', [], '前[blogcard https://example.com/a]後', '<div class="box v1">前' . $inEmbed . '後</div>');
+    $out = letsblog_expand_custom_tags($outerRaw);
+    check('embed: content に組み込みタグの生の記法が残るカスタムタグは投稿時点の HTML を使い、生の記法を出さない',
+        letsblog_test_strip($out) === '<div class="box v1">前<section class="bc2">タイトル</section>後</div>' && !str_contains($out, '[blogcard'));
+    $outerOk = letsblog_test_marker('box', [], '本文', '<div class="box v1">本文</div>');
+    check('embed: 生の記法がなければ従来どおりカスタムタグを展開し直す', letsblog_expand_custom_tags($outerOk) === '<div class="box v2">本文</div>');
+    $outerToc = letsblog_test_marker('box', [], 'a [TOC] b', 'KEEP');
+    check('embed: [toc] の生の記法も同様に扱う', letsblog_test_strip(letsblog_expand_custom_tags($outerToc)) === 'KEEP');
+}
+check('embed: 目印は HTML コメントだけで、プラグインがなくても画面に出ない',
+    function_exists('letsblog_test_embed') && preg_match('/^<!-- lbs:embed [^>]*? -->.*<!-- \/lbs:embed -->$/s', letsblog_test_embed('TOC', ['k' => '-->x'], '<ul>[x]</ul>')) === 1);
+
 // AC3: プラグインを停止すると、目印はコメントなので画面に出ず、投稿時点の HTML が表示される(フックごと消える)。
 check('tags: 目印は HTML コメントだけで、プラグインがなくても画面に出ない',
     function_exists('letsblog_test_marker') && preg_match('/^<!-- lbs:tag [^>]*? -->.*<!-- \/lbs:tag -->$/s', letsblog_test_marker('a', ['k' => '-->x'], '<p>[x]</p>', 'E')) === 1);

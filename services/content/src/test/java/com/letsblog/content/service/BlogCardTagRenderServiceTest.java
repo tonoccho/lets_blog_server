@@ -136,4 +136,118 @@ class BlogCardTagRenderServiceTest {
         org.mockito.Mockito.verify(projectBridgeClient, org.mockito.Mockito.atLeastOnce())
                 .resolveTagDesign(org.mockito.ArgumentMatchers.isNull(), anyString(), any());
     }
+
+    private void stubCard(String url, Map<String, String> data) {
+        when(contentCacheService.resolve(url))
+                .thenReturn(new ContentCacheResponse(url, ContentType.BLOGCARD, data, Instant.now(), Instant.now()));
+    }
+
+    private static final Map<String, String> FULL_DATA = Map.of(
+            "title", "記事のタイトル",
+            "description", "記事の説明",
+            "siteName", "サイト名",
+            "url", "https://example.com/article",
+            "imageUrl", "https://example.com/og.png");
+
+    // ---- issue #1563: 取得したデータを目印として残す ----
+
+    @Test
+    void render_取得したデータを目印のJSONに生の値で残し_投稿時点のHTMLを目印で挟む() {
+        stubTagDesign();
+        stubCard("https://example.com/article", FULL_DATA);
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        com.fasterxml.jackson.databind.JsonNode marker = EmbedMarkerTestSupport.firstMarker(result);
+        assertEquals("BLOGCARD", marker.get("type").asText());
+        com.fasterxml.jackson.databind.JsonNode data = marker.get("data");
+        assertEquals("記事のタイトル", data.get("title").asText());
+        assertEquals("記事の説明", data.get("description").asText());
+        assertEquals("サイト名", data.get("siteName").asText());
+        assertEquals("https://example.com/article", data.get("url").asText());
+        assertEquals("https://example.com/og.png", data.get("imageUrl").asText());
+        assertEquals(1, EmbedMarkerTestSupport.closeCount(result));
+        assertTrue(result.contains("<a class=\"lb-blogcard\" href=\"https://example.com/article\""));
+        assertTrue(result.indexOf("<!-- lbs:embed ") < result.indexOf("lb-blogcard\""));
+        assertTrue(result.indexOf("lb-blogcard\"") < result.indexOf("<!-- /lbs:embed -->"));
+    }
+
+    @Test
+    void render_単独の行のタグは目印とカードを別のHTMLブロックにするため空行で区切る() {
+        stubTagDesign();
+        stubCard("https://example.com/article", FULL_DATA);
+
+        String result = service().render("前の段落\n[blogcard https://example.com/article]\n次の段落", 1L);
+
+        assertTrue(result.contains("-->\n\n<a class=\"lb-blogcard\""), result);
+        assertTrue(result.contains("</a>\n\n<!-- /lbs:embed -->\n次の段落"), result);
+    }
+
+    @Test
+    void render_文中のタグは段落を割らないよう区切りなしで目印を付ける() {
+        stubTagDesign();
+        stubCard("https://example.com/article", FULL_DATA);
+
+        String result = service().render("見て[blogcard https://example.com/article]ね", 1L);
+
+        assertTrue(result.contains("見て<!-- lbs:embed "), result);
+        assertTrue(result.contains("--><a class=\"lb-blogcard\""), result);
+        assertTrue(result.contains("</a><!-- /lbs:embed -->ね"), result);
+    }
+
+    @Test
+    void render_目印のJSONはコメントを閉じず_HTMLやタグ記法として解釈されない() {
+        stubTagDesign();
+        stubCard("https://example.com/article", Map.of(
+                "title", "A --> <b>[toc]</b> [blogcard x]",
+                "url", "https://example.com/article"));
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        String raw = EmbedMarkerTestSupport.firstMarkerRaw(result);
+        assertFalse(raw.contains("-"));
+        assertFalse(raw.contains("<"));
+        assertFalse(raw.contains(">"));
+        assertFalse(raw.contains("["));
+        assertFalse(raw.contains("]"));
+        assertEquals("A --> <b>[toc]</b> [blogcard x]",
+                EmbedMarkerTestSupport.firstMarker(result).get("data").get("title").asText());
+    }
+
+    @Test
+    void render_カスタムテンプレートでもデータを目印に残す() {
+        lenient().when(projectBridgeClient.resolveTagDesign(any(), anyString(), any())).thenReturn(
+                new ProjectBridgeClient.TagDesignResponse("#fff", "#000", "#f00", null, "<section>{{title}}</section>"));
+        lenient().when(projectBridgeClient.toColors(any()))
+                .thenReturn(new TagDesignColors("#fff", "#000", "#f00", null));
+        stubCard("https://example.com/article", FULL_DATA);
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        assertTrue(result.contains("<section>記事のタイトル</section>"));
+        assertEquals("記事のタイトル", EmbedMarkerTestSupport.firstMarker(result).get("data").get("title").asText());
+    }
+
+    @Test
+    void render_http以外のURLは目印のデータに入れず_元のURLに置き換える() {
+        stubTagDesign();
+        stubCard("https://example.com/article", Map.of(
+                "title", "t", "url", "javascript:alert(1)", "imageUrl", "javascript:alert(2)"));
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        assertFalse(result.contains("javascript:"));
+        com.fasterxml.jackson.databind.JsonNode data = EmbedMarkerTestSupport.firstMarker(result).get("data");
+        assertEquals("https://example.com/article", data.get("url").asText());
+        assertEquals("", data.get("imageUrl").asText());
+    }
+
+    @Test
+    void render_取得に失敗したリンクには目印を付けない() {
+        when(contentCacheService.resolve(anyString())).thenThrow(new ContentScrapingException("取得失敗", null));
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        assertFalse(result.contains("lbs:embed"));
+    }
 }

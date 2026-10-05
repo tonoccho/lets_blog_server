@@ -11,6 +11,7 @@ import org.springframework.web.util.HtmlUtils;
 
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -63,8 +64,9 @@ public class AmazonTagRenderService {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String rawUrl = matcher.group(1);
+            boolean block = EmbedMarker.isStandalone(markdown, matcher.start(), matcher.end());
             matcher.appendReplacement(
-                    result, Matcher.quoteReplacement(renderCard(rawUrl, projectId, isProductionSite)));
+                    result, Matcher.quoteReplacement(renderCard(rawUrl, projectId, isProductionSite, block)));
         }
         matcher.appendTail(result);
 
@@ -106,7 +108,7 @@ public class AmazonTagRenderService {
                 + ";border-radius:4px;padding:4px 10px;align-self:flex-start;margin-top:auto;}";
     }
 
-    private String renderCard(String rawUrl, Long projectId, boolean isProductionSite) {
+    private String renderCard(String rawUrl, Long projectId, boolean isProductionSite, boolean block) {
         try {
             ContentCacheResponse response = contentCacheService.resolve(rawUrl);
             Map<String, String> data = response.data();
@@ -123,16 +125,26 @@ public class AmazonTagRenderService {
             String priceTimestamp = fetchedAt.isEmpty() || price.isEmpty()
                     ? "" : fetchedAt + "時点の価格です";
 
+            // 表示時にプラグインが差し込み直すためのデータ(エスケープ前の生の値)。プラグイン側でエスケープする。
+            // 商品URLは非本番サイトでは空(リンクを非活性化する。issue #389)。
+            Map<String, String> markerData = new LinkedHashMap<>();
+            markerData.put("productName", firstNonBlank(data.get("productName"), href));
+            markerData.put("price", toYenPrice(data.get("price")));
+            markerData.put("summary", nullToEmpty(data.get("summary")));
+            markerData.put("productUrl", isProductionSite ? href : "");
+            markerData.put("imageUrl", imageUrl == null ? "" : imageUrl);
+            markerData.put("priceTimestamp", priceTimestamp);
+
             String customTemplate = projectBridgeClient.resolveTagDesign(
                     projectId, "AMAZON", currentActorService.getAuthorizationHeader()).htmlTemplate();
             if (customTemplate != null) {
-                return EmbedTagTemplateRenderer.render(customTemplate, Map.of(
+                return EmbedMarker.wrap("AMAZON", markerData, EmbedTagTemplateRenderer.render(customTemplate, Map.of(
                         "productName", productName,
                         "price", price,
                         "productUrl", isProductionSite ? escapedHref : "",
                         "imageUrl", escapedImageUrl,
                         "summary", summary,
-                        "priceTimestamp", priceTimestamp));
+                        "priceTimestamp", priceTimestamp)), block);
             }
 
             StringBuilder html = new StringBuilder();
@@ -160,7 +172,7 @@ public class AmazonTagRenderService {
             }
             html.append("<div class=\"lb-amazon-card-cta\">Amazonで見る</div>")
                     .append("</div></").append(tag).append(">");
-            return html.toString();
+            return EmbedMarker.wrap("AMAZON", markerData, html.toString(), block);
         } catch (IllegalArgumentException | ContentScrapingException e) {
             log.warn("[amazon]の展開に失敗したため通常のリンクにフォールバックします: url={}, error={}",
                     rawUrl, e.getMessage());

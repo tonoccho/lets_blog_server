@@ -497,25 +497,33 @@ function letsblog_expand_one_tag(string $json, array $templates): ?string
     if (!isset($templates[$data['name']])) {
         return null;
     }
+    // content に組み込みタグの生の記法が残っている(入れ子の中で展開されなかった)場合、展開し直すと生の記法が画面に出る。
+    // その場合は投稿時点の HTML を使う(中の組み込みタグの目印は呼び出し側が展開し直す。issue #1563)。
+    if (preg_match('/\[(?:blogcard|amazon|toc|recharts)\b/i', $data['content']) === 1) {
+        return null;
+    }
     // content には、アプリが先に展開した入れ子のタグの目印が入っている。内側も同期済みのテンプレートで展開し直す。
     $content = letsblog_expand_custom_tags($data['content']);
     return letsblog_render_tag_template($templates[$data['name']], $content, $data['attrs']);
 }
 
-/** the_content(wpautop より前)で、目印付きのカスタムタグを展開し直す。目印のない本文は変えない。 */
+/**
+ * the_content(wpautop より前)で、目印付きのカスタムタグ(lbs:tag)と組み込みタグ(lbs:embed、issue #1563)を
+ * 展開し直す。目印のない本文は変えない。
+ */
 function letsblog_expand_custom_tags($content)
 {
-    if (!is_string($content) || !str_contains($content, '<!-- lbs:tag ')) {
+    if (!is_string($content) || (!str_contains($content, '<!-- lbs:tag ') && !str_contains($content, '<!-- lbs:embed '))) {
         return $content;
     }
-    if (preg_match_all('/<!-- lbs:tag ([^>]*?) -->|<!-- \/lbs:tag -->/', $content, $tokens, PREG_SET_ORDER | PREG_OFFSET_CAPTURE) === 0) {
+    if (preg_match_all('/<!-- lbs:(tag|embed) ([^>]*?) -->|<!-- \/lbs:(?:tag|embed) -->/', $content, $tokens, PREG_SET_ORDER | PREG_OFFSET_CAPTURE) === 0) {
         return $content;
     }
     // 入れ子を数えて、最も外側の開始・終了の組を集める。閉じのない開始と、対応のない閉じは触らない。
     $pairs = [];
     $stack = [];
     foreach ($tokens as $token) {
-        if (isset($token[1])) {
+        if (!str_starts_with($token[0][0], '<!-- /')) {
             $stack[] = $token;
             continue;
         }
@@ -535,7 +543,9 @@ function letsblog_expand_custom_tags($content)
         $openEnd = $openStart + strlen($open[0][0]);
         $closeStart = $close[0][1];
         $out .= substr($content, $cursor, $openStart - $cursor);
-        $expanded = letsblog_expand_one_tag($open[1][0], $templates);
+        $expanded = $open[1][0] === 'embed'
+            ? letsblog_expand_one_embed($open[2][0])
+            : letsblog_expand_one_tag($open[2][0], $templates);
         if ($expanded === null) {
             $out .= $open[0][0]
                 . letsblog_expand_custom_tags(substr($content, $openEnd, $closeStart - $openEnd))
@@ -546,6 +556,185 @@ function letsblog_expand_custom_tags($content)
         $cursor = $closeStart + strlen($close[0][0]);
     }
     return $out . substr($content, $cursor);
+}
+
+// ---- 組み込みタグ(ブログカード・Amazon・目次)の目印を、同期済みのデザインで表示時に展開し直す(issue #1563) ----
+// 投稿 HTML には、アプリが `<!-- lbs:embed {"type":..,"data":{..}} -->投稿時点の展開HTML<!-- /lbs:embed -->` の形で
+// 取得したデータ(目次は見出しの構造)を残している。ここでは外部ページを取得せず、そのデータだけを使う。
+// データは差し込む前に必ずエスケープし(XSS)、URL は http(s) のものだけを使う。
+
+/** 同期済みの組み込みタグのデザインを、tagType => htmlTemplate(未設定は null)で返す。同期されていない種別は含めない。 */
+function letsblog_synced_tag_designs(): array
+{
+    $payload = letsblog_synced_payload();
+    $designs = $payload['tagDesigns'] ?? null;
+    if (!is_array($designs)) {
+        return [];
+    }
+    $templates = [];
+    foreach ($designs as $design) {
+        if (!is_array($design) || !is_string($design['tagType'] ?? null)) {
+            continue;
+        }
+        $template = $design['htmlTemplate'] ?? null;
+        $templates[$design['tagType']] = is_string($template) ? $template : null;
+    }
+    return $templates;
+}
+
+function letsblog_embed_escape(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/** データの文字列項目を取り出す。文字列でなければ空文字。 */
+function letsblog_embed_text(array $data, string $key): string
+{
+    return is_string($data[$key] ?? null) ? $data[$key] : '';
+}
+
+function letsblog_embed_is_http_url(string $value): bool
+{
+    return preg_match('#^https?://#i', trim($value)) === 1;
+}
+
+/** テンプレートの {{key}} を値(エスケープ済み)で 1 回の走査で置換する。値の中のプレースホルダーは置換しない。 */
+function letsblog_embed_fill(string $template, array $values): string
+{
+    return preg_replace_callback(
+        '/\{\{([a-zA-Z0-9_]+)\}\}/',
+        function (array $m) use ($values): string {
+            return $values[$m[1]] ?? '';
+        },
+        $template
+    ) ?? $template;
+}
+
+/** ブログカード。url が http(s) でなければ null(投稿時点の HTML を使う)。 */
+function letsblog_embed_blogcard(array $data, ?string $template): ?string
+{
+    $url = letsblog_embed_text($data, 'url');
+    if (!letsblog_embed_is_http_url($url)) {
+        return null;
+    }
+    $image = letsblog_embed_text($data, 'imageUrl');
+    $image = letsblog_embed_is_http_url($image) ? $image : '';
+    $v = [
+        'title' => letsblog_embed_escape(letsblog_embed_text($data, 'title')),
+        'description' => letsblog_embed_escape(letsblog_embed_text($data, 'description')),
+        'siteName' => letsblog_embed_escape(letsblog_embed_text($data, 'siteName')),
+        'url' => letsblog_embed_escape(trim($url)),
+        'imageUrl' => letsblog_embed_escape(trim($image)),
+    ];
+    if ($template !== null) {
+        return letsblog_embed_fill($template, $v);
+    }
+    return '<a class="lb-blogcard" href="' . $v['url'] . '" target="_blank" rel="noopener noreferrer">'
+        . ($image !== '' ? '<div class="lb-blogcard-thumb" style="background-image:url(\'' . $v['imageUrl'] . '\')"></div>' : '')
+        . '<div class="lb-blogcard-body"><div class="lb-blogcard-title">' . $v['title'] . '</div>'
+        . '<div class="lb-blogcard-description">' . $v['description'] . '</div>'
+        . '<div class="lb-blogcard-site">' . $v['siteName'] . '</div></div></a>';
+}
+
+/** Amazon。商品 URL は空(非本番サイトで投稿)か http(s)。それ以外は null。 */
+function letsblog_embed_amazon(array $data, ?string $template): ?string
+{
+    $url = trim(letsblog_embed_text($data, 'productUrl'));
+    if ($url !== '' && !letsblog_embed_is_http_url($url)) {
+        return null;
+    }
+    $image = letsblog_embed_text($data, 'imageUrl');
+    $image = letsblog_embed_is_http_url($image) ? trim($image) : '';
+    $v = [
+        'productName' => letsblog_embed_escape(letsblog_embed_text($data, 'productName')),
+        'price' => letsblog_embed_escape(letsblog_embed_text($data, 'price')),
+        'summary' => letsblog_embed_escape(letsblog_embed_text($data, 'summary')),
+        'productUrl' => letsblog_embed_escape($url),
+        'imageUrl' => letsblog_embed_escape($image),
+        'priceTimestamp' => letsblog_embed_escape(letsblog_embed_text($data, 'priceTimestamp')),
+    ];
+    if ($template !== null) {
+        return letsblog_embed_fill($template, $v);
+    }
+    $link = $url !== '';
+    $tag = $link ? 'a' : 'div';
+    $html = '<' . $tag . ' class="lb-amazon-card"'
+        . ($link ? ' href="' . $v['productUrl'] . '" target="_blank" rel="noopener noreferrer nofollow sponsored"' : '') . '>';
+    if ($image !== '') {
+        $html .= '<div class="lb-amazon-card-thumb" style="background-image:url(\'' . $v['imageUrl'] . '\')"></div>';
+    }
+    $html .= '<div class="lb-amazon-card-body"><div class="lb-amazon-card-name">' . $v['productName'] . '</div>';
+    foreach (['summary' => 'summary', 'price' => 'price', 'priceTimestamp' => 'timestamp'] as $key => $class) {
+        if ($v[$key] !== '') {
+            $html .= '<div class="lb-amazon-card-' . $class . '">' . $v[$key] . '</div>';
+        }
+    }
+    return $html . '<div class="lb-amazon-card-cta">Amazonで見る</div></div></' . $tag . '>';
+}
+
+/** 目次の項目(text・href・children)から入れ子の <li> 群を組み立てる。形式が壊れていれば null。 */
+function letsblog_embed_toc_items($items, int $depth)
+{
+    if (!is_array($items) || $items === [] || !array_is_list($items) || $depth > 6) {
+        return null;
+    }
+    $html = '';
+    foreach ($items as $item) {
+        if (!is_array($item) || !is_string($item['text'] ?? null) || !is_string($item['href'] ?? null) || !str_starts_with($item['href'], '#')) {
+            return null;
+        }
+        $children = $item['children'] ?? [];
+        if (!is_array($children)) {
+            return null;
+        }
+        $nested = '';
+        if ($children !== []) {
+            $inner = letsblog_embed_toc_items($children, $depth + 1);
+            if ($inner === null) {
+                return null;
+            }
+            $nested = '<ul>' . $inner . '</ul>';
+        }
+        $html .= '<li><a href="' . letsblog_embed_escape($item['href']) . '">' . letsblog_embed_escape($item['text']) . '</a>' . $nested . '</li>';
+    }
+    return $html;
+}
+
+/** 目次。{{toc}} には既定のクラスつきの <ul> 全体を入れる。構造が壊れていれば null。 */
+function letsblog_embed_toc(array $data, ?string $template): ?string
+{
+    $list = letsblog_embed_toc_items($data['items'] ?? null, 1);
+    if ($list === null) {
+        return null;
+    }
+    $ul = '<ul class="lb-toc-list">' . $list . '</ul>';
+    return $template === null ? $ul : str_replace('{{toc}}', $ul, $template);
+}
+
+/**
+ * 組み込みタグの目印 1 組を、同期済みのデザインで展開し直す。デザインが同期されていない種別、
+ * 知らない種別、壊れたデータは null(呼び出し側が投稿時点の HTML を使う)。
+ */
+function letsblog_expand_one_embed(string $json): ?string
+{
+    $marker = json_decode($json, true);
+    if (!is_array($marker) || !is_string($marker['type'] ?? null) || !is_array($marker['data'] ?? null)) {
+        return null;
+    }
+    $designs = letsblog_synced_tag_designs();
+    if (!array_key_exists($marker['type'], $designs)) {
+        return null;
+    }
+    $template = $designs[$marker['type']];
+    switch ($marker['type']) {
+        case 'BLOGCARD':
+            return letsblog_embed_blogcard($marker['data'], $template);
+        case 'AMAZON':
+            return letsblog_embed_amazon($marker['data'], $template);
+        case 'TOC':
+            return letsblog_embed_toc($marker['data'], $template);
+    }
+    return null;
 }
 
 if (function_exists('add_filter')) {

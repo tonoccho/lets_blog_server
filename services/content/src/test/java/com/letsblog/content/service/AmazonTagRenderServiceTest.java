@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -176,5 +177,106 @@ class AmazonTagRenderServiceTest {
     void render_タグが無ければそのまま返す() {
         String markdown = "普通の本文です。";
         assertTrue(service().render(markdown, 1L, true).equals(markdown));
+    }
+
+    private void stubProduct(Map<String, String> data, Instant checked) {
+        when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
+                .thenReturn(new ContentCacheResponse(
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON, data, checked, checked));
+    }
+
+    private static final Map<String, String> PRODUCT = Map.of(
+            "productName", "商品名",
+            "productUrl", "https://amazon.co.jp/dp/xxx",
+            "imageUrl", "https://m.media-amazon.com/x.jpg",
+            "summary", "概要",
+            "price", "1000");
+
+    // ---- issue #1563: 取得したデータを目印として残す ----
+
+    @Test
+    void render_取得したデータを目印のJSONに生の値で残し_投稿時点のHTMLを目印で挟む() {
+        stubTagDesign();
+        stubProduct(PRODUCT, Instant.parse("2026-09-08T20:03:35Z"));
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
+
+        com.fasterxml.jackson.databind.JsonNode marker = EmbedMarkerTestSupport.firstMarker(result);
+        assertEquals("AMAZON", marker.get("type").asText());
+        com.fasterxml.jackson.databind.JsonNode data = marker.get("data");
+        assertEquals("商品名", data.get("productName").asText());
+        assertEquals("￥1000", data.get("price").asText());
+        assertEquals("概要", data.get("summary").asText());
+        assertEquals("https://amazon.co.jp/dp/xxx", data.get("productUrl").asText());
+        assertEquals("https://m.media-amazon.com/x.jpg", data.get("imageUrl").asText());
+        assertEquals("2026/09/08 20:03時点の価格です", data.get("priceTimestamp").asText());
+        assertEquals(1, EmbedMarkerTestSupport.closeCount(result));
+        assertTrue(result.indexOf("<!-- lbs:embed ") < result.indexOf("lb-amazon-card\""));
+        assertTrue(result.indexOf("lb-amazon-card\"") < result.indexOf("<!-- /lbs:embed -->"));
+    }
+
+    @Test
+    void render_非本番サイトでは目印の商品URLを空にする() {
+        stubTagDesign();
+        stubProduct(PRODUCT, Instant.now());
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, false);
+
+        assertEquals("", EmbedMarkerTestSupport.firstMarker(result).get("data").get("productUrl").asText());
+        assertFalse(result.contains("href="));
+    }
+
+    @Test
+    void render_単独の行のタグは空行で区切り_文中のタグは区切らない() {
+        stubTagDesign();
+        stubProduct(PRODUCT, Instant.now());
+
+        String alone = service().render("前\n[amazon https://amazon.co.jp/dp/xxx]\n後", 1L, true);
+        String inline = service().render("これ[amazon https://amazon.co.jp/dp/xxx]です", 1L, true);
+
+        assertTrue(alone.contains("-->\n\n<a class=\"lb-amazon-card\""), alone);
+        assertTrue(alone.contains("</a>\n\n<!-- /lbs:embed -->\n後"), alone);
+        assertTrue(inline.contains("これ<!-- lbs:embed "), inline);
+        assertTrue(inline.contains("</a><!-- /lbs:embed -->です"), inline);
+    }
+
+    @Test
+    void render_目印のJSONはコメントを閉じずタグ記法として解釈されない() {
+        stubTagDesign();
+        stubProduct(Map.of("productName", "A --> <i>[amazon x]</i>", "productUrl", "https://amazon.co.jp/dp/xxx"),
+                Instant.now());
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
+
+        String raw = EmbedMarkerTestSupport.firstMarkerRaw(result);
+        assertFalse(raw.contains("-") || raw.contains("<") || raw.contains(">") || raw.contains("[") || raw.contains("]"));
+        assertEquals("A --> <i>[amazon x]</i>",
+                EmbedMarkerTestSupport.firstMarker(result).get("data").get("productName").asText());
+    }
+
+    @Test
+    void render_取得時刻や価格がなければ目印の価格関連は空になる() {
+        stubTagDesign();
+        when(contentCacheService.resolve("https://amazon.co.jp/dp/xxx"))
+                .thenReturn(new ContentCacheResponse(
+                        "https://amazon.co.jp/dp/xxx", ContentType.AMAZON,
+                        Map.of("productName", "商品名", "productUrl", "javascript:x"), null, Instant.now()));
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
+
+        com.fasterxml.jackson.databind.JsonNode data = EmbedMarkerTestSupport.firstMarker(result).get("data");
+        assertEquals("", data.get("price").asText());
+        assertEquals("", data.get("priceTimestamp").asText());
+        assertEquals("https://amazon.co.jp/dp/xxx", data.get("productUrl").asText());
+        assertEquals("", data.get("imageUrl").asText());
+    }
+
+    @Test
+    void render_取得に失敗したリンクには目印を付けない() {
+        when(contentCacheService.resolve(anyString())).thenThrow(new ContentScrapingException("取得失敗", null));
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
+
+        assertFalse(result.contains("lbs:embed"));
     }
 }

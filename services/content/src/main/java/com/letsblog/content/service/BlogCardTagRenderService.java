@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,7 +56,8 @@ public class BlogCardTagRenderService {
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String rawUrl = matcher.group(1);
-            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl, projectId)));
+            boolean block = EmbedMarker.isStandalone(markdown, matcher.start(), matcher.end());
+            matcher.appendReplacement(result, Matcher.quoteReplacement(renderCard(rawUrl, projectId, block)));
         }
         matcher.appendTail(result);
 
@@ -94,7 +96,7 @@ public class BlogCardTagRenderService {
                 + ".lb-blogcard-site{font-size:.75em;opacity:.6;margin-top:auto;}";
     }
 
-    private String renderCard(String rawUrl, Long projectId) {
+    private String renderCard(String rawUrl, Long projectId, boolean block) {
         try {
             ContentCacheResponse response = contentCacheService.resolve(rawUrl);
             Map<String, String> data = response.data();
@@ -107,15 +109,23 @@ public class BlogCardTagRenderService {
             String escapedHref = HtmlUtils.htmlEscape(href);
             String escapedImageUrl = imageUrl == null ? "" : HtmlUtils.htmlEscape(imageUrl);
 
+            // 表示時にプラグインが差し込み直すためのデータ(エスケープ前の生の値)。プラグイン側でエスケープする。
+            Map<String, String> markerData = new LinkedHashMap<>();
+            markerData.put("title", firstNonBlank(data.get("title"), href));
+            markerData.put("description", nullToEmpty(data.get("description")));
+            markerData.put("siteName", nullToEmpty(data.get("siteName")));
+            markerData.put("url", href);
+            markerData.put("imageUrl", imageUrl == null ? "" : imageUrl);
+
             String customTemplate = projectBridgeClient.resolveTagDesign(
                     projectId, "BLOGCARD", currentActorService.getAuthorizationHeader()).htmlTemplate();
             if (customTemplate != null) {
-                return EmbedTagTemplateRenderer.render(customTemplate, Map.of(
+                return EmbedMarker.wrap("BLOGCARD", markerData, EmbedTagTemplateRenderer.render(customTemplate, Map.of(
                         "title", title,
                         "description", description,
                         "siteName", siteName,
                         "url", escapedHref,
-                        "imageUrl", escapedImageUrl));
+                        "imageUrl", escapedImageUrl)), block);
             }
 
             StringBuilder html = new StringBuilder();
@@ -130,7 +140,7 @@ public class BlogCardTagRenderService {
                     .append("<div class=\"lb-blogcard-description\">").append(description).append("</div>")
                     .append("<div class=\"lb-blogcard-site\">").append(siteName).append("</div>")
                     .append("</div></a>");
-            return html.toString();
+            return EmbedMarker.wrap("BLOGCARD", markerData, html.toString(), block);
         } catch (IllegalArgumentException | ContentScrapingException e) {
             log.warn("[blogcard]の展開に失敗したため通常のリンクにフォールバックします: url={}, error={}",
                     rawUrl, e.getMessage());
