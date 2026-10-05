@@ -150,29 +150,6 @@ export interface HtmlResponse {
   html?: string;
 }
 
-export interface FetchRealPostRequest {
-  url?: string;
-  cookieName?: string;
-  cookieValue?: string;
-}
-
-export interface ThemeSkeletonResponse {
-  html?: string;
-  available?: boolean;
-  reason?: string;
-  eyecatchSpliced?: boolean;
-  css?: string;
-}
-
-export interface FetchAndSpliceRequest {
-  url?: string;
-  titleRendered?: string;
-  contentRendered?: string;
-  ourTitle?: string;
-  ourContentHtml?: string;
-  featuredImageDataUri?: string;
-}
-
 export interface MarkTrashedRequest {
   siteId?: number;
   wpPostId?: string;

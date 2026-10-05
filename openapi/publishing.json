@@ -41,47 +41,6 @@
         }
       }
     },
-    "/api/projects/{projectId}/preview/skeleton": {
-      "post": {
-        "tags": [
-          "article-preview-controller"
-        ],
-        "operationId": "skeleton",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RenderSkeletonRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThemeSkeletonResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/projects/{id}/bulk-management/upload": {
       "post": {
         "tags": [
@@ -1378,46 +1337,6 @@
         }
       }
     },
-    "/api/projects/{projectId}/preview/theme-css": {
-      "get": {
-        "tags": [
-          "article-preview-controller"
-        ],
-        "operationId": "themeCss",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "siteId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThemeCssResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/projects/{id}/bulk-management/themes/comparison": {
       "get": {
         "tags": [
@@ -1803,47 +1722,6 @@
         }
       }
     },
-    "/api/projects/{projectId}/preview/preview-post": {
-      "delete": {
-        "tags": [
-          "article-preview-controller"
-        ],
-        "operationId": "deletePreviewPost",
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "siteId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "postId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
     "/api/posts/{site}/{wpPostId}": {
       "delete": {
         "tags": [
@@ -2036,72 +1914,6 @@
             "items": {
               "type": "string"
             }
-          }
-        }
-      },
-      "RenderSkeletonRequest": {
-        "type": "object",
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "contentHtml": {
-            "type": "string"
-          },
-          "featuredImageDataUri": {
-            "type": "string"
-          },
-          "siteId": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "existingPreviewPostId": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "categories": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "contentHtml",
-          "title"
-        ]
-      },
-      "ThemeSkeletonResponse": {
-        "type": "object",
-        "properties": {
-          "html": {
-            "type": "string"
-          },
-          "available": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "eyecatchSpliced": {
-            "type": "boolean"
-          },
-          "css": {
-            "type": "string"
-          },
-          "previewPostId": {
-            "type": "string"
-          },
-          "warning": {
-            "type": "string"
           }
         }
       },
@@ -2550,23 +2362,6 @@
             "type": "string"
           },
           "dumpBase64": {
-            "type": "string"
-          }
-        }
-      },
-      "ThemeCssResponse": {
-        "type": "object",
-        "properties": {
-          "css": {
-            "type": "string"
-          },
-          "available": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "source": {
             "type": "string"
           }
         }

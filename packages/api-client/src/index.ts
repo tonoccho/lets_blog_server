@@ -223,7 +223,6 @@ export * from './generated/project/tag-design-setting-controller/tag-design-sett
 
 // publishing(記事公開・プレビュー・タクソノミ・一括管理、#707/#708/#712)
 export * from './generated/publishing/openAPIDefinition.schemas';
-export * from './generated/publishing/article-preview-controller/article-preview-controller';
 export * from './generated/publishing/bulk-management-controller/bulk-management-controller';
 export * from './generated/publishing/post-controller/post-controller';
 export * from './generated/publishing/taxonomy-controller/taxonomy-controller';
@@ -293,9 +292,6 @@ export type {
   publishResponse200,
   publishResponseSuccess,
 } from './generated/content/custom-tag-template-controller/custom-tag-template-controller';
-export type {
-  ThemeSkeletonResponse,
-} from './generated/content/openAPIDefinition.schemas';
 export {
   getList3Url,
   list3,

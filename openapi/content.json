@@ -492,66 +492,6 @@
         }
       }
     },
-    "/api/internal/content/preview-skeleton/fetch-real-post": {
-      "post": {
-        "tags": [
-          "internal-preview-skeleton-controller"
-        ],
-        "operationId": "fetchRealPost",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FetchRealPostRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThemeSkeletonResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/internal/content/preview-skeleton/fetch-and-splice": {
-      "post": {
-        "tags": [
-          "internal-preview-skeleton-controller"
-        ],
-        "operationId": "fetchAndSplice",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FetchAndSpliceRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThemeSkeletonResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/internal/content/posts/mark-trashed": {
       "post": {
         "tags": [
@@ -1609,63 +1549,6 @@
         "type": "object",
         "properties": {
           "html": {
-            "type": "string"
-          }
-        }
-      },
-      "FetchRealPostRequest": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          },
-          "cookieName": {
-            "type": "string"
-          },
-          "cookieValue": {
-            "type": "string"
-          }
-        }
-      },
-      "ThemeSkeletonResponse": {
-        "type": "object",
-        "properties": {
-          "html": {
-            "type": "string"
-          },
-          "available": {
-            "type": "boolean"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "eyecatchSpliced": {
-            "type": "boolean"
-          },
-          "css": {
-            "type": "string"
-          }
-        }
-      },
-      "FetchAndSpliceRequest": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          },
-          "titleRendered": {
-            "type": "string"
-          },
-          "contentRendered": {
-            "type": "string"
-          },
-          "ourTitle": {
-            "type": "string"
-          },
-          "ourContentHtml": {
-            "type": "string"
-          },
-          "featuredImageDataUri": {
             "type": "string"
           }
         }

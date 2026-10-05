@@ -15,27 +15,6 @@ export interface TaxonomyResolveResponse {
   tagIds?: string[];
 }
 
-export interface RenderSkeletonRequest {
-  title: string;
-  contentHtml: string;
-  featuredImageDataUri?: string;
-  siteId?: number;
-  existingPreviewPostId?: string;
-  slug?: string;
-  categories?: string[];
-  tags?: string[];
-}
-
-export interface ThemeSkeletonResponse {
-  html?: string;
-  available?: boolean;
-  reason?: string;
-  eyecatchSpliced?: boolean;
-  css?: string;
-  previewPostId?: string;
-  warning?: string;
-}
-
 export type BulkOperationLogResponseOperationType = typeof BulkOperationLogResponseOperationType[keyof typeof BulkOperationLogResponseOperationType];
 
 
@@ -286,13 +265,6 @@ export interface CmsBridgeExportDatabaseResponse {
   dumpBase64?: string;
 }
 
-export interface ThemeCssResponse {
-  css?: string;
-  available?: boolean;
-  reason?: string;
-  source?: string;
-}
-
 export interface StatusEnvironmentValue {
   available?: boolean;
   error?: boolean;
@@ -511,10 +483,6 @@ export type UploadMediaBody = {
   file: Blob;
 };
 
-export type ThemeCssParams = {
-siteId?: number;
-};
-
 export type ThemeComparisonParams = {
 page?: number;
 };
@@ -538,11 +506,6 @@ page?: number;
 
 export type ScanMediaParams = {
 environment: string;
-};
-
-export type DeletePreviewPostParams = {
-siteId: number;
-postId: string;
 };
 
 export type DeleteMediaParams = {
