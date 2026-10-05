@@ -2,6 +2,7 @@ package com.letsblog.platform.config;
 
 import com.letsblog.common.web.ErrorResponse;
 import com.letsblog.platform.service.BackupException;
+import com.letsblog.platform.service.ComputeDeviceException;
 import com.letsblog.platform.service.ForbiddenException;
 import com.letsblog.platform.service.IdentityServiceUnavailableException;
 import lombok.extern.slf4j.Slf4j;
@@ -128,6 +129,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** 演算デバイス切り替えを受け付けられない(issue #1399)。例外自身のHTTPステータスで返す。 */
+    @ExceptionHandler(ComputeDeviceException.class)
+    public ResponseEntity<ErrorResponse> handleComputeDevice(ComputeDeviceException e) {
+        return ResponseEntity.status(e.status()).body(ErrorResponse.of(e.getMessage()));
     }
 
     /** バックアップ/リストア処理(mysqldump/mysql/pg_dump/pg_restore)の失敗(issue #694)。 */

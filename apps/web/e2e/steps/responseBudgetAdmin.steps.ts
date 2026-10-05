@@ -142,6 +142,24 @@ When('システム設定画面で表示されたままの値を保存して Serv
   recordResponseTime(ctx, timing.roundTripMs, 'システム設定の保存(Server Action)の往復');
 });
 
+// ---- 演算デバイス(applyComputeDeviceAction。issue #1399) ----
+
+When('システム設定画面の演算デバイス欄でCPUを選んで適用して Server Action の往復を計測する', async ({ page, ctx }) => {
+  await page.goto('/admin/system-settings');
+  await expect(page.getByRole('heading', { name: '演算デバイス(ComfyUI)' })).toBeVisible({ timeout: 30_000 });
+  await waitForHydrated(page.getByRole('button', { name: '適用する' }));
+  await page.getByRole('radio', { name: 'CPU' }).check();
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await page.getByRole('button', { name: '適用する' }).click();
+    await expect(page.getByTestId('compute-device-apply-state')).toContainText('適用中', { timeout: 30_000 });
+  });
+  recordResponseTime(ctx, timing.roundTripMs, 'ComfyUIの演算デバイスの適用(Server Action)の往復');
+  // 裏の適用が終わるまで待つ。適用中のまま次のシナリオへ進むと、platform-service が次の適用を拒否する。
+  await expect(page.getByTestId('compute-device-apply-state')).toContainText('適用が完了しました', {
+    timeout: 60_000,
+  });
+});
+
 // ---- バックアップ(restoreBackupAction) ----
 
 When(

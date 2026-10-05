@@ -368,6 +368,7 @@ API: platform `SystemSettingController`, `AppSettingController`, `BackupControll
 | AC-SYS-007 | バックアップのダウンロード | 環境を失っても復旧できる | `GET /api/backup/download` がリストア可能なアーカイブを返す。一般ユーザーは作成・ダウンロードできない | `features/platform/backup.feature` › バックアップを作成でき、ダウンロードしたアーカイブに全スキーマのダンプが含まれる / 一般ユーザーはバックアップの作成・ダウンロードができない | 検証済(issue #1156。親issue #940のシナリオ13・15を引き取る。`@destructive`。全スキーマのダンプ含有確認は、`BackupService#createBackup()`でMySQLスキーマ`lbs_log`のダンプ書き込みを一時的にスキップし「スキーマ lbs_log のダンプが含まれていません」で失敗することを実測してRedを確認した後、元に戻して再びGreenを確認済み。一般ユーザー拒否の確認は、同メソッドの`adminAuthorizationService.requireAdmin()`呼び出しを一時的にコメントアウトし、一般ユーザーでも200が返って`toBe(403)`が`Received: 200`で失敗することを実測してRedを確認した後、元に戻して再びGreenを確認済み。バックアップからのリストア(シナリオ14)は#1141/#1142の環境不整合により別issueへ分離しておりAC-SYS-008が対象) |
 | AC-SYS-008 | バックアップからのリストア | 実際に復旧できる | `POST /api/backup/restore` 後、バックアップ時点のデータが復元される。1つのMySQLスキーマのダンプが不正なアーカイブでは、失敗したスキーマ名を画面に示して止まり、以降の手順(Keycloak PostgreSQL)は実行されず、自動ロールバックもしない | `features/platform/backup-restore.feature` › 正しいアーカイブで復元すると、変更・削除した代表データがバックアップ時点に戻り、後から追加したものは消える / 1つのMySQLスキーマのダンプが不正なアーカイブで復元すると、失敗したスキーマを示して止まり、ロールバックされず、正しいアーカイブで復元し直せる | 検証済(issue #1157。2026-10-02 に実スタックで2シナリオとも通過。復元後の Keycloak ユーザーは、Keycloak API がキャッシュ値を返す(#1590)ため Keycloak PostgreSQL を直接読んで確認する。`@destructive` `@slow`。代表データ(project-service のプロジェクト、content-service のカスタムタグ、Keycloak のテスト用ユーザー)で確認する。共有スタックのDB全体を上書きするため、実行はスタックを占有できるときに `npm run test:at -- --project=at-destructive --no-deps --grep バックアップからのリストア` で行う) |
 | AC-SYS-009 | VSCode拡張の配布 | 拡張をサーバーから入手できる | `GET /api/system/vscode-extension` が `.vsix` を返す。ビルド物に`coverage/`や`src/`を含まない(#773の退行検知) | `features/platform/vscode-extension.feature` › ダウンロードした.vsixは妥当なVSIX(zip)である / ビルドされた.vsixにcoverage/やsrc/が含まれない(#773の退行検知) | 検証済(issue #1153。この開発ホストはfirefox/webkitの共有ライブラリが未導入で`npx playwright test`のglobalSetupがブラウザ起動確認自体で落ちるため、`npm run test:at:fast`はそのままでは動かない。`E2E_SKIP_BROWSER_CHECK=1`で起動確認を回避し、`--project=at-main --no-deps`(環境は既にシード済みのため)、`E2E_WORKERS=1`で実行し2件とも成功を確認した。ワーカー数を1にしたのは、並行実行するとビルド出力パスの競合で500になる既知の別バグ(#1190、このIssueのACの対象外)を踏むため。退行検知シナリオ(#773)はRedを実証済み: `.vscodeignore` の `coverage/**`/`src/**` 除外を一時的にコメントアウトし `npm run test:coverage`(`apps/extension`)でcoverage/を生成した状態で実行すると`extension/src/*.ts`と`extension/coverage/**`が同梱されて失敗することを確認し、除外を戻すと再び成功することを確認した。zip解析は当初python3をシェルアウトしていたが、Review指摘によりNode標準の`Buffer`だけでzipのセントラルディレクトリを読む実装に置き換えた) |
+| AC-SYS-011 | ComfyUI の演算デバイス(GPU / CPU)の切り替え(#1399) | 管理者が画面から GPU と CPU を選んで切り替えられ、GPU の無いホストでは CPU に固定される | 両構成(`lbs-comfyui` / `lbs-comfyui-cpu`)があるホストで、適用すると「適用中」の後に「完了」が表示され、選んだ構成だけが `running` になる。GPU 構成が無いホストは「CPU(固定)」と表示され、GPU は選べず、API へ直接送った GPU への適用も拒否されてコンテナは操作されない。選んだ構成が上限時間内に成功しないと失敗の理由が表示され、元の構成へ戻る。管理者以外には欄が表示されず、API は 403 | `features/platform/compute-device.feature` › 両構成があるホストでGPUからCPUへ切り替えると、適用中の後に完了が表示される / GPU構成が無いホストでは「CPU(固定)」と表示され、GPUは選べず理由が表示される / GPU構成が無いホストでGPUへの適用をAPIへ直接送っても拒否され、どのコンテナも操作されない / 選んだ構成が上限時間内に稼働しないと、失敗の理由が表示され元の構成に戻る / 一般ユーザーには演算デバイス欄が表示されない / 一般ユーザーは演算デバイスの参照APIも適用APIも403になる、`scripts/test_docker_socket_proxy.py`(AC5。proxy の書き込み許可) | 実装中(#1399。受け入れシナリオは Docker Engine API スタブ `infra/e2e-stubs/docker-engine` へ向けて書いたが、共有の受け入れ環境の platform / web を作り直して実行する工程は未実施で、シナリオは未実行。単体テストは通過。**docker-socket-proxy の書き込み許可は #1587 の結論待ち**: `POST: 0` + `ALLOW_START` / `ALLOW_STOP` では start / stop が 403 になることを実機のイメージで確認したため、`docker-compose.yml` は変更していない) |
 
 ### 2.13 ログと非同期経路 — `LOG`
 
@@ -580,7 +581,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AT-11 (#937) | ダイアグラムとレンダリング | AC-DIAG-001〜007 |
 | AT-12 (#938) | カスタムタグ・テンプレート・コンテンツ設定 | AC-TAG-001〜021 |
 | AT-13 (#939) | Analytics | AC-ANA-001〜006 |
-| AT-14 (#940) | システム設定・バックアップ・拡張配布・ダッシュボード | AC-SYS-001〜009 |
+| AT-14 (#940) | システム設定・バックアップ・拡張配布・ダッシュボード | AC-SYS-001〜009、AC-SYS-011(#1399) |
 | AT-15 (#941) | ログと非同期経路 | AC-LOG-001〜010(008〜010 は #941 で追加。ログ経路の障害耐性・停止中のログの扱い・閲覧と認可) |
 | AT-16 (#942) | VSCode拡張 | AC-EXT-001〜024(AC-EXT-019 は対象外) |
 | AT-17 (#943) | 認可・ルーティング・レート制限・相関ID・縮退 | AC-XC-001〜010 |
@@ -591,19 +592,19 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 ## 6. 集計
 
-§2 に列挙した機能ID: **218**。うち3件(AC-EXT-019、AC-POST-010・011)は対象外としたので、
-受け入れテストの対象は **215**。
+§2 に列挙した機能ID: **223**。うち3件(AC-EXT-019、AC-POST-010・011)は対象外としたので、
+受け入れテストの対象は **220**。
 
 | 状態 | 件数 |
 | --- | --- |
 | `検証済` | 159 |
 | `部分的に検証` | 3 |
-| `実装中` | 8 |
+| `実装中` | 13 |
 | `実装済み` | 21 |
 | `既存spec` / `既存spec(部分)` | 3 |
 | `未着手` | 21 |
 | `対象外`(§2 に行を持つもの) | 3 |
-| **§2 合計** | **218** |
+| **§2 合計** | **223** |
 
 `実装済み` は §1 の状態の定義に無い。`AC-AI-*` の全20行がこの語を使っており、§1 の
 どの状態に当たるかは各行を担当する Issue の判断である。ここでは行の値どおりに数える。
@@ -622,11 +623,11 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 領域 | 件数 | | 領域 | 件数 | | 領域 | 件数 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `SET` | 3 | | `AI` | 20 | | `SYS` | 9 |
+| `SET` | 3 | | `AI` | 20 | | `SYS` | 10 |
 | `AUTH` | 10 | | `PLAN` | 12 | | `LOG` | 10 |
 | `USR` | 15 | | `IMG` | 15 | | `EXT` | 24 |
 | `PRJ` | 9 | | `DIAG` | 7 | | `XC` | 11 |
-| `SITE` | 11 | | `TAG` | 17 | | `UX` | 8 |
+| `SITE` | 11 | | `TAG` | 21 | | `UX` | 8 |
 | `POST` | 15 | | `ANA` | 6 | | `STUB` | 2 |
 | `BULK` | 14 | | | | | | |
 
@@ -662,7 +663,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | `/users/[id]/edit` | AC-USR-003, AC-USR-004, AC-USR-010 |
 | `/admin/roles` | AC-USR-007 |
 | `/admin/ssh-keys` | AC-SITE-010 |
-| `/admin/system-settings` | AC-SYS-005, AC-SYS-006 |
+| `/admin/system-settings` | AC-SYS-005, AC-SYS-006, AC-SYS-011 |
 | `/admin/backup` | AC-SYS-007, AC-SYS-008 |
 | `/admin/tag-design` | AC-TAG-014 |
 | `/projects` | AC-PRJ-001, AC-PRJ-002 |
@@ -710,7 +711,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 ハードゲートで、本節はそれを**画面・操作の全体へ広げるための対象一覧**である。
 シナリオを全対象へ広げる作業は #1477、3秒を構造的に満たせない操作の非同期化は #1478 が担う。
 
-- 範囲: **`app/**/page.tsx` の全27ページの初回表示**と、**`export async function *Action` の全119件**。
+- 範囲: **`app/**/page.tsx` の全27ページの初回表示**と、**`export async function *Action` の全120件**。
   「クリック」単位の粒度は Gherkin 上に存在しない(「クリック」を含むステップは5件)ため、
   クリックではなく「ページの初回表示」と「Server Action」を単位にした。
 - 一覧は `find apps/web/src/app -name page.tsx` と
@@ -792,7 +793,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全119件)
+### 10.5 Server Action(全120件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -801,7 +802,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/admin/backup/actions.ts`<br>`restoreBackupAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
 | `app/admin/roles/actions.ts`<br>`assignRoleAction`<br>`removeRoleAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/admin/ssh-keys/actions.ts`<br>`createSshKeyPairAction`<br>`deleteSshKeyPairAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
-| `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
+| `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction`<br>`applyComputeDeviceAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作。`applyComputeDeviceAction` は適用を**受け付けた時点で返る**(platform-service が裏でコンテナの停止・起動・成功判定を進め、進行は別に取得する。#1399)ので、切り替えの完了までの時間(最大180秒)は含まない | 予算対象 |
 | `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`<br>`updateCustomTagTemplateAction`<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う(画像生成の同期経路 `generateProjectImagesAction` は #1408 で非同期ジョブ `requestProjectImageJobAction` に置き換わり、削除済み)。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |

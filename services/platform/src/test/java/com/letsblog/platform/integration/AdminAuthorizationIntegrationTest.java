@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -155,5 +156,25 @@ class AdminAuthorizationIntegrationTest {
                 .andExpect(status().isForbidden());
 
         verify(identityClient).lookupProfile("Bearer disabled-jwt");
+    }
+    /**
+     * ComfyUIの演算デバイス切り替え(issue #1399 AC4)。参照API・適用APIとも、一般ユーザーは
+     * Docker Engine APIに触れる前に403で拒否される(Docker Engine APIは未到達のためテストはモック不要)。
+     */
+    @Test
+    @DisplayName("演算デバイス: 一般ユーザーは参照APIも適用APIも403")
+    void 演算デバイスは非adminなら参照も適用も403() throws Exception {
+        when(jwtDecoder.decode("user-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1399", "user"));
+        when(identityClient.lookupProfile("Bearer user-jwt"))
+                .thenReturn(Optional.of(new ActorProfile(12L, "user")));
+
+        mockMvc.perform(get("/api/system-settings/compute-devices/comfyui")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/system-settings/compute-devices/comfyui/apply")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"device\":\"GPU\"}"))
+                .andExpect(status().isForbidden());
     }
 }

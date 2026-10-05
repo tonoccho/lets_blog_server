@@ -158,6 +158,23 @@ services:
     ports:
       - "127.0.0.1:18087:8080"
 
+  # Docker Engine API(issue #1399)。ComfyUIの演算デバイス(GPU/CPU)切り替えは、platform-service が
+  # docker-socket-proxy 経由でコンテナを start / stop する。共有の受け入れ環境で実コンテナを止めると
+  # 他のシナリオを壊すため、platform の切り替え専用の向き先(COMPUTE_DEVICE_DOCKER_BASE_URL)だけを
+  # このスタブへ向ける。ダッシュボードのコンテナ一覧(DOCKER_SOCKET_PROXY_BASE_URL)は実物のまま。
+  # スタブは GET /containers/json と POST /containers/{id}/start|stop だけを実装する。
+  # COMPOSE_PROJECT_NAME は platform と同じ値にする(一覧のプロジェクトラベルの照合に使われる)。
+  docker-engine-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-docker-engine-stub
+    command: ["node", "/app/docker-engine/server.js"]
+    environment:
+      TZ: UTC
+      PORT: "8080"
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-lets_blog_server}
+    ports:
+      - "127.0.0.1:18089:8080"
+
   # ---- ollama は AT では起動しない(issue #1090)----
   #
   # AT の LLM は llm-stub が担う(#928: GPU にも外部SaaS にも依存しない)。ollama と
@@ -217,12 +234,19 @@ services:
       # platform 自身の ConnectedServiceStatusService(連携サービスの状況)も
       # この値の /system_stats を叩くため、スタブがその経路を実装している。
       COMFYUI_BASE_URL: http://comfyui-stub:8080
+      # 演算デバイス切り替え(issue #1399)の向き先だけを Docker Engine API スタブへ向ける。
+      # 成功判定の /system_stats は上の COMFYUI_BASE_URL(= comfyui-stub)が応える。
+      # 待機の上限は受け入れテストが失敗シナリオを現実的な時間で確かめられるよう10秒に縮める(既定180秒)。
+      COMPUTE_DEVICE_DOCKER_BASE_URL: http://docker-engine-stub:8080
+      COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS: "10"
     depends_on:
       llm-stub:
         condition: service_healthy
       image-stub:
         condition: service_healthy
       comfyui-stub:
+        condition: service_healthy
+      docker-engine-stub:
         condition: service_healthy
 
   # 画像生成の実行者。向き先そのものは上の platform が決める(DB > 環境変数の順に解決される

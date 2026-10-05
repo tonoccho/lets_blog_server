@@ -469,3 +469,74 @@ nvidia デバイス予約は変数展開でもマージでも消せない(上記
   固有名 `comfyui-cpu` でも到達でき、GPU構成を止めずにこちらだけを指名できる(#1401 の前提)。
 - モデル・出力ボリューム(`comfyui_models` / `comfyui_output`)は共有。両者は同時に起動しない前提。
 - 検証: `scripts/test_comfyui_gpu_profile.py`(compose契約テスト)。実機での生成は #1401。
+
+## 管理画面からの演算デバイス切り替え(GPU / CPU)(#1399)
+
+管理者は `/admin/system-settings` の「演算デバイス(ComfyUI)」で、ComfyUI を GPU 構成と CPU 構成の
+どちらで動かすかを選んで適用できる。platform-service が Docker Engine API の
+`POST /containers/{id}/stop` と `POST /containers/{id}/start` だけで切り替える。
+
+- 両構成のコンテナ(`lbs-comfyui` と `lbs-comfyui-cpu`)を**事前に作っておく**。アプリは作成・削除・
+  作り直しをしない。待機側の作成は運用手順で、GPU ホスト(`COMPOSE_PROFILES=gpu`)では
+  `docker compose up -d` の後に一度だけ次を実行する(`.env.example` にも同じ手順を書いた)。
+
+  ```bash
+  docker compose --profile cpu create comfyui-cpu
+  ```
+
+- GPU の有無は、`lbs-comfyui` が存在するかで判定する(proxy の読み取り権限ではホストの GPU を直接
+  調べられない。GPU 構成のコンテナは GPU ホストでしか作らない運用)。無ければ CPU に固定し、GPU への適用は
+  API でも拒否する。`lbs-comfyui` だけがある場合は、CPU を選べない理由として上の作成手順を表示する。
+- 現在の構成は、動いているコンテナ(`running`)から判定する。DB に保存した選択値は使わない。
+- 適用は受け付けたらすぐ返り(202)、裏で「現在の構成を stop → 選んだ構成を start → 成功判定」を進める。
+  成功は選んだ構成が `running` かつ `http://comfyui:8188/system_stats` が HTTP 200。待つ上限は
+  `COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS`(既定 180)。成功しなければ選んだ構成を stop して元の構成を
+  start し直し、画面に失敗の段階と理由を出す。元の構成の再起動にも失敗したときは手動復旧のコマンドを表示する。
+  適用中の次の適用要求は 409 で拒否する。進行状態はメモリにだけ持つ(適用中に platform-service が
+  再起動した場合の引き継ぎは対象外)。
+- 向き先は `COMPUTE_DEVICE_DOCKER_BASE_URL`(既定は `DOCKER_SOCKET_PROXY_BASE_URL`)。受け入れ環境では
+  これだけを Docker Engine API のスタブ(`infra/e2e-stubs/docker-engine`)へ向け、ダッシュボードの
+  コンテナ一覧には影響させない。
+- 注意: 運用者が手で `docker compose up -d` を実行すると、有効なプロファイル側が再び起動して**両方が動いて
+  しまう場合がある**(同じネットワークエイリアス `comfyui` が重複する)。アプリはこれを自動では直さず、
+  画面に「GPU と CPU の両方が稼働中」と表示する。切り替えを適用すると片方に寄せられる。
+- 接続先を別ホストの ComfyUI に向けている場合(システム設定の `comfyui_base_url`)は対象外。切り替えるのは
+  同じ compose で同梱しているコンテナだけである。
+
+### docker-socket-proxy の権限(start / stop だけを開ける)— 未確定(#1587)
+
+Epic #551 / #701 の方針(docker socket へ到達できるのは platform-service だけ)のうち、コンテナの
+**start / stop だけ**を開ける。作成・削除・exec・イメージ操作・`restart`(kill を含む `ALLOW_RESTARTS`)は
+開けない。当初の想定は「`POST: 0` を残し `ALLOW_START: 1` と `ALLOW_STOP: 1` だけを足す」だったが、
+**実機のイメージで確認したところ成立しなかった**ため、`docker-compose.yml` の proxy の権限はまだ変更していない
+(`POST: 0` のまま。この状態では start / stop は通らず、管理画面の適用は失敗として表示され元の構成のまま残る)。
+方式の決定は #1587。
+
+確認した環境: `tecnativa/docker-socket-proxy:latest`(image id `1f5038b54f06`)。使い捨てのネットワークに
+proxy を起動し、docker.sock の代わりに使い捨てのスタブ socket(受けたリクエストを記録して 200/204 を返すだけ)を
+マウントした。実際の docker.sock と共有スタックには触れていない。
+
+| 設定 | `GET /containers/json` | start | stop | `POST /containers/create` | `DELETE /containers/{id}` | `POST /containers/{id}/exec` | `POST /images/create` | restart / kill / pause |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `CONTAINERS=1 POST=0 ALLOW_START=1 ALLOW_STOP=1`(当初の想定) | 200 | **403** | **403** | 403 | 403 | 403 | 403 | 403 |
+| `CONTAINERS=1 POST=1 ALLOW_START=1 ALLOW_STOP=1` | 200 | 204 | 204 | **204(到達)** | **204(到達)** | **204(到達)** | 403 | **204(到達)** |
+| haproxy の `frontend` を許可リストへ差し替え(下) | 200 | 204 | 204 | 403 | 403 | 403 | 403 | 403 |
+
+原因は、イメージの `haproxy.cfg.template` の先頭が `http-request deny unless METH_GET || { env(POST) -m bool }`
+で、`ALLOW_*` の allow 規則より前に評価されること。`POST=0` では全 POST がそこで拒否され、`POST=1` にすると
+`CONTAINERS=1` が `/containers/` 配下の全 POST(create / exec / kill を含む)を通してしまう。
+
+3行目は、同じイメージの `haproxy.cfg.template` の `frontend dockerfrontend` だけを次に差し替えて
+read-only マウントした場合の結果で、期待どおり start / stop だけが通る(選択肢の一つとして #1587 に報告済み。
+**まだ採用していない**)。
+
+```
+frontend dockerfrontend
+    bind ${BIND_CONFIG}
+    http-request allow if METH_GET { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/json$ }
+    http-request allow if { method POST } { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/(start|stop)$ }
+    http-request deny
+    default_backend dockerbackend
+```
+
+方式が決まったら、同じ手順で実機の proxy に対して再確認し、このセクションの表を更新すること。

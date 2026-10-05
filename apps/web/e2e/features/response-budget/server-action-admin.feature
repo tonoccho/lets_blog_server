@@ -48,6 +48,14 @@
     もし システム設定画面で表示されたままの値を保存して Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
+  # 適用は受け付けた時点で返り(進行は裏で進む)、Docker Engine API スタブの状態を変えるため、
+  # 他のシナリオと並列に走らない `@destructive`。実コンテナは触らない(`platform/compute-device.feature`)。
+  @budget-action:applyComputeDeviceAction @destructive @docker-engine-stub
+  シナリオ: ComfyUIの演算デバイスの適用(Server Action)の往復が3秒以内に返る
+    前提 Docker Engine APIスタブに、GPU構成が稼働中でCPU構成が停止中の両構成がある
+    もし システム設定画面の演算デバイス欄でCPUを選んで適用して Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る
+
   @budget-action:restoreBackupAction
   シナリオ: バックアップのリストア要求(Server Action)の往復が3秒以内に返る
     もし バックアップ画面でバックアップとして読めないファイルのリストアを実行して Server Action の往復を計測する

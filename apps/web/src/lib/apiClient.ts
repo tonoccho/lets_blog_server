@@ -1894,6 +1894,44 @@ export function updateAppSettings(settings: Record<string, string>): Promise<voi
   });
 }
 
+/**
+ * ComfyUI などの演算デバイス(GPU / CPU)切り替え(issue #1399)。管理者だけが参照・適用できる。
+ * 現在の構成は実際に動いているコンテナから判定した値で、DBの選択値ではない。
+ */
+export type ComputeDevice = 'GPU' | 'CPU';
+
+export interface ComputeDeviceApplyStatus {
+  state: 'IDLE' | 'APPLYING' | 'SUCCEEDED' | 'FAILED';
+  requestedDevice: ComputeDevice | null;
+  message: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface ComputeDeviceStatus {
+  target: string;
+  currentDevice: ComputeDevice | 'NONE' | 'BOTH';
+  cpuFixed: boolean;
+  gpuSelectable: boolean;
+  cpuSelectable: boolean;
+  gpuUnavailableReason: string | null;
+  cpuUnavailableReason: string | null;
+  apply: ComputeDeviceApplyStatus;
+}
+
+export function getComputeDeviceStatus(target: string): Promise<ComputeDeviceStatus> {
+  return apiFetch<ComputeDeviceStatus>(`/api/system-settings/compute-devices/${encodeURIComponent(target)}`);
+}
+
+/** 適用を受け付けたらすぐ返る(202)。進行は {@link getComputeDeviceStatus} で取得する。 */
+export function applyComputeDevice(device: ComputeDevice, target: string = 'comfyui'): Promise<ComputeDeviceStatus> {
+  return apiFetch<ComputeDeviceStatus>(`/api/system-settings/compute-devices/${encodeURIComponent(target)}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device }),
+  });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;

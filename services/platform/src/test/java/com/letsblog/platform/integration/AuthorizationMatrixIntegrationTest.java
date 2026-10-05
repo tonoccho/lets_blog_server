@@ -99,6 +99,10 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/system-settings/app-settings"),
                 new Endpoint("PUT", "/api/system-settings/app-settings"),
 
+                // -- ComputeDeviceController (2、issue #1399) --
+                new Endpoint("GET", "/api/system-settings/compute-devices/comfyui"),
+                new Endpoint("POST", "/api/system-settings/compute-devices/comfyui/apply"),
+
                 // -- DashboardController (5、issue #695) --
                 new Endpoint("GET", "/api/dashboard/service-status"),
                 new Endpoint("GET", "/api/dashboard/service-status/stream"),

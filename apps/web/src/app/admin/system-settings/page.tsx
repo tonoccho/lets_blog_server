@@ -1,12 +1,16 @@
 import { requireAdminSession } from "@/lib/session";
-import { listAppSettings } from "@/lib/apiClient";
+import { getComputeDeviceStatus, listAppSettings } from "@/lib/apiClient";
 import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { AppSettingsPanel } from "./AppSettingsPanel";
+import { ComputeDevicePanel } from "./ComputeDevicePanel";
 
 export default async function AdminSystemSettingsPage() {
   await requireAdminSession();
-  const settings = await loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []);
+  const [settings, computeDevice] = await Promise.all([
+    loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []),
+    loadOrReport("admin/system-settings", "演算デバイスの状態", getComputeDeviceStatus("comfyui"), null),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -19,9 +23,11 @@ export default async function AdminSystemSettingsPage() {
           この保存操作での変更が全てロールバックされます。
         </p>
       </div>
-      <FetchErrorNotice labels={failedLabels(settings)} />
+      <FetchErrorNotice labels={failedLabels(settings, computeDevice)} />
       {/* 取得失敗時に空の設定を表示すると、そのまま保存して既存値を消しかねないため描画しない */}
       {!settings.failed && <AppSettingsPanel settings={settings.data} />}
+      {/* 「保存する設定」とは別の「適用する操作」。取得できなければ操作させない */}
+      {computeDevice.data && <ComputeDevicePanel status={computeDevice.data} />}
     </div>
   );
 }

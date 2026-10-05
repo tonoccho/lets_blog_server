@@ -146,6 +146,16 @@ app:
   # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは
   # 本サービスのみに限定する(Epic #551の方針。docker-compose.ymlのdocker-socket-proxy定義参照)。
   docker-socket-proxy-base-url: ${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}
+  # 演算デバイス(GPU/CPU)の切り替え(issue #1399)。start / stop だけを呼ぶため、向き先は
+  # ContainerStatusServiceと同じdocker-socket-proxyが既定だが、受け入れ環境ではこれだけをDocker Engine
+  # APIのスタブへ向ける(ダッシュボードのコンテナ一覧を変えないため)。
+  compute-device:
+    docker-base-url: ${COMPUTE_DEVICE_DOCKER_BASE_URL:${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}}
+    # 切り替え後の成功判定(コンテナがrunning かつ HTTP 200)。ComfyUIは /system_stats。
+    comfyui-health-url: ${COMPUTE_DEVICE_COMFYUI_HEALTH_URL:${COMFYUI_BASE_URL:http://localhost:8188}/system_stats}
+    # 選んだ構成が成功の条件を満たすまで待つ上限(秒)。超えたら元の構成へ戻す。
+    apply-timeout-seconds: ${COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS:180}
+    poll-interval-millis: ${COMPUTE_DEVICE_POLL_INTERVAL_MILLIS:2000}
   # 自分が属するdocker composeプロジェクト名(issue #803)。docker-socket-proxyはホストの
   # Dockerデーモン全体を見ているため、コンテナ名の lbs- 前方一致だけだと同一ホスト上の
   # 別プロジェクトのコンテナ(例: 開発環境のテストハーネスが起動する lbs-test-db)まで
