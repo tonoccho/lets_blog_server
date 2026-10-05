@@ -166,6 +166,19 @@ const WRITING_ASSIST_FEATURES: Record<string, { path: string; body: Record<strin
   },
   タグ提案: { path: '/api/ai/tags', body: { text: 'モデル選択の確認' } },
   校正チェック: { path: '/api/ai/proofread', body: { text: 'モデル選択の確認' } },
+  // 記事企画(ArticlePlanService, issue #1643)。projectId はパスに入るため `{projectId}` を置換する。
+  壁打ちチャット: {
+    path: '/api/projects/{projectId}/article-plan/chat',
+    body: { history: [], message: 'モデル選択の確認', sessionId: null, githubIssueNumber: null },
+  },
+  タイトル提案: {
+    path: '/api/projects/{projectId}/article-plan/suggest-titles',
+    body: { history: [{ role: 'user', content: 'モデル選択の確認' }] },
+  },
+  構成提案: {
+    path: '/api/projects/{projectId}/article-plan/suggest-structure',
+    body: { history: [{ role: 'user', content: 'モデル選択の確認' }] },
+  },
 };
 
 async function callWritingAssist(
@@ -184,7 +197,8 @@ async function callWritingAssist(
   if (options.provider) {
     data.provider = options.provider;
   }
-  ctx.writingAssistAttempt = await request.post(definition.path, {
+  const path = definition.path.replace('{projectId}', String(currentProjectId(ctx)));
+  ctx.writingAssistAttempt = await request.post(path, {
     headers: { Authorization: `Bearer ${token}` },
     data,
   });

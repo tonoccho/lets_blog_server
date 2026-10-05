@@ -3,6 +3,7 @@ package com.letsblog.ai.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.client.ProjectBridgeClient;
 import com.letsblog.ai.client.PublishingServiceClient;
@@ -127,10 +128,11 @@ public class ArticlePlanService {
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            AiProvider provider = llmModelService.getSelectedProvider(projectId);
             llmClient.useProject(projectId);
             WebSearchOutcome searchOutcome = webSearchService.searchSafely(message, projectId);
             String prompt = buildChatPrompt(history, message, searchOutcome);
-            String reply = llmClient.generate(prompt, model);
+            String reply = llmClient.generate(prompt, model, provider);
             completeJob(job, Map.of(
                     "reply", reply,
                     "webSearchAttempted", "true",
@@ -143,7 +145,7 @@ public class ArticlePlanService {
             updatedHistory.add(new PlanChatMessage("assistant", reply));
 
             Long resolvedSessionId = sessionId == null
-                    ? createSession(projectId, message, updatedHistory, githubIssueNumber, model)
+                    ? createSession(projectId, message, updatedHistory, githubIssueNumber, model, provider)
                     : appendToSession(projectId, sessionId, updatedHistory);
 
             return new PlanChatResponse(reply, resolvedSessionId);
@@ -154,8 +156,9 @@ public class ArticlePlanService {
     }
 
     private Long createSession(
-            Long projectId, String firstMessage, List<PlanChatMessage> history, Integer githubIssueNumber, String model) {
-        String title = generateSessionTitle(firstMessage, model);
+            Long projectId, String firstMessage, List<PlanChatMessage> history, Integer githubIssueNumber, String model,
+            AiProvider provider) {
+        String title = generateSessionTitle(firstMessage, model, provider);
 
         ArticlePlanSession session = new ArticlePlanSession();
         session.setProjectId(projectId);
@@ -182,11 +185,11 @@ public class ArticlePlanService {
         return session;
     }
 
-    private String generateSessionTitle(String firstMessage, String model) {
+    private String generateSessionTitle(String firstMessage, String model, AiProvider provider) {
         GenerationJob job = startJob("plan_session_title", Map.of("message", firstMessage));
         try {
             String prompt = "User: " + firstMessage + "\n\n" + TITLE_GENERATION_INSTRUCTION;
-            String raw = llmClient.generate(prompt, model);
+            String raw = llmClient.generate(prompt, model, provider);
             String title = sanitizeTitle(raw);
             completeJob(job, Map.of("title", title));
             return title;
@@ -323,8 +326,9 @@ public class ArticlePlanService {
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            AiProvider provider = llmModelService.getSelectedProvider(projectId);
             llmClient.useProject(projectId);
-            String raw = llmClient.generate(buildTitleSuggestionPrompt(history), model);
+            String raw = llmClient.generate(buildTitleSuggestionPrompt(history), model, provider);
             List<String> titles = parseTitles(raw);
             completeJob(job, Map.of("titlesCount", String.valueOf(titles.size()), "raw", raw));
             return new SuggestTitlesResponse(titles);
@@ -344,8 +348,9 @@ public class ArticlePlanService {
         ));
         try {
             String model = llmModelService.getSelectedModel(projectId);
+            AiProvider provider = llmModelService.getSelectedProvider(projectId);
             llmClient.useProject(projectId);
-            String structure = llmClient.generate(buildStructureSuggestionPrompt(history), model).strip();
+            String structure = llmClient.generate(buildStructureSuggestionPrompt(history), model, provider).strip();
             completeJob(job, Map.of("structureLength", String.valueOf(structure.length())));
             return new SuggestStructureResponse(structure);
         } catch (RuntimeException e) {
@@ -378,13 +383,14 @@ public class ArticlePlanService {
         try {
             List<String> existingCategories = listExistingCategories(projectId);
             String model = llmModelService.getSelectedModel(projectId);
+            AiProvider provider = llmModelService.getSelectedProvider(projectId);
             llmClient.useProject(projectId);
             String prompt = buildMetadataSuggestionPrompt(history, existingCategories);
 
             String raw = "";
             SuggestMetadataResponse response = new SuggestMetadataResponse(List.of(), List.of(), List.of(), List.of());
             for (int attempt = 1; attempt <= MAX_METADATA_ATTEMPTS; attempt++) {
-                raw = llmClient.generate(prompt, model);
+                raw = llmClient.generate(prompt, model, provider);
                 response = parseMetadata(raw);
                 if (isUsableMetadata(response)) {
                     break;
