@@ -7,7 +7,7 @@ import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '.
  * 公開時の SNS 告知(issue #1575)のステップ定義。
  * 「ステップ定義ファイルは相乗りしない」方針のため、フィクスチャのヘルパーはここに閉じて持つ。
  * X の API は x スタブ(ホストからは 127.0.0.1:18088、WordPress からは http://x-stub:8080)。
- * 他のシナリオの `ALL_STUBS` に x を加えないよう、スタブへの入口もここに閉じて持つ。
+ * x は `ALL_STUBS` に含まれる(#1620)が、このシナリオ固有の操作(投稿本文の確認など)の入口はここに閉じて持つ。
  */
 
 const WORDPRESS_CONTAINER = 'lbs-wordpress';

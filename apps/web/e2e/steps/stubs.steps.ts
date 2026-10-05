@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Before, Given, Then, When } from './fixtures';
 import { expect } from '../support';
 import {
@@ -67,6 +69,12 @@ const PROBES: Record<StubName, { path: string; method: string; body?: unknown; h
     path: '/prompt',
     method: 'POST',
     body: { prompt: comfyUiWorkflow({ seed: 1_106_000, batchSize: 1 }) },
+  },
+  // X API(#1573)。トークンは固定値で状態を持たないので、同じ呼び出しは常に同じ応答になる。
+  x: {
+    path: '/2/users/me',
+    method: 'GET',
+    headers: { Authorization: 'Bearer e2e-x-access-valid' },
   },
 };
 
@@ -329,4 +337,35 @@ When('ComfyUIスタブへメモリ解放を要求する', async () => {
 
 Then('メモリ解放の要求は成功する', async () => {
   expect(comfyUi.lastStatus, 'ComfyUIスタブが /api/interrupt に応答しない').toBe(200);
+});
+
+/* ------------------------------------------------------------------ *
+ * ドキュメントと support/stubs.ts の一致(issue #1620)
+ *
+ * docs/ACCEPTANCE_TESTING.md の「何をスタブ化しているか」表が挙げるスタブと、
+ * ALL_STUBS / resetAllStubs の対象が食い違うと、表のスタブだけが決定性・エラー注入・
+ * リセットの検証から漏れる。表の「ホスト公開」列(ポート)を正として突き合わせる。
+ * ------------------------------------------------------------------ */
+
+const docStubPorts: number[] = [];
+
+When('docs\\/ACCEPTANCE_TESTING.md の外部依存スタブ表を読む', async () => {
+  const doc = readFileSync(resolve(__dirname, '../../../../docs/ACCEPTANCE_TESTING.md'), 'utf8');
+  docStubPorts.length = 0;
+  for (const line of doc.split('\n')) {
+    const m = /^\| `[a-z-]+-stub` \|.*\| (18\d{3}) \|$/.exec(line);
+    if (m) docStubPorts.push(Number(m[1]));
+  }
+  expect(docStubPorts.length, 'ドキュメントのスタブ表から行を読めなかった').toBeGreaterThan(0);
+});
+
+Then('表の全てのスタブの公開ポートが STUB_URLS に含まれる', async () => {
+  const ports = Object.values(STUB_URLS).map((u) => Number(new URL(u).port));
+  for (const port of docStubPorts) {
+    expect(ports, `ドキュメントのスタブ(ポート ${port})が STUB_URLS に無い`).toContain(port);
+  }
+});
+
+Then('表の全てのスタブが ALL_STUBS と同じ名前で数えられる', async () => {
+  expect(ALL_STUBS, 'ALL_STUBS の数がドキュメントの表と一致しない').toHaveLength(docStubPorts.length);
 });
