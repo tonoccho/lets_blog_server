@@ -30,6 +30,7 @@ import {
   probeThroughGateway,
   sendThroughGateway,
   waitForContainerLog,
+  waitForContainerLogLine,
   type GatewayBodyResponse,
   type GatewayProbeResult,
   type GatewayResponse,
@@ -648,6 +649,27 @@ Then('下流サービスのログにその相関IDが記録される', async ({ 
     `クライアントが指定した相関ID(${correlationId})が下流サービスのログに現れない。`
       + 'gateway が下流へ転送していないか、下流がMDCへ載せていない(#582)'
   ).toBe(true);
+});
+
+/**
+ * 下流サービスの所要時間ログ(`RequestDurationLoggingFilter`、issue #1470)。
+ * 相関IDで行を特定し、同じ1行にメソッド・パス・ステータス・所要時間が揃っていることを見る。
+ * 行の中身は DOWNSTREAM_LOG_TRIGGER(POST /api/posts → 405)と対応する。
+ */
+Then('下流サービスのログにメソッド・パス・ステータス・所要時間・その相関IDを含む1行が記録される', async ({ ctx }) => {
+  const correlationId = ctx.correlationId as string;
+  const line = waitForContainerLogLine(DOWNSTREAM_CONTAINER, `correlation_id=${correlationId}`);
+  expect(
+    line,
+    `下流サービスのログに、相関ID(${correlationId})を持つ所要時間ログの行が無い。`
+      + 'サービスが RequestDurationLoggingFilter を登録していない(#1470)'
+  ).toBeDefined();
+  expect(line as string).toMatch(
+    new RegExp(
+      `service request: method=${DOWNSTREAM_LOG_TRIGGER.method} path=${DOWNSTREAM_LOG_TRIGGER.path}`
+        + ` status=\\d{3} duration_ms=\\d+ correlation_id=${correlationId}`
+    )
+  );
 });
 
 Then('gatewayと下流サービスの双方のログを同じ相関IDで串刺しできる', async ({ ctx }) => {

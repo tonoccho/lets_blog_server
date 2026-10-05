@@ -404,3 +404,25 @@ export function waitForContainerLog(
   } while (Date.now() < deadline);
   return false;
 }
+
+/**
+ * コンテナのログから、`needle` を含む最初の1行が現れるまで待って、その行を返す(issue #1470)。
+ * 1行の中に複数の項目が並んでいること(例: 所要時間ログ)を検証するのに使う。
+ * 制限時間内に現れなければ undefined を返し、判定は呼び出し側に委ねる。
+ */
+export function waitForContainerLogLine(
+  container: string, needle: string, timeoutMs = 30_000
+): string | undefined {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const output = execFileSync(
+      'sh', ['-c', `docker logs --tail 400 ${container} 2>&1`], { encoding: 'utf8', timeout: 60_000 }
+    );
+    const line = output.split('\n').find((candidate) => candidate.includes(needle));
+    if (line !== undefined) {
+      return line;
+    }
+    execFileSync('sleep', ['1']);
+  } while (Date.now() < deadline);
+  return undefined;
+}

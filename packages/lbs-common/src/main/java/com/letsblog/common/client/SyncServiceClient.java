@@ -10,8 +10,11 @@ import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
@@ -47,6 +50,8 @@ import org.springframework.web.client.RestClientResponseException;
  * {@code Consumer<HttpHeaders>}引数でAuthorizationヘッダーを設定する。
  */
 public final class SyncServiceClient {
+
+    private static final Logger log = LoggerFactory.getLogger(SyncServiceClient.class);
 
     private final String serviceName;
     /** 実際の宛先。例外メッセージへ含め、設定ミスによる向き先違いを切り分けられるようにする(issue #827)。 */
@@ -202,15 +207,44 @@ public final class SyncServiceClient {
      * 都度確認する一般的な合成順)。
      */
     private <T> T execute(String operation, boolean retryable, Supplier<T> call) {
-        Supplier<T> translated = translate(operation, call);
+        AtomicInteger attempts = new AtomicInteger();
+        Supplier<T> counted = () -> {
+            attempts.incrementAndGet();
+            return call.get();
+        };
+        Supplier<T> translated = translate(operation, counted);
         Supplier<T> decorated = CircuitBreaker.decorateSupplier(circuitBreaker, translated);
         if (retryable) {
             decorated = Retry.decorateSupplier(retry, decorated);
         }
+        long start = System.nanoTime();
+        String outcome = "success";
         try {
             return decorated.get();
         } catch (CallNotPermittedException e) {
+            outcome = SyncServiceCircuitOpenException.class.getSimpleName();
             throw new SyncServiceCircuitOpenException(serviceName, baseUrl, operation);
+        } catch (RuntimeException e) {
+            outcome = e.getClass().getSimpleName();
+            throw e;
+        } finally {
+            logCall(operation, attempts.get(), outcome, (System.nanoTime() - start) / 1_000_000L);
+        }
+    }
+
+    /**
+     * 呼び出し1件につき1行(issue #1470)。リトライの各試行ではなく、呼び出し元から見た1回分の
+     * 所要時間(リトライのバックオフ待ちを含む)を出す。成功かつリトライ無しはINFO、リトライが
+     * 起きた・失敗した呼び出しは調べる価値があるのでWARN。
+     * 相関IDはMDC経由でログパターン({@code %X{correlationId}})に載る。
+     */
+    private void logCall(String operation, int attempts, String outcome, long durationMs) {
+        boolean retried = attempts > 1;
+        String format = "sync call: target={} url={} operation={} duration_ms={} attempts={} retried={} outcome={}";
+        if (retried || !"success".equals(outcome)) {
+            log.warn(format, serviceName, baseUrl, operation, durationMs, attempts, retried, outcome);
+        } else {
+            log.info(format, serviceName, baseUrl, operation, durationMs, attempts, retried, outcome);
         }
     }
 

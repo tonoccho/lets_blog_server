@@ -1,6 +1,7 @@
 package com.letsblog.common.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,6 +13,9 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -24,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -461,6 +466,128 @@ class SyncServiceClientTest {
         assertEquals(url, e.baseUrl());
         assertTrue(e.getMessage().contains(url), "宛先URLを含むこと: " + e.getMessage());
         assertTrue(e.getMessage().contains("test-service"), "論理サービス名も残ること: " + e.getMessage());
+    }
+
+    // ---- 呼び出しごとのログ(issue #1470) ----
+
+    private ListAppender<ILoggingEvent> attachSyncLogAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(SyncServiceClient.class)).addAppender(appender);
+        return appender;
+    }
+
+    private void detachSyncLogAppender(ListAppender<ILoggingEvent> appender) {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(SyncServiceClient.class))
+                .detachAppender(appender);
+    }
+
+    @Test
+    void 成功した呼び出しは呼び出し先と所要時間と試行回数をINFOで出す() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 200, "{\"value\":\"ok\"}"));
+        SyncServiceClient client = freshBuilder(baseUrl(httpServer)).profile(SyncCallProfile.SHORT).build();
+        ListAppender<ILoggingEvent> appender = attachSyncLogAppender();
+        try {
+            client.get("/api/value", new Object[0], Value.class, h -> { });
+        } finally {
+            detachSyncLogAppender(appender);
+        }
+
+        assertEquals(1, appender.list.size());
+        ILoggingEvent event = appender.list.get(0);
+        assertEquals(Level.INFO, event.getLevel());
+        String message = event.getFormattedMessage();
+        assertTrue(message.contains("target=test-service"), message);
+        assertTrue(message.contains("operation=GET /api/value"), message);
+        assertTrue(message.contains("duration_ms="), message);
+        assertTrue(message.contains("attempts=1"), message);
+        assertTrue(message.contains("retried=false"), message);
+        assertTrue(message.contains("outcome=success"), message);
+    }
+
+    @Test
+    void リトライが起きた呼び出しは試行回数とretried_trueをWARNで出す() throws IOException {
+        rawServerSocket = new ServerSocket(0);
+        int port = rawServerSocket.getLocalPort();
+        AtomicInteger attempts = new AtomicInteger();
+        Thread serverThread = new Thread(() -> acceptAndRespondAfterFailures(rawServerSocket, attempts, 2));
+        serverThread.setDaemon(true);
+        serverThread.start();
+        SyncServiceClient client = SyncServiceClient
+                .builder(RestClient.builder(), "flaky-service", "http://localhost:" + port)
+                .circuitBreakerRegistry(CircuitBreakerRegistry.ofDefaults())
+                .retryRegistry(RetryRegistry.ofDefaults())
+                .profile(SyncCallProfile.SHORT)
+                .build();
+        ListAppender<ILoggingEvent> appender = attachSyncLogAppender();
+        try {
+            client.get("/api/value", new Object[0], Value.class, h -> { });
+        } finally {
+            detachSyncLogAppender(appender);
+        }
+
+        assertEquals(1, appender.list.size(), "リトライごとではなく呼び出し1件につき1行");
+        assertEquals(Level.WARN, appender.list.get(0).getLevel());
+        String message = appender.list.get(0).getFormattedMessage();
+        assertTrue(message.contains("target=flaky-service"), message);
+        // resilience4jの試行回数。JDK HttpClientが接続断を1回透過的に再接続するため、サーバーが見た
+        // 3回は応用層では2回になりうる。ここで固定したいのは「2回以上=リトライが起きた」こと。
+        assertTrue(message.matches(".*attempts=[23] .*"), message);
+        assertTrue(message.contains("retried=true"), message);
+        assertTrue(message.contains("outcome=success"), message);
+    }
+
+    @Test
+    void 失敗した呼び出しは例外の種別を載せてWARNで出し例外はそのまま伝える() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 400, "{\"error\":\"bad\"}"));
+        SyncServiceClient client = freshBuilder(baseUrl(httpServer)).profile(SyncCallProfile.SHORT).build();
+        ListAppender<ILoggingEvent> appender = attachSyncLogAppender();
+        try {
+            assertThrows(SyncServiceClientErrorException.class,
+                    () -> client.post("/api/value", new Object[0], java.util.Map.of("a", "b"), Value.class, h -> { }));
+        } finally {
+            detachSyncLogAppender(appender);
+        }
+
+        assertEquals(1, appender.list.size());
+        assertEquals(Level.WARN, appender.list.get(0).getLevel());
+        String message = appender.list.get(0).getFormattedMessage();
+        assertTrue(message.contains("operation=POST /api/value"), message);
+        assertTrue(message.contains("outcome=SyncServiceClientErrorException"), message);
+        assertTrue(message.contains("retried=false"), message);
+    }
+
+    @Test
+    void サーキットオープンで弾かれた呼び出しも試行0回として記録する() throws IOException {
+        httpServer = startHttpServer(exchange -> respond(exchange, 500, "{\"error\":\"boom\"}"));
+        SyncServiceClient client = freshBuilder(baseUrl(httpServer))
+                .profile(SyncCallProfile.SHORT)
+                .retryConfig(RetryConfig.custom().maxAttempts(1).build())
+                .circuitBreakerConfig(CircuitBreakerConfig.custom()
+                        .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                        .slidingWindowSize(2)
+                        .minimumNumberOfCalls(2)
+                        .failureRateThreshold(50.0f)
+                        .recordExceptions(SyncServiceServerErrorException.class)
+                        .build())
+                .build();
+        for (int i = 0; i < 2; i++) {
+            assertThrows(SyncServiceServerErrorException.class,
+                    () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+        }
+        ListAppender<ILoggingEvent> appender = attachSyncLogAppender();
+        try {
+            assertThrows(SyncServiceCircuitOpenException.class,
+                    () -> client.get("/api/value", new Object[0], Value.class, h -> { }));
+        } finally {
+            detachSyncLogAppender(appender);
+        }
+
+        assertEquals(1, appender.list.size());
+        String message = appender.list.get(0).getFormattedMessage();
+        assertTrue(message.contains("attempts=0"), message);
+        assertTrue(message.contains("outcome=SyncServiceCircuitOpenException"), message);
+        assertFalse(message.contains("retried=true"), message);
     }
 
     private record Value(String value) {

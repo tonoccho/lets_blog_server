@@ -10,6 +10,14 @@ logging:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z', UTC} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
 
 management:
+  # issue #1470: http.server.requests の p95 / p99 をActuatorから読めるようにする。
+  # 読み方: GET /actuator/metrics/http.server.requests.percentile?tag=phi:0.95 (phi:0.99)。
+  # percentiles-histogram はPrometheus用のバケットを出すだけでActuatorのp95/p99にはならないので使わない。
+  # クライアント側計算のパーセンタイルはこのメーターだけに絞る(全メーターへ広げるとメモリを食う)。
+  metrics:
+    distribution:
+      percentiles:
+        http.server.requests: 0.95,0.99
   endpoints:
     web:
       exposure:
