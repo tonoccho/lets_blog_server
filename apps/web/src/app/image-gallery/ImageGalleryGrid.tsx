@@ -667,12 +667,19 @@ export function ImageGalleryGrid({
                   {image.tags && image.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {image.tags.map((tag) => (
-                        <span
+                        <button
                           key={tag}
-                          className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-neutral-600 dark:text-neutral-400"
+                          type="button"
+                          aria-label={`タグ「${tag}」で絞り込む`}
+                          onClick={(e) => {
+                            // カード本体のクリック(選択の切り替え)に伝えない。issue #1616
+                            e.stopPropagation();
+                            applyFilter(tag, activeFolder);
+                          }}
+                          className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700"
                         >
                           {tag}
-                        </span>
+                        </button>
                       ))}
                     </div>
                   )}

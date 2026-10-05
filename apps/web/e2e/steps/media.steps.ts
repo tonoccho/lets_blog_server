@@ -2293,6 +2293,21 @@ When(/^タグ「([^」]+)」で絞り込む$/, async ({ page }, tag: string) => 
   }).toPass({ timeout: 30_000 });
 });
 
+When(/^カード上のタグ「([^」]+)」を押す$/, async ({ page }, tag: string) => {
+  await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+  const cardTag = page.getByRole('button', { name: `タグ「${tag}」で絞り込む`, exact: true }).first();
+  const chip = page.getByRole('button', { name: tag, exact: true });
+  // SSR 直後はハイドレーション前でクリックが失われるので、チップが選択状態になるまで押し直す。
+  await expect(async () => {
+    await cardTag.click();
+    await expect(chip).toHaveClass(/bg-neutral-900/, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+Then(/^上部のタグチップ「([^」]+)」が選択表示になっている$/, async ({ page }, tag: string) => {
+  await expect(page.getByRole('button', { name: tag, exact: true })).toHaveClass(/bg-neutral-900/);
+});
+
 Then('一覧に表示される固定画像は最新と最初に作成した2件だけである', async ({ ctx, page }) => {
   const fixtures = ctx.mediaPagingIds as number[];
   const expected = [fixtures[0], fixtures[fixtures.length - 1]];
