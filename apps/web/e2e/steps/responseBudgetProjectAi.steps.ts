@@ -145,10 +145,10 @@ async function gotoAssetPanelButton(page: Page, ctx: Record<string, unknown>) {
   return open;
 }
 
-/** 生成画像ギャラリーの小見出しを持つ区画の「開く」ボタン。 */
+/** 画像ギャラリーの小見出しを持つ区画の「開く」ボタン。 */
 function galleryToggle(page: Page) {
   return page
-    .locator('div', { has: page.getByRole('heading', { name: '生成画像ギャラリーから選択してアップロード' }) })
+    .locator('div', { has: page.getByRole('heading', { name: '画像ギャラリーから選択してアップロード' }) })
     .getByRole('button', { name: '開く', exact: true })
     .first();
 }
@@ -162,13 +162,13 @@ When('アセット画像生成パネルを開いて Server Action の往復を�
   });
 });
 
-When('アセット画像生成パネルの生成画像ギャラリーを開いて Server Action の往復を計測する', async ({ page, ctx }) => {
+When('アセット画像生成パネルの画像ギャラリーを開いて Server Action の往復を計測する', async ({ page, ctx }) => {
   const open = await gotoAssetPanelButton(page, ctx);
   await open.click();
   const toggle = galleryToggle(page);
   await expect(toggle).toBeVisible({ timeout: 30_000 });
   await waitForHydrated(toggle);
-  await measureAndRecord(page, ctx, 'アセット画像生成パネルの生成画像ギャラリーの取得', async () => {
+  await measureAndRecord(page, ctx, 'アセット画像生成パネルの画像ギャラリーの取得', async () => {
     await toggle.click();
     await expect(page.getByText('読み込んでいます…')).toHaveCount(0, { timeout: 30_000 });
   });

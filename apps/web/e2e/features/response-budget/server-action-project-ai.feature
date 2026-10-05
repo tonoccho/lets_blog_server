@@ -71,7 +71,7 @@
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:fetchGeneratedImagesAction
-  シナリオ: アセット画像生成パネルの生成画像ギャラリーの取得(Server Action)の往復が3秒以内に返る
+  シナリオ: アセット画像生成パネルの画像ギャラリーの取得(Server Action)の往復が3秒以内に返る
     前提 応答時間予算の検証用のプロジェクトがある
-    もし アセット画像生成パネルの生成画像ギャラリーを開いて Server Action の往復を計測する
+    もし アセット画像生成パネルの画像ギャラリーを開いて Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る

@@ -1,6 +1,6 @@
 # language: ja
 @response-budget @retries:2
-機能: 生成画像ギャラリーの Server Action が3秒の予算内に返る
+機能: 画像ギャラリーの Server Action が3秒の予算内に返る
 
   `docs/ACCEPTANCE_CRITERIA.md` §10.5 の `app/image-gallery/actions.ts`(issue #1477)。書式と計り方は
   `page-first-display.feature` / `server-action-admin.feature` の冒頭を読むこと。
@@ -15,20 +15,20 @@
 
   @budget-action:getGeneratedImageAction
   シナリオ: 生成画像の詳細の取得(Server Action)の往復が3秒以内に返る
-    もし 生成画像ギャラリーでその画像を開いて Server Action の往復を計測する
+    もし 画像ギャラリーでその画像を開いて Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:updateGeneratedImageTagsAction
   シナリオ: 生成画像のタグ保存(Server Action)の往復が3秒以内に返る
-    もし 生成画像ギャラリーでその画像の詳細を開いてタグを追加し Server Action の往復を計測する
+    もし 画像ギャラリーでその画像の詳細を開いてタグを追加し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:deleteGeneratedImageAction
   シナリオ: 生成画像の削除(Server Action)の往復が3秒以内に返る
-    もし 生成画像ギャラリーでその画像の詳細を開いて削除し Server Action の往復を計測する
+    もし 画像ギャラリーでその画像の詳細を開いて削除し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:bulkDeleteGeneratedImagesAction
   シナリオ: 生成画像の一括削除(Server Action)の往復が3秒以内に返る
-    もし 生成画像ギャラリーでその画像を選択して一括削除し Server Action の往復を計測する
+    もし 画像ギャラリーでその画像を選択して一括削除し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る

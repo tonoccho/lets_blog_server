@@ -99,7 +99,7 @@ const UPLOAD_BUCKET_EXACT_PATHS = [
   // 実際の画像生成(ComfyUI/ChatGPT呼び出し)。`/api/ai/image-options`(設定の参照)を
   // 巻き込まないよう、部分一致ではなく完全一致で扱う。
   '/api/ai/image',
-  // 生成画像ギャラリーへの画像アップロード(issue #1599、multipart最大20MB)。
+  // 画像ギャラリーへの画像アップロード(issue #1599、multipart最大20MB)。
   '/api/generated-images/upload',
   // `/api/ai/image/jobs`(画像生成の非同期受理口、issue #1405)は意図的に含めない。受理は
   // ジョブ1件の作成で終わり、GPU占有は専用Executorが直列化するため、共有枠ではなく

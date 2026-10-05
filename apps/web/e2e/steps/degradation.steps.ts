@@ -102,9 +102,9 @@ Then('投稿履歴ページは取得失敗を示し、0件とは表示しない'
   await expect(page.getByText('投稿履歴はまだありません', { exact: false })).toHaveCount(0);
 });
 
-Then('生成画像ギャラリーは取得失敗を示し、画像なしとは表示しない', async ({ page }) => {
+Then('画像ギャラリーは取得失敗を示し、画像なしとは表示しない', async ({ page }) => {
   await page.goto('/image-gallery');
-  await expect(page.locator('h1:has-text("生成画像ギャラリー")')).toBeVisible();
+  await expect(page.locator('h1:has-text("画像ギャラリー")')).toBeVisible();
   await expect(page.getByText('エラーが発生しました')).toHaveCount(0);
   await expect(fetchErrorNotice(page, '生成画像')).toBeVisible();
   await expect(page.getByText('生成画像がありません', { exact: false })).toHaveCount(0);

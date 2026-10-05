@@ -16,7 +16,7 @@
   ## issue #1363(親issue #1261 分割B)による拡張
 
   分割Aと同型の不備が、既にTZを受け取っている一覧系クライアント部品にも見つかった。
-  `ImageGalleryGrid`(生成画像ギャラリー)・`SiteListTable`(サイト一覧)・`PostsTable`
+  `ImageGalleryGrid`(画像ギャラリー)・`SiteListTable`(サイト一覧)・`PostsTable`
   (`/projects/[id]/posts`の投稿履歴)は`timezone: string | null`を親から素通しで受け取り
   ながら、未設定(null)のとき閲覧者のブラウザTZへ落ちる経路が無かった。ステップ定義
   (`e2e/steps/panelTimezone.steps.ts`)の`TARGET_PAGES`を画面ごとに引数化して再利用し、
@@ -27,7 +27,7 @@
   シナリオを追加しない。
 
   シナリオで使うフィクスチャは画面ごとに性質が異なるため使い分ける。
-  - 生成画像ギャラリー: `media.steps.ts`の「seedを持たないChatGPT画像がギャラリーにある」
+  - 画像ギャラリー: `media.steps.ts`の「seedを持たないChatGPT画像がギャラリーにある」
     (issue #1101)をそのまま再利用する。
   - サイト一覧: `cross-cutting.steps.ts`の`POST /api/sites`パターン(issue #830)を踏襲した
     専用フィクスチャ(`TZ検証用のサイトが1件登録されている`)を使う。
@@ -164,19 +164,19 @@
     かつ コンソールにハイドレーションエラーが記録されない
 
   @media
-  シナリオ: 個人設定TZがAsia/Tokyoなら、ブラウザTZに関係なく生成画像ギャラリーの日時がTokyo換算で表示される
+  シナリオ: 個人設定TZがAsia/Tokyoなら、ブラウザTZに関係なく画像ギャラリーの日時がTokyo換算で表示される
     前提 個人設定のタイムゾーンを「Asia/Tokyo」に変更する
     かつ seedを持たないChatGPT画像がギャラリーにある
-    もし ブラウザのタイムゾーンを「Pacific/Auckland」にして管理者としてログインし、生成画像ギャラリー画面を開く
-    ならば 生成画像ギャラリーのその画像の作成日時が「Asia/Tokyo」への換算値と一致する
+    もし ブラウザのタイムゾーンを「Pacific/Auckland」にして管理者としてログインし、画像ギャラリー画面を開く
+    ならば 画像ギャラリーのその画像の作成日時が「Asia/Tokyo」への換算値と一致する
     かつ コンソールにハイドレーションエラーが記録されない
 
   @media
-  シナリオ: 個人設定TZが未設定なら、ブラウザTZ(Pacific/Auckland)換算で生成画像ギャラリーの日時が表示される
+  シナリオ: 個人設定TZが未設定なら、ブラウザTZ(Pacific/Auckland)換算で画像ギャラリーの日時が表示される
     前提 個人設定のタイムゾーンを未設定にする
     かつ seedを持たないChatGPT画像がギャラリーにある
-    もし ブラウザのタイムゾーンを「Pacific/Auckland」にして管理者としてログインし、生成画像ギャラリー画面を開く
-    ならば 生成画像ギャラリーのその画像の作成日時が「Pacific/Auckland」への換算値と一致する
+    もし ブラウザのタイムゾーンを「Pacific/Auckland」にして管理者としてログインし、画像ギャラリー画面を開く
+    ならば 画像ギャラリーのその画像の作成日時が「Pacific/Auckland」への換算値と一致する
     かつ コンソールにハイドレーションエラーが記録されない
 
   シナリオ: 個人設定TZがAsia/Tokyoなら、ブラウザTZに関係なくサイト一覧の登録日がTokyo換算で表示される

@@ -231,7 +231,7 @@ export function ProjectAssetGenerationPanel({
   }
 
   /**
-   * 生成画像ギャラリーの「この画像の設定をコピー」でコピーされたJSONをクリップボードから読み取り、
+   * 画像ギャラリーの「この画像の設定をコピー」でコピーされたJSONをクリップボードから読み取り、
    * フォームに反映する(issue #437)。
    */
   async function handleCreateFromClipboard() {
@@ -354,7 +354,7 @@ export function ProjectAssetGenerationPanel({
     }
     setMessage({
       type: "success",
-      text: `画像を1920x1080に変換し、生成画像ギャラリーに登録しました(画像ID: ${result.imageId})。`,
+      text: `画像を1920x1080に変換し、画像ギャラリーに登録しました(画像ID: ${result.imageId})。`,
     });
     setUploadFile(null);
     setUploadInputKey((key) => key + 1);
@@ -368,7 +368,7 @@ export function ProjectAssetGenerationPanel({
     }
   }
 
-  /** 生成画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。読み込み済みなら何もしない。 */
+  /** 画像ギャラリーに保存済みの画像を選択肢として読み込む(issue #436)。読み込み済みなら何もしない。 */
   async function loadGalleryImages() {
     if (galleryImages || galleryLoading) return;
     setGalleryLoading(true);
@@ -452,7 +452,7 @@ export function ProjectAssetGenerationPanel({
 
       <div className={SUBSECTION_CLASS}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">生成画像ギャラリーから選択してアップロード</h3>
+          <h3 className="text-sm font-semibold">画像ギャラリーから選択してアップロード</h3>
           <button type="button" onClick={handleGalleryToggle} className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">
             {galleryOpen ? "閉じる" : "開く"}
           </button>
@@ -461,7 +461,7 @@ export function ProjectAssetGenerationPanel({
           <>
             {galleryLoading && <p className="text-xs text-neutral-500 dark:text-neutral-400">読み込んでいます…</p>}
             {galleryImages && galleryImages.length === 0 && (
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">生成画像ギャラリーに画像がありません。</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">画像ギャラリーに画像がありません。</p>
             )}
             {galleryImages && galleryImages.length > 0 && (
               <>

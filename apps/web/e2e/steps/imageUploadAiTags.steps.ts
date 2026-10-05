@@ -121,7 +121,7 @@ async function openDetail(page: Page, ctx: Record<string, unknown>): Promise<voi
   }).toPass({ timeout: 30_000 });
 }
 
-When('生成画像ギャラリーでそのアップロード画像の詳細を開く', async ({ ctx, page }) => {
+When('画像ギャラリーでそのアップロード画像の詳細を開く', async ({ ctx, page }) => {
   expect(ctx.uploadStatus, 'アップロードに失敗しています').toBe(201);
   await openDetail(page, ctx);
 });

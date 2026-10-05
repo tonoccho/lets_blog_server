@@ -134,7 +134,7 @@ describe('ProjectAssetGenerationPanel チャットでプロンプトを作成', 
   })
 })
 
-describe('ProjectAssetGenerationPanel 生成画像ギャラリーから選択してアップロード (issue #436)', () => {
+describe('ProjectAssetGenerationPanel 画像ギャラリーから選択してアップロード (issue #436)', () => {
   const GALLERY_IMAGES = [
     { id: 10, projectId: null, prompt: 'a cute cat', checkpoint: 'model.safetensors', createdAt: '2026-08-01T00:00:00Z', tags: [] },
     { id: 11, projectId: 2, prompt: 'a mountain landscape', checkpoint: 'model.safetensors', createdAt: '2026-08-02T00:00:00Z', tags: [] },
@@ -147,7 +147,7 @@ describe('ProjectAssetGenerationPanel 生成画像ギャラリーから選択し
   })
 
   function openGallerySection() {
-    const header = screen.getByText('生成画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
+    const header = screen.getByText('画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
     fireEvent.click(within(header).getByText('開く'))
   }
 
@@ -659,7 +659,7 @@ describe('ProjectAssetGenerationPanel クリップボードのbatchCount (issue 
     expect((screen.getByLabelText('batch size(最大16)') as HTMLInputElement).value).toBe('3')
   })
 
-  it('batchCountを含まないJSON(生成画像ギャラリーのコピー)ではbatch countが1に戻る', async () => {
+  it('batchCountを含まないJSON(画像ギャラリーのコピー)ではbatch countが1に戻る', async () => {
     mockClipboardReadText(JSON.stringify({ prompt: 'a cat', batchSize: 3 }))
     await openPanel()
     fireEvent.change(screen.getByLabelText('batch count(最大16)'), { target: { value: '7' } })
@@ -883,7 +883,7 @@ describe('ProjectAssetGenerationPanel ギャラリーとチャットの残りの
   })
 
   function toggleGallerySection() {
-    const header = screen.getByText('生成画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
+    const header = screen.getByText('画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
     fireEvent.click(within(header).getByText(/開く|閉じる/))
   }
 
@@ -893,13 +893,13 @@ describe('ProjectAssetGenerationPanel ギャラリーとチャットの残りの
 
     toggleGallerySection()
     await waitFor(() => {
-      expect(screen.getByText('生成画像ギャラリーに画像がありません。')).toBeInTheDocument()
+      expect(screen.getByText('画像ギャラリーに画像がありません。')).toBeInTheDocument()
     })
     toggleGallerySection()
     toggleGallerySection()
 
     await waitFor(() => {
-      expect(screen.getByText('生成画像ギャラリーに画像がありません。')).toBeInTheDocument()
+      expect(screen.getByText('画像ギャラリーに画像がありません。')).toBeInTheDocument()
     })
     expect(actions.fetchGeneratedImagesAction).toHaveBeenCalledTimes(1)
   })
@@ -1033,7 +1033,7 @@ describe('ProjectAssetGenerationPanel 配色 (issue #1107)', () => {
   }
 
   function openGallerySection() {
-    const header = screen.getByText('生成画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
+    const header = screen.getByText('画像ギャラリーから選択してアップロード').closest('div') as HTMLElement
     fireEvent.click(within(header).getByText('開く'))
   }
 
@@ -1048,7 +1048,7 @@ describe('ProjectAssetGenerationPanel 配色 (issue #1107)', () => {
 
   it('ギャラリーが空の状態で、パネル配下のどの要素にもgrayパレットのクラスが無い', async () => {
     await openPanelWithBothSections()
-    expect(screen.getByText('生成画像ギャラリーに画像がありません。')).toBeInTheDocument()
+    expect(screen.getByText('画像ギャラリーに画像がありません。')).toBeInTheDocument()
 
     const offenders = selfAndDescendants(panelSection())
       .flatMap((el) => classTokens(el))
@@ -1070,7 +1070,7 @@ describe('ProjectAssetGenerationPanel 配色 (issue #1107)', () => {
   it('2つのサブフォームのコンテナのクラス列が互いに一致する', async () => {
     await openPanelWithBothSections()
 
-    const gallery = subsectionContainer('生成画像ギャラリーから選択してアップロード')
+    const gallery = subsectionContainer('画像ギャラリーから選択してアップロード')
     const chat = subsectionContainer('チャットでプロンプトを作成')
     expect(gallery.getAttribute('class')).toBe(chat.getAttribute('class'))
   })
@@ -1078,7 +1078,7 @@ describe('ProjectAssetGenerationPanel 配色 (issue #1107)', () => {
   it('2つのサブフォームのコンテナが、bg-とborder-の色指定にdark:対を持つ', async () => {
     await openPanelWithBothSections()
 
-    for (const heading of ['生成画像ギャラリーから選択してアップロード', 'チャットでプロンプトを作成']) {
+    for (const heading of ['画像ギャラリーから選択してアップロード', 'チャットでプロンプトを作成']) {
       const tokens = classTokens(subsectionContainer(heading))
       expect(tokens.filter((t) => /^bg-/.test(t))).not.toEqual([])
       expect(tokens.filter((t) => /^dark:bg-/.test(t))).not.toEqual([])

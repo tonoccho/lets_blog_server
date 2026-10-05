@@ -365,6 +365,15 @@ Then('左メニューの管理見出しが英語表示になる', async ({ page 
   await expect(page.locator(ADMIN_LABEL_LOCATOR)).toHaveText(messagesEn.sideNav.admin);
 });
 
+Then(
+  /^左メニューに「([^」]+)」のリンクがあり「([^」]+)」は表示されない$/,
+  async ({ page }, present: string, absent: string) => {
+    const nav = page.getByTestId('side-nav');
+    await expect(nav.getByRole('link', { name: present, exact: true }).first()).toBeVisible();
+    await expect(nav.getByRole('link', { name: absent, exact: true })).toHaveCount(0);
+  },
+);
+
 Then('デスクトップ幅のナビゲーションの全項目が英語表示になる', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/', { waitUntil: 'load' });

@@ -295,7 +295,7 @@ Then('その要求のジョブは作られていない', async ({ ctx, request }
 
 // ---- ギャラリーの詳細(参照元の表示) ----
 
-When('生成画像ギャラリーで参照付きで生成された画像の詳細を開く', async ({ ctx, page }) => {
+When('画像ギャラリーで参照付きで生成された画像の詳細を開く', async ({ ctx, page }) => {
   const generatedId = (ctx.mediaGeneratedIds as number[])[0];
   ctx.refGenGeneratedImageId = generatedId;
   await page.goto('/image-gallery', { waitUntil: 'commit' });

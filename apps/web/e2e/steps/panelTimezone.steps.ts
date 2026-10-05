@@ -97,10 +97,10 @@ Given('個人設定のタイムゾーンを未設定にする', async ({ ctx, re
 const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; heading: string }> = {
   ダッシュボード: { path: () => '/', heading: 'ダッシュボード' },
   SSH鍵管理ページ: { path: () => '/admin/ssh-keys', heading: 'SSH鍵管理' },
-  // media.steps.ts が issue #1236 で既に「...生成画像ギャラリーを開く」という同名の
+  // media.steps.ts が issue #1236 で既に「...画像ギャラリーを開く」という同名の
   // Whenステップを持つため、targetNameは末尾に「画面」を付けて区別する
   // (bddgen: "Multiple definitions matched scenario step" を実測で確認済み)。
-  生成画像ギャラリー画面: { path: () => '/image-gallery', heading: '生成画像ギャラリー' },
+  画像ギャラリー画面: { path: () => '/image-gallery', heading: '画像ギャラリー' },
   サイト一覧: { path: () => '/sites', heading: 'サイト' },
   // `publishLifecycle.steps.ts`の「公開検証用のWordPressサイトがあり、プロジェクトの
   // テスト環境に紐づいている」が設定する`ctx.publishProjectId`を使う。
@@ -124,7 +124,7 @@ const TARGET_PAGES: Record<string, { path: (ctx: ScenarioContext) => string; hea
  * 専用の `BrowserContext` / `Page` を作り、その中でログインする。
  */
 When(
-  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|生成画像ギャラリー画面|サイト一覧|投稿履歴一覧|投稿履歴|ユーザー管理|プロジェクト|操作ログ)を開く$/,
+  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、(ダッシュボード|SSH鍵管理ページ|画像ギャラリー画面|サイト一覧|投稿履歴一覧|投稿履歴|ユーザー管理|プロジェクト|操作ログ)を開く$/,
   async ({ ctx, page }, timezoneId: string, targetName: string) => {
     const target = TARGET_PAGES[targetName];
     const browser = page.context().browser();
@@ -295,7 +295,7 @@ Then(
   }
 );
 
-// ------------------------------------------------------- issue #1363: 生成画像ギャラリーの作成日時
+// ------------------------------------------------------- issue #1363: 画像ギャラリーの作成日時
 
 /**
  * ギャラリーのフィクスチャ自体は media.steps.ts の既存Given「seedを持たないChatGPT画像が
@@ -304,7 +304,7 @@ Then(
  * エコー値は1秒程度ずれ得る)、一覧のキャプションに表示された値と突き合わせる。
  */
 Then(
-  /^生成画像ギャラリーのその画像の作成日時が「([^」]+)」への換算値と一致する$/,
+  /^画像ギャラリーのその画像の作成日時が「([^」]+)」への換算値と一致する$/,
   async ({ ctx, request }, timeZone: string) => {
     const tzPage = ctx.panelTzPage as Page;
     const imageId = ctx.mediaImageId as number;

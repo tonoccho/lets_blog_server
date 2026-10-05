@@ -24,6 +24,13 @@
     ならば デスクトップ幅のナビゲーションの全項目が英語表示になる
     かつ モバイル幅のナビゲーションの全項目が英語表示になる
 
+  # issue #1645: 画面名の改名(生成画像ギャラリー → 画像ギャラリー)。メッセージファイルを
+  # 参照せず、文言そのものを検証する。
+  シナリオ: 表示言語を英語にすると、左メニューの画像ギャラリーが「Image Gallery」になる(issue #1645)
+    前提 管理者としてログイン済みである
+    もし 表示言語を英語に切り替える
+    ならば 左メニューに「Image Gallery」のリンクがあり「Generated Image Gallery」は表示されない
+
   # 下のシナリオは共有管理者アカウントの個人設定TZを書き換える。既定の並列実行では
   # `ui-quality/panel-timezone-hydration.feature`・`media/image-gallery.feature`の
   # 同種シナリオと衝突するため、`@account-isolation:timezone` で専用プロジェクト

@@ -279,7 +279,7 @@ wins when it is set higher.
 ### Managing Generated Images
 
 All generated images (from either the extension or the Web Admin Panel) are listed on the
-**生成画像ギャラリー** page (`/image-gallery` in the Web Admin Panel), which shows the prompt,
+**画像ギャラリー** page (`/image-gallery` in the Web Admin Panel), which shows the prompt,
 auto-suggested tags, and generation date for each image, and lets you filter by tag, edit tags,
 or delete an image. The VSCode extension's **Let's Blog: Image Gallery** panel offers the same
 list for inserting a previously generated image into the current article, plus a right-click

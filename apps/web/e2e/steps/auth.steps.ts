@@ -1239,7 +1239,7 @@ async function clickLinkByName(page: Page, label: string, exact: boolean): Promi
 Step('「ダッシュボード」のリンクをクリックする', async ({ page }) => clickLinkByName(page, 'ダッシュボード', true));
 Step('「サイト」のリンクをクリックする', async ({ page }) => clickLinkByName(page, 'サイト', true));
 Step('「投稿数」のリンクをクリックする', async ({ page }) => clickLinkByName(page, '投稿数', false));
-Step('「生成画像ギャラリー」のリンクをクリックする', async ({ page }) => clickLinkByName(page, '生成画像ギャラリー', true));
+Step('「画像ギャラリー」のリンクをクリックする', async ({ page }) => clickLinkByName(page, '画像ギャラリー', true));
 
 Then('「登録サイト数」という文言は表示されない', async ({ page }) => {
   await expect(page.getByText('登録サイト数')).toHaveCount(0);

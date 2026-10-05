@@ -13,7 +13,7 @@ import { STUB_URLS, forceStubStatus, resetStub, stubRequestCount } from '../supp
 import { magnifierOf, selectedCountText } from '../support/galleryCard';
 
 /**
- * 生成画像ギャラリーのseed表示のステップ定義(issue #1101)。
+ * 画像ギャラリーのseed表示のステップ定義(issue #1101)。
  *
  * 画像そのものの生成は行わない。ComfyUIはGPU必須の任意サービスで受け入れテスト環境に
  * 常在せず、OpenAI画像スタブはseedの概念を持たないため、「どのseedで生成されたか」を
@@ -118,7 +118,7 @@ Given('seedを持たないChatGPT画像がギャラリーにある', async ({ ct
  * 詳細ダイアログが開かないまま `toBeVisible` がタイムアウトする(issue #1284、#1283と同種)。
  * 見出しが現れるまでクリックを再試行する。
  */
-When('生成画像ギャラリーでその画像の詳細を開く', async ({ ctx, page }) => {
+When('画像ギャラリーでその画像の詳細を開く', async ({ ctx, page }) => {
   await page.goto('/image-gallery', { waitUntil: 'commit' });
   const thumbnail = page.locator(`img[src="/image-gallery/${ctx.mediaImageId}/file"]`);
   await expect(thumbnail).toBeVisible({ timeout: 30_000 });
@@ -771,7 +771,7 @@ Then(
  * 受け入れ基準ならAPIから)。
  */
 
-/** 生成画像ギャラリーのURL。 */
+/** 画像ギャラリーのURL。 */
 const IMAGE_GALLERY_PATH = '/image-gallery';
 
 /**
@@ -1091,9 +1091,9 @@ Given(
   }
 );
 
-When('生成画像ギャラリーを開く', async ({ page }) => {
+When('画像ギャラリーを開く', async ({ page }) => {
   await page.goto(IMAGE_GALLERY_PATH, { waitUntil: 'commit' });
-  await expect(page.getByRole('heading', { name: '生成画像ギャラリー' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: '画像ギャラリー' })).toBeVisible({ timeout: 30_000 });
 });
 
 Then(
@@ -2080,7 +2080,7 @@ Given(/^個人設定のタイムゾーンを「([^」]+)」に変更する$/, as
 });
 
 When(
-  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、生成画像ギャラリーを開く$/,
+  /^ブラウザのタイムゾーンを「([^」]+)」にして管理者としてログインし、画像ギャラリーを開く$/,
   async ({ ctx, page }, timezoneId: string) => {
     const browser = page.context().browser();
     if (!browser) {
@@ -2102,7 +2102,7 @@ When(
 
     await loginViaKeycloak(tzPage, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
     await tzPage.goto(IMAGE_GALLERY_PATH, { waitUntil: 'networkidle' });
-    await expect(tzPage.getByRole('heading', { name: '生成画像ギャラリー' })).toBeVisible({ timeout: 30_000 });
+    await expect(tzPage.getByRole('heading', { name: '画像ギャラリー' })).toBeVisible({ timeout: 30_000 });
     // ハイドレーション後の再描画にも猶予を見る(#1236の症状は再描画のタイミングで起きる)。
     await tzPage.waitForTimeout(1000);
   }

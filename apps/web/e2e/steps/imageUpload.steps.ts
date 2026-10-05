@@ -12,7 +12,7 @@ import {
 } from '../support';
 
 /**
- * issue #1599: 手元の画像を1920x1080に変換して生成画像ギャラリーへ登録する、のステップ定義。
+ * issue #1599: 手元の画像を1920x1080に変換して画像ギャラリーへ登録する、のステップ定義。
  *
  * 後始末は `media.steps.ts` の `@media` After が `ctx.mediaProjectId` のプロジェクトごと行う
  * (画面・API から作ったアップロード画像はプロジェクトに紐づく)。
@@ -124,7 +124,7 @@ async function uploadViaPanel(
 ): Promise<void> {
   await page.getByLabel('アップロードする画像ファイル').setInputFiles(file);
   await page.getByRole('button', { name: 'ギャラリーへ登録' }).click();
-  const success = page.getByText(/生成画像ギャラリーに登録しました\(画像ID: \d+\)/);
+  const success = page.getByText(/画像ギャラリーに登録しました\(画像ID: \d+\)/);
   await expect(success).toBeVisible({ timeout: 120_000 });
   const text = (await success.textContent()) ?? '';
   const match = text.match(/画像ID: (\d+)/);
@@ -181,7 +181,7 @@ When('21MBのPNG画像ファイルをアップロード対象に選ぶ', async (
   });
 });
 
-Then('その画像は生成画像ギャラリーにアップロード画像として表示される', async ({ page, ctx }) => {
+Then('その画像は画像ギャラリーにアップロード画像として表示される', async ({ page, ctx }) => {
   const id = ctx.uploadedImageId as number;
   await page.goto('/image-gallery', { waitUntil: 'commit' });
   const card = galleryCardOf(page.locator(`img[src="/image-gallery/${id}/file"]`));
@@ -252,7 +252,7 @@ Then('このプロジェクトのギャラリーにアップロード画像は�
 When('パネルのギャラリーからそのアップロード画像を選んでアセットとして追加する', async ({ page, ctx }) => {
   const id = ctx.uploadedImageId as number;
   const section = page
-    .getByRole('heading', { name: '生成画像ギャラリーから選択してアップロード' })
+    .getByRole('heading', { name: '画像ギャラリーから選択してアップロード' })
     .locator('xpath=ancestor::div[contains(@class,"space-y-3")][1]');
   await section.getByRole('button', { name: '開く' }).click();
   await section.locator(`button:has(img[src="/image-gallery/${id}/file"])`).click();

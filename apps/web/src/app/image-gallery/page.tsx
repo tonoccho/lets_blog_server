@@ -20,7 +20,7 @@ export default async function ImageGalleryPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-xl font-semibold">生成画像ギャラリー</h1>
+      <h1 className="text-xl font-semibold">画像ギャラリー</h1>
 
       <FetchErrorNotice labels={failedLabels(imagesResult, foldersResult)} />
 

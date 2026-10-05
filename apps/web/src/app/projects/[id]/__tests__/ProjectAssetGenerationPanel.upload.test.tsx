@@ -64,7 +64,7 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
     fireEvent.click(screen.getByRole('button', { name: 'ギャラリーへ登録' }))
 
     await waitFor(() => {
-      expect(screen.getByText(/生成画像ギャラリーに登録しました/)).toBeInTheDocument()
+      expect(screen.getByText(/画像ギャラリーに登録しました/)).toBeInTheDocument()
     })
     const [projectId, formData] = (actions.uploadGeneratedImageAction as jest.Mock).mock.calls[0]
     expect(projectId).toBe(5)

@@ -11,7 +11,7 @@ import {
 } from '../support/responseBudgetFixtures';
 
 /**
- * 生成画像ギャラリー(`app/image-gallery/actions.ts`)の Server Action の3秒予算シナリオ(issue #1477、
+ * 画像ギャラリー(`app/image-gallery/actions.ts`)の Server Action の3秒予算シナリオ(issue #1477、
  * `features/response-budget/server-action-media.feature`)のステップ定義。
  * 計測は共通の `measureServerActionRoundTrip`、判定は共通ステップ(`responseBudget.steps.ts`)。
  */
@@ -55,7 +55,7 @@ async function openGallery(page: import('@playwright/test').Page, ctx: Record<st
   return thumbnail;
 }
 
-When('生成画像ギャラリーでその画像を開いて Server Action の往復を計測する', async ({ page, ctx }) => {
+When('画像ギャラリーでその画像を開いて Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
   const timing = await measureServerActionRoundTrip(page, async () => {
     await magnifierOf(thumbnail).click();
@@ -64,7 +64,7 @@ When('生成画像ギャラリーでその画像を開いて Server Action の�
   recordResponseTime(ctx, timing.roundTripMs, '生成画像の詳細の取得(Server Action)の往復');
 });
 
-When('生成画像ギャラリーでその画像の詳細を開いてタグを追加し Server Action の往復を計測する', async ({ page, ctx }) => {
+When('画像ギャラリーでその画像の詳細を開いてタグを追加し Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
   await magnifierOf(thumbnail).click();
   await expect(page.locator('dt:text-is("prompt") + dd')).toBeVisible({ timeout: 30_000 });
@@ -77,7 +77,7 @@ When('生成画像ギャラリーでその画像の詳細を開いてタグを�
   recordResponseTime(ctx, timing.roundTripMs, '生成画像のタグ保存(Server Action)の往復');
 });
 
-When('生成画像ギャラリーでその画像の詳細を開いて削除し Server Action の往復を計測する', async ({ page, ctx }) => {
+When('画像ギャラリーでその画像の詳細を開いて削除し Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
   await magnifierOf(thumbnail).click();
   await expect(page.locator('dt:text-is("prompt") + dd')).toBeVisible({ timeout: 30_000 });
@@ -89,7 +89,7 @@ When('生成画像ギャラリーでその画像の詳細を開いて削除し S
   recordResponseTime(ctx, timing.roundTripMs, '生成画像の削除(Server Action)の往復');
 });
 
-When('生成画像ギャラリーでその画像を選択して一括削除し Server Action の往復を計測する', async ({ page, ctx }) => {
+When('画像ギャラリーでその画像を選択して一括削除し Server Action の往復を計測する', async ({ page, ctx }) => {
   const thumbnail = await openGallery(page, ctx);
   // 検証用の1枚だけを選ぶ(全選択すると他の画像まで消える)。チェックボックスは画像と同じカードにある。
   await thumbnail.locator('xpath=ancestor::div[contains(@class,"relative")][1]').getByRole('checkbox').check();
