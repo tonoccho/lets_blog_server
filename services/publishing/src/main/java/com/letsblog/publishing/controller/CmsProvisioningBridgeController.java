@@ -6,10 +6,13 @@ import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.LetsblogSnsCommand;
+import com.letsblog.publishing.cms.LetsblogSnsResult;
 import com.letsblog.publishing.cms.LetsblogSyncResult;
 import com.letsblog.publishing.cms.WpCliInstallResult;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.dto.CmsBridgeConnectionCheckResponse;
+import com.letsblog.publishing.dto.CmsBridgeLetsblogSnsRequest;
 import com.letsblog.publishing.dto.CmsBridgeLetsblogSyncRequest;
 import com.letsblog.publishing.dto.CmsBridgeCredentialsRequest;
 import com.letsblog.publishing.dto.CmsBridgeExportDatabaseResponse;
@@ -93,6 +96,18 @@ public class CmsProvisioningBridgeController {
         CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
         CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
         return new LetsblogSyncResult(adapter.syncLetsblogPlugin(credentials, request.payload(), request.hash()));
+    }
+
+    /**
+     * SNS 告知の接続・状態・テスト投稿・履歴(`wp letsblog sns ...`、wp-cliだけ。issue #1574)。
+     * コマンド名は許可リストで検証する。標準入力(トークンを含む)はログに出さない。
+     */
+    @PostMapping("/api/internal/project/cms/letsblog-sns")
+    public LetsblogSnsResult runLetsblogSns(@Valid @RequestBody CmsBridgeLetsblogSnsRequest request) {
+        LetsblogSnsCommand command = LetsblogSnsCommand.fromWire(request.command());
+        CmsCredentials credentials = buildCredentials(request.cmsType(), request.credentials());
+        CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+        return new LetsblogSnsResult(adapter.runLetsblogSns(credentials, command, request.sns(), request.stdin()));
     }
 
     @PostMapping("/api/internal/project/cms/has-author-capability")

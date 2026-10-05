@@ -1234,6 +1234,20 @@ media-service所有(issue #573 stage3)。プロジェクト画面の「ガベー
 | GET /api/projects/{id}/media-garbage-collection/scan | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectMediaGarbageCollectionController.java:41-45` |
 | POST /api/projects/{id}/media-garbage-collection/delete | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectMediaGarbageCollectionController.java:47-56` |
 
+## ProjectSnsController (4エンドポイント、ベースパス `/api/projects/{projectId}/sns/x`)
+
+project-service所有(issue #1574)。プロジェクト設定画面の「SNS 告知」欄(公式 X アカウントの接続)向けAPI。
+OAuth のトークンは本番サイトの letsblog プラグインへ送るだけで、アプリは保存せず、どの応答にも載せない。
+クライアントの秘密と PKCE の検証子は認可の間だけメモリに持つ。コールバックは認可を始めた本人・同じプロジェクト
+だけを受け付ける(`SnsXService#completeAuthorization`)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/sns/x | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 接続状態・接続できない理由・告知履歴。本番サイトに届かないときは「取得できない」として返す |
+| POST /api/projects/{projectId}/sns/x/authorize | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 認可の開始。X の認可画面の URL を返す |
+| POST /api/projects/{projectId}/sns/x/callback | requireAdmin | 401 | 403 | 認可OK | 現状維持 | Next.js 側コールバックからのサーバー間呼び出し。アカウント名だけを返す |
+| POST /api/projects/{projectId}/sns/x/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
+
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |

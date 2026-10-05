@@ -693,4 +693,77 @@ class WordPressAgentOperationsTest {
 
         assertThrows(AgentOperationException.class, () -> operations.createSignedPreview(creds(), "{}", null));
     }
+
+    // ---- issue #1574: wp letsblog sns(SNS 告知の接続・状態・テスト投稿・履歴をwp-cliだけで扱う) ----
+
+    @Test
+    void letsblogSns_コマンドと標準入力をエージェント経由のwp_cliへ渡し標準出力を返す() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sns"))
+                .andExpect(content().json(
+                        "{\"slug\":\"main\",\"command\":\"config-set\",\"sns\":\"x\",\"stdin\":\"{\\\"sns\\\":\\\"x\\\"}\"}"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":0,\"stdout\":\"{\\\"sns\\\":\\\"x\\\",\\\"status\\\":\\\"接続済み\\\"}\\n\",\"stderr\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        String stdout = operations.letsblogSns(
+                creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_SET, "x", "{\"sns\":\"x\"}");
+
+        assertEquals("{\"sns\":\"x\",\"status\":\"接続済み\"}", stdout);
+        server.verify();
+    }
+
+    @Test
+    void letsblogSns_標準入力が無いコマンドはstdinを送らない() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sns"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.stdin").doesNotExist())
+                .andExpect(content().json("{\"slug\":\"main\",\"command\":\"status\",\"sns\":\"x\"}"))
+                .andRespond(withSuccess("{\"exitCode\":0,\"stdout\":\"{}\",\"stderr\":\"\"}", MediaType.APPLICATION_JSON));
+
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.STATUS, "x", null);
+        server.verify();
+    }
+
+    @Test
+    void letsblogSns_wp_cliが失敗したらstderrつきの例外で_標準入力の秘密は含めない() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sns"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"\",\"stderr\":\"Error: X の投稿に失敗しました\"}",
+                        MediaType.APPLICATION_JSON));
+
+        AgentOperationException e = assertThrows(AgentOperationException.class,
+                () -> operations.letsblogSns(creds(),
+                        com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_SET, "x", "{\"access_token\":\"SECRET-TOKEN\"}"));
+
+        assertTrue(e.getMessage().contains("X の投稿に失敗しました"));
+        assertTrue(!e.getMessage().contains("SECRET-TOKEN"));
+    }
+
+    @Test
+    void letsblogSns_stderrが空ならstdoutを例外に含める() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sns"))
+                .andRespond(withSuccess("{\"exitCode\":1,\"stdout\":\"boom\",\"stderr\":\"\"}", MediaType.APPLICATION_JSON));
+
+        AgentOperationException e = assertThrows(AgentOperationException.class,
+                () -> operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.TEST, "x", null));
+        assertTrue(e.getMessage().contains("boom"));
+    }
+
+    @Test
+    void letsblogSns_エージェントがエラーを返したら例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sns"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"サイト 'main' が見つかりません\"}"));
+
+        assertThrows(AgentOperationException.class,
+                () -> operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.LOG, "x", null));
+    }
+
+    @Test
+    void letsblogSns_エージェントへ届かなければ例外() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-sns"))
+                .andRespond(request -> { throw new java.io.IOException("connection refused"); });
+
+        assertThrows(AgentOperationException.class,
+                () -> operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.LOG, "x", null));
+    }
 }

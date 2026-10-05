@@ -77,6 +77,13 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
     expect(notFound).not.toHaveBeenCalled()
   })
 
+  it('概要タブに SNS 告知の設定画面へのリンクを出す(issue #1574)', async () => {
+    getProject.mockResolvedValue({ id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null })
+    render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
+    const link = within(screen.getByTestId('active-tab')).getByRole('link', { name: 'SNS 告知の設定' })
+    expect(link).toHaveAttribute('href', '/projects/7/settings/sns')
+  })
+
   it('プロジェクトが取得できなければ notFound() になる(loading UI のまま止まらない)', async () => {
     getProject.mockRejectedValue(new Error('404'))
     jest.spyOn(console, 'error').mockImplementation(() => undefined)

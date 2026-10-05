@@ -51,6 +51,10 @@ import {
   clearProjectClaudeApiKey,
   downloadPenpotPlugin,
   downloadMcpServer,
+  getProjectXConnection,
+  startProjectXAuthorization,
+  completeProjectXAuthorization,
+  testProjectXPost,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -738,5 +742,60 @@ describe('生成画像フォルダ(issue #1493)', () => {
     expect(String(url)).toMatch(/\/api\/generated-images\/7\/folder$/)
     expect(init.method).toBe('PUT')
     expect(JSON.parse(init.body as string)).toEqual({ folderId: null })
+  })
+})
+
+describe('プロジェクトの X 接続(issue #1574)', () => {
+  it('getProjectXConnectionは接続状態を取得する', async () => {
+    const view = { connectable: true, reason: null, siteName: '本番', status: null, log: null }
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectXConnection(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/x')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('startProjectXAuthorizationはクライアントの情報とリダイレクト先をPOSTし認可URLを受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ authorizeUrl: 'https://x.example/authorize' }))
+
+    const result = await startProjectXAuthorization(7, {
+      clientId: 'cid',
+      clientSecret: 'csecret',
+      redirectUri: 'https://localhost/connect/x/callback',
+    })
+
+    expect(result).toEqual({ authorizeUrl: 'https://x.example/authorize' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/x/authorize')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientId: 'cid',
+      clientSecret: 'csecret',
+      redirectUri: 'https://localhost/connect/x/callback',
+    })
+  })
+
+  it('completeProjectXAuthorizationはstateとコードをPOSTしアカウント名を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, accountName: 'lets_blog' }))
+
+    const result = await completeProjectXAuthorization(7, { state: '7.abc', code: 'the-code' })
+
+    expect(result).toEqual({ projectId: 7, accountName: 'lets_blog' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/x/callback')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ state: '7.abc', code: 'the-code' })
+  })
+
+  it('testProjectXPostはテスト投稿をPOSTし結果を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, error: null }))
+
+    await expect(testProjectXPost(7)).resolves.toEqual({ success: true, error: null })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/x/test')
+    expect(init.method).toBe('POST')
   })
 })

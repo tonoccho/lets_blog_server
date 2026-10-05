@@ -10,6 +10,7 @@ import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.LetsblogSnsCommand;
 import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
@@ -378,6 +379,34 @@ public class WordPressAgentOperations {
             return savedHash;
         } catch (RestClientResponseException e) {
             throw new AgentOperationException("letsblogプラグインへの同期に失敗しました: " + agentErrorDetail(e), e);
+        } catch (ResourceAccessException e) {
+            throw new AgentOperationException(accessFailureMessage(e), e);
+        }
+    }
+
+    /**
+     * エージェント経由で `wp letsblog sns ...` を実行し、標準出力を返す(issue #1574)。秘密を含む標準入力
+     * (`config set` のJSON)はエージェントがwp-cliの標準入力へ渡し、引数・一時ファイル・ログには残さない。
+     * 失敗したときの例外にも標準入力は含めない(wp-cliのstderr/stdoutだけ)。
+     */
+    public String letsblogSns(WordPressCredentials creds, LetsblogSnsCommand command, String sns, String stdin) {
+        try {
+            Map<String, Object> request = new HashMap<>();
+            request.put("slug", creds.wpSlug());
+            request.put("command", command.wire());
+            putIfPresent(request, "sns", sns);
+            putIfPresent(request, "stdin", stdin);
+            JsonNode body = post("/wp-cli/letsblog-sns", request);
+            String stdout = body.path("stdout").asText("");
+            String stderr = body.path("stderr").asText("");
+            if (body.path("exitCode").asInt(1) != 0) {
+                log.warn("wp letsblog sns {} が失敗しました (wpSlug={}): {}", command.wire(), creds.wpSlug(), stderr);
+                throw new AgentOperationException("wp letsblog sns " + command.wire() + " の実行に失敗しました: "
+                        + (stderr.isBlank() ? stdout : stderr).strip());
+            }
+            return stdout.strip();
+        } catch (RestClientResponseException e) {
+            throw new AgentOperationException("SNS告知の操作に失敗しました: " + agentErrorDetail(e), e);
         } catch (ResourceAccessException e) {
             throw new AgentOperationException(accessFailureMessage(e), e);
         }

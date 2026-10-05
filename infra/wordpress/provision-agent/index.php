@@ -1105,6 +1105,39 @@ if ($path === '/wp-cli/letsblog-preview' && $_SERVER['REQUEST_METHOD'] === 'POST
     respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
 }
 
+// SNS 告知の接続・状態・テスト投稿・履歴(issue #1574)。`wp letsblog sns ...` を wp-cli だけで実行し、終了コードと
+// 標準出力・標準エラーをそのまま返す。コマンド名は許可リストで検証し、SNS名は形式を検証する。`config-set` の標準入力
+// (トークンを含むJSON)は wp-cli の標準入力へだけ渡し、引数・一時ファイル・ログには出さない。導入済みかどうかの判定は
+// アプリ側で行うため、ここでは導入処理を走らせない。
+if ($path === '/wp-cli/letsblog-sns' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $slug = (string) ($input['slug'] ?? '');
+    $command = (string) ($input['command'] ?? '');
+    $sns = $input['sns'] ?? null;
+    $stdin = $input['stdin'] ?? null;
+    $snsValid = $sns === null || (is_string($sns) && preg_match('/^[a-z0-9_-]{1,32}$/', $sns) === 1);
+    if (!isValidSlug($slug) || !in_array($command, ['config-set', 'config-clear', 'status', 'test', 'log'], true)
+        || !$snsValid || ($stdin !== null && !is_string($stdin))
+        || ($command === 'config-set' && ($stdin === null || $stdin === ''))
+        || ($command === 'test' && $sns === null)) {
+        respond(400, ['error' => 'パラメータが不正です']);
+    }
+    $sitePath = "/var/www/html/sites/$slug";
+    if (!is_dir($sitePath)) {
+        respond(404, ['error' => "サイト '$slug' が見つかりません"]);
+    }
+
+    $subArgs = match ($command) {
+        'config-set' => ['config', 'set'],
+        'config-clear' => $sns === null ? ['config', 'clear'] : ['config', 'clear', $sns],
+        'status' => ['status'],
+        'test' => ['test', $sns],
+        'log' => ['log', '--format=json'],
+    };
+    $args = array_merge(['letsblog', 'sns'], $subArgs, ["--path=$sitePath", '--allow-root']);
+    [$code, $out, $err] = $command === 'config-set' ? runWpWithStdin($args, $stdin) : runWp($args);
+    respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
+}
+
 // letsblogプラグインの再導入(issue #1557)。配置済みで内容が同じでも有効化し直す。
 if ($path === '/wp-cli/letsblog-install' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');

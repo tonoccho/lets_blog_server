@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getProject,
@@ -166,6 +167,19 @@ export default async function ProjectDetailPage({
           </div>
 
           <MasterEnvironmentSelector projectId={project.id} project={project} />
+
+          <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5">
+            <h2 className="font-medium">SNS 告知</h2>
+            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+              プロジェクトの公式 X アカウントを本番サイトのプラグインへ接続し、記事の公開を告知します。
+            </p>
+            <Link
+              href={`/projects/${project.id}/settings/sns`}
+              className="mt-2 inline-block text-sm text-blue-600 hover:underline"
+            >
+              SNS 告知の設定
+            </Link>
+          </div>
 
           {membersFetchFailed ? (
             <p className="text-sm text-red-600">

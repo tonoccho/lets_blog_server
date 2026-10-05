@@ -2128,4 +2128,86 @@ class WordPressSshOperationsTest {
         verify(executor, never()).putFile(any(SshConnectionParams.class), any(byte[].class), any());
         verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
     }
+
+    // ---- issue #1574: wp letsblog sns(秘密は引数ではなく標準入力で渡す) ----
+
+    @Test
+    void letsblogSns_config_setは標準入力のJSONでwp_cliを実行し標準出力を返す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), any(byte[].class)))
+                .thenReturn(ok("{\"sns\":\"x\",\"status\":\"接続済み\"}\n"));
+
+        String stdout = operations.letsblogSns(creds(),
+                com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_SET, "x", "{\"access_token\":\"SECRET\"}");
+
+        assertEquals("{\"sns\":\"x\",\"status\":\"接続済み\"}", stdout);
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> stdin = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), stdin.capture());
+        assertEquals(true, command.getValue().contains("letsblog sns config set"));
+        assertEquals(false, command.getValue().contains("SECRET"));
+        assertArrayEquals("{\"access_token\":\"SECRET\"}".getBytes(StandardCharsets.UTF_8), stdin.getValue());
+        verify(executor, never()).putFile(any(SshConnectionParams.class), any(byte[].class), any());
+    }
+
+    @Test
+    void letsblogSns_各コマンドを対応するwp_cliの引数へ変換する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{}"));
+
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_CLEAR, "x", null);
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.STATUS, "x", null);
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.TEST, "x", null);
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.LOG, "x", null);
+
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(4)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(true, commands.getAllValues().get(0).endsWith("letsblog sns config clear x"));
+        assertEquals(true, commands.getAllValues().get(1).endsWith("letsblog sns status"));
+        assertEquals(true, commands.getAllValues().get(2).endsWith("letsblog sns test x"));
+        assertEquals(true, commands.getAllValues().get(3).endsWith("letsblog sns log --format=json"));
+    }
+
+    @Test
+    void letsblogSns_wp_cliが失敗したら例外で_標準入力の秘密は含めない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), any(byte[].class)))
+                .thenReturn(fail("Error: access_token が必要です"));
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.letsblogSns(creds(),
+                        com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_SET, "x", "{\"access_token\":\"SECRET\"}"));
+
+        assertEquals(true, e.getMessage().contains("access_token が必要です"));
+        assertEquals(false, e.getMessage().contains("SECRET"));
+    }
+
+    @Test
+    void letsblogSns_stderrが空ならstdoutを例外に含める() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(new SshCommandResult(1, "boom", "", null));
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.TEST, "x", null));
+        assertEquals(true, e.getMessage().contains("boom"));
+    }
+
+    @Test
+    void letsblogSns_config_clearはSNSを省略するとすべてを消す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{}"));
+
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_CLEAR, null, null);
+
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), isNull());
+        assertEquals(true, command.getValue().endsWith("letsblog sns config clear"));
+        assertThrows(IllegalArgumentException.class, () -> operations.letsblogSns(creds(),
+                com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_CLEAR, "x;y", null));
+    }
+
+    @Test
+    void letsblogSns_SNS名が不正ならシェルへ渡さず拒否する() {
+        assertThrows(IllegalArgumentException.class, () -> operations.letsblogSns(creds(),
+                com.letsblog.publishing.cms.LetsblogSnsCommand.TEST, "x; rm -rf /", null));
+        assertThrows(IllegalArgumentException.class, () -> operations.letsblogSns(creds(),
+                com.letsblog.publishing.cms.LetsblogSnsCommand.TEST, null, null));
+        verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
+    }
 }

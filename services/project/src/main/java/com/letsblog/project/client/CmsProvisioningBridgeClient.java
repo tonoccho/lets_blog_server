@@ -3,6 +3,7 @@ package com.letsblog.project.client;
 import com.letsblog.project.cms.ConnectionCheckResult;
 import com.letsblog.project.cms.DatabaseExport;
 import com.letsblog.project.cms.LetsblogPluginStatus;
+import com.letsblog.project.cms.LetsblogSnsResult;
 import com.letsblog.project.cms.LetsblogSyncResult;
 import com.letsblog.project.cms.ProvisioningResult;
 import com.letsblog.project.cms.WpCliInstallResult;
@@ -96,6 +97,25 @@ public class CmsProvisioningBridgeClient {
         body.put("payload", payload);
         body.put("hash", hash);
         return post("/api/internal/project/cms/sync-letsblog-plugin", body, LetsblogSyncResult.class);
+    }
+
+    /**
+     * `wp letsblog sns ...`(SNS 告知の接続・状態・テスト投稿・履歴)を実行する(issue #1574)。wp-cli だけで行う。
+     * stdin(`config-set` のJSON)にはトークンが入るため、ログにも例外にも出さない。
+     *
+     * @param command {@code config-set} / {@code config-clear} / {@code status} / {@code test} / {@code log}
+     */
+    public LetsblogSnsResult letsblogSns(
+            String cmsType, Map<String, String> credentials, String command, String sns, String stdin) {
+        Map<String, Object> body = credentialsBody(cmsType, credentials);
+        body.put("command", command);
+        if (sns != null) {
+            body.put("sns", sns);
+        }
+        if (stdin != null) {
+            body.put("stdin", stdin);
+        }
+        return post("/api/internal/project/cms/letsblog-sns", body, LetsblogSnsResult.class);
     }
 
     public boolean hasAuthorProvisioningCapability(String cmsType, Map<String, String> credentials) {

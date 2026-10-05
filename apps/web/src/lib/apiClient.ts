@@ -1731,6 +1731,64 @@ export function clearProjectGoogleAnalyticsCredentials(projectId: number): Promi
   return apiFetch<void>(`/api/projects/${projectId}/api-keys/google-analytics`, { method: 'DELETE' });
 }
 
+/** 本番サイトのプラグインが持つ X の接続状態(未設定 / 接続済み / 要再接続)。 */
+export type XConnectionState = 'UNSET' | 'CONNECTED' | 'RECONNECT';
+
+/**
+ * プロジェクト設定画面の X 接続(issue #1574)。トークンもクライアントの秘密も含まない。
+ * 本番サイトが無い・プラグインが導入済みでないときは connectable=false と reason、status/log は null。
+ * 本番サイトに届かないときは status.available / log.available が false(画面は「取得できない」と示す)。
+ */
+export interface XConnectionView {
+  connectable: boolean;
+  reason: string | null;
+  siteName: string | null;
+  status: {
+    available: boolean;
+    state: XConnectionState | null;
+    accountName: string | null;
+    error: string | null;
+  } | null;
+  log: {
+    available: boolean;
+    entries: { kind: string; success: boolean; error: string | null; at: string | null }[];
+    error: string | null;
+  } | null;
+}
+
+export function getProjectXConnection(projectId: number): Promise<XConnectionView> {
+  return apiFetch<XConnectionView>(`/api/projects/${projectId}/sns/x`);
+}
+
+/** クライアントの情報は認可の間だけバックエンドのメモリに置かれる(保存されない)。 */
+export function startProjectXAuthorization(
+  projectId: number,
+  input: { clientId: string; clientSecret: string; redirectUri: string }
+): Promise<{ authorizeUrl: string }> {
+  return apiFetch<{ authorizeUrl: string }>(`/api/projects/${projectId}/sns/x/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function completeProjectXAuthorization(
+  projectId: number,
+  input: { state: string; code: string }
+): Promise<{ projectId: number; accountName: string }> {
+  return apiFetch<{ projectId: number; accountName: string }>(`/api/projects/${projectId}/sns/x/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function testProjectXPost(projectId: number): Promise<{ success: boolean; error: string | null }> {
+  return apiFetch<{ success: boolean; error: string | null }>(`/api/projects/${projectId}/sns/x/test`, {
+    method: 'POST',
+  });
+}
+
 export interface GoogleAnalyticsDailyDataPoint {
   date: string;
   sessions: number;

@@ -432,6 +432,18 @@ public class WordPressAdapter implements CmsAdapter {
         throw unsupportedTransport(creds);
     }
 
+    @Override
+    public String runLetsblogSns(CmsCredentials credentials, LetsblogSnsCommand command, String sns, String stdin) {
+        CmsCredentials.WordPressCredentials creds = (CmsCredentials.WordPressCredentials) credentials;
+        if (creds.isSsh()) {
+            return sshOperations.letsblogSns(creds, command, sns, stdin);
+        }
+        if (creds.isAgent()) {
+            return agentOperations.letsblogSns(creds, command, sns, stdin);
+        }
+        throw unsupportedTransport(creds);
+    }
+
     private IllegalStateException unsupportedTransport(CmsCredentials.WordPressCredentials creds) {
         return new IllegalStateException("サポートされていないWordPress接続方式です(transport=" + creds.transport() + ")");
     }

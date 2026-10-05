@@ -4,12 +4,14 @@ import com.letsblog.project.dto.ProjectCreateRequest;
 import com.letsblog.project.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.project.dto.ProjectResponse;
 import com.letsblog.project.dto.ProjectUpdateRequest;
+import com.letsblog.project.dto.SiteResponse;
 import com.letsblog.project.dto.SyncEnvironmentRequest;
 import com.letsblog.project.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.project.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.ProjectEnvironmentSyncService;
 import com.letsblog.project.service.ProjectService;
+import com.letsblog.project.service.SnsXService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -37,17 +39,27 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/projects")
 public class ProjectController {
 
+    private static final String PRODUCTION = "production";
+
     private final ProjectService projectService;
     private final ProjectEnvironmentSyncService projectEnvironmentSyncService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final SnsXService snsXService;
 
     public ProjectController(
             ProjectService projectService,
             ProjectEnvironmentSyncService projectEnvironmentSyncService,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            SnsXService snsXService) {
         this.projectService = projectService;
         this.projectEnvironmentSyncService = projectEnvironmentSyncService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.snsXService = snsXService;
+    }
+
+    private Long productionSiteIdOf(Long projectId) {
+        SiteResponse site = projectService.getProject(projectId).productionSite();
+        return site == null ? null : site.id();
     }
 
     @PostMapping
@@ -97,13 +109,26 @@ public class ProjectController {
     public ProjectResponse bindEnvironment(
             @PathVariable Long id, @Valid @RequestBody ProjectEnvironmentBindRequest request) {
         adminAuthorizationService.requireAdmin();
-        return projectService.bindEnvironment(id, request.environment(), request.siteId());
+        boolean production = PRODUCTION.equals(request.environment());
+        Long previousSiteId = production ? productionSiteIdOf(id) : null;
+        ProjectResponse response = projectService.bindEnvironment(id, request.environment(), request.siteId());
+        if (production) {
+            // 本番サイトを変えたら、旧サイトの X の設定を消す(issue #1574)。
+            snsXService.onProductionSiteChanged(previousSiteId, request.siteId());
+        }
+        return response;
     }
 
     @DeleteMapping("/{id}/environments/{environment}")
     public ProjectResponse unbindEnvironment(@PathVariable Long id, @PathVariable String environment) {
         adminAuthorizationService.requireAdmin();
-        return projectService.unbindEnvironment(id, environment);
+        boolean production = PRODUCTION.equals(environment);
+        Long previousSiteId = production ? productionSiteIdOf(id) : null;
+        ProjectResponse response = projectService.unbindEnvironment(id, environment);
+        if (production) {
+            snsXService.onProductionSiteChanged(previousSiteId, null);
+        }
+        return response;
     }
 
     @PutMapping("/{id}/master-environment")

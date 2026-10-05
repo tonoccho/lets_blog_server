@@ -268,6 +268,16 @@ services:
       comfyui-stub:
         condition: service_healthy
 
+  # project-service の X 接続(#1574)。トークン交換と自分の情報は x-stub へ(コンテナ間)、
+  # 利用者のブラウザが開く認可画面はホストから見える 127.0.0.1:18088 の x-stub へ向ける。
+  project:
+    environment:
+      X_API_BASE_URL: http://x-stub:8080
+      X_AUTHORIZE_URL: http://127.0.0.1:18088/i/oauth2/authorize
+    depends_on:
+      x-stub:
+        condition: service_healthy
+
   # publishing-service も GitHub の Pull Request / contents / comments API を使う(#1333)。
   # 実 GitHub へ向けると受け入れテストが本リポジトリの PR を汚すので、github-stub へ向ける(#1334)。
   publishing:

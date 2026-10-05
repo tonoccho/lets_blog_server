@@ -429,7 +429,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 | `image-stub` | OpenAI 画像生成(gpt-image-1) | media の Spring プロファイル `e2e-stubs` | 18085 |
 | `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
 | `comfyui-stub` | ComfyUI(画像生成。**枚数と seed の検証だけ**) | `COMFYUI_BASE_URL`(platform / media) | 18087 |
-| `x-stub` | X API(トークン更新・投稿・自分の情報。#1573) | WordPress の wp-config 定数 `LETSBLOG_X_API_BASE_URL`(letsblog プラグイン) | 18088 |
+| `x-stub` | X API(認可画面・トークン交換/更新・投稿・自分の情報。#1573、#1574) | WordPress の wp-config 定数 `LETSBLOG_X_API_BASE_URL`(letsblog プラグイン)、`X_API_BASE_URL` / `X_AUTHORIZE_URL`(project) | 18088 |
 
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。

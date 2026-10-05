@@ -445,6 +445,19 @@ public class SiteService {
         return bridgeClient.syncLetsblogPlugin(site.getCmsType().name(), credentials, payload, hash).syncHash();
     }
 
+    /**
+     * そのサイトの letsblog プラグインで `wp letsblog sns ...` を実行し、標準出力を返す(issue #1574)。
+     * 送ってよいか(導入済みか)の判断は呼び出し側({@link SnsXService})が行う。stdin(トークンを含む)は
+     * そのまま下流へ渡すだけで、保存もログ出力もしない。
+     */
+    @Transactional(readOnly = true)
+    public String runLetsblogSns(Long id, String command, String sns, String stdin) {
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new SiteNotFoundException("id " + id + " のサイトは登録されていません"));
+        Map<String, String> credentials = resolveSshKeyMaterial(getRawCredentials(site));
+        return bridgeClient.letsblogSns(site.getCmsType().name(), credentials, command, sns, stdin).stdout();
+    }
+
     private Boolean resolveHasAdminCapability(ConnectionCheckResult connectionCheckResult, Site site,
             Map<String, String> rawCredentials) {
         if (!connectionCheckResult.ok() || site.getCmsType() != CmsType.WORDPRESS) {

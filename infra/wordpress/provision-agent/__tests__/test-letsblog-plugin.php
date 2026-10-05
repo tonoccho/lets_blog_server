@@ -456,6 +456,24 @@ check('プレビュー発行は一時ファイルを必ず削除する', str_con
 check('プレビュー発行は導入処理を走らせない', $prevBlock !== '' && !str_contains($prevBlock, 'ensureLetsblogPlugin(') && !str_contains($prevBlock, 'resolveExistingSitePath('));
 check('プレビュー発行は終了コードと標準出力・標準エラーを返す', str_contains($prevBlock, "'exitCode'") && str_contains($prevBlock, "'stdout'") && str_contains($prevBlock, "'stderr'"));
 
+// --- issue #1574: /wp-cli/letsblog-sns(SNS 告知の接続・状態・テスト投稿・履歴。秘密は標準入力だけで渡す) ---
+check('index.php が /wp-cli/letsblog-sns を持つ', str_contains($index, "'/wp-cli/letsblog-sns'"));
+$snsPos = strpos($index, "\$path === '/wp-cli/letsblog-sns'");
+$snsEnd = $snsPos !== false ? strpos($index, "\nif (\$path === ", $snsPos + 1) : false;
+$snsBlock = $snsPos !== false ? substr($index, $snsPos, $snsEnd !== false ? $snsEnd - $snsPos : 3200) : '';
+check('SNS は wp letsblog sns を wp-cli で実行する', str_contains($snsBlock, "'letsblog', 'sns'"));
+check('SNS は config set を標準入力つきで実行する(引数に秘密を載せない)',
+    str_contains($snsBlock, 'runWpWithStdin(') && str_contains($snsBlock, "'config', 'set'"));
+check('SNS は config clear / status / test / log --format=json を呼び分ける',
+    str_contains($snsBlock, "'config', 'clear'") && str_contains($snsBlock, "'status'")
+    && str_contains($snsBlock, "'test'") && str_contains($snsBlock, "'log', '--format=json'"));
+check('SNS はコマンド名を許可リストで検証する', str_contains($snsBlock, 'config-set') && str_contains($snsBlock, 'config-clear') && str_contains($snsBlock, '400'));
+check('SNS は SNS 名の形式を検証する', str_contains($snsBlock, 'preg_match('));
+check('SNS は標準入力を一時ファイルへ書かず、ログにも出さない',
+    $snsBlock !== '' && !str_contains($snsBlock, 'file_put_contents(') && !str_contains($snsBlock, 'error_log('));
+check('SNS は導入処理を走らせない', $snsBlock !== '' && !str_contains($snsBlock, 'ensureLetsblogPlugin(') && !str_contains($snsBlock, 'resolveExistingSitePath('));
+check('SNS は終了コードと標準出力・標準エラーを返す', str_contains($snsBlock, "'exitCode'") && str_contains($snsBlock, "'stdout'") && str_contains($snsBlock, "'stderr'"));
+
 // --- issue #1559: 同期済み CSS を表側で読み込み、本文の囲みのプレフィックスクラスを表示時に付け直す ---
 $GLOBALS['letsblog_test_styles'] = ['registered' => [], 'enqueued' => [], 'inline' => []];
 function wp_register_style(string $handle, $src, array $deps = [], $ver = false): bool

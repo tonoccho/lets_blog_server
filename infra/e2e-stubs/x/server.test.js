@@ -107,3 +107,88 @@ test('制御エンドポイントでエラーを注入できる', async () => {
 test('未対応のパスは 404', async () => {
   assert.equal((await fetch(`${base}/2/unknown`)).status, 404);
 });
+
+// ---- issue #1574: 認可コードフロー(アプリが接続に使う) ----
+
+const crypto = require('node:crypto');
+const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+const challengeOf = (verifier) => crypto.createHash('sha256').update(verifier).digest('base64url');
+const authorize = (overrides = {}) => {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: 'e2e-client-id',
+    redirect_uri: 'https://localhost/connect/x/callback',
+    scope: 'tweet.read tweet.write users.read offline.access',
+    state: '7.abc',
+    code_challenge: challengeOf(VERIFIER),
+    code_challenge_method: 'S256',
+    ...overrides,
+  });
+  for (const [k, v] of [...params]) if (v === undefined || v === '') params.delete(k);
+  return fetch(`${base}/i/oauth2/authorize?${params.toString()}`, { redirect: 'manual' });
+};
+const exchange = (code, { verifier = VERIFIER, auth = basic, redirect = 'https://localhost/connect/x/callback' } = {}) =>
+  fetch(`${base}/2/oauth2/token`, {
+    method: 'POST',
+    headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirect,
+      ...(verifier ? { code_verifier: verifier } : {}),
+    }).toString(),
+  });
+
+test('認可画面は redirect_uri へ code と state を付けて戻す', async () => {
+  const r = await authorize();
+  assert.equal(r.status, 302);
+  const location = new URL(r.headers.get('location'));
+  assert.equal(`${location.origin}${location.pathname}`, 'https://localhost/connect/x/callback');
+  assert.equal(location.searchParams.get('state'), '7.abc');
+  assert.ok(location.searchParams.get('code'));
+});
+
+test('認可コードは PKCE の検証子から決まる(同じチャレンジなら同じコード)', async () => {
+  const a = new URL((await authorize()).headers.get('location')).searchParams.get('code');
+  const b = new URL((await authorize()).headers.get('location')).searchParams.get('code');
+  const c = new URL((await authorize({ code_challenge: challengeOf('another-verifier-value-another-verifier-value') })).headers.get('location')).searchParams.get('code');
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+});
+
+test('認可画面: 不正なリクエストは 400(クライアント・response_type・PKCE・redirect_uri・スコープ)', async () => {
+  for (const bad of [
+    { client_id: 'other' },
+    { response_type: 'token' },
+    { code_challenge: '' },
+    { code_challenge_method: 'plain' },
+    { redirect_uri: '' },
+    { scope: 'tweet.read' },
+    { state: '' },
+  ]) {
+    const r = await authorize(bad);
+    assert.equal(r.status, 400, JSON.stringify(bad));
+  }
+});
+
+test('認可コードをトークンに交換でき、そのトークンで投稿できる', async () => {
+  const code = new URL((await authorize()).headers.get('location')).searchParams.get('code');
+  const r = await exchange(code);
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.access_token, 'e2e-x-access-valid');
+  assert.equal(body.refresh_token, 'e2e-x-refresh-valid');
+  assert.equal(body.expires_in, 7200);
+  assert.equal((await tweet(body.access_token)).status, 201);
+});
+
+test('認可コードの交換: 検証子の不一致・コード不正・クライアント認証なしは拒否する', async () => {
+  const code = new URL((await authorize()).headers.get('location')).searchParams.get('code');
+  const wrongVerifier = await exchange(code, { verifier: 'wrong-verifier-wrong-verifier-wrong-verifier-123' });
+  assert.equal(wrongVerifier.status, 400);
+  assert.equal((await wrongVerifier.json()).error, 'invalid_grant');
+  assert.equal((await exchange('bogus')).status, 400);
+  assert.equal((await exchange(code, { verifier: '' })).status, 400);
+  assert.equal((await exchange(code, { redirect: '' })).status, 400);
+  assert.equal((await exchange(code, { auth: 'Basic AAAA' })).status, 401);
+});

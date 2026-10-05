@@ -600,4 +600,23 @@ class SiteServiceTest {
 
         assertThrows(SiteNotFoundException.class, () -> service().syncLetsblogPlugin(9L, "{}", "h"));
     }
+
+    // ---- issue #1574: SNS 告知の wp-cli 実行 ----
+
+    @Test
+    void runLetsblogSns_コマンドと標準入力をブリッジへ渡し標準出力を返す() {
+        when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
+        when(bridgeClient.letsblogSns(eq("WORDPRESS"), any(), eq("config-set"), eq("x"), eq("{\"a\":1}")))
+                .thenReturn(new com.letsblog.project.cms.LetsblogSnsResult("{\"status\":\"接続済み\"}"));
+
+        assertEquals("{\"status\":\"接続済み\"}", service().runLetsblogSns(1L, "config-set", "x", "{\"a\":1}"));
+    }
+
+    @Test
+    void runLetsblogSns_未登録のサイトはSiteNotFound() {
+        when(siteRepository.findById(9L)).thenReturn(Optional.empty());
+
+        assertThrows(SiteNotFoundException.class, () -> service().runLetsblogSns(9L, "status", "x", null));
+        verify(bridgeClient, never()).letsblogSns(anyString(), any(), anyString(), any(), any());
+    }
 }

@@ -68,6 +68,11 @@ export const PAGE_INVENTORY: PageSpec[] = [
     path: (f) => `/projects/${f.projectId}/settings/google-analytics`,
   },
   {
+    id: '/projects/[id]/settings/sns',
+    role: 'admin',
+    path: (f) => `/projects/${f.projectId}/settings/sns`,
+  },
+  {
     id: '/projects/[id]/settings/adsense',
     role: 'admin',
     path: (f) => `/projects/${f.projectId}/settings/adsense`,

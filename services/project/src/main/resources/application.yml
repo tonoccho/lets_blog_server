@@ -98,6 +98,10 @@ app:
   # legacy-apiと同じ値(同一エージェントを共有する)。
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   wordpress-provision-token: ${WP_PROVISION_TOKEN:}
+  # プロジェクトの公式 X アカウントの接続(issue #1574、XApiClient)。API のベース URL と、利用者のブラウザを
+  # 遷移させる認可画面の URL。受け入れテストでは x-stub へ向ける(docker-compose.e2e-stubs.yml)。
+  x-api-base-url: ${X_API_BASE_URL:https://api.x.com}
+  x-authorize-url: ${X_AUTHORIZE_URL:https://x.com/i/oauth2/authorize}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-serviceの
 # SecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と

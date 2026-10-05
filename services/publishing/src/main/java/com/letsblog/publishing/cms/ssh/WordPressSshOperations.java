@@ -12,6 +12,7 @@ import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.MediaContentHash;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.LetsblogSnsCommand;
 import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.cms.PostContent;
@@ -1463,6 +1464,40 @@ public class WordPressSshOperations {
         } catch (IllegalArgumentException e) {
             throw new SshOperationException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * `wp letsblog sns ...` を実行して標準出力を返す(issue #1574)。秘密を含む `config set` のJSONはコマンドラインに
+     * 載せず、SSHの標準入力で渡す(リモートの `ps` や履歴に残さない)。SNS名は形式を検証してからシェルへ渡す。
+     * 失敗したときの例外には標準入力を含めない。
+     *
+     * @param sns テスト投稿では必須。設定の削除では省略可(省略するとすべて消す)。それ以外では使わない
+     */
+    public String letsblogSns(WordPressCredentials creds, LetsblogSnsCommand command, String sns, String stdin) {
+        boolean snsRequired = command == LetsblogSnsCommand.TEST;
+        boolean snsUsed = snsRequired || command == LetsblogSnsCommand.CONFIG_CLEAR;
+        if (snsUsed && sns != null && !sns.matches("[a-z0-9_-]{1,32}")) {
+            throw new IllegalArgumentException("SNS名の形式が不正です");
+        }
+        if (snsRequired && sns == null) {
+            throw new IllegalArgumentException("SNS名を指定してください");
+        }
+        String subcommand = switch (command) {
+            case CONFIG_SET -> "letsblog sns config set";
+            case CONFIG_CLEAR -> "letsblog sns config clear" + (sns == null ? "" : " " + sns);
+            case STATUS -> "letsblog sns status";
+            case TEST -> "letsblog sns test " + sns;
+            case LOG -> "letsblog sns log --format=json";
+        };
+        byte[] input = command.requiresStdin() && stdin != null ? stdin.getBytes(StandardCharsets.UTF_8) : null;
+        SshCommandResult result = exec(creds, wpCli(creds, subcommand), input);
+        if (!result.ok()) {
+            log.warn("wp letsblog sns {} が失敗しました (sshHost={}, wpPath={}): {}",
+                    command.wire(), creds.sshHost(), creds.wpPath(), result.stderr());
+            throw new SshOperationException("wp letsblog sns " + command.wire() + " の実行に失敗しました: "
+                    + firstLine(result.stderr(), result.stdout()));
+        }
+        return result.stdout().strip();
     }
 
     private byte[] letsblogPluginSource() {

@@ -151,6 +151,15 @@ public interface CmsAdapter {
     }
 
     /**
+     * letsblog プラグインの `wp letsblog sns ...`(SNS 告知の接続・状態・テスト投稿・履歴)を実行し、標準出力を返す
+     * (issue #1574)。秘密は引数ではなく標準入力で渡す。sns はテスト投稿では必須、設定の削除では省略可
+     * (省略するとすべて消す)。対応しない場合はUnsupportedOperationExceptionを投げる。
+     */
+    default String runLetsblogSns(CmsCredentials credentials, LetsblogSnsCommand command, String sns, String stdin) {
+        throw new UnsupportedOperationException("このCMSはSNS告知の設定に対応していません");
+    }
+
+    /**
      * letsblog プラグインが使えるサイトであることを要求する(issue #1557)。導入済み以外(未導入・要更新)なら、
      * 理由と対処(再導入)を示す{@link LetsblogPluginUnavailableException}を投げる。投稿・プレビューが
      * CMSへ何かを書き込む前に呼ぶ。

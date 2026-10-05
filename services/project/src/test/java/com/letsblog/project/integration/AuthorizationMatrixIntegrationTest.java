@@ -74,6 +74,12 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/projects/1/github-repository"),
                 new Endpoint("POST", "/api/projects/1/environments/sync"),
 
+                // -- ProjectSnsController(issue #1574) --
+                new Endpoint("GET", "/api/projects/1/sns/x"),
+                new Endpoint("POST", "/api/projects/1/sns/x/authorize"),
+                new Endpoint("POST", "/api/projects/1/sns/x/callback"),
+                new Endpoint("POST", "/api/projects/1/sns/x/test"),
+
                 // -- SiteController --
                 new Endpoint("POST", "/api/sites"),
                 new Endpoint("POST", "/api/sites/managed-wordpress"),

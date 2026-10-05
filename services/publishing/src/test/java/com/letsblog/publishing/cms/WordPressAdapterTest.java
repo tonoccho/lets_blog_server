@@ -611,4 +611,30 @@ class WordPressAdapterTest {
         assertThrows(IllegalStateException.class,
                 () -> adapter.createSignedPreview(unsupportedCredentials(), "{}", null));
     }
+
+    // ---- issue #1574: SNS 告知の wp-cli 実行 ----
+
+    @Test
+    void runLetsblogSns_SSHはWordPressSshOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = sshCredentials();
+        when(sshOperations.letsblogSns(creds, LetsblogSnsCommand.STATUS, "x", null)).thenReturn("{}");
+
+        assertEquals("{}", adapter.runLetsblogSns(creds, LetsblogSnsCommand.STATUS, "x", null));
+        verify(agentOperations, never()).letsblogSns(any(), any(), any(), any());
+    }
+
+    @Test
+    void runLetsblogSns_AGENTはWordPressAgentOperationsに委譲する() {
+        CmsCredentials.WordPressCredentials creds = agentCredentials();
+        when(agentOperations.letsblogSns(creds, LetsblogSnsCommand.CONFIG_SET, "x", "{}")).thenReturn("ok");
+
+        assertEquals("ok", adapter.runLetsblogSns(creds, LetsblogSnsCommand.CONFIG_SET, "x", "{}"));
+        verify(sshOperations, never()).letsblogSns(any(), any(), any(), any());
+    }
+
+    @Test
+    void runLetsblogSns_未対応トランスポートは例外() {
+        assertThrows(IllegalStateException.class,
+                () -> adapter.runLetsblogSns(unsupportedCredentials(), LetsblogSnsCommand.STATUS, "x", null));
+    }
 }

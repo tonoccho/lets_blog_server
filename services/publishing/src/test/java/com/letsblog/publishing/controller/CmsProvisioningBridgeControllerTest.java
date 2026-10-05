@@ -169,4 +169,28 @@ class CmsProvisioningBridgeControllerTest {
 
         assertEquals("h1", controller().syncLetsblogPlugin(request).syncHash());
     }
+
+
+    @Test
+    void runLetsblogSns_コマンドと標準入力をアダプターへ渡し標準出力を返す() {
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.runLetsblogSns(any(), eq(com.letsblog.publishing.cms.LetsblogSnsCommand.CONFIG_SET),
+                eq("x"), eq("{\"a\":1}"))).thenReturn("{\"status\":\"接続済み\"}");
+
+        com.letsblog.publishing.dto.CmsBridgeLetsblogSnsRequest request =
+                new com.letsblog.publishing.dto.CmsBridgeLetsblogSnsRequest(
+                        "WORDPRESS", agentRequest().credentials(), "config-set", "x", "{\"a\":1}");
+
+        assertEquals("{\"status\":\"接続済み\"}", controller().runLetsblogSns(request).stdout());
+    }
+
+    @Test
+    void runLetsblogSns_未知のコマンドは拒否する() {
+        com.letsblog.publishing.dto.CmsBridgeLetsblogSnsRequest request =
+                new com.letsblog.publishing.dto.CmsBridgeLetsblogSnsRequest(
+                        "WORDPRESS", agentRequest().credentials(), "rm-rf", "x", null);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> controller().runLetsblogSns(request));
+    }
 }
