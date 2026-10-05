@@ -12,6 +12,7 @@ import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.MediaContentHash;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.LetsblogPluginUnavailableException;
 import com.letsblog.publishing.cms.LetsblogSnsCommand;
 import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.MediaUploadResult;
@@ -1456,6 +1457,9 @@ public class WordPressSshOperations {
         if (!result.ok()) {
             log.warn("wp letsblog previewが失敗しました (sshHost={}, wpPath={}): {}",
                     creds.sshHost(), creds.wpPath(), result.stderr());
+            if (LetsblogPluginStatus.isSubcommandMissing(result.stderr())) {
+                throw new LetsblogPluginUnavailableException(LetsblogPluginStatus.needsUpdate());
+            }
             throw new SshOperationException("wp letsblog previewの実行に失敗しました: "
                     + firstLine(result.stderr(), result.stdout()));
         }

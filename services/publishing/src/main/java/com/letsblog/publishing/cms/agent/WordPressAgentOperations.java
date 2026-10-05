@@ -10,6 +10,7 @@ import com.letsblog.publishing.cms.CmsPostContentSummary;
 import com.letsblog.publishing.cms.CmsPostSummary;
 import com.letsblog.publishing.cms.ConnectionCheckResult;
 import com.letsblog.publishing.cms.LetsblogPluginStatus;
+import com.letsblog.publishing.cms.LetsblogPluginUnavailableException;
 import com.letsblog.publishing.cms.LetsblogSnsCommand;
 import com.letsblog.publishing.cms.SignedPreview;
 import com.letsblog.publishing.cms.MediaUploadResult;
@@ -431,6 +432,9 @@ public class WordPressAgentOperations {
             String stderr = body.path("stderr").asText("");
             if (body.path("exitCode").asInt(1) != 0) {
                 log.warn("wp letsblog previewが失敗しました (wpSlug={}): {}", creds.wpSlug(), stderr);
+                if (LetsblogPluginStatus.isSubcommandMissing(stderr)) {
+                    throw new LetsblogPluginUnavailableException(LetsblogPluginStatus.needsUpdate());
+                }
                 throw new AgentOperationException("wp letsblog previewの実行に失敗しました: "
                         + (stderr.isBlank() ? stdout : stderr).strip());
             }

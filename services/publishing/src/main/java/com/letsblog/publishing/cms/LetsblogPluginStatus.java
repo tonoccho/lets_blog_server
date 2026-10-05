@@ -48,6 +48,19 @@ public record LetsblogPluginStatus(State state, String version, Integer protocol
     }
 
     /**
+     * wp-cli が「`letsblog` は登録されているが、そのサブコマンドは登録されていない」と答えたか。プレビュー等の
+     * サブコマンドが追加される前の旧プラグインが入っているサイトの応答で、再導入(要更新)で直る(issue #1618)。
+     */
+    public static boolean isSubcommandMissing(String output) {
+        return output != null && output.contains("is not a registered subcommand");
+    }
+
+    /** サブコマンドが無い旧プラグインのサイト向けの「要更新」状態。プロトコル版は取得できないのでnull。 */
+    public static LetsblogPluginStatus needsUpdate() {
+        return new LetsblogPluginStatus(State.NEEDS_UPDATE, null, null, null);
+    }
+
+    /**
      * `wp letsblog status` が正常終了したときの標準出力から判定する。JSONオブジェクトとして読めなければ
      * (PHPの警告・致命的エラー等)判定できないので、未導入にせず例外にする。
      *

@@ -59,6 +59,16 @@ class LetsblogPluginStatusTest {
     }
 
     @Test
+    void サブコマンド未登録のエラーだけが旧プラグインを意味し_要更新になる_issue1618() {
+        assertTrue(LetsblogPluginStatus.isSubcommandMissing(
+                "Error: 'preview' is not a registered subcommand of 'letsblog'."));
+        assertFalse(LetsblogPluginStatus.isSubcommandMissing("Error: タイトルがありません"));
+        assertFalse(LetsblogPluginStatus.isSubcommandMissing(null));
+        assertFalse(LetsblogPluginStatus.needsUpdate().installed());
+        assertEquals(LetsblogPluginStatus.State.NEEDS_UPDATE, LetsblogPluginStatus.needsUpdate().state());
+    }
+
+    @Test
     void 未導入は導入済みではない() {
         LetsblogPluginStatus status = LetsblogPluginStatus.notInstalled();
 

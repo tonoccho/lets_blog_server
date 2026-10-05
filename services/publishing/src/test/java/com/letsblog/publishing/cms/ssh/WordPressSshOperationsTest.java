@@ -2089,6 +2089,20 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void createSignedPreview_旧プラグインでpreviewが未登録なら一時ファイルを消して再導入を案内する例外_issue1618() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
+                .thenReturn(fail("Error: 'preview' is not a registered subcommand of 'letsblog'."))
+                .thenReturn(ok(""));
+
+        com.letsblog.publishing.cms.LetsblogPluginUnavailableException e = assertThrows(
+                com.letsblog.publishing.cms.LetsblogPluginUnavailableException.class,
+                () -> operations.createSignedPreview(creds(), "{}", null));
+
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NEEDS_UPDATE, e.getStatus().state());
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), any(), isNull());
+    }
+
+    @Test
     void createSignedPreview_wp_cliが失敗しても一時ファイルを消して例外() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull()))
                 .thenReturn(fail("Error: タイトルがありません"))

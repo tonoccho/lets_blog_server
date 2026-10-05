@@ -677,6 +677,20 @@ class WordPressAgentOperationsTest {
     }
 
     @Test
+    void createSignedPreview_旧プラグインでpreviewが未登録なら再導入を案内する409相当の例外_issue1618() {
+        server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
+                .andRespond(withSuccess(
+                        "{\"exitCode\":1,\"stdout\":\"\",\"stderr\":\"Error: 'preview' is not a registered subcommand of 'letsblog'. See 'wp help letsblog' for available subcommands.\"}",
+                        MediaType.APPLICATION_JSON));
+
+        com.letsblog.publishing.cms.LetsblogPluginUnavailableException e = assertThrows(
+                com.letsblog.publishing.cms.LetsblogPluginUnavailableException.class,
+                () -> operations.createSignedPreview(creds(), "{}", null));
+        assertEquals(com.letsblog.publishing.cms.LetsblogPluginStatus.State.NEEDS_UPDATE, e.getStatus().state());
+        assertTrue(e.getMessage().contains("再導入"));
+    }
+
+    @Test
     void createSignedPreview_出力がJSONでなければ例外() {
         server.expect(requestTo("http://wordpress:9000/wp-cli/letsblog-preview"))
                 .andRespond(withSuccess("{\"exitCode\":0,\"stdout\":\"PHP Fatal error\",\"stderr\":\"\"}",
