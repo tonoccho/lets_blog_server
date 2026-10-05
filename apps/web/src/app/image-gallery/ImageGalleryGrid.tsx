@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Sparkles, Upload } from "lucide-react";
 import type { GeneratedImageDetail, GeneratedImageFolder, GeneratedImageSummary } from "@/lib/apiClient";
 import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
 import {
@@ -22,6 +23,17 @@ const PROVIDER_LABEL: Record<string, string> = {
 
 /** アップロード画像(provider=UPLOAD、issue #1599)はpromptを持たないので、代わりに出所を表す名前で呼ぶ。 */
 const UPLOADED_IMAGE_LABEL = "アップロード画像";
+
+/** カードの種別アイコンの名前(issue #1646)。UPLOAD 以外はすべて AI 生成で、ComfyUI / ChatGPT は名前で区別する。 */
+const AI_SOURCE_LABEL: Record<string, string> = {
+  COMFYUI: "AI生成(ComfyUI)",
+  CHATGPT: "AI生成(ChatGPT)",
+};
+
+function sourceIconLabel(provider: string): string {
+  if (provider === "UPLOAD") return PROVIDER_LABEL.UPLOAD;
+  return AI_SOURCE_LABEL[provider] ?? "AI生成";
+}
 
 function imageLabel(prompt: string | null): string {
   return prompt ?? UPLOADED_IMAGE_LABEL;
@@ -697,7 +709,21 @@ export function ImageGalleryGrid({
                   className="aspect-square w-full bg-neutral-100 object-contain group-hover:opacity-80 dark:bg-neutral-800"
                 />
                 <div className="space-y-1 p-2 text-xs">
-                  <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{imageLabel(image.prompt)}</p>
+                  <div className="flex items-start gap-1">
+                    <span
+                      role="img"
+                      aria-label={sourceIconLabel(image.provider)}
+                      title={sourceIconLabel(image.provider)}
+                      className="mt-0.5 shrink-0 text-neutral-500 dark:text-neutral-400"
+                    >
+                      {image.provider === "UPLOAD" ? (
+                        <Upload aria-hidden="true" className="h-3.5 w-3.5" />
+                      ) : (
+                        <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+                      )}
+                    </span>
+                    <p className="line-clamp-2 text-neutral-700 dark:text-neutral-300">{imageLabel(image.prompt)}</p>
+                  </div>
                   {image.tags && image.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {image.tags.map((tag) => (

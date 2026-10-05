@@ -2431,3 +2431,47 @@ After({ tags: '@media' }, async ({ ctx, request }) => {
     });
   }
 });
+
+// issue #1646: カードの種別アイコン。アップロード / ComfyUI / ChatGPT の画像を1件ずつ作り、各カードのアイコンを確かめる。
+const SOURCE_ICON_NAMES = ['アップロード', 'AI生成(ComfyUI)', 'AI生成(ChatGPT)'];
+
+Given('ギャラリーにアップロード画像・ComfyUI画像・ChatGPT画像が1件ずつある', async ({ ctx, request }) => {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const ids: Record<string, number> = {};
+  for (const provider of ['UPLOAD', 'COMFYUI', 'CHATGPT']) {
+    ids[provider] = await createGeneratedImage(request, {
+      prompt: `E2E source icon fixture ${suffix}-${provider}`,
+      provider,
+      seed: 1_646_000,
+    });
+  }
+  ctx.mediaSourceIconIds = ids;
+});
+
+async function expectOnlySourceIcon(
+  page: Page,
+  ctx: Record<string, unknown>,
+  provider: string,
+  name: string
+): Promise<void> {
+  const id = (ctx.mediaSourceIconIds as Record<string, number>)[provider];
+  const thumbnail = page.locator(`img[src="/image-gallery/${id}/file"]`);
+  await expect(thumbnail).toBeVisible({ timeout: 30_000 });
+  const card = thumbnail.locator('xpath=ancestor::div[contains(@class,"relative")][1]');
+  await expect(card.getByRole('img', { name, exact: true })).toBeVisible();
+  for (const other of SOURCE_ICON_NAMES.filter((n) => n !== name)) {
+    await expect(card.getByRole('img', { name: other, exact: true })).toHaveCount(0);
+  }
+}
+
+Then('アップロード画像のカードにアクセシブルネーム「アップロード」のアイコンだけが表示される', async ({ ctx, page }) => {
+  await expectOnlySourceIcon(page, ctx, 'UPLOAD', 'アップロード');
+});
+
+Then('ComfyUI画像のカードにアクセシブルネーム「AI生成\\(ComfyUI)」のアイコンだけが表示される', async ({ ctx, page }) => {
+  await expectOnlySourceIcon(page, ctx, 'COMFYUI', 'AI生成(ComfyUI)');
+});
+
+Then('ChatGPT画像のカードにアクセシブルネーム「AI生成\\(ChatGPT)」のアイコンだけが表示される', async ({ ctx, page }) => {
+  await expectOnlySourceIcon(page, ctx, 'CHATGPT', 'AI生成(ChatGPT)');
+});
