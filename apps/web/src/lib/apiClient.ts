@@ -1789,6 +1789,43 @@ export function testProjectXPost(projectId: number): Promise<{ success: boolean;
   });
 }
 
+/**
+ * 設定画面の「SNS 告知」欄の PV 達成ルール(issue #1578)。GA4 の認証情報は含まない。
+ * `addable=false` のとき `reason` が理由(GA が未連携など)。`send` は本番サイトのプラグインへ最後に送った結果。
+ */
+export interface PvRulesView {
+  addable: boolean;
+  reason: string | null;
+  rules: { id: string; period: 'daily' | 'total'; threshold: number }[];
+  send: { state: 'NONE' | 'SENT' | 'FAILED'; error: string | null; at: string | null };
+}
+
+export function getProjectPvRules(projectId: number): Promise<PvRulesView> {
+  return apiFetch<PvRulesView>(`/api/projects/${projectId}/sns/pv`);
+}
+
+export function addProjectPvRule(
+  projectId: number,
+  input: { period: 'daily' | 'total'; threshold: number }
+): Promise<PvRulesView> {
+  return apiFetch<PvRulesView>(`/api/projects/${projectId}/sns/pv/rules`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteProjectPvRule(projectId: number, ruleId: string): Promise<PvRulesView> {
+  return apiFetch<PvRulesView>(`/api/projects/${projectId}/sns/pv/rules/${encodeURIComponent(ruleId)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** 送信失敗からの回復。GA4 の認証情報とルール全件を本番サイトのプラグインへ送り直す。 */
+export function resendProjectPvRules(projectId: number): Promise<PvRulesView> {
+  return apiFetch<PvRulesView>(`/api/projects/${projectId}/sns/pv/resend`, { method: 'POST' });
+}
+
 export interface GoogleAnalyticsDailyDataPoint {
   date: string;
   sessions: number;

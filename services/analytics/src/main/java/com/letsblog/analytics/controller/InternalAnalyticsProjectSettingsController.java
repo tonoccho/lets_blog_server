@@ -1,5 +1,6 @@
 package com.letsblog.analytics.controller;
 
+import com.letsblog.analytics.service.AdminAuthorizationService;
 import com.letsblog.analytics.service.ProjectAnalyticsSettingsService;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,10 +33,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class InternalAnalyticsProjectSettingsController {
 
     private final ProjectAnalyticsSettingsService projectAnalyticsSettingsService;
+    private final AdminAuthorizationService adminAuthorizationService;
 
     public InternalAnalyticsProjectSettingsController(
-            ProjectAnalyticsSettingsService projectAnalyticsSettingsService) {
+            ProjectAnalyticsSettingsService projectAnalyticsSettingsService,
+            AdminAuthorizationService adminAuthorizationService) {
         this.projectAnalyticsSettingsService = projectAnalyticsSettingsService;
+        this.adminAuthorizationService = adminAuthorizationService;
     }
 
     // ---- Google Analytics ----
@@ -52,6 +56,28 @@ public class InternalAnalyticsProjectSettingsController {
         return new GoogleAnalyticsStatusResponse(
                 projectAnalyticsSettingsService.hasGoogleAnalytics(projectId),
                 projectAnalyticsSettingsService.googleAnalyticsPropertyId(projectId));
+    }
+
+    public record GoogleAnalyticsCredentialsResponse(
+            boolean configured, String propertyId, String clientId, String clientSecret, String refreshToken) {
+
+        /** 秘密がログや例外メッセージに出ないよう、{@code toString}では秘密を伏せる。 */
+        @Override
+        public String toString() {
+            return "GoogleAnalyticsCredentialsResponse[configured=" + configured + ", propertyId=" + propertyId + "]";
+        }
+    }
+
+    /**
+     * 本番サイトのプラグインへ送るための、復号済みの GA4 認証情報(issue #1578。project-service だけが呼ぶ)。
+     * 秘密を返すので、他のブリッジと違って呼び出し元ユーザーがプロジェクトのメンバーかadminであることを検査する。
+     */
+    @GetMapping("/api/internal/analytics/projects/{projectId}/google-analytics/credentials")
+    public GoogleAnalyticsCredentialsResponse googleAnalyticsCredentials(@PathVariable Long projectId) {
+        adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
+        var credentials = projectAnalyticsSettingsService.googleAnalyticsCredentials(projectId);
+        return new GoogleAnalyticsCredentialsResponse(credentials.configured(), credentials.propertyId(),
+                credentials.clientId(), credentials.clientSecret(), credentials.refreshToken());
     }
 
     /** 認可不要: {@link #googleAnalyticsStatus}と同じ理由(gateway非経由・呼び出し元が認可済み、issue #583)。 */

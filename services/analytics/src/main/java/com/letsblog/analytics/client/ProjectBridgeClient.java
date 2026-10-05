@@ -4,6 +4,8 @@ import com.letsblog.analytics.service.IdentityServiceUnavailableException;
 import com.letsblog.analytics.service.ProjectNotFoundException;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
@@ -24,6 +26,8 @@ import org.springframework.web.client.RestClientResponseException;
  */
 @Component
 public class ProjectBridgeClient {
+
+    private static final Logger log = LoggerFactory.getLogger(ProjectBridgeClient.class);
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
@@ -66,6 +70,23 @@ public class ProjectBridgeClient {
         } catch (RestClientException e) {
             throw new IdentityServiceUnavailableException(
                     "project-serviceのプロジェクト情報取得に失敗しました: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * GA のプロパティを選び終えた(連携が完了した)ことを project-service へ知らせ、本番サイトのプラグインへ
+     * GA4 の認証情報とルールを送らせる(issue #1578)。付随の処理なので、届かなくても GA 連携そのものは
+     * 失敗にしない(送信できなかった事実は project-service が「送信失敗」として記録し、画面から再送できる)。
+     */
+    public void notifyGoogleAnalyticsConnected(Long projectId, String bearerToken) {
+        try {
+            restClient.post()
+                    .uri("/api/internal/project/projects/{projectId}/sns/pv/sync", projectId)
+                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientException e) {
+            log.warn("GA連携の完了をproject-serviceへ知らせられませんでした (projectId={}): {}", projectId, e.getMessage());
         }
     }
 

@@ -474,6 +474,18 @@ check('SNS は標準入力を一時ファイルへ書かず、ログにも出さ
 check('SNS は導入処理を走らせない', $snsBlock !== '' && !str_contains($snsBlock, 'ensureLetsblogPlugin(') && !str_contains($snsBlock, 'resolveExistingSitePath('));
 check('SNS は終了コードと標準出力・標準エラーを返す', str_contains($snsBlock, "'exitCode'") && str_contains($snsBlock, "'stdout'") && str_contains($snsBlock, "'stderr'"));
 
+// --- issue #1578: /wp-cli/letsblog-sns は PV 達成ルール(GA4 の認証情報とルール)も扱う。秘密は標準入力だけで渡す ---
+check('SNS は pv-config-set / pv-config-clear / pv-status / pv-rules-set も許可リストに持つ',
+    str_contains($snsBlock, 'pv-config-set') && str_contains($snsBlock, 'pv-config-clear')
+    && str_contains($snsBlock, 'pv-status') && str_contains($snsBlock, 'pv-rules-set'));
+check('SNS は pv config set / pv rules set を標準入力つきで実行する(引数に秘密を載せない)',
+    str_contains($snsBlock, "'pv', 'config', 'set'") && str_contains($snsBlock, "'pv', 'rules', 'set'")
+    && str_contains($snsBlock, 'runWpWithStdin('));
+check('SNS は pv config clear / pv status を呼び分ける',
+    str_contains($snsBlock, "'pv', 'config', 'clear'") && str_contains($snsBlock, "'pv', 'status'"));
+check('SNS は pv-config-set / pv-rules-set に標準入力が無ければ 400 にする',
+    str_contains($snsBlock, "\$command === 'pv-config-set'") && str_contains($snsBlock, "\$command === 'pv-rules-set'"));
+
 // --- issue #1559: 同期済み CSS を表側で読み込み、本文の囲みのプレフィックスクラスを表示時に付け直す ---
 $GLOBALS['letsblog_test_styles'] = ['registered' => [], 'enqueued' => [], 'inline' => []];
 function wp_register_style(string $handle, $src, array $deps = [], $ver = false): bool

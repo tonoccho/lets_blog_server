@@ -1,6 +1,8 @@
 package com.letsblog.analytics.controller;
 
+import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.service.AdminAuthorizationService;
+import com.letsblog.analytics.service.CurrentActorService;
 import com.letsblog.analytics.service.ProjectAnalyticsSettingsService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -34,12 +36,18 @@ public class ProjectAnalyticsApiKeyController {
 
     private final ProjectAnalyticsSettingsService projectAnalyticsSettingsService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final ProjectBridgeClient projectBridgeClient;
+    private final CurrentActorService currentActorService;
 
     public ProjectAnalyticsApiKeyController(
             ProjectAnalyticsSettingsService projectAnalyticsSettingsService,
-            AdminAuthorizationService adminAuthorizationService) {
+            AdminAuthorizationService adminAuthorizationService,
+            ProjectBridgeClient projectBridgeClient,
+            CurrentActorService currentActorService) {
         this.projectAnalyticsSettingsService = projectAnalyticsSettingsService;
         this.adminAuthorizationService = adminAuthorizationService;
+        this.projectBridgeClient = projectBridgeClient;
+        this.currentActorService = currentActorService;
     }
 
     /**
@@ -132,6 +140,8 @@ public class ProjectAnalyticsApiKeyController {
             @PathVariable Long projectId, @Valid @RequestBody SelectGoogleAnalyticsPropertyRequest request) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
         projectAnalyticsSettingsService.selectGoogleAnalyticsProperty(projectId, request.propertyId());
+        // GA の連携が完了した(issue #1578): 本番サイトのプラグインへ GA4 の認証情報とルールを送らせる。
+        projectBridgeClient.notifyGoogleAnalyticsConnected(projectId, currentActorService.getAuthorizationHeader());
         return ResponseEntity.noContent().build();
     }
 

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import ProjectSnsSettingsPage from "../page";
-import { getProject, getProjectXConnection } from "@/lib/apiClient";
+import { getProject, getProjectPvRules, getProjectXConnection } from "@/lib/apiClient";
 
 /**
  * issue #1574: SNS 告知の設定ページ(サーバーコンポーネント)。接続状態の取得に失敗しても画面全体は落とさず、
@@ -9,6 +9,7 @@ import { getProject, getProjectXConnection } from "@/lib/apiClient";
 jest.mock("@/lib/apiClient", () => ({
   getProject: jest.fn(),
   getProjectXConnection: jest.fn(),
+  getProjectPvRules: jest.fn(),
 }));
 jest.mock("@/lib/session", () => ({ requireAdminSession: jest.fn() }));
 jest.mock("next/navigation", () => ({
@@ -24,6 +25,21 @@ jest.mock("../../../ProjectSnsXSection", () => ({
     return <div data-testid="sns-section" />;
   },
 }));
+
+const pvSectionProps = jest.fn();
+jest.mock("../../../ProjectPvRulesSection", () => ({
+  ProjectPvRulesSection: (props: unknown) => {
+    pvSectionProps(props);
+    return <div data-testid="pv-section" />;
+  },
+}));
+
+const pvView = {
+  addable: true,
+  reason: null,
+  rules: [{ id: "r1", period: "daily", threshold: 100 }],
+  send: { state: "SENT", error: null, at: null },
+};
 
 const view = { connectable: true, reason: null, siteName: "本番", status: null, log: null };
 
@@ -44,6 +60,7 @@ describe("ProjectSnsSettingsPage", () => {
     process.env.NEXTAUTH_URL = "https://localhost";
     (getProject as jest.Mock).mockResolvedValue({ id: 5, name: "テストプロジェクト" });
     (getProjectXConnection as jest.Mock).mockResolvedValue(view);
+    (getProjectPvRules as jest.Mock).mockResolvedValue(pvView);
   });
 
   afterAll(() => {
@@ -80,6 +97,22 @@ describe("ProjectSnsSettingsPage", () => {
 
     expect(screen.getByTestId("sns-section")).toBeInTheDocument();
     expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
+  });
+
+  it("取得した PV 達成ルールを PV 欄へ渡す(issue #1578)", async () => {
+    await renderPage();
+
+    expect(screen.getByTestId("pv-section")).toBeInTheDocument();
+    expect(pvSectionProps).toHaveBeenCalledWith({ projectId: 5, view: pvView });
+  });
+
+  it("PV 達成ルールを取得できなくても画面は描き、PV 欄へはnullを渡す(issue #1578)", async () => {
+    (getProjectPvRules as jest.Mock).mockRejectedValue(new Error("502"));
+
+    await renderPage();
+
+    expect(screen.getByTestId("sns-section")).toBeInTheDocument();
+    expect(pvSectionProps).toHaveBeenCalledWith({ projectId: 5, view: null });
   });
 
   it("プロジェクトが取得できなければ notFound になる", async () => {

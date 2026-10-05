@@ -55,6 +55,10 @@ import {
   startProjectXAuthorization,
   completeProjectXAuthorization,
   testProjectXPost,
+  getProjectPvRules,
+  addProjectPvRule,
+  deleteProjectPvRule,
+  resendProjectPvRules,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -796,6 +800,56 @@ describe('プロジェクトの X 接続(issue #1574)', () => {
 
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/x/test')
+    expect(init.method).toBe('POST')
+  })
+})
+
+describe('プロジェクトの PV 達成ルール(issue #1578)', () => {
+  const view = {
+    addable: true,
+    reason: null,
+    rules: [{ id: 'r1', period: 'daily', threshold: 100 }],
+    send: { state: 'SENT', error: null, at: null },
+  }
+
+  it('getProjectPvRulesはルールと送信状態を取得する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectPvRules(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/pv')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('addProjectPvRuleは期間と閾値をPOSTする', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(addProjectPvRule(7, { period: 'total', threshold: 5000 })).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/pv/rules')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ period: 'total', threshold: 5000 })
+  })
+
+  it('deleteProjectPvRuleはルールIDを指定してDELETEする', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(deleteProjectPvRule(7, 'r1')).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/pv/rules/r1')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('resendProjectPvRulesは再送をPOSTする', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(resendProjectPvRules(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/pv/resend')
     expect(init.method).toBe('POST')
   })
 })

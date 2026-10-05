@@ -108,6 +108,42 @@ public class ProjectAnalyticsSettingsService {
         analyticsCredentialsService.setGaPropertyId(projectId, normalized);
     }
 
+    /**
+     * 本番サイトのプラグインへ送る GA4 の認証情報(issue #1578)。復号済みの秘密を含むので、呼び出し元は
+     * 内部ブリッジ({@code InternalAnalyticsProjectSettingsController})だけで、公開 API には載せない。
+     * プロパティ選択・OAuthクライアント(ID とシークレット)・リフレッシュトークンが揃っていなければ
+     * {@code configured=false}で、秘密は返さない。
+     */
+    public GoogleAnalyticsCredentialsView googleAnalyticsCredentials(Long projectId) {
+        if (!analyticsCredentialsService.hasGoogleAnalyticsCredentials(projectId)) {
+            return GoogleAnalyticsCredentialsView.UNCONFIGURED;
+        }
+        String clientId = analyticsCredentialsService.getGaOauthClientId(projectId);
+        String clientSecret = decryptGaClientSecret(projectId);
+        if (clientId == null || clientId.isBlank() || clientSecret == null) {
+            return GoogleAnalyticsCredentialsView.UNCONFIGURED;
+        }
+        return new GoogleAnalyticsCredentialsView(
+                true,
+                analyticsCredentialsService.getGaPropertyId(projectId),
+                clientId,
+                clientSecret,
+                credentialCipher.decrypt(analyticsCredentialsService.getGaRefreshTokenEncrypted(projectId)));
+    }
+
+    /** {@link #googleAnalyticsCredentials}の戻り値。{@code toString}で秘密が出ないよう、秘密を伏せる。 */
+    public record GoogleAnalyticsCredentialsView(
+            boolean configured, String propertyId, String clientId, String clientSecret, String refreshToken) {
+
+        static final GoogleAnalyticsCredentialsView UNCONFIGURED =
+                new GoogleAnalyticsCredentialsView(false, null, null, null, null);
+
+        @Override
+        public String toString() {
+            return "GoogleAnalyticsCredentialsView[configured=" + configured + ", propertyId=" + propertyId + "]";
+        }
+    }
+
     public void clearGoogleAnalyticsCredentials(Long projectId) {
         analyticsCredentialsService.clearGoogleAnalyticsCredentials(projectId);
     }

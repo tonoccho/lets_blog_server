@@ -1115,9 +1115,13 @@ if ($path === '/wp-cli/letsblog-sns' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $sns = $input['sns'] ?? null;
     $stdin = $input['stdin'] ?? null;
     $snsValid = $sns === null || (is_string($sns) && preg_match('/^[a-z0-9_-]{1,32}$/', $sns) === 1);
-    if (!isValidSlug($slug) || !in_array($command, ['config-set', 'config-clear', 'status', 'test', 'log'], true)
+    $pvCommands = ['pv-config-set', 'pv-config-clear', 'pv-status', 'pv-rules-set'];
+    if (!isValidSlug($slug)
+        || !in_array($command, array_merge(['config-set', 'config-clear', 'status', 'test', 'log'], $pvCommands), true)
         || !$snsValid || ($stdin !== null && !is_string($stdin))
         || ($command === 'config-set' && ($stdin === null || $stdin === ''))
+        || ($command === 'pv-config-set' && ($stdin === null || $stdin === ''))
+        || ($command === 'pv-rules-set' && ($stdin === null || $stdin === ''))
         || ($command === 'test' && $sns === null)) {
         respond(400, ['error' => 'パラメータが不正です']);
     }
@@ -1132,9 +1136,16 @@ if ($path === '/wp-cli/letsblog-sns' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'status' => ['status'],
         'test' => ['test', $sns],
         'log' => ['log', '--format=json'],
+        'pv-config-set' => ['pv', 'config', 'set'],
+        'pv-config-clear' => ['pv', 'config', 'clear'],
+        'pv-status' => ['pv', 'status'],
+        'pv-rules-set' => ['pv', 'rules', 'set'],
     };
-    $args = array_merge(['letsblog', 'sns'], $subArgs, ["--path=$sitePath", '--allow-root']);
-    [$code, $out, $err] = $command === 'config-set' ? runWpWithStdin($args, $stdin) : runWp($args);
+    // PV 達成ルール(issue #1578)は `wp letsblog pv ...`。それ以外は `wp letsblog sns ...`。
+    $base = in_array($command, $pvCommands, true) ? ['letsblog'] : ['letsblog', 'sns'];
+    $args = array_merge($base, $subArgs, ["--path=$sitePath", '--allow-root']);
+    $withStdin = in_array($command, ['config-set', 'pv-config-set', 'pv-rules-set'], true);
+    [$code, $out, $err] = $withStdin ? runWpWithStdin($args, $stdin) : runWp($args);
     respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
 }
 

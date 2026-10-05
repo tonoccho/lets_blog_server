@@ -1248,6 +1248,27 @@ OAuth のトークンは本番サイトの letsblog プラグインへ送るだ�
 | POST /api/projects/{projectId}/sns/x/callback | requireAdmin | 401 | 403 | 認可OK | 現状維持 | Next.js 側コールバックからのサーバー間呼び出し。アカウント名だけを返す |
 | POST /api/projects/{projectId}/sns/x/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
 
+## ProjectSnsPvController (4エンドポイント、ベースパス `/api/projects/{projectId}/sns/pv`)
+
+project-service所有(issue #1578)。プロジェクト設定画面の「SNS 告知」欄の PV 達成ルール向けAPI。ルールの正本はアプリ
+(`project_pv_rules`)で、ルールの保存・削除・再送のたびに、GA4 の認証情報(analytics-service から復号済みで読む)と
+ルール全件を本番サイトの letsblog プラグインへ wp-cli(`pv config set` / `pv rules set`)で送る。GA4 の認証情報は
+どの応答にも載らず、アプリは保存しない。GA が未連携のプロジェクトではルールを追加できない(409)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/sns/pv | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | ルール・追加できない理由・本番サイトへの送信状態 |
+| POST /api/projects/{projectId}/sns/pv/rules | requireAdmin | 401 | 403 | 認可OK | 現状維持 | ルールの追加。GA 未連携は409 |
+| DELETE /api/projects/{projectId}/sns/pv/rules/{ruleId} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | ルールの削除。残りを本番サイトへ送り直す |
+| POST /api/projects/{projectId}/sns/pv/resend | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 送信失敗からの再送 |
+
+内部ブリッジ(gateway非経由、呼び出し元ユーザーのBearerトークンを転送):
+
+| HTTPメソッド + パス | 認可チェック | 備考 |
+| --- | --- | --- |
+| POST /api/internal/project/projects/{projectId}/sns/pv/sync | requireProjectMemberOrAdmin | `ProjectPvInternalController`。analytics-service が GA のプロパティ選択の完了を知らせ、本番サイトへ GA4 の認証情報とルールを送らせる |
+| GET /api/internal/analytics/projects/{projectId}/google-analytics/credentials | requireProjectMemberOrAdmin | analytics-service の `InternalAnalyticsProjectSettingsController`。復号済みの GA4 認証情報を project-service へ返す。秘密を返すため、他の内部ブリッジと違って呼び出し元ユーザーの権限を検査する |
+
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |

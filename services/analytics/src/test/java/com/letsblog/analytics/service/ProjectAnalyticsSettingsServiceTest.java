@@ -144,6 +144,68 @@ class ProjectAnalyticsSettingsServiceTest {
     }
 
     @Test
+    void googleAnalyticsCredentials_連携済みなら復号したOAuthの認証情報とプロパティIDを返す() {
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("987");
+        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
+        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("secret"));
+        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
+                .thenReturn(credentialCipher.encrypt("refresh"));
+
+        var credentials = service().googleAnalyticsCredentials(1L);
+
+        assertTrue(credentials.configured());
+        assertEquals("987", credentials.propertyId());
+        assertEquals("cid", credentials.clientId());
+        assertEquals("secret", credentials.clientSecret());
+        assertEquals("refresh", credentials.refreshToken());
+    }
+
+    @Test
+    void googleAnalyticsCredentials_未連携なら設定済みでなく秘密は返さない() {
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(false);
+
+        var credentials = service().googleAnalyticsCredentials(1L);
+
+        assertFalse(credentials.configured());
+        assertNull(credentials.propertyId());
+        assertNull(credentials.clientId());
+        assertNull(credentials.clientSecret());
+        assertNull(credentials.refreshToken());
+        verify(analyticsCredentialsService, never()).getGaRefreshTokenEncrypted(any());
+    }
+
+    @Test
+    void googleAnalyticsCredentials_クライアントのシークレットが無ければ設定済みとしない() {
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
+        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(false);
+
+        var credentials = service().googleAnalyticsCredentials(1L);
+
+        assertFalse(credentials.configured());
+        assertNull(credentials.refreshToken());
+    }
+
+    @Test
+    void googleAnalyticsCredentials_クライアントIDが未保存でも設定済みとしない() {
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn(null);
+
+        assertFalse(service().googleAnalyticsCredentials(1L).configured());
+    }
+
+    @Test
+    void googleAnalyticsCredentials_クライアントIDが無ければ設定済みとしない() {
+        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn(" ");
+
+        assertFalse(service().googleAnalyticsCredentials(1L).configured());
+    }
+
+    @Test
     void 状態の読み取りは資格情報サービスへ委譲する() {
         when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
         when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123");

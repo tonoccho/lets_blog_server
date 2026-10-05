@@ -1,7 +1,14 @@
 import { notFound } from "next/navigation";
-import { getProject, getProjectXConnection, type XConnectionView } from "@/lib/apiClient";
+import {
+  getProject,
+  getProjectPvRules,
+  getProjectXConnection,
+  type PvRulesView,
+  type XConnectionView,
+} from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
+import { ProjectPvRulesSection } from "../../ProjectPvRulesSection";
 import { ProjectSnsXSection } from "../../ProjectSnsXSection";
 
 export default async function ProjectSnsSettingsPage({
@@ -17,9 +24,10 @@ export default async function ProjectSnsSettingsPage({
   const projectId = Number(id);
 
   // 接続状態の取得に失敗しても画面全体は落とさず、欄の側で「取得できない」と示す。
-  const [project, view] = await Promise.all([
+  const [project, view, pvView] = await Promise.all([
     getProject(projectId).catch(() => null),
     getProjectXConnection(projectId).catch((): XConnectionView | null => null),
+    getProjectPvRules(projectId).catch((): PvRulesView | null => null),
   ]);
   if (!project) {
     notFound();
@@ -46,6 +54,8 @@ export default async function ProjectSnsSettingsPage({
         connectedBanner={connected === "1"}
         errorBanner={error}
       />
+
+      <ProjectPvRulesSection projectId={projectId} view={pvView} />
     </div>
   );
 }

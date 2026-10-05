@@ -2224,4 +2224,63 @@ class WordPressSshOperationsTest {
                 com.letsblog.publishing.cms.LetsblogSnsCommand.TEST, null, null));
         verify(executor, never()).exec(any(SshConnectionParams.class), any(), any());
     }
+
+    // ---- issue #1578: wp letsblog pv(GA4 の認証情報とルール。秘密は標準入力で渡す) ----
+
+    @Test
+    void letsblogSns_pv_config_setは標準入力のJSONでwp_cliを実行し_秘密はコマンドラインに載せない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), any(byte[].class))).thenReturn(ok("{}"));
+
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.PV_CONFIG_SET, null,
+                "{\"refresh_token\":\"SECRET\"}");
+
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> stdin = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), stdin.capture());
+        assertEquals(true, command.getValue().endsWith("letsblog pv config set"));
+        assertEquals(false, command.getValue().contains("SECRET"));
+        assertArrayEquals("{\"refresh_token\":\"SECRET\"}".getBytes(StandardCharsets.UTF_8), stdin.getValue());
+    }
+
+    @Test
+    void letsblogSns_pv_rules_setは標準入力のJSONでルールを渡す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), any(byte[].class))).thenReturn(ok("{\"rules\":1}"));
+
+        String out = operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.PV_RULES_SET, null,
+                "[{\"id\":\"r1\",\"period\":\"daily\",\"threshold\":100}]");
+
+        assertEquals("{\"rules\":1}", out);
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> stdin = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), stdin.capture());
+        assertEquals(true, command.getValue().endsWith("letsblog pv rules set"));
+        assertArrayEquals("[{\"id\":\"r1\",\"period\":\"daily\",\"threshold\":100}]".getBytes(StandardCharsets.UTF_8),
+                stdin.getValue());
+    }
+
+    @Test
+    void letsblogSns_pv_statusとpv_config_clearは標準入力なしで実行する() {
+        when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{}"));
+
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.PV_STATUS, null, null);
+        operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.PV_CONFIG_CLEAR, null, null);
+
+        ArgumentCaptor<String> commands = ArgumentCaptor.forClass(String.class);
+        verify(executor, times(2)).exec(any(SshConnectionParams.class), commands.capture(), isNull());
+        assertEquals(true, commands.getAllValues().get(0).endsWith("letsblog pv status"));
+        assertEquals(true, commands.getAllValues().get(1).endsWith("letsblog pv config clear"));
+    }
+
+    @Test
+    void letsblogSns_pvのwp_cliが失敗したら例外で_標準入力の秘密は含めない() {
+        when(executor.exec(any(SshConnectionParams.class), any(), any(byte[].class)))
+                .thenReturn(fail("Error: ルールの配列(JSON)を渡してください"));
+
+        SshOperationException e = assertThrows(SshOperationException.class,
+                () -> operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.PV_RULES_SET, null,
+                        "{\"refresh_token\":\"SECRET\"}"));
+
+        assertEquals(true, e.getMessage().contains("pv-rules-set"));
+        assertEquals(false, e.getMessage().contains("SECRET"));
+    }
 }

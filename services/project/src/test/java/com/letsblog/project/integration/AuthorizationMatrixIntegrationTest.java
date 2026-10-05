@@ -80,6 +80,12 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/sns/x/callback"),
                 new Endpoint("POST", "/api/projects/1/sns/x/test"),
 
+                // -- ProjectSnsPvController(issue #1578) --
+                new Endpoint("GET", "/api/projects/1/sns/pv"),
+                new Endpoint("POST", "/api/projects/1/sns/pv/rules"),
+                new Endpoint("DELETE", "/api/projects/1/sns/pv/rules/r1"),
+                new Endpoint("POST", "/api/projects/1/sns/pv/resend"),
+
                 // -- SiteController --
                 new Endpoint("POST", "/api/sites"),
                 new Endpoint("POST", "/api/sites/managed-wordpress"),
@@ -123,6 +129,7 @@ class AuthorizationMatrixIntegrationTest {
 
                 // -- 内部ブリッジ(ProjectInternalController) --
                 new Endpoint("GET", "/api/internal/project/projects/1"),
+                new Endpoint("POST", "/api/internal/project/projects/1/sns/pv/sync"),
                 new Endpoint("POST", "/api/internal/project/letsblog-sync"),
                 new Endpoint("GET", "/api/internal/project/projects/1/github-token"),
                 new Endpoint("PUT", "/api/internal/project/projects/1/github-token"),

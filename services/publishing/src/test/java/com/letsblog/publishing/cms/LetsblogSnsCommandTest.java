@@ -38,4 +38,20 @@ class LetsblogSnsCommandTest {
         assertEquals(false, LetsblogSnsCommand.TEST.requiresStdin());
         assertEquals(false, LetsblogSnsCommand.LOG.requiresStdin());
     }
+
+    @Test
+    void PV達成ルールのコマンドも文字列から引ける_issue_1578() {
+        assertEquals(LetsblogSnsCommand.PV_CONFIG_SET, LetsblogSnsCommand.fromWire("pv-config-set"));
+        assertEquals(LetsblogSnsCommand.PV_CONFIG_CLEAR, LetsblogSnsCommand.fromWire("pv-config-clear"));
+        assertEquals(LetsblogSnsCommand.PV_STATUS, LetsblogSnsCommand.fromWire("pv-status"));
+        assertEquals(LetsblogSnsCommand.PV_RULES_SET, LetsblogSnsCommand.fromWire("pv-rules-set"));
+    }
+
+    @Test
+    void PVのコマンドで標準入力が要るのは_config_setとrules_setだけ() {
+        assertEquals(true, LetsblogSnsCommand.PV_CONFIG_SET.requiresStdin());
+        assertEquals(true, LetsblogSnsCommand.PV_RULES_SET.requiresStdin());
+        assertEquals(false, LetsblogSnsCommand.PV_CONFIG_CLEAR.requiresStdin());
+        assertEquals(false, LetsblogSnsCommand.PV_STATUS.requiresStdin());
+    }
 }

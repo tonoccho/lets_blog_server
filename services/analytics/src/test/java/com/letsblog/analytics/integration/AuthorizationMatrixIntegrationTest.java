@@ -79,6 +79,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- 内部ブリッジ(InternalAnalyticsProjectSettingsController) --
                 new Endpoint("GET", "/api/internal/analytics/projects/1/google-analytics"),
                 new Endpoint("DELETE", "/api/internal/analytics/projects/1/google-analytics"),
+                new Endpoint("GET", "/api/internal/analytics/projects/1/google-analytics/credentials"),
                 new Endpoint("GET", "/api/internal/analytics/projects/1/adsense"),
                 new Endpoint("PUT", "/api/internal/analytics/projects/1/adsense"),
                 new Endpoint("PUT", "/api/internal/analytics/projects/1/adsense/client-secret"),

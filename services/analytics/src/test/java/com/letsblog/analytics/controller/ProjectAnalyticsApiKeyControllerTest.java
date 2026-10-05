@@ -2,7 +2,9 @@ package com.letsblog.analytics.controller;
 
 import com.letsblog.analytics.adsense.AdSenseAccountSummary;
 import com.letsblog.analytics.analytics.GoogleAnalyticsPropertySummary;
+import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.service.AdminAuthorizationService;
+import com.letsblog.analytics.service.CurrentActorService;
 import com.letsblog.analytics.service.ProjectAnalyticsSettingsService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,9 +34,13 @@ class ProjectAnalyticsApiKeyControllerTest {
     private ProjectAnalyticsSettingsService settings;
     @Mock
     private AdminAuthorizationService authorization;
+    @Mock
+    private ProjectBridgeClient projectBridgeClient;
+    @Mock
+    private CurrentActorService currentActorService;
 
     private ProjectAnalyticsApiKeyController controller() {
-        return new ProjectAnalyticsApiKeyController(settings, authorization);
+        return new ProjectAnalyticsApiKeyController(settings, authorization, projectBridgeClient, currentActorService);
     }
 
     @Test
@@ -100,6 +106,30 @@ class ProjectAnalyticsApiKeyControllerTest {
         InOrder order = inOrder(authorization, settings);
         order.verify(authorization).requireProjectMemberOrAdmin(1L);
         order.verify(settings).selectGoogleAnalyticsProperty(1L, "111");
+    }
+
+    @Test
+    void selectGoogleAnalyticsProperty_保存したあと_本番サイトへ送るようproject_serviceへ知らせる() {
+        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
+
+        controller().selectGoogleAnalyticsProperty(
+                1L, new ProjectAnalyticsApiKeyController.SelectGoogleAnalyticsPropertyRequest("111"));
+
+        InOrder order = inOrder(authorization, settings, projectBridgeClient);
+        order.verify(settings).selectGoogleAnalyticsProperty(1L, "111");
+        order.verify(projectBridgeClient).notifyGoogleAnalyticsConnected(1L, "Bearer t");
+    }
+
+    @Test
+    void selectGoogleAnalyticsProperty_保存が拒否されたらproject_serviceへは知らせない() {
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("未連携"))
+                .when(settings).selectGoogleAnalyticsProperty(1L, "111");
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> controller()
+                .selectGoogleAnalyticsProperty(
+                        1L, new ProjectAnalyticsApiKeyController.SelectGoogleAnalyticsPropertyRequest("111")));
+
+        org.mockito.Mockito.verifyNoInteractions(projectBridgeClient);
     }
 
     @Test

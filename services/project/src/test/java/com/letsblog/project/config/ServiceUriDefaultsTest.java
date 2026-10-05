@@ -29,6 +29,12 @@ class ServiceUriDefaultsTest {
     }
 
     @Test
+    @DisplayName("analytics-service-uri の既定値は実在する analytics-service を指す(issue #1578)")
+    void analyticsServiceUriDefaultsToAnalytics() {
+        assertThat(load().getProperty("app.analytics-service-uri")).endsWith(":http://analytics:8080}");
+    }
+
+    @Test
     @DisplayName("どのサービスURIの既定値も撤去済みの legacy-api(api:8080)を指さない")
     void noUriDefaultsToLegacyApi() {
         load().forEach((key, value) -> {
