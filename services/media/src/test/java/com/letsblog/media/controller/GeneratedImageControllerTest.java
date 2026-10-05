@@ -87,7 +87,7 @@ class GeneratedImageControllerTest {
                 buildImage(1L, "a cat", "[\"猫\",\"動物\"]"),
                 buildImage(2L, "a dog", "[\"犬\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null, null);
 
         assertEquals(2, result.size());
     }
@@ -98,7 +98,7 @@ class GeneratedImageControllerTest {
                 buildImage(1L, "a cat", "[\"猫\",\"動物\"]"),
                 buildImage(2L, "a dog", "[\"犬\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, "猫", null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, "猫", null, null, null, null, null);
 
         assertEquals(1, result.size());
         assertEquals(1L, result.get(0).id());
@@ -111,7 +111,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByProjectIdOrderByCreatedAtDescIdDesc(5L))
                 .thenReturn(List.of(buildImage(1L, "a cat", "[\"猫\"]")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(5L, null, null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(5L, null, null, null, null, null, null);
 
         assertEquals(1, result.size());
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
@@ -122,7 +122,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", "   ")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -161,7 +161,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", null)));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -171,7 +171,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc())
                 .thenReturn(List.of(buildImage(1L, "a cat", "not json")));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, null, null);
 
         assertEquals(List.of(), result.get(0).tags());
     }
@@ -424,7 +424,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 inFolder(10L, 1L), inFolder(11L, 2L), inFolder(12L, 3L), inFolder(13L, null)));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, 1L, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, 1L, null, null);
 
         assertEquals(List.of(10L, 11L), result.stream().map(GeneratedImageSummaryResponse::id).toList());
         assertEquals(1L, result.get(0).folderId());
@@ -435,7 +435,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 inFolder(10L, 1L), inFolder(13L, null)));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, true);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, null, null, null, true, null);
 
         assertEquals(List.of(13L), result.stream().map(GeneratedImageSummaryResponse::id).toList());
         assertNull(result.get(0).folderId());
@@ -446,13 +446,13 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 inFolder(10L, 1L), inFolder(13L, null)));
 
-        assertEquals(2, controller.list(null, null, null, null, null, false).size());
+        assertEquals(2, controller.list(null, null, null, null, null, false, null).size());
     }
 
     @Test
     void list_folderIdとunfiledの同時指定は拒否する() {
         assertThrows(InvalidFilterParameterException.class,
-                () -> controller.list(null, null, null, null, 1L, true));
+                () -> controller.list(null, null, null, null, 1L, true, null));
     }
 
     @Test
@@ -461,7 +461,7 @@ class GeneratedImageControllerTest {
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 inFolder(10L, 2L), inFolder(11L, 1L), inFolder(12L, 1L), inFolder(13L, 1L)));
 
-        List<GeneratedImageSummaryResponse> result = controller.list(null, null, 1, 1, 1L, null);
+        List<GeneratedImageSummaryResponse> result = controller.list(null, null, 1, 1, 1L, null, null);
 
         assertEquals(List.of(12L), result.stream().map(GeneratedImageSummaryResponse::id).toList());
     }

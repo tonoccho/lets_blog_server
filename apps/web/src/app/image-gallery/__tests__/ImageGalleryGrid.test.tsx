@@ -187,11 +187,12 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
 
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
     await waitFor(() => expect(screen.queryByAltText('a dog')).not.toBeInTheDocument())
-    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null, null)
 
-    fireEvent.click(screen.getByRole('button', { name: 'すべて' }))
+    // 種別チップ(issue #1647)にも「すべて」があるので、タグ側(種別グループの外)を選ぶ。
+    fireEvent.click(screen.getAllByRole('button', { name: 'すべて' }).find((b) => !b.closest('[role="group"]'))!)
     expect(await screen.findByAltText('a dog')).toBeInTheDocument()
-    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null, null)
   })
 
   it('詳細の取得に失敗したらエラーを表示する', async () => {

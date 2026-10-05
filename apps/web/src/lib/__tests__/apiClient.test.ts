@@ -724,6 +724,23 @@ describe('生成画像フォルダ(issue #1493)', () => {
     expect(new URL(calls()[1][0]).searchParams.has('unfiled')).toBe(false)
   })
 
+  it('listGeneratedImages は source(UPLOAD / AI)を載せ、未指定では載せない(issue #1647)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]))
+
+    await listGeneratedImages(undefined, { source: 'UPLOAD', tag: '猫', limit: 24, offset: 24 })
+    await listGeneratedImages(undefined, { source: 'AI' })
+    await listGeneratedImages(undefined, {})
+
+    // 失敗時の操作ログ送信(/api/operation-logs)が間に挟まるので、一覧の呼び出しだけを取り出す。
+    const listCalls = calls().filter((c) => new URL(c[0]).pathname === '/api/generated-images')
+    const first = new URL(listCalls[0][0]).searchParams
+    expect(first.get('source')).toBe('UPLOAD')
+    expect(first.get('tag')).toBe('猫')
+    expect(first.get('offset')).toBe('24')
+    expect(new URL(listCalls[1][0]).searchParams.get('source')).toBe('AI')
+    expect(new URL(listCalls[2][0]).searchParams.has('source')).toBe(false)
+  })
+
   it('listGeneratedImageFolders は GET /api/generated-images/folders を呼ぶ', async () => {
     const folders = [{ id: 1, name: '風景', parentId: null }]
     fetchMock.mockResolvedValue(jsonResponse(folders))

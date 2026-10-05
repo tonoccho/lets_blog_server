@@ -60,7 +60,7 @@ describe('カード上のタグで絞り込む', () => {
 
     fireEvent.click(cardTag('猫'))
 
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null, null))
     expect(await screen.findByAltText('prompt-99')).toBeInTheDocument()
     expect(screen.queryByAltText('prompt-3')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '猫' })).toHaveClass('bg-neutral-900')
@@ -71,12 +71,12 @@ describe('カード上のタグで絞り込む', () => {
     renderGrid([image(1, ['猫'], 1)])
 
     fireEvent.click(within(screen.getByRole('treeitem', { name: '風景' })).getAllByRole('button', { name: '風景' })[0])
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 1))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 1, null))
     await waitFor(() => expect(screen.getByRole('treeitem', { name: '風景' })).toHaveAttribute('aria-selected', 'true'))
 
     fireEvent.click(cardTag('猫'))
 
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', 1))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', 1, null))
   })
 
   it('タグを押しても詳細モーダルは開かず、選択件数も変わらない', async () => {
@@ -102,7 +102,7 @@ describe('カード上のタグで絞り込む', () => {
     fireEvent.click(cardTag('猫'))
 
     await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
-    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null, null)
     expect(screen.getByRole('button', { name: '猫' })).toHaveClass('bg-neutral-900')
   })
 })

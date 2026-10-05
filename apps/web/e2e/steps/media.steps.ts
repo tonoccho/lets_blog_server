@@ -146,6 +146,105 @@ Then('詳細にseedの値は表示されず、再現不可と分かる表示に�
   await expect(detailValue(page, 'seed')).toContainText('再現不可');
 });
 
+// issue #1647: 種別(アップロード / AI生成)の絞り込み。29件のうち最新と最初に作った画像だけをアップロード画像にし、
+// 最初の1件は初回表示の24件に含まれない位置にある(続きのページにも条件が引き継がれることの確認)。
+const SOURCE_FIXTURE_COUNT = 29;
+
+function sourceProviderOf(index: number): string {
+  if (index === 0 || index === SOURCE_FIXTURE_COUNT - 1) return 'UPLOAD';
+  return index === SOURCE_FIXTURE_COUNT - 2 ? 'CHATGPT' : 'COMFYUI';
+}
+
+Given(
+  /^ギャラリーに固定画像の生成画像を29件作成し、最新と最初に作成した1件だけをアップロード画像にする$/,
+  async ({ ctx, request }) => {
+    await createPagingFixtures(request, ctx, SOURCE_FIXTURE_COUNT, [], undefined, sourceProviderOf);
+  }
+);
+
+Given(
+  /^ギャラリーに固定画像の生成画像を29件作成し、最新・中間・最初に作成した3件にだけタグ「([^」]+)」を付け、最新と最初に作成した1件だけをアップロード画像にする$/,
+  async ({ ctx, request }, tag: string) => {
+    await createPagingFixtures(
+      request,
+      ctx,
+      SOURCE_FIXTURE_COUNT,
+      [0, 14, SOURCE_FIXTURE_COUNT - 1],
+      tag,
+      sourceProviderOf
+    );
+  }
+);
+
+function sourceChip(page: Page, name: string): Locator {
+  return page.getByRole('group', { name: '種別で絞り込み' }).getByRole('button', { name, exact: true });
+}
+
+When(/^種別「(すべて|アップロード|AI生成)」で絞り込む$/, async ({ page }, name: string) => {
+  await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+  const chip = sourceChip(page, name);
+  // SSR 直後はハイドレーション前でクリックが失われるので、選択状態になるまで押し直す。
+  await expect(async () => {
+    await chip.click();
+    await expect(chip).toHaveClass(/bg-neutral-900/, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+/** 絞り込み結果が固定画像の集合 expected と一致するまで待つ(固定画像以外は共有環境の他の画像なので無視する)。 */
+async function expectShownFixtures(page: Page, ctx: Record<string, unknown>, indexes: number[]): Promise<void> {
+  const fixtures = ctx.mediaPagingIds as number[];
+  const expected = indexes.map((i) => fixtures[i]).sort((a, b) => a - b);
+  await expect
+    .poll(
+      async () => (await thumbnailIds(page)).filter((id) => fixtures.includes(id)).sort((a, b) => a - b),
+      { timeout: 30_000 }
+    )
+    .toEqual(expected);
+}
+
+Then('一覧に表示される固定画像はアップロード画像の2件だけである', async ({ ctx, page }) => {
+  await expectShownFixtures(page, ctx, [0, SOURCE_FIXTURE_COUNT - 1]);
+});
+
+Then('一覧に表示される固定画像は中間に作成した1件だけである', async ({ ctx, page }) => {
+  await expectShownFixtures(page, ctx, [14]);
+});
+
+Then('一覧にアップロード画像とAI生成画像の両方の固定画像が表示される', async ({ ctx, page }) => {
+  const fixtures = ctx.mediaPagingIds as number[];
+  const newestUpload = fixtures[SOURCE_FIXTURE_COUNT - 1];
+  const newestAi = fixtures[SOURCE_FIXTURE_COUNT - 2];
+  await expect
+    .poll(async () => {
+      const shown = await thumbnailIds(page);
+      return shown.includes(newestUpload) && shown.includes(newestAi);
+    }, { timeout: 30_000 })
+    .toBe(true);
+});
+
+When('AI生成の固定画像27件がすべて現れるまで一覧の末尾までスクロールする', async ({ ctx, page }) => {
+  const fixtures = ctx.mediaPagingIds as number[];
+  const aiFixtures = fixtures.slice(1, SOURCE_FIXTURE_COUNT - 1);
+  await expect(galleryThumbnails(page).first()).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        const shown = await thumbnailIds(page);
+        return aiFixtures.every((id) => shown.includes(id));
+      },
+      { timeout: 60_000, intervals: [300] }
+    )
+    .toBe(true);
+});
+
+Then('一覧にアップロード画像の固定画像は1件も表示されていない', async ({ ctx, page }) => {
+  const fixtures = ctx.mediaPagingIds as number[];
+  const shown = await thumbnailIds(page);
+  expect(shown).not.toContain(fixtures[0]);
+  expect(shown).not.toContain(fixtures[SOURCE_FIXTURE_COUNT - 1]);
+});
+
 After({ tags: '@media' }, async ({ ctx, request }) => {
   const id = ctx.mediaImageId as number | undefined;
   if (id === undefined) {
@@ -2198,7 +2297,8 @@ async function createPagingFixtures(
   ctx: Record<string, unknown>,
   count: number,
   taggedIndexes: number[],
-  tag?: string
+  tag?: string,
+  providerOf: (index: number) => string = () => 'COMFYUI'
 ): Promise<void> {
   const ids: number[] = [];
   ctx.mediaPagingIds = ids;
@@ -2206,7 +2306,7 @@ async function createPagingFixtures(
   for (let i = 0; i < count; i += 1) {
     const overrides: Record<string, unknown> = {
       prompt: `E2E paging fixture ${suffix}-${i}`,
-      provider: 'COMFYUI',
+      provider: providerOf(i),
       seed: 1_472_000 + i,
     };
     if (tag !== undefined && taggedIndexes.includes(i)) {

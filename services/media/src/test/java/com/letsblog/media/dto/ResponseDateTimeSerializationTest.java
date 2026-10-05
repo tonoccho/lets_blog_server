@@ -133,7 +133,7 @@ class ResponseDateTimeSerializationTest {
         GeneratedImageController controller = imageController(repository);
 
         JsonNode detail = json(controller.get(3L));
-        JsonNode summary = json(controller.list(null, null, null, null, null, null)).get(0);
+        JsonNode summary = json(controller.list(null, null, null, null, null, null, null)).get(0);
 
         assertEquals(CREATED_Z, detail.get("createdAt").asString());
         assertEquals(CREATED_Z, summary.get("createdAt").asString());

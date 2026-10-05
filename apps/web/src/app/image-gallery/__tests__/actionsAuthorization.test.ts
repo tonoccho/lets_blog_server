@@ -121,7 +121,7 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
   it('未ログインは /login へ送り、取得しない', async () => {
     getServerSession.mockResolvedValue(null);
 
-    await expect(fetchGalleryImagesPageAction(24, null, null)).rejects.toThrow('NEXT_REDIRECT:/login');
+    await expect(fetchGalleryImagesPageAction(24, null, null, null)).rejects.toThrow('NEXT_REDIRECT:/login');
     expect(listGeneratedImages).not.toHaveBeenCalled();
   });
 
@@ -129,19 +129,44 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     listGeneratedImages.mockResolvedValue([{ id: 1 }]);
 
-    const result = await fetchGalleryImagesPageAction(48, null, null);
+    const result = await fetchGalleryImagesPageAction(48, null, null, null);
 
     expect(result).toEqual([{ id: 1 }]);
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 48, tag: undefined, folderId: undefined, unfiled: undefined });
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 48, tag: undefined, folderId: undefined, unfiled: undefined, source: undefined });
   });
 
   it('tag があればそのまま渡す', async () => {
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     listGeneratedImages.mockResolvedValue([]);
 
-    await fetchGalleryImagesPageAction(0, '猫', null);
+    await fetchGalleryImagesPageAction(0, '猫', null, null);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: undefined });
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: undefined, source: undefined });
+  });
+});
+
+/** issue #1647: 種別(UPLOAD / AI)は一覧APIの source として渡す。null は絞り込みなし(source を付けない)。 */
+describe('fetchGalleryImagesPageAction の種別絞り込み(issue #1647)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    listGeneratedImages.mockResolvedValue([]);
+  });
+
+  it.each(['UPLOAD', 'AI'] as const)('%s は tag・フォルダと併せて source として渡す', async (source) => {
+    await fetchGalleryImagesPageAction(24, '猫', 5, source);
+
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
+      limit: 24, offset: 24, tag: '猫', folderId: 5, unfiled: undefined, source,
+    });
+  });
+
+  it('null は source を付けない', async () => {
+    await fetchGalleryImagesPageAction(0, null, null, null);
+
+    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
+      limit: 24, offset: 0, tag: undefined, folderId: undefined, unfiled: undefined, source: undefined,
+    });
   });
 });
 
@@ -179,18 +204,18 @@ describe('fetchGalleryImagesPageAction のフォルダ絞り込み(issue #1493)'
   });
 
   it('フォルダidは folderId として渡す', async () => {
-    await fetchGalleryImagesPageAction(0, null, 5);
+    await fetchGalleryImagesPageAction(0, null, 5, null);
 
     expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
-      limit: 24, offset: 0, tag: undefined, folderId: 5, unfiled: undefined,
+      limit: 24, offset: 0, tag: undefined, folderId: 5, unfiled: undefined, source: undefined,
     });
   });
 
   it('"unfiled" は unfiled=true として渡し、folderId は付けない', async () => {
-    await fetchGalleryImagesPageAction(0, '猫', 'unfiled');
+    await fetchGalleryImagesPageAction(0, '猫', 'unfiled', null);
 
     expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
-      limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: true,
+      limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: true, source: undefined,
     });
   });
 });

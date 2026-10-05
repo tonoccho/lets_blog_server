@@ -96,11 +96,13 @@ export async function setGeneratedImageFolderAction(
  * `tag` を渡すとサーバ側で絞り込んだ後の一覧の `offset` 位置から返る。
  * `folder` はフォルダid(そのフォルダと子孫の画像)、`"unfiled"`(どのフォルダにも属さない画像)、
  * null(絞り込みなし)(issue #1493)。タグ絞り込みとは併用できる。
+ * `source` は種別(`"UPLOAD"` アップロード画像 / `"AI"` AI生成画像)、null は絞り込みなし(issue #1647)。
  */
 export async function fetchGalleryImagesPageAction(
   offset: number,
   tag: string | null,
   folder: number | "unfiled" | null,
+  source: "UPLOAD" | "AI" | null,
 ): Promise<GeneratedImageSummary[]> {
   await requireSession();
   return listGeneratedImages(undefined, {
@@ -109,5 +111,6 @@ export async function fetchGalleryImagesPageAction(
     tag: tag ?? undefined,
     folderId: typeof folder === "number" ? folder : undefined,
     unfiled: folder === "unfiled" ? true : undefined,
+    source: source ?? undefined,
   });
 }

@@ -89,7 +89,7 @@ describe('ImageGalleryGrid 無限スクロール(issue #1472)', () => {
     await scrollToEnd()
 
     await waitFor(() => expect(thumbnails()).toHaveLength(GALLERY_PAGE_SIZE + 3))
-    expect(fetchPage).toHaveBeenCalledWith(GALLERY_PAGE_SIZE, null, null)
+    expect(fetchPage).toHaveBeenCalledWith(GALLERY_PAGE_SIZE, null, null, null)
   })
 
   it('返った件数がページサイズ未満ならそれ以上は要求しない', async () => {
@@ -136,7 +136,7 @@ describe('ImageGalleryGrid 無限スクロール(issue #1472)', () => {
 
     await scrollToEnd()
     await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2))
-    expect(fetchPage).toHaveBeenLastCalledWith(GALLERY_PAGE_SIZE * 2, null, null)
+    expect(fetchPage).toHaveBeenLastCalledWith(GALLERY_PAGE_SIZE * 2, null, null, null)
   })
 
   it('読み込みが進むとタグのチップが増える', async () => {
@@ -212,7 +212,7 @@ describe('ImageGalleryGrid サーバ側のタグ絞り込み(issue #1472)', () =
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
 
     await waitFor(() => expect(thumbnails()).toHaveLength(2))
-    expect(fetchPage).toHaveBeenCalledWith(0, '猫', null)
+    expect(fetchPage).toHaveBeenCalledWith(0, '猫', null, null)
     // チップは絞り込み前に読み込み済みの画像から作るので、絞り込み後も選択肢は残る。
     expect(screen.getByRole('button', { name: '猫' })).toBeInTheDocument()
   })
@@ -228,7 +228,7 @@ describe('ImageGalleryGrid サーバ側のタグ絞り込み(issue #1472)', () =
     await scrollToEnd()
 
     await waitFor(() => expect(thumbnails()).toHaveLength(GALLERY_PAGE_SIZE + 1))
-    expect(fetchPage).toHaveBeenLastCalledWith(GALLERY_PAGE_SIZE, '猫', null)
+    expect(fetchPage).toHaveBeenLastCalledWith(GALLERY_PAGE_SIZE, '猫', null, null)
   })
 
   it('絞り込み中にもう一度同じタグを押すか「すべて」を押すと、絞り込みなしで取り直す', async () => {
@@ -240,15 +240,16 @@ describe('ImageGalleryGrid サーバ側のタグ絞り込み(issue #1472)', () =
 
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
     await waitFor(() => expect(thumbnails()).toHaveLength(1))
-    fireEvent.click(screen.getByRole('button', { name: 'すべて' }))
+    // 種別チップ(issue #1647)にも「すべて」があるので、タグ側(種別グループの外)を選ぶ。
+    fireEvent.click(screen.getAllByRole('button', { name: 'すべて' }).find((b) => !b.closest('[role="group"]'))!)
     await waitFor(() => expect(thumbnails()).toHaveLength(GALLERY_PAGE_SIZE))
-    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null, null)
 
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
     await waitFor(() => expect(thumbnails()).toHaveLength(1))
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
     await waitFor(() => expect(thumbnails()).toHaveLength(GALLERY_PAGE_SIZE))
-    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, null, null, null)
   })
 
   it('絞り込んだ結果が0件なら該当なしを示す', async () => {
@@ -313,7 +314,7 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
     await waitFor(() => expect(screen.queryByAltText('prompt-200')).not.toBeInTheDocument())
     await scrollToEnd()
 
-    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith(GALLERY_PAGE_SIZE - 1, null, null))
+    await waitFor(() => expect(fetchPage).toHaveBeenCalledWith(GALLERY_PAGE_SIZE - 1, null, null, null))
   })
 
   it('タグを保存すると一覧の画像のタグとチップに反映する', async () => {

@@ -60,6 +60,9 @@ public class GeneratedImageController {
      */
     static final int MAX_LIMIT = 100;
 
+    /** アップロード画像の{@code provider}値(GeneratedImageUploadServiceと同じ)。種別絞り込みの判定に使う。 */
+    private static final String UPLOAD_PROVIDER = "UPLOAD";
+
     private final GeneratedImageRepository generatedImageRepository;
     private final GeneratedImageStorageService generatedImageStorageService;
     private final ObjectMapper objectMapper;
@@ -95,6 +98,10 @@ public class GeneratedImageController {
      * <p>{@code folderId}指定時は、そのフォルダと子孫フォルダに属する画像だけ、{@code unfiled=true}指定時は
      * どのフォルダにも属さない画像だけに絞り込む(issue #1493)。同時指定は400。タグ絞り込み・ページング・
      * projectIdと併用でき、画像の認可は変わらない(絞り込みは認可の範囲内の画像をさらに狭めるだけ)。
+     *
+     * <p>{@code source}は種別での絞り込み(issue #1647)。{@code UPLOAD}は{@code provider='UPLOAD'}の画像、
+     * {@code AI}はそれ以外(ComfyUI・ChatGPT)。省略時は絞り込まない。それ以外の値は400。他の条件とANDで効き、
+     * 絞り込んだ後にページングする。
      */
     @GetMapping("/api/generated-images")
     public List<GeneratedImageSummaryResponse> list(
@@ -103,7 +110,8 @@ public class GeneratedImageController {
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) Integer offset,
             @RequestParam(required = false) Long folderId,
-            @RequestParam(required = false) Boolean unfiled) {
+            @RequestParam(required = false) Boolean unfiled,
+            @RequestParam(required = false) String source) {
         // projectId 指定時はそのプロジェクトのメンバーに限定する(issue #830)。
         // 未指定は「全プロジェクトの生成画像を返す」なので admin に限定する。本来は
         // 「操作者が所属するプロジェクトの分だけ」返すべきだが、所属プロジェクトの一覧を
@@ -115,6 +123,7 @@ public class GeneratedImageController {
             adminAuthorizationService.requireAdmin();
         }
         validatePaging(limit, offset);
+        Boolean uploadOnly = parseSource(source);
         boolean unfiledOnly = Boolean.TRUE.equals(unfiled);
         if (folderId != null && unfiledOnly) {
             throw new InvalidFilterParameterException("folderIdとunfiledは同時に指定できません");
@@ -124,12 +133,14 @@ public class GeneratedImageController {
         // tagはtags_json(TEXT列)の中身なのでDBでは絞れない。フォルダ絞り込みも、子孫を解決した
         // idの集合でここで絞る。tag・フォルダ絞り込み無しでlimit指定のときだけDBで切り、
         // それ以外は全行を読んで絞り込んだ後にメモリ上で切る(絞り込み → ページングの順を守る)。
-        boolean pagedInDatabase = tag == null && folderIds == null && !unfiledOnly && limit != null;
+        boolean pagedInDatabase = tag == null && folderIds == null && !unfiledOnly && uploadOnly == null
+                && limit != null;
         List<GeneratedImage> images = findImages(projectId, pagedInDatabase ? new OffsetLimitPageable(skip, limit) : null);
         var summaries = images.stream()
                 .filter(image -> folderIds == null
                         || (image.getFolderId() != null && folderIds.contains(image.getFolderId())))
                 .filter(image -> !unfiledOnly || image.getFolderId() == null)
+                .filter(image -> uploadOnly == null || UPLOAD_PROVIDER.equals(image.getProvider()) == uploadOnly)
                 .map(image -> new GeneratedImageSummaryResponse(
                         image.getId(), image.getProjectId(), image.getPrompt(),
                         image.getCheckpoint(), UtcDateTimes.toInstant(image.getCreatedAt()), parseTags(image.getTagsJson()),
@@ -142,6 +153,18 @@ public class GeneratedImageController {
             }
         }
         return summaries.toList();
+    }
+
+    /** {@code source}を「アップロードのみ(true)/AIのみ(false)/絞り込まない(null)」へ解く。不正値は400(issue #1647)。 */
+    private static Boolean parseSource(String source) {
+        if (source == null) {
+            return null;
+        }
+        return switch (source) {
+            case "UPLOAD" -> Boolean.TRUE;
+            case "AI" -> Boolean.FALSE;
+            default -> throw new InvalidFilterParameterException("sourceはUPLOADまたはAIで指定してください");
+        };
     }
 
     private List<GeneratedImage> findImages(Long projectId, OffsetLimitPageable pageable) {

@@ -39,6 +39,14 @@ function errorMessage(err: unknown): string {
 
 /** フォルダでの絞り込み。フォルダid(そのフォルダと子孫)、"unfiled"(未分類)、null(絞り込みなし)(issue #1493)。 */
 type FolderFilter = number | "unfiled" | null;
+/** 種別の絞り込み(issue #1647)。UPLOAD はアップロード画像、AI は ComfyUI / ChatGPT の画像、null は絞り込みなし。 */
+type SourceFilter = "UPLOAD" | "AI" | null;
+
+const SOURCE_CHIPS: { label: string; value: SourceFilter }[] = [
+  { label: "すべて", value: null },
+  { label: "アップロード", value: "UPLOAD" },
+  { label: "AI生成", value: "AI" },
+];
 
 /** 親idごとの子フォルダ(作成順)。ツリー表示と選択肢の元になる。 */
 function groupByParent(folders: GeneratedImageFolder[]): Map<number | null, GeneratedImageFolder[]> {
@@ -112,6 +120,8 @@ export function ImageGalleryGrid({
   const [activeTag, setActiveTag] = useState<string | null>(null);
   /** フォルダで絞り込むフィルタ(issue #1493)。タグ絞り込みと併用できる。 */
   const [activeFolder, setActiveFolder] = useState<FolderFilter>(null);
+  /** 種別で絞り込むフィルタ(issue #1647)。タグ・フォルダと併用できる。 */
+  const [activeSource, setActiveSource] = useState<SourceFilter>(null);
   const [folders, setFolders] = useState<GeneratedImageFolder[]>(initialFolders);
   /** 折りたたんだフォルダのid。既定はすべて展開。 */
   const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set());
@@ -148,15 +158,16 @@ export function ImageGalleryGrid({
     const seq = ++requestSeq.current;
     const tag = activeTag;
     const folder = activeFolder;
+    const source = activeSource;
     loadingRef.current = true;
     setLoading(true);
     setLoadError(null);
-    fetchGalleryImagesPageAction(fetchedCount, tag, folder).then(
+    fetchGalleryImagesPageAction(fetchedCount, tag, folder, source).then(
       (next) => {
         if (seq !== requestSeq.current) return;
         loadingRef.current = false;
         setItems((current) => appendUnique(current, next));
-        if (tag === null && folder === null) setKnownImages((current) => appendUnique(current, next));
+        if (tag === null && folder === null && source === null) setKnownImages((current) => appendUnique(current, next));
         setFetchedCount((count) => count + next.length);
         setHasMore(next.length >= GALLERY_PAGE_SIZE);
         setLoading(false);
@@ -171,24 +182,25 @@ export function ImageGalleryGrid({
   }
 
   /**
-   * タグ(nullは「すべて」)とフォルダの絞り込みを選び直し、offset=0 から取り直す。
+   * タグ(nullは「すべて」)・フォルダ・種別の絞り込みを選び直し、offset=0 から取り直す。
    * 失敗したときは読み込み済みの一覧と現在の絞り込みを残す。
    */
-  function applyFilter(tag: string | null, folder: FolderFilter) {
+  function applyFilter(tag: string | null, folder: FolderFilter, source: SourceFilter) {
     const seq = ++requestSeq.current;
     loadingRef.current = true;
     setLoading(true);
     setLoadError(null);
-    fetchGalleryImagesPageAction(0, tag, folder).then(
+    fetchGalleryImagesPageAction(0, tag, folder, source).then(
       (first) => {
         if (seq !== requestSeq.current) return;
         loadingRef.current = false;
         setActiveTag(tag);
         setActiveFolder(folder);
+        setActiveSource(source);
         setCheckedIds(new Set());
         anchorId.current = null;
         setItems(first);
-        if (tag === null && folder === null) setKnownImages(first);
+        if (tag === null && folder === null && source === null) setKnownImages(first);
         setFetchedCount(first.length);
         setHasMore(first.length >= GALLERY_PAGE_SIZE);
         setLoading(false);
@@ -199,7 +211,7 @@ export function ImageGalleryGrid({
         setLoadError({
           label: "絞り込みを読み込めませんでした",
           message: errorMessage(err),
-          retry: () => applyFilter(tag, folder),
+          retry: () => applyFilter(tag, folder, source),
         });
         setLoading(false);
       },
@@ -207,11 +219,15 @@ export function ImageGalleryGrid({
   }
 
   function selectTag(tag: string | null) {
-    applyFilter(tag, activeFolder);
+    applyFilter(tag, activeFolder, activeSource);
   }
 
   function selectFolder(folder: FolderFilter) {
-    applyFilter(activeTag, folder);
+    applyFilter(activeTag, folder, activeSource);
+  }
+
+  function selectSource(source: SourceFilter) {
+    applyFilter(activeTag, activeFolder, source);
   }
 
   function toggleCollapsed(id: number) {
@@ -252,7 +268,7 @@ export function ImageGalleryGrid({
           list.map((image) => (image.id === imageId ? { ...image, folderId: result.folderId } : image));
         setItems(apply);
         setKnownImages(apply);
-        if (activeFolder !== null) applyFilter(activeTag, activeFolder);
+        if (activeFolder !== null) applyFilter(activeTag, activeFolder, activeSource);
       } catch (err) {
         setError(errorMessage(err));
       }
@@ -569,6 +585,24 @@ export function ImageGalleryGrid({
         )}
       </div>
 
+      <div role="group" aria-label="種別で絞り込み" className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-neutral-500 dark:text-neutral-400">種別で絞り込み:</span>
+        {SOURCE_CHIPS.map((chip) => (
+          <button
+            key={chip.label}
+            type="button"
+            onClick={() => selectSource(chip.value)}
+            className={`rounded-full px-2.5 py-1 ${
+              activeSource === chip.value
+                ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
+            }`}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
       {allTags.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-neutral-500 dark:text-neutral-400">タグで絞り込み:</span>
@@ -674,7 +708,7 @@ export function ImageGalleryGrid({
                           onClick={(e) => {
                             // カード本体のクリック(選択の切り替え)に伝えない。issue #1616
                             e.stopPropagation();
-                            applyFilter(tag, activeFolder);
+                            applyFilter(tag, activeFolder, activeSource);
                           }}
                           className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700"
                         >

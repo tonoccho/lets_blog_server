@@ -520,7 +520,14 @@ export function listGenerationJobs(): Promise<GenerationJob[]> {
  */
 export function listGeneratedImages(
   projectId?: number,
-  options: { limit?: number; offset?: number; tag?: string; folderId?: number; unfiled?: boolean } = {},
+  options: {
+    limit?: number;
+    offset?: number;
+    tag?: string;
+    folderId?: number;
+    unfiled?: boolean;
+    source?: 'UPLOAD' | 'AI';
+  } = {},
 ): Promise<GeneratedImageSummary[]> {
   const params = new URLSearchParams();
   if (projectId) params.set('projectId', String(projectId));
@@ -528,6 +535,8 @@ export function listGeneratedImages(
   // フォルダ(子孫を含む)と未分類の絞り込み(issue #1493)。同時指定はサーバが400で拒否する。
   if (options.folderId !== undefined) params.set('folderId', String(options.folderId));
   if (options.unfiled) params.set('unfiled', 'true');
+  // 種別(アップロード / AI生成)の絞り込み(issue #1647)。不正値はサーバが400で拒否する。
+  if (options.source !== undefined) params.set('source', options.source);
   if (options.limit !== undefined) params.set('limit', String(options.limit));
   if (options.offset !== undefined) params.set('offset', String(options.offset));
   const query = params.toString();

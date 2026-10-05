@@ -147,7 +147,7 @@ describe('フォルダでの絞り込み', () => {
     chooseFolder('風景')
 
     await waitFor(() => expect(screen.queryByAltText('prompt-1')).not.toBeInTheDocument())
-    expect(fetchPage).toHaveBeenLastCalledWith(0, null, 1)
+    expect(fetchPage).toHaveBeenLastCalledWith(0, null, 1, null)
     expect(screen.getByAltText('prompt-2')).toBeInTheDocument()
     expect(treeItem('風景')).toHaveAttribute('aria-selected', 'true')
     expect(treeItem('すべて')).toHaveAttribute('aria-selected', 'false')
@@ -158,11 +158,11 @@ describe('フォルダでの絞り込み', () => {
     renderGrid()
 
     chooseFolder('未分類')
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 'unfiled'))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 'unfiled', null))
     await waitFor(() => expect(treeItem('未分類')).toHaveAttribute('aria-selected', 'true'))
 
     chooseFolder('すべて')
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, null))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, null, null))
     await waitFor(() => expect(treeItem('すべて')).toHaveAttribute('aria-selected', 'true'))
   })
 
@@ -171,10 +171,10 @@ describe('フォルダでの絞り込み', () => {
     renderGrid([image(1, 1, ['猫'])])
 
     fireEvent.click(screen.getByRole('button', { name: '猫' }))
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', null, null))
 
     chooseFolder('風景')
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', 1))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, '猫', 1, null))
     await waitFor(() => expect(treeItem('風景')).toHaveAttribute('aria-selected', 'true'))
   })
 
@@ -188,7 +188,7 @@ describe('フォルダでの絞り込み', () => {
     await waitFor(() => expect(treeItem('風景')).toHaveAttribute('aria-selected', 'true'))
     await scrollToEnd()
 
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(GALLERY_PAGE_SIZE, null, 1))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(GALLERY_PAGE_SIZE, null, 1, null))
   })
 
   it('絞り込みの取得に失敗したら、読み込み済みの一覧と選択を残して通知する', async () => {
@@ -320,7 +320,7 @@ describe('詳細モーダルからの所属変更', () => {
 
     fireEvent.change(select, { target: { value: '3' } })
 
-    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 1))
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 1, null))
     await waitFor(() => expect(screen.queryByAltText('prompt-1')).not.toBeInTheDocument())
   })
 
