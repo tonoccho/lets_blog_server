@@ -1,5 +1,5 @@
 # language: ja
-@publishing @api @slow @mode:serial
+@publishing @api @slow @mode:serial @site-isolation:preview
 機能: 廃止した旧プレビュー経路(テーマCSS取得・骨組み差し込み・一時投稿)が存在しない
 
   letsblog プラグインを必須にしたため、プラグインのないサイト向けだった旧プレビュー経路を削除した

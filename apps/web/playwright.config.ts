@@ -90,7 +90,7 @@ const atMain = defineBddProject({
   tags:
     'not @stage:setup and not @stage:provision and not @destructive'
     + ' and not @stub-isolation:llm and not @account-isolation:timezone'
-    + ' and not @stub-isolation:analytics'
+    + ' and not @stub-isolation:analytics and not @site-isolation:preview'
     + excludeRequiresGpu,
 });
 
@@ -298,6 +298,23 @@ const atAnalyticsExclusive = defineBddProject({
   name: 'at-analytics-exclusive',
   outputDir: '.features-gen/at-analytics-exclusive',
   tags: '@stub-isolation:analytics' + excludeRequiresGpu,
+});
+
+/**
+ * issue #1632: プレビュー検証用の共有サイト(siteKey `at65previewprobe`)を
+ * プロジェクトのテスト環境へ紐づける全ファイルの専用レーン。
+ *
+ * `publishing/preview.feature` と `publishing/preview-signed-url.feature` は背景で同じサイトを
+ * シナリオごとの別プロジェクトへ紐づける。サイトは同時に1プロジェクトにしか紐づけられないため、
+ * `@mode:serial`(同一ファイル内だけ直列化)では別ファイルの背景と並列になり、紐付けが
+ * 409(既に別プロジェクトに紐付けられています)で落ちる。`workers: 1` の専用プロジェクトへ
+ * 集めて直列化する(`at-timezone-exclusive` と同型)。
+ */
+const atPreviewExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-preview-exclusive',
+  outputDir: '.features-gen/at-preview-exclusive',
+  tags: '@site-isolation:preview' + excludeRequiresGpu,
 });
 
 /**
@@ -518,12 +535,19 @@ export default defineConfig({
       workers: 1,
     },
     {
+      // at-main とは並列に走る。共有サイトに触れるため、at-destructive はこれの完了も待つ(issue #1632)。
+      ...atPreviewExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-provision'],
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
       // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive /
       // at-timezone-exclusive / at-analytics-exclusive も共有状態に触れるため、at-main と
       // 同様に完了を待ってから始める(issue #1188、issue #1374、issue #1372)。
-      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive'],
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive'],
       // この段階の**内部**も直列化する(issue #1387)。dependencies は他プロジェクトの
       // 完了しか担保せず、24シナリオ同士は既定の並列度でそのまま走っていた。それぞれが
       // 別のサービスを止めるため互いの停止に巻き込まれ、2026-09-23 のリリース検証で

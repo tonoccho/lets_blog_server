@@ -1,5 +1,5 @@
 # language: ja
-@publishing @api @slow @mode:serial
+@publishing @api @slow @mode:serial @site-isolation:preview
 機能: 投稿を作らずに実テーマで表示する署名付きプレビュー URL
 
   letsblog プラグインを導入したサイトに、タイトル・本文 HTML・カテゴリ・タグ・アイキャッチを wp-cli で渡すと、
