@@ -104,6 +104,8 @@ export function ImageGalleryGrid({
   const [newTag, setNewTag] = useState("");
   /** 一括削除のために選んだ画像のid(issue #1492)。表示中の画像だけが対象。 */
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+  // Shift+クリックの範囲選択の起点。最後に Shift なしで選択を切り替えた画像(issue #1615)。
+  const anchorId = useRef<number | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ type: "success" | "error"; text: string } | null>(null);
   /** タグ一覧を絞り込むフィルタ(issue #281)。nullは絞り込みなし。 */
@@ -184,6 +186,7 @@ export function ImageGalleryGrid({
         setActiveTag(tag);
         setActiveFolder(folder);
         setCheckedIds(new Set());
+        anchorId.current = null;
         setItems(first);
         if (tag === null && folder === null) setKnownImages(first);
         setFetchedCount(first.length);
@@ -375,6 +378,34 @@ export function ImageGalleryGrid({
       else next.add(id);
       return next;
     });
+  }
+
+  /**
+   * 画像のクリックによる選択。Shift が押されていて起点が表示中にあれば、起点から表示順に範囲を起点の状態へ揃える。
+   * それ以外は 1 枚を切り替えて起点にする。起点が一覧から消えていれば起点なしとして扱う。
+   */
+  function handleSelectClick(id: number, shiftKey: boolean) {
+    const anchorIndex = items.findIndex((image) => image.id === anchorId.current);
+    if (shiftKey && anchorIndex >= 0) {
+      const targetIndex = items.findIndex((image) => image.id === id);
+      const select = checkedIds.has(items[anchorIndex].id);
+      const rangeIds = items
+        .slice(Math.min(anchorIndex, targetIndex), Math.max(anchorIndex, targetIndex) + 1)
+        .map((image) => image.id);
+      setCheckedIds((current) => {
+        const next = new Set(current);
+        rangeIds.forEach((rangeId) => (select ? next.add(rangeId) : next.delete(rangeId)));
+        return next;
+      });
+      return;
+    }
+    anchorId.current = id;
+    toggleChecked(id);
+  }
+
+  /** Shift+クリックでブラウザの文字選択が始まらないようにする。 */
+  function preventShiftTextSelection(e: React.MouseEvent) {
+    if (e.shiftKey) e.preventDefault();
   }
 
   /** 表示中の画像がすべて選択済みなら全て外し、そうでなければ表示中の全画像を選ぶ。 */
@@ -604,7 +635,9 @@ export function ImageGalleryGrid({
                 type="checkbox"
                 aria-label={`${imageLabel(image.prompt)}を選択`}
                 checked={checkedIds.has(image.id)}
-                onChange={() => toggleChecked(image.id)}
+                onChange={() => {}}
+                onClick={(e) => handleSelectClick(image.id, e.shiftKey)}
+                onMouseDown={preventShiftTextSelection}
                 className="absolute left-2 top-2 z-10 h-5 w-5"
               />
               <button
@@ -618,9 +651,10 @@ export function ImageGalleryGrid({
                   <path d="M12.5 12.5L18 18" strokeLinecap="round" />
                 </svg>
               </button>
-              {/* カード本体のクリックは選択の切り替え。チェックボックスと同じ toggleChecked を通す(issue #1614)。 */}
+              {/* カード本体のクリックは選択の切り替え。チェックボックスと同じ handleSelectClick を通す(issue #1614)。 */}
               <div
-                onClick={() => toggleChecked(image.id)}
+                onClick={(e) => handleSelectClick(image.id, e.shiftKey)}
+                onMouseDown={preventShiftTextSelection}
                 className="group w-full cursor-pointer overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-left"
               >
                 <img
