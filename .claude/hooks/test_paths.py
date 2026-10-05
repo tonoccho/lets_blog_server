@@ -163,6 +163,7 @@ class NeutralClassification(unittest.TestCase):
         "build.gradle",
         "services/identity/build.gradle",
         "settings.gradle",
+        "gradle.properties",
         "gradle/wrapper/gradle-wrapper.properties",
         "gradlew",
         # 型・lint 設定。

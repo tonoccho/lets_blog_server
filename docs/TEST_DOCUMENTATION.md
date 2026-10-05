@@ -587,6 +587,60 @@ kill -9 <PID>
 - セキュリティ検証: 100%
 - パフォーマンス測定: 重要パス対象
 
+## Gradle のメモリ予算(#1633)
+
+無人パイプラインのユニットは `MemoryHigh=4G` / `MemoryMax=6G`。Gradle(デーモン + テスト JVM)は 4G の枠に収める。
+上限は `gradle.properties`(デーモン・並列度)とルート `build.gradle` の `subprojects`(Test タスク)で決まる。
+`org.gradle.jvmargs` を書くと既定値は引き継がれないため、必要な値はすべて明示している。
+
+### 実測
+
+測定コマンド(全 11 モジュール。`cleanTest` を足すのは、足さないと Gradle が前回結果を再利用して実行されないため):
+
+```bash
+./gradlew --stop
+systemd-run --user --wait --collect --pipe -p MemoryMax=4G -p MemorySwapMax=0 \
+  --working-directory="$PWD" --setenv=PATH="$PATH" \
+  ./gradlew --no-daemon cleanTest test jacocoTestReport
+```
+
+| | Memory peak | 所要時間 | tests / failures / errors / skipped | oom-kill |
+|---|---|---|---|---|
+| 変更前(2026-10-05, 既定値) | 1.7G | 7m32s | 4588 / 0 / 0 / 2 | なし |
+| 変更後 | 1.6G | 7m56s | 4588 / 0 / 0 / 2 | なし |
+
+件数は `**/build/test-results/test/*.xml` の合計。`OutOfMemoryError` はログに出ていない。
+ピークが 1.6G と 4G の約 4 割なのは、`org.gradle.parallel=false` と `maxParallelForks=1` で同時に動くテスト JVM が 1 つだけだから。
+変更前の ps で見た 2026-10-05 の OOM(java の anon-rss 約 1.39GiB)は、ホスト全体のメモリ逼迫(lbs-* コンテナと GitLab で約 25GiB、swap 枯渇)の中で起きた。Gradle 単体の使用量はこの枠に十分収まる。
+
+### 上限値と根拠
+
+| 設定 | 値 | 根拠 |
+|---|---|---|
+| デーモン `-Xms/-Xmx` | 256m / 512m | Gradle 9.7.0 の既定と同じ。ビルドスクリプトの評価だけで足りる |
+| デーモン `MaxMetaspaceSize` | 384m | 既定と同じ |
+| `ReservedCodeCacheSize` / `MaxDirectMemorySize` | 128m / 128m | 既定では上限が実質無い領域。ヒープ外の常駐を有界にする |
+| テスト JVM `maxHeapSize` | 512m | 既定と同じ。`@SpringBootTest` 61 件のコンテキストキャッシュで足りている |
+| テスト JVM `MaxMetaspaceSize` | 256m | 既定は無制限だった。実測の失敗なしで収まる値 |
+| `org.gradle.parallel` / `maxParallelForks` | false / 1 | 既定どおり。意図を残すために明示 |
+| `org.gradle.workers.max` | 4 | 既定は CPU コア数(8)。意図して絞った上限。`parallel=false` では同時に動くテスト JVM は 1 つなので、1.6G の実測には効いておらず、将来 parallel を有効にしたときの歯止め |
+| `org.gradle.daemon.idletimeout` | 15 分 | 既定は 3 時間。pipeline のデーモンが次の Issue の間も枠を消費し続けるのを避ける |
+
+### 6G 枠の内訳(目安)
+
+| 項目 | 最大 |
+|---|---|
+| Gradle デーモン(ヒープ 512m + Metaspace 384m + コードキャッシュ 128m + ダイレクト 128m + スタック等) | 約 1.4G |
+| テスト JVM 1 つ(同 512m + 256m + 128m + 128m + JaCoCo エージェント等) | 約 1.2G |
+| claude 本体 | 約 0.4G |
+| jest・Playwright など他ツール | 残り(約 3G) |
+
+### 確認方法
+
+`./gradlew --stop` の後に `./gradlew :services:identity:test` を実行し、`ps -eo args` でデーモンの `-Xmx512m -XX:MaxMetaspaceSize=384m` と
+`Gradle Test Executor` の `-Xmx512m -XX:MaxMetaspaceSize=256m` を確認できる。
+Dockerfile は `gradle.properties` を COPY せず、イメージ内では `bootJar` と `copyRuntimeLibs`(`--no-daemon`)しか動かないため影響しない。
+
 ## 今後の改善
 
 1. **自動スクリーンショット**: CI/CD でテスト失敗時のスクリーンショットを自動収集

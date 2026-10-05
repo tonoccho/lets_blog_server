@@ -128,7 +128,7 @@ PRODUCTION_PATTERNS = [
 #       `.gitlab/` は Issue / MR テンプレートの置き場、`.gitlab-ci.yml` はパイプライン定義
 #       (#1022)。`.github/` は #1027 で削除した。宣言も併せて外してある —
 #       残しておくと、再び置かれたときに「意図して中立にした」ものとして黙って通る。
-#   package.json / package-lock.json / build.gradle / settings.gradle / gradle*
+#   package.json / package-lock.json / build.gradle / settings.gradle / gradle.properties / gradle/ / gradlew
 #       依存マニフェストとビルド定義。テストとプロダクションの両方が同じファイルを共有するため、
 #       プロダクション扱いにすると「テスト専用の依存を足すテストフェーズのコミット」が
 #       フェーズ分離違反になり、通常の作業が成立しなくなる。加えて Dependabot による
@@ -192,6 +192,7 @@ NEUTRAL_PATTERNS = [
     r"(^|/)LICENSE$",
     r"(^|/)build\.gradle$",
     r"^settings\.gradle$",
+    r"^gradle\.properties$",
     r"^gradle/",
     r"^gradlew(\.bat)?$",
     r"(^|/)package(-lock)?\.json$",

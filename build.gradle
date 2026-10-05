@@ -28,6 +28,11 @@ subprojects {
         tasks.withType(Test).configureEach {
             environment 'TZ', 'UTC'
             systemProperty 'user.timezone', 'UTC'
+            // #1633: テストJVMの総メモリを固定する。ヒープ以外(Metaspace・コードキャッシュ・
+            // ダイレクトメモリ)は既定だと無制限で、ヒープ上限(512m)を大きく超えて常駐する。
+            maxHeapSize = '512m'
+            maxParallelForks = 1
+            jvmArgs '-XX:MaxMetaspaceSize=256m', '-XX:ReservedCodeCacheSize=128m', '-XX:MaxDirectMemorySize=128m'
         }
     }
 
