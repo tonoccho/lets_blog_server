@@ -1041,8 +1041,9 @@ export type SignedPreviewUrlResult =
   | { kind: 'ready'; url: string; expiresAt: number }
   | { kind: 'pluginUnavailable'; message: string; needsUpdate: boolean };
 
-/** プラグインが使えないときにサーバーが409の本文へ載せる文言に含まれる目印。 */
-const PLUGIN_UNAVAILABLE_MARKER = 'letsblog プラグイン';
+/** プラグインが使えないときにサーバーが409の`details.code`へ載せるコード(issue #1619)。文言には依存しない。 */
+const PLUGIN_NOT_INSTALLED_CODE = 'LETSBLOG_PLUGIN_NOT_INSTALLED';
+const PLUGIN_NEEDS_UPDATE_CODE = 'LETSBLOG_PLUGIN_NEEDS_UPDATE';
 
 /**
  * 投稿を作らずに実サイトのテーマで表示する署名付きプレビューURLを発行する(issue #1561)。
@@ -1067,23 +1068,38 @@ export async function createSignedPreviewUrl(
     );
     return { kind: 'ready', url: signed.url, expiresAt: signed.expiresAt };
   } catch (err) {
-    if (err instanceof ApiError && err.status === 409 && err.responseBody.includes(PLUGIN_UNAVAILABLE_MARKER)) {
-      return {
-        kind: 'pluginUnavailable',
-        message: pluginUnavailableMessage(err.responseBody),
-        needsUpdate: err.responseBody.includes('要更新'),
-      };
+    if (err instanceof ApiError && err.status === 409) {
+      const code = pluginUnavailableCode(err.responseBody);
+      if (code === PLUGIN_NOT_INSTALLED_CODE || code === PLUGIN_NEEDS_UPDATE_CODE) {
+        return {
+          kind: 'pluginUnavailable',
+          message: pluginUnavailableMessage(err.responseBody),
+          needsUpdate: code === PLUGIN_NEEDS_UPDATE_CODE,
+        };
+      }
     }
     throw err;
   }
 }
 
-/** 409の本文(JSONの`message`)から文言を取り出す。JSONでなければ本文をそのまま使う。 */
+/** 409の本文(JSON)の`details.code`を取り出す。JSONでない・codeが無い本文はundefined。 */
+function pluginUnavailableCode(body: string): string | undefined {
+  try {
+    const details = (JSON.parse(body) as { details?: { code?: unknown } } | null)?.details;
+    return typeof details?.code === 'string' ? details.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 409の本文(JSONの`error`/`message`)から文言を取り出す。JSONでなければ本文をそのまま使う。 */
 function pluginUnavailableMessage(body: string): string {
   try {
-    const parsed: unknown = JSON.parse(body);
-    if (parsed && typeof parsed === 'object' && typeof (parsed as { message?: unknown }).message === 'string') {
-      return (parsed as { message: string }).message;
+    const parsed = JSON.parse(body) as { message?: unknown; error?: unknown } | null;
+    // サーバーの共通エラー形状は`error`。`message`も従来どおり受け付ける。
+    const text = parsed?.message ?? parsed?.error;
+    if (typeof text === 'string') {
+      return text;
     }
   } catch {
     // JSONでない本文はそのまま使う。

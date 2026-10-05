@@ -73,35 +73,51 @@ describe('createSignedPreviewUrl', () => {
     expect(second).toMatchObject({ kind: 'ready', url: 'https://blog.example.com/?t=2' });
   });
 
-  it('プラグインが使えないサイト(409)では例外にせず、案内用の結果を返す', async () => {
-    respondWith(
-      { message: 'このサイトでは letsblog プラグインが使えない(未導入)ため、投稿とプレビューはできません。' },
-      409
-    );
+  const unavailableBody = (code: string, error: string): unknown => ({ error, details: { code } });
+
+  it('未導入のコードの409は例外にせず、案内用の結果を返す(文言には依存しない)', async () => {
+    respondWith(unavailableBody('LETSBLOG_PLUGIN_NOT_INSTALLED', '全く別の文言'), 409);
 
     const result = await apiClient.createSignedPreviewUrl('token', undefined, 7, input);
 
-    expect(result.kind).toBe('pluginUnavailable');
-    expect(result).toMatchObject({ message: expect.stringContaining('未導入') });
+    expect(result).toMatchObject({ kind: 'pluginUnavailable', needsUpdate: false, message: '全く別の文言' });
   });
 
-  it('要更新の409は要更新の案内になる', async () => {
-    respondWith({ message: 'このサイトでは letsblog プラグインが使えない(要更新)ため' }, 409);
+  it('要更新のコードの409は、文言に関係なく要更新の案内になる', async () => {
+    respondWith(unavailableBody('LETSBLOG_PLUGIN_NEEDS_UPDATE', 'foo'), 409);
 
     const result = await apiClient.createSignedPreviewUrl('token', undefined, 7, input);
 
     expect(result).toMatchObject({ kind: 'pluginUnavailable', needsUpdate: true });
   });
 
-  it('409の本文にmessageが無ければ、本文をそのまま案内の文言にする', async () => {
-    respondWith({ detail: 'letsblog プラグインが未導入です' }, 409);
+  it('コードが無ければ、旧文言を含む409でもプラグイン案内にしない', async () => {
+    respondWith({ message: 'このサイトでは letsblog プラグインが使えない(要更新)ため' }, 409);
 
-    const result = await apiClient.createSignedPreviewUrl('token', undefined, 7, input);
+    await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
+  });
 
-    expect(result).toMatchObject({
-      kind: 'pluginUnavailable',
-      message: JSON.stringify({ detail: 'letsblog プラグインが未導入です' }),
-    });
+  it('本文がJSONでない409はApiErrorで失敗する', async () => {
+    mockedRequest.mockImplementation(async () => ({
+      status: 409,
+      ok: false,
+      statusText: 'ERR',
+      header: () => undefined,
+      text: async () => 'letsblog プラグイン 要更新',
+      json: async () => ({}),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+
+    await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('detailsがあってもcodeが無い・別コードの409はApiErrorで失敗する', async () => {
+    respondWith({ error: 'x', details: {} }, 409);
+    await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
+    respondWith({ error: 'x', details: { code: 'OTHER' } }, 409);
+    await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
+    respondWith(null, 409);
+    await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
   });
 
   it('プラグインと無関係な409はそのままApiErrorで失敗する', async () => {

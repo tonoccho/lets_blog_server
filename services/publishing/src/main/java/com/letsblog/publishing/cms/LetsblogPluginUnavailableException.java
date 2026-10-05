@@ -7,6 +7,9 @@ package com.letsblog.publishing.cms;
  */
 public class LetsblogPluginUnavailableException extends IllegalStateException {
 
+    public static final String CODE_NOT_INSTALLED = "LETSBLOG_PLUGIN_NOT_INSTALLED";
+    public static final String CODE_NEEDS_UPDATE = "LETSBLOG_PLUGIN_NEEDS_UPDATE";
+
     private final LetsblogPluginStatus status;
 
     public LetsblogPluginUnavailableException(LetsblogPluginStatus status) {
@@ -17,6 +20,12 @@ public class LetsblogPluginUnavailableException extends IllegalStateException {
 
     public LetsblogPluginStatus getStatus() {
         return status;
+    }
+
+    /** 409の応答に載せる機械可読なコード(issue #1619)。クライアントは文言でなくこれで判定する。 */
+    public String getCode() {
+        return status.state() == LetsblogPluginStatus.State.NEEDS_UPDATE
+                ? CODE_NEEDS_UPDATE : CODE_NOT_INSTALLED;
     }
 
     private static String label(LetsblogPluginStatus status) {

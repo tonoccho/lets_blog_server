@@ -2,6 +2,7 @@ package com.letsblog.publishing.config;
 
 import com.letsblog.common.web.ErrorResponse;
 import com.letsblog.publishing.cms.CmsApiException;
+import com.letsblog.publishing.cms.LetsblogPluginUnavailableException;
 import com.letsblog.publishing.cms.agent.AgentOperationException;
 import com.letsblog.publishing.cms.agent.PostNotFoundException;
 import com.letsblog.publishing.cms.ssh.SshOperationException;
@@ -79,6 +80,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException e) {
         log.warn("multipartアップロードのサイズ上限を超えました: {}", e.getMessage());
         return payloadTooLarge();
+    }
+
+    /**
+     * letsblogプラグインが使えないサイト(issue #1557)。従来どおり409だが、未導入/要更新を
+     * {@code details.code}で返す(issue #1619)。{@link IllegalStateException}より具体的なので優先される。
+     */
+    @ExceptionHandler(LetsblogPluginUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handlePluginUnavailable(LetsblogPluginUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(e.getMessage(), Map.of("code", e.getCode())));
     }
 
     /**
