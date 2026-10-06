@@ -24,6 +24,10 @@ jest.mock('next-auth/jwt', () => ({ getToken: (...args: unknown[]) => getTokenMo
 import {
   getGeneratedImage,
   startProjectImageJob,
+  startCustomTagGenerationJob,
+  startStaticContentGenerationJob,
+  startTagDesignGenerationJob,
+  saveStaticContent,
   getSiteAdminPath,
   listGeneratedImages,
   listGeneratedImageFolders,
@@ -639,6 +643,59 @@ describe('startProjectImageJob (issue #1408)', () => {
     expect(url).not.toMatch(/\/api\/ai\/image(\?|$)/)
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({ prompt: 'cat', projectId: 7, batchSize: 2 })
+  })
+})
+
+describe('LLM生成の非同期ジョブAPI(issue #1409)', () => {
+  it('startCustomTagGenerationJob は POST /api/custom-tags/generate/jobs へ送り、同期の /generate は叩かない', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 21, type: 'custom_tag_generation', status: 'running' }, 202))
+
+    const job = await startCustomTagGenerationJob({ prompt: 'p', tagName: 't', description: 'd', projectId: 7 })
+
+    expect(job).toEqual({ id: 21, type: 'custom_tag_generation', status: 'running' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/custom-tags/generate/jobs')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ prompt: 'p', tagName: 't', description: 'd', projectId: 7 })
+  })
+
+  it('startStaticContentGenerationJob は POST /api/sites/{id}/static-content/generate/jobs へ種別を送る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 22, type: 'static_content_generation', status: 'running' }, 202))
+
+    const job = await startStaticContentGenerationJob(3, 'PRIVACY_POLICY')
+
+    expect(job.id).toBe(22)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/sites/3/static-content/generate/jobs')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ contentType: 'PRIVACY_POLICY' })
+  })
+
+  it('startTagDesignGenerationJob はプロジェクト個別とグローバルで別のパスへ送る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 23, type: 'tag_design_generation', status: 'running' }, 202))
+
+    await startTagDesignGenerationJob(7, 'TOC', '淡いグレー')
+    await startTagDesignGenerationJob(null, 'BLOGCARD', 'p')
+
+    // 操作ログの記録(#143)も同じ fetch を通るので、ジョブの要求だけを取り出す。
+    const [projectCall, globalCall] = calls().filter(([url]) => url.includes('/generate/jobs'))
+    expect(projectCall[0]).toContain('/api/projects/7/tag-design-settings/TOC/generate/jobs')
+    expect(JSON.parse(String(projectCall[1].body))).toEqual({ prompt: '淡いグレー' })
+    expect(globalCall[0]).toContain('/api/tag-design-settings/BLOGCARD/generate/jobs')
+    expect(globalCall[0]).not.toContain('/api/projects/')
+  })
+
+  it('saveStaticContent は PUT /api/sites/{id}/static-content/{種別} へ本文を送り、保存された静的コンテンツを返す', async () => {
+    const saved = { id: 1, siteId: 3, contentType: 'OPERATOR_INFO', body: '本文', createdAt: 'a', updatedAt: 'b' }
+    fetchMock.mockResolvedValue(jsonResponse(saved))
+
+    const result = await saveStaticContent(3, 'OPERATOR_INFO', '本文')
+
+    expect(result).toEqual(saved)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/sites/3/static-content/OPERATOR_INFO')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ body: '本文' })
   })
 })
 

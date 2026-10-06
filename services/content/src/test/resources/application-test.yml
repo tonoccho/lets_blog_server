@@ -39,3 +39,8 @@ app:
 keycloak:
   jwk-set-uri: http://localhost:19999/auth/realms/letsblog/protocol/openid-connect/certs
   issuer: http://localhost:19999/auth/realms/letsblog
+  # カスタムタグ生成ジョブ(issue #1409)の終端通知用のClient Credentials(ServiceTokenClientConfig)。
+  admin:
+    token-uri: http://localhost:19999/auth/realms/letsblog/protocol/openid-connect/token
+    client-id: letsblog-services
+    client-secret: test-secret

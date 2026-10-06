@@ -80,6 +80,7 @@ class AuthorizationMatrixIntegrationTest {
         return Stream.of(
                 // -- CustomTagController --
                 new Endpoint("POST", "/api/custom-tags/generate"),
+                new Endpoint("POST", "/api/custom-tags/generate/jobs"),
                 new Endpoint("POST", "/api/custom-tags/validate"),
                 new Endpoint("POST", "/api/custom-tags"),
                 new Endpoint("GET", "/api/custom-tags"),

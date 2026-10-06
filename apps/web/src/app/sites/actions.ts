@@ -7,7 +7,8 @@ import {
   createManagedWordPressSite,
   deleteSite,
   generateSshKeyPair,
-  generateStaticContent,
+  startStaticContentGenerationJob,
+  saveStaticContent,
   getLetsblogPluginStatus,
   getLetsblogSync,
   installLetsblogPlugin,
@@ -213,17 +214,48 @@ export async function resyncLetsblogAction(id: number): Promise<LetsblogSyncStat
 }
 
 export interface GenerateStaticContentResult {
-  content?: StaticContent;
+  jobId?: number;
+  status?: string;
   error?: string;
 }
 
+/**
+ * 静的コンテンツの生成を非同期ジョブとして要求する(issue #1409)。生成の完了を待たず、生成と同時に
+ * 保存もしない。受理されたジョブ(ID・状態)だけを返し、結果は処理キューの「結果を見る」で確認して
+ * 「保存」(`saveStaticContentAction`)で書き込む。`status` が `failed` なのは、待ち行列が満杯で
+ * ジョブが作られたうえで失敗として返ったとき。
+ */
 export async function generateStaticContentAction(
   siteId: number,
   contentType: StaticContentType
 ): Promise<GenerateStaticContentResult> {
   await requireAdminSession();
   try {
-    const content = await generateStaticContent(siteId, contentType);
+    const job = await startStaticContentGenerationJob(siteId, contentType);
+    return { jobId: job.id, status: job.status };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface SaveStaticContentResult {
+  content?: StaticContent;
+  error?: string;
+}
+
+/**
+ * 生成結果を確認した利用者の「保存」(issue #1409)。既存の `static_content` へ書き込む
+ * (同じサイト・種別は上書き)。
+ */
+export async function saveStaticContentAction(
+  siteId: number,
+  contentType: StaticContentType,
+  body: string
+): Promise<SaveStaticContentResult> {
+  await requireAdminSession();
+  try {
+    const content = await saveStaticContent(siteId, contentType, body);
+    revalidatePath(`/sites/${siteId}/edit`);
     return { content };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

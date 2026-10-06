@@ -161,7 +161,7 @@ function generationForm(page: Page): Locator {
   return page.locator('form').filter({ has: page.locator('textarea[name="prompt"]') });
 }
 
-When('カスタムタグ管理画面でAIにタグを生成させ、続いて自動で走る検証の Server Action の往復を計測する', async ({ page, ctx }) => {
+When('カスタムタグ管理画面でAIにタグの生成を要求し、結果を開いて自動で走る検証の Server Action の往復を計測する', async ({ page, ctx, request }) => {
   await page.goto(`/projects/${ctx[PROJECT_ID_KEY]}/tags`);
   const tab = page.getByRole('button', { name: 'カスタムタグ管理', exact: true });
   await expect(tab).toBeVisible({ timeout: 30_000 });
@@ -172,21 +172,38 @@ When('カスタムタグ管理画面でAIにタグを生成させ、続いて自
     await expect(form.locator('textarea[name="prompt"]')).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
 
+  const tagName = `e2e1477g${uniqueSuffix()}`;
   await form.locator('textarea[name="prompt"]').fill('青いボタンコンポーネントを作成してください');
-  await form.locator('input[name="tagName"]').fill(`e2e1477g${uniqueSuffix()}`);
+  await form.locator('input[name="tagName"]').fill(tagName);
   const submit = form.locator('button[type="submit"]');
   // 送信ボタンはセッションとハイドレーションの完了まで押せない(#778 / #1414)。
   await expect(submit).toHaveText('生成', { timeout: 30_000 });
   await expect(submit).toBeEnabled();
+  await submit.click();
+  // 生成は非同期ジョブとして受理される(#1409)。受理されたら、完了するまで待って結果を開く。
+  const queued = page.getByTestId('custom-tag-generation-queued');
+  await expect(queued).toBeVisible({ timeout: 30_000 });
+  const jobId = Number(await queued.getAttribute('data-job-id'));
+  const headers = await adminHeaders(request);
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get(`/api/generation-jobs/${jobId}`, { headers });
+        return ((await response.json()) as { status: string }).status;
+      },
+      { timeout: 120_000 }
+    )
+    .toBe('done');
+
+  // 検証(validateCustomTagAction)は、結果(未保存)を表示したときに自動で送られる。その往復を計る。
   const timing = await measureServerActionRoundTrip(
     page,
     async () => {
-      await submit.click();
-      await expect(page.getByText('生成完了！')).toBeVisible({ timeout: 120_000 });
+      await page.goto(`/projects/${ctx[PROJECT_ID_KEY]}/tags?tab=custom-tags&customTagJob=${jobId}`);
+      await expect(page.getByTestId('custom-tag-generation-result')).toBeVisible({ timeout: 30_000 });
     },
     { timeoutMs: 120_000 }
   );
-  // 往復は完了順に [生成, 検証]。検証は生成の成功後にだけ自動で送られるので、2回以上でなければ検証が走っていない。
-  expect(timing.roundTripsMs.length, `生成のあとに検証の Server Action が送られていません: ${timing.roundTripsMs}`).toBeGreaterThanOrEqual(2);
+  expect(timing.roundTripsMs.length, `結果の表示のあとに検証の Server Action が送られていません: ${timing.roundTripsMs}`).toBeGreaterThanOrEqual(1);
   recordResponseTime(ctx, timing.roundTripsMs[timing.roundTripsMs.length - 1], 'カスタムタグの検証(Server Action)の往復');
 });

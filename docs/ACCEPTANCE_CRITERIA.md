@@ -793,7 +793,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全120件)
+### 10.5 Server Action(全121件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -804,7 +804,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/admin/ssh-keys/actions.ts`<br>`createSshKeyPairAction`<br>`deleteSshKeyPairAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction`<br>`applyComputeDeviceAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作。`applyComputeDeviceAction` は適用を**受け付けた時点で返る**(platform-service が裏でコンテナの停止・起動・成功判定を進め、進行は別に取得する。#1399)ので、切り替えの完了までの時間(最大180秒)は含まない | 予算対象 |
 | `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`<br>`updateCustomTagTemplateAction`<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
-| `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う(画像生成の同期経路 `generateProjectImagesAction` は #1408 で非同期ジョブ `requestProjectImageJobAction` に置き換わり、削除済み)。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
+| `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | カスタムタグのAI生成を非同期ジョブとして要求する受付だけの操作になった(#1409。生成と同時に保存はせず、結果は処理キューの「結果を見る」から確認して `upsertProjectCustomTagAction` で保存する)。生成そのものは外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う(画像生成の同期経路 `generateProjectImagesAction` は #1408 で非同期ジョブ `requestProjectImageJobAction` に置き換わり、削除済み)。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/image-gallery/actions.ts`<br>`getGeneratedImageAction`<br>`fetchGalleryImagesPageAction`<br>`deleteGeneratedImageAction`<br>`bulkDeleteGeneratedImagesAction`<br>`updateGeneratedImageTagsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/image-gallery/actions.ts`<br>`createGeneratedImageFolderAction`<br>`setGeneratedImageFolderAction` | — | — | 画像のフォルダ作成・割り当て(データの読み書きが gateway を往復するだけ)。受け入れシナリオ(`@budget-action`)が未整備のため、予算対象に加える判断は #1623 で行う。 | 予算対象外 |
@@ -822,7 +822,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/projects/[id]/actions.ts`<br>`uploadGeneratedImageAction` | — | — | 生成画像のアップロード。ファイルの大きさに応じて時間が延びる。受け入れシナリオ(`@budget-action`)が未整備のため、予算対象に加える判断は #1623 で行う。 | 予算対象外 |
 | `app/projects/[id]/custom-tags/actions.ts`<br>`updateProjectCssSelectorPrefixAction`<br>`upsertProjectCustomTagAction`<br>`deleteProjectCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/projects/[id]/tag-design/actions.ts`<br>`saveTagDesignSettingAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
-| `app/projects/[id]/tag-design/actions.ts`<br>`generateTagDesignAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
+| `app/projects/[id]/tag-design/actions.ts`<br>`generateTagDesignAction` | — | — | タグデザインのAI生成を非同期ジョブとして要求する受付だけの操作になった(#1409。結果は処理キューの「結果を見る」から確認して `saveTagDesignSettingAction` で保存する)。生成そのものは外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/projects/actions.ts`<br>`createProjectAction`<br>`deleteProjectAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/setup/actions.ts`<br>`setupAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/sites/[id]/edit/actions.ts`<br>`updateSiteAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
@@ -830,6 +830,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/sites/actions.ts`<br>`registerSiteAction`<br>`generateSshKeyPairAction`<br>`deleteSiteAction`<br>`checkSiteConnectionAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/sites/actions.ts`<br>`createManagedWordPressSiteAction`(サイト自動構築) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。gateway 60秒で現に応答が失われる。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
 | `app/sites/actions.ts`<br>`installWpCliAction`<br>`generateStaticContentAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
+| `app/sites/actions.ts`<br>`saveStaticContentAction` | — | — | 静的コンテンツの生成結果を確認した利用者の「保存」(#1409。既存の `static_content` への書き込み)。生成は `generateStaticContentAction` が非同期ジョブとして受け付ける。受け入れシナリオ(`@budget-action`)が未整備のため、予算対象に加える判断は #1623 で行う。 | 予算対象外 |
 | `app/users/[id]/edit/actions.ts`<br>`updateUserProfileAction`<br>`uploadAvatarAction`<br>`updatePreferencesAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/users/actions.ts`<br>`createUserAction`<br>`deleteUserAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 

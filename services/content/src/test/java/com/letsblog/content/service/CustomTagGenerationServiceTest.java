@@ -65,6 +65,52 @@ class CustomTagGenerationServiceTest {
         return "```html\n" + html + "\n```\n\n```css\n" + css + "\n```";
     }
 
+    // ---- issue #1409: 保存せずに生成内容だけを返す(非同期ジョブ用) ----
+
+    @Test
+    void generateContent_HTMLとCSSを返し保存も管理者確認もしない() {
+        String html = "<div class=\"note\">{{content}}</div>";
+        String css = ".note { color: red; }";
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse(html, css));
+        when(customTagValidationService.validate(html, css)).thenReturn(new ValidationResult(true, List.of(), List.of()));
+
+        CustomTagGenerationService.GeneratedContent content = service.generateContent("注意書きカード");
+
+        assertEquals(html, content.htmlTemplate());
+        assertEquals(css, content.cssContent());
+        verify(customTagRepository, never()).save(any());
+        verify(mediaRenderClient, never()).createPenpotDesignFile(anyString(), anyString());
+        verify(adminAuthorizationService, never()).requireAdmin();
+    }
+
+    @Test
+    void generateContent_CSSが無ければ空文字で返す() {
+        String html = "<p>{{content}}</p>";
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("```html\n" + html + "\n```");
+        when(customTagValidationService.validate(html, "")).thenReturn(new ValidationResult(true, List.of(), List.of()));
+
+        assertEquals("", service.generateContent("p").cssContent());
+    }
+
+    @Test
+    void generateContent_HTMLを抽出できなければ例外() {
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("説明だけ");
+
+        assertThrows(InvalidCustomTagContentException.class, () -> service.generateContent("p"));
+    }
+
+    @Test
+    void generateContent_検証に落ちたら理由つきの例外() {
+        String html = "<script>x</script>";
+        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("```html\n" + html + "\n```");
+        when(customTagValidationService.validate(html, "")).thenReturn(new ValidationResult(
+                false, List.of(ValidationError.of("script-tag-detected", "scriptは使えません", "error")), List.of()));
+
+        InvalidCustomTagContentException e =
+                assertThrows(InvalidCustomTagContentException.class, () -> service.generateContent("p"));
+        assertTrue(e.getMessage().contains("scriptは使えません"));
+    }
+
     @Test
     void generate_LLMレスポンスからHTMLとCSSを抽出しバリデーションを通れば保存する() {
         String html = "<div class=\"note\">{{content}}</div>";

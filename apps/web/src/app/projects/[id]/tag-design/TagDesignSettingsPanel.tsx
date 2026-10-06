@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useState, useTransition } from "react";
 import type { EmbedTagType, TagDesignPreset, TagDesignSetting } from "@/lib/apiClient";
+import type { TagDesignJobResult } from "@/lib/llmJobResults";
 import { saveTagDesignSettingAction, generateTagDesignAction, TagDesignFormState } from "./actions";
 
 const initialState: TagDesignFormState = {};
@@ -192,48 +193,80 @@ interface GeneratedTagDesign {
   cssContent: string;
 }
 
-/** 組み込みタグのデザインをAIで生成するフォーム(issue #183)。カスタムタグのAI生成と同じUXで、
- * プロンプトを送信すると生成結果をプレビューし、「この結果を適用」で編集フォームへ反映する。 */
+/**
+ * 組み込みタグのデザインをAIで生成するフォーム(issue #183)。生成は非同期ジョブとして処理キューに積まれ
+ * (issue #1409)、完了を待たず、生成と同時に保存もしない。処理キューの「結果を見る」でこの画面へ戻ると、
+ * `pendingResult`(ジョブの結果)が未保存として示され、「保存」を押したときに初めて既存の保存先へ書き込まれる。
+ * 保存前に手直ししたいときは「この結果を適用」で編集フォームへ反映できる。
+ */
 function TagDesignGenerationForm({
   projectId,
   tagType,
+  pendingResult,
   onApply,
+  onSave,
 }: {
   projectId: number | null;
   tagType: EmbedTagType;
+  pendingResult: (TagDesignJobResult & { jobId: number }) | null;
   onApply: (result: GeneratedTagDesign) => void;
+  onSave: (result: GeneratedTagDesign) => Promise<string | null>;
 }) {
   const [prompt, setPrompt] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isSaving, startSaveTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<GeneratedTagDesign | null>(null);
+  const [queuedJobId, setQueuedJobId] = useState<number | null>(null);
+  const [resolved, setResolved] = useState<"applied" | "saved" | null>(null);
 
   function handleGenerate() {
     setError(null);
+    setQueuedJobId(null);
     startTransition(async () => {
       const response = await generateTagDesignAction(projectId, tagType, prompt);
       if (response.error) {
         setError(response.error);
-        setResult(null);
         return;
       }
-      setResult(response.data ?? null);
+      if (response.status === "failed") {
+        // 実行枠と待ち行列が満杯のとき、ジョブは作られた上で failed として返る。
+        setError("タグデザイン生成の待ち行列が満杯です。しばらくしてからもう一度要求してください。");
+        return;
+      }
+      setQueuedJobId(response.jobId ?? null);
+      setPrompt("");
     });
   }
 
   function handleApply() {
-    if (!result) return;
-    onApply(result);
-    setResult(null);
-    setPrompt("");
+    if (!pendingResult) return;
+    onApply(pendingResult);
+    setResolved("applied");
   }
+
+  function handleSave() {
+    if (!pendingResult) return;
+    setError(null);
+    startSaveTransition(async () => {
+      const saveError = await onSave(pendingResult);
+      if (saveError) {
+        setError(saveError);
+        return;
+      }
+      setResolved("saved");
+    });
+  }
+
+  // 保存・適用したら、同じ結果を「未保存」として出し続けない。
+  const showResult = pendingResult !== null && resolved === null;
 
   return (
     <div className="space-y-2 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
       <h2 className="text-sm font-medium">AIでデザインを生成</h2>
       <p className="text-xs text-neutral-600 dark:text-neutral-400">
-        AIに自然言語で見た目の要望を送信すると、CSS(必要であればHTMLテンプレートも)が自動生成されます。
-        生成結果はすぐには保存されません。内容を確認し、適用したうえで下のフォームから保存してください。
+        AIに自然言語で見た目の要望を送信すると、CSS(必要であればHTMLテンプレートも)が生成されます。
+        生成は処理キューで進み、生成結果はすぐには保存されません。完了後、処理キューの「結果を見る」から内容を
+        確認し、「保存」を押したときに保存されます。
       </p>
       <textarea
         value={prompt}
@@ -251,25 +284,52 @@ function TagDesignGenerationForm({
       >
         {isPending ? "生成中…" : "生成"}
       </button>
+      {queuedJobId !== null && (
+        <p
+          data-testid="tag-design-queued"
+          data-job-id={queuedJobId}
+          className="rounded bg-green-50 p-2 text-xs text-green-800"
+        >
+          生成を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から内容を確認し、
+          「保存」を押すと保存されます(この時点ではまだ保存されていません)。
+        </p>
+      )}
+      {resolved === "saved" && <p className="text-sm text-green-600">保存しました。</p>}
 
-      {result && (
-        <div className="space-y-2 rounded border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3">
-          <p className="text-sm font-medium text-green-800 dark:text-green-400">生成結果</p>
+      {showResult && (
+        <div
+          data-testid="tag-design-generated"
+          data-job-id={pendingResult.jobId}
+          className="space-y-2 rounded border border-yellow-200 dark:border-yellow-900 bg-yellow-50 dark:bg-yellow-950/30 p-3"
+        >
+          <p className="text-sm font-medium text-yellow-800 dark:text-yellow-400">
+            生成結果(ジョブ #{pendingResult.jobId})。まだ保存されていません。
+          </p>
           <pre className="overflow-x-auto rounded bg-white dark:bg-neutral-900 p-2 font-mono text-xs text-neutral-600 dark:text-neutral-400">
-            {result.cssContent}
+            {pendingResult.cssContent}
           </pre>
-          {result.htmlTemplate && (
+          {pendingResult.htmlTemplate && (
             <pre className="overflow-x-auto rounded bg-white dark:bg-neutral-900 p-2 font-mono text-xs text-neutral-600 dark:text-neutral-400">
-              {result.htmlTemplate}
+              {pendingResult.htmlTemplate}
             </pre>
           )}
-          <button
-            type="button"
-            onClick={handleApply}
-            className="rounded bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700"
-          >
-            この結果を適用
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="rounded bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              {isSaving ? "保存中…" : "保存"}
+            </button>
+            <button
+              type="button"
+              onClick={handleApply}
+              className="rounded border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-sm"
+            >
+              この結果を適用
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -281,11 +341,14 @@ function TagDesignEditor({
   tagType,
   presets,
   initialSetting,
+  jobResult,
 }: {
   projectId: number | null;
   tagType: EmbedTagType;
   presets: TagDesignPreset[];
   initialSetting: TagDesignSetting;
+  /** 処理キューの「結果を見る」から開いた、このタグ種別の生成結果(未保存。issue #1409)。 */
+  jobResult: (TagDesignJobResult & { jobId: number }) | null;
 }) {
   const [state, formAction, pending] = useActionState(saveTagDesignSettingAction, initialState);
   const [presetId, setPresetId] = useState(initialSetting.presetId);
@@ -363,9 +426,38 @@ function TagDesignEditor({
     }
   }
 
+  /**
+   * 生成結果の「保存」(issue #1409)。現在のプリセット・色に生成したCSS/HTMLを添えて、編集フォームの保存と同じ
+   * 既存の保存アクションへ渡す。HTMLが空の結果(構造変更なし)は現在のHTMLテンプレートを保つ。成功したら編集欄へも反映する。
+   * 失敗の理由を返す(成功は null)。
+   */
+  async function handleSaveGenerated(result: GeneratedTagDesign): Promise<string | null> {
+    const formData = new FormData();
+    formData.set("projectId", projectId === null ? "" : String(projectId));
+    formData.set("tagType", tagType);
+    formData.set("presetId", presetId);
+    formData.set("backgroundColor", colors.backgroundColor);
+    formData.set("textColor", colors.textColor);
+    formData.set("accentColor", colors.accentColor);
+    formData.set("customCss", result.cssContent);
+    formData.set("htmlTemplate", result.htmlTemplate || htmlTemplate);
+    const saveState = await saveTagDesignSettingAction({}, formData);
+    if (saveState.error) {
+      return saveState.error;
+    }
+    handleGenerated(result);
+    return null;
+  }
+
   return (
     <div className="space-y-4">
-      <TagDesignGenerationForm projectId={projectId} tagType={tagType} onApply={handleGenerated} />
+      <TagDesignGenerationForm
+        projectId={projectId}
+        tagType={tagType}
+        pendingResult={jobResult}
+        onApply={handleGenerated}
+        onSave={handleSaveGenerated}
+      />
 
       <form
         action={formAction}
@@ -505,12 +597,20 @@ export function TagDesignSettingsPanel({
   projectId,
   presets,
   settings,
+  jobResult,
 }: {
   projectId: number | null;
   presets: TagDesignPreset[];
   settings: TagDesignSetting[];
+  /** 処理キューの「結果を見る」から開いた、タグデザイン生成ジョブの結果(未保存。issue #1409)。 */
+  jobResult?: (TagDesignJobResult & { jobId: number }) | null;
 }) {
-  const [editingType, setEditingType] = useState<EmbedTagType>(settings[0]?.tagType ?? "TOC");
+  // 結果を見に来たときは、生成されたタグ種別の編集画面を開く(一覧に無ければ先頭)。
+  const initialType =
+    jobResult && settings.some((setting) => setting.tagType === jobResult.tagType)
+      ? jobResult.tagType
+      : (settings[0]?.tagType ?? "TOC");
+  const [editingType, setEditingType] = useState<EmbedTagType>(initialType);
   const editingSetting = settings.find((setting) => setting.tagType === editingType) ?? settings[0];
 
   return (
@@ -591,6 +691,7 @@ export function TagDesignSettingsPanel({
           tagType={editingSetting.tagType}
           presets={presets}
           initialSetting={editingSetting}
+          jobResult={jobResult && jobResult.tagType === editingSetting.tagType ? jobResult : null}
         />
       )}
     </div>

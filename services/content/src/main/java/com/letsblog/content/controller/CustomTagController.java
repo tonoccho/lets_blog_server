@@ -4,9 +4,11 @@ import com.letsblog.content.dto.CustomTagRequest;
 import com.letsblog.content.dto.CustomTagResponse;
 import com.letsblog.content.dto.GenerateCustomTagRequest;
 import com.letsblog.content.dto.GenerateCustomTagResponse;
+import com.letsblog.content.dto.GenerationJobResponse;
 import com.letsblog.content.dto.ValidateCustomTagRequest;
 import com.letsblog.content.dto.ValidationResult;
 import com.letsblog.content.service.CustomTagService;
+import com.letsblog.content.service.CustomTagGenerationJobStarter;
 import com.letsblog.content.service.CustomTagGenerationService;
 import com.letsblog.content.service.CustomTagValidationService;
 import jakarta.validation.Valid;
@@ -27,20 +29,39 @@ public class CustomTagController {
     private final CustomTagService customTagService;
     private final CustomTagGenerationService customTagGenerationService;
     private final CustomTagValidationService customTagValidationService;
+    private final CustomTagGenerationJobStarter customTagGenerationJobStarter;
 
     public CustomTagController(
             CustomTagService customTagService,
             CustomTagGenerationService customTagGenerationService,
-            CustomTagValidationService customTagValidationService) {
+            CustomTagValidationService customTagValidationService,
+            CustomTagGenerationJobStarter customTagGenerationJobStarter) {
         this.customTagService = customTagService;
         this.customTagGenerationService = customTagGenerationService;
         this.customTagValidationService = customTagValidationService;
+        this.customTagGenerationJobStarter = customTagGenerationJobStarter;
     }
 
     @PostMapping("/generate")
     public ResponseEntity<GenerateCustomTagResponse> generate(@Valid @RequestBody GenerateCustomTagRequest request) {
         GenerateCustomTagResponse response = customTagGenerationService.generate(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * カスタムタグのAI生成を非同期ジョブとして受理する(issue #1409)。生成の完了を待たずにジョブIDを返し、
+     * 状態と結果(生成したHTML/CSS)は{@code GET /api/generation-jobs/{id}}で引く。生成結果は
+     * {@code custom_tags}へ書かれず、利用者が確認して{@code POST /api/custom-tags}で「保存」する。
+     * 同期の{@link #generate}(生成と同時に保存する)は変えない。認可は同じ(admin限定、受理側で確認)。
+     *
+     * <p>パスを分けたのは画像生成の{@code POST /api/ai/image/jobs}(#1405)に揃えるため。
+     */
+    @PostMapping("/generate/jobs")
+    public ResponseEntity<GenerationJobResponse> generateJob(
+            @Valid @RequestBody GenerateCustomTagRequest request,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(customTagGenerationJobStarter.start(request, authorization)));
     }
 
     /**

@@ -56,7 +56,10 @@
     "queueStatusFailed": "Failed",
     "queueTypeCheckpointDownload": "Checkpoint download",
     "queueTypeGarbageCollection": "Media cleanup",
-    "queueTypeImageGeneration": "Image generation"
+    "queueTypeImageGeneration": "Image generation",
+    "queueTypeCustomTagGeneration": "Custom tag generation",
+    "queueTypeStaticContentGeneration": "Static content generation",
+    "queueTypeTagDesignGeneration": "Tag design generation"
   },
   "dashboard": {
     "title": "Dashboard",

@@ -52,9 +52,13 @@ class GlobalTagDesignSettingControllerTest {
     @Mock
     private com.letsblog.project.service.LetsblogSyncService letsblogSyncService;
 
+    @Mock
+    private com.letsblog.project.service.TextGenerationJobStarter textGenerationJobStarter;
+
     private GlobalTagDesignSettingController controller() {
         return new GlobalTagDesignSettingController(
-                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService, letsblogSyncService);
+                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService, letsblogSyncService,
+                textGenerationJobStarter);
     }
 
     @Test
@@ -145,5 +149,32 @@ class GlobalTagDesignSettingControllerTest {
         assertEquals(saved, controller().save(EmbedTagType.TOC, request));
 
         verify(letsblogSyncService).requestAllSync();
+    }
+
+    // ---- issue #1409: 生成を非同期ジョブとして受理する ----
+
+    @Test
+    void generateJob_admin確認後にprojectId未指定でジョブとして受理し202を返す() {
+        java.time.LocalDateTime created = java.time.LocalDateTime.of(2026, 10, 6, 1, 2, 3);
+        when(textGenerationJobStarter.startTagDesign(isNull(), any(), any()))
+                .thenReturn(new com.letsblog.common.client.GenerationJobSummary(
+                        9L, "tag_design_generation", "running", created, created));
+
+        org.springframework.http.ResponseEntity<com.letsblog.project.dto.GenerationJobResponse> response =
+                controller().generateJob(EmbedTagType.BLOGCARD, new GenerateTagDesignRequest("p"));
+
+        assertEquals(org.springframework.http.HttpStatus.ACCEPTED, response.getStatusCode());
+        assertEquals(9L, response.getBody().id());
+        verify(adminAuthorizationService).requireAdmin();
+        verify(textGenerationJobStarter).startTagDesign(null, EmbedTagType.BLOGCARD, "p");
+    }
+
+    @Test
+    void generateJob_adminでなければジョブを作らない() {
+        doThrow(new ForbiddenException("x")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller().generateJob(EmbedTagType.TOC, new GenerateTagDesignRequest("p")));
+        org.mockito.Mockito.verifyNoInteractions(textGenerationJobStarter);
     }
 }

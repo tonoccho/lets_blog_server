@@ -1,6 +1,12 @@
 import {
+  CUSTOM_TAG_GENERATION_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
+  STATIC_CONTENT_GENERATION_JOB_TYPE,
+  TAG_DESIGN_GENERATION_JOB_TYPE,
+  buildCustomTagResultHref,
+  buildStaticContentResultHref,
+  buildTagDesignResultHref,
   FAILURE_REASON_MAX_LENGTH,
   buildImageGenerationResultHref,
   isActiveJobStatus,
@@ -119,4 +125,64 @@ describe('readFailureReason (#1571)', () => {
     expect(reason).toBe('a'.repeat(FAILURE_REASON_MAX_LENGTH - 1) + '…')
     expect(reason).toHaveLength(FAILURE_REASON_MAX_LENGTH)
   })
+})
+
+describe('LLM generation job result links (#1409)', () => {
+  it('uses the job types written by the content and project services', () => {
+    expect(CUSTOM_TAG_GENERATION_JOB_TYPE).toBe('custom_tag_generation')
+    expect(STATIC_CONTENT_GENERATION_JOB_TYPE).toBe('static_content_generation')
+    expect(TAG_DESIGN_GENERATION_JOB_TYPE).toBe('tag_design_generation')
+  })
+
+  it('builds the result hrefs, naming the job whose result to show', () => {
+    expect(buildCustomTagResultHref(7, 42)).toBe('/projects/7/tags?tab=custom-tags&customTagJob=42')
+    expect(buildStaticContentResultHref(3, 43)).toBe('/sites/3/edit?staticContentJob=43')
+    expect(buildTagDesignResultHref(7, 44)).toBe('/projects/7/tags?tab=tag-design&tagDesignJob=44')
+    expect(buildTagDesignResultHref(null, 45)).toBe('/admin/tag-design?tagDesignJob=45')
+  })
+
+  it('sends a custom tag generation to its project tag screen using the request payload project id', () => {
+    expect(resolveResultHref('custom_tag_generation', '{"tagName":"a","projectId":7}', 42)).toBe(
+      '/projects/7/tags?tab=custom-tags&customTagJob=42'
+    )
+  })
+
+  it('sends a static content generation to the edit screen of the site in the request payload', () => {
+    expect(resolveResultHref('static_content_generation', '{"siteId":3,"contentType":"PRIVACY_POLICY"}', 43)).toBe(
+      '/sites/3/edit?staticContentJob=43'
+    )
+  })
+
+  it('sends a project tag design generation to the project tag screen and a global one to the admin screen', () => {
+    expect(resolveResultHref('tag_design_generation', '{"projectId":7,"tagType":"TOC"}', 44)).toBe(
+      '/projects/7/tags?tab=tag-design&tagDesignJob=44'
+    )
+    expect(resolveResultHref('tag_design_generation', '{"projectId":null,"tagType":"TOC"}', 45)).toBe(
+      '/admin/tag-design?tagDesignJob=45'
+    )
+  })
+
+  it.each([
+    ['custom_tag_generation', null],
+    ['custom_tag_generation', '{not json'],
+    ['custom_tag_generation', '{"tagName":"a","projectId":null}'],
+    ['custom_tag_generation', '{"tagName":"a","projectId":"7"}'],
+    ['static_content_generation', null],
+    ['static_content_generation', '{"contentType":"PRIVACY_POLICY"}'],
+    ['static_content_generation', '{"siteId":"3"}'],
+    ['tag_design_generation', null],
+    ['tag_design_generation', '{not json'],
+    ['tag_design_generation', '42'],
+    ['tag_design_generation', '{"tagType":"TOC"}'],
+    ['tag_design_generation', '{"projectId":"7"}'],
+  ])('gives no link for %s with request payload %s', (type, payload) => {
+    expect(resolveResultHref(type, payload, 1)).toBeNull()
+  })
+
+  it.each(['custom_tag_generation', 'static_content_generation', 'tag_design_generation'])(
+    'gives no link for %s without a job id',
+    (type) => {
+      expect(resolveResultHref(type, '{"projectId":7,"siteId":3}')).toBeNull()
+    }
+  )
 })

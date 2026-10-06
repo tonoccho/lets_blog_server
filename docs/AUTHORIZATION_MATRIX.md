@@ -918,6 +918,7 @@ platform-service所有(issue #694)。未認証401はplatform-serviceの`Security
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | POST /api/custom-tags/generate | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagGenerationService.generate()`内 |
+| POST /api/custom-tags/generate/jobs | requireAdmin(受理側 `CustomTagGenerationJobStarter`) | 401 | 403 | 認可OK | 現状維持 | 非同期ジョブとして受理(#1409)。生成結果は保存先へ書かない |
 | POST /api/custom-tags/validate | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | ステートレスな検証のみ(DBへの副作用なし) |
 | POST /api/custom-tags | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `CustomTagService.create()`内 |
 | GET /api/custom-tags | requireProjectMemberOrAdmin(projectId指定時のみ、service層) | 401 | 403(projectId指定時) | 認可OK | 現状維持 | `CustomTagService.list()`内。issue #1057で追加。projectId未指定(グローバルタグのみ)は従来通り認証済みなら誰でも参照可 |
@@ -1040,6 +1041,7 @@ project-service所有(issue #763)。プロジェクトに紐付いていない�
 | GET /api/tag-design-settings | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `GlobalTagDesignSettingController.java:54-58` |
 | PUT /api/tag-design-settings/{tagType} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `GlobalTagDesignSettingController.java:60-66` |
 | POST /api/tag-design-settings/{tagType}/generate | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `GlobalTagDesignSettingController.java:68-75` |
+| POST /api/tag-design-settings/{tagType}/generate/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 非同期ジョブとして受理(#1409)。`generate`と同じ認可 |
 
 ## HealthController (1エンドポイント、ベースパスなし)
 
@@ -1339,6 +1341,8 @@ identity-service所有(RBAC、issue #653系)。
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/sites/{siteId}/static-content | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 統合テストで代表検証済み(b) |
 | POST /api/sites/{siteId}/static-content/generate | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/sites/{siteId}/static-content/generate/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 非同期ジョブとして受理(#1409)。`generate`と同じ認可 |
+| PUT /api/sites/{siteId}/static-content/{contentType} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 生成結果を確認した利用者の「保存」(#1409)。既存の`static_content`への書き込み |
 
 ## SshKeyPairController (3エンドポイント、ベースパス `/api/ssh-key-pairs`)
 
@@ -1366,6 +1370,7 @@ platform-service所有(issue #693)。未認証401はplatform-serviceの`Security
 | GET /api/projects/{projectId}/tag-design-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | PUT /api/projects/{projectId}/tag-design-settings/{tagType} | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{projectId}/tag-design-settings/{tagType}/generate | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/projects/{projectId}/tag-design-settings/{tagType}/generate/jobs | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 非同期ジョブとして受理(#1409)。`generate`と同じ認可 |
 
 ## TaxonomyController (1エンドポイント、ベースパスなし)
 

@@ -8,8 +8,11 @@ import { useI18n } from "./I18nProvider";
 import { fetchQueueJobsAction } from "./infoRailActions";
 import {
   CHECKPOINT_DOWNLOAD_JOB_TYPE,
+  CUSTOM_TAG_GENERATION_JOB_TYPE,
   GARBAGE_COLLECTION_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
+  STATIC_CONTENT_GENERATION_JOB_TYPE,
+  TAG_DESIGN_GENERATION_JOB_TYPE,
   isActiveJobStatus,
   type QueueJob,
 } from "./infoRailQueue";
@@ -29,6 +32,9 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   [CHECKPOINT_DOWNLOAD_JOB_TYPE]: "queueTypeCheckpointDownload",
   [GARBAGE_COLLECTION_JOB_TYPE]: "queueTypeGarbageCollection",
   [IMAGE_GENERATION_JOB_TYPE]: "queueTypeImageGeneration",
+  [CUSTOM_TAG_GENERATION_JOB_TYPE]: "queueTypeCustomTagGeneration",
+  [STATIC_CONTENT_GENERATION_JOB_TYPE]: "queueTypeStaticContentGeneration",
+  [TAG_DESIGN_GENERATION_JOB_TYPE]: "queueTypeTagDesignGeneration",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

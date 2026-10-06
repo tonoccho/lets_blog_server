@@ -27,4 +27,21 @@ public class AsyncJobConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 静的コンテンツ・タグデザインのAI生成ジョブ(issue #1409)。実行時間の大半はai-serviceのLLM応答待ちで、
+     * 共有コンテナのような単一資源を取り合わないので、並列度は小さく(core 2 / max 4)抑え、待ち行列は20件。
+     * 溢れた要求は受理側がジョブを{@code queue_full}のfailedにして返す。同期API
+     * ({@code POST .../generate})はこのExecutorを使わない。
+     */
+    @Bean(name = "textGenerationExecutor")
+    public Executor textGenerationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("text-generation-");
+        executor.initialize();
+        return executor;
+    }
 }

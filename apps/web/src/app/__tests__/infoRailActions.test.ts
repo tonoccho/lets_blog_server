@@ -175,3 +175,31 @@ describe('fetchQueueJobsAction image generation (#1408)', () => {
     expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
   })
 })
+
+describe('fetchQueueJobsAction LLM generation jobs (#1409)', () => {
+  it.each([
+    ['custom_tag_generation', '{"tagName":"a","projectId":7}', '/projects/7/tags?tab=custom-tags&customTagJob=9'],
+    ['static_content_generation', '{"siteId":3,"contentType":"OPERATOR_INFO"}', '/sites/3/edit?staticContentJob=9'],
+    ['tag_design_generation', '{"projectId":7,"tagType":"TOC"}', '/projects/7/tags?tab=tag-design&tagDesignJob=9'],
+    ['tag_design_generation', '{"projectId":null,"tagType":"TOC"}', '/admin/tag-design?tagDesignJob=9'],
+  ])('links a done %s job to its feature screen, naming the job', async (type, requestPayload, href) => {
+    mockListJobs.mockResolvedValue([job(9, type, 'done')])
+    mockGetJob.mockResolvedValue({ requestPayload })
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(9)
+    expect(result.jobs[0].resultHref).toBe(href)
+  })
+
+  it('gives no link when the detail of a done LLM generation job cannot be read', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'static_content_generation', 'done')])
+    mockGetJob.mockRejectedValue(new Error('404'))
+    expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
+  })
+
+  it('does not fetch the detail of a running LLM generation job', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'custom_tag_generation', 'running')])
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).not.toHaveBeenCalled()
+    expect(result.jobs[0].resultHref).toBeNull()
+  })
+})

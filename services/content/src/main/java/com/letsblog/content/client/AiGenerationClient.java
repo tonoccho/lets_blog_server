@@ -1,10 +1,8 @@
 package com.letsblog.content.client;
 
-import com.letsblog.common.client.ServiceAuthHeaders;
 import com.letsblog.common.client.SyncCallProfile;
 import com.letsblog.common.client.SyncServiceClient;
 import com.letsblog.common.client.SyncServiceException;
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +24,8 @@ import org.springframework.web.client.RestClient;
  *
  * <p>projectIdを渡すとai-service側でそのプロジェクトの選択中モデル/プロバイダーを解決して使う
  * (未指定時はシステム既定)。認証はmedia-service(#573)のGenerationJobClient等と同じ方式
- * (呼び出し元ユーザーのBearerトークンをそのまま転送する)。
+ * (リクエスト中は呼び出し元ユーザーのBearerトークンをそのまま転送する。リクエストの無い非同期ジョブ(#1409)
+ * ではこのサービス自身のトークン。{@link OutboundAuthHeaders}参照)。
  *
  * <p>フォールバック方針: 明確なエラー({@link AiServiceException}）。LLM生成結果はプレースホルダで
  * 代替できる性質のものではなく(記事本文/タグ提案等、ユーザーが結果を直接目にする)、機能縮退は
@@ -36,15 +35,15 @@ import org.springframework.web.client.RestClient;
 public class AiGenerationClient {
 
     private final SyncServiceClient client;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders authHeaders;
 
     public AiGenerationClient(
             RestClient.Builder builder, @Value("${app.ai-service-uri}") String aiServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders authHeaders) {
         this.client = SyncServiceClient.builder(builder, "ai-service", aiServiceUri)
                 .profile(SyncCallProfile.LLM)
                 .build();
-        this.request = request;
+        this.authHeaders = authHeaders;
     }
 
     public String generate(Long projectId, String prompt, String providerOverride) {
@@ -55,7 +54,7 @@ public class AiGenerationClient {
             body.put("providerOverride", providerOverride);
             GenerateResponse response = client.post(
                     "/api/internal/ai/generate", new Object[0], body, GenerateResponse.class,
-                    ServiceAuthHeaders.forwardedBearer(request));
+                    authHeaders.current());
             if (response == null) {
                 throw new AiServiceException("ai-serviceから空の応答を受け取りました", null);
             }

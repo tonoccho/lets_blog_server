@@ -134,6 +134,8 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 
 gateway(`services/gateway/src/main/resources/application.yml`)は、上記LLM呼び出しに到達する同期APIのパスに専用ルートを持ち、`response-timeout: 180s`(LLMプロファイルと同じ。ai-serviceの`LLM_REQUEST_TIMEOUT_SECONDS`既定120秒を上回る)を与えている(issue #1410)。対象は`POST /api/custom-tags/generate`(`content-custom-tags-generate`)、`POST /api/sites/*/static-content/generate`(`project-site-static-content-generate`)、`POST /api/projects/*/tag-design-settings/*/generate`と`POST /api/tag-design-settings/*/generate`(`project-tag-design-settings-generate`)。同じプレフィックスの一覧・保存などCRUDは延ばさず既定の60秒のまま。専用ルートは広い`project`/`content`系より前に置く(先勝ち)。nginxの`location /api/`は`proxy_read_timeout 1200s`で、180秒はその範囲内。テスト: `LlmGenerationRouteTimeoutTest`。
 
+これらの同期APIには非同期の受理口がある(issue #1409。`POST /api/custom-tags/generate/jobs`、`POST /api/sites/*/static-content/generate/jobs`、`POST /api/projects/*/tag-design-settings/*/generate/jobs`、`POST /api/tag-design-settings/*/generate/jobs`)。受理はジョブを1件作って即座に返すだけなので、上の`generate`専用ルート(180秒)には載せず、広い`content`/`project`ルートの既定タイムアウトで受ける(完全一致のため`/generate/jobs`は専用ルートに巻き込まれない)。生成本体は`@Async`のランナーがai-serviceの`POST /api/internal/ai/generate`を呼ぶ。リクエストの無いスレッドなので、`AiGenerationClient`は`OutboundAuthHeaders`でこのサービス自身のClient Credentialsトークンを使う(リクエスト中は従来どおり呼び出し元のBearerを転送する)。生成結果は`generation_jobs.result_payload`にだけ置き、各機能の保存先へは書かない。content-serviceはこのために`GenerationJobClient`/`ServiceTokenClient`を取り込み、`KEYCLOAK_SERVICES_CLIENT_SECRET`を受け取る。
+
 
 #### log-writer の AIジョブ取得を機能縮退にしている理由(#825)
 

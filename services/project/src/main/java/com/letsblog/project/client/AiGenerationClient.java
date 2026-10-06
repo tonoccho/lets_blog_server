@@ -1,12 +1,10 @@
 package com.letsblog.project.client;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -18,7 +16,8 @@ import org.springframework.web.client.RestClientException;
  *
  * <p>projectIdを渡すとai-service側でそのプロジェクトの選択中モデル/プロバイダーを解決して使う
  * (未指定時はシステム既定)。認証はmedia-service(#573)のGenerationJobClient等と同じ暫定策
- * (呼び出し元ユーザーのBearerトークンをそのまま転送する)。
+ * (リクエスト中は呼び出し元ユーザーのBearerトークンをそのまま転送する。リクエストの無い非同期ジョブ(#1409)
+ * ではこのサービス自身のトークン。{@link OutboundAuthHeaders}参照)。
  */
 @Component
 public class AiGenerationClient {
@@ -29,16 +28,16 @@ public class AiGenerationClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(180);
 
     private final RestClient restClient;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders authHeaders;
 
     public AiGenerationClient(
             RestClient.Builder builder, @Value("${app.ai-service-uri}") String aiServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders authHeaders) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.baseUrl(aiServiceUri).requestFactory(requestFactory).build();
-        this.request = request;
+        this.authHeaders = authHeaders;
     }
 
     public String generate(Long projectId, String prompt, String providerOverride) {
@@ -49,7 +48,7 @@ public class AiGenerationClient {
             body.put("providerOverride", providerOverride);
             GenerateResponse response = restClient.post()
                     .uri("/api/internal/ai/generate")
-                    .headers(this::setAuthorization)
+                    .headers(authHeaders.current())
                     .body(body)
                     .retrieve()
                     .body(GenerateResponse.class);
@@ -63,12 +62,5 @@ public class AiGenerationClient {
     }
 
     private record GenerateResponse(String result) {
-    }
-
-    private void setAuthorization(HttpHeaders headers) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
-        }
     }
 }

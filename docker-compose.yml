@@ -285,6 +285,9 @@ services:
       # ため、呼び出し元のBearerトークンをそのままidentity-serviceへ転送して問い合わせる
       # (log-writer/media-service/ai-serviceと同じ暫定策)。
       IDENTITY_SERVICE_URI: http://identity:8080
+      # カスタムタグ生成ジョブ(issue #1409)の完了・失敗をai-serviceの内部ブリッジへ反映するための
+      # Client Credentials(ServiceTokenClientConfig)。media-service・project-serviceと同じ資格情報。
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
     depends_on:
       mysql:
         condition: service_healthy

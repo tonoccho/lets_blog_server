@@ -58,6 +58,17 @@ public class StaticContentGenerationService {
 
     @Transactional
     public StaticContentResponse generate(Long siteId, StaticContentType contentType) {
+        return upsert(siteId, contentType, generateBody(siteId, contentType));
+    }
+
+    /**
+     * サイトのプラグイン構成からLLMで本文を生成するところまで。{@code static_content}へは書かない
+     * (issue #1409)。同期の{@link #generate}(生成と同時に保存する)と、非同期ジョブ
+     * ({@code TextGenerationJobRunner})が共有する。非同期ジョブの結果は{@code generation_jobs.result_payload}
+     * にだけ載り、利用者が「保存」を押したときに初めて{@link #save}が書く。
+     */
+    @Transactional(readOnly = true)
+    public String generateBody(Long siteId, StaticContentType contentType) {
         Site site = siteRepository.findById(siteId)
                 .orElseThrow(() -> new SiteNotFoundException("id " + siteId + " のサイトは登録されていません"));
 
@@ -68,7 +79,28 @@ public class StaticContentGenerationService {
         if (body.isBlank()) {
             throw new AiServiceGenerationException("LLMレスポンスが空でした。時間をおいて再度お試しください。");
         }
+        return body;
+    }
 
+    /** サイトが存在することを確かめる。非同期ジョブの受理側が、ジョブを作る前に呼ぶ(issue #1409)。 */
+    @Transactional(readOnly = true)
+    public void requireSite(Long siteId) {
+        if (!siteRepository.existsById(siteId)) {
+            throw new SiteNotFoundException("id " + siteId + " のサイトは登録されていません");
+        }
+    }
+
+    /**
+     * 利用者が結果を確認して「保存」したときの書き込み(issue #1409)。同じサイト・種別があれば上書きする。
+     * 下書きではなく、{@code static_content}への通常の保存である。
+     */
+    @Transactional
+    public StaticContentResponse save(Long siteId, StaticContentType contentType, String body) {
+        requireSite(siteId);
+        return upsert(siteId, contentType, body);
+    }
+
+    private StaticContentResponse upsert(Long siteId, StaticContentType contentType, String body) {
         StaticContent entity = staticContentRepository.findBySiteIdAndContentType(siteId, contentType)
                 .orElseGet(() -> {
                     StaticContent created = new StaticContent();

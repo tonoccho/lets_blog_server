@@ -308,6 +308,22 @@ describe('InfoRailQueue (#1407)', () => {
     expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('Image generation')
   })
 
+  it.each([
+    ['custom_tag_generation', 'カスタムタグ生成', 'Custom tag generation'],
+    ['static_content_generation', '静的コンテンツ生成', 'Static content generation'],
+    ['tag_design_generation', 'タグデザイン生成', 'Tag design generation'],
+  ])('labels a %s job in Japanese and English instead of showing the raw type (#1409)', async (type, ja, en) => {
+    mockFetch.mockResolvedValue({ jobs: [job({ id: 1, type, status: 'running' })], timeZone: 'UTC' })
+    const { unmount } = setup('ja')
+    await flush()
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent(ja)
+    expect(screen.getByTestId('info-rail-queue-item')).not.toHaveTextContent(type)
+    unmount()
+    setup('en')
+    await flush()
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent(en)
+  })
+
   it('links a done image generation to its result via the view-result link (#1408)', async () => {
     mockFetch.mockResolvedValue({
       jobs: [job({ id: 4, type: 'image_generation', status: 'done', resultHref: '/projects/7?tab=ai-models&imageJob=4' })],

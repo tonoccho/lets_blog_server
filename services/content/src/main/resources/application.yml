@@ -122,3 +122,10 @@ app:
 keycloak:
   jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
   issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # サービス間のClient Credentials認証(#567)。カスタムタグ生成ジョブ(issue #1409)の完了・失敗をai-serviceの
+  # 内部ブリッジへ反映するときと、リクエストの無い非同期スレッドからai-serviceのLLM生成を呼ぶときに、
+  # このサービス自身のトークンを使う(#1083。ユーザーのBearerは数分で失効する)。ServiceTokenClientConfig参照。
+  admin:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
+    client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}

@@ -1,5 +1,7 @@
 import { getTagDesignSettings } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
+import { loadLlmJobResult, readTagDesignJobResult } from "@/lib/llmJobResults";
+import { TAG_DESIGN_GENERATION_JOB_TYPE } from "@/app/infoRailQueue";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { TagDesignSettingsPanel } from "../../projects/[id]/tag-design/TagDesignSettingsPanel";
 
@@ -17,10 +19,21 @@ import { TagDesignSettingsPanel } from "../../projects/[id]/tag-design/TagDesign
  * ページ自身の `requireAdminSession()` に加えて proxy.ts の ADMIN_ONLY_PREFIXES でも
  * 弾かれるようにするため。
  */
-export default async function GlobalTagDesignPage() {
+export default async function GlobalTagDesignPage({
+  searchParams,
+}: {
+  /** `?tagDesignJob=` は処理キューの「結果を見る」の遷移先で(issue #1409)、グローバルのAI生成ジョブの結果(未保存)を表示する。 */
+  searchParams?: Promise<{ tagDesignJob?: string }>;
+} = {}) {
   await requireAdminSession();
+  const { tagDesignJob } = (await searchParams) ?? {};
 
-  const overview = await getTagDesignSettings(null);
+  const [overview, tagDesignResult] = await Promise.all([
+    getTagDesignSettings(null),
+    loadLlmJobResult(tagDesignJob, TAG_DESIGN_GENERATION_JOB_TYPE, readTagDesignJobResult),
+  ]);
+  // プロジェクト個別のジョブの結果は、グローバルの画面には出さない。
+  const generatedTagDesign = tagDesignResult?.projectId === null ? tagDesignResult : null;
 
   return (
     <div className="space-y-6">
@@ -44,6 +57,7 @@ export default async function GlobalTagDesignPage() {
         projectId={null}
         presets={overview.presets}
         settings={overview.settings}
+        jobResult={generatedTagDesign}
       />
     </div>
   );

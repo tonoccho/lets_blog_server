@@ -457,6 +457,35 @@ export function generateStaticContent(
   });
 }
 
+/**
+ * 静的コンテンツの生成を非同期ジョブとして要求する(`POST /api/sites/{id}/static-content/generate/jobs`、issue #1409)。
+ * 生成の完了を待たずに受理されたジョブ(id・状態)が返り、生成した本文は `static_content` へ書かれず、
+ * ジョブの結果(`GET /api/generation-jobs/{id}` の `resultPayload.body`)にだけ置かれる。
+ */
+export function startStaticContentGenerationJob(
+  siteId: number,
+  contentType: StaticContentType
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`/api/sites/${siteId}/static-content/generate/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentType }),
+  });
+}
+
+/** 静的コンテンツの「保存」(`PUT /api/sites/{id}/static-content/{種別}`、issue #1409)。同じ種別があれば上書きする。 */
+export function saveStaticContent(
+  siteId: number,
+  contentType: StaticContentType,
+  body: string
+): Promise<StaticContent> {
+  return apiFetch<StaticContent>(`/api/sites/${siteId}/static-content/${contentType}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  });
+}
+
 export interface SshKeyPair {
   publicKeyLine: string;
   privateKeyPem: string;
@@ -1005,6 +1034,19 @@ export function generateCustomTag(input: GenerateCustomTagInput): Promise<Custom
   });
 }
 
+/**
+ * カスタムタグのAI生成を非同期ジョブとして要求する(`POST /api/custom-tags/generate/jobs`、issue #1409)。
+ * 生成の完了を待たずに受理されたジョブ(id・状態)が返り、生成したHTML/CSSは `custom_tags` へ書かれず、
+ * ジョブの結果(`GET /api/generation-jobs/{id}` の `resultPayload`)にだけ置かれる。保存は `createCustomTag`。
+ */
+export function startCustomTagGenerationJob(input: GenerateCustomTagInput): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>('/api/custom-tags/generate/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 export function validateCustomTag(input: ValidateCustomTagRequest): Promise<ValidationResult> {
   return apiFetch<ValidationResult>('/api/custom-tags/validate', {
     method: 'POST',
@@ -1126,6 +1168,23 @@ export function generateTagDesign(
   prompt: string
 ): Promise<GenerateTagDesignResult> {
   return apiFetch<GenerateTagDesignResult>(`${tagDesignBasePath(projectId)}/${tagType}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+/**
+ * タグデザインのAI生成を非同期ジョブとして要求する(`POST .../{tagType}/generate/jobs`、issue #1409)。
+ * projectIdがnullならグローバル既定。生成したCSS/HTMLは設定へ書かれず、ジョブの結果にだけ置かれる。
+ * 保存は `saveTagDesignSetting`。
+ */
+export function startTagDesignGenerationJob(
+  projectId: number | null,
+  tagType: EmbedTagType,
+  prompt: string
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`${tagDesignBasePath(projectId)}/${tagType}/generate/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),

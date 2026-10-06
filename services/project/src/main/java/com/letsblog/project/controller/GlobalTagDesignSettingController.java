@@ -3,6 +3,7 @@ package com.letsblog.project.controller;
 import com.letsblog.project.domain.EmbedTagType;
 import com.letsblog.project.dto.GenerateTagDesignRequest;
 import com.letsblog.project.dto.GenerateTagDesignResponse;
+import com.letsblog.project.dto.GenerationJobResponse;
 import com.letsblog.project.dto.SaveTagDesignSettingRequest;
 import com.letsblog.project.dto.TagDesignSettingResponse;
 import com.letsblog.project.dto.TagDesignSettingsOverviewResponse;
@@ -10,7 +11,9 @@ import com.letsblog.project.service.AdminAuthorizationService;
 import com.letsblog.project.service.LetsblogSyncService;
 import com.letsblog.project.service.TagDesignGenerationService;
 import com.letsblog.project.service.TagDesignSettingService;
+import com.letsblog.project.service.TextGenerationJobStarter;
 import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,13 +46,16 @@ public class GlobalTagDesignSettingController {
     private final TagDesignGenerationService tagDesignGenerationService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final LetsblogSyncService letsblogSyncService;
+    private final TextGenerationJobStarter textGenerationJobStarter;
 
     public GlobalTagDesignSettingController(
             TagDesignSettingService tagDesignSettingService,
             TagDesignGenerationService tagDesignGenerationService,
             AdminAuthorizationService adminAuthorizationService,
-            LetsblogSyncService letsblogSyncService) {
+            LetsblogSyncService letsblogSyncService,
+            TextGenerationJobStarter textGenerationJobStarter) {
         this.letsblogSyncService = letsblogSyncService;
+        this.textGenerationJobStarter = textGenerationJobStarter;
         this.tagDesignSettingService = tagDesignSettingService;
         this.tagDesignGenerationService = tagDesignGenerationService;
         this.adminAuthorizationService = adminAuthorizationService;
@@ -79,5 +85,18 @@ public class GlobalTagDesignSettingController {
         adminAuthorizationService.requireAdmin();
         String currentHtmlTemplate = tagDesignSettingService.resolveHtmlTemplate(null, tagType);
         return tagDesignGenerationService.generate(null, tagType, request.prompt(), currentHtmlTemplate);
+    }
+
+    /**
+     * グローバル既定タグデザインのAI生成を非同期ジョブとして受理する(issue #1409)。{@link TagDesignSettingController#generateJob}
+     * のグローバル版で、projectId は{@code null}のまま。認可はadmin限定で同期の{@link #generate}と同じ。
+     */
+    @PostMapping("/{tagType}/generate/jobs")
+    public ResponseEntity<GenerationJobResponse> generateJob(
+            @PathVariable EmbedTagType tagType,
+            @Valid @RequestBody GenerateTagDesignRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(textGenerationJobStarter.startTagDesign(null, tagType, request.prompt())));
     }
 }

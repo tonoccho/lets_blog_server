@@ -53,12 +53,19 @@ public class CustomTagGenerationService {
         this.customTagValidationService = customTagValidationService;
     }
 
-    @Transactional
-    public GenerateCustomTagResponse generate(GenerateCustomTagRequest request) {
-        adminAuthorizationService.requireAdmin();
+    /** LLMの生成結果から取り出した、検証済みのHTMLテンプレートとCSS(保存はしない)。 */
+    public record GeneratedContent(String htmlTemplate, String cssContent) {
+    }
 
+    /**
+     * プロンプトからHTML/CSSを生成して検証するところまで。{@code custom_tags}へは書かず、管理者確認も行わない
+     * (issue #1409)。同期の{@link #generate}と、非同期ジョブ({@code CustomTagGenerationJobRunner})が共有する。
+     * 非同期ジョブはリクエストの無いスレッドで動くので、管理者の確認は受理側(リクエストスレッド)で済ませる。
+     * 生成結果は呼び出し元がジョブの結果へ載せ、利用者が「保存」したときに初めて既存の保存先へ書かれる。
+     */
+    public GeneratedContent generateContent(String prompt) {
         // プロンプトをLLMに送信(ai-serviceへ委譲、issue #574)
-        String llmResponse = aiGenerationClient.generate(null, buildPrompt(request.prompt()), null);
+        String llmResponse = aiGenerationClient.generate(null, buildPrompt(prompt), null);
 
         // HTMLとCSSを抽出
         String htmlTemplate = extractHtml(llmResponse);
@@ -77,6 +84,16 @@ public class CustomTagGenerationService {
                     .collect(Collectors.joining(", "));
             throw new InvalidCustomTagContentException("生成されたHTML/CSSがセキュリティ要件を満たしていません: " + errorMessage);
         }
+        return new GeneratedContent(htmlTemplate, cssContent);
+    }
+
+    @Transactional
+    public GenerateCustomTagResponse generate(GenerateCustomTagRequest request) {
+        adminAuthorizationService.requireAdmin();
+
+        GeneratedContent content = generateContent(request.prompt());
+        String htmlTemplate = content.htmlTemplate();
+        String cssContent = content.cssContent();
 
         // カスタムタグが既に存在するかチェック
         Long projectId = request.projectId();

@@ -17,22 +17,10 @@ jest.mock('@/lib/useCustomTagGeneration', () => ({
   useCustomTagGeneration: () => ({
     isLoading: false,
     error: null,
-    result: null,
+    queuedJobId: null,
     generate: jest.fn(),
     reset: jest.fn(),
   }),
-}))
-jest.mock('@/lib/useCustomTagValidation', () => ({
-  useCustomTagValidation: () => ({
-    isLoading: false,
-    error: null,
-    result: null,
-    validate: jest.fn(),
-    reset: jest.fn(),
-  }),
-}))
-jest.mock('../ValidationPanel', () => ({
-  ValidationPanel: () => <div>ValidationPanel</div>,
 }))
 
 import { CustomTagGenerationForm } from '../CustomTagGenerationForm'
@@ -45,7 +33,7 @@ describe('CustomTagGenerationForm(マウント前)', () => {
       update: jest.fn(),
     })
 
-    render(<CustomTagGenerationForm projects={[]} currentProjectId={null} onGenerationSuccess={jest.fn()} />)
+    render(<CustomTagGenerationForm projects={[]} currentProjectId={null} />)
 
     expect(screen.getByRole('button', { name: '生成' })).toBeDisabled()
   })

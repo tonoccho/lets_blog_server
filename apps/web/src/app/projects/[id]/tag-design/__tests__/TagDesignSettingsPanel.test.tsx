@@ -295,10 +295,8 @@ describe("AIでデザインを生成するフォーム", () => {
     expect(screen.getByText("生成に失敗しました。")).toBeInTheDocument();
   });
 
-  it("生成に成功すると結果をプレビューし、「適用」でCSS欄・HTMLテンプレート欄へ反映される", async () => {
-    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({
-      data: { cssContent: ".generated{color:green;}", htmlTemplate: "<div>generated</div>" },
-    });
+  it("生成の要求が受理されたら、保存済みとは言わず処理キューに追加された旨を示し、プロンプト欄を空にする(issue #1409)", async () => {
+    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ jobId: 23, status: "running" });
 
     render(
       <TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={buildMultiTagSettings()} />
@@ -311,17 +309,186 @@ describe("AIでデザインを生成するフォーム", () => {
       fireEvent.click(screen.getByRole("button", { name: "生成" }));
     });
 
-    expect(screen.getByText(".generated{color:green;}")).toBeInTheDocument();
+    expect(generateTagDesignAction).toHaveBeenCalledWith(1, "TOC", "緑にして");
+    const notice = screen.getByTestId("tag-design-queued");
+    expect(notice).toHaveAttribute("data-job-id", "23");
+    expect(notice).toHaveTextContent("処理キューに追加されました");
+    expect(notice).toHaveTextContent("結果を見る");
+    expect(notice).toHaveTextContent("保存");
+    expect(promptTextarea).toHaveValue("");
+    // 要求しただけでは、編集欄にも結果の表示にも何も現れない
+    expect(screen.queryByTestId("tag-design-generated")).not.toBeInTheDocument();
+    expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).not.toContain("green");
+  });
+
+  it("グローバル(projectId null)でも同じく projectId null のまま要求する(issue #1409)", async () => {
+    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ jobId: 24, status: "running" });
+
+    render(
+      <TagDesignSettingsPanel projectId={null} presets={twoPresets} settings={buildMultiTagSettings()} />
+    );
+    fireEvent.change(screen.getByPlaceholderText(/背景を淡いグレーにして/), { target: { value: "p" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    });
+
+    expect(generateTagDesignAction).toHaveBeenCalledWith(null, "TOC", "p");
+  });
+
+  it("ジョブが満杯で failed として返ったら、待ち行列が満杯である旨を表示する(issue #1409)", async () => {
+    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ jobId: 25, status: "failed" });
+
+    render(
+      <TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={buildMultiTagSettings()} />
+    );
+    fireEvent.change(screen.getByPlaceholderText(/背景を淡いグレーにして/), { target: { value: "p" } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "生成" }));
+    });
+
+    expect(screen.getByText(/待ち行列が満杯/)).toBeInTheDocument();
+    expect(screen.queryByTestId("tag-design-queued")).not.toBeInTheDocument();
+  });
+});
+
+describe("処理キューの「結果を見る」から開いた生成結果と「保存」(issue #1409)", () => {
+  const jobResult = {
+    jobId: 23,
+    projectId: 1,
+    tagType: "BLOGCARD" as const,
+    htmlTemplate: "<div>generated</div>",
+    cssContent: ".generated{color:green;}",
+  };
+
+  beforeEach(() => {
+    (saveTagDesignSettingAction as jest.Mock).mockReset();
+  });
+
+  function renderWithResult(result = jobResult, projectId: number | null = 1) {
+    return render(
+      <TagDesignSettingsPanel
+        projectId={projectId}
+        presets={twoPresets}
+        settings={buildMultiTagSettings()}
+        jobResult={result}
+      />
+    );
+  }
+
+  it("生成されたタグ種別の編集画面を開き、生成結果を未保存として表示する", () => {
+    renderWithResult();
+
+    // 先頭(TOC)ではなく、結果のタグ種別(ブログカード)の編集画面が開く
+    expect(screen.getByText(/ブログカードのデザインを編集/)).toBeInTheDocument();
+    const block = screen.getByTestId("tag-design-generated");
+    expect(block).toHaveAttribute("data-job-id", "23");
+    expect(block).toHaveTextContent("保存されていません");
+    expect(block).toHaveTextContent(".generated{color:green;}");
+    expect(block).toHaveTextContent("<div>generated</div>");
+    // 保存するまで編集欄は変わらない
+    expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).not.toContain("generated");
+    expect(saveTagDesignSettingAction).not.toHaveBeenCalled();
+  });
+
+  it("別のタグ種別の編集画面に切り替えると、そのタグ種別の結果ではないので表示しない", () => {
+    renderWithResult();
+
+    const tocRow = screen.getAllByRole("row").find((row) => within(row).queryByText("目次"))!;
+    fireEvent.click(within(tocRow).getByRole("button", { name: "編集" }));
+
+    expect(screen.getByText(/目次のデザインを編集/)).toBeInTheDocument();
+    expect(screen.queryByTestId("tag-design-generated")).not.toBeInTheDocument();
+  });
+
+  it("「保存」は現在のプリセット・色に生成したCSS/HTMLを添えて既存の保存アクションへ渡し、編集欄へも反映する", async () => {
+    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ success: true });
+    renderWithResult();
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
+    });
+
+    const [, formData] = (saveTagDesignSettingAction as jest.Mock).mock.calls[0] as [unknown, FormData];
+    expect(Object.fromEntries(formData.entries())).toEqual({
+      projectId: "1",
+      tagType: "BLOGCARD",
+      presetId: "default",
+      backgroundColor: "#ffffff",
+      textColor: "#111111",
+      accentColor: "#2563eb",
+      customCss: ".generated{color:green;}",
+      htmlTemplate: "<div>generated</div>",
+    });
+    expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).toBe(".generated{color:green;}");
+    expect((screen.getByRole("textbox", { name: /^HTMLテンプレート/ }) as HTMLTextAreaElement).value).toBe(
+      "<div>generated</div>"
+    );
+    expect(screen.queryByTestId("tag-design-generated")).not.toBeInTheDocument();
+    expect(screen.getByText("保存しました。")).toBeInTheDocument();
+  });
+
+  it("グローバル(projectId null)の結果は projectId を空にして保存する", async () => {
+    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ success: true });
+    renderWithResult(jobResult, null);
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
+    });
+
+    const [, formData] = (saveTagDesignSettingAction as jest.Mock).mock.calls[0] as [unknown, FormData];
+    expect(formData.get("projectId")).toBe("");
+  });
+
+  it("HTMLテンプレートが空の結果(構造変更なし)は、現在のHTMLテンプレートを保つ", async () => {
+    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ success: true });
+    renderWithResult({ ...jobResult, htmlTemplate: "" });
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
+    });
+
+    const [, formData] = (saveTagDesignSettingAction as jest.Mock).mock.calls[0] as [unknown, FormData];
+    expect(formData.get("htmlTemplate")).toBe("<div>{{title}}</div>");
+    expect(formData.get("customCss")).toBe(".generated{color:green;}");
+  });
+
+  it("保存に失敗したら理由を表示し、結果を残して再試行できる", async () => {
+    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ error: "APIエラー (403): 権限がありません" });
+    renderWithResult();
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
+    });
+
+    expect(screen.getByText("APIエラー (403): 権限がありません")).toBeInTheDocument();
+    expect(screen.getByTestId("tag-design-generated")).toBeInTheDocument();
+    expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).not.toContain("generated");
+  });
+
+  it("「この結果を適用」は保存せずに編集欄へ反映する(保存前に手直しできる)", () => {
+    renderWithResult();
 
     fireEvent.click(screen.getByRole("button", { name: "この結果を適用" }));
 
-    const cssTextarea = screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement;
-    expect(cssTextarea.value).toBe(".generated{color:green;}");
-    const htmlTextarea = screen.getByRole("textbox", { name: /^HTMLテンプレート/ }) as HTMLTextAreaElement;
-    expect(htmlTextarea.value).toBe("<div>generated</div>");
-    // 適用後はプロンプト欄・生成結果表示(「この結果を適用」ボタン)がリセットされる
-    expect(promptTextarea).toHaveValue("");
-    expect(screen.queryByRole("button", { name: "この結果を適用" })).not.toBeInTheDocument();
+    expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).toBe(".generated{color:green;}");
+    expect(saveTagDesignSettingAction).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("tag-design-generated")).not.toBeInTheDocument();
+  });
+
+  it("結果のタグ種別が一覧に無ければ先頭のタグ種別を開く", () => {
+    render(
+      <TagDesignSettingsPanel
+        projectId={1}
+        presets={twoPresets}
+        settings={[buildMultiTagSettings()[0]]}
+        jobResult={jobResult}
+      />
+    );
+
+    expect(screen.getByText(/目次のデザインを編集/)).toBeInTheDocument();
+    expect(screen.queryByTestId("tag-design-generated")).not.toBeInTheDocument();
   });
 });
 

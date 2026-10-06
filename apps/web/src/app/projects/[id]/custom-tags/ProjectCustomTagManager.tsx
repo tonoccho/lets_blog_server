@@ -3,6 +3,8 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import type { CustomTag, Project } from "@/lib/apiClient";
 import { CustomTagGenerationForm } from "@/app/custom-tags/CustomTagGenerationForm";
+import { CustomTagGenerationResult } from "@/app/custom-tags/CustomTagGenerationResult";
+import type { CustomTagJobResult } from "@/lib/llmJobResults";
 import { SAMPLE_CONTENT, TemplateEditor, buildPreviewSrcDoc, fetchPreview } from "@/app/custom-tags/CustomTagManager";
 import { CssSelectorPrefixForm } from "./CssSelectorPrefixForm";
 import { upsertProjectCustomTagAction, deleteProjectCustomTagAction, type CustomTagFormState } from "./actions";
@@ -53,12 +55,15 @@ export function ProjectCustomTagManager({
   projectSlug,
   cssSelectorPrefix,
   tags,
+  generatedResult,
 }: {
   projectId: number;
   projectName: string;
   projectSlug: string;
   cssSelectorPrefix: string | null;
   tags: CustomTag[];
+  /** 処理キューの「結果を見る」から開いた、カスタムタグ生成ジョブの結果(未保存。issue #1409)。 */
+  generatedResult?: (CustomTagJobResult & { jobId: number }) | null;
 }) {
   const [editing, setEditing] = useState<CustomTag | null>(null);
   const [state, formAction, pending] = useActionState(upsertProjectCustomTagAction, initialState);
@@ -98,12 +103,16 @@ export function ProjectCustomTagManager({
 
       <CssSelectorPrefixForm projectId={projectId} projectSlug={projectSlug} cssSelectorPrefix={cssSelectorPrefix} />
 
-      <CustomTagGenerationForm
-        projects={[currentProject]}
-        currentProjectId={projectId}
-        effectivePrefix={cssSelectorPrefix ?? projectSlug}
-        onGenerationSuccess={(tag) => setEditing(tag)}
-      />
+      {generatedResult && (
+        <CustomTagGenerationResult
+          key={generatedResult.jobId}
+          projectId={projectId}
+          result={generatedResult}
+          effectivePrefix={cssSelectorPrefix ?? projectSlug}
+        />
+      )}
+
+      <CustomTagGenerationForm projects={[currentProject]} currentProjectId={projectId} />
 
       <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="w-full text-left text-sm">

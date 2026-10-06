@@ -11,10 +11,11 @@
     作成(`createCustomTagTemplateAction`)だけは、画面から作ったテンプレートが対象になる。名前を
     `E2E1477 ` で始めて、後片付けが名前で拾って消す。編集・削除は画面の詳細パネルの「保存」「削除」から呼ぶ
     (issue #1550。それまでこの3つは画面のどこからも呼ばれておらず、シナリオを置けなかった)。
-  - `validateCustomTagAction` は、AI でカスタムタグを生成した**直後に自動で**走る(生成フォームの
-    `useCustomTagValidation`)。生成(`generateCustomTagAction`)自体は予算対象外(外部LLMの応答時間に依存。
-    §10.5)なので、LLM スタブ(`@stub`)に生成させ、続けて送られる **2回目の Server Action の往復**
-    (検証)だけを計る。
+  - `validateCustomTagAction` は、AI でカスタムタグを生成した結果(未保存)を処理キューの「結果を見る」から
+    表示したときに**自動で**走る(結果パネルの `useCustomTagValidation`、issue #1409)。生成の要求
+    (`generateCustomTagAction`)は非同期ジョブの受付だけだが、予算対象外のまま
+    (§10.5。生成そのものは外部LLMの応答時間に依存する)。LLM スタブ(`@stub`)に生成させ、完了を待って
+    結果を開き、そのとき送られる検証の Server Action の往復だけを計る。
 
   背景:
     前提 応答時間予算の検証のために管理者としてログインしている
@@ -63,5 +64,5 @@
   @stub @budget-action:validateCustomTagAction
   シナリオ: カスタムタグの検証(Server Action)の往復が3秒以内に返る
     前提 応答時間予算の検証用のカスタムタグ用プロジェクトがある
-    もし カスタムタグ管理画面でAIにタグを生成させ、続いて自動で走る検証の Server Action の往復を計測する
+    もし カスタムタグ管理画面でAIにタグの生成を要求し、結果を開いて自動で走る検証の Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る

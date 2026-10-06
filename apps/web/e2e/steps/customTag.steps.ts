@@ -9,6 +9,7 @@ import {
   fetchAccessToken,
 } from '../support';
 import { measureFirstDisplay, recordResponseTime } from '../support/responseBudget';
+import { waitForHydrated } from '../support/responseBudgetFixtures';
 
 /**
  * カスタムタグ・テンプレート・コンテンツ設定の受け入れシナリオを支えるステップ定義
@@ -267,7 +268,8 @@ async function openGenerationForm(page: Page, projectId: number): Promise<Locato
 }
 
 /**
- * 生成フォームを送信し、成功(「生成完了!」)か失敗(赤字のエラー)のどちらかに到達するまで待つ。
+ * 生成フォームを送信し、要求の受付(処理キューに追加された旨)か失敗(赤字のエラー)のどちらかに
+ * 到達するまで待つ。生成は非同期ジョブとして受理され(issue #1409)、完了も保存も待たない。
  *
  * 送信ボタンはセッションが未解決の間 `disabled` で、ラベルも「セッション確認中...」になる
  * (`CustomTagGenerationForm`。issue #778 の修正)。したがって
@@ -288,9 +290,9 @@ async function submitGeneration(
   await expect(submit).toBeEnabled();
   await submit.click();
 
-  await expect(page.getByText('生成完了！').or(form.locator('p.text-red-600')).first()).toBeVisible({
-    timeout: 120_000,
-  });
+  await expect(
+    page.getByTestId('custom-tag-generation-queued').or(form.locator('p.text-red-600')).first()
+  ).toBeVisible({ timeout: 30_000 });
 }
 
 /** タグ一覧の、そのタグ名の行。 */
@@ -320,20 +322,36 @@ Given('同じCSSのカスタムタグを持つ別のプロジェクトがある'
 
 // ---- 生成と検証(generation.feature) ----
 
+/** 要求したジョブを、処理キューと結果画面のステップ(llmGenerationJob.steps.ts)が特定できるよう印を残す。 */
+function rememberRequestedJob(ctx: ScenarioState, projectId: number, tagName: string): void {
+  ctx.llmMarkers = [tagName];
+  ctx.llmReturnUrl = `/projects/${projectId}/tags`;
+}
+
 When(
-  /^そのプロジェクトのカスタムタグ管理画面で「([^」]+)」というプロンプトからカスタムタグを生成する$/,
+  /^そのプロジェクトのカスタムタグ管理画面で「([^」]+)」というプロンプトからカスタムタグの生成を要求する$/,
   async ({ ctx, page }, prompt: string) => {
     const form = await openGenerationForm(page, ctx.tagProjectId as number);
-    const tagName = `e2e938g${uniqueSuffix()}`;
+    const tagName = `e2e1409g${uniqueSuffix()}`;
     await submitGeneration(page, form, prompt, tagName);
     ctx.tagName = tagName;
     ctx.tagGeneratedName = tagName;
+    rememberRequestedJob(ctx, ctx.tagProjectId as number, tagName);
   }
 );
 
-Then('生成完了が表示される', async ({ page }) => {
-  await expect(page.getByText('生成完了！')).toBeVisible();
+Then('生成の要求を受け付けた旨が示され、生成と同時に保存されたとは示されない', async ({ page }) => {
+  const notice = page.getByTestId('custom-tag-generation-queued');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('処理キューに追加されました');
+  await expect(page.getByText('生成完了！')).toHaveCount(0);
+  await expect(page.getByText(/生成と同時に保存/)).toHaveCount(0);
 });
+
+/** 「結果を見る」で開いた、カスタムタグの生成結果(未保存)。 */
+function generationResult(page: Page): Locator {
+  return page.getByTestId('custom-tag-generation-result');
+}
 
 /**
  * 検証結果の表示は3通りある(エラーあり / 警告あり / どちらも無い)。
@@ -341,14 +359,31 @@ Then('生成完了が表示される', async ({ page }) => {
  * **警告だけ**が付くため、「検証成功」だけを待つと結果が出ているのに落ちる(issue #949)。
  * ここで確かめたいのは「検証が走って結果が示されること」なので3通りとも受ける。
  */
-Then('生成結果の検証結果が画面に示される', async ({ page }) => {
+Then('生成結果として未保存のHTMLとCSSが表示され、検証結果が画面に示される', async ({ ctx, page }) => {
+  const result = generationResult(page);
+  await expect(result).toBeVisible({ timeout: 30_000 });
+  await expect(result).toContainText('保存されていません');
+  await expect(result).toContainText(`[${ctx.tagGeneratedName as string}]`);
+  await expect(result.locator('pre').first()).not.toBeEmpty();
   await expect(
-    page
+    result
       .getByText('検証成功')
-      .or(page.locator('h3:has-text("エラー (")'))
-      .or(page.locator('h3:has-text("警告 (")'))
+      .or(result.locator('h3:has-text("エラー (")'))
+      .or(result.locator('h3:has-text("警告 (")'))
       .first()
   ).toBeVisible({ timeout: 30_000 });
+});
+
+When('生成結果の「保存」を押す', async ({ page }) => {
+  const save = generationResult(page).getByRole('button', { name: '保存', exact: true });
+  await expect(save).toBeVisible({ timeout: 30_000 });
+  // 保存は副作用のある操作なので、クリックを再試行せず、ハイドレーション完了を待ってから1度だけ押す。
+  await waitForHydrated(save);
+  await save.click();
+});
+
+Then('保存したことが示される', async ({ page }) => {
+  await expect(generationResult(page).getByText('保存しました。')).toBeVisible({ timeout: 30_000 });
 });
 
 Then('ページを開き直すと、生成したタグがカスタムタグ一覧に現れる', async ({ ctx, page }) => {
@@ -372,7 +407,7 @@ Then('タグ名の入力は不正と判定され、生成は始まらない', as
   const tagNameInput = generationForm(page).locator('input[name="tagName"]');
   const isValid = await tagNameInput.evaluate((el: HTMLInputElement) => el.checkValidity());
   expect(isValid, 'タグ名がブラウザのバリデーションを通ってしまいました').toBe(false);
-  await expect(page.getByText('生成完了！')).toHaveCount(0);
+  await expect(page.getByTestId('custom-tag-generation-queued')).toHaveCount(0);
 });
 
 async function requestValidation(
@@ -419,21 +454,89 @@ Then(
 );
 
 When(
-  'そのプロジェクトのカスタムタグ管理画面で、既にあるタグと同じ名前でカスタムタグを生成する',
+  'そのプロジェクトのカスタムタグ管理画面で、既にあるタグと同じ名前でカスタムタグの生成を要求する',
   async ({ ctx, page }) => {
     const form = await openGenerationForm(page, ctx.tagProjectId as number);
-    await submitGeneration(page, form, 'e2e938 の失敗経路', ctx.tagName as string);
+    await submitGeneration(page, form, 'e2e1409 の失敗経路', ctx.tagName as string);
+    // 重複は生成の前ではなく「保存」で検出される。保存後に一覧へ現れる名前は、既にあるタグ自身のもの。
+    ctx.tagGeneratedName = ctx.tagName;
+    rememberRequestedJob(ctx, ctx.tagProjectId as number, ctx.tagName as string);
   }
 );
 
-Then('生成フォームに失敗の理由が表示される', async ({ ctx, page }) => {
-  const message = generationForm(page).locator('p.text-red-600');
-  await expect(message).toBeVisible();
+Then('生成結果の保存は失敗し、理由が表示される', async ({ ctx, page }) => {
+  const message = generationResult(page).locator('p.text-red-600');
+  await expect(message).toBeVisible({ timeout: 30_000 });
   await expect(message).toContainText(ctx.tagName as string);
 });
 
-Then('生成完了は表示されない', async ({ page }) => {
-  await expect(page.getByText('生成完了！')).toHaveCount(0);
+Then('保存したことは示されない', async ({ page }) => {
+  await expect(page.getByText('保存しました。')).toHaveCount(0);
+});
+
+Then('そのプロジェクトのカスタムタグ一覧には、その名前のタグが1件だけある', async ({ ctx, request }) => {
+  const response = await request.get(`/api/projects/${ctx.tagProjectId}/custom-tags`, {
+    headers: await authHeaders(request),
+  });
+  expect(response.ok(), `カスタムタグ一覧の取得に失敗しました (status=${response.status()})`).toBe(true);
+  const tags = (await response.json()) as { tagName: string }[];
+  expect(tags.filter((tag) => tag.tagName === ctx.tagName)).toHaveLength(1);
+});
+
+// ---- 生成ジョブ(API。保存の前後でカスタムタグ一覧が変わらないことを確かめる) ----
+
+interface GenerationJobDetail {
+  id: number;
+  status: string;
+  resultPayload: string | null;
+}
+
+When('そのプロジェクトのカスタムタグ生成をジョブとして要求する', async ({ ctx, request }) => {
+  const tagName = `e2e1409a${uniqueSuffix()}`;
+  const response = await request.post('/api/custom-tags/generate/jobs', {
+    headers: await authHeaders(request),
+    data: { prompt: '青いボタンコンポーネントを作成してください', tagName, projectId: ctx.tagProjectId },
+  });
+  expect(
+    response.status(),
+    `ジョブとして受理されませんでした (status=${response.status()}): ${await response.text()}`
+  ).toBe(202);
+  ctx.tagGeneratedName = tagName;
+  ctx.tagGenerationJobId = ((await response.json()) as { id: number }).id;
+});
+
+async function fetchJob(request: APIRequestContext, jobId: number): Promise<GenerationJobDetail> {
+  const response = await request.get(`/api/generation-jobs/${jobId}`, { headers: await authHeaders(request) });
+  expect(response.ok(), `ジョブの取得に失敗しました (status=${response.status()})`).toBe(true);
+  return (await response.json()) as GenerationJobDetail;
+}
+
+When('カスタムタグ生成のジョブが終わるまで待つ', async ({ ctx, request }) => {
+  const deadline = Date.now() + 120_000;
+  let job = await fetchJob(request, ctx.tagGenerationJobId as number);
+  while (Date.now() < deadline && (job.status === 'running' || job.status === 'pending')) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    job = await fetchJob(request, ctx.tagGenerationJobId as number);
+  }
+  ctx.tagGenerationJob = job;
+});
+
+Then('そのジョブは「done」で終わり、結果に生成されたHTMLとCSSが示される', async ({ ctx }) => {
+  const job = ctx.tagGenerationJob as GenerationJobDetail;
+  expect(job.status, `ジョブが完了していません: ${JSON.stringify(job)}`).toBe('done');
+  const result = JSON.parse(job.resultPayload ?? '{}') as { htmlTemplate?: string; cssContent?: string; tagName?: string };
+  expect(result.tagName).toBe(ctx.tagGeneratedName);
+  expect(result.htmlTemplate ?? '').not.toBe('');
+  expect(result.cssContent ?? '').not.toBe('');
+});
+
+Then('そのプロジェクトのカスタムタグ一覧に、生成したタグは現れない', async ({ ctx, request }) => {
+  const response = await request.get(`/api/projects/${ctx.tagProjectId}/custom-tags`, {
+    headers: await authHeaders(request),
+  });
+  expect(response.ok(), `カスタムタグ一覧の取得に失敗しました (status=${response.status()})`).toBe(true);
+  const tags = (await response.json()) as { tagName: string }[];
+  expect(tags.map((tag) => tag.tagName)).not.toContain(ctx.tagGeneratedName as string);
 });
 
 // ---- 編集と削除(management.feature) ----

@@ -109,4 +109,28 @@ describe('Tabs', () => {
       expect(screen.getByText('Content 1')).toBeInTheDocument()
     })
   })
+
+  it('defaultTabId が(同じ画面のまま)変わったら、選択中のタブがそれに追従する', () => {
+    const { rerender } = render(<Tabs tabs={mockTabs} defaultTabId="tab1" />)
+    expect(screen.getByText('Content 1')).toBeInTheDocument()
+
+    rerender(<Tabs tabs={mockTabs} defaultTabId="tab3" />)
+    expect(screen.getByText('Content 3')).toBeInTheDocument()
+    expect(screen.queryByText('Content 1')).not.toBeInTheDocument()
+  })
+
+  it('defaultTabId が変わらない再描画では、利用者が選んだタブを保つ', () => {
+    const { rerender } = render(<Tabs tabs={mockTabs} defaultTabId="tab1" />)
+    fireEvent.click(screen.getByText('Tab 2'))
+
+    rerender(<Tabs tabs={mockTabs} defaultTabId="tab1" />)
+    expect(screen.getByText('Content 2')).toBeInTheDocument()
+  })
+
+  it('存在しない defaultTabId に変わっても、選択中のタブは変えない', () => {
+    const { rerender } = render(<Tabs tabs={mockTabs} defaultTabId="tab2" />)
+
+    rerender(<Tabs tabs={mockTabs} defaultTabId="nope" />)
+    expect(screen.getByText('Content 2')).toBeInTheDocument()
+  })
 })

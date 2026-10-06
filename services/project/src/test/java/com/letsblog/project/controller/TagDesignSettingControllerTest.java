@@ -39,9 +39,13 @@ class TagDesignSettingControllerTest {
     @Mock
     private com.letsblog.project.service.LetsblogSyncService letsblogSyncService;
 
+    @Mock
+    private com.letsblog.project.service.TextGenerationJobStarter textGenerationJobStarter;
+
     private TagDesignSettingController controller() {
         return new TagDesignSettingController(
-                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService, letsblogSyncService);
+                tagDesignSettingService, tagDesignGenerationService, adminAuthorizationService, letsblogSyncService,
+                textGenerationJobStarter);
     }
 
     @Test
@@ -136,5 +140,33 @@ class TagDesignSettingControllerTest {
                 com.letsblog.project.domain.EmbedTagType.TOC,
                 new com.letsblog.project.dto.SaveTagDesignSettingRequest("default", "#fff", "#000", "#f00", null, null)));
         org.mockito.Mockito.verifyNoInteractions(letsblogSyncService);
+    }
+
+    // ---- issue #1409: 生成を非同期ジョブとして受理する ----
+
+    @Test
+    void generateJob_認可後にジョブとして受理し202を返す() {
+        GenerateTagDesignRequest request = new GenerateTagDesignRequest("淡いグレー");
+        java.time.LocalDateTime created = java.time.LocalDateTime.of(2026, 10, 6, 1, 2, 3);
+        when(textGenerationJobStarter.startTagDesign(1L, com.letsblog.project.domain.EmbedTagType.TOC, "淡いグレー"))
+                .thenReturn(new com.letsblog.common.client.GenerationJobSummary(
+                        9L, "tag_design_generation", "running", created, created));
+
+        org.springframework.http.ResponseEntity<com.letsblog.project.dto.GenerationJobResponse> response =
+                controller().generateJob(1L, com.letsblog.project.domain.EmbedTagType.TOC, request);
+
+        assertEquals(org.springframework.http.HttpStatus.ACCEPTED, response.getStatusCode());
+        assertEquals(9L, response.getBody().id());
+        assertEquals("tag_design_generation", response.getBody().type());
+        verify(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    }
+
+    @Test
+    void generateJob_認可に失敗したらジョブを作らない() {
+        doThrow(new ForbiddenException("x")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+
+        assertThrows(ForbiddenException.class, () -> controller().generateJob(
+                1L, com.letsblog.project.domain.EmbedTagType.TOC, new GenerateTagDesignRequest("p")));
+        org.mockito.Mockito.verifyNoInteractions(textGenerationJobStarter);
     }
 }

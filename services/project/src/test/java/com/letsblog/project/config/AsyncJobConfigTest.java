@@ -47,4 +47,35 @@ class AsyncJobConfigTest {
                 .getAnnotation(org.springframework.scheduling.annotation.Async.class).value();
         assertEquals(beanName, qualifier);
     }
+
+    @Test
+    @DisplayName("textGenerationExecutor は LLM 待ちが主なので core 2 / max 4 / 待ち行列 20(issue #1409)")
+    void textGenerationExecutorIsSmall() {
+        Executor executor = new AsyncJobConfig().textGenerationExecutor();
+
+        ThreadPoolTaskExecutor pool = (ThreadPoolTaskExecutor) executor;
+        assertEquals(2, pool.getCorePoolSize());
+        assertEquals(4, pool.getMaxPoolSize());
+        assertEquals(20, pool.getThreadPoolExecutor().getQueue().remainingCapacity());
+        assertTrue(pool.getThreadNamePrefix().startsWith("text-generation"));
+        pool.shutdown();
+    }
+
+    @Test
+    @DisplayName("Bean 名は TextGenerationJobRunner の2つの @Async が指す名前と一致する(issue #1409)")
+    void textGenerationBeanNameMatchesAsyncQualifier() throws Exception {
+        String beanName = AsyncJobConfig.class.getMethod("textGenerationExecutor")
+                .getAnnotation(org.springframework.context.annotation.Bean.class).name()[0];
+        Class<?> runner = com.letsblog.project.service.TextGenerationJobRunner.class;
+        String staticQualifier = runner
+                .getMethod("runStaticContent", Long.class, Long.class,
+                        com.letsblog.project.domain.StaticContentType.class, String.class)
+                .getAnnotation(org.springframework.scheduling.annotation.Async.class).value();
+        String designQualifier = runner
+                .getMethod("runTagDesign", Long.class, Long.class,
+                        com.letsblog.project.domain.EmbedTagType.class, String.class)
+                .getAnnotation(org.springframework.scheduling.annotation.Async.class).value();
+        assertEquals(beanName, staticQualifier);
+        assertEquals(beanName, designQualifier);
+    }
 }

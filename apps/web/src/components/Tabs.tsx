@@ -27,6 +27,13 @@ export function Tabs({
   const [internalTabId, setInternalTabId] = useState(
     tabs.some((tab) => tab.id === defaultTabId) ? (defaultTabId as string) : tabs[0]?.id || "",
   );
+  // 同じ画面のままURLの `?tab=` だけが変わる遷移(例: 処理キューの「結果を見る」)ではコンポーネントが
+  // 作り直されないので、defaultTabId の変化を選択中のタブへ反映する(render 中の state 調整)。
+  const [seenDefaultTabId, setSeenDefaultTabId] = useState(defaultTabId);
+  if (seenDefaultTabId !== defaultTabId) {
+    setSeenDefaultTabId(defaultTabId);
+    if (tabs.some((tab) => tab.id === defaultTabId)) setInternalTabId(defaultTabId as string);
+  }
   const activeTabId = controlledTabId ?? internalTabId;
 
   function selectTab(id: string) {
