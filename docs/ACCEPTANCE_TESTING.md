@@ -602,6 +602,20 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 - CPU 構成での実生成と所要時間の実測は、利用者の決定(#1401、2026-10-05)により当面実施しない(#1637)。
   このシナリオは既定実行とリリース検証の対象外のまま置いておく。
 
+**Ollama(CPU 構成)の1シナリオ(#1402)。** `features/ai/generation-ollama-cpu.feature` が、同じ `@requires-real-ai-cpu`
+(新しいタグ・環境変数・Playwright プロジェクトは増やしていない)で、#1585 の CPU 構成(`ollama-cpu`、コンテナ
+`lbs-ollama-cpu`)に対して**LLM の応答が返ること**を確かめる。`at-destructive`。
+
+- 既定の AT 構成では `ollama` / `ollama-model-init` は起動しない(#1090、`profiles: ["ollama"]`)。シナリオだけが
+  `docker compose -p lets_blog_server -f docker-compose.yml -f docker-compose.e2e-stubs.yml --profile ollama-cpu up -d ollama-cpu`
+  で明示起動し、自分が起動した場合に限り終了後に `docker stop` する。
+- 向き先はシステム設定 `llm_provider` / `llm_ollama_base_url`(`http://lbs-ollama-cpu:11434/v1`)/ `llm_ollama_model` を DB へ書き、
+  終了後(途中で落ちても `After`)に元へ戻す。
+- モデルは小さい `qwen2.5:0.5b-instruct`(約 400MB)を `docker exec lbs-ollama-cpu ollama pull` で用意する(`ollama_models` は保全ボリューム)。
+  `LLM_REQUEST_TIMEOUT_SECONDS`(120 秒)は広げない。呼び出しは短い本文の `POST /api/ai/tags`。
+- 除外・ログ記録は上記 ComfyUI のレーンと共通。**実機での実行と所要時間の記録は、利用者の決定(#1402、2026-10-05)により
+  当面実施しない(#1638)。所要時間は未測定。**
+
 **実測所要時間(AC-2)。** 未測定。実装した環境(メモリ空き約 6GB、共有スタックがループと同居)では、
 CPU 構成のコンテナ起動と 5.2GB のモデル導入、fp32 の CPU 生成が共有スタックを圧迫し得るため実行しなかった。
 `.feature` と手順は書いてあるので、CPU 構成のコンテナを起動した環境で
