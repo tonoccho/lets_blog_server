@@ -388,6 +388,19 @@ export interface ImageGenerationOptionsResponse {
   defaultQualityPrompt?: string;
 }
 
+export interface UpdateGeneratedImageFolderNameRequest {
+  /**
+     * @minLength 0
+     * @maxLength 255
+     */
+  name: string;
+}
+
+export interface GeneratedImageFolderDeleteImpactResponse {
+  descendantFolderCount?: number;
+  imageCount?: number;
+}
+
 export type Delete1Params = {
 environment: string;
 };

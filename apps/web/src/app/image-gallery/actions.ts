@@ -6,6 +6,9 @@ import { GALLERY_PAGE_SIZE } from "./pageSize";
 import {
   bulkDeleteGeneratedImages,
   createGeneratedImageFolder,
+  deleteGeneratedImageFolder,
+  getGeneratedImageFolderDeleteImpact,
+  renameGeneratedImageFolder,
   deleteGeneratedImage,
   editGeneratedImage,
   getGeneratedImage,
@@ -17,6 +20,7 @@ import {
   type GeneratedImageCrop,
   type GeneratedImageDetail,
   type GeneratedImageFolder,
+  type GeneratedImageFolderDeleteImpact,
   type GeneratedImageSummary,
 } from "@/lib/apiClient";
 
@@ -90,6 +94,27 @@ export async function setGeneratedImageFolderAction(
   const result = await setGeneratedImageFolder(id, folderId);
   revalidatePath("/image-gallery");
   return result;
+}
+
+/** フォルダを改名する(issue #1494)。認可は上記参照(ログイン必須)。改名は admin のみ(media-service が判定)。 */
+export async function renameGeneratedImageFolderAction(id: number, name: string): Promise<GeneratedImageFolder> {
+  await requireSession();
+  const result = await renameGeneratedImageFolder(id, name);
+  revalidatePath("/image-gallery");
+  return result;
+}
+
+/** フォルダ削除の影響範囲(子孫フォルダ数・未分類に戻る画像の枚数)を取る(issue #1494)。何も変更しないので再検証しない。 */
+export async function getGeneratedImageFolderDeleteImpactAction(id: number): Promise<GeneratedImageFolderDeleteImpact> {
+  await requireSession();
+  return getGeneratedImageFolderDeleteImpact(id);
+}
+
+/** フォルダと子孫を削除する。所属画像は消さず未分類へ戻る(issue #1494)。認可は上記参照。削除は admin のみ(media-service が判定)。 */
+export async function deleteGeneratedImageFolderAction(id: number): Promise<void> {
+  await requireSession();
+  await deleteGeneratedImageFolder(id);
+  revalidatePath("/image-gallery");
 }
 
 /**

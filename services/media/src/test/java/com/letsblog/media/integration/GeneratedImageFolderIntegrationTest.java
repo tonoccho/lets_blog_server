@@ -28,6 +28,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -35,7 +36,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * issue #1493: 生成画像の入れ子フォルダ(作成・親の変更・画像の所属・フォルダ絞り込み・認可)を、
+ * issue #1493: 生成画像の入れ子フォルダ(作成・親の変更・画像の所属・フォルダ絞り込み・認可)と、
+ * issue #1494: フォルダの改名・削除(削除の影響範囲・画像の未分類化)を、
  * 実DB(lbs_media_test)と実コントローラ経由で検証する。循環防止は再帰CTEに依存するため実DBが要る。
  * 外部境界(identity-service)は{@code @MockitoBean}で置き換える(ADR-0006)。
  */
@@ -282,5 +284,151 @@ class GeneratedImageFolderIntegrationTest {
     @DisplayName("操作者を解決できない(無効化)ユーザーはフォルダ一覧も403")
     void 操作者なしはフォルダ一覧も403() throws Exception {
         mockMvc.perform(as(get(FOLDERS), "disabled-jwt")).andExpect(status().isForbidden());
+    }
+
+    private ResultActions putName(String jwt, long folderId, String name) throws Exception {
+        return mockMvc.perform(as(put(FOLDERS + "/" + folderId + "/name"), jwt)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"" + name + "\"}"));
+    }
+
+    private ResultActions deleteFolder(String jwt, long folderId) throws Exception {
+        return mockMvc.perform(as(delete(FOLDERS + "/" + folderId), jwt));
+    }
+
+    private ResultActions impact(String jwt, long folderId) throws Exception {
+        return mockMvc.perform(as(get(FOLDERS + "/" + folderId + "/delete-impact"), jwt));
+    }
+
+    private int countFolders() {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM generated_image_folders", Integer.class);
+    }
+
+    @Test
+    @DisplayName("改名すると名前だけが変わり、親と所属画像は変わらない。前後の空白は除き、同じ親の下の重複は検査しない")
+    void 改名できる() throws Exception {
+        long parent = createFolder("親", null);
+        long folder = createFolder("旧名", parent);
+        long sibling = createFolder("兄弟", parent);
+        long image = insertImage("img", null);
+        putImageFolder("admin-jwt", image, folder).andExpect(status().isOk());
+
+        putName("admin-jwt", folder, " 新名 ").andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(folder))
+                .andExpect(jsonPath("$.name").value("新名"))
+                .andExpect(jsonPath("$.parentId").value(parent));
+        putName("admin-jwt", sibling, "新名").andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT folder_id FROM generated_images WHERE id = ?", Long.class, image)).isEqualTo(folder);
+    }
+
+    @Test
+    @DisplayName("改名で空の名前は400、存在しないフォルダは404で、名前は変わらない")
+    void 不正な改名は拒否される() throws Exception {
+        long folder = createFolder("名前", null);
+
+        putName("admin-jwt", folder, "  ").andExpect(status().isBadRequest());
+        putName("admin-jwt", 999999L, "x").andExpect(status().isNotFound());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT name FROM generated_image_folders WHERE id = ?", String.class, folder)).isEqualTo("名前");
+    }
+
+    @Test
+    @DisplayName("葉のフォルダを削除すると、フォルダは消え、中の画像は残って未分類に戻る")
+    void 葉のフォルダを削除すると画像は未分類に戻る() throws Exception {
+        long keep = createFolder("残す", null);
+        long folder = createFolder("消す", null);
+        long inFolder = insertImage("in", null);
+        long inKeep = insertImage("keep", null);
+        putImageFolder("admin-jwt", inFolder, folder).andExpect(status().isOk());
+        putImageFolder("admin-jwt", inKeep, keep).andExpect(status().isOk());
+
+        deleteFolder("admin-jwt", folder).andExpect(status().isNoContent());
+
+        assertThat(countFolders()).isEqualTo(1);
+        assertThat(imageRepository.count()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT folder_id FROM generated_images WHERE id = ?", Long.class, inFolder)).isNull();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT folder_id FROM generated_images WHERE id = ?", Long.class, inKeep)).isEqualTo(keep);
+    }
+
+    @Test
+    @DisplayName("子孫を持つフォルダを削除すると子孫フォルダも消え、子孫の画像もすべて未分類に戻る(画像は1枚も消えない)。兄弟の枝は残る")
+    void 子孫ごと削除しても画像は失われない() throws Exception {
+        long a = createFolder("A", null);
+        long b = createFolder("B", a);
+        long c = createFolder("C", b);
+        long d = createFolder("D", a);
+        long sibling = createFolder("別枝", null);
+        long inA = insertImage("inA", null);
+        long inC = insertImage("inC", null);
+        long inD = insertImage("inD", null);
+        long inSibling = insertImage("inSibling", null);
+        putImageFolder("admin-jwt", inA, a).andExpect(status().isOk());
+        putImageFolder("admin-jwt", inC, c).andExpect(status().isOk());
+        putImageFolder("admin-jwt", inD, d).andExpect(status().isOk());
+        putImageFolder("admin-jwt", inSibling, sibling).andExpect(status().isOk());
+
+        deleteFolder("admin-jwt", a).andExpect(status().isNoContent());
+
+        assertThat(jdbcTemplate.queryForList("SELECT id FROM generated_image_folders", Long.class))
+                .containsExactly(sibling);
+        assertThat(imageRepository.count()).isEqualTo(4);
+        assertThat(listIds("?unfiled=true")).containsExactlyInAnyOrder(inA, inC, inD);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT folder_id FROM generated_images WHERE id = ?", Long.class, inSibling)).isEqualTo(sibling);
+    }
+
+    @Test
+    @DisplayName("存在しないフォルダの削除は404")
+    void 存在しないフォルダの削除は404() throws Exception {
+        deleteFolder("admin-jwt", 999999L).andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("削除の影響範囲は、子孫フォルダ数(自分を含まない)と、自分と子孫に属する画像の枚数を返す。何も変更しない")
+    void 削除の影響範囲を返す() throws Exception {
+        long a = createFolder("A", null);
+        long b = createFolder("B", a);
+        long c = createFolder("C", b);
+        long other = createFolder("別", null);
+        for (String prompt : new String[] {"1", "2"}) {
+            putImageFolder("admin-jwt", insertImage("a" + prompt, null), a).andExpect(status().isOk());
+        }
+        putImageFolder("admin-jwt", insertImage("c", null), c).andExpect(status().isOk());
+        putImageFolder("admin-jwt", insertImage("o", null), other).andExpect(status().isOk());
+
+        impact("admin-jwt", a).andExpect(status().isOk())
+                .andExpect(jsonPath("$.descendantFolderCount").value(2))
+                .andExpect(jsonPath("$.imageCount").value(3));
+        impact("admin-jwt", c).andExpect(status().isOk())
+                .andExpect(jsonPath("$.descendantFolderCount").value(0))
+                .andExpect(jsonPath("$.imageCount").value(1));
+        impact("admin-jwt", other + 1000).andExpect(status().isNotFound());
+
+        assertThat(countFolders()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("admin以外はフォルダの改名・削除・影響範囲の取得が403で拒否され、状態は変わらない")
+    void 改名と削除はadminのみ() throws Exception {
+        long parent = createFolder("親", null);
+        long folder = createFolder("子", parent);
+        long image = insertImage("img", null);
+        putImageFolder("admin-jwt", image, folder).andExpect(status().isOk());
+
+        putName("user-jwt", folder, "改名").andExpect(status().isForbidden());
+        deleteFolder("user-jwt", parent).andExpect(status().isForbidden());
+        impact("user-jwt", parent).andExpect(status().isForbidden());
+        // 認可を先に行うので、存在しないフォルダでも404ではなく403(存在を漏らさない)。
+        deleteFolder("user-jwt", 999999L).andExpect(status().isForbidden());
+
+        assertThat(countFolders()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT name FROM generated_image_folders WHERE id = ?", String.class, folder)).isEqualTo("子");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT folder_id FROM generated_images WHERE id = ?", Long.class, image)).isEqualTo(folder);
     }
 }

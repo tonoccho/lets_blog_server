@@ -33,6 +33,9 @@ import {
   listGeneratedImageFolders,
   createGeneratedImageFolder,
   setGeneratedImageFolder,
+  renameGeneratedImageFolder,
+  getGeneratedImageFolderDeleteImpact,
+  deleteGeneratedImageFolder,
   getSetupStatus,
   downloadGeneratedImageFile,
   deleteGeneratedImage,
@@ -844,6 +847,34 @@ describe('生成画像フォルダ(issue #1493)', () => {
     expect(String(url)).toMatch(/\/api\/generated-images\/7\/folder$/)
     expect(init.method).toBe('PUT')
     expect(JSON.parse(init.body as string)).toEqual({ folderId: null })
+  })
+})
+
+describe('生成画像フォルダの改名・削除(issue #1494)', () => {
+  it('renameGeneratedImageFolder は name を PUT する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 3, name: '新名', parentId: null }))
+
+    await expect(renameGeneratedImageFolder(3, '新名')).resolves.toEqual({ id: 3, name: '新名', parentId: null })
+    const [url, init] = calls()[0]
+    expect(String(url)).toMatch(/\/api\/generated-images\/folders\/3\/name$/)
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({ name: '新名' })
+  })
+
+  it('getGeneratedImageFolderDeleteImpact は delete-impact を GET する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ descendantFolderCount: 2, imageCount: 5 }))
+
+    await expect(getGeneratedImageFolderDeleteImpact(3)).resolves.toEqual({ descendantFolderCount: 2, imageCount: 5 })
+    expect(String(calls()[0][0])).toMatch(/\/api\/generated-images\/folders\/3\/delete-impact$/)
+  })
+
+  it('deleteGeneratedImageFolder は DELETE する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(null, 204))
+
+    await expect(deleteGeneratedImageFolder(3)).resolves.toBeUndefined()
+    const [url, init] = calls()[0]
+    expect(String(url)).toMatch(/\/api\/generated-images\/folders\/3$/)
+    expect(init.method).toBe('DELETE')
   })
 })
 

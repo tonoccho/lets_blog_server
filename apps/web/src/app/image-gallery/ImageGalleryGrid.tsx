@@ -8,8 +8,11 @@ import {
   bulkDeleteGeneratedImagesAction,
   createGeneratedImageFolderAction,
   deleteGeneratedImageAction,
+  deleteGeneratedImageFolderAction,
   fetchGalleryImagesPageAction,
   getGeneratedImageAction,
+  getGeneratedImageFolderDeleteImpactAction,
+  renameGeneratedImageFolderAction,
   setGeneratedImageFolderAction,
   updateGeneratedImageTagsAction,
 } from "./actions";
@@ -143,6 +146,11 @@ export function ImageGalleryGrid({
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [isSavingFolder, startFolderTransition] = useTransition();
+  /** 改名中のフォルダ(issue #1494)。nullは改名していない。 */
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  /** 改名・削除を実行中(二重実行を防ぐ)。 */
+  const [folderBusy, setFolderBusy] = useState(false);
   /** 「この画像の設定をコピー」ボタンの一時的なフィードバック表示(issue #437)。 */
   const [settingsCopied, setSettingsCopied] = useState(false);
   /** 編集画面を開いているか(issue #1655)。 */
@@ -292,6 +300,66 @@ export function ImageGalleryGrid({
     });
   }
 
+  function startRename(folder: GeneratedImageFolder) {
+    setFolderError(null);
+    setRenamingId(folder.id);
+    setRenameValue(folder.name);
+  }
+
+  /** フォルダを改名する(admin のみ。権限が無ければ403の理由をそのまま表示する)。所属画像・親は変わらない。 */
+  async function handleRenameFolder(id: number) {
+    setFolderBusy(true);
+    setFolderError(null);
+    try {
+      const renamed = await renameGeneratedImageFolderAction(id, renameValue.trim());
+      setFolders((current) => current.map((folder) => (folder.id === id ? renamed : folder)));
+      setRenamingId(null);
+    } catch (err) {
+      setFolderError(errorMessage(err));
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  /**
+   * フォルダと子孫を削除する(admin のみ)。先に影響範囲(子孫フォルダ数・未分類に戻る画像の枚数)を取り、
+   * 取り消せないことを明示して確認する。キャンセルすれば何も変えない。画像は削除されず未分類に戻る。
+   */
+  async function handleDeleteFolder(folder: GeneratedImageFolder) {
+    setFolderBusy(true);
+    setFolderError(null);
+    try {
+      const impact = await getGeneratedImageFolderDeleteImpactAction(folder.id);
+      if (
+        !window.confirm(
+          `フォルダ「${folder.name}」を削除します。子孫フォルダ${impact.descendantFolderCount}個も削除され、画像${impact.imageCount}枚は未分類に戻ります(画像は削除されません)。この操作は元に戻せません。よろしいですか?`,
+        )
+      ) {
+        return;
+      }
+      await deleteGeneratedImageFolderAction(folder.id);
+      const removed = new Set<number>([folder.id]);
+      // 親が先に並ぶとは限らないので、増えなくなるまで子孫を集める。
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const f of folders) {
+          if (f.parentId !== null && removed.has(f.parentId) && !removed.has(f.id)) {
+            removed.add(f.id);
+            grew = true;
+          }
+        }
+      }
+      setFolders((current) => current.filter((f) => !removed.has(f.id)));
+      if (renamingId !== null && removed.has(renamingId)) setRenamingId(null);
+      // 削除したフォルダを選んでいたなら「すべて」へ戻る。一覧は未分類に戻った画像を反映するため取り直す。
+      applyFilter(activeTag, typeof activeFolder === "number" && removed.has(activeFolder) ? null : activeFolder, activeSource);
+    } catch (err) {
+      setFolderError(errorMessage(err));
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
   function renderFolderNodes(parentId: number | null, depth: number) {
     return (foldersByParent.get(parentId) ?? []).map((folder) => {
       const hasChildren = foldersByParent.has(folder.id);
@@ -318,13 +386,64 @@ export function ImageGalleryGrid({
             ) : (
               <span className="w-4" aria-hidden="true" />
             )}
-            <button
-              type="button"
-              onClick={() => selectFolder(folder.id)}
-              className={`rounded px-2 py-0.5 ${folderButtonClass(activeFolder === folder.id)}`}
-            >
-              {folder.name}
-            </button>
+            {renamingId === folder.id ? (
+              <>
+                <input
+                  type="text"
+                  aria-label={`「${folder.name}」の新しい名前`}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  disabled={folderBusy}
+                  className="rounded border border-neutral-300 dark:border-neutral-700 px-2 py-0.5"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleRenameFolder(folder.id)}
+                  disabled={folderBusy || !renameValue.trim()}
+                  aria-label="改名を保存"
+                  className="rounded bg-neutral-900 px-2 py-0.5 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+                >
+                  保存
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRenamingId(null)}
+                  disabled={folderBusy}
+                  aria-label="改名をやめる"
+                  className="rounded px-2 py-0.5 text-neutral-600 dark:text-neutral-300"
+                >
+                  やめる
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => selectFolder(folder.id)}
+                  className={`rounded px-2 py-0.5 ${folderButtonClass(activeFolder === folder.id)}`}
+                >
+                  {folder.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startRename(folder)}
+                  disabled={folderBusy}
+                  aria-label={`「${folder.name}」を改名`}
+                  className="rounded px-1 text-neutral-500 hover:underline"
+                >
+                  改名
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteFolder(folder)}
+                  disabled={folderBusy}
+                  aria-label={`「${folder.name}」を削除`}
+                  className="rounded px-1 text-red-600 hover:underline"
+                >
+                  削除
+                </button>
+              </>
+            )}
           </div>
           {hasChildren && !collapsed && (
             <ul role="group" className="ml-4 space-y-1">

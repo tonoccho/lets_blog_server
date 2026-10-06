@@ -669,6 +669,31 @@ export function setGeneratedImageFolder(id: number, folderId: number | null): Pr
   });
 }
 
+/** フォルダ削除の影響範囲(issue #1494)。`descendantFolderCount` は自分を含まない子孫フォルダ数、`imageCount` は未分類へ戻る画像の枚数。 */
+export interface GeneratedImageFolderDeleteImpact {
+  descendantFolderCount: number;
+  imageCount: number;
+}
+
+/** フォルダを改名する。同じ親の下の重複名は検査しない。admin のみ(issue #1494)。 */
+export function renameGeneratedImageFolder(id: number, name: string): Promise<GeneratedImageFolder> {
+  return apiFetch<GeneratedImageFolder>(`/api/generated-images/folders/${id}/name`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** フォルダ削除の影響範囲(確認ダイアログ用、何も変更しない)。admin のみ(issue #1494)。 */
+export function getGeneratedImageFolderDeleteImpact(id: number): Promise<GeneratedImageFolderDeleteImpact> {
+  return apiFetch<GeneratedImageFolderDeleteImpact>(`/api/generated-images/folders/${id}/delete-impact`);
+}
+
+/** フォルダと子孫を削除する。所属画像は削除せず未分類へ戻る。admin のみ(issue #1494)。 */
+export function deleteGeneratedImageFolder(id: number): Promise<void> {
+  return apiFetch<void>(`/api/generated-images/folders/${id}`, { method: 'DELETE' });
+}
+
 /** 自動生成されたタグを手動で編集・追加する(issue #281)。 */
 export function updateGeneratedImageTags(id: number, tags: string[]): Promise<GeneratedImageDetail> {
   return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/tags`, {

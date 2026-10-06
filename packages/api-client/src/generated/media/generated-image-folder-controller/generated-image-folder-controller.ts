@@ -6,7 +6,9 @@
  */
 import type {
   CreateGeneratedImageFolderRequest,
+  GeneratedImageFolderDeleteImpactResponse,
   GeneratedImageFolderResponse,
+  UpdateGeneratedImageFolderNameRequest,
   UpdateGeneratedImageFolderParentRequest
 } from '../openAPIDefinition.schemas';
 
@@ -54,6 +56,52 @@ const res = await fetch(getChangeParentUrl(id),
 
   const data: changeParentResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as changeParentResponse
+}
+
+
+export type renameFolderResponse200 = {
+  data: GeneratedImageFolderResponse
+  status: 200
+}
+
+export type renameFolderResponseSuccess = (renameFolderResponse200) & {
+  headers: Headers;
+};
+;
+
+export type renameFolderResponse = (renameFolderResponseSuccess)
+
+export const getRenameFolderUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/generated-images/folders/${id}/name`
+}
+
+export const renameFolder = async (id: number,
+    updateGeneratedImageFolderNameRequest: UpdateGeneratedImageFolderNameRequest, options?: RequestInit): Promise<renameFolderResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Array.isArray(h)) return Object.fromEntries(h);
+    return h;
+  };
+const res = await fetch(getRenameFolderUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateGeneratedImageFolderNameRequest)
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: renameFolderResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as renameFolderResponse
 }
 
 
@@ -138,6 +186,84 @@ const res = await fetch(getCreateFolderUrl(),
 
   const data: createFolderResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as createFolderResponse
+}
+
+
+export type folderDeleteImpactResponse200 = {
+  data: GeneratedImageFolderDeleteImpactResponse
+  status: 200
+}
+
+export type folderDeleteImpactResponseSuccess = (folderDeleteImpactResponse200) & {
+  headers: Headers;
+};
+;
+
+export type folderDeleteImpactResponse = (folderDeleteImpactResponseSuccess)
+
+export const getFolderDeleteImpactUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/generated-images/folders/${id}/delete-impact`
+}
+
+export const folderDeleteImpact = async (id: number, options?: RequestInit): Promise<folderDeleteImpactResponse> => {
+
+  const res = await fetch(getFolderDeleteImpactUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: folderDeleteImpactResponse['data'] = body ? JSON.parse(body) : {}
+  return { data, status: res.status, headers: res.headers } as folderDeleteImpactResponse
+}
+
+
+export type removeFolderResponse204 = {
+  data: void
+  status: 204
+}
+
+export type removeFolderResponseSuccess = (removeFolderResponse204) & {
+  headers: Headers;
+};
+;
+
+export type removeFolderResponse = (removeFolderResponseSuccess)
+
+export const getRemoveFolderUrl = (id: number,) => {
+
+
+
+
+  return `http://localhost:8080/api/generated-images/folders/${id}`
+}
+
+export const removeFolder = async (id: number, options?: RequestInit): Promise<removeFolderResponse> => {
+
+  const res = await fetch(getRemoveFolderUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+)
+
+
+  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
+
+  const data: removeFolderResponse['data'] = body ? JSON.parse(body) : undefined
+  return { data, status: res.status, headers: res.headers } as removeFolderResponse
 }
 
 

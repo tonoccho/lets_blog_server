@@ -1021,6 +1021,9 @@ media-service所有。ComfyUIで生成した画像とパラメータの一覧・
 | GET /api/generated-images/folders | requireAuthenticated | 401 | 該当なし(認証済みなら誰でも可) | 認可OK | 現状維持 | issue #1493。共通ツリー(id・name・parentId)を全利用者に返す。応答に画像の件数や情報を含めず、他プロジェクトの画像の存在を露出させない。操作者を解決できない(無効化)ユーザーは403。`{id}`付きの`GET /api/generated-images/{id}`とはリテラルパスが優先して解決される |
 | POST /api/generated-images/folders | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1493。フォルダの作成(親は任意)。存在しない親は404、空の名前は400 |
 | PUT /api/generated-images/folders/{id}/parent | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1493。親の変更。自分自身・自分の子孫を親に指定すると409(再帰CTEで子孫を引いて確認。自己参照FKだけでは循環を防げないため)で、状態は変わらない。存在しないフォルダ・親は404 |
+| PUT /api/generated-images/folders/{id}/name | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1494。フォルダの改名。フォルダは横断の共通ツリーで`projectId`を持たないため、#1493のフォルダ操作と同じく**adminのみ**(`requireProjectMemberOrAdminForResource`は適用できない)。認可を先に行うので権限の無い利用者にはフォルダの存在も漏らさない。空の名前は400、存在しないフォルダは404。同じ親の下の重複名は作成時と同じく検査しない |
+| GET /api/generated-images/folders/{id}/delete-impact | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1494。削除の影響範囲(自分を含まない子孫フォルダ数と、自分と子孫に属する画像の枚数)。確認ダイアログ用で何も変更しない。画像の件数を返すため、一覧(`GET /api/generated-images/folders`)と違い**adminのみ**(他プロジェクトの画像の存在を一般利用者へ露出させない)。存在しないフォルダは404 |
+| DELETE /api/generated-images/folders/{id} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1494。フォルダと全子孫の削除。画像は削除せず、1つの`@Transactional`で所属画像を未分類(`folder_id`をNULL)にしてから葉の側から子孫、最後に自分を削除する(FKはRESTRICT)。204を返す。権限の無い利用者は403で状態は変わらない。存在しないフォルダは404 |
 
 ## GenerationJobController (3エンドポイント、ベースパス `/api/generation-jobs`)
 

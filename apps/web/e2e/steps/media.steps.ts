@@ -1784,6 +1784,137 @@ Then(
   }
 );
 
+// ---- ギャラリーのフォルダの改名・削除(issue #1494) ----
+
+When(
+  /^ギャラリーでフォルダ「([^」]+)」を「([^」]+)」に改名する$/,
+  async ({ ctx, page }, label: string, newLabel: string) => {
+    const oldName = folderName(ctx, label);
+    const newName = folderName(ctx, newLabel);
+    await expect(folderItem(page, oldName)).toBeVisible({ timeout: 30_000 });
+    // ハイドレーション完了前のクリックは取りこぼされるので、新しい名前がツリーに現れるまで再試行する。
+    await expect(async () => {
+      if (!(await page.getByLabel(`「${oldName}」の新しい名前`).isVisible())) {
+        await page.getByRole('button', { name: `「${oldName}」を改名`, exact: true }).click({ timeout: 2_000 });
+      }
+      const input = page.getByLabel(`「${oldName}」の新しい名前`);
+      await input.fill(newName, { timeout: 2_000 });
+      await expect(input).toHaveValue(newName, { timeout: 1_000 });
+      await page.getByRole('button', { name: '改名を保存' }).click({ timeout: 2_000 });
+      await expect(folderItem(page, newName)).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
+  }
+);
+
+Then(/^ギャラリーのフォルダツリーにフォルダ「([^」]+)」が表示される$/, async ({ ctx, page }, label: string) => {
+  await expect(folderItem(page, folderName(ctx, label))).toBeVisible({ timeout: 30_000 });
+});
+
+Then(/^ギャラリーのフォルダツリーにフォルダ「([^」]+)」は表示されない$/, async ({ ctx, page }, label: string) => {
+  await expect(folderItem(page, folderName(ctx, label))).toHaveCount(0, { timeout: 30_000 });
+});
+
+/** 削除ボタンを押し、確認ダイアログの文言を記録して、承諾またはキャンセルする。 */
+async function deleteFolderThroughDialog(
+  page: Page,
+  ctx: Record<string, unknown>,
+  label: string,
+  accept: boolean
+): Promise<void> {
+  const name = folderName(ctx, label);
+  await expect(folderItem(page, name)).toBeVisible({ timeout: 30_000 });
+  const messages: string[] = [];
+  ctx.mediaFolderConfirmMessages = messages;
+  page.on('dialog', (dialog) => {
+    messages.push(dialog.message());
+    void (accept ? dialog.accept() : dialog.dismiss());
+  });
+  // ハイドレーション完了前のクリックは取りこぼされるので、ダイアログが出るまで再試行する。
+  await expect(async () => {
+    // 既にダイアログを処理済み(承諾で削除済みのためボタンも消えている)なら再クリックしない。
+    if (messages.length === 0) {
+      await page.getByRole('button', { name: `「${name}」を削除`, exact: true }).click({ timeout: 2_000 });
+    }
+    await expect.poll(() => messages.length, { timeout: 2_000 }).toBeGreaterThan(0);
+  }).toPass({ timeout: 30_000 });
+}
+
+When(
+  /^ギャラリーでフォルダ「([^」]+)」を削除し、確認ダイアログを承諾する$/,
+  async ({ ctx, page }, label: string) => {
+    await deleteFolderThroughDialog(page, ctx, label, true);
+  }
+);
+
+When(
+  /^ギャラリーでフォルダ「([^」]+)」を削除し、確認ダイアログをキャンセルする$/,
+  async ({ ctx, page }, label: string) => {
+    await deleteFolderThroughDialog(page, ctx, label, false);
+  }
+);
+
+Then(
+  /^削除の確認に子孫フォルダ(\d+)個と画像(\d+)枚が表示され、元に戻せないと明示される$/,
+  async ({ ctx }, folderCount: string, imageCount: string) => {
+    const messages = (ctx.mediaFolderConfirmMessages as string[]) ?? [];
+    expect(messages, '確認ダイアログが1回だけ出ていない').toHaveLength(1);
+    expect(messages[0]).toContain(`子孫フォルダ${folderCount}個`);
+    expect(messages[0]).toContain(`画像${imageCount}枚`);
+    expect(messages[0]).toContain('元に戻せません');
+  }
+);
+
+async function folderExists(
+  request: APIRequestContext,
+  ctx: Record<string, unknown>,
+  label: string
+): Promise<boolean> {
+  const folders = await listFolders(request, await adminToken(request));
+  return folders.some((f) => f.id === folderIds(ctx)[label]);
+}
+
+Then(/^フォルダ「([^」]+)」は削除されている$/, async ({ ctx, request }, label: string) => {
+  await expect.poll(() => folderExists(request, ctx, label), { timeout: 30_000 }).toBe(false);
+});
+
+Then(/^フォルダ「([^」]+)」は削除されていない$/, async ({ ctx, request }, label: string) => {
+  expect(await folderExists(request, ctx, label), `フォルダ「${label}」が消えている`).toBe(true);
+});
+
+Then(
+  /^プロンプト「([^」]+)」の画像はフォルダ「([^」]+)」に属したままである$/,
+  async ({ ctx, request }, prompt: string, label: string) => {
+    const response = await request.get(`/api/generated-images/${galleryImageIds(ctx)[prompt]}`, {
+      headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    });
+    expect(response.status()).toBe(200);
+    expect(((await response.json()) as { folderId: number | null }).folderId).toBe(folderIds(ctx)[label]);
+  }
+);
+
+When(
+  /^一般利用者がフォルダ「([^」]+)」の改名・削除・削除影響範囲の取得をしようとする$/,
+  async ({ ctx, request }, label: string) => {
+    ctx.mediaFolderStatuses = [];
+    const headers = { Authorization: `Bearer ${await userToken(request)}` };
+    const base = `/api/generated-images/folders/${folderIds(ctx)[label]}`;
+    recordFolderStatus(ctx, (await request.put(`${base}/name`, { headers, data: { name: '改名された' } })).status());
+    recordFolderStatus(ctx, (await request.delete(base, { headers })).status());
+    recordFolderStatus(ctx, (await request.get(`${base}/delete-impact`, { headers })).status());
+  }
+);
+
+Then('フォルダの改名・削除・削除影響範囲の取得はどれも一般利用者への403で拒否される', async ({ ctx }) => {
+  expect(ctx.mediaFolderStatuses, '一般利用者の改名・削除・影響範囲の取得が全て403で拒否されていない').toEqual([
+    403, 403, 403,
+  ]);
+});
+
+Then(/^フォルダ「([^」]+)」は元の名前のままである$/, async ({ ctx, request }, label: string) => {
+  const folders = await listFolders(request, await adminToken(request));
+  expect(folders.find((f) => f.id === folderIds(ctx)[label])?.name).toBe(folderName(ctx, label));
+});
+
 // ---- 画像設定(image-settings.feature) ----
 
 Given('画像設定を確かめるためのプロジェクトがある', async ({ ctx, request }) => {

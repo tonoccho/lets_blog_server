@@ -1,7 +1,9 @@
 package com.letsblog.media.service;
 
 import com.letsblog.media.domain.GeneratedImageFolder;
+import com.letsblog.media.dto.GeneratedImageFolderDeleteImpactResponse;
 import com.letsblog.media.repository.GeneratedImageFolderRepository;
+import com.letsblog.media.repository.GeneratedImageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,8 +20,12 @@ public class GeneratedImageFolderService {
 
     private final GeneratedImageFolderRepository folderRepository;
 
-    public GeneratedImageFolderService(GeneratedImageFolderRepository folderRepository) {
+    private final GeneratedImageRepository imageRepository;
+
+    public GeneratedImageFolderService(GeneratedImageFolderRepository folderRepository,
+                                       GeneratedImageRepository imageRepository) {
         this.folderRepository = folderRepository;
+        this.imageRepository = imageRepository;
     }
 
     public List<GeneratedImageFolder> list() {
@@ -55,6 +61,36 @@ public class GeneratedImageFolderService {
         }
         folder.setParentId(parentId);
         return folderRepository.save(folder);
+    }
+
+    /** 改名する。同じ親の下の重複名は作成時と同じく検査しない(issue #1494)。 */
+    @Transactional
+    public GeneratedImageFolder rename(Long id, String name) {
+        GeneratedImageFolder folder = folderRepository.findById(id)
+                .orElseThrow(() -> new GeneratedImageFolderNotFoundException("id: " + id));
+        folder.setName(name.trim());
+        return folderRepository.save(folder);
+    }
+
+    /** 削除の影響範囲。子孫フォルダ数(自分を含まない)と、自分と子孫に属する画像の枚数。 */
+    @Transactional(readOnly = true)
+    public GeneratedImageFolderDeleteImpactResponse deleteImpact(Long id) {
+        requireExists(id);
+        Set<Long> ids = descendantIdsIncludingSelf(id);
+        return new GeneratedImageFolderDeleteImpactResponse(ids.size() - 1, imageRepository.countByFolderIdIn(ids));
+    }
+
+    /**
+     * フォルダと全子孫を削除し、所属画像はすべて未分類へ戻す(画像は消さない)。親子・画像所属のFKは
+     * RESTRICTなので、画像の未分類化→葉から順に子孫の削除→自分の削除を1トランザクションで行う
+     * (片方だけ成功して、存在しないフォルダを指す画像が残ることを防ぐ)。
+     */
+    @Transactional
+    public void delete(Long id) {
+        requireExists(id);
+        List<Long> deepestFirst = folderRepository.findSelfAndDescendantIdsDeepestFirst(id);
+        imageRepository.clearFolder(deepestFirst);
+        deepestFirst.forEach(folderRepository::deleteRowById);
     }
 
     /** 指定フォルダ自身と全子孫のid。絞り込み条件「このフォルダの中」を解決するのに使う。 */

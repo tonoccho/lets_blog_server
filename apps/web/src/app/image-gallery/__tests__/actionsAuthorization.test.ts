@@ -36,6 +36,9 @@ const listGeneratedImages = jest.fn();
 const bulkDeleteGeneratedImages = jest.fn();
 const createGeneratedImageFolder = jest.fn();
 const setGeneratedImageFolder = jest.fn();
+const renameGeneratedImageFolder = jest.fn();
+const getGeneratedImageFolderDeleteImpact = jest.fn();
+const deleteGeneratedImageFolder = jest.fn();
 const editGeneratedImage = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getGeneratedImage: (...a: unknown[]) => getGeneratedImage(...a),
@@ -45,6 +48,9 @@ jest.mock('@/lib/apiClient', () => ({
   bulkDeleteGeneratedImages: (...a: unknown[]) => bulkDeleteGeneratedImages(...a),
   createGeneratedImageFolder: (...a: unknown[]) => createGeneratedImageFolder(...a),
   setGeneratedImageFolder: (...a: unknown[]) => setGeneratedImageFolder(...a),
+  renameGeneratedImageFolder: (...a: unknown[]) => renameGeneratedImageFolder(...a),
+  getGeneratedImageFolderDeleteImpact: (...a: unknown[]) => getGeneratedImageFolderDeleteImpact(...a),
+  deleteGeneratedImageFolder: (...a: unknown[]) => deleteGeneratedImageFolder(...a),
   editGeneratedImage: (...a: unknown[]) => editGeneratedImage(...a),
 }));
 
@@ -52,6 +58,9 @@ import {
   bulkDeleteGeneratedImagesAction,
   createGeneratedImageFolderAction,
   setGeneratedImageFolderAction,
+  renameGeneratedImageFolderAction,
+  getGeneratedImageFolderDeleteImpactAction,
+  deleteGeneratedImageFolderAction,
   deleteGeneratedImageAction,
   editGeneratedImageAction,
   fetchGalleryImagesPageAction,
@@ -263,6 +272,52 @@ describe('フォルダの Server Action(issue #1493)', () => {
     createGeneratedImageFolder.mockRejectedValue(new Error('APIエラー (403): forbidden'));
 
     await expect(createGeneratedImageFolderAction('海', null)).rejects.toThrow('403');
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+/** issue #1494: フォルダの改名・削除影響範囲・削除の Server Action はログイン必須。admin 判定は media-service が行い、403 はそのまま伝わる。 */
+describe('フォルダの改名・削除の Server Action(issue #1494)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('未ログインは /login へ送り、何も呼ばない', async () => {
+    getServerSession.mockResolvedValue(null);
+
+    await expect(renameGeneratedImageFolderAction(1, '海')).rejects.toThrow('NEXT_REDIRECT:/login');
+    await expect(getGeneratedImageFolderDeleteImpactAction(1)).rejects.toThrow('NEXT_REDIRECT:/login');
+    await expect(deleteGeneratedImageFolderAction(1)).rejects.toThrow('NEXT_REDIRECT:/login');
+    expect(renameGeneratedImageFolder).not.toHaveBeenCalled();
+    expect(getGeneratedImageFolderDeleteImpact).not.toHaveBeenCalled();
+    expect(deleteGeneratedImageFolder).not.toHaveBeenCalled();
+  });
+
+  it('改名・削除は結果を返し一覧を再検証する。影響範囲の取得は再検証しない', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'admin' } });
+    renameGeneratedImageFolder.mockResolvedValue({ id: 1, name: '海', parentId: null });
+    getGeneratedImageFolderDeleteImpact.mockResolvedValue({ descendantFolderCount: 2, imageCount: 3 });
+    deleteGeneratedImageFolder.mockResolvedValue(undefined);
+
+    await expect(renameGeneratedImageFolderAction(1, '海')).resolves.toEqual({ id: 1, name: '海', parentId: null });
+    expect(revalidatePath).toHaveBeenCalledTimes(1);
+    await expect(getGeneratedImageFolderDeleteImpactAction(1)).resolves.toEqual({ descendantFolderCount: 2, imageCount: 3 });
+    expect(revalidatePath).toHaveBeenCalledTimes(1);
+    await expect(deleteGeneratedImageFolderAction(1)).resolves.toBeUndefined();
+
+    expect(renameGeneratedImageFolder).toHaveBeenCalledWith(1, '海');
+    expect(deleteGeneratedImageFolder).toHaveBeenCalledWith(1);
+    expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
+    expect(revalidatePath).toHaveBeenCalledTimes(2);
+  });
+
+  it('media-service が403を返したら、再検証せずそのまま伝える', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    renameGeneratedImageFolder.mockRejectedValue(new Error('APIエラー (403): forbidden'));
+    deleteGeneratedImageFolder.mockRejectedValue(new Error('APIエラー (403): forbidden'));
+
+    await expect(renameGeneratedImageFolderAction(1, '海')).rejects.toThrow('403');
+    await expect(deleteGeneratedImageFolderAction(1)).rejects.toThrow('403');
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

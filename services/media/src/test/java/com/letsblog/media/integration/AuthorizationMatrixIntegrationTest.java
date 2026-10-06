@@ -111,6 +111,9 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/generated-images/folders"),
                 new Endpoint("POST", "/api/generated-images/folders"),
                 new Endpoint("PUT", "/api/generated-images/folders/1/parent"),
+                new Endpoint("PUT", "/api/generated-images/folders/1/name"),
+                new Endpoint("GET", "/api/generated-images/folders/1/delete-impact"),
+                new Endpoint("DELETE", "/api/generated-images/folders/1"),
 
                 // -- ProjectMediaGarbageCollectionController --
                 new Endpoint("GET", "/api/projects/1/media-garbage-collection/scan"),

@@ -380,6 +380,47 @@
         }
       }
     },
+    "/api/generated-images/folders/{id}/name": {
+      "put": {
+        "tags": [
+          "generated-image-folder-controller"
+        ],
+        "operationId": "renameFolder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGeneratedImageFolderNameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageFolderResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/diagrams/{id}": {
       "get": {
         "tags": [
@@ -853,6 +894,61 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/generated-images/folders/{id}/delete-impact": {
+      "get": {
+        "tags": [
+          "generated-image-folder-controller"
+        ],
+        "operationId": "folderDeleteImpact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageFolderDeleteImpactResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/generated-images/folders/{id}": {
+      "delete": {
+        "tags": [
+          "generated-image-folder-controller"
+        ],
+        "operationId": "removeFolder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
           }
         }
       }
@@ -2386,6 +2482,32 @@
           },
           "defaultQualityPrompt": {
             "type": "string"
+          }
+        }
+      },
+      "UpdateGeneratedImageFolderNameRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 0
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "GeneratedImageFolderDeleteImpactResponse": {
+        "type": "object",
+        "properties": {
+          "descendantFolderCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "imageCount": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       }

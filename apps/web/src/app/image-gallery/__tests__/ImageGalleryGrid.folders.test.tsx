@@ -16,12 +16,18 @@ jest.mock('../actions', () => ({
   bulkDeleteGeneratedImagesAction: jest.fn(),
   createGeneratedImageFolderAction: jest.fn(),
   setGeneratedImageFolderAction: jest.fn(),
+  renameGeneratedImageFolderAction: jest.fn(),
+  getGeneratedImageFolderDeleteImpactAction: jest.fn(),
+  deleteGeneratedImageFolderAction: jest.fn(),
 }))
 
 const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
 const getDetail = actions.getGeneratedImageAction as jest.Mock
 const createFolder = actions.createGeneratedImageFolderAction as jest.Mock
 const setFolder = actions.setGeneratedImageFolderAction as jest.Mock
+const renameFolder = actions.renameGeneratedImageFolderAction as jest.Mock
+const deleteImpact = actions.getGeneratedImageFolderDeleteImpactAction as jest.Mock
+const deleteFolder = actions.deleteGeneratedImageFolderAction as jest.Mock
 
 function image(id: number, folderId: number | null = null, tags: string[] = []): GeneratedImageSummary {
   return {
@@ -346,5 +352,182 @@ describe('詳細モーダルからの所属変更', () => {
     const select = await screen.findByLabelText('所属フォルダ')
 
     expect(within(select).getByRole('option', { name: '海' })).toBeInTheDocument()
+  })
+})
+
+describe('フォルダの改名(issue #1494)', () => {
+  function startRename(name: string) {
+    fireEvent.click(within(treeItem(name)).getAllByRole('button', { name: `「${name}」を改名` })[0])
+  }
+
+  it('改名を始めると現在の名前が入った入力が出て、保存するとツリーに新しい名前で現れる(階層と選択は保つ)', async () => {
+    renameFolder.mockResolvedValue({ id: 2, name: '高山', parentId: 1 })
+    renderGrid()
+
+    startRename('山')
+    const input = screen.getByLabelText('「山」の新しい名前')
+    expect(input).toHaveValue('山')
+    fireEvent.change(input, { target: { value: ' 高山 ' } })
+    fireEvent.click(screen.getByRole('button', { name: '改名を保存' }))
+
+    await waitFor(() => expect(within(treeItem('風景')).getByRole('treeitem', { name: '高山' })).toHaveAttribute('aria-level', '2'))
+    expect(renameFolder).toHaveBeenCalledWith(2, '高山')
+    expect(screen.queryByRole('treeitem', { name: '山' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('「山」の新しい名前')).not.toBeInTheDocument()
+  })
+
+  it('空白だけの名前は保存できず、やめると何も送らず元に戻る', () => {
+    renderGrid()
+
+    startRename('山')
+    fireEvent.change(screen.getByLabelText('「山」の新しい名前'), { target: { value: '   ' } })
+    expect(screen.getByRole('button', { name: '改名を保存' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '改名をやめる' }))
+
+    expect(renameFolder).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('「山」の新しい名前')).not.toBeInTheDocument()
+    expect(treeItem('山')).toBeInTheDocument()
+  })
+
+  it('改名に失敗したら理由を表示し、入力と元の名前を残す', async () => {
+    renameFolder.mockRejectedValue(new Error('この操作にはadmin権限が必要です'))
+    renderGrid()
+
+    startRename('人物')
+    fireEvent.change(screen.getByLabelText('「人物」の新しい名前'), { target: { value: '動物' } })
+    fireEvent.click(screen.getByRole('button', { name: '改名を保存' }))
+
+    expect(await screen.findByText('この操作にはadmin権限が必要です')).toBeInTheDocument()
+    expect(screen.getByLabelText('「人物」の新しい名前')).toHaveValue('動物')
+    expect(treeItem('人物')).toBeInTheDocument()
+  })
+
+  it('Error以外の失敗も文字列にして表示する', async () => {
+    renameFolder.mockRejectedValue('だめ')
+    renderGrid()
+
+    startRename('人物')
+    fireEvent.click(screen.getByRole('button', { name: '改名を保存' }))
+
+    expect(await screen.findByText('だめ')).toBeInTheDocument()
+  })
+})
+
+describe('フォルダの削除(issue #1494)', () => {
+  let confirmSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    confirmSpy = jest.spyOn(window, 'confirm')
+  })
+
+  afterEach(() => {
+    confirmSpy.mockRestore()
+  })
+
+  function clickDelete(name: string) {
+    fireEvent.click(within(treeItem(name)).getAllByRole('button', { name: `「${name}」を削除` })[0])
+  }
+
+  it('確認ダイアログに子孫フォルダ数・未分類に戻る画像の枚数・取り消せないことを出す', async () => {
+    deleteImpact.mockResolvedValue({ descendantFolderCount: 1, imageCount: 5 })
+    confirmSpy.mockReturnValue(false)
+    renderGrid()
+
+    clickDelete('風景')
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(1))
+    const message = confirmSpy.mock.calls[0][0] as string
+    expect(deleteImpact).toHaveBeenCalledWith(1)
+    expect(message).toContain('「風景」')
+    expect(message).toContain('子孫フォルダ1個')
+    expect(message).toContain('5枚')
+    expect(message).toContain('元に戻せません')
+  })
+
+  it('キャンセルすると削除せず、フォルダも一覧も変わらない', async () => {
+    deleteImpact.mockResolvedValue({ descendantFolderCount: 0, imageCount: 0 })
+    confirmSpy.mockReturnValue(false)
+    renderGrid([image(1, 3)])
+
+    clickDelete('人物')
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+
+    expect(deleteFolder).not.toHaveBeenCalled()
+    expect(fetchPage).not.toHaveBeenCalled()
+    expect(treeItem('人物')).toBeInTheDocument()
+    expect(screen.getByAltText('prompt-1')).toBeInTheDocument()
+  })
+
+  it('承諾すると削除し、子孫もツリーから消える。絞り込み中でなければ一覧は取り直すが選択は変えない', async () => {
+    deleteImpact.mockResolvedValue({ descendantFolderCount: 1, imageCount: 2 })
+    deleteFolder.mockResolvedValue(undefined)
+    confirmSpy.mockReturnValue(true)
+    fetchPage.mockResolvedValueOnce([image(1)])
+    renderGrid([image(1, 2)])
+
+    clickDelete('風景')
+
+    await waitFor(() => expect(deleteFolder).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.queryByRole('treeitem', { name: '風景' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('treeitem', { name: '山' })).not.toBeInTheDocument()
+    expect(treeItem('人物')).toBeInTheDocument()
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, null, null))
+    expect(treeItem('すべて')).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('選んでいたフォルダ(の子孫)を削除すると「すべて」へ戻り、タグ絞り込みは保つ', async () => {
+    fetchPage.mockResolvedValueOnce([image(2, 2, ['猫'])])
+    renderGrid([image(1)])
+    fireEvent.click(within(treeItem('山')).getAllByRole('button', { name: '山' })[0])
+    await waitFor(() => expect(treeItem('山')).toHaveAttribute('aria-selected', 'true'))
+    deleteImpact.mockResolvedValue({ descendantFolderCount: 1, imageCount: 1 })
+    deleteFolder.mockResolvedValue(undefined)
+    confirmSpy.mockReturnValue(true)
+    fetchPage.mockResolvedValueOnce([image(2, null, ['猫'])])
+
+    clickDelete('風景')
+
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, null, null))
+    await waitFor(() => expect(treeItem('すべて')).toHaveAttribute('aria-selected', 'true'))
+  })
+
+  it('別のフォルダを選んでいる間に削除しても、その選択は保つ', async () => {
+    fetchPage.mockResolvedValueOnce([image(3, 3)])
+    renderGrid([image(1)])
+    chooseFolder('人物')
+    await waitFor(() => expect(treeItem('人物')).toHaveAttribute('aria-selected', 'true'))
+    deleteImpact.mockResolvedValue({ descendantFolderCount: 1, imageCount: 0 })
+    deleteFolder.mockResolvedValue(undefined)
+    confirmSpy.mockReturnValue(true)
+    fetchPage.mockResolvedValueOnce([image(3, 3)])
+
+    clickDelete('風景')
+
+    await waitFor(() => expect(fetchPage).toHaveBeenLastCalledWith(0, null, 3, null))
+    expect(treeItem('人物')).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('影響範囲を取得できなければ確認を出さず、理由を表示する', async () => {
+    deleteImpact.mockRejectedValue(new Error('この操作にはadmin権限が必要です'))
+    renderGrid()
+
+    clickDelete('人物')
+
+    expect(await screen.findByText('この操作にはadmin権限が必要です')).toBeInTheDocument()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(deleteFolder).not.toHaveBeenCalled()
+  })
+
+  it('削除に失敗したら理由を表示し、ツリーは変えない', async () => {
+    deleteImpact.mockResolvedValue({ descendantFolderCount: 0, imageCount: 0 })
+    deleteFolder.mockRejectedValue('だめ')
+    confirmSpy.mockReturnValue(true)
+    renderGrid()
+
+    clickDelete('人物')
+
+    expect(await screen.findByText('だめ')).toBeInTheDocument()
+    expect(treeItem('人物')).toBeInTheDocument()
+    expect(fetchPage).not.toHaveBeenCalled()
   })
 })
