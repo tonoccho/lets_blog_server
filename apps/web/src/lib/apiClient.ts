@@ -599,19 +599,27 @@ export interface GeneratedImageCrop {
   height: number;
 }
 
+/** 画像の編集(issue #1656)の明るさ・コントラスト。どちらも -100〜+100 で、0 が変更なし。 */
+export interface GeneratedImageAdjustment {
+  brightness: number;
+  contrast: number;
+}
+
 /**
- * 画像を回転・反転・切り抜きして、新しい画像として保存する(issue #1655)。操作は並べた順に適用し、
- * 切り抜きは操作後の画像の座標で指定する。元の画像は変わらず、新しい画像は元のタグ・フォルダ・種別を引き継ぐ。
+ * 画像を回転・反転・切り抜き・明るさ/コントラスト調整して、新しい画像として保存する(issue #1655, #1656)。
+ * 操作は並べた順に適用し、切り抜きは操作後の画像の座標で指定する。調整は変更なし(0・0)なら `null`。
+ * 元の画像は変わらず、新しい画像は元のタグ・フォルダ・種別を引き継ぐ。
  */
 export function editGeneratedImage(
   id: number,
   operations: string[],
   crop: GeneratedImageCrop | null,
+  adjustment: GeneratedImageAdjustment | null,
 ): Promise<GeneratedImageDetail> {
   return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/edit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ operations, crop }),
+    body: JSON.stringify({ operations, crop, adjustment }),
   });
 }
 

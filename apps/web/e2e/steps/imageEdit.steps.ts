@@ -1,5 +1,5 @@
 import zlib from 'node:zlib';
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
 import { magnifierOf } from '../support/galleryCard';
 import {
@@ -312,3 +312,79 @@ Then('画像の編集は存在しない画像として404で拒否される', as
   expect(ctx.editStatus).toBe(404);
 });
 
+// ---------------------------------------------------------------- 明るさ・コントラスト(issue #1656)
+
+interface LuminanceStats {
+  mean: number;
+  variance: number;
+}
+
+/** フィクスチャ(左半分 (220,20,20)・右半分 (20,20,220))の輝度(Rec.601)の統計。 */
+const ORIGINAL_STATS: LuminanceStats = (() => {
+  const red = 0.299 * 220 + 0.587 * 20 + 0.114 * 20;
+  const blue = 0.299 * 20 + 0.587 * 20 + 0.114 * 220;
+  const mean = (red + blue) / 2;
+  return { mean, variance: ((red - mean) ** 2 + (blue - mean) ** 2) / 2 };
+})();
+
+/** ブラウザで画像を読み込み、画素の輝度の平均と分散を求める(PNG は可逆なので回転しても変わらない)。 */
+async function luminanceStats(page: Page, imageId: number): Promise<LuminanceStats> {
+  return page.evaluate(async (url) => {
+    const blob = await (await fetch(url)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    const count = data.length / 4;
+    let sum = 0;
+    let sumSquares = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      sum += luminance;
+      sumSquares += luminance * luminance;
+    }
+    const mean = sum / count;
+    return { mean, variance: sumSquares / count - mean * mean };
+  }, `/image-gallery/${imageId}/file`);
+}
+
+When(/^編集画面で(明るさ|コントラスト)のスライダーを(-?\d+)にする$/, async ({ page }, name: string, value: number) => {
+  await page.getByRole('slider', { name, exact: true }).fill(String(value));
+});
+
+Then('プレビューにフィルタは掛かっていない', async ({ page }) => {
+  await expect(page.getByAltText('編集プレビュー')).toHaveCSS('filter', 'none');
+});
+
+Then(/^プレビューのフィルタは「([^」]+)」である$/, async ({ page }, filter: string) => {
+  await expect(page.getByAltText('編集プレビュー')).toHaveCSS('filter', filter);
+});
+
+Then(/^明るさのスライダーは(-?\d+)である$/, async ({ page }, value: number) => {
+  await expect(page.getByRole('slider', { name: '明るさ', exact: true })).toHaveValue(String(value));
+});
+
+Then('新しい画像の平均輝度は元の画像より高い', async ({ page, ctx }) => {
+  const edited = await luminanceStats(page, ctx.editedImageId as number);
+  expect(edited.mean).toBeGreaterThan(ORIGINAL_STATS.mean + 5);
+});
+
+Then('新しい画像の輝度の分散は元の画像より大きい', async ({ page, ctx }) => {
+  const edited = await luminanceStats(page, ctx.editedImageId as number);
+  expect(edited.variance).toBeGreaterThan(ORIGINAL_STATS.variance * 1.1);
+});
+
+Then('元の画像の明るさとコントラストは変わっていない', async ({ page, ctx }) => {
+  const original = await luminanceStats(page, ctx.editSourceId as number);
+  expect(original.mean).toBeCloseTo(ORIGINAL_STATS.mean, 0);
+  expect(original.variance).toBeCloseTo(ORIGINAL_STATS.variance, -1);
+});
+
+Then('新しい画像の明るさとコントラストは元の画像と同じである', async ({ page, ctx }) => {
+  const edited = await luminanceStats(page, ctx.editedImageId as number);
+  expect(edited.mean).toBeCloseTo(ORIGINAL_STATS.mean, 0);
+  expect(edited.variance).toBeCloseTo(ORIGINAL_STATS.variance, -1);
+});

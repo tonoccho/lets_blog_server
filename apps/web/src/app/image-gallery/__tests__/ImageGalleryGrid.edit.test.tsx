@@ -68,7 +68,7 @@ describe('ImageGalleryGrid 画像の編集(issue #1655)', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(fetchPage).toHaveBeenCalledWith(0, null, null, null))
-    expect(edit).toHaveBeenCalledWith(1, ['ROTATE_CW'], null)
+    expect(edit).toHaveBeenCalledWith(1, ['ROTATE_CW'], null, null)
     expect(await screen.findByText('新しい画像として保存しました(ID 2)')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '画像を編集' })).not.toBeInTheDocument()
   })

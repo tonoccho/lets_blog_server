@@ -168,7 +168,7 @@ describe('ImageEditDialog 保存とキャンセル(issue #1655)', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(SAVED))
-    expect(edit).toHaveBeenCalledWith(5, ['ROTATE_CW'], { x: 10, y: 20, width: 100, height: 100 })
+    expect(edit).toHaveBeenCalledWith(5, ['ROTATE_CW'], { x: 10, y: 20, width: 100, height: 100 }, null)
   })
 
   it('切り抜きなしの保存は crop を null で送る', async () => {
@@ -178,7 +178,7 @@ describe('ImageEditDialog 保存とキャンセル(issue #1655)', () => {
     fireEvent.click(screen.getByRole('button', { name: '上下反転' }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(edit).toHaveBeenCalledWith(5, ['FLIP_VERTICAL'], null))
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(5, ['FLIP_VERTICAL'], null, null))
   })
 
   it('保存中は保存ボタンを押せず、二重に送らない', async () => {
@@ -238,5 +238,77 @@ describe('ImageEditDialog プレビューの大きさ', () => {
     drag(box, [0, 0], [240, 135])
 
     expect(screen.getByText('切り抜き範囲: 960 × 540 px')).toBeInTheDocument()
+  })
+})
+
+function slider(name: string) {
+  return screen.getByRole('slider', { name })
+}
+
+describe('ImageEditDialog 明るさ・コントラスト(issue #1656)', () => {
+  it('開いた直後のスライダーは中央(0)で、プレビューにフィルタは掛からない', () => {
+    renderDialog()
+
+    expect(slider('明るさ')).toHaveValue('0')
+    expect(slider('コントラスト')).toHaveValue('0')
+    expect(slider('明るさ')).toHaveAttribute('min', '-100')
+    expect(slider('明るさ')).toHaveAttribute('max', '100')
+    expect(slider('コントラスト')).toHaveAttribute('min', '-100')
+    expect(slider('コントラスト')).toHaveAttribute('max', '100')
+    expect(screen.getByAltText('編集プレビュー').style.filter).toBe('none')
+  })
+
+  it('スライダーを動かすと、プレビューに即座に反映され、保存できるようになる', () => {
+    renderDialog()
+
+    fireEvent.change(slider('明るさ'), { target: { value: '50' } })
+    fireEvent.change(slider('コントラスト'), { target: { value: '-50' } })
+
+    expect(screen.getByAltText('編集プレビュー').style.filter).toBe('brightness(1.5) contrast(0.5)')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+  })
+
+  it('「リセット」で変更なしに戻り、保存はできなくなる', () => {
+    renderDialog()
+    fireEvent.change(slider('明るさ'), { target: { value: '50' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'リセット' }))
+
+    expect(slider('明るさ')).toHaveValue('0')
+    expect(screen.getByAltText('編集プレビュー').style.filter).toBe('none')
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+  })
+
+  it('回転と組み合わせて保存すると、操作と調整を一度に送る', async () => {
+    edit.mockResolvedValue(SAVED)
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: '右に90°回転' }))
+    fireEvent.change(slider('明るさ'), { target: { value: '30' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(5, ['ROTATE_CW'], null, { brightness: 30, contrast: 0 }))
+  })
+
+  it('調整だけでも保存できる', async () => {
+    edit.mockResolvedValue(SAVED)
+    renderDialog()
+    fireEvent.change(slider('コントラスト'), { target: { value: '20' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(5, [], null, { brightness: 0, contrast: 20 }))
+  })
+
+  it('リセット後の回転だけの保存は、調整を送らない', async () => {
+    edit.mockResolvedValue(SAVED)
+    renderDialog()
+    fireEvent.change(slider('明るさ'), { target: { value: '40' } })
+    fireEvent.click(screen.getByRole('button', { name: 'リセット' }))
+    fireEvent.click(screen.getByRole('button', { name: '上下反転' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(5, ['FLIP_VERTICAL'], null, null))
   })
 })

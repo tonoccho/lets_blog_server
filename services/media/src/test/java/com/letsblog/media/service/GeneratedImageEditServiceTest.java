@@ -72,7 +72,7 @@ class GeneratedImageEditServiceTest {
         when(creationService.create(any())).thenReturn(created);
         when(repository.save(created)).thenReturn(created);
 
-        GeneratedImage result = service.edit(src, List.of(ImageEditOperation.ROTATE_CW), null);
+        GeneratedImage result = service.edit(src, List.of(ImageEditOperation.ROTATE_CW), null, null);
 
         assertEquals(created, result);
         ArgumentCaptor<CreateGeneratedImageRequest> captor = ArgumentCaptor.forClass(CreateGeneratedImageRequest.class);
@@ -100,7 +100,7 @@ class GeneratedImageEditServiceTest {
         GeneratedImage created = new GeneratedImage();
         when(creationService.create(any())).thenReturn(created);
 
-        service.edit(src, List.of(), new ImageCropRegion(0, 0, 10, 10));
+        service.edit(src, List.of(), new ImageCropRegion(0, 0, 10, 10), null);
 
         ArgumentCaptor<CreateGeneratedImageRequest> captor = ArgumentCaptor.forClass(CreateGeneratedImageRequest.class);
         verify(creationService).create(captor.capture());
@@ -118,9 +118,27 @@ class GeneratedImageEditServiceTest {
         when(storage.load("7/a.png")).thenReturn(UploadImageFixtures.png(UploadImageFixtures.solid(40, 20, Color.RED, false)));
 
         assertThrows(InvalidImageUploadException.class,
-                () -> service.edit(src, List.of(), new ImageCropRegion(30, 0, 20, 10)));
+                () -> service.edit(src, List.of(), new ImageCropRegion(30, 0, 20, 10), null));
 
         verifyNoInteractions(creationService);
         verifyNoInteractions(repository);
+    }
+
+    @Test
+    @DisplayName("明るさ・コントラストの調整を適用して登録する")
+    void 調整を適用して登録する() throws IOException {
+        GeneratedImage src = source("UPLOAD", "image/png", null, null);
+        when(storage.load("7/a.png")).thenReturn(
+                UploadImageFixtures.png(UploadImageFixtures.solid(40, 20, new Color(100, 100, 100), false)));
+        GeneratedImage created = new GeneratedImage();
+        when(creationService.create(any())).thenReturn(created);
+
+        service.edit(src, List.of(), null, new ImageAdjustment(50, 0));
+
+        ArgumentCaptor<CreateGeneratedImageRequest> captor = ArgumentCaptor.forClass(CreateGeneratedImageRequest.class);
+        verify(creationService).create(captor.capture());
+        BufferedImage stored = ImageIO.read(new ByteArrayInputStream(captor.getValue().imageData()));
+        assertEquals(150, new Color(stored.getRGB(3, 3)).getRed(), 1);
+        assertEquals(40, captor.getValue().width());
     }
 }

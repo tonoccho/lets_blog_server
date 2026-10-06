@@ -39,7 +39,10 @@ describe('editGeneratedImage(issue #1655)', () => {
       headers: { get: () => 'application/json' },
     } as unknown as Response)
 
-    const result = await editGeneratedImage(3, ['ROTATE_CW', 'FLIP_HORIZONTAL'], { x: 1, y: 2, width: 3, height: 4 })
+    const result = await editGeneratedImage(3, ['ROTATE_CW', 'FLIP_HORIZONTAL'], { x: 1, y: 2, width: 3, height: 4 }, {
+      brightness: 20,
+      contrast: -10,
+    })
 
     expect(result).toEqual({ id: 9, provider: 'UPLOAD' })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit & { headers?: Record<string, string> }]
@@ -49,6 +52,22 @@ describe('editGeneratedImage(issue #1655)', () => {
     expect(JSON.parse(init.body as string)).toEqual({
       operations: ['ROTATE_CW', 'FLIP_HORIZONTAL'],
       crop: { x: 1, y: 2, width: 3, height: 4 },
+      adjustment: { brightness: 20, contrast: -10 },
     })
+  })
+
+  it('調整を省略(null)すると adjustment: null で送る', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: 'Created',
+      text: async () => JSON.stringify({ id: 9 }),
+      headers: { get: () => 'application/json' },
+    } as unknown as Response)
+
+    await editGeneratedImage(3, ['ROTATE_CW'], null, null)
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ operations: ['ROTATE_CW'], crop: null, adjustment: null })
   })
 })

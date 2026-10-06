@@ -241,4 +241,40 @@ class GeneratedImageEditIntegrationTest {
         assertThat(repository.count()).isEqualTo(1);
         assertThat(storedFileCount(PROJECT_ID)).isEqualTo(1);
     }
+
+    @Test
+    @DisplayName("明るさを上げて保存すると新しい画像の輝度が上がり、元の画像は変わらない。回転と組み合わせられる")
+    void 明るさを上げて保存() throws Exception {
+        long sourceId = uploadSource(PROJECT_ID,
+                UploadImageFixtures.png(UploadImageFixtures.solid(60, 30, new Color(100, 100, 100), false)),
+                "a.png", "image/png");
+
+        MvcResult result = edit("member-jwt", sourceId,
+                "{\"operations\":[\"ROTATE_CW\"],\"adjustment\":{\"brightness\":50,\"contrast\":0}}");
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(201);
+        long newId = ((Number) JsonPath.read(result.getResponse().getContentAsString(), "$.id")).longValue();
+        BufferedImage edited = file(newId);
+        assertThat(edited.getWidth()).isEqualTo(30);
+        assertThat(edited.getHeight()).isEqualTo(60);
+        assertThat(new Color(edited.getRGB(3, 3)).getRed()).isBetween(149, 151);
+        assertThat(new Color(file(sourceId).getRGB(3, 3)).getRed()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("調整だけの編集は受け付けられ、範囲外の調整・0のみの調整は400で何も増えない")
+    void 調整の検証() throws Exception {
+        long sourceId = uploadSource(PROJECT_ID,
+                UploadImageFixtures.png(UploadImageFixtures.solid(60, 30, Color.RED, false)), "a.png", "image/png");
+
+        for (String json : new String[] {
+                "{\"adjustment\":{\"brightness\":101,\"contrast\":0}}",
+                "{\"adjustment\":{\"brightness\":0,\"contrast\":-101}}",
+                "{\"adjustment\":{\"brightness\":0,\"contrast\":0}}"}) {
+            assertThat(edit("member-jwt", sourceId, json).getResponse().getStatus()).as(json).isEqualTo(400);
+        }
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(edit("member-jwt", sourceId,
+                "{\"adjustment\":{\"brightness\":0,\"contrast\":10}}").getResponse().getStatus()).isEqualTo(201);
+    }
 }

@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 生成画像を回転・反転・切り抜きし、<b>新しい画像として</b>登録する(issue #1655)。元の画像は変えない。
+ * 生成画像を回転・反転・切り抜き・明るさ/コントラスト調整し、<b>新しい画像として</b>登録する(issue #1655, #1656)。元の画像は変えない。
  *
  * <p>新しい画像は元の画像のタグ・フォルダ・種別({@code provider})・prompt を引き継ぐ。prompt は、AI生成の
  * 画像がギャラリーで「アップロード画像」と表示されないようにするために引き継ぐ(他の生成パラメータは、
@@ -35,9 +35,10 @@ public class GeneratedImageEditService {
         this.repository = repository;
     }
 
-    public GeneratedImage edit(GeneratedImage source, List<ImageEditOperation> operations, ImageCropRegion crop) {
+    public GeneratedImage edit(GeneratedImage source, List<ImageEditOperation> operations, ImageCropRegion crop,
+            ImageAdjustment adjustment) {
         ImageResizeService.ReencodedImage edited = imageResizeService.applyEdits(
-                storage.load(source.getFilePath()), source.getMimeType(), operations, crop);
+                storage.load(source.getFilePath()), source.getMimeType(), operations, crop, adjustment);
         GeneratedImage created = creationService.create(new CreateGeneratedImageRequest(
                 source.getProjectId(), source.getPrompt(), null, null, null, null, null, null,
                 edited.width(), edited.height(), null, null, null, null, null,

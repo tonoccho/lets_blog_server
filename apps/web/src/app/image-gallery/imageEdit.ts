@@ -4,6 +4,10 @@
  * 同じ: 操作は並べた順に適用し、切り抜きは操作後の画像の座標で指定する。
  */
 
+/** 明るさ・コントラストのスライダーの範囲。0 が変更なし。 */
+export const ADJUSTMENT_MIN = -100;
+export const ADJUSTMENT_MAX = 100;
+
 export type EditOperation = "ROTATE_CW" | "ROTATE_CCW" | "FLIP_HORIZONTAL" | "FLIP_VERTICAL";
 
 export interface Size {
@@ -106,4 +110,18 @@ export function toPixelCrop(rect: CropRect, bounds: Size): CropRect | null {
   const width = right - left;
   const height = bottom - top;
   return width < 1 || height < 1 ? null : { x: left, y: top, width, height };
+}
+
+/** 明るさ・コントラストのどちらかが変更なし(0)でなければ true。 */
+export function isAdjusted(brightness: number, contrast: number): boolean {
+  return brightness !== 0 || contrast !== 0;
+}
+
+/**
+ * プレビューの CSS filter。media-service の `ImageAdjustment` と同じ式: 係数は `1 + 値/100`、明るさ→コントラストの順。
+ * 変更なし(0・0)は `none`。式を変えるときは `ImageAdjustment` も合わせる。
+ */
+export function adjustmentFilter(brightness: number, contrast: number): string {
+  if (!isAdjusted(brightness, contrast)) return "none";
+  return `brightness(${1 + brightness / 100}) contrast(${1 + contrast / 100})`;
 }

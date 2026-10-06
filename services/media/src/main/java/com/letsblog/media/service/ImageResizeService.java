@@ -154,15 +154,20 @@ public class ImageResizeService {
     }
 
     /**
-     * 画像を回転・反転・切り抜きする(issue #1655)。操作は並べた順に適用し、切り抜きは操作後の画像の座標で
-     * 指定する。拡大・縮小はせず、出力の画素数は操作の結果どおり。メタ情報は残さず、形式は元のまま
+     * 画像を回転・反転・切り抜きし、明るさ・コントラストを調整する(issue #1655, #1656)。操作は並べた順に適用し、切り抜きは操作後の画像の座標で
+     * 指定する。明るさ・コントラストは切り抜きのあとに適用する({@link ImageAdjustment}。画素単位の処理なので順序は結果に影響しない)。拡大・縮小はせず、出力の画素数は操作の結果どおり。メタ情報は残さず、形式は元のまま
      * ({@link #reencodeKeepingResolution}と同じ書き出し)。操作も切り抜きも無い・切り抜きが範囲外・
      * 読めない/大きすぎる画像は{@link InvalidImageUploadException}。
      */
     public ReencodedImage applyEdits(
-            byte[] originalBytes, String mimeType, List<ImageEditOperation> operations, ImageCropRegion crop) {
+            byte[] originalBytes, String mimeType, List<ImageEditOperation> operations, ImageCropRegion crop,
+            ImageAdjustment adjustment) {
         boolean hasOperations = operations != null && !operations.isEmpty();
-        if (!hasOperations && crop == null) {
+        if (adjustment != null && !adjustment.isInRange()) {
+            throw new InvalidImageUploadException("明るさ・コントラストは-100〜100で指定してください。");
+        }
+        boolean hasAdjustment = adjustment != null && !adjustment.isIdentity();
+        if (!hasOperations && crop == null && !hasAdjustment) {
             throw new InvalidImageUploadException("編集内容がありません。");
         }
         BufferedImage current = applyOrientation(
@@ -180,7 +185,28 @@ public class ImageResizeService {
         if (crop != null) {
             current = crop(current, crop);
         }
+        if (hasAdjustment) {
+            current = adjust(current, adjustment);
+        }
         return encodeKeepingFormat(current, mimeType);
+    }
+
+    /** 明るさ・コントラスト(issue #1656)を画素ごとに適用する。透明度は変えない。 */
+    private BufferedImage adjust(BufferedImage src, ImageAdjustment adjustment) {
+        int[] table = adjustment.lookupTable();
+        int width = src.getWidth();
+        int height = src.getHeight();
+        int[] pixels = src.getRGB(0, 0, width, height, null, 0, width);
+        for (int i = 0; i < pixels.length; i++) {
+            int argb = pixels[i];
+            pixels[i] = (argb & 0xff000000)
+                    | (table[(argb >> 16) & 0xff] << 16)
+                    | (table[(argb >> 8) & 0xff] << 8)
+                    | table[argb & 0xff];
+        }
+        BufferedImage dst = new BufferedImage(width, height, imageType(src));
+        dst.setRGB(0, 0, width, height, pixels, 0, width);
+        return dst;
     }
 
     private BufferedImage crop(BufferedImage src, ImageCropRegion region) {

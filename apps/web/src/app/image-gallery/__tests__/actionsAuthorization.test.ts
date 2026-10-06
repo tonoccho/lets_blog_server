@@ -276,7 +276,7 @@ describe('editGeneratedImageAction(issue #1655)', () => {
   it('未ログインは /login へ送り、編集しない', async () => {
     getServerSession.mockResolvedValue(null);
 
-    await expect(editGeneratedImageAction(1, ['ROTATE_CW'], null)).rejects.toThrow('NEXT_REDIRECT:/login');
+    await expect(editGeneratedImageAction(1, ['ROTATE_CW'], null, null)).rejects.toThrow('NEXT_REDIRECT:/login');
     expect(editGeneratedImage).not.toHaveBeenCalled();
   });
 
@@ -284,11 +284,12 @@ describe('editGeneratedImageAction(issue #1655)', () => {
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     editGeneratedImage.mockResolvedValue({ id: 9 });
     const crop = { x: 1, y: 2, width: 3, height: 4 };
+    const adjustment = { brightness: 20, contrast: -10 };
 
-    const result = await editGeneratedImageAction(1, ['ROTATE_CW'], crop);
+    const result = await editGeneratedImageAction(1, ['ROTATE_CW'], crop, adjustment);
 
     expect(result).toEqual({ id: 9 });
-    expect(editGeneratedImage).toHaveBeenCalledWith(1, ['ROTATE_CW'], crop);
+    expect(editGeneratedImage).toHaveBeenCalledWith(1, ['ROTATE_CW'], crop, adjustment);
     expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
   });
 });

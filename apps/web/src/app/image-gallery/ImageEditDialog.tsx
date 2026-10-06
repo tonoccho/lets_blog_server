@@ -4,7 +4,11 @@ import { useState, type MouseEvent } from "react";
 import type { GeneratedImageDetail } from "@/lib/apiClient";
 import { editGeneratedImageAction } from "./actions";
 import {
+  ADJUSTMENT_MAX,
+  ADJUSTMENT_MIN,
+  adjustmentFilter,
   clampDragRect,
+  isAdjusted,
   presetCropRect,
   presetRatio,
   previewTransform,
@@ -34,8 +38,27 @@ const PRESET_BUTTONS: { preset: CropPreset; label: string }[] = [
   { preset: "WIDE", label: "16:9" },
 ];
 
+function AdjustmentSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label className="flex items-center gap-3">
+      <span className="w-24">{label}</span>
+      <input
+        type="range"
+        aria-label={label}
+        min={ADJUSTMENT_MIN}
+        max={ADJUSTMENT_MAX}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="flex-1"
+      />
+      <span className="w-10 text-right tabular-nums">{value}</span>
+    </label>
+  );
+}
+
 /**
- * 画像の編集画面(issue #1655)。回転・反転・切り抜きをプレビューで確かめ、「保存」で新しい画像として
+ * 画像の編集画面(issue #1655, #1656)。回転・反転・切り抜き・明るさ/コントラストをプレビューで確かめ、「保存」で新しい画像として
  * 登録する(元の画像は変わらない)。「キャンセル」では何も送らない。編集の本体は media-service が行い、
  * ここのプレビューは見た目の確認だけ。
  */
@@ -58,6 +81,9 @@ export function ImageEditDialog({
   /** 切り抜き範囲。操作後の画像の画素座標。 */
   const [crop, setCrop] = useState<CropRect | null>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);
+  /** 明るさ・コントラスト(issue #1656)。-100〜+100、0 が変更なし。 */
+  const [brightness, setBrightness] = useState(0);
+  const [contrast, setContrast] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +93,7 @@ export function ImageEditDialog({
   const boxHeight = size.height * scale;
   const ratio = presetRatio(preset, size.width, size.height);
   const pixelCrop = crop ? toPixelCrop(crop, size) : null;
+  const adjusted = isAdjusted(brightness, contrast);
 
   function addOperation(operation: EditOperation) {
     const next = [...operations, operation];
@@ -81,6 +108,11 @@ export function ImageEditDialog({
     setPreset(next);
     const nextRatio = presetRatio(next, size.width, size.height);
     if (nextRatio !== null) setCrop(presetCropRect(size, nextRatio));
+  }
+
+  function resetAdjustment() {
+    setBrightness(0);
+    setContrast(0);
   }
 
   function clearCrop() {
@@ -114,14 +146,19 @@ export function ImageEditDialog({
     setSaving(true);
     setError(null);
     try {
-      onSaved(await editGeneratedImageAction(imageId, operations, pixelCrop));
+      onSaved(await editGeneratedImageAction(
+          imageId,
+          operations,
+          pixelCrop,
+          adjusted ? { brightness, contrast } : null,
+        ));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSaving(false);
     }
   }
 
-  const canSave = !saving && (operations.length > 0 || pixelCrop !== null);
+  const canSave = !saving && (operations.length > 0 || pixelCrop !== null || adjusted);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
@@ -189,6 +226,7 @@ export function ImageEditDialog({
                 left: `${(boxWidth - width * scale) / 2}px`,
                 top: `${(boxHeight - height * scale) / 2}px`,
                 transform: previewTransform(operations),
+                filter: adjustmentFilter(brightness, contrast),
               }}
             />
             {crop && (
@@ -206,6 +244,14 @@ export function ImageEditDialog({
               />
             )}
           </div>
+        </div>
+
+        <div className="space-y-2 text-sm" role="group" aria-label="明るさとコントラスト">
+          <AdjustmentSlider label="明るさ" value={brightness} onChange={setBrightness} />
+          <AdjustmentSlider label="コントラスト" value={contrast} onChange={setContrast} />
+          <button type="button" onClick={resetAdjustment} className="text-neutral-600 underline dark:text-neutral-300">
+            リセット
+          </button>
         </div>
 
         <div className="space-y-1 text-sm text-neutral-600 dark:text-neutral-400">

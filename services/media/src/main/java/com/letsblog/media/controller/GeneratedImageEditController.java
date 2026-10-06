@@ -53,7 +53,7 @@ public class GeneratedImageEditController {
         adminAuthorizationService.requireProjectMemberOrAdminForResource(source.getProjectId());
         List<ImageEditOperation> operations =
                 request.operations() != null ? request.operations() : List.of();
-        return toResponse(generatedImageEditService.edit(source, operations, request.crop()));
+        return toResponse(generatedImageEditService.edit(source, operations, request.crop(), request.adjustment()));
     }
 
     private static GeneratedImageDetailResponse toResponse(GeneratedImage image) {

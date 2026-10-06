@@ -13,6 +13,7 @@ import {
   setGeneratedImageFolder,
   updateGeneratedImageTags,
   type GeneratedImageBulkDeleteResult,
+  type GeneratedImageAdjustment,
   type GeneratedImageCrop,
   type GeneratedImageDetail,
   type GeneratedImageFolder,
@@ -92,16 +93,17 @@ export async function setGeneratedImageFolderAction(
 }
 
 /**
- * 画像を回転・反転・切り抜きして、新しい画像として保存する(issue #1655)。認可は上記参照(ログイン必須)。
+ * 画像を回転・反転・切り抜き・明るさ/コントラスト調整して、新しい画像として保存する(issue #1655, #1656)。認可は上記参照(ログイン必須)。
  * 画像ごとの認可(プロジェクトのメンバーまたは admin)は media-service が判定し、非メンバーは403になる。
  */
 export async function editGeneratedImageAction(
   id: number,
   operations: string[],
   crop: GeneratedImageCrop | null,
+  adjustment: GeneratedImageAdjustment | null,
 ): Promise<GeneratedImageDetail> {
   await requireSession();
-  const result = await editGeneratedImage(id, operations, crop);
+  const result = await editGeneratedImage(id, operations, crop, adjustment);
   revalidatePath("/image-gallery");
   return result;
 }

@@ -8,6 +8,7 @@ import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageEditService;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
+import com.letsblog.media.service.ImageAdjustment;
 import com.letsblog.media.service.ImageCropRegion;
 import com.letsblog.media.service.ImageEditOperation;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,10 +67,10 @@ class GeneratedImageEditControllerTest {
         GeneratedImage created = image(2L, 7L);
         ImageCropRegion crop = new ImageCropRegion(0, 0, 5, 5);
         when(repository.findById(1L)).thenReturn(Optional.of(src));
-        when(editService.edit(src, List.of(ImageEditOperation.ROTATE_CW), crop)).thenReturn(created);
+        when(editService.edit(src, List.of(ImageEditOperation.ROTATE_CW), crop, null)).thenReturn(created);
 
         GeneratedImageDetailResponse response = controller.edit(
-                1L, new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), crop));
+                1L, new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), crop, null));
 
         verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
         assertEquals(2L, response.id());
@@ -83,9 +84,9 @@ class GeneratedImageEditControllerTest {
         GeneratedImage src = image(1L, 7L);
         ImageCropRegion crop = new ImageCropRegion(0, 0, 5, 5);
         when(repository.findById(1L)).thenReturn(Optional.of(src));
-        when(editService.edit(src, List.of(), crop)).thenReturn(image(2L, 7L));
+        when(editService.edit(src, List.of(), crop, null)).thenReturn(image(2L, 7L));
 
-        assertEquals(2L, controller.edit(1L, new EditGeneratedImageRequest(null, crop)).id());
+        assertEquals(2L, controller.edit(1L, new EditGeneratedImageRequest(null, crop, null)).id());
     }
 
     @Test
@@ -94,7 +95,7 @@ class GeneratedImageEditControllerTest {
         when(repository.findById(9L)).thenReturn(Optional.empty());
 
         assertThrows(GeneratedImageNotFoundException.class,
-                () -> controller.edit(9L, new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), null)));
+                () -> controller.edit(9L, new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), null, null)));
         verifyNoInteractions(editService);
     }
 
@@ -106,7 +107,7 @@ class GeneratedImageEditControllerTest {
                 .requireProjectMemberOrAdminForResource(7L);
 
         assertThrows(ForbiddenException.class,
-                () -> controller.edit(1L, new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), null)));
+                () -> controller.edit(1L, new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), null, null)));
         verifyNoInteractions(editService);
     }
 
@@ -115,16 +116,27 @@ class GeneratedImageEditControllerTest {
     void タグの応答() {
         GeneratedImage src = image(1L, 7L);
         when(repository.findById(1L)).thenReturn(Optional.of(src));
-        EditGeneratedImageRequest request = new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), null);
+        EditGeneratedImageRequest request = new EditGeneratedImageRequest(List.of(ImageEditOperation.ROTATE_CW), null, null);
 
         for (Object[] c : new Object[][] {
                 {"[\"cat\",\"sky\"]", List.of("cat", "sky")}, {null, List.of()}, {"  ", List.of()},
                 {"not json", List.of()}}) {
             GeneratedImage created = image(2L, 7L);
             created.setTagsJson((String) c[0]);
-            when(editService.edit(src, List.of(ImageEditOperation.ROTATE_CW), null)).thenReturn(created);
+            when(editService.edit(src, List.of(ImageEditOperation.ROTATE_CW), null, null)).thenReturn(created);
 
             assertEquals(c[1], controller.edit(1L, request).tags());
         }
+    }
+
+    @Test
+    @DisplayName("明るさ・コントラストの調整は編集サービスへそのまま渡る")
+    void 調整を渡す() {
+        GeneratedImage src = image(1L, 7L);
+        ImageAdjustment adjustment = new ImageAdjustment(30, -20);
+        when(repository.findById(1L)).thenReturn(Optional.of(src));
+        when(editService.edit(src, List.of(), null, adjustment)).thenReturn(image(2L, 7L));
+
+        assertEquals(2L, controller.edit(1L, new EditGeneratedImageRequest(null, null, adjustment)).id());
     }
 }

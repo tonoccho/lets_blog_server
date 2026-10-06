@@ -1,5 +1,7 @@
 import {
+  adjustmentFilter,
   clampDragRect,
+  isAdjusted,
   presetCropRect,
   presetRatio,
   previewTransform,
@@ -140,5 +142,19 @@ describe('toPixelCrop', () => {
     })
     expect(toPixelCrop({ x: 0, y: 0, width: 0.2, height: 10 }, { width: 400, height: 200 })).toBeNull()
     expect(toPixelCrop({ x: 400, y: 0, width: 10, height: 10 }, { width: 400, height: 200 })).toBeNull()
+  })
+})
+
+describe('adjustmentFilter(issue #1656)', () => {
+  it('0・0 は none、そうでなければサーバーと同じ係数 1+値/100 の CSS filter', () => {
+    expect(adjustmentFilter(0, 0)).toBe('none')
+    expect(adjustmentFilter(50, 0)).toBe('brightness(1.5) contrast(1)')
+    expect(adjustmentFilter(-100, 100)).toBe('brightness(0) contrast(2)')
+  })
+
+  it('isAdjusted は 0・0 のときだけ false', () => {
+    expect(isAdjusted(0, 0)).toBe(false)
+    expect(isAdjusted(1, 0)).toBe(true)
+    expect(isAdjusted(0, -1)).toBe(true)
   })
 })
