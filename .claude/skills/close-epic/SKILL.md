@@ -63,8 +63,25 @@ not make an unmet criterion met; an Epic whose children are all closed can still
 - a reference is unclassifiable.
 
 Otherwise **CLOSABLE**. Report per Epic: verdict, the classification table with its body-text
-grounds, each non-child criterion with its status and evidence. Filing fix Issues for unmet
-criteria is out of scope here (#1626); report them only.
+grounds, each non-child criterion with its status and evidence. Unmet criteria are then filed
+as Issues (Step 4a); the skill never fixes them itself.
+
+## Step 4a: File an Issue for each unmet criterion
+
+For every unmet non-child criterion (not open children, not unclassifiable references), in both
+invocations. The permitted mutations are only those listed for `close-epic` in `CLAUDE.md` →
+**Read-Only Stages**; no file is written.
+
+1. Follow `CLAUDE.md` → **Scope Control**: `glab issue list --search "<term>"` (add `--all`),
+   separately for each affected file path, symbol and the observable symptom.
+2. If an **open** Issue already covers the same problem, create nothing: comment the new evidence
+   on it and use its number.
+3. Otherwise create one Issue with the `project-planner` template (Title, Background, Problem,
+   Goal, Requirements, Acceptance Criteria, Scope, Out of Scope, Dependencies), at most five
+   Acceptance Criteria, labels `status::Inbox` and `priority::P0|P1|P2`. Never `user-request`
+   (`CLAUDE.md` → **Issue Provenance**: Claude found it), never `hotfix` or `bug`.
+4. Post **one** comment on the Epic listing each unmet criterion with its Issue number (existing
+   or new). Do not close the Epic and do not change its labels in this step.
 
 ## Step 5: Close (only for `/close-epic close #<n> ...`)
 

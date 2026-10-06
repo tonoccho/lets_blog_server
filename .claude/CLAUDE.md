@@ -342,7 +342,7 @@ Only GitLab Issue state, and only the mutations listed for that stage:
 | `triage-backlog` | Move `Inbox → Backlog`; set `Priority` on each Issue it moves |
 | `ready-issue` | Move `Backlog → Ready`; post the Readiness Report as a comment; rewrite Epic shorthand in the Issue body to `#<number>` (required by **Dependency Resolution** → Recording dependencies) |
 | `report-bug` | Create exactly one Issue directly in `status::Backlog` with `user-request`, `bug`, `priority::P0`, `hotfix` — see **How to change status** for the Inbox-skip exception this row grants |
-| `close-epic` | Move an `epic` Issue `Inbox → Done` (one call: `remove_labels=status::Inbox`, `add_labels=status::Done`) and close it, only for Epics the user named in their own `/close-epic close #<n>` slash command and that re-read as CLOSABLE just before; see **Legal Transitions** for the marker-gated transition |
+| `close-epic` | Move an `epic` Issue `Inbox → Done` (one call: `remove_labels=status::Inbox`, `add_labels=status::Done`) and close it, only for Epics the user named in their own `/close-epic close #<n>` slash command and that re-read as CLOSABLE just before; see **Legal Transitions** for the marker-gated transition. Also: file a fix Issue (in `Inbox`, `Priority` set, no `user-request`) for each unmet non-child acceptance criterion, comment on an existing Issue that already covers it, and comment the Issue numbers on the Epic |
 
 Anything else is out of bounds — including closing an Issue, which stays the user's call.
 
