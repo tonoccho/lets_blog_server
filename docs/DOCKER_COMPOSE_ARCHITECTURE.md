@@ -43,9 +43,9 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
-| `ollama` | 11434 | 非公開(platform/ai経由) | ローカルLLM(#1086)。GPUは**オプトイン**(下記)。`platform` が `LLM_OLLAMA_BASE_URL=http://ollama:11434/v1` を解決し、ai-service がその設定で呼ぶ。reverse-proxy は中継しない |
+| `ollama` | 11434 | 非公開(platform/ai経由) | ローカルLLM(#1086)。GPUは**オプトイン**(下記)。`platform` が DB(`system_settings.llm_ollama_base_url`。無ければ起動時に `http://ollama:11434/v1` を書き込む)で接続先を解決し、ai-service がその設定で呼ぶ(環境変数 `LLM_OLLAMA_BASE_URL` は廃止した、#1567)。reverse-proxy は中継しない |
 | `ollama-model-init` | — | — | 既定モデルを起動時に取得するワンショット(#1086)。`restart: "no"` で終了コード0なら `ContainerStatusService`(#725)が「正常に完了したジョブ」として扱う |
-| `comfyui` | 8188 | 非公開(media経由) | GPU必須。#979でreverse-proxyの`/comfyui/`中継を削除した(ブラウザから開く導線が無く、無認証で任意のワークフローを実行できてしまうため)。media-serviceが`COMFYUI_BASE_URL=http://comfyui:8188`でlbs-net経由に呼ぶ |
+| `comfyui` | 8188 | 非公開(media経由) | GPU必須。#979でreverse-proxyの`/comfyui/`中継を削除した(ブラウザから開く導線が無く、無認証で任意のワークフローを実行できてしまうため)。media-serviceが DB の接続先(`system_settings.comfyui_base_url`。無ければ起動時に `http://comfyui:8188` を書き込む。環境変数 `COMFYUI_BASE_URL` は廃止した、#1567)でlbs-net経由に呼ぶ |
 | `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
@@ -465,7 +465,7 @@ nvidia デバイス予約は変数展開でもマージでも消せない(上記
 - イメージは既存の `COMFYUI_IMAGE`(CPU実行時は `yanwk/comfyui-boot:cpu`)。新しいイメージ変数は無い。
 - 起動引数は環境変数 `CLI_ARGS`(コンテナ内 `/runner-scripts/entrypoint.sh` が展開)。`comfyui` は `COMFYUI_CLI_ARGS`(既定は空)、
   `comfyui-cpu` は `--cpu --force-fp32` に `COMFYUI_CLI_ARGS` を足す。
-- `comfyui-cpu` はネットワークエイリアス `comfyui` を持つため、`COMFYUI_BASE_URL`(`http://comfyui:8188`)は不変。
+- `comfyui-cpu` はネットワークエイリアス `comfyui` を持つため、既定の接続先(`http://comfyui:8188`)は不変(`COMFYUI_BASE_URL` は廃止した、#1567)。
   固有名 `comfyui-cpu` でも到達でき、GPU構成を止めずにこちらだけを指名できる(#1401 の前提)。
 - モデル・出力ボリューム(`comfyui_models` / `comfyui_output`)は共有。両者は同時に起動しない前提。
 - 検証: `scripts/test_comfyui_gpu_profile.py`(compose契約テスト)。実機での生成は #1401。

@@ -47,7 +47,6 @@ public class ConnectedServiceStatusService {
     private static final String PLANTUML_HEALTHCHECK_SOURCE = "@startuml\nA->B\n@enduml";
 
     private final DataSource dataSource;
-    private final RestClient comfyUiClient;
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
     private final RestClient penpotClient;
@@ -55,7 +54,6 @@ public class ConnectedServiceStatusService {
     private final AppSettingService appSettingService;
     private final LetsBlogServiceStatusService letsBlogServiceStatusService;
     private final RabbitMqQueueStatusService rabbitMqQueueStatusService;
-    private final String comfyUiBaseUrl;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
     private final String penpotBaseUrl;
@@ -66,11 +64,15 @@ public class ConnectedServiceStatusService {
      * MockRestServiceServerに束縛済みのBuilderを返す関数に差し替える)。
      */
     private final Function<String, RestClient.Builder> ollamaClientBuilderFactory;
+    /**
+     * ComfyUIのbaseUrlもOllamaと同じくDB(AppSettingService)で実行時に解決される(issue #1567)ため、
+     * チェックの都度、解決済みbaseUrlからRestClient.Builderを組み立てる。
+     */
+    private final Function<String, RestClient.Builder> comfyUiClientBuilderFactory;
 
     @Autowired
     public ConnectedServiceStatusService(
             DataSource dataSource,
-            @Value("${app.comfyui-base-url}") String comfyUiBaseUrl,
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
             @Value("${app.penpot-base-url}") String penpotBaseUrl,
@@ -79,7 +81,7 @@ public class ConnectedServiceStatusService {
             LetsBlogServiceStatusService letsBlogServiceStatusService,
             RabbitMqQueueStatusService rabbitMqQueueStatusService) {
         this(dataSource,
-                builderWithTimeout(comfyUiBaseUrl), comfyUiBaseUrl,
+                ConnectedServiceStatusService::builderWithTimeout,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
@@ -91,7 +93,7 @@ public class ConnectedServiceStatusService {
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ConnectedServiceStatusService(
             DataSource dataSource,
-            RestClient.Builder comfyUiBuilder, String comfyUiBaseUrl,
+            Function<String, RestClient.Builder> comfyUiClientBuilderFactory,
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
             RestClient.Builder penpotBuilder, String penpotBaseUrl,
@@ -101,7 +103,6 @@ public class ConnectedServiceStatusService {
             RabbitMqQueueStatusService rabbitMqQueueStatusService,
             Function<String, RestClient.Builder> ollamaClientBuilderFactory) {
         this.dataSource = dataSource;
-        this.comfyUiClient = comfyUiBuilder.build();
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.penpotClient = penpotBuilder.build();
@@ -109,7 +110,7 @@ public class ConnectedServiceStatusService {
         this.appSettingService = appSettingService;
         this.letsBlogServiceStatusService = letsBlogServiceStatusService;
         this.rabbitMqQueueStatusService = rabbitMqQueueStatusService;
-        this.comfyUiBaseUrl = comfyUiBaseUrl;
+        this.comfyUiClientBuilderFactory = comfyUiClientBuilderFactory;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
         this.penpotBaseUrl = penpotBaseUrl;
@@ -300,7 +301,12 @@ public class ConnectedServiceStatusService {
      * (issue #1397)ため、HTTPリクエスト数は増えない。
      */
     private CheckOutcome checkComfyUi() {
-        return checkHttpService(comfyUiClient, comfyUiBaseUrl, "/system_stats",
+        String baseUrl = appSettingService.getComfyUiBaseUrl();
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return new CheckOutcome(Status.WARNING, null,
+                    "ComfyUIの接続先が設定されていません(システム設定またはプロジェクト設定で設定してください)", null);
+        }
+        return checkHttpService(comfyUiClientBuilderFactory.apply(baseUrl).build(), baseUrl, "/system_stats",
                 ConnectedServiceStatusService::comfyUiComputeDeviceOf);
     }
 

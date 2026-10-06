@@ -121,6 +121,40 @@ class LlmClientTest {
         assertFalse(e.getMessage().contains("api_error"), "生の404本文をそのまま流さない。実際: " + e.getMessage());
     }
 
+    // ---- Ollama接続先が未設定(issue #1567) ----
+
+    @Test
+    void generate_OLLAMAの接続先が空なら接続を試みず未設定と分かるエラーにする() {
+        LlmClient ollamaClient = new LlmClient(
+                new StubConfigProvider(AiProvider.OLLAMA, "", "", "qwen2.5:7b-instruct"));
+
+        AiServiceException e = assertThrows(AiServiceException.class, () -> ollamaClient.generate("こんにちは"));
+
+        assertTrue(e.getMessage().contains("Ollama"), "実際: " + e.getMessage());
+        assertTrue(e.getMessage().contains("接続先が設定されていません"), "実際: " + e.getMessage());
+        assertTrue(e.getMessage().contains("設定してください"), "設定を促す文言にする。実際: " + e.getMessage());
+    }
+
+    @Test
+    void generate_OLLAMAの接続先がnullでも未設定として扱う() {
+        LlmClient ollamaClient = new LlmClient(
+                new StubConfigProvider(AiProvider.OLLAMA, null, "", "qwen2.5:7b-instruct"));
+
+        AiServiceException e = assertThrows(AiServiceException.class, () -> ollamaClient.generate("こんにちは"));
+
+        assertTrue(e.getMessage().contains("接続先が設定されていません"), "実際: " + e.getMessage());
+    }
+
+    @Test
+    void generate_OLLAMAの接続先が空白だけでも未設定として扱う() {
+        LlmClient ollamaClient = new LlmClient(
+                new StubConfigProvider(AiProvider.OLLAMA, "   ", "", "qwen2.5:7b-instruct"));
+
+        AiServiceException e = assertThrows(AiServiceException.class, () -> ollamaClient.generate("こんにちは"));
+
+        assertTrue(e.getMessage().contains("接続先が設定されていません"), "実際: " + e.getMessage());
+    }
+
     /** 実機のOllama 0.x が返す本文(#1086の手動確認で採取)。文言が上のテストと異なる。 */
     @Test
     void generate_実機Ollamaのモデル未取得応答も取得中である旨のメッセージにする() throws IOException {

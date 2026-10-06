@@ -112,9 +112,7 @@ public class AppSettingService {
             @Value("${app.llm-request-timeout-seconds}") String llmRequestTimeoutSecondsEnvDefault,
             @Value("${app.llm-provider:OLLAMA}") String llmProviderEnvDefault,
             @Value("${app.llm-claude-model:claude-3-5-haiku-20241022}") String llmClaudeModelEnvDefault,
-            @Value("${app.llm-ollama-base-url:http://ollama:11434/v1}") String llmOllamaBaseUrlEnvDefault,
             @Value("${app.llm-ollama-model:qwen2.5:7b-instruct}") String llmOllamaModelEnvDefault,
-            @Value("${app.comfyui-base-url}") String comfyUiBaseUrlEnvDefault,
             @Value("${spring.mail.host}") String mailHostEnvDefault,
             @Value("${spring.mail.port}") String mailPortEnvDefault,
             @Value("${spring.mail.username:}") String mailUsernameEnvDefault,
@@ -126,17 +124,17 @@ public class AppSettingService {
         this.repository = repository;
         this.credentialCipher = credentialCipher;
         this.adminAuthorizationService = adminAuthorizationService;
+        // Ollama / ComfyUIの接続先(LLM_OLLAMA_BASE_URL / COMFYUI_BASE_URL)は環境変数既定を持たない
+        // (issue #1567)。DBに無ければ未設定で、既定値は起動時にConnectionDefaultsSeederがDBへ書く。
         Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put(LLM_MODEL, llmModelEnvDefault);
         defaults.put(LLM_AVAILABLE_MODELS, llmAvailableModelsEnvDefault);
         defaults.put(LLM_REQUEST_TIMEOUT_SECONDS, llmRequestTimeoutSecondsEnvDefault);
         defaults.put(LLM_PROVIDER, llmProviderEnvDefault);
         defaults.put(LLM_CLAUDE_MODEL, llmClaudeModelEnvDefault);
-        defaults.put(LLM_OLLAMA_BASE_URL, llmOllamaBaseUrlEnvDefault);
         defaults.put(LLM_OLLAMA_MODEL, llmOllamaModelEnvDefault);
         defaults.put(LLM_OLLAMA_AVAILABLE_MODELS, "");
         defaults.put(LLM_CLAUDE_AVAILABLE_MODELS, "");
-        defaults.put(COMFYUI_BASE_URL, comfyUiBaseUrlEnvDefault);
         defaults.put(MAIL_HOST, mailHostEnvDefault);
         defaults.put(MAIL_PORT, mailPortEnvDefault);
         defaults.put(MAIL_USERNAME, mailUsernameEnvDefault);
@@ -206,7 +204,8 @@ public class AppSettingService {
     /**
      * 複数項目をまとめて更新する。1つのトランザクションとして扱い、いずれかの値が不正な場合は
      * 例外をスローして全ての変更をロールバックする(保存の一部だけが反映された状態になることを防ぐ)。
-     * 値が空文字列の場合はDB設定を削除し、環境変数の値へフォールバックする(未設定に戻す)。
+     * 値が空文字列の場合はDB設定を削除し、環境変数の既定値を持つ項目はその値へフォールバックする
+     * (未設定に戻す)。Ollama / ComfyUIの接続先は環境変数既定が無いので、削除すると未設定になる(issue #1567)。
      */
     @AuditLog(action = AuditLogAction.SYSTEM_SETTING_UPDATED, resourceType = "SYSTEM_SETTING")
     @Transactional

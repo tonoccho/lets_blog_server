@@ -41,7 +41,6 @@ app:
   llm-model: gpt-4o-mini
   llm-available-models: gpt-4o-mini,gpt-4o
   llm-request-timeout-seconds: 120
-  comfyui-base-url: http://localhost:8188
   # ConnectedServiceStatusService/ContainerStatusServiceのテスト用値(issue #695、C10-3)。
   # MockRestServiceServerを介するユニットテスト自体はこれらを使わないが、@SpringBootTestで
   # フルコンテキストを起動するAdminAuthorizationIntegrationTestがBean生成のために必要とする。

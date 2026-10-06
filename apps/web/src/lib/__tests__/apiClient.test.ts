@@ -505,7 +505,7 @@ describe('AI接続情報・接続先の上書き(issue #1504)', () => {
   })
 
   it('getProjectConnectionsは #1503 のエンドポイントを取得する', async () => {
-    const body = { ollama: { overrideBaseUrl: null, baseUrl: 'http://o', source: 'ENVIRONMENT' } }
+    const body = { ollama: { overrideBaseUrl: null, baseUrl: 'http://o', source: 'DATABASE' } }
     fetchMock.mockResolvedValue(jsonResponse(body))
 
     const result = await getProjectConnections(7)

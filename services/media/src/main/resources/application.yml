@@ -95,7 +95,6 @@ app:
   # issue #1135: /api/render/**のJSON本文サイズ上限(バイト、RenderBodySizeLimitFilter)。
   render:
     max-body-bytes: ${RENDER_MAX_BODY_BYTES:10485760}
-  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}

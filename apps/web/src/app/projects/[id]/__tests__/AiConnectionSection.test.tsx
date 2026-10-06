@@ -24,7 +24,7 @@ const updateMock = updateProjectConnectionAction as jest.MockedFunction<typeof u
 
 function project(overrides: Partial<ProjectConnectionsResponse> = {}): ProjectConnectionsResponse {
   return {
-    ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+    ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
     comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
     ...overrides,
   };
@@ -36,7 +36,7 @@ function connections(overrides: Partial<AiConnection>[] = []): AiConnection[] {
       provider: "OLLAMA",
       displayName: "Ollama",
       targetUrl: "http://ollama.default:11434/v1/models",
-      source: "ENVIRONMENT",
+      source: "DATABASE",
       status: "NORMAL",
       detail: null,
       configured: true,
@@ -61,12 +61,41 @@ beforeEach(() => {
 });
 
 describe("AiConnectionSection の表示", () => {
-  it("Ollamaの接続先URL・設定の出所(環境変数既定)・利用可否(利用可能)を表示する", async () => {
+  it("接続先の説明に環境変数は出てこない(接続先はプロジェクト設定かシステム設定の2つだけで決まる、issue #1567)", async () => {
+    render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
+
+    await screen.findByText("http://ollama.default:11434/v1");
+
+    expect(screen.getByText(/空で保存すると上書きを解除し、システム設定の値に戻ります/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("環境変数");
+  });
+
+  it("出所はプロジェクト設定・システム設定・未設定のどれかで表示する(環境変数既定は表示しない)", async () => {
+    const cases: Array<["PROJECT" | "DATABASE" | "NONE", string]> = [
+      ["PROJECT", "プロジェクト設定"],
+      ["DATABASE", "システム設定"],
+      ["NONE", "未設定"],
+    ];
+    for (const [source, text] of cases) {
+      fetchProjectMock.mockResolvedValue(
+        project({ comfyui: { overrideBaseUrl: null, baseUrl: source === "NONE" ? null : "http://c:8188", source } })
+      );
+      const { unmount } = render(<AiConnectionSection projectId={3} provider="COMFYUI" />);
+
+      const origin = (await screen.findByText("設定の出所")).nextElementSibling;
+      await waitFor(() => expect(origin).toHaveTextContent(new RegExp(`^${text}$`)));
+      expect(document.body.textContent).not.toContain("環境変数既定");
+      unmount();
+    }
+  });
+
+  it("Ollamaの接続先URL・設定の出所(システム設定)・利用可否(利用可能)を表示する", async () => {
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
 
     expect(await screen.findByText("http://ollama.default:11434/v1")).toBeInTheDocument();
     expect(screen.getByText("Ollamaの接続情報")).toBeInTheDocument();
-    expect(screen.getByText("環境変数既定")).toBeInTheDocument();
+    expect(screen.getByText("システム設定")).toBeInTheDocument();
+    expect(screen.queryByText("環境変数既定")).not.toBeInTheDocument();
     expect(await screen.findByText("利用可能")).toBeInTheDocument();
     expect(fetchProjectMock).toHaveBeenCalledWith(3);
     expect(fetchConnectionsMock).toHaveBeenCalledWith(3);
@@ -216,7 +245,7 @@ describe("AiConnectionSection の保存", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledWith(3, "OLLAMA", ""));
-    expect(await screen.findByText("環境変数既定")).toBeInTheDocument();
+    expect(await screen.findByText("システム設定")).toBeInTheDocument();
     expect(screen.getByText("http://ollama.default:11434/v1")).toBeInTheDocument();
     expect(input).toHaveValue("");
   });

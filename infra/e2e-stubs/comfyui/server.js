@@ -363,7 +363,7 @@ createStub({
 
     if (method === 'GET' && path === '/system_stats') {
       // platform-service の ConnectedServiceStatusService がここで疎通を判定する。
-      // 受け入れテスト環境では COMFYUI_BASE_URL がこのスタブを指すため、実装しないと
+      // 受け入れテスト環境では DB の comfyui_base_url がこのスタブを指すため、実装しないと
       // 「連携サービスの状況」が常に異常になる。
       sendJson(res, 200, {
         system: { os: 'linux', comfyui_version: 'e2e-stub', python_version: 'e2e-stub' },

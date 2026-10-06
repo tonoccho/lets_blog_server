@@ -47,8 +47,7 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
                 "OPENAI", "claude-3-5-haiku-20241022",
-                "http://ollama:11434/v1", "qwen2.5:7b-instruct",
-                "http://localhost:8188",
+                "qwen2.5:7b-instruct",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
     }
@@ -128,11 +127,12 @@ class AppSettingServiceTest {
     }
 
     @Test
-    void getComfyUiBaseUrl_DB未設定なら環境変数値にフォールバックする() {
+    void getComfyUiBaseUrl_DB未設定なら環境変数の値は使わず未設定として空を返す_issue1567() {
         AppSettingService service = service();
         when(repository.findById("comfyui_base_url")).thenReturn(Optional.empty());
 
-        assertEquals("http://localhost:8188", service.getComfyUiBaseUrl());
+        assertEquals("", service.getComfyUiBaseUrl());
+        assertEquals("", service.comfyUiBaseUrl());
     }
 
     @Test
@@ -438,12 +438,12 @@ class AppSettingServiceTest {
     }
 
     @Test
-    void baseUrlFor_OLLAMAはDB未設定なら環境変数の既定値にフォールバックする() {
+    void baseUrlFor_OLLAMAはDB未設定なら環境変数の値は使わず未設定として空を返す_issue1567() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
-        assertEquals("http://ollama:11434/v1", service.baseUrlFor(AiProvider.OLLAMA));
-        assertEquals("http://ollama:11434/v1", service.getLlmOllamaBaseUrl());
+        assertEquals("", service.baseUrlFor(AiProvider.OLLAMA));
+        assertEquals("", service.getLlmOllamaBaseUrl());
     }
 
     @Test
@@ -456,16 +456,18 @@ class AppSettingServiceTest {
     }
 
     @Test
-    void getAllSettings_OLLAMA専用キーは環境変数の既定値を取得元付きで返す() {
+    void getAllSettings_OLLAMAとComfyUIの接続先は環境変数があってもDB未設定なら未設定を返す_issue1567() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
-        AppSettingService.SettingStatus status = service.getAllSettings().stream()
-                .filter(s -> s.key().equals("llm_ollama_base_url")).findFirst().orElseThrow();
+        for (String key : List.of("llm_ollama_base_url", "comfyui_base_url")) {
+            AppSettingService.SettingStatus status = service.getAllSettings().stream()
+                    .filter(s -> s.key().equals(key)).findFirst().orElseThrow();
 
-        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, status.source());
-        assertEquals("http://ollama:11434/v1", status.value());
-        assertTrue(status.configured());
+            assertEquals(AppSettingService.SettingSource.NONE, status.source(), key);
+            assertEquals(null, status.value(), key);
+            assertTrue(!status.configured(), key);
+        }
     }
 
     @Test
@@ -499,10 +501,38 @@ class AppSettingServiceTest {
     void getAllSettings_DB値が空文字の項目は環境変数へフォールバックする() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        when(repository.findById("llm_ollama_model")).thenReturn(Optional.of(
+                new SystemSetting("llm_ollama_model", credentialCipher.encrypt(" "))));
+
+        assertEquals("qwen2.5:7b-instruct", service.defaultModelFor(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void 接続先のDB値が空文字なら環境変数へ落ちず未設定になる_issue1567() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
         when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.of(
                 new SystemSetting("llm_ollama_base_url", credentialCipher.encrypt(" "))));
+        when(repository.findById("comfyui_base_url")).thenReturn(Optional.of(
+                new SystemSetting("comfyui_base_url", credentialCipher.encrypt(""))));
 
-        assertEquals("http://ollama:11434/v1", service.baseUrlFor(AiProvider.OLLAMA));
+        assertEquals("", service.baseUrlFor(AiProvider.OLLAMA));
+        assertEquals("", service.getComfyUiBaseUrl());
+        assertEquals(AppSettingService.SettingSource.NONE, service.ollamaBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.NONE, service.comfyUiBaseUrlSource());
+    }
+
+    @Test
+    void 接続先のDB値は環境変数の値より常に優先される_issue1567() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.of(
+                new SystemSetting("llm_ollama_base_url", credentialCipher.encrypt("http://db-ollama:11434/v1"))));
+        when(repository.findById("comfyui_base_url")).thenReturn(Optional.of(
+                new SystemSetting("comfyui_base_url", credentialCipher.encrypt("http://db-comfy:8188"))));
+
+        assertEquals("http://db-ollama:11434/v1", service.getLlmOllamaBaseUrl());
+        assertEquals("http://db-comfy:8188", service.getComfyUiBaseUrl());
     }
 
     @Test
@@ -584,7 +614,6 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "", "", "120",
                 "", "",
-                "", "",
                 "",
                 "", "587", "", "", "",
                 "", "10", "");
@@ -594,14 +623,14 @@ class AppSettingServiceTest {
     void getAllSettings_DB値が空文字の項目は環境変数を取得元として返す() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
-        when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.of(
-                new SystemSetting("llm_ollama_base_url", credentialCipher.encrypt("  "))));
+        when(repository.findById("llm_ollama_model")).thenReturn(Optional.of(
+                new SystemSetting("llm_ollama_model", credentialCipher.encrypt("  "))));
 
         AppSettingService.SettingStatus status = service.getAllSettings().stream()
-                .filter(s -> s.key().equals("llm_ollama_base_url")).findFirst().orElseThrow();
+                .filter(s -> s.key().equals("llm_ollama_model")).findFirst().orElseThrow();
 
         assertEquals(AppSettingService.SettingSource.ENVIRONMENT, status.source());
-        assertEquals("http://ollama:11434/v1", status.value());
+        assertEquals("qwen2.5:7b-instruct", status.value());
     }
 
     @Test
@@ -830,8 +859,7 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "gpt-4o-mini", "", "120",
                 "OPENAI", "claude-3-5-haiku-20241022",
-                "http://ollama:11434/v1", "qwen2.5:7b-instruct",
-                "http://localhost:8188",
+                "qwen2.5:7b-instruct",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
@@ -845,8 +873,7 @@ class AppSettingServiceTest {
                 repository, credentialCipher, adminAuthorizationService,
                 "gpt-4o-mini", "gpt-4o", "120",
                 "OPENAI", "claude-3-5-haiku-20241022",
-                "http://ollama:11434/v1", "",
-                "http://localhost:8188",
+                "",
                 "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
                 "http://localhost:3000", "10", "wp-admin");
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
@@ -869,12 +896,12 @@ class AppSettingServiceTest {
     // ---- ai-connections向けの取得元(issue #1499) ----
 
     @Test
-    void 取得元_環境変数のみなら2項目ともENVIRONMENTを返す() {
+    void 取得元_環境変数に値があってもDBに無ければ2項目ともENVIRONMENTではなくNONEを返す_issue1567() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
-        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.ollamaBaseUrlSource());
-        assertEquals(AppSettingService.SettingSource.ENVIRONMENT, service.comfyUiBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.NONE, service.ollamaBaseUrlSource());
+        assertEquals(AppSettingService.SettingSource.NONE, service.comfyUiBaseUrlSource());
     }
 
     @Test

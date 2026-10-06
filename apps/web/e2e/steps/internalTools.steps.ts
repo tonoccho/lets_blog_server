@@ -105,12 +105,9 @@ function execInContainer(container: string, args: string[]): string {
 /**
  * media-service が実際に使う ComfyUI の向き先を取得する。
  *
- * media-service コンテナの `COMFYUI_BASE_URL` 環境変数は読まれていない
- * (`ComfyUiClient` は呼ぶ都度 `PlatformServiceClient` 経由で platform-service の
- * `/api/internal/platform/image-generation-config` から取得する。#1106 のレビュー指摘)。
- * さらに `docker-compose.e2e-stubs.yml` は受け入れテスト環境で media の
- * `COMFYUI_BASE_URL` を常に `comfyui-stub` へ固定するため、この環境変数を読んでも
- * 「実際に効いている値」の確認にならない(issue #1311)。
+ * 接続先は環境変数では決まらない(issue #1567。`ComfyUiClient` は呼ぶ都度 `PlatformServiceClient`
+ * 経由で platform-service の `/api/internal/platform/image-generation-config` から取得し、
+ * その値はプロジェクト設定かシステム設定(DB)だけで決まる。#1106 のレビュー指摘、#1311)。
  *
  * 実際に効いている値を見るため、media-service 自身と同じ経路——Client Credentials Grant で
  * 自身のサービストークンを取得し、そのトークンで platform-service の内部ブリッジを呼ぶ——を

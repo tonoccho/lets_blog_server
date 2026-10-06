@@ -98,7 +98,7 @@ describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
     fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
     fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
     fetchProjectConnectionsMock.mockReset().mockResolvedValue({
-      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
       comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
     });
   });
@@ -182,7 +182,7 @@ describe("ProjectAiModelsPanel の接続情報セクション(issue #1504)", () 
     fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
     fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
     fetchProjectConnectionsMock.mockReset().mockResolvedValue({
-      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
       comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
     });
   });
@@ -249,7 +249,7 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
     fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
     fetchProjectConnectionsMock.mockReset().mockResolvedValue({
-      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "ENVIRONMENT" },
+      ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
       comfyui: { overrideBaseUrl: null, baseUrl: "http://comfy.default:8188", source: "DATABASE" },
     });
   });

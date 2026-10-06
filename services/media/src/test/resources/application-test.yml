@@ -30,7 +30,6 @@ spring:
       reply-timeout: 1000
 
 app:
-  comfyui-base-url: http://localhost:19999
   comfyui-checkpoint: v1-5-pruned-emaonly.safetensors
   comfyui-models-path: /tmp/comfyui-models
   plantuml-base-url: http://localhost:19999

@@ -222,7 +222,7 @@ cd apps/extension && npm audit --audit-level=moderate
 GPUを持たないホストでも、ComfyUIをCPUで実行できる(issue #1395)。`.env` で
 `COMFYUI_IMAGE=yanwk/comfyui-boot:cpu` とし、`COMPOSE_PROFILES=cpu` を有効にすると、
 `docker compose up -d` のまま別サービス `comfyui-cpu`(`--cpu --force-fp32`、nvidia予約なし)が
-起動する。`COMFYUI_BASE_URL` は変更不要で、`comfyui`(GPU)とは同時に起動しない。
+起動する。ComfyUI の接続先は変更不要(DB の設定で決まる。`COMFYUI_BASE_URL` は廃止した)で、`comfyui`(GPU)とは同時に起動しない。
 ただしCPU実行は**実用的な速度に達しない**(画像生成は遅いが完了することが到達点)。
 AI機能を実用速度で使うにはGPU(上記要件)を推奨する。
 

@@ -2899,7 +2899,7 @@ export function updateReviewStepSetting(
 }
 
 export type AiConnectionProvider = 'OLLAMA' | 'COMFYUI' | 'OPENAI' | 'CLAUDE';
-export type ConnectionSource = 'PROJECT' | 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+export type ConnectionSource = 'PROJECT' | 'DATABASE' | 'NONE';
 
 /** `GET /api/projects/{id}/ai-connections`(issue #1499)の1件。targetUrlは疎通確認に使ったURL。 */
 export interface AiConnection {

@@ -44,6 +44,10 @@ import java.util.UUID;
 @Slf4j
 public class ComfyUiClient implements ImageGenerationProvider {
 
+    /** 接続先がプロジェクト設定にもシステム設定(DB)にも無いときのメッセージ(issue #1567)。 */
+    static final String COMFYUI_URL_REQUIRED =
+            "ComfyUIの接続先が設定されていません。プロジェクトのAI・アセットまたはシステム設定で接続先を設定してください。";
+
     private static final int POLL_INTERVAL_MS = 1000;
 
     /** img2imgで変化の強さを指定されなかったときのdenoise(issue #1601、利用者承認済み)。 */
@@ -148,11 +152,17 @@ public class ComfyUiClient implements ImageGenerationProvider {
      * 接続を試みず、原因のプロジェクト設定を示すメッセージで失敗させる(issue #1547)。
      */
     private GuardedTarget targetOf(Long projectId) {
+        GuardedTarget target;
         try {
-            return configProvider.comfyUiTarget(projectId);
+            target = configProvider.comfyUiTarget(projectId);
         } catch (ForbiddenDestinationException e) {
             throw new AiServiceException(e.getMessage(), e);
         }
+        if (target.baseUrl() == null || target.baseUrl().isBlank()) {
+            // プロジェクト設定にもシステム設定(DB)にも無い。環境変数へは落とさず、設定を促して失敗させる(issue #1567)。
+            throw new AiServiceException(COMFYUI_URL_REQUIRED, null);
+        }
+        return target;
     }
 
     /** httpsで元がホスト名だったときだけ、SNIに元のホスト名を載せた専用のクライアントで接続する。 */

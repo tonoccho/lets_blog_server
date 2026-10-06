@@ -98,7 +98,7 @@ class ConnectedServiceStatusServiceTest {
 
         return new ConnectedServiceStatusService(
                 dataSource,
-                comfyUiBuilder, COMFYUI_URL,
+                baseUrl -> comfyUiBuilder,
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
                 penpotBuilder, PENPOT_URL,
@@ -121,6 +121,8 @@ class ConnectedServiceStatusServiceTest {
                 .thenReturn(new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
         // LLMチェックの既定はOPENAI。個々のテストで上書きする。
         lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        // ComfyUIの接続先はDB(AppSettingService)で解決される(issue #1567)。
+        lenient().when(appSettingService.getComfyUiBaseUrl()).thenReturn(COMFYUI_URL);
         service = buildService();
     }
 

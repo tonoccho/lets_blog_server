@@ -58,9 +58,12 @@ class OllamaDisabledInAcceptanceStack(base.ComposeConfigHarness):
             expected.pop("profiles", None)
             self.assertEqual(expected, actual)
 
-    def test_at_llm_still_points_at_stub(self):
+    def test_at_llm_still_uses_the_ollama_provider_and_stub_model(self):
+        """#1567: 接続先(スタブの URL)は環境変数ではなく DB へ投入する。ここに残るのは種別とモデル名。"""
         env = self.full_config(compose_files=AT_FILES)["services"]["platform"]["environment"]
-        self.assertEqual("http://llm-stub:8080", env["LLM_OLLAMA_BASE_URL"])
+        self.assertEqual("OLLAMA", env["LLM_PROVIDER"])
+        self.assertEqual("e2e-stub-model", env["LLM_OLLAMA_MODEL"])
+        self.assertNotIn("LLM_OLLAMA_BASE_URL", env)
 
 
 if __name__ == "__main__":

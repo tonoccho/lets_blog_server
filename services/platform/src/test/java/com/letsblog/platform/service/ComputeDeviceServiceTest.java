@@ -320,6 +320,78 @@ class ComputeDeviceServiceTest {
         assertEquals(3, probes[0]);
     }
 
+    // ---- ComfyUIの成功判定URLはDBの接続先から呼ぶ都度解決する(issue #1567) ----
+
+    @Test
+    void 成功判定のURLはDBのComfyUI接続先を呼ぶ都度引いて使う() {
+        docker.with(GPU, "running").with(CPU, "exited");
+        String[] base = {"http://comfy-a:8188"};
+        ComputeDeviceHealthProbe probe = url -> {
+            probedUrls.add(url);
+            return true;
+        };
+        ComputeDeviceService service = new ComputeDeviceService(docker, probe,
+                List.of(new ComputeTarget("comfyui", GPU, CPU, "unused")),
+                () -> base[0] + "/system_stats",
+                Runnable::run, clock, d -> clock.advance(d), TIMEOUT, POLL);
+
+        service.apply("comfyui", ComputeDevice.CPU);
+        base[0] = "http://comfy-b:8188";
+        service.apply("comfyui", ComputeDevice.GPU);
+
+        assertEquals(List.of("http://comfy-a:8188/system_stats", "http://comfy-b:8188/system_stats"), probedUrls);
+    }
+
+    @Test
+    void 接続先が空のときは疎通失敗として扱い上限まで待たずにURLを探しに行かない() {
+        docker.with(GPU, "running").with(CPU, "exited");
+        ComputeDeviceHealthProbe probe = url -> {
+            probedUrls.add(url);
+            return true;
+        };
+        ComputeDeviceService service = new ComputeDeviceService(docker, probe,
+                List.of(new ComputeTarget("comfyui", GPU, CPU, "unused")),
+                () -> "",
+                Runnable::run, clock, d -> clock.advance(d), TIMEOUT, POLL);
+
+        service.apply("comfyui", ComputeDevice.CPU);
+
+        assertTrue(probedUrls.isEmpty(), "空のURLへは疎通確認を出さない");
+        assertEquals(ApplyState.FAILED, service.getStatus("comfyui").apply().state());
+    }
+
+    @Test
+    void ComfyUI以外の対象は自分のURLを使い_URLの供給元に左右されない() {
+        docker.with(GPU, "running").with(CPU, "exited");
+        ComputeDeviceHealthProbe probe = url -> {
+            probedUrls.add(url);
+            return true;
+        };
+        ComputeDeviceService service = new ComputeDeviceService(docker, probe,
+                List.of(new ComputeTarget("comfyui", GPU, CPU, "unused"),
+                        new ComputeTarget("other", "Other", "lbs-other", "lbs-other-cpu", "http://other.test/health",
+                                false, "other-cpu")),
+                () -> "http://comfy/system_stats",
+                Runnable::run, clock, d -> clock.advance(d), TIMEOUT, POLL);
+        docker.with("lbs-other", "running").with("lbs-other-cpu", "exited");
+
+        service.apply("other", ComputeDevice.CPU);
+
+        assertEquals(List.of("http://other.test/health"), probedUrls);
+    }
+
+    @Test
+    void 明示のURL指定があればそれを使い_無ければDBの接続先にsystem_statsを足す() {
+        assertEquals("http://override/health",
+                ComputeDeviceService.comfyUiHealthUrl(() -> "http://comfy:8188", "http://override/health"));
+        assertEquals("http://comfy:8188/system_stats",
+                ComputeDeviceService.comfyUiHealthUrl(() -> "http://comfy:8188", ""));
+        assertEquals("http://comfy:8188/system_stats",
+                ComputeDeviceService.comfyUiHealthUrl(() -> "http://comfy:8188/", null));
+        assertEquals("", ComputeDeviceService.comfyUiHealthUrl(() -> null, ""));
+        assertEquals("", ComputeDeviceService.comfyUiHealthUrl(() -> "  ", " "));
+    }
+
     // ---- 拒否(要件3・5) ----
 
     @Test

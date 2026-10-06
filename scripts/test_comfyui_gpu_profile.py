@@ -211,12 +211,15 @@ class ComfyuiGpuUnchanged(ComposeConfigHarness):
         services = self.config_services(extra_env={"COMPOSE_PROFILES": "gpu"})
         self.assertNotIn("comfyui-cpu", services)
 
-    def test_consumers_still_point_at_comfyui_host(self):
+    def test_consumers_reach_comfyui_by_alias_without_a_connection_env(self):
+        """#1567: 接続先は環境変数で渡さない(既定値 http://comfyui:8188 は起動時に DB へ入る)。
+
+        CPU 構成でも接続先が変わらないのは、`comfyui-cpu` が `comfyui` のエイリアスを持つため。
+        """
         config = self.full_config(extra_env={"COMPOSE_PROFILES": "cpu"})
+        self.assertIn("comfyui", config["services"]["comfyui-cpu"]["networks"]["lbs-net"]["aliases"])
         for name in ("media", "platform"):
-            self.assertEqual(
-                "http://comfyui:8188", config["services"][name]["environment"]["COMFYUI_BASE_URL"]
-            )
+            self.assertNotIn("COMFYUI_BASE_URL", config["services"][name]["environment"])
 
 
 class ComfyuiCpuDocumentation(unittest.TestCase):

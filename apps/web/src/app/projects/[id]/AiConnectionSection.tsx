@@ -14,7 +14,6 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 const SOURCE_LABEL: Record<ConnectionSource, string> = {
   PROJECT: "プロジェクト設定",
   DATABASE: "システム設定",
-  ENVIRONMENT: "環境変数既定",
   NONE: "未設定",
 };
 
@@ -152,7 +151,7 @@ export function AiConnectionSection({ projectId, provider }: { projectId: number
           {saving ? "保存中…" : "保存"}
         </button>
         <p className="w-full text-xs text-neutral-500 dark:text-neutral-400">
-          空で保存すると上書きを解除し、システム設定または環境変数の既定値に戻ります。
+          空で保存すると上書きを解除し、システム設定の値に戻ります。
         </p>
       </form>
       {message && (

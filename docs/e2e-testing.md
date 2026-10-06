@@ -304,7 +304,7 @@ OpenAI画像生成 / GitHub は、決定的に応答するスタブへ置き換�
 # スタブを重ねて起動する
 docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
 
-# LLM の接続設定がDBに残っていると環境変数より優先されるため、先に空にする
+# LLM の接続設定がDBに残っていると環境変数より優先されるため、先に消し、Ollama / ComfyUI はスタブの URL を DB へ投入する
 ./scripts/e2e-clear-llm-db-overrides.sh
 
 # 生成が失敗したらスキップせず落とす(未検証へ戻ったことに気づけるようにする)

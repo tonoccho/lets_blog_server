@@ -91,7 +91,7 @@ When('OllamaのURL入力欄を空にして保存する', async ({ page }) => {
 
 async function expectConnectionShown(page: Page, provider: 'Ollama' | 'ComfyUI'): Promise<void> {
   await expect(field(page, provider, '接続先URL')).toHaveText(/^https?:\/\/\S+$/, { timeout: 15_000 });
-  await expect(field(page, provider, '設定の出所')).toHaveText(/^(プロジェクト設定|システム設定|環境変数既定)$/);
+  await expect(field(page, provider, '設定の出所')).toHaveText(/^(プロジェクト設定|システム設定|未設定)$/);
   await expect(field(page, provider, '利用可否')).toHaveText(/^(利用可能|利用不可|警告)$/, { timeout: 30_000 });
 }
 
@@ -110,6 +110,11 @@ Then(
     await expect(field(page, 'Ollama', '設定の出所')).toHaveText(source);
   }
 );
+
+Then(/^Ollamaの設定の出所が「(.+)」と表示される$/, async ({ page }, source: string) => {
+  await expect(field(page, 'Ollama', '設定の出所')).toHaveText(source, { timeout: 15_000 });
+  await expect(page.getByText('環境変数既定')).toHaveCount(0);
+});
 
 Then(/^Ollamaの設定の出所が「(.+)」ではなく、URL入力欄は空である$/, async ({ page }, source: string) => {
   await expect(page.getByText('保存しました。')).toBeVisible({ timeout: 15_000 });

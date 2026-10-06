@@ -47,7 +47,7 @@ describe('接続情報のServer Action(issue #1504)', () => {
   });
 
   it('fetchProjectConnectionsActionは管理者セッションを要求し、接続先をそのまま返す(失敗は投げる)', async () => {
-    const data = { ollama: { overrideBaseUrl: null, baseUrl: 'http://o', source: 'ENVIRONMENT' } };
+    const data = { ollama: { overrideBaseUrl: null, baseUrl: 'http://o', source: 'DATABASE' } };
     getProjectConnections.mockResolvedValue(data);
     await expect(fetchProjectConnectionsAction(7)).resolves.toEqual(data);
     expect(requireAdminSession).toHaveBeenCalled();

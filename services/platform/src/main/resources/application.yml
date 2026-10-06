@@ -138,12 +138,10 @@ app:
   # AI執筆支援が動く状態を既定にする。DB(system_settings)に値があればそちらが優先される。
   llm-provider: ${LLM_PROVIDER:OLLAMA}
   llm-claude-model: ${LLM_CLAUDE_MODEL:claude-3-5-haiku-20241022}
-  # OLLAMA専用の接続設定(issue #1086)。OPENAIと共用していた llm-model を
-  # 分離した。LlmClientが {baseUrl}/chat/completions へPOSTするため /v1 まで含める
-  # (http://ollama:11434 だけでは404になる)。
-  llm-ollama-base-url: ${LLM_OLLAMA_BASE_URL:http://ollama:11434/v1}
+  # OLLAMA専用の既定モデル(issue #1086)。OPENAIと共用していた llm-model を分離した。
+  # Ollama / ComfyUI の接続先は環境変数では決めない(issue #1567)。プロジェクト設定かシステム設定(DB)だけで
+  # 決まり、DBに値が無ければ起動時に ConnectionDefaultsSeeder がコード内の既定値を書き込む。
   llm-ollama-model: ${LLM_OLLAMA_MODEL:qwen2.5:7b-instruct}
-  comfyui-base-url: ${COMFYUI_BASE_URL:http://localhost:8188}
   brave-search-api-key: ${BRAVE_SEARCH_API_KEY:}
   # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
   # legacy-apiのapiコンテナが持っていた同名プロパティと同じ。
@@ -160,7 +158,8 @@ app:
   compute-device:
     docker-base-url: ${COMPUTE_DEVICE_DOCKER_BASE_URL:${DOCKER_SOCKET_PROXY_BASE_URL:http://localhost:2375}}
     # 切り替え後の成功判定(コンテナがrunning かつ HTTP 200)。ComfyUIは /system_stats。
-    comfyui-health-url: ${COMPUTE_DEVICE_COMFYUI_HEALTH_URL:${COMFYUI_BASE_URL:http://localhost:8188}/system_stats}
+    # 向き先は環境変数ではなくDBのComfyUI接続先から切り替えの都度決める(issue #1567)ので、ここに値は置かない
+    # (app.compute-device.comfyui-health-url を明示したときだけ、それが優先される)。
     # 選んだ構成が成功の条件を満たすまで待つ上限(秒)。超えたら元の構成へ戻す。
     apply-timeout-seconds: ${COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS:180}
     poll-interval-millis: ${COMPUTE_DEVICE_POLL_INTERVAL_MILLIS:2000}

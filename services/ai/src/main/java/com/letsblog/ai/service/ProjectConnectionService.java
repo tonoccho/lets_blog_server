@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * プロジェクト単位のOllama / ComfyUI接続先の参照・更新(issue #1503)。
- * 解決順は プロジェクト設定 → システム設定(DB) → 環境変数既定。システム側の解決結果は
+ * 解決順は プロジェクト設定 → システム設定(DB)(どちらにも無ければ未設定。環境変数には落とさない、issue #1567)。システム側の解決結果は
  * platform-serviceが返し(#1499)、ここではプロジェクトの上書きがあればそれで置き換える。
  */
 @Service

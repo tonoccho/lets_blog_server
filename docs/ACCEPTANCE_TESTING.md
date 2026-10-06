@@ -423,13 +423,13 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |
 | --- | --- | --- | --- |
-| `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | ai の Spring プロファイル `e2e-stubs`(ChatGPT)/ `LLM_OLLAMA_BASE_URL`(platform) | 18081 |
+| `llm-stub` | 外部LLM(OpenAI互換 Chat Completions) | ai の Spring プロファイル `e2e-stubs`(ChatGPT)/ DB の `llm_ollama_base_url`(`e2e-clear-llm-db-overrides.sh` が投入。`LLM_OLLAMA_BASE_URL` は廃止した) | 18081 |
 | `ga-stub` | Google Analytics Data API + Admin API(`accountSummaries`)+ OAuth | `GOOGLE_ANALYTICS_DATA_API_BASE_URL`, `GOOGLE_ANALYTICS_ADMIN_API_BASE_URL`, `GOOGLE_ANALYTICS_OAUTH_TOKEN_URI` | 18082 |
 | `adsense-stub` | AdSense Management API(`accounts.list` + `reports:generate`)+ Google OAuth | `ADSENSE_DATA_API_BASE_URL`, `GOOGLE_OAUTH_TOKEN_URI` | 18083 |
 | `brave-stub` | Brave Search API | `BRAVE_SEARCH_BASE_URL` | 18084 |
 | `image-stub` | OpenAI 画像生成(gpt-image-1) | media の Spring プロファイル `e2e-stubs` | 18085 |
 | `github-stub` | GitHub REST API(issues) | `GITHUB_API_BASE_URL`(ai) | 18086 |
-| `comfyui-stub` | ComfyUI(画像生成。**枚数と seed の検証だけ**) | `COMFYUI_BASE_URL`(platform / media) | 18087 |
+| `comfyui-stub` | ComfyUI(画像生成。**枚数と seed の検証だけ**) | DB の `comfyui_base_url`(`e2e-clear-llm-db-overrides.sh` が投入。`COMFYUI_BASE_URL` は廃止した) | 18087 |
 | `x-stub` | X API(認可画面・トークン交換/更新・投稿・自分の情報。#1573、#1574) | WordPress の wp-config 定数 `LETSBLOG_X_API_BASE_URL`(letsblog プラグイン)、`X_API_BASE_URL` / `X_AUTHORIZE_URL`(project) | 18088 |
 | `threads-stub` | Threads API(認可画面・トークン交換・長期トークン化と更新・投稿(作成→公開)・自分の情報。#1579) | WordPress の wp-config 定数 `LETSBLOG_THREADS_API_BASE_URL`(letsblog プラグイン)、`THREADS_API_BASE_URL` / `THREADS_AUTHORIZE_URL`(project) | 18090 |
 | `facebook-stub` | Facebook(Graph API)(認可画面・コード交換・長期ユーザートークン化・管理しているページの一覧・ページのフィードへの投稿。個人アカウントには投稿できない。#1580) | WordPress の wp-config 定数 `LETSBLOG_FACEBOOK_API_BASE_URL`(letsblog プラグイン)、`FACEBOOK_API_BASE_URL` / `FACEBOOK_AUTHORIZE_URL`(project) | 18091 |
@@ -504,7 +504,7 @@ ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 �
 batch size 16 の枚数検証や batch count のリピート検証を実生成で行うと現実的な時間に
 収まらない。逆に、実際に絵が出ることはスタブでは分からない。
 
-**スタブは実機のシナリオを置き換えない。** `@slow` のシナリオが `COMFYUI_BASE_URL` を
+**スタブは実機のシナリオを置き換えない。** `@slow` のシナリオが ComfyUI の接続先(DB の `comfyui_base_url`)を
 スタブへ向けたまま通ってしまうと、「実機で生成できること」が誰も検証しない状態になる。
 スタブを使う構成(`docker-compose.e2e-stubs.yml`)で `@slow` を回さないこと。
 
@@ -527,7 +527,7 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 | 事実 | 出典 |
 | --- | --- |
 | AT 環境は `docker-compose.yml` に `docker-compose.e2e-stubs.yml` を重ねて起動する | `scripts/rebuild-acceptance-env.sh` |
-| その overlay が platform の `COMFYUI_BASE_URL` を `http://comfyui-stub:8080` に固定する | `docker-compose.e2e-stubs.yml` |
+| 前処理 `e2e-clear-llm-db-overrides.sh` が DB の `comfyui_base_url` を `http://comfyui-stub:8080` にする(環境変数 `COMFYUI_BASE_URL` は廃止した) | `scripts/e2e-clear-llm-db-overrides.sh` |
 | media は生成・一覧のたびに platform から baseUrl を取り直す | `services/media/src/main/java/com/letsblog/media/ai/ComfyUiClient.java` |
 | スタブの `/object_info` が返すチェックポイント一覧は固定値で、導入したものは決して現れない | `infra/e2e-stubs/comfyui/server.js` の `CHECKPOINTS` |
 
@@ -543,7 +543,7 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 両方とも `Keycloakからのトークン取得に失敗しました (status=400): invalid_grant`
 (seed/provision を飛ばしたため検証用アカウントが無い)で落ちた。これは**シナリオ本来の
 失敗理由ではなく**、実機に対して通るかの測定としては無効である。よって「実機に対して通るか」は
-未測定であり、上の根拠はコード上の事実(`COMFYUI_BASE_URL` の固定とスタブの固定一覧)と、
+未測定であり、上の根拠はコード上の事実(DB の接続先がスタブである事実とスタブの固定一覧)と、
 #1400 への 2026-09-24 の利用者コメント(この結論を測定を待たず出せるとしたもの)による。
 実機 AI レーン(#1401)で実測すること。
 
@@ -657,12 +657,13 @@ curl -s http://127.0.0.1:18087/__control/state | jq '.prompts[-1] | {seed, batch
 
 #### comfyui-stub のシナリオを回す前に DB 上書きを消す
 
-**`lbs_platform.system_settings` に `comfyui_base_url` の行があると、overlay の
-`COMFYUI_BASE_URL=http://comfyui-stub:8080` は黙って無視され、スタブへ向かない。**
-`AppSettingService.resolve()` が DB 優先で、`comfyui_base_url` は管理APIから保存できる
-設定キーだからである(下の「落とし穴」と同じ仕組み。#1106)。
+**ComfyUI の接続先は DB(`lbs_platform.system_settings` の `comfyui_base_url`)だけで決まる。**
+環境変数 `COMFYUI_BASE_URL` は廃止した(#1567)ので、overlay では差し替えられない。管理APIから
+保存された別の値が残っていると、スタブではなくそちらへ向かう(#1106)。
 
-`scripts/e2e-clear-llm-db-overrides.sh` はこの行も消す(#1106 で `KEYS` に追加した)。
+`scripts/e2e-clear-llm-db-overrides.sh` は `KEYS` の行を消したうえで、`llm_ollama_base_url`
+(`http://llm-stub:8080`)と `comfyui_base_url`(`http://comfyui-stub:8080`)をスタブの URL として
+DB へ投入する(暗号化は `scripts/e2e_encrypt_setting.py`。`APP_ENCRYPTION_KEY` は `.env` から読む)。
 comfyui-stub を使うシナリオの前に実行すること。
 
 ```bash
@@ -973,17 +974,18 @@ Next.js サーバーから gateway へ直接出るため、Playwright の `page.
 
 LLM と画像生成の接続設定は「DB(`lbs_platform.system_settings`)に値があればDB、
 無ければ環境変数の既定値」という順で解決される(platform-service の `AppSettingService` が正)。
+ただし Ollama / ComfyUI の接続先は環境変数既定を持たず、DB(とプロジェクト設定)だけで決まる(#1567)。
 
-つまり **compose で `LLM_OLLAMA_BASE_URL` を差し替えても、システム設定画面で一度でも保存していれば
-実サービスへ出ていく**。実キーが入っていれば課金が発生し、入っていなければテストが不可解に落ちる。
+つまり **システム設定画面で一度でも保存していれば、AT 用に別の向き先を用意しても
+実サービスへ出ていく**(Ollama / ComfyUI の接続先は DB だけで決まるので特にそうなる)。実キーが入っていれば課金が発生し、入っていなければテストが不可解に落ちる。
 
 ```bash
 ./scripts/e2e-clear-llm-db-overrides.sh          # 消す行を表示するだけ
-./scripts/e2e-clear-llm-db-overrides.sh --yes    # 削除して platform を再起動
+./scripts/e2e-clear-llm-db-overrides.sh --yes    # 削除し、Ollama / ComfyUI はスタブの URL を投入して platform を再起動
 ```
 
 **`comfyui_base_url` も同じ扱いである**(#1106)。管理APIから保存できる設定キーなので、
-行が入ると `COMFYUI_BASE_URL` の差し替えが効かない。上のスクリプトが消す
+スタブ以外の値が入るとスタブへ向かない。上のスクリプトが消してスタブの URL を入れ直す
 (`KEYS` に入っている)。新しい向き先や資格情報のキーを `AppSettingService` に足したら、
 `KEYS` にも足すこと — 足し忘れは `scripts/test_e2e_clear_db_overrides.py` が検出する。
 

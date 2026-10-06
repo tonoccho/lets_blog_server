@@ -25,6 +25,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Supplier;
 
 /**
  * 管理画面から演算デバイス(GPU / CPU)を切り替える(issue #1399)。
@@ -70,6 +71,7 @@ public class ComputeDeviceService {
     private final DockerEngineClient docker;
     private final ComputeDeviceHealthProbe probe;
     private final Map<String, ComputeTarget> targets = new HashMap<>();
+    private final Supplier<String> comfyUiHealthUrlSource;
     private final Executor executor;
     private final Clock clock;
     private final Sleeper sleeper;
@@ -83,12 +85,16 @@ public class ComputeDeviceService {
     public ComputeDeviceService(
             DockerEngineClient docker,
             ComputeDeviceHealthProbe probe,
-            @Value("${app.compute-device.comfyui-health-url}") String comfyUiHealthUrl,
+            AppSettingService appSettingService,
+            @Value("${app.compute-device.comfyui-health-url:}") String comfyUiHealthUrlOverride,
             @Value("${app.compute-device.apply-timeout-seconds:180}") long timeoutSeconds,
             @Value("${app.compute-device.poll-interval-millis:2000}") long pollIntervalMillis) {
+        // ComfyUIの接続先は環境変数ではなくDBの設定で決まる(issue #1567)。DBの値は後から変わるので、
+        // 成功判定のURLは切り替えの都度引く(targetに入れるURLは使われない)。
         this(docker, probe,
-                List.of(new ComputeTarget("comfyui", "lbs-comfyui", "lbs-comfyui-cpu", comfyUiHealthUrl),
+                List.of(new ComputeTarget("comfyui", "lbs-comfyui", "lbs-comfyui-cpu", ""),
                         new ComputeTarget("ollama", "Ollama", "lbs-ollama", "lbs-ollama-cpu", null, true, "ollama-cpu")),
+                () -> comfyUiHealthUrl(appSettingService::comfyUiBaseUrl, comfyUiHealthUrlOverride),
                 Executors.newCachedThreadPool(runnable -> {
                     Thread thread = new Thread(runnable, "compute-device-apply");
                     thread.setDaemon(true);
@@ -110,6 +116,21 @@ public class ComputeDeviceService {
             Sleeper sleeper,
             Duration timeout,
             Duration pollInterval) {
+        this(docker, probe, targetList, null, executor, clock, sleeper, timeout, pollInterval);
+    }
+
+    /** comfyuiの成功判定URLを、切り替えの都度この供給元から引く(nullなら対象に持たせたURLを使う)。 */
+    ComputeDeviceService(
+            DockerEngineClient docker,
+            ComputeDeviceHealthProbe probe,
+            List<ComputeTarget> targetList,
+            Supplier<String> comfyUiHealthUrlSource,
+            Executor executor,
+            Clock clock,
+            Sleeper sleeper,
+            Duration timeout,
+            Duration pollInterval) {
+        this.comfyUiHealthUrlSource = comfyUiHealthUrlSource;
         this.docker = docker;
         this.probe = probe;
         targetList.forEach(target -> targets.put(target.id(), target));
@@ -118,6 +139,26 @@ public class ComputeDeviceService {
         this.sleeper = sleeper;
         this.timeout = timeout;
         this.pollInterval = pollInterval;
+    }
+
+    /** 明示のURL指定があればそれ、無ければDBのComfyUI接続先の {@code /system_stats}。接続先が空なら空文字。 */
+    static String comfyUiHealthUrl(Supplier<String> baseUrl, String override) {
+        if (override != null && !override.isBlank()) {
+            return override;
+        }
+        String base = baseUrl.get();
+        if (base == null || base.isBlank()) {
+            return "";
+        }
+        return base.replaceAll("/+$", "") + "/system_stats";
+    }
+
+    /** 判定に使うURL。comfyuiは供給元(DBの接続先)があればそれを、他の対象は自分のURLを使う。 */
+    private String healthUrlOf(ComputeTarget target) {
+        if (comfyUiHealthUrlSource != null && "comfyui".equals(target.id())) {
+            return comfyUiHealthUrlSource.get();
+        }
+        return target.healthUrl();
     }
 
     // ---- 状態 ----
@@ -246,7 +287,7 @@ public class ComputeDeviceService {
         String condition = running
                 ? (target.usesContainerHealth()
                         ? "コンテナ " + wanted.name() + " のヘルスチェックが healthy になる"
-                        : target.healthUrl() + " が HTTP 200 を返す")
+                        : healthUrlOf(target) + " が HTTP 200 を返す")
                 : "コンテナ " + wanted.name() + " が running になる";
         throw new StageFailure(stage, timeout.toSeconds() + "秒以内に " + condition + " 状態になりませんでした");
     }
@@ -254,7 +295,8 @@ public class ComputeDeviceService {
     /** 成功判定。URLを持つ対象はその疎通で、持たない対象(Ollama)はコンテナのヘルスチェックで判定する。 */
     private boolean isHealthy(ComputeTarget target, ContainerRef wanted) {
         if (!target.usesContainerHealth()) {
-            return probe.isHealthy(target.healthUrl());
+            String url = healthUrlOf(target);
+            return url != null && !url.isBlank() && probe.isHealthy(url);
         }
         try {
             return docker.inspectContainer(wanted.id()).healthy();

@@ -168,7 +168,8 @@ When('システム全体のLLM接続設定を元に戻す', async ({ ctx, reques
 /**
  * システム全体のLLMプロバイダーをOLLAMAへ切り替える。ATスタックは環境変数でOPENAIに固定されているが、
  * DB設定は環境変数より優先される(AppSettingService)ため、これでplatform-serviceの
- * ConnectedServiceStatusService#checkLlm がOllama経路(LLM_OLLAMA_BASE_URL=llm-stub)を通る。
+ * ConnectedServiceStatusService#checkLlm がOllama経路(DBの llm_ollama_base_url=llm-stub、
+ * e2e-clear-llm-db-overrides.sh が投入する、issue #1567)を通る。
  * 復元値はPUTより前にctxへ記録し、PUTが失敗しても After で戻せるようにする。
  */
 Given('システム全体のLLMプロバイダーをOllamaへ変更する', async ({ ctx, request }) => {
@@ -182,6 +183,35 @@ Given('システム全体のLLMプロバイダーをOllamaへ変更する', asyn
 After(async ({ ctx, request }) => {
   if (ctx.systemSettingsOllamaSwitchOriginal === undefined) return;
   await putAppSettings(request, { llm_provider: ctx.systemSettingsOllamaSwitchOriginal as string });
+});
+
+// ---- Ollama接続先の未設定化(issue #1567) ----
+
+/**
+ * システム設定のOllama接続先を消す(空文字のPUTはDBの行を削除する)。接続先は環境変数へフォールバック
+ * しないため、これでシステム全体の接続先は「未設定」になる。復元値はPUTより前にctxへ記録し、
+ * PUTが失敗しても After で戻せるようにする。DB由来でなければ空のまま戻す(消えた状態が元の状態)。
+ */
+Given('システム全体のOllama接続先を未設定にする', async ({ ctx, request }) => {
+  const baseUrl = (await fetchAppSettings(request)).find((s) => s.key === 'llm_ollama_base_url');
+  expect(baseUrl, 'llm_ollama_base_urlの設定項目が見つかりません').toBeDefined();
+  ctx.systemSettingsOllamaUrlOriginal = baseUrl!.source === 'DATABASE' ? baseUrl!.value ?? '' : '';
+  await putAppSettings(request, { llm_ollama_base_url: '' });
+});
+
+After(async ({ ctx, request }) => {
+  if (ctx.systemSettingsOllamaUrlOriginal === undefined) return;
+  await putAppSettings(request, { llm_ollama_base_url: ctx.systemSettingsOllamaUrlOriginal as string });
+});
+
+Then('タグ提案の呼び出しは接続先の未設定を示すエラーで失敗する', async ({ request }) => {
+  const response = await requestTagSuggestion(request);
+  const body = await response.text();
+  expect(
+    response.ok(),
+    'タグ提案が成功しました。Ollamaの接続先が環境変数など別の経路へフォールバックしている疑いがあります。'
+  ).toBe(false);
+  expect(body, `応答本文: ${body}`).toContain('接続先が設定されていません');
 });
 
 Then('タグ提案の呼び出しは失敗する', async ({ request }) => {

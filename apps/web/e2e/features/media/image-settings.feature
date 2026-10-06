@@ -25,7 +25,7 @@
   エンドポイントは既定値と一緒に ComfyUI のチェックポイント/サンプラー一覧も返すため、
   ComfyUI(実機または `comfyui-stub`)へ届かないと応答そのものが失敗する。
   通常の実行構成(`docker-compose.e2e-stubs.yml` を重ねる。docs/ACCEPTANCE_TESTING.md §9)では
-  `COMFYUI_BASE_URL` がスタブを指すので GPU は要らない。
+  DB のシステム設定 `comfyui_base_url` がスタブを指すので GPU は要らない。
 
   ## upload-endpoint 枠(docs/ACCEPTANCE_TESTING.md §9)
 

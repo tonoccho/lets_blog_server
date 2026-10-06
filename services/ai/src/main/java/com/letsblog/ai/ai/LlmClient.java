@@ -45,6 +45,13 @@ public class LlmClient {
      */
     public static final String PROJECT_API_KEY_REQUIRED = "のAPIキーが設定されていません。このプロジェクトでAPIキーを設定してください。";
 
+    /**
+     * Ollamaの接続先がプロジェクト設定にもシステム設定(DB)にも無いときのメッセージ(issue #1567)。
+     * 接続先は環境変数にフォールバックしないので、設定を促す。
+     */
+    public static final String OLLAMA_URL_REQUIRED =
+            "Ollamaの接続先が設定されていません。プロジェクトのAI・アセットまたはシステム設定で接続先を設定してください。";
+
     private static final String ANTHROPIC_VERSION = "2023-06-01";
 
     /**
@@ -168,6 +175,9 @@ public class LlmClient {
         } catch (ForbiddenDestinationException e) {
             // 接続を試みずに失敗させる。メッセージは原因のプロジェクト設定を示す(issue #1547)。
             throw new AiServiceException(e.getMessage(), e);
+        }
+        if (provider == AiProvider.OLLAMA && (target.baseUrl() == null || target.baseUrl().isBlank())) {
+            throw new AiServiceException(OLLAMA_URL_REQUIRED, null);
         }
         return generateWithOpenAiCompatible(prompt, image, model, apiKey, target, provider);
     }

@@ -17,6 +17,9 @@
 # そちらが優先される(AppSettingService が正)。環境変数だけ差し替えても実サービスへ
 # 出ていく。受け入れテストの前に scripts/e2e-clear-llm-db-overrides.sh で DB 側を空にすること。
 #
+# Ollama / ComfyUI の接続先は環境変数で決まらない(issue #1567)ので、このファイルでは差し替えない。
+# 同スクリプトが system_settings の llm_ollama_base_url / comfyui_base_url にスタブの URL を投入する。
+#
 # ## ホスト公開ポート
 #
 # 各スタブは 127.0.0.1 のみに公開する。受け入れテストが制御エンドポイント
@@ -237,25 +240,22 @@ services:
     environment:
       # issue #1568: ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、システム全体のキーも環境変数も無い。
       # プロジェクト指定の無い呼び出し(VSCode拡張・タグ提案など)がスタブへ向くよう、AT では
-      # 既定プロバイダを、キー不要のOLLAMAに固定してスタブ(下の LLM_OLLAMA_BASE_URL)へ向ける。
+      # 既定プロバイダを、キー不要のOLLAMAに固定する。接続先のスタブ(http://llm-stub:8080)は
+      # 環境変数ではなく DB へ入る(scripts/e2e-clear-llm-db-overrides.sh、issue #1567)。
       # OPENAI を使うシナリオは、プロジェクトにスタブ用のキーを設定してそのプロジェクトで選ぶ。
-      # scripts/e2e-clear-llm-db-overrides.sh が DB 上書きを消すため、ここで固定しないと
-      # 環境変数既定がそのまま効く。
+      # 同スクリプトが DB 上書きを消すため、ここで固定しないと環境変数既定がそのまま効く。
       LLM_PROVIDER: OLLAMA
-      # OLLAMA の接続先は、存在しない ollama コンテナではなくスタブへ向ける。
-      LLM_OLLAMA_BASE_URL: http://llm-stub:8080
       LLM_OLLAMA_MODEL: e2e-stub-model
       # media-service は画像生成の接続設定を platform の
       # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
       # ChatGPT 画像生成の向き先は設定項目ではなく、media の e2e-stubs プロファイルで決まる(#1569)。
-      # ComfyUI の向き先も同じ経路で決まる(issue #1106)。media-service は
-      # ComfyUiClient が呼ぶ都度 platform の image-generation-config から baseUrl を取るので、
-      # **ここを向けないと media 側だけ差し替えてもスタブへは届かない**。
-      # platform 自身の ConnectedServiceStatusService(連携サービスの状況)も
-      # この値の /system_stats を叩くため、スタブがその経路を実装している。
-      COMFYUI_BASE_URL: http://comfyui-stub:8080
+      # ComfyUI の向き先は環境変数では決まらない(issue #1567)。DB の comfyui_base_url に
+      # scripts/e2e-clear-llm-db-overrides.sh がスタブの URL を投入する(issue #1106 以来の経路:
+      # media-service は ComfyUiClient が呼ぶ都度 platform の image-generation-config から baseUrl を取り、
+      # platform 自身の ConnectedServiceStatusService(連携サービスの状況)も同じ DB の値の
+      # /system_stats を叩くため、スタブがその経路を実装している)。
       # 演算デバイス切り替え(issue #1399)の向き先だけを Docker Engine API スタブへ向ける。
-      # 成功判定の /system_stats は上の COMFYUI_BASE_URL(= comfyui-stub)が応える。
+      # 成功判定の /system_stats は上の DB の comfyui_base_url(= comfyui-stub)が応える。
       # 待機の上限は受け入れテストが失敗シナリオを現実的な時間で確かめられるよう10秒に縮める(既定180秒)。
       COMPUTE_DEVICE_DOCKER_BASE_URL: http://docker-engine-stub:8080
       COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS: "10"
@@ -269,21 +269,14 @@ services:
       docker-engine-stub:
         condition: service_healthy
 
-  # 画像生成の実行者。向き先そのものは上の platform が決める(DB > 環境変数の順に解決される
-  # AppSettingService が正、issue #531)。
-  #
-  # **現時点で media の Java コードはこの値を読んでいない**(#1106 のレビュー指摘)。
-  # media の application.yml は app.comfyui-base-url を宣言しているが @Value 注入する
-  # コードが無く、ComfyUiClient は呼ぶ都度 configProvider.comfyUiBaseUrl()
-  # (= platform の /api/internal/platform/image-generation-config)から baseUrl を取る。
-  # したがってこの行は現状では効いていない。**防御として残している**: media が
-  # app.comfyui-base-url を直接読む形に戻ったとき、GPUの無いホストで実 ComfyUI へ
-  # 出ていく経路を作らないため。消すと、その変更が黙って実機に向く。
+  # 画像生成の実行者。向き先そのものは上の platform が決める(プロジェクト設定 → DB の system_settings、
+  # AppSettingService が正、issue #531 / #1567)。media の ComfyUiClient は呼ぶ都度
+  # platform の /api/internal/platform/image-generation-config から baseUrl を取り、環境変数は読まない
+  # (media の COMFYUI_BASE_URL は廃止した、issue #1567)。ここではスタブの起動待ちだけを宣言する。
   media:
     environment:
       # ChatGPT 画像生成の向き先を image-stub にする(#1569)。上のコメント(ai)を参照。
       SPRING_PROFILES_ACTIVE: e2e-stubs
-      COMFYUI_BASE_URL: http://comfyui-stub:8080
     depends_on:
       comfyui-stub:
         condition: service_healthy
