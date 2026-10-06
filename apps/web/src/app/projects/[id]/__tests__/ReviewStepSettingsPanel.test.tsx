@@ -36,6 +36,11 @@ function initialData(overrides: Partial<ReviewStepSettingsResponse> = {}): Revie
     ],
     availableProviders: ["OLLAMA", "OPENAI", "CLAUDE"],
     availableModels: ["gpt-4o-mini", "gpt-4o"],
+    availableModelsByProvider: {
+      OLLAMA: ["qwen2.5:7b-instruct"],
+      OPENAI: ["gpt-4o-mini", "gpt-4o"],
+      CLAUDE: ["claude-3-5-haiku-20241022", "gpt-4o"],
+    },
     ...overrides,
   };
 }
@@ -223,5 +228,84 @@ describe("ReviewStepSettingsPanel", () => {
 
     const row = rowFor("日本語チェック");
     expect(within(row).getByRole("option", { name: "FUTURE_PROVIDER" })).toBeInTheDocument();
+  });
+
+  // issue #1423: 工程のproviderで使えるモデル名だけが候補に並ぶ
+  function modelOptionValues(label: string): string[] {
+    const select = within(rowFor(label)).getByLabelText(`${label}のモデル`) as HTMLSelectElement;
+    return Array.from(select.options)
+      .map((o) => o.value)
+      .filter((v) => v !== "");
+  }
+
+  it("providerがOLLAMAの工程のモデル候補にOpenAIのモデル名は含まれない", () => {
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({ steps: [{ stepKey: "JAPANESE", provider: "OLLAMA", model: null }] })}
+      />
+    );
+    expect(modelOptionValues("日本語チェック")).toEqual(["qwen2.5:7b-instruct"]);
+  });
+
+  it("providerを切り替えると、モデル候補がそのproviderの候補へ切り替わる", () => {
+    render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
+    const row = rowFor("校正チェック");
+    fireEvent.change(within(row).getByLabelText("校正チェックのプロバイダー"), { target: { value: "OLLAMA" } });
+    expect(modelOptionValues("校正チェック")).toEqual(["qwen2.5:7b-instruct"]);
+    fireEvent.change(within(row).getByLabelText("校正チェックのプロバイダー"), { target: { value: "OPENAI" } });
+    expect(modelOptionValues("校正チェック")).toEqual(["gpt-4o-mini", "gpt-4o"]);
+  });
+
+  it("provider未設定の工程のモデル候補は、システム既定providerの候補(availableModels)のまま", () => {
+    render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
+    expect(modelOptionValues("日本語チェック")).toEqual(["gpt-4o-mini", "gpt-4o"]);
+  });
+
+  it("providerの候補がAPIに無いときは、システム既定providerの候補へフォールバックする", () => {
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({
+          steps: [{ stepKey: "JAPANESE", provider: "OPENAI", model: null }],
+          availableModelsByProvider: {},
+        })}
+      />
+    );
+    expect(modelOptionValues("日本語チェック")).toEqual(["gpt-4o-mini", "gpt-4o"]);
+  });
+
+  it("providerを切り替えて新providerの候補に無いモデルが選択中だった場合、modelは未設定へクリアされ、保存で旧モデルが送られない", async () => {
+    updateMock.mockResolvedValue({});
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({ steps: [{ stepKey: "JAPANESE", provider: "OPENAI", model: "gpt-4o" }] })}
+      />
+    );
+    const row = rowFor("日本語チェック");
+    fireEvent.change(within(row).getByLabelText("日本語チェックのプロバイダー"), { target: { value: "OLLAMA" } });
+    expect((within(row).getByLabelText("日本語チェックのモデル") as HTMLSelectElement).value).toBe("");
+    fireEvent.click(within(row).getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "OLLAMA", "");
+    });
+  });
+
+  it("providerを切り替えても、選択中のモデルが新providerの候補にも在るならmodelは保持される", async () => {
+    updateMock.mockResolvedValue({});
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({ steps: [{ stepKey: "JAPANESE", provider: "OPENAI", model: "gpt-4o" }] })}
+      />
+    );
+    const row = rowFor("日本語チェック");
+    fireEvent.change(within(row).getByLabelText("日本語チェックのプロバイダー"), { target: { value: "CLAUDE" } });
+    expect((within(row).getByLabelText("日本語チェックのモデル") as HTMLSelectElement).value).toBe("gpt-4o");
+    fireEvent.click(within(row).getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "CLAUDE", "gpt-4o");
+    });
   });
 });

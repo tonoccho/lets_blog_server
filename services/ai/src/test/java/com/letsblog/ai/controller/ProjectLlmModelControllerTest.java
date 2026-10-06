@@ -108,7 +108,8 @@ class ProjectLlmModelControllerTest {
         ReviewStepSettingsResponse expected = new ReviewStepSettingsResponse(
                 List.of(new ReviewStepSettingResponse("JAPANESE", null, null)),
                 List.of("OLLAMA", "OPENAI", "CLAUDE"),
-                List.of("gpt-4o-mini"));
+                List.of("gpt-4o-mini"),
+                java.util.Map.of("OPENAI", List.of("gpt-4o-mini")));
         when(reviewStepModelService.listSettings(1L)).thenReturn(expected);
 
         ReviewStepSettingsResponse response = controller.listReviewStepSettings(1L);
@@ -131,7 +132,8 @@ class ProjectLlmModelControllerTest {
         ReviewStepSettingsResponse expected = new ReviewStepSettingsResponse(
                 List.of(new ReviewStepSettingResponse("STYLE", "CLAUDE", "gpt-4o")),
                 List.of("OLLAMA", "OPENAI", "CLAUDE"),
-                List.of("gpt-4o"));
+                List.of("gpt-4o"),
+                java.util.Map.of("CLAUDE", List.of("gpt-4o")));
         when(reviewStepModelService.selectSetting(1L, ReviewStepKey.STYLE, "CLAUDE", "gpt-4o"))
                 .thenReturn(expected);
 

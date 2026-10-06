@@ -367,6 +367,7 @@ describe('レビューステップ別のLLM設定(issue #1212)', () => {
       steps: [{ stepKey: 'JAPANESE', provider: null, model: null }],
       availableProviders: ['OPENAI'],
       availableModels: ['gpt-4o-mini'],
+      availableModelsByProvider: { OPENAI: ['gpt-4o-mini'] },
     }
     fetchMock.mockResolvedValue(jsonResponse(body))
 
@@ -383,6 +384,7 @@ describe('レビューステップ別のLLM設定(issue #1212)', () => {
       steps: [{ stepKey: 'JAPANESE', provider: 'OPENAI', model: 'gpt-4o-mini' }],
       availableProviders: ['OPENAI'],
       availableModels: ['gpt-4o-mini'],
+      availableModelsByProvider: { OPENAI: ['gpt-4o-mini'] },
     }
     fetchMock.mockResolvedValue(jsonResponse(body))
 
@@ -400,6 +402,7 @@ describe('レビューステップ別のLLM設定(issue #1212)', () => {
       steps: [{ stepKey: 'JAPANESE', provider: null, model: null }],
       availableProviders: ['OPENAI'],
       availableModels: ['gpt-4o-mini'],
+      availableModelsByProvider: { OPENAI: ['gpt-4o-mini'] },
     }
     fetchMock.mockResolvedValue(jsonResponse(body))
 

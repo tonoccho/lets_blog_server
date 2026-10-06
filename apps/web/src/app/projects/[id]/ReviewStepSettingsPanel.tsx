@@ -71,6 +71,7 @@ export function ReviewStepSettingsPanel({
               step={step}
               availableProviders={initialData.availableProviders}
               availableModels={initialData.availableModels}
+              availableModelsByProvider={initialData.availableModelsByProvider}
               onSaved={applySaved}
             />
           ))}
@@ -85,12 +86,14 @@ function ReviewStepRow({
   step,
   availableProviders,
   availableModels,
+  availableModelsByProvider,
   onSaved,
 }: {
   projectId: number;
   step: ReviewStepSetting;
   availableProviders: string[];
   availableModels: string[];
+  availableModelsByProvider: Record<string, string[]>;
   onSaved: (updated: ReviewStepSetting) => void;
 }) {
   const [provider, setProvider] = useState(step.provider ?? "");
@@ -98,6 +101,19 @@ function ReviewStepRow({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const label = STEP_LABEL[step.stepKey];
+  // issue #1423: 選択中のproviderで使えるモデルだけを候補にする。未設定(または一覧が無い)の
+  // ときはシステム既定providerの一覧。
+  const modelOptions = (provider && availableModelsByProvider?.[provider]) || availableModels;
+
+  // issue #1423: providerを変えたとき、選択中のモデルが新providerの候補に無ければ未設定へ
+  // クリアする(旧providerのモデル名が新providerと組で保存されるのを防ぐ)。
+  function handleProviderChange(next: string) {
+    const nextOptions = (next && availableModelsByProvider?.[next]) || availableModels;
+    setProvider(next);
+    if (model && !nextOptions.includes(model)) {
+      setModel("");
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -127,7 +143,7 @@ function ReviewStepRow({
           aria-label={`${label}のプロバイダー`}
           value={provider}
           disabled={saving}
-          onChange={(e) => setProvider(e.target.value)}
+          onChange={(e) => handleProviderChange(e.target.value)}
           className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm disabled:opacity-60"
         >
           <option value="">{UNSET_OPTION_LABEL}</option>
@@ -147,7 +163,7 @@ function ReviewStepRow({
           className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-1 text-sm disabled:opacity-60"
         >
           <option value="">{UNSET_OPTION_LABEL}</option>
-          {availableModels.map((value) => (
+          {modelOptions.map((value) => (
             <option key={value} value={value}>
               {value}
             </option>

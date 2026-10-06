@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -61,7 +63,12 @@ public class ReviewStepModelService {
                 .toList();
 
         var availableProviders = Arrays.stream(AiProvider.values()).map(Enum::name).toList();
-        return new ReviewStepSettingsResponse(steps, availableProviders, llmConfigProvider.availableModels());
+        Map<String, List<String>> modelsByProvider = new LinkedHashMap<>();
+        for (AiProvider provider : AiProvider.values()) {
+            modelsByProvider.put(provider.name(), llmConfigProvider.availableModelsFor(provider));
+        }
+        return new ReviewStepSettingsResponse(
+                steps, availableProviders, llmConfigProvider.availableModels(), modelsByProvider);
     }
 
     /**

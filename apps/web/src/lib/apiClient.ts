@@ -2871,7 +2871,10 @@ export interface ReviewStepSetting {
 export interface ReviewStepSettingsResponse {
   steps: ReviewStepSetting[];
   availableProviders: string[];
+  /** provider未設定のステップ用(システム既定providerの一覧)。 */
   availableModels: string[];
+  /** providerごとの一覧(issue #1423)。工程のproviderで使えるモデル名だけを候補にする。 */
+  availableModelsByProvider: Record<string, string[]>;
 }
 
 export function listReviewStepSettings(projectId: number): Promise<ReviewStepSettingsResponse> {

@@ -36,7 +36,7 @@ describe('レビューステップ別LLM設定のServer Action(issue #1212)', ()
   });
 
   it('fetchReviewStepSettingsActionは管理者セッションを要求し、一覧をそのまま返す', async () => {
-    const data = { steps: [], availableProviders: ['OPENAI'], availableModels: ['gpt-4o-mini'] };
+    const data = { steps: [], availableProviders: ['OPENAI'], availableModels: ['gpt-4o-mini'], availableModelsByProvider: { OPENAI: ['gpt-4o-mini'] } };
     listReviewStepSettings.mockResolvedValue(data);
 
     const result = await fetchReviewStepSettingsAction(7);
@@ -51,6 +51,7 @@ describe('レビューステップ別LLM設定のServer Action(issue #1212)', ()
       steps: [{ stepKey: 'JAPANESE', provider: 'OPENAI', model: 'gpt-4o-mini' }],
       availableProviders: ['OPENAI'],
       availableModels: ['gpt-4o-mini'],
+      availableModelsByProvider: { OPENAI: ['gpt-4o-mini'] },
     });
 
     const result = await updateReviewStepSettingAction(7, 'JAPANESE', 'OPENAI', 'gpt-4o-mini');

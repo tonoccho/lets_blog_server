@@ -63,6 +63,24 @@ class ReviewStepModelServiceTest {
     }
 
     @Test
+    void listSettings_providerごとの候補を返しOLLAMAにOpenAIのモデルを含めない() {
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.availableModels()).thenReturn(List.of("gpt-4o-mini"));
+        when(llmConfigProvider.availableModelsFor(AiProvider.OLLAMA)).thenReturn(List.of("qwen2.5:7b-instruct"));
+        when(llmConfigProvider.availableModelsFor(AiProvider.OPENAI)).thenReturn(List.of("gpt-4o-mini", "gpt-4o"));
+        when(llmConfigProvider.availableModelsFor(AiProvider.CLAUDE)).thenReturn(List.of("claude-3-5-haiku-20241022"));
+
+        ReviewStepSettingsResponse response = service().listSettings(1L);
+
+        assertEquals(List.of("OLLAMA", "OPENAI", "CLAUDE"), List.copyOf(response.availableModelsByProvider().keySet()));
+        assertEquals(List.of("qwen2.5:7b-instruct"), response.availableModelsByProvider().get("OLLAMA"));
+        assertEquals(List.of("gpt-4o-mini", "gpt-4o"), response.availableModelsByProvider().get("OPENAI"));
+        assertEquals(List.of("claude-3-5-haiku-20241022"), response.availableModelsByProvider().get("CLAUDE"));
+        // provider未設定の工程用(システム既定provider)は現行のまま
+        assertEquals(List.of("gpt-4o-mini"), response.availableModels());
+    }
+
+    @Test
     void listSettings_設定済みステップはその値を返す() {
         ProjectReviewStepSetting factCheck = new ProjectReviewStepSetting(1L, ReviewStepKey.FACT_CHECK);
         factCheck.setLlmProvider("OPENAI");

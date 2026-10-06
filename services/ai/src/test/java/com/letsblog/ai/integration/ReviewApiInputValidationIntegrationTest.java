@@ -77,7 +77,7 @@ class ReviewApiInputValidationIntegrationTest {
         // IllegalStateException→409に化けてしまう(GlobalExceptionHandler#handleIllegalState)。
         // 本テストが検証したいのは入力検証(400/409の作り分け)であり、この経路の可用性ではないため
         // モックする。
-        when(platformServiceClient.resolveLlmConfig(org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.anyString()))
+        when(platformServiceClient.resolveLlmConfig(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(new PlatformServiceClient.LlmConfig(
                         "OPENAI", "https://api.openai.com", "test-api-key", "gpt-4o-mini", List.of("gpt-4o-mini"), 30));
     }

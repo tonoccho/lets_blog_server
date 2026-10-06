@@ -74,6 +74,10 @@ function reviewStepData(): ReviewStepSettingsResponse {
     ],
     availableProviders: ["OPENAI", "CLAUDE"],
     availableModels: ["gpt-4o-mini", "gpt-4o"],
+    availableModelsByProvider: {
+      OPENAI: ["gpt-4o-mini", "gpt-4o"],
+      CLAUDE: ["claude-sonnet"],
+    },
   };
 }
 

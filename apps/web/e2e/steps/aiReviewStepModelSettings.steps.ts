@@ -105,7 +105,22 @@ When(
     await modelSelect.selectOption(modelValue ?? '');
     const modelLabel = await options[1].textContent();
 
+    // 保存(Server Action)の応答まで待つ。待たずに次の手順で再読み込みすると、送信中の
+    // 保存が打ち切られて永続化されない(画面上の選択値は保存前から同じなので表示確認では気付けない)。
+    // 画面は接続状態の取得など別の Server Action も定期的に送るので、引数(provider と model)で
+    // 保存の往復だけを見分ける。
+    const saved = page.waitForResponse((response) => {
+      const request = response.request();
+      const body = request.postData() ?? '';
+      return (
+        request.method() === 'POST' &&
+        !!request.headers()['next-action'] &&
+        body.includes(`"${provider}"`) &&
+        body.includes(JSON.stringify(modelValue ?? ''))
+      );
+    });
     await row.getByRole('button', { name: '保存' }).click();
+    await saved;
 
     ctx.reviewStepSavedProvider = provider;
     ctx.reviewStepSavedModelLabel = (modelLabel ?? '').trim();
@@ -177,6 +192,36 @@ When(/^「(.+)」の行でプロバイダーを「(.+)」に選んで保存す�
 
 Then(/^「(.+)」の行にエラーメッセージが表示される$/, async ({ page }, stepLabel: string) => {
   await expect(reviewStepRow(page, stepLabel).locator('.text-red-600')).toBeVisible({ timeout: 15_000 });
+});
+
+// issue #1423: providerを切り替えたときのモデル候補(保存はしない)。
+When(/^「(.+)」の行でプロバイダーを「(.+)」に選ぶ$/, async ({ page }, stepLabel: string, provider: string) => {
+  await reviewStepRow(page, stepLabel).getByLabel(`${stepLabel}のプロバイダー`).selectOption(provider);
+});
+
+async function modelOptionValues(page: Page, stepLabel: string): Promise<string[]> {
+  const values = await reviewStepRow(page, stepLabel)
+    .getByLabel(`${stepLabel}のモデル`)
+    .locator('option')
+    .evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value));
+  return values.filter((v) => v !== '');
+}
+
+When(/^「(.+)」の行のモデル候補を控える$/, async ({ ctx, page }, stepLabel: string) => {
+  const values = await modelOptionValues(page, stepLabel);
+  expect(values.length).toBeGreaterThan(0);
+  ctx.reviewStepRememberedModels = values;
+});
+
+Then(/^「(.+)」の行のモデル候補に控えた候補が含まれない$/, async ({ ctx, page }, stepLabel: string) => {
+  const remembered = ctx.reviewStepRememberedModels as string[];
+  await expect
+    .poll(async () => {
+      const now = await modelOptionValues(page, stepLabel);
+      return now.filter((v) => remembered.includes(v));
+    })
+    .toEqual([]);
+  expect((await modelOptionValues(page, stepLabel)).length).toBeGreaterThan(0);
 });
 
 /** ReviewStepSettingsPanel.tsxのPROVIDER_LABELと同じ対応表。 */
