@@ -100,3 +100,47 @@ When('画像ギャラリーでその画像を選択して一括削除し Server 
   });
   recordResponseTime(ctx, timing.roundTripMs, '生成画像の一括削除(Server Action)の往復');
 });
+
+/** フォルダを作成できない(後片付けの API が無い。#1494)ので、シナリオごとに一意な名前にする。 */
+function budgetFolderName(): string {
+  return `E2E1623${uniqueSuffix()}`;
+}
+
+When('画像ギャラリーでフォルダを作成し Server Action の往復を計測する', async ({ page, ctx }) => {
+  await openGallery(page, ctx);
+  const name = budgetFolderName();
+  const input = page.getByLabel('新しいフォルダの名前');
+  await waitForHydrated(input);
+  await input.fill(name);
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await page.getByRole('button', { name: 'フォルダを作成' }).click();
+    await expect(page.getByRole('treeitem', { name })).toBeVisible({ timeout: 30_000 });
+  });
+  recordResponseTime(ctx, timing.roundTripMs, '生成画像のフォルダ作成(Server Action)の往復');
+});
+
+Given('応答時間予算の検証用のフォルダがある', async ({ request, ctx }) => {
+  const name = budgetFolderName();
+  const response = await request.post('/api/generated-images/folders', {
+    headers: await adminHeaders(request),
+    data: { name, parentId: null },
+  });
+  expect(response.status(), `フォルダの作成に失敗しました: ${await response.text()}`).toBe(201);
+  ctx.responseBudgetFolderId = ((await response.json()) as { id: number }).id;
+  ctx.responseBudgetFolderName = name;
+});
+
+When('画像ギャラリーでその画像の詳細を開いてフォルダへ割り当て Server Action の往復を計測する', async ({ page, ctx }) => {
+  const thumbnail = await openGallery(page, ctx);
+  await magnifierOf(thumbnail).click();
+  await expect(page.locator('dt:text-is("prompt") + dd')).toBeVisible({ timeout: 30_000 });
+  const select = page.getByLabel('所属フォルダ');
+  await waitForHydrated(select);
+  const folderId = String(ctx.responseBudgetFolderId);
+  await expect(select.locator(`option[value="${folderId}"]`)).toHaveCount(1, { timeout: 30_000 });
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await select.selectOption(folderId);
+    await expect(select).toHaveValue(folderId, { timeout: 30_000 });
+  });
+  recordResponseTime(ctx, timing.roundTripMs, '生成画像のフォルダ割り当て(Server Action)の往復');
+});

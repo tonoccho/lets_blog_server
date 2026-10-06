@@ -32,3 +32,14 @@
   シナリオ: 生成画像の一括削除(Server Action)の往復が3秒以内に返る
     もし 画像ギャラリーでその画像を選択して一括削除し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:createGeneratedImageFolderAction
+  シナリオ: 生成画像のフォルダ作成(Server Action)の往復が3秒以内に返る
+    もし 画像ギャラリーでフォルダを作成し Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:setGeneratedImageFolderAction
+  シナリオ: 生成画像のフォルダ割り当て(Server Action)の往復が3秒以内に返る
+    前提 応答時間予算の検証用のフォルダがある
+    もし 画像ギャラリーでその画像の詳細を開いてフォルダへ割り当て Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る

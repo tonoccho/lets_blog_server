@@ -60,3 +60,17 @@
     かつ 応答時間予算の検証用のサイトがある
     もし サイト編集画面で静的コンテンツを生成して Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:getLetsblogPluginStatusAction
+  シナリオ: letsblog プラグインの状態表示(Server Action)の往復が3秒以内に返る
+    前提 応答時間予算の検証のために管理者としてログインしている
+    かつ 応答時間予算の検証用のサイトがある
+    もし サイト編集画面を開いて letsblog プラグインの状態表示の Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:getLetsblogSyncAction
+  シナリオ: letsblog の同期状態表示(Server Action)の往復が3秒以内に返る
+    前提 応答時間予算の検証のために管理者としてログインしている
+    かつ 応答時間予算の検証用のサイトがある
+    もし サイト編集画面を開いて letsblog の同期状態表示の Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る

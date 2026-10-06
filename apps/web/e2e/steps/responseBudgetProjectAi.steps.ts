@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
-import { When } from './fixtures';
+import { Given, When } from './fixtures';
 import { expect } from '../support';
-import { waitForHydrated } from '../support/responseBudgetFixtures';
+import { adminHeaders, uniqueSuffix, waitForHydrated } from '../support/responseBudgetFixtures';
 import { measureAndRecord, projectId } from '../support/responseBudgetProject';
 
 /**
@@ -173,3 +173,58 @@ When('アセット画像生成パネルの画像ギャラリーを開いて Serv
     await expect(page.getByText('読み込んでいます…')).toHaveCount(0, { timeout: 30_000 });
   });
 });
+
+// ---- 画像生成ジョブ(requestProjectImageJobAction / fetchImageJobResultAction。#1623) ----
+
+When('アセット画像生成パネルで画像生成ジョブを依頼して Server Action の往復を計測する', async ({ page, ctx }) => {
+  const open = await gotoAssetPanelButton(page, ctx);
+  await open.click();
+  await expect(page.getByRole('heading', { name: 'アセット画像生成' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('パラメータ選択肢を読み込んでいます…')).toHaveCount(0, { timeout: 30_000 });
+  const prompt = page.getByPlaceholder('生成したい画像の説明');
+  await waitForHydrated(prompt);
+  await prompt.fill(`e2e 1623 budget ${uniqueSuffix()}`);
+  const generate = page.getByRole('button', { name: '生成', exact: true });
+  await expect(generate).toBeEnabled({ timeout: 30_000 });
+  // 計るのは受付(ジョブの作成)までの往復。生成そのものは #1404 のキューが担う。
+  await measureAndRecord(page, ctx, '画像生成ジョブの依頼', async () => {
+    await generate.click();
+    await expect(page.getByText(/生成を要求しました。処理キューに追加されました/)).toBeVisible({ timeout: 30_000 });
+  });
+});
+
+Given('応答時間予算の検証用の完了した画像生成ジョブがある', async ({ request, ctx }) => {
+  const headers = await adminHeaders(request);
+  const accepted = await request.post('/api/ai/image/jobs', {
+    headers,
+    data: { prompt: `e2e 1623 budget ${uniqueSuffix()}`, projectId: projectId(ctx) },
+    timeout: 30_000,
+  });
+  expect(accepted.status(), `ジョブの受付に失敗しました: ${await accepted.text()}`).toBe(202);
+  const jobId = ((await accepted.json()) as { id: number }).id;
+  // 完了(成功または失敗)まで待つ。結果の読み取りは完了後の操作なので、計測の前に済ませておく。
+  await expect
+    .poll(
+      async () => {
+        const detail = await request.get(`/api/generation-jobs/${jobId}`, { headers });
+        return detail.ok() ? ((await detail.json()) as { status: string }).status : 'unknown';
+      },
+      { timeout: 180_000, intervals: [1_000] }
+    )
+    .not.toMatch(/^(pending|running|unknown)$/);
+  ctx.responseBudgetImageJobId = jobId;
+});
+
+When(
+  '処理キューの「結果を見る」と同じ経路でそのジョブの結果を開いて Server Action の往復を計測する',
+  async ({ page, ctx }) => {
+    const jobId = ctx.responseBudgetImageJobId as number;
+    await measureAndRecord(page, ctx, '画像生成ジョブの結果の取得', async () => {
+      // 「結果を見る」のリンク先(buildImageGenerationResultHref)。パネルが開き、ジョブの結果を読む。
+      await page.goto(`/projects/${projectId(ctx)}?tab=ai-models&imageJob=${jobId}`);
+      await expect(page.getByRole('heading', { name: 'アセット画像生成' })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText('パラメータ選択肢を読み込んでいます…')).toHaveCount(0, { timeout: 30_000 });
+      await expect(page.getByText(`ジョブ #${jobId} が生成した`)).toBeVisible({ timeout: 30_000 });
+    });
+  }
+);

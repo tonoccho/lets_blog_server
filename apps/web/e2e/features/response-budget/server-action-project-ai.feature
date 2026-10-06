@@ -75,3 +75,16 @@
     前提 応答時間予算の検証用のプロジェクトがある
     もし アセット画像生成パネルの画像ギャラリーを開いて Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:requestProjectImageJobAction
+  シナリオ: アセット画像生成ジョブの依頼(Server Action)の往復が3秒以内に返る
+    前提 応答時間予算の検証用のプロジェクトがある
+    もし アセット画像生成パネルで画像生成ジョブを依頼して Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:fetchImageJobResultAction
+  シナリオ: 画像生成ジョブの結果の取得(Server Action)の往復が3秒以内に返る
+    前提 応答時間予算の検証用のプロジェクトがある
+    かつ 応答時間予算の検証用の完了した画像生成ジョブがある
+    もし 処理キューの「結果を見る」と同じ経路でそのジョブの結果を開いて Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る

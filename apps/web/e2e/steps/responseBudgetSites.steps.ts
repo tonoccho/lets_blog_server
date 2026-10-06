@@ -159,3 +159,23 @@ When('サイト編集画面で静的コンテンツを生成して Server Action
   });
   recordResponseTime(ctx, timing.roundTripMs, '静的コンテンツの生成(Server Action)の往復');
 });
+
+async function measureLetsblogPanel(page: Page, ctx: Record<string, unknown>, testId: string, operation: string) {
+  const siteId = ctx.responseBudgetSiteId as number;
+  const status = page.getByTestId(testId);
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await page.goto(`/sites/${siteId}/edit`);
+    await expect(status).toBeVisible({ timeout: 30_000 });
+    // 状態は画面の表示時に自動で取得される。往復の完了は measureServerActionRoundTrip が待つ。
+    // 表示の確定(確認中が消える)までは待たない: 未同期のサイトでは同期状態の表示が確定しない(#1660)。
+  });
+  recordResponseTime(ctx, timing.roundTripMs, operation);
+}
+
+When('サイト編集画面を開いて letsblog プラグインの状態表示の Server Action の往復を計測する', async ({ page, ctx }) => {
+  await measureLetsblogPanel(page, ctx, 'letsblog-plugin-status', 'letsblog プラグインの状態表示(Server Action)の往復');
+});
+
+When('サイト編集画面を開いて letsblog の同期状態表示の Server Action の往復を計測する', async ({ page, ctx }) => {
+  await measureLetsblogPanel(page, ctx, 'letsblog-sync-status', 'letsblog の同期状態表示(Server Action)の往復');
+});
