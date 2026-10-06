@@ -7,10 +7,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * プロジェクト(またはグローバル)単位で生成画像ファイル名用の4桁連番を払い出すサービス。
- * 行ロック(PESSIMISTIC_WRITE)で採番するため、同一プロジェクトへの同時採番でも
- * 連番の重複・欠番は発生しない。初回のみ行が存在せず、その作成が同時に競合する
- * 可能性があるため、呼び出し側(GeneratedImageStorageService)で一意制約違反時の
- * リトライを行う。
+ * 先に行を ON DUPLICATE KEY で確保してから行ロック(PESSIMISTIC_WRITE)で採番するため、
+ * 同一プロジェクトへの同時採番(初回を含む)でもデッドロック・連番の重複・欠番は発生しない。
  */
 @Service
 public class GeneratedImageSequenceService {
@@ -23,8 +21,8 @@ public class GeneratedImageSequenceService {
 
     @Transactional
     public int nextSequence(String projectKey) {
-        GeneratedImageSequence sequence = repository.findByProjectKeyForUpdate(projectKey)
-                .orElseGet(() -> repository.saveAndFlush(new GeneratedImageSequence(projectKey)));
+        repository.insertIfAbsent(projectKey);
+        GeneratedImageSequence sequence = repository.findByProjectKeyForUpdate(projectKey).orElseThrow();
         int next = sequence.getLastSeq() + 1;
         sequence.setLastSeq(next);
         repository.save(sequence);

@@ -11,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -39,14 +40,13 @@ class GeneratedImageSequenceServiceTest {
     }
 
     @Test
-    void nextSequence_行が存在しない場合は新規作成して1を返す() {
-        when(repository.findByProjectKeyForUpdate("12")).thenReturn(Optional.empty());
+    void nextSequence_行が存在しない場合は先に行を確保してから1を返す() {
         GeneratedImageSequence created = new GeneratedImageSequence("12");
-        when(repository.saveAndFlush(org.mockito.ArgumentMatchers.any(GeneratedImageSequence.class)))
-                .thenReturn(created);
+        when(repository.findByProjectKeyForUpdate("12")).thenReturn(Optional.of(created));
 
         int result = service.nextSequence("12");
 
         assertEquals(1, result);
+        verify(repository).insertIfAbsent("12");
     }
 }
