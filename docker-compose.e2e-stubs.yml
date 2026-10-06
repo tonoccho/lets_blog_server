@@ -170,6 +170,16 @@ services:
     ports:
       - "127.0.0.1:18091:8080"
 
+  # LinkedIn API(issue #1581)。letsblog プラグインの LinkedIn 送信処理(ugcPosts への投稿)と、
+  # project-service の LinkedIn 接続(認可画面・トークン交換・userinfo)の向き先。
+  # プラグインは wp-config.php の定数 LETSBLOG_LINKEDIN_API_BASE_URL(http://linkedin-stub:8080)でここへ向ける。
+  linkedin-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-linkedin-stub
+    command: ["node", "/app/linkedin/server.js"]
+    ports:
+      - "127.0.0.1:18092:8080"
+
   # ComfyUI(issue #1106)。実機は NVIDIA ランタイムが要り、1枚あたり数十秒かかるため、
   # batch size 16 の枚数検証も「リピートごとに seed が変わる」ことの確認も実行時間に乗らない。
   # スタブが引き受けるのは枚数と seed の決定的な検証だけで、画像の見た目は再現しない。
@@ -293,12 +303,18 @@ services:
       # Facebook の接続(#1580)も同じ方式。認可画面はホストから見える 127.0.0.1:18091 の facebook-stub へ向ける。
       FACEBOOK_API_BASE_URL: http://facebook-stub:8080
       FACEBOOK_AUTHORIZE_URL: http://127.0.0.1:18091/dialog/oauth
+      # LinkedIn の接続(#1581)も同じ方式。認可画面はホストから見える 127.0.0.1:18092 の linkedin-stub へ向ける。
+      LINKEDIN_API_BASE_URL: http://linkedin-stub:8080
+      LINKEDIN_TOKEN_URL: http://linkedin-stub:8080/oauth/v2/accessToken
+      LINKEDIN_AUTHORIZE_URL: http://127.0.0.1:18092/oauth/v2/authorization
     depends_on:
       x-stub:
         condition: service_healthy
       threads-stub:
         condition: service_healthy
       facebook-stub:
+        condition: service_healthy
+      linkedin-stub:
         condition: service_healthy
 
   # publishing-service も GitHub の Pull Request / contents / comments API を使う(#1333)。

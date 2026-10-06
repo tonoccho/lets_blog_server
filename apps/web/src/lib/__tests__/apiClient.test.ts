@@ -64,6 +64,11 @@ import {
   completeProjectThreadsAuthorization,
   testProjectThreadsPost,
   disconnectProjectThreads,
+  getProjectLinkedInConnection,
+  startProjectLinkedInAuthorization,
+  completeProjectLinkedInAuthorization,
+  testProjectLinkedInPost,
+  disconnectProjectLinkedIn,
   getProjectFacebookConnection,
   startProjectFacebookAuthorization,
   completeProjectFacebookAuthorization,
@@ -1049,6 +1054,72 @@ describe('プロジェクトの Threads 接続(issue #1579)', () => {
 
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/threads')
+    expect(init.method).toBe('DELETE')
+  })
+})
+
+describe('プロジェクトの LinkedIn 接続(issue #1581)', () => {
+  it('getProjectLinkedInConnectionは接続状態を取得する', async () => {
+    const view = { connectable: true, reason: null, siteName: '本番', status: null, log: null }
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectLinkedInConnection(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/linkedin')
+    expect(url).not.toContain('/sns/x')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('startProjectLinkedInAuthorizationはアプリの情報とリダイレクト先をPOSTし認可URLを受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ authorizeUrl: 'https://linkedin.example/authorize' }))
+
+    const result = await startProjectLinkedInAuthorization(7, {
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      redirectUri: 'https://localhost/connect/linkedin/callback',
+    })
+
+    expect(result).toEqual({ authorizeUrl: 'https://linkedin.example/authorize' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/linkedin/authorize')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      redirectUri: 'https://localhost/connect/linkedin/callback',
+    })
+  })
+
+  it('completeProjectLinkedInAuthorizationはstateとコードをPOSTしアカウント名を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, accountName: "Let's Blog E2E" }))
+
+    const result = await completeProjectLinkedInAuthorization(7, { state: '7.abc', code: 'the-code' })
+
+    expect(result).toEqual({ projectId: 7, accountName: "Let's Blog E2E" })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/linkedin/callback')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ state: '7.abc', code: 'the-code' })
+  })
+
+  it('testProjectLinkedInPostはテスト投稿をPOSTし結果を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, error: null }))
+
+    await expect(testProjectLinkedInPost(7)).resolves.toEqual({ success: true, error: null })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/linkedin/test')
+    expect(init.method).toBe('POST')
+  })
+
+  it('disconnectProjectLinkedInはDELETEで切断する', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await disconnectProjectLinkedIn(7)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/linkedin')
     expect(init.method).toBe('DELETE')
   })
 })

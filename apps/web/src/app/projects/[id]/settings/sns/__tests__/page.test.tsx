@@ -4,6 +4,7 @@ import {
   getProject,
   getProjectFacebookConnection,
   getProjectFacebookPages,
+  getProjectLinkedInConnection,
   getProjectPvRules,
   getProjectSnsTemplates,
   getProjectThreadsConnection,
@@ -20,6 +21,7 @@ jest.mock("@/lib/apiClient", () => ({
   getProjectThreadsConnection: jest.fn(),
   getProjectFacebookConnection: jest.fn(),
   getProjectFacebookPages: jest.fn(),
+  getProjectLinkedInConnection: jest.fn(),
   getProjectPvRules: jest.fn(),
   getProjectSnsTemplates: jest.fn(),
 }));
@@ -51,6 +53,14 @@ jest.mock("../../../ProjectSnsFacebookSection", () => ({
   ProjectSnsFacebookSection: (props: unknown) => {
     facebookSectionProps(props);
     return <div data-testid="facebook-section" />;
+  },
+}));
+
+const linkedinSectionProps = jest.fn();
+jest.mock("../../../ProjectSnsLinkedInSection", () => ({
+  ProjectSnsLinkedInSection: (props: unknown) => {
+    linkedinSectionProps(props);
+    return <div data-testid="linkedin-section" />;
   },
 }));
 
@@ -104,6 +114,7 @@ describe("ProjectSnsSettingsPage", () => {
     (getProjectXConnection as jest.Mock).mockResolvedValue(view);
     (getProjectThreadsConnection as jest.Mock).mockResolvedValue(view);
     (getProjectFacebookConnection as jest.Mock).mockResolvedValue(view);
+    (getProjectLinkedInConnection as jest.Mock).mockResolvedValue(view);
     (getProjectPvRules as jest.Mock).mockResolvedValue(pvView);
     (getProjectSnsTemplates as jest.Mock).mockResolvedValue(templatesView);
   });
@@ -306,6 +317,54 @@ describe("ProjectSnsSettingsPage", () => {
 
       expect(screen.getByTestId("sns-section")).toBeInTheDocument();
       expect(facebookSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
+    });
+  });
+  describe("LinkedIn の欄(issue #1581)", () => {
+    it("取得した LinkedIn の接続状態と LinkedIn 用のコールバックURLを LinkedIn 欄へ渡す", async () => {
+      await renderPage();
+
+      expect(screen.getByTestId("linkedin-section")).toBeInTheDocument();
+      expect(linkedinSectionProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 5,
+          view,
+          callbackUrl: "https://localhost/connect/linkedin/callback",
+          connectedBanner: false,
+          errorBanner: undefined,
+        })
+      );
+    });
+
+    it("LinkedIn の接続完了(connected=linkedin)は LinkedIn 欄にだけバナーを出す", async () => {
+      await renderPage({ connected: "linkedin" });
+
+      expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: true }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+    });
+
+    it("LinkedIn の失敗(sns=linkedin)は LinkedIn 欄にだけ理由を出し、X 欄には出さない", async () => {
+      await renderPage({ error: "access_denied", sns: "linkedin" });
+
+      expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "access_denied" }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+      expect(threadsSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("X の失敗は LinkedIn 欄には出さない", async () => {
+      await renderPage({ error: "invalid_state" });
+
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "invalid_state" }));
+      expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("LinkedIn の接続状態を取得できなくても画面は描き、LinkedIn 欄へはnullを渡す", async () => {
+      (getProjectLinkedInConnection as jest.Mock).mockRejectedValue(new Error("502"));
+
+      await renderPage();
+
+      expect(screen.getByTestId("sns-section")).toBeInTheDocument();
+      expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
     });
   });
 });

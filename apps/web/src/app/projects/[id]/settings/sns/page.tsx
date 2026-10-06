@@ -3,6 +3,7 @@ import {
   getProject,
   getProjectFacebookConnection,
   getProjectFacebookPages,
+  getProjectLinkedInConnection,
   getProjectPvRules,
   getProjectSnsTemplates,
   getProjectThreadsConnection,
@@ -15,6 +16,7 @@ import { requireAdminSession } from "@/lib/session";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ProjectPvRulesSection } from "../../ProjectPvRulesSection";
 import { ProjectSnsFacebookSection } from "../../ProjectSnsFacebookSection";
+import { ProjectSnsLinkedInSection } from "../../ProjectSnsLinkedInSection";
 import { ProjectSnsTemplatesSection } from "../../ProjectSnsTemplatesSection";
 import { ProjectSnsThreadsSection } from "../../ProjectSnsThreadsSection";
 import { ProjectSnsXSection } from "../../ProjectSnsXSection";
@@ -32,11 +34,12 @@ export default async function ProjectSnsSettingsPage({
   const projectId = Number(id);
 
   // 接続状態の取得に失敗しても画面全体は落とさず、欄の側で「取得できない」と示す。
-  const [project, view, threadsView, facebookView, pvView, templatesView] = await Promise.all([
+  const [project, view, threadsView, facebookView, linkedinView, pvView, templatesView] = await Promise.all([
     getProject(projectId).catch(() => null),
     getProjectXConnection(projectId).catch((): XConnectionView | null => null),
     getProjectThreadsConnection(projectId).catch((): XConnectionView | null => null),
     getProjectFacebookConnection(projectId).catch((): XConnectionView | null => null),
+    getProjectLinkedInConnection(projectId).catch((): XConnectionView | null => null),
     getProjectPvRules(projectId).catch((): PvRulesView | null => null),
     getProjectSnsTemplates(projectId).catch((): SnsTemplatesView | null => null),
   ]);
@@ -75,7 +78,7 @@ export default async function ProjectSnsSettingsPage({
         view={view}
         callbackUrl={`${process.env.NEXTAUTH_URL}/connect/x/callback`}
         connectedBanner={connected === "1"}
-        errorBanner={sns === "threads" || sns === "facebook" ? undefined : error}
+        errorBanner={sns === "threads" || sns === "facebook" || sns === "linkedin" ? undefined : error}
       />
 
       <ProjectSnsThreadsSection
@@ -93,6 +96,14 @@ export default async function ProjectSnsSettingsPage({
         connectedBanner={connected === "facebook"}
         errorBanner={sns === "facebook" ? error : facebookPagesError}
         pageSelection={facebookPageSelection}
+      />
+
+      <ProjectSnsLinkedInSection
+        projectId={projectId}
+        view={linkedinView}
+        callbackUrl={`${process.env.NEXTAUTH_URL}/connect/linkedin/callback`}
+        connectedBanner={connected === "linkedin"}
+        errorBanner={sns === "linkedin" ? error : undefined}
       />
 
       <ProjectPvRulesSection projectId={projectId} view={pvView} />

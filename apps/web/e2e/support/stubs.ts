@@ -24,7 +24,8 @@ export type StubName =
   | 'comfyui'
   | 'x'
   | 'threads'
-  | 'facebook';
+  | 'facebook'
+  | 'linkedin';
 
 /** ホストから見たスタブの公開先。docker-compose.e2e-stubs.yml の ports と対応する。 */
 export const STUB_URLS: Record<StubName, string> = {
@@ -38,6 +39,7 @@ export const STUB_URLS: Record<StubName, string> = {
   x: 'http://127.0.0.1:18088',
   threads: 'http://127.0.0.1:18090',
   facebook: 'http://127.0.0.1:18091',
+  linkedin: 'http://127.0.0.1:18092',
 };
 
 export const ALL_STUBS = Object.keys(STUB_URLS) as StubName[];

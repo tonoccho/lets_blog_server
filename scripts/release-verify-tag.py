@@ -765,6 +765,26 @@ DEFAULT_STEPS = [
         "touches_stack": True,
     },
     {
+        # letsblog プラグインの LinkedIn 送信処理(メンバー本人のプロフィールへの投稿・期限切れと 401 の要再接続・理由の履歴)のテスト(issue #1581)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "letsblog-linkedin-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-letsblog-linkedin.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         "name": "backend-expose-mysql",
         "argv": [
             "docker",

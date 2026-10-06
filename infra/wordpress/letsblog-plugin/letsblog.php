@@ -1348,6 +1348,113 @@ letsblog_sns_register_sender('facebook', [
     'send' => 'letsblog_facebook_send',
 ]);
 
+// ---- LinkedIn(issue #1581。アクセストークン 1 本だけを持つ。60 日で切れ、プラグインは更新しない) ----
+
+/** LinkedIn の投稿(commentary)の上限(文字数)。 */
+const LETSBLOG_LINKEDIN_TEXT_LIMIT = 3000;
+
+/** API のベース URL。変えられるのは wp-config.php の定数だけ(e2e でスタブへ向けるため)。アプリから送る設定では変えられない。 */
+function letsblog_linkedin_api_base(): string
+{
+    return rtrim(defined('LETSBLOG_LINKEDIN_API_BASE_URL') ? (string) LETSBLOG_LINKEDIN_API_BASE_URL : 'https://api.linkedin.com', '/');
+}
+
+/** 失敗の理由として履歴に残す短い説明。秘密は含まない(応答の本文の message だけを使う)。 */
+function letsblog_linkedin_describe_failure(string $what, $response): string
+{
+    if (is_wp_error($response)) {
+        return "LinkedIn に接続できません({$what})";
+    }
+    $code = (int) wp_remote_retrieve_response_code($response);
+    $body = json_decode((string) wp_remote_retrieve_body($response), true);
+    $message = is_array($body) && is_string($body['message'] ?? null)
+        ? ': ' . mb_substr($body['message'], 0, 200)
+        : '';
+    return "LinkedIn の{$what}に失敗しました(HTTP {$code}{$message})";
+}
+
+/**
+ * 告知文を LinkedIn の本文と記事のリンクに分ける。最後の行が URL ならリンクに、残りを本文にする
+ * (URL が無ければ本文だけ。URL だけならリンクにし、本文にも同じ URL を入れる: 本文は空にできない)。
+ *
+ * @return array{text: string, link: ?string}
+ */
+function letsblog_linkedin_split_text(string $text): array
+{
+    $text = trim($text);
+    $break = mb_strrpos($text, "\n");
+    $last = $break === false ? $text : trim(mb_substr($text, $break + 1));
+    if (preg_match('#^https?://\S+$#', $last) !== 1) {
+        return ['text' => $text, 'link' => null];
+    }
+    $body = $break === false ? '' : trim(mb_substr($text, 0, $break));
+    return ['text' => $body === '' ? $last : $body, 'link' => $last];
+}
+
+/** 告知文を LinkedIn の上限(3000文字)に収める。超えるときは URL を残して切り詰める(letsblog_sns_fit_text)。 */
+function letsblog_linkedin_fit_text(string $text): string
+{
+    return letsblog_sns_fit_text($text, LETSBLOG_LINKEDIN_TEXT_LIMIT, 'mb_strlen');
+}
+
+/**
+ * 接続したメンバー本人のプロフィールへ投稿する(POST /v2/ugcPosts、公開範囲 PUBLIC)。
+ * トークンは更新しない(refresh token が出ない)。有効期限を過ぎていれば API を呼ばずに要再接続にし、
+ * API が HTTP 401 を返したときも要再接続にする。429 などは理由だけを返し、要再接続にはしない。
+ */
+function letsblog_linkedin_send(array $cred, string $text, int $now): array
+{
+    if ((int) ($cred['expires_at'] ?? 0) <= $now) {
+        return [
+            'ok' => false,
+            'error' => 'LinkedIn のトークンの期限が切れています(期限切れのため LinkedIn の再接続が必要です)',
+            'cred' => $cred,
+            'needs_reconnect' => true,
+        ];
+    }
+    $parts = letsblog_linkedin_split_text($text);
+    $content = [
+        'shareCommentary' => ['text' => $parts['text']],
+        'shareMediaCategory' => $parts['link'] === null ? 'NONE' : 'ARTICLE',
+    ];
+    if ($parts['link'] !== null) {
+        $content['media'] = [['status' => 'READY', 'originalUrl' => $parts['link']]];
+    }
+    $response = wp_remote_request(letsblog_linkedin_api_base() . '/v2/ugcPosts', [
+        'method' => 'POST',
+        'timeout' => 15,
+        'headers' => [
+            'Authorization' => 'Bearer ' . $cred['access_token'],
+            'Content-Type' => 'application/json',
+            'X-Restli-Protocol-Version' => '2.0.0',
+        ],
+        'body' => json_encode([
+            'author' => 'urn:li:person:' . $cred['member_id'],
+            'lifecycleState' => 'PUBLISHED',
+            'specificContent' => ['com.linkedin.ugc.ShareContent' => $content],
+            'visibility' => ['com.linkedin.ugc.MemberNetworkVisibility' => 'PUBLIC'],
+        ]),
+    ]);
+    $status = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+    if ($status !== 201) {
+        return [
+            'ok' => false,
+            'error' => letsblog_linkedin_describe_failure('投稿', $response),
+            'cred' => $cred,
+            'needs_reconnect' => $status === 401,
+        ];
+    }
+    return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
+}
+
+letsblog_sns_register_sender('linkedin', [
+    'secret_fields' => ['access_token'],
+    'required' => ['access_token', 'member_id', 'expires_at'],
+    'int_fields' => ['expires_at'],
+    'send' => 'letsblog_linkedin_send',
+    'fit' => 'letsblog_linkedin_fit_text',
+]);
+
 // ---- 公開時の告知(issue #1575)。公開の検知は WordPress 側で行い、Let's Blog が止まっていても告知できる ----
 
 /** CLI(wp-cli)で実行中か。cron のループバックが期待できないので、CLI ではその場で送る。 */
