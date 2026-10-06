@@ -79,6 +79,12 @@ import {
  * 判定は ./acceptance-accounts.ts。`ACCEPTANCE_RESET=data` は scripts/run-at-setup.sh が使う
  * データ層リセットで、ロック取得の内側で reset-acceptance-env.sh を実行する。
  *
+ * issue #1653: 共有スタックのコンテナ image がコードより古いまま AT が走ると、実装済みの機能が
+ * 失敗に見える(#1652)。scripts/check-image-freshness.py が、各サービスの稼働中イメージの作成時刻を
+ * そのサービスのソースパスに触れた最新コミットの時刻と比べ、古ければ再ビルドのコマンドを示して
+ * 中断する。ACCEPTANCE_RESET のゼロ構築(・データ層リセット)の**後**、healthy待ちの前に置く
+ * (ゼロ構築前の古いイメージで落とさないため)。判定ロジックはそこが唯一の実装。
+ *
  * 環境変数:
  *   ACCEPTANCE_RESET=data  : scripts/reset-acceptance-env.sh --yes(データ層のみ、約30秒)を実行してから始める
  *                            (入口は scripts/run-at-setup.sh。破壊的)
@@ -95,6 +101,8 @@ import {
  *   E2E_HEALTH_TIMEOUT     : healthy待ちのタイムアウト秒数(既定600)
  *   AT_WORKTREE_CHECK_BYPASS=1 : 作業ツリー一致チェック(#1202)を明示的に迂回する唯一の
  *                            エスケープハッチ。迂回したことは標準出力に記録される。
+ *   AT_STALE_IMAGE_CHECK_BYPASS=1 : イメージ鮮度チェック(#1653)を迂回し、古いスタックのまま実行する。
+ *                            古いサービス名と迂回したことは標準出力に記録される。
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
@@ -145,6 +153,19 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
       stdio: 'inherit',
       timeout: 600_000,
     });
+  }
+
+  console.log('[e2e] 稼働中コンテナのイメージがソースより古くないか確認します');
+  try {
+    execFileSync('python3', [path.join(repoRoot, 'scripts', 'check-image-freshness.py')], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+  } catch {
+    throw new Error(
+      'コンテナのイメージがワークツリーのコードより古いため、受け入れテストを開始しません。' +
+        '再ビルドのコマンドは上のログを参照してください。'
+    );
   }
 
   if (process.env.E2E_SKIP_HEALTH_WAIT === '1') {
