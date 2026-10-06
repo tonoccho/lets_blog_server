@@ -183,14 +183,33 @@ Given('一般利用者がメンバーではないプロジェクトに編集用�
 
 When('画像ギャラリーでその画像の編集画面を開く', async ({ page, ctx }) => {
   const id = ctx.editSourceId as number;
-  await page.goto('/image-gallery', { waitUntil: 'commit' });
+  // issue #1664: 既定の並列度(4ワーカー)では、一覧の24枚のサムネイルを各ワーカーが取りに行く分で
+  // 共有スタックのゲートウェイのレート制限(429)に当たり、一覧や詳細の取得が一時的に失敗していた
+  // (「生成画像を取得できませんでした」)。このシナリオが使うのは編集元の1枚だけなので、ほかの画像の
+  // ファイル取得は止めて、スタックへの負荷を減らす(アサーションは変えない)。
+  await page.route(/\/image-gallery\/\d+\/file/, (route) => {
+    const requested = Number(/\/image-gallery\/(\d+)\/file/.exec(route.request().url())?.[1]);
+    // `<img>` の取得だけを止める(後続のステップが `fetch` で保存結果のファイルを読むため)。
+    return requested === id || route.request().resourceType() !== 'image' ? route.continue() : route.abort();
+  });
   const thumbnail = page.locator(`img[src="/image-gallery/${id}/file"]`);
-  await expect(thumbnail).toBeVisible({ timeout: 30_000 });
-  // ハイドレーション前のクリックでは詳細ダイアログが開かない(再試行する)。
+  // 一覧の取得自体が429で失敗した画面は待っても直らないので、開き直す。
   await expect(async () => {
+    await page.goto('/image-gallery', { waitUntil: 'commit' });
+    await expect(thumbnail).toBeVisible({ timeout: 10_000 });
+  }).toPass({ timeout: 40_000, intervals: [0, 2_000, 4_000] });
+  // ハイドレーション前のクリックでは詳細ダイアログが開かない(再試行する)。ただし、クリックのたびに
+  // 詳細の取得(サーバーアクション)が走って詳細が空に戻るため、1回の押下には取得が終わるのに足りる待ちを与える。
+  // 詳細の取得が429で失敗すると、エラー表示のまま詳細ダイアログが開いたままになり、背後の虫眼鏡は
+  // 押せなくなる。その場合は閉じてから押し直す。
+  await expect(async () => {
+    const close = page.getByRole('button', { name: '閉じる', exact: true });
+    if (await close.isVisible()) await close.click();
     await magnifierOf(thumbnail).click();
-    await expect(page.getByRole('button', { name: '編集', exact: true })).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: '編集', exact: true })).toBeVisible({ timeout: 10_000 });
+  }).toPass({ timeout: 60_000 });
+  // 後続のステップは、保存した別の画像を `<img>` で読む。止めるのは編集画面を開くまで。
+  await page.unroute(/\/image-gallery\/\d+\/file/);
   await page.getByRole('button', { name: '編集', exact: true }).click();
   await expect(page.getByRole('heading', { name: '画像を編集' })).toBeVisible();
 });
@@ -330,7 +349,13 @@ const ORIGINAL_STATS: LuminanceStats = (() => {
 /** ブラウザで画像を読み込み、画素の輝度の平均と分散を求める(PNG は可逆なので回転しても変わらない)。 */
 async function luminanceStats(page: Page, imageId: number): Promise<LuminanceStats> {
   return page.evaluate(async (url) => {
-    const blob = await (await fetch(url)).blob();
+    // ゲートウェイのレート制限(429)の応答は画像ではなくデコードできないので、取れるまで取り直す(issue #1664)。
+    let response = await fetch(url);
+    for (let attempt = 0; !response.ok && attempt < 5; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      response = await fetch(url);
+    }
+    const blob = await response.blob();
     const bitmap = await createImageBitmap(blob);
     const canvas = document.createElement('canvas');
     canvas.width = bitmap.width;
