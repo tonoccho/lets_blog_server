@@ -246,6 +246,12 @@ Then('同期検証のサイトの同期状態が同期済みと表示される',
   await expect(page.getByTestId('letsblog-sync-status')).toContainText('同期済み', { timeout: 60_000 });
 });
 
+Then('同期検証のサイトの編集画面で同期状態が未同期と表示される', async ({ ctx, page }) => {
+  const [site] = sites(ctx);
+  await page.goto(`/sites/${site.id}/edit`);
+  await expect(page.getByTestId('letsblog-sync-status')).toContainText('未同期', { timeout: 60_000 });
+});
+
 Then('同期検証のサイトの REST API に letsblog のルートが存在しない', async ({ ctx }) => {
   for (const site of sites(ctx)) {
     const routes = wpCli(site.siteKey, [

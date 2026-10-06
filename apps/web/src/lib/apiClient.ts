@@ -423,8 +423,10 @@ export function installLetsblogPlugin(id: number): Promise<LetsblogPluginStatus>
   return apiFetch<LetsblogPluginStatus>(`/api/sites/${id}/letsblog-plugin/install`, { method: 'POST' });
 }
 
-export function getLetsblogSync(id: number): Promise<LetsblogSyncState | null> {
-  return apiFetch<LetsblogSyncState | null>(`/api/sites/${id}/letsblog-sync`);
+export async function getLetsblogSync(id: number): Promise<LetsblogSyncState | null> {
+  // 未同期のとき応答本文は空で、apiFetch は undefined を返す。Server Action の往復で
+  // undefined は「未取得」と区別できないため、ここで null(未同期)に揃える(issue #1660)。
+  return (await apiFetch<LetsblogSyncState | undefined>(`/api/sites/${id}/letsblog-sync`)) ?? null;
 }
 
 export function resyncLetsblog(id: number): Promise<LetsblogSyncState> {

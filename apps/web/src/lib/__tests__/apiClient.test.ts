@@ -83,6 +83,7 @@ import {
   getProjectSnsTemplates,
   saveProjectSnsTemplates,
   resendProjectSnsTemplates,
+  getLetsblogSync,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -1208,5 +1209,19 @@ describe('プロジェクトの Facebook ページ接続(issue #1580)', () => {
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/facebook')
     expect(init.method).toBe('DELETE')
+  })
+
+  it('getLetsblogSync は未同期(空本文)を undefined ではなく null として返す (issue #1660)', async () => {
+    fetchMock.mockResolvedValue(textResponse('', 200, 'OK'))
+
+    await expect(getLetsblogSync(7)).resolves.toBeNull()
+    expect(calls()[0][0]).toContain('/api/sites/7/letsblog-sync')
+  })
+
+  it('getLetsblogSync は同期済みの状態をそのまま返す (issue #1660)', async () => {
+    const state = { status: 'SYNCED', error: null, hash: 'abc', syncedAt: '2026-10-04T00:00:00Z' }
+    fetchMock.mockResolvedValue(jsonResponse(state))
+
+    await expect(getLetsblogSync(7)).resolves.toEqual(state)
   })
 })
