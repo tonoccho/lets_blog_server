@@ -71,6 +71,9 @@ import {
   addProjectPvRule,
   deleteProjectPvRule,
   resendProjectPvRules,
+  getProjectSnsTemplates,
+  saveProjectSnsTemplates,
+  resendProjectSnsTemplates,
 } from '@/lib/apiClient'
 
 type FetchCall = [string, RequestInit & { headers?: Record<string, string> }]
@@ -882,6 +885,47 @@ describe('プロジェクトの PV 達成ルール(issue #1578)', () => {
 
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/pv/resend')
+    expect(init.method).toBe('POST')
+  })
+})
+
+describe('プロジェクトの告知文テンプレート(issue #1583)', () => {
+  const view = {
+    publishTemplate: '【新着】{title} {url}',
+    pvTemplate: '',
+    send: { state: 'SENT', error: null, at: null },
+  }
+
+  it('getProjectSnsTemplatesはテンプレートと送信状態を取得する', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectSnsTemplates(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/templates')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('saveProjectSnsTemplatesは公開時と PV 達成時のテンプレートをPUTする', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(
+      saveProjectSnsTemplates(7, { publishTemplate: '【新着】{title} {url}', pvTemplate: '{threshold}PV' })
+    ).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/templates')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ publishTemplate: '【新着】{title} {url}', pvTemplate: '{threshold}PV' })
+  })
+
+  it('resendProjectSnsTemplatesは再送をPOSTする', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(resendProjectSnsTemplates(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/templates/resend')
     expect(init.method).toBe('POST')
   })
 })

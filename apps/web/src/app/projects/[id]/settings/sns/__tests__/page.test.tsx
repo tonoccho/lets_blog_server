@@ -5,6 +5,7 @@ import {
   getProjectFacebookConnection,
   getProjectFacebookPages,
   getProjectPvRules,
+  getProjectSnsTemplates,
   getProjectThreadsConnection,
   getProjectXConnection,
 } from "@/lib/apiClient";
@@ -20,6 +21,7 @@ jest.mock("@/lib/apiClient", () => ({
   getProjectFacebookConnection: jest.fn(),
   getProjectFacebookPages: jest.fn(),
   getProjectPvRules: jest.fn(),
+  getProjectSnsTemplates: jest.fn(),
 }));
 jest.mock("@/lib/session", () => ({ requireAdminSession: jest.fn() }));
 jest.mock("next/navigation", () => ({
@@ -60,6 +62,20 @@ jest.mock("../../../ProjectPvRulesSection", () => ({
   },
 }));
 
+const templatesSectionProps = jest.fn();
+jest.mock("../../../ProjectSnsTemplatesSection", () => ({
+  ProjectSnsTemplatesSection: (props: unknown) => {
+    templatesSectionProps(props);
+    return <div data-testid="templates-section" />;
+  },
+}));
+
+const templatesView = {
+  publishTemplate: "【新着】{title} {url}",
+  pvTemplate: "",
+  send: { state: "SENT", error: null, at: null },
+};
+
 const pvView = {
   addable: true,
   reason: null,
@@ -89,6 +105,7 @@ describe("ProjectSnsSettingsPage", () => {
     (getProjectThreadsConnection as jest.Mock).mockResolvedValue(view);
     (getProjectFacebookConnection as jest.Mock).mockResolvedValue(view);
     (getProjectPvRules as jest.Mock).mockResolvedValue(pvView);
+    (getProjectSnsTemplates as jest.Mock).mockResolvedValue(templatesView);
   });
 
   afterAll(() => {
@@ -141,6 +158,22 @@ describe("ProjectSnsSettingsPage", () => {
 
     expect(screen.getByTestId("sns-section")).toBeInTheDocument();
     expect(pvSectionProps).toHaveBeenCalledWith({ projectId: 5, view: null });
+  });
+
+  it("取得した告知文テンプレートをテンプレート欄へ渡す(issue #1583)", async () => {
+    await renderPage();
+
+    expect(screen.getByTestId("templates-section")).toBeInTheDocument();
+    expect(templatesSectionProps).toHaveBeenCalledWith({ projectId: 5, view: templatesView });
+  });
+
+  it("告知文テンプレートを取得できなくても画面は描き、テンプレート欄へはnullを渡す(issue #1583)", async () => {
+    (getProjectSnsTemplates as jest.Mock).mockRejectedValue(new Error("502"));
+
+    await renderPage();
+
+    expect(screen.getByTestId("sns-section")).toBeInTheDocument();
+    expect(templatesSectionProps).toHaveBeenCalledWith({ projectId: 5, view: null });
   });
 
   it("プロジェクトが取得できなければ notFound になる", async () => {

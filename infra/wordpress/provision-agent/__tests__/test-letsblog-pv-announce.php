@@ -404,6 +404,34 @@ $GLOBALS['t_posts'][12]->post_status = 'publish';
 fetch_at($T1 + 3700);
 check('公開に戻れば判定される', count(tweets()) === $before + 1);
 
+// ============ 告知文テンプレート(issue #1583): PV 達成時の {period}・{threshold} の置き換え ============
+[$err] = run_cmd('sns', ['templates', 'set'], [], json_encode(['publish' => '【新着】{title}', 'pv' => '{period}で{threshold}PV達成! {title} {url}'], JSON_UNESCAPED_UNICODE));
+check('テンプレート: templates set で PV 達成時のテンプレートを渡せる', $err === null, (string) $err);
+check('テンプレート: ルールを入れ替える(1日62000・累計70000)', set_rules([rule('tpl-d', 'daily', 62000), rule('tpl-t', 'total', 70000)], $T1 + 4000) === null);
+set_rows([['20260831', $P2, 36], ['20260901', $P1, 5000], ['20260901', $P2, 35000]]);
+fetch_at($T1 + 4050);
+$before = count(tweets());
+set_rows([['20260831', $P2, 36], ['20260901', $P1, 5000], ['20260901', $P2, 63000]]);
+fetch_at($T1 + 4100);
+$new = array_slice(tweets(), $before);
+check('テンプレート: 1日ルールの達成で {period}={1日}・{threshold} が値に置き換わる', $new === ['1日で62000PV達成! 二つ目の記事 https://blog.example.test/?p=12'], json_encode($new, JSON_UNESCAPED_UNICODE));
+$before = count(tweets());
+set_rows([['20260831', $P2, 36], ['20260901', $P1, 5000], ['20260901', $P2, 80000]]);
+fetch_at($T1 + 4200);
+$new = array_slice(tweets(), $before);
+check('テンプレート: 累計ルールの達成で {period}={累計}・{threshold} が値に置き換わる', $new === ['累計で70000PV達成! 二つ目の記事 https://blog.example.test/?p=12'], json_encode($new, JSON_UNESCAPED_UNICODE));
+check('テンプレート: 公開時のテンプレートは PV 達成の告知に使われない', tweets_for('【新着】') === []);
+
+run_cmd('sns', ['templates', 'set'], [], json_encode(['publish' => '【新着】{title}', 'pv' => ''], JSON_UNESCAPED_UNICODE));
+check('テンプレート: PV のテンプレートが空なら、既定の告知文で告知する(ルールを追加)', set_rules([rule('tpl-t2', 'total', 90000)], $T1 + 4300) === null);
+set_rows([['20260831', $P2, 36], ['20260901', $P1, 5000], ['20260901', $P2, 80000]]);
+fetch_at($T1 + 4350);
+$before = count(tweets());
+set_rows([['20260831', $P2, 36], ['20260901', $P1, 5000], ['20260901', $P2, 95000]]);
+fetch_at($T1 + 4400);
+$new = array_slice(tweets(), $before);
+check('テンプレート: 空なら既定(タイトル・URL・達成した内容)', $new === ["二つ目の記事\nhttps://blog.example.test/?p=12\n累計90000PV を達成しました"], json_encode($new, JSON_UNESCAPED_UNICODE));
+
 if ($failures !== []) {
     echo count($failures) . " 件以上失敗\n";
     exit(1);

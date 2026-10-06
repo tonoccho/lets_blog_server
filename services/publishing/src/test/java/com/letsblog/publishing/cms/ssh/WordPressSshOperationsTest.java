@@ -2259,6 +2259,23 @@ class WordPressSshOperationsTest {
     }
 
     @Test
+    void letsblogSns_templates_setは標準入力のJSONで告知文テンプレートを渡す() {
+        when(executor.exec(any(SshConnectionParams.class), any(), any(byte[].class))).thenReturn(ok("{\"templates\":true}"));
+
+        String out = operations.letsblogSns(creds(), com.letsblog.publishing.cms.LetsblogSnsCommand.TEMPLATES_SET, null,
+                "{\"publish\":\"【新着】{title} {url}\",\"pv\":\"\"}");
+
+        assertEquals("{\"templates\":true}", out);
+        ArgumentCaptor<String> command = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<byte[]> stdin = ArgumentCaptor.forClass(byte[].class);
+        verify(executor).exec(any(SshConnectionParams.class), command.capture(), stdin.capture());
+        assertEquals(true, command.getValue().endsWith("letsblog sns templates set"));
+        assertEquals(false, command.getValue().contains("title"));
+        assertArrayEquals("{\"publish\":\"【新着】{title} {url}\",\"pv\":\"\"}".getBytes(StandardCharsets.UTF_8),
+                stdin.getValue());
+    }
+
+    @Test
     void letsblogSns_pv_statusとpv_config_clearは標準入力なしで実行する() {
         when(executor.exec(any(SshConnectionParams.class), any(), isNull())).thenReturn(ok("{}"));
 

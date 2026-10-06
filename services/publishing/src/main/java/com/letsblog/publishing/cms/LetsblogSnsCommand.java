@@ -1,7 +1,7 @@
 package com.letsblog.publishing.cms;
 
 /**
- * letsblog プラグインの `wp letsblog sns ...`・`wp letsblog pv ...` のうち、アプリが呼ぶサブコマンド(issue #1574、#1578)。
+ * letsblog プラグインの `wp letsblog sns ...`・`wp letsblog pv ...` のうち、アプリが呼ぶサブコマンド(issue #1574、#1578、#1583)。
  * ブリッジとエージェントの間では {@link #wire()} の文字列で表し、許可リスト以外は受け付けない
  * (任意の引数をシェルやwp-cliへ渡さないため)。
  */
@@ -23,7 +23,9 @@ public enum LetsblogSnsCommand {
     /** `pv status`。GA4 の設定状態。 */
     PV_STATUS("pv-status", false),
     /** `pv rules set`。標準入力のJSON(ルールの配列)で、ルールを丸ごと置き換える。 */
-    PV_RULES_SET("pv-rules-set", true);
+    PV_RULES_SET("pv-rules-set", true),
+    /** `sns templates set`(issue #1583)。公開時と PV 達成時の告知文テンプレートを、標準入力のJSONで丸ごと置き換える。 */
+    TEMPLATES_SET("templates-set", true);
 
     private final String wire;
     private final boolean requiresStdin;

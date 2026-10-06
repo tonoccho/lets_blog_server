@@ -15,7 +15,7 @@
   背景:
     前提 サイト一覧ページを開いている
 
-  @stage:provision @slow @timeout:600000 @mode:serial
+  @stage:provision @stub-isolation:x @slow @timeout:600000 @mode:serial
   シナリオ: wp-admin から下書きを公開すると、X のスタブにタイトルと URL が1回だけ投稿され、告知履歴に記録される
     前提 告知検証用に、X を接続したサイトに下書きの記事を作成しておく
     もし 告知検証の下書きを wp-admin から公開する
@@ -23,14 +23,14 @@
     ならば 告知検証の X のスタブにタイトルと URL が1回だけ投稿されている
     かつ 告知検証の告知履歴に成功として記録されている
 
-  @stage:provision @slow @timeout:600000 @mode:serial
+  @stage:provision @stub-isolation:x @slow @timeout:600000 @mode:serial
   シナリオ: Let's Blog から即時公開すると、wp-cli 経由でも1回だけ投稿される
     前提 告知検証用に、X を接続したサイトを用意する
     もし 告知検証の記事を Let's Blog から即時公開する
     ならば 告知検証の X のスタブにタイトルと URL が1回だけ投稿されている
     かつ 告知検証の告知履歴に成功として記録されている
 
-  @stage:provision @slow @timeout:600000 @mode:serial
+  @stage:provision @stub-isolation:x @slow @timeout:600000 @mode:serial
   シナリオ: 予約投稿は、投稿時にも予約時刻に公開されたときにも告知されない
     前提 告知検証用に、X を接続したサイトを用意する
     もし 告知検証の記事を Let's Blog から予約投稿する
@@ -39,7 +39,7 @@
     かつ 告知検証のサイトで WP-Cron を実行する
     ならば 告知検証の X のスタブには何も投稿されていない
 
-  @stage:provision @slow @timeout:600000 @mode:serial
+  @stage:provision @stub-isolation:x @slow @timeout:600000 @mode:serial
   シナリオ: 公開済みの記事の更新や、非公開にしてからの再公開では告知されない
     前提 告知検証用に、X を接続したサイトを用意する
     かつ 告知検証の記事を Let's Blog から即時公開する
@@ -49,7 +49,7 @@
     かつ 告知検証のサイトで WP-Cron を実行する
     ならば 告知検証の X のスタブにはまだ1回だけ投稿されている
 
-  @stage:provision @slow @timeout:600000 @mode:serial
+  @stage:provision @stub-isolation:x @slow @timeout:600000 @mode:serial
   シナリオ: X がエラーを返しても記事は公開され、失敗とその理由が告知履歴に記録される
     前提 告知検証用に、X を接続したサイトを用意する
     かつ 告知検証の X のスタブが次の投稿に 429 を返すようにしておく

@@ -1108,7 +1108,7 @@ if ($path === '/wp-cli/letsblog-preview' && $_SERVER['REQUEST_METHOD'] === 'POST
 // SNS 告知の接続・状態・テスト投稿・履歴(issue #1574)。`wp letsblog sns ...` を wp-cli だけで実行し、終了コードと
 // 標準出力・標準エラーをそのまま返す。コマンド名は許可リストで検証し、SNS名は形式を検証する。`config-set` の標準入力
 // (トークンを含むJSON)は wp-cli の標準入力へだけ渡し、引数・一時ファイル・ログには出さない。導入済みかどうかの判定は
-// アプリ側で行うため、ここでは導入処理を走らせない。
+// アプリ側で行うため、ここでは導入処理を走らせない。告知文テンプレート(issue #1583)の `templates-set` も同じく標準入力の JSON で渡す。
 if ($path === '/wp-cli/letsblog-sns' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $slug = (string) ($input['slug'] ?? '');
     $command = (string) ($input['command'] ?? '');
@@ -1117,11 +1117,12 @@ if ($path === '/wp-cli/letsblog-sns' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $snsValid = $sns === null || (is_string($sns) && preg_match('/^[a-z0-9_-]{1,32}$/', $sns) === 1);
     $pvCommands = ['pv-config-set', 'pv-config-clear', 'pv-status', 'pv-rules-set'];
     if (!isValidSlug($slug)
-        || !in_array($command, array_merge(['config-set', 'config-clear', 'status', 'test', 'log'], $pvCommands), true)
+        || !in_array($command, array_merge(['config-set', 'config-clear', 'status', 'test', 'log', 'templates-set'], $pvCommands), true)
         || !$snsValid || ($stdin !== null && !is_string($stdin))
         || ($command === 'config-set' && ($stdin === null || $stdin === ''))
         || ($command === 'pv-config-set' && ($stdin === null || $stdin === ''))
         || ($command === 'pv-rules-set' && ($stdin === null || $stdin === ''))
+        || ($command === 'templates-set' && ($stdin === null || $stdin === ''))
         || ($command === 'test' && $sns === null)) {
         respond(400, ['error' => 'パラメータが不正です']);
     }
@@ -1140,11 +1141,12 @@ if ($path === '/wp-cli/letsblog-sns' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         'pv-config-clear' => ['pv', 'config', 'clear'],
         'pv-status' => ['pv', 'status'],
         'pv-rules-set' => ['pv', 'rules', 'set'],
+        'templates-set' => ['templates', 'set'],
     };
     // PV 達成ルール(issue #1578)は `wp letsblog pv ...`。それ以外は `wp letsblog sns ...`。
     $base = in_array($command, $pvCommands, true) ? ['letsblog'] : ['letsblog', 'sns'];
     $args = array_merge($base, $subArgs, ["--path=$sitePath", '--allow-root']);
-    $withStdin = in_array($command, ['config-set', 'pv-config-set', 'pv-rules-set'], true);
+    $withStdin = in_array($command, ['config-set', 'pv-config-set', 'pv-rules-set', 'templates-set'], true);
     [$code, $out, $err] = $withStdin ? runWpWithStdin($args, $stdin) : runWp($args);
     respond(200, ['exitCode' => $code, 'stdout' => $out, 'stderr' => $err]);
 }

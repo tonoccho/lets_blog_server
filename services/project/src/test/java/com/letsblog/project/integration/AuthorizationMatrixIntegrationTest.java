@@ -102,6 +102,11 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("DELETE", "/api/projects/1/sns/pv/rules/r1"),
                 new Endpoint("POST", "/api/projects/1/sns/pv/resend"),
 
+                // -- ProjectSnsTemplateController(issue #1583) --
+                new Endpoint("GET", "/api/projects/1/sns/templates"),
+                new Endpoint("PUT", "/api/projects/1/sns/templates"),
+                new Endpoint("POST", "/api/projects/1/sns/templates/resend"),
+
                 // -- SiteController --
                 new Endpoint("POST", "/api/sites"),
                 new Endpoint("POST", "/api/sites/managed-wordpress"),

@@ -1836,6 +1836,37 @@ export function resendProjectPvRules(projectId: number): Promise<PvRulesView> {
 }
 
 /**
+ * 設定画面の「SNS 告知」欄の告知文テンプレート(issue #1583)。公開時と PV 達成時を別々に持つ。空は「既定の告知文を使う」。
+ * 差し込み項目は {title}・{url}、PV 達成時のみ {period}・{threshold}。`send` は本番サイトのプラグインへ最後に送った結果。
+ */
+export interface SnsTemplatesView {
+  publishTemplate: string;
+  pvTemplate: string;
+  send: { state: 'NONE' | 'SENT' | 'FAILED'; error: string | null; at: string | null };
+}
+
+export function getProjectSnsTemplates(projectId: number): Promise<SnsTemplatesView> {
+  return apiFetch<SnsTemplatesView>(`/api/projects/${projectId}/sns/templates`);
+}
+
+/** 保存して本番サイトのプラグインへ送る(送れなくても保存は残り、`send.state` が FAILED になる)。 */
+export function saveProjectSnsTemplates(
+  projectId: number,
+  input: { publishTemplate: string; pvTemplate: string }
+): Promise<SnsTemplatesView> {
+  return apiFetch<SnsTemplatesView>(`/api/projects/${projectId}/sns/templates`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+/** 送信失敗からの回復。保存済みのテンプレートを本番サイトのプラグインへ送り直す。 */
+export function resendProjectSnsTemplates(projectId: number): Promise<SnsTemplatesView> {
+  return apiFetch<SnsTemplatesView>(`/api/projects/${projectId}/sns/templates/resend`, { method: 'POST' });
+}
+
+/**
  * プロジェクト設定画面の Threads 接続(issue #1579)。応答の形は X と同じ(トークンもアプリの秘密も含まない)。
  */
 export function getProjectThreadsConnection(projectId: number): Promise<XConnectionView> {

@@ -54,6 +54,9 @@ const LETSBLOG_PV_MAX_PAGES = 50;
 const LETSBLOG_OPTION_PV_RULES = 'letsblog_pv_rules';
 const LETSBLOG_OPTION_PV_ANNOUNCED = 'letsblog_pv_announced';
 const LETSBLOG_SNS_KIND_PV = 'PV 達成';
+/** 告知文のテンプレート(issue #1583)。公開時と PV 達成時を別々に持つ option 名と、1つあたりの文字数の上限。 */
+const LETSBLOG_OPTION_SNS_TEMPLATES = 'letsblog_sns_templates';
+const LETSBLOG_SNS_TEMPLATE_LIMIT = 1000;
 
 /** 署名付きプレビュー(issue #1561)。URL のクエリ名・一時データの名前・期限切れを掃除するための索引。 */
 const LETSBLOG_PREVIEW_QUERY_VAR = 'letsblog_preview';
@@ -748,6 +751,7 @@ if (function_exists('add_filter')) {
  * 定義: secret_fields(暗号化して保存する項目)、required(必須の項目)、optional(任意の項目)、int_fields(整数の項目)、
  * send(callable(array $cred, string $text, int $now): array{ok: bool, error: ?string, cred: array, needs_reconnect?: bool})。
  * account_name(アカウントの表示名)はどの SNS でも任意で受け取る。
+ * fit(任意)は告知文をその SNS の文字数の上限に収める関数名(issue #1583)。
  */
 function letsblog_sns_senders(?string $sns = null, ?array $definition = null): array
 {
@@ -917,7 +921,9 @@ function letsblog_sns_announce(string $sns, string $kind, ?int $postId, string $
     if ($cred === null || !empty(letsblog_sns_config_all()[$sns]['reconnect'])) {
         $result = ['ok' => false, 'error' => "{$sns} は" . LETSBLOG_SNS_STATUS_RECONNECT . 'です(認証情報を使えません)'];
     } else {
-        $result = ($senders[$sns]['send'])($cred, $text, $now);
+        // SNS ごとの文字数の上限(issue #1583)。超えるときは URL を残して切り詰める。
+        $fit = $senders[$sns]['fit'] ?? null;
+        $result = ($senders[$sns]['send'])($cred, is_callable($fit) ? (string) $fit($text) : $text, $now);
         $newCred = $result['cred'] ?? $cred;
         if ($newCred !== $cred || !empty($result['needs_reconnect'])) {
             letsblog_sns_save_credentials($sns, $newCred, !empty($result['needs_reconnect']));
@@ -927,6 +933,56 @@ function letsblog_sns_announce(string $sns, string $kind, ?int $postId, string $
     $entry['error'] = $result['ok'] ? null : (string) ($result['error'] ?? '不明なエラー');
     letsblog_sns_log_append($entry);
     return ['ok' => $entry['success'], 'error' => $entry['error'], 'entry' => $entry];
+}
+
+/**
+ * 告知文を SNS の文字数の上限に収める(issue #1583)。$measure は文字列の長さを数える関数(SNS ごとの数え方)。
+ *
+ * 切り詰めの規則: 上限以内ならそのまま。超えるときは、最後の URL を決して削らず、
+ * (1) URL より後ろを末尾から削り(削ったら「…」を付ける)、それでも超えるなら
+ * (2) URL より前の本文を末尾から削る(削ったら「…」を付け、URL の直前の空白・改行は残す)。
+ * URL が無い告知文は、末尾に「…」を付けて上限まで切る。URL だけで上限を超えるときは、やむを得ず上限で切る。
+ */
+function letsblog_sns_fit_text(string $text, int $limit, callable $measure): string
+{
+    if ($measure($text) <= $limit) {
+        return $text;
+    }
+    $hardCut = function () use ($text, $limit, $measure): string {
+        $length = mb_strlen($text);
+        while ($length > 0 && $measure(mb_substr($text, 0, $length)) > $limit) {
+            $length--;
+        }
+        return mb_substr($text, 0, $length);
+    };
+    if (preg_match_all('#https?://[\x21-\x7E]+#', $text, $found) < 1) {
+        for ($length = mb_strlen($text) - 1; $length >= 0; $length--) {
+            $candidate = mb_substr($text, 0, $length) . '…';
+            if ($measure($candidate) <= $limit) {
+                return $candidate;
+            }
+        }
+        return $hardCut();
+    }
+    $url = (string) end($found[0]);
+    $position = (int) strrpos($text, $url);
+    $head = substr($text, 0, $position);
+    $tail = substr($text, $position + strlen($url));
+    for ($length = mb_strlen($tail) - 1; $length >= 0; $length--) {
+        $candidate = $head . $url . ($length === 0 ? '' : rtrim(mb_substr($tail, 0, $length)) . '…');
+        if ($measure($candidate) <= $limit) {
+            return $candidate;
+        }
+    }
+    $core = rtrim($head);
+    $separator = substr($head, strlen($core));
+    for ($length = mb_strlen($core) - 1; $length >= 0; $length--) {
+        $candidate = $length === 0 ? $url : mb_substr($core, 0, $length) . '…' . $separator . $url;
+        if ($measure($candidate) <= $limit) {
+            return $candidate;
+        }
+    }
+    return $hardCut();
 }
 
 // ---- X(OAuth 2.0 の confidential client。更新は Basic 認証で client_id:client_secret を送る) ----
@@ -1025,12 +1081,43 @@ function letsblog_x_send(array $cred, string $text, int $now): array
     return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
 }
 
+/** X の投稿の上限(重み付きの長さ)。 */
+const LETSBLOG_X_TEXT_LIMIT = 280;
+/** X は URL を実際の長さによらず 23 と数える。 */
+const LETSBLOG_X_URL_WEIGHT = 23;
+
+/**
+ * X の重み付きの長さ。URL は 23、U+0000-U+10FF・U+2000-U+200D・U+2010-U+201F・U+2032-U+2037 は 1、
+ * それ以外(全角など)は 2(X の twitter-text の数え方)。
+ */
+function letsblog_x_weighted_length(string $text): int
+{
+    $total = 0;
+    $rest = preg_replace_callback('#https?://[\x21-\x7E]+#', function () use (&$total) {
+        $total += LETSBLOG_X_URL_WEIGHT;
+        return '';
+    }, $text);
+    foreach (preg_split('//u', (string) $rest, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+        $code = mb_ord($char, 'UTF-8');
+        $light = $code <= 0x10FF || ($code >= 0x2000 && $code <= 0x200D) || ($code >= 0x2010 && $code <= 0x201F) || ($code >= 0x2032 && $code <= 0x2037);
+        $total += $light ? 1 : 2;
+    }
+    return $total;
+}
+
+/** 告知文を X の上限に収める。超えるときは URL を残して切り詰める(letsblog_sns_fit_text)。 */
+function letsblog_x_fit_text(string $text): string
+{
+    return letsblog_sns_fit_text($text, LETSBLOG_X_TEXT_LIMIT, 'letsblog_x_weighted_length');
+}
+
 letsblog_sns_register_sender('x', [
     'secret_fields' => ['client_secret', 'access_token', 'refresh_token'],
     'required' => ['client_id', 'client_secret', 'access_token', 'refresh_token'],
     'optional' => ['expires_at'],
     'int_fields' => ['expires_at'],
     'send' => 'letsblog_x_send',
+    'fit' => 'letsblog_x_fit_text',
 ]);
 
 // ---- Threads(issue #1579。長期トークン 1 本だけを持つ。更新に client_secret は要らない) ----
@@ -1090,20 +1177,10 @@ function letsblog_threads_refresh(array $cred, int $now): array
     return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
 }
 
-/** 告知文を Threads の上限に収める。超えるときは、最後の行(パーマリンク)を残して手前を「…」で切り詰める。 */
+/** 告知文を Threads の上限(500文字)に収める。超えるときは URL を残して切り詰める(letsblog_sns_fit_text)。 */
 function letsblog_threads_fit_text(string $text): string
 {
-    if (mb_strlen($text) <= LETSBLOG_THREADS_TEXT_LIMIT) {
-        return $text;
-    }
-    $break = mb_strrpos($text, "\n");
-    $tail = $break === false ? '' : mb_substr($text, $break);
-    $head = $break === false ? $text : mb_substr($text, 0, $break);
-    $room = LETSBLOG_THREADS_TEXT_LIMIT - mb_strlen($tail) - 1;
-    if ($break === false || $room < 1) {
-        return mb_substr($text, 0, LETSBLOG_THREADS_TEXT_LIMIT);
-    }
-    return mb_substr($head, 0, $room) . '…' . $tail;
+    return letsblog_sns_fit_text($text, LETSBLOG_THREADS_TEXT_LIMIT, 'mb_strlen');
 }
 
 /** @return array{ok: bool, error: ?string, cred: array, needs_reconnect: bool} */
@@ -1179,6 +1256,7 @@ letsblog_sns_register_sender('threads', [
     'optional' => ['issued_at'],
     'int_fields' => ['expires_at', 'issued_at'],
     'send' => 'letsblog_threads_send',
+    'fit' => 'letsblog_threads_fit_text',
 ]);
 
 // ---- Facebook ページ(issue #1580。ページのトークン 1 本だけを持つ。個人アカウントには投稿しない) ----
@@ -1289,11 +1367,72 @@ function &letsblog_sns_pending(): array
     return $pending;
 }
 
+/** 告知文に差し込む記事のタイトル。HTML のタグを除き、エンティティを戻した文字列。 */
+function letsblog_sns_post_title($post): string
+{
+    return html_entity_decode(letsblog_strip_tags((string) get_the_title($post)), ENT_QUOTES, 'UTF-8');
+}
+
 /** 告知文の既定: 記事のタイトルとパーマリンク。 */
 function letsblog_sns_default_text($post): string
 {
-    $title = html_entity_decode(letsblog_strip_tags((string) get_the_title($post)), ENT_QUOTES, 'UTF-8');
-    return $title . "\n" . (string) get_permalink($post);
+    return letsblog_sns_post_title($post) . "\n" . (string) get_permalink($post);
+}
+
+/**
+ * 保存済みの告知文テンプレート(issue #1583)。公開時(publish)と PV 達成時(pv)で別々に持つ。
+ * 保存値が壊れている・文字列でないときは空(= 既定の告知文を使う)として扱う。
+ *
+ * @return array{publish: string, pv: string}
+ */
+function letsblog_sns_templates(): array
+{
+    $saved = get_option(LETSBLOG_OPTION_SNS_TEMPLATES, []);
+    $saved = is_array($saved) ? $saved : [];
+    return [
+        'publish' => is_string($saved['publish'] ?? null) ? $saved['publish'] : '',
+        'pv' => is_string($saved['pv'] ?? null) ? $saved['pv'] : '',
+    ];
+}
+
+/**
+ * テンプレートの差し込み項目({title}・{url}、PV 達成時は {period}・{threshold})を値に置き換える。
+ * 渡されなかった項目と、知らない波括弧はそのまま残す。置き換えた値の中は、さらに置き換えない(strtr は1回で置き換える)。
+ *
+ * @param array<string, string> $values 項目名 => 値
+ */
+function letsblog_sns_render(string $template, array $values): string
+{
+    $map = [];
+    foreach ($values as $name => $value) {
+        $map['{' . $name . '}'] = (string) $value;
+    }
+    return strtr($template, $map);
+}
+
+/** 公開時の告知文。テンプレートが空(空白だけを含む)なら既定の告知文。 */
+function letsblog_sns_publish_text($post): string
+{
+    $template = letsblog_sns_templates()['publish'];
+    if (trim($template) === '') {
+        return letsblog_sns_default_text($post);
+    }
+    return letsblog_sns_render($template, ['title' => letsblog_sns_post_title($post), 'url' => (string) get_permalink($post)]);
+}
+
+/** PV 達成時の告知文。テンプレートが空(空白だけを含む)なら、既定の告知文に達成した内容を添える。 */
+function letsblog_sns_pv_text($post, array $rule): string
+{
+    $template = letsblog_sns_templates()['pv'];
+    if (trim($template) === '') {
+        return letsblog_sns_default_text($post) . "\n" . letsblog_pv_rule_label($rule) . ' を達成しました';
+    }
+    return letsblog_sns_render($template, [
+        'title' => letsblog_sns_post_title($post),
+        'url' => (string) get_permalink($post),
+        'period' => $rule['period'] === 'daily' ? '1日' : '累計',
+        'threshold' => (string) $rule['threshold'],
+    ]);
 }
 
 function letsblog_strip_tags(string $text): string
@@ -1358,7 +1497,7 @@ function letsblog_sns_announce_post(int $id): void
     update_post_meta($id, LETSBLOG_META_SNS_SENT, (string) time());
     foreach (array_keys(letsblog_sns_config_all()) as $sns) {
         try {
-            letsblog_sns_announce((string) $sns, 'publish', $id, letsblog_sns_default_text($post), time());
+            letsblog_sns_announce((string) $sns, 'publish', $id, letsblog_sns_publish_text($post), time());
         } catch (Throwable $e) {
             letsblog_sns_log_append([
                 'sns' => (string) $sns, 'kind' => 'publish', 'post_id' => $id, 'at' => gmdate('c'),
@@ -1925,7 +2064,7 @@ function letsblog_pv_evaluate(int $now, bool $baselineOnly = false): void
             if ($baselineOnly) {
                 continue;
             }
-            $text = letsblog_sns_default_text(get_post($id)) . "\n" . letsblog_pv_rule_label($rule) . ' を達成しました';
+            $text = letsblog_sns_pv_text(get_post($id), $rule);
             foreach ($snsList as $sns) {
                 try {
                     letsblog_sns_announce((string) $sns, LETSBLOG_SNS_KIND_PV, $id, $text, $now);
@@ -2074,7 +2213,9 @@ if (defined('WP_CLI') && WP_CLI) {
          *
          * [<args>...]
          * : `config set`(標準入力に JSON: sns, client_id, client_secret, access_token, refresh_token, expires_at, account_name)、
-         *   `config clear [<sns>]`、`status`、`test <sns>`、`log --format=json`。
+         *   `config clear [<sns>]`、`status`、`test <sns>`、`log --format=json`、
+         *   `templates set`(標準入力に JSON: publish, pv。告知文のテンプレートを丸ごと置き換える。差し込み項目は
+         *   {title}・{url}、PV 達成時のみ {period}・{threshold}。空なら既定の告知文)。
          *
          * [--format=<format>]
          * : `log` の出力形式。json のみ。
@@ -2120,9 +2261,44 @@ if (defined('WP_CLI') && WP_CLI) {
                     return;
                 }
                 WP_CLI::line(json_encode(letsblog_sns_log_entries(), JSON_UNESCAPED_UNICODE));
+            } elseif ($sub === 'templates') {
+                $this->sns_templates($args[1] ?? '', $assoc_args);
             } else {
-                WP_CLI::error('サブコマンドは config set / config clear / status / test <sns> / log のどれかです');
+                WP_CLI::error('サブコマンドは config set / config clear / status / test <sns> / log / templates set のどれかです');
             }
+        }
+
+        /** 告知文テンプレートの受け取り(issue #1583)。標準入力の JSON で、公開時(publish)と PV 達成時(pv)を丸ごと置き換える。 */
+        private function sns_templates(string $action, array $assoc_args): void
+        {
+            if ($action !== 'set') {
+                WP_CLI::error('templates のサブコマンドは set です');
+                return;
+            }
+            if ($assoc_args !== []) {
+                WP_CLI::error('テンプレートを引数では受け取りません。JSON を標準入力で渡してください');
+                return;
+            }
+            $decoded = json_decode($this->read_stdin(), true);
+            if (!is_array($decoded) || array_is_list($decoded)) {
+                WP_CLI::error('標準入力が JSON オブジェクトではありません');
+                return;
+            }
+            $templates = [];
+            foreach (['publish' => '公開時', 'pv' => 'PV 達成時'] as $key => $label) {
+                $value = $decoded[$key] ?? '';
+                if (!is_string($value)) {
+                    WP_CLI::error("{$label}のテンプレート({$key})は文字列で指定してください");
+                    return;
+                }
+                if (mb_strlen($value) > LETSBLOG_SNS_TEMPLATE_LIMIT) {
+                    WP_CLI::error("{$label}のテンプレート({$key})は " . LETSBLOG_SNS_TEMPLATE_LIMIT . ' 文字以内にしてください');
+                    return;
+                }
+                $templates[$key] = $value;
+            }
+            update_option(LETSBLOG_OPTION_SNS_TEMPLATES, $templates, false);
+            WP_CLI::line(json_encode(['templates' => true]));
         }
 
         private function sns_config(string $action, array $rest, array $assoc_args): void

@@ -54,4 +54,11 @@ class LetsblogSnsCommandTest {
         assertEquals(false, LetsblogSnsCommand.PV_CONFIG_CLEAR.requiresStdin());
         assertEquals(false, LetsblogSnsCommand.PV_STATUS.requiresStdin());
     }
+
+    @Test
+    void 告知文テンプレートのコマンドも文字列から引け_標準入力のJSONで渡す_issue_1583() {
+        assertEquals(LetsblogSnsCommand.TEMPLATES_SET, LetsblogSnsCommand.fromWire("templates-set"));
+        assertEquals("templates-set", LetsblogSnsCommand.TEMPLATES_SET.wire());
+        assertEquals(true, LetsblogSnsCommand.TEMPLATES_SET.requiresStdin());
+    }
 }

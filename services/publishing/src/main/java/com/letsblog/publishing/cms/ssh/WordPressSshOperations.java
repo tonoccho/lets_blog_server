@@ -1496,6 +1496,7 @@ public class WordPressSshOperations {
             case PV_CONFIG_CLEAR -> "letsblog pv config clear";
             case PV_STATUS -> "letsblog pv status";
             case PV_RULES_SET -> "letsblog pv rules set";
+            case TEMPLATES_SET -> "letsblog sns templates set";
         };
         byte[] input = command.requiresStdin() && stdin != null ? stdin.getBytes(StandardCharsets.UTF_8) : null;
         SshCommandResult result = exec(creds, wpCli(creds, subcommand), input);

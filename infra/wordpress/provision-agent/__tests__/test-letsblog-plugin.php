@@ -486,6 +486,11 @@ check('SNS は pv config clear / pv status を呼び分ける',
 check('SNS は pv-config-set / pv-rules-set に標準入力が無ければ 400 にする',
     str_contains($snsBlock, "\$command === 'pv-config-set'") && str_contains($snsBlock, "\$command === 'pv-rules-set'"));
 
+// --- issue #1583: /wp-cli/letsblog-sns は告知文テンプレート(sns templates set)も扱う。標準入力の JSON だけで渡す ---
+check('SNS は templates-set も許可リストに持つ', str_contains($snsBlock, 'templates-set'));
+check('SNS は wp letsblog sns templates set を標準入力つきで実行する', str_contains($snsBlock, "'templates', 'set'") && str_contains($snsBlock, 'runWpWithStdin('));
+check('SNS は templates-set に標準入力が無ければ 400 にする', str_contains($snsBlock, "\$command === 'templates-set'"));
+
 // --- issue #1559: 同期済み CSS を表側で読み込み、本文の囲みのプレフィックスクラスを表示時に付け直す ---
 $GLOBALS['letsblog_test_styles'] = ['registered' => [], 'enqueued' => [], 'inline' => []];
 function wp_register_style(string $handle, $src, array $deps = [], $ver = false): bool

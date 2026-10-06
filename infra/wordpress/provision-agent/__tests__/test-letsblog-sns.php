@@ -577,6 +577,150 @@ letsblog_sns_on_transition('publish', 'draft', $p, true);
 letsblog_sns_on_after_insert(140);
 check('設定前に公開済みの記事は、非公開化→再公開でも告知しない', tweet_count() === $n && count(cron_events()) === $c && announce_meta(140) !== '');
 
+// ============ 告知文テンプレート(issue #1583) ============
+run_sns('sns', ['config', 'clear']);
+$GLOBALS['t_options'][LETSBLOG_OPTION_SNS_LOG] = [];
+x_reset();
+$GLOBALS['t_options'] = array_diff_key($GLOBALS['t_options'], ['letsblog_sns_templates' => true]);
+
+function templates_json(array $t): string
+{
+    return json_encode($t, JSON_UNESCAPED_UNICODE);
+}
+function last_tweet_text(): string
+{
+    $reqs = x_tweet_requests();
+    $last = end($reqs);
+    return (string) (json_decode($last['args']['body'] ?? '', true)['text'] ?? '');
+}
+/** 検証用の X の重み付き長さ(プラグインの実装とは別に持つ): URL は 23、U+0000-U+10FF・U+2000-U+200D・U+2010-U+201F・U+2032-U+2037 は 1、それ以外は 2。 */
+function x_weight(string $text): int
+{
+    $total = 0;
+    $rest = preg_replace_callback('#https?://\S+#u', function () use (&$total) {
+        $total += 23;
+        return '';
+    }, $text);
+    foreach (preg_split('//u', (string) $rest, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+        $c = mb_ord($ch);
+        $total += ($c <= 0x10FF || ($c >= 0x2000 && $c <= 0x200D) || ($c >= 0x2010 && $c <= 0x201F) || ($c >= 0x2032 && $c <= 0x2037)) ? 1 : 2;
+    }
+    return $total;
+}
+
+// --- templates set: 標準入力の JSON で公開時と PV 達成時を別々に受け取り、丸ごと置き換える ---
+check('テンプレート: 何も設定していなければ両方空', letsblog_sns_templates() === ['publish' => '', 'pv' => '']);
+[$err, $lines] = run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '【新着】{title} {url}', 'pv' => '{period}で{threshold}PV {url}']));
+check('templates set: 成功する', $err === null, (string) $err);
+check('templates set: 保存した内容が別々に読める', letsblog_sns_templates() === ['publish' => '【新着】{title} {url}', 'pv' => '{period}で{threshold}PV {url}'], json_encode(letsblog_sns_templates(), JSON_UNESCAPED_UNICODE));
+check('templates set: 結果を JSON で出力する', (json_decode($lines[0] ?? '', true)['templates'] ?? null) === true, implode('|', $lines));
+[$err] = run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => 'だけ']));
+check('templates set: 渡さなかった側は空になる(丸ごと置き換え)', $err === null && letsblog_sns_templates() === ['publish' => 'だけ', 'pv' => '']);
+[$err] = run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '', 'pv' => '']));
+check('templates set: 空を渡すと空に戻る', $err === null && letsblog_sns_templates() === ['publish' => '', 'pv' => '']);
+foreach ([
+    'JSON でない' => '{not json',
+    '配列(リスト)' => '["a"]',
+    '公開時が文字列でない' => json_encode(['publish' => 5, 'pv' => '']),
+    'PV が文字列でない' => json_encode(['publish' => '', 'pv' => ['x']]),
+    '公開時が1000文字を超える' => json_encode(['publish' => str_repeat('あ', 1001), 'pv' => '']),
+    'PV が1000文字を超える' => json_encode(['publish' => '', 'pv' => str_repeat('あ', 1001)]),
+] as $label => $input) {
+    run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '保存済み', 'pv' => '保存済みPV']));
+    [$err] = run_sns('sns', ['templates', 'set'], [], $input);
+    check("templates set: {$label}は失敗し、保存済みの内容は壊れない", $err !== null && letsblog_sns_templates() === ['publish' => '保存済み', 'pv' => '保存済みPV']);
+}
+[$err] = run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => str_repeat('あ', 1000), 'pv' => str_repeat('い', 1000)]));
+check('templates set: ちょうど1000文字は受け取る', $err === null);
+[$err] = run_sns('sns', ['templates', 'set'], ['publish' => 'x'], templates_json(['publish' => 'a']));
+check('templates set: 引数でテンプレートを受け取らない', $err !== null);
+[$err] = run_sns('sns', ['templates', 'nope'], [], '{}');
+check('templates: 未知のサブコマンドは失敗する', $err !== null);
+$GLOBALS['t_options']['letsblog_sns_templates'] = 'broken';
+check('テンプレート: 壊れた保存値は空として扱う', letsblog_sns_templates() === ['publish' => '', 'pv' => '']);
+$GLOBALS['t_options']['letsblog_sns_templates'] = ['publish' => 5, 'pv' => null];
+check('テンプレート: 文字列でない値は空として扱う', letsblog_sns_templates() === ['publish' => '', 'pv' => '']);
+run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '', 'pv' => '']));
+
+// --- 差し込み項目の置き換え ---
+check('差し込み: title と url を置き換える', letsblog_sns_render('【{title}】{url}', ['title' => '記事', 'url' => 'https://a.test/1']) === '【記事】https://a.test/1');
+check('差し込み: 同じ項目を何度でも置き換える', letsblog_sns_render('{title}/{title}', ['title' => 'T']) === 'T/T');
+check('差し込み: period と threshold を置き換える', letsblog_sns_render('{period}で{threshold}PV', ['period' => '1日', 'threshold' => '100']) === '1日で100PV');
+check('差し込み: 値が渡されない項目(公開時の period・threshold)は置き換えない', letsblog_sns_render('{title} {period} {threshold}', ['title' => 'T', 'url' => 'u']) === 'T {period} {threshold}');
+check('差し込み: 知らない波括弧はそのまま残す', letsblog_sns_render('{foo} {title}', ['title' => 'T']) === '{foo} T');
+check('差し込み: 置き換えた値の中の {url} を、さらに置き換えない', letsblog_sns_render('{title} {url}', ['title' => '{url}', 'url' => 'https://a.test/1']) === '{url} https://a.test/1');
+check('差し込み: 項目が無いテンプレートはそのまま', letsblog_sns_render('固定の文面', ['title' => 'T']) === '固定の文面');
+
+// --- 公開時の告知文: テンプレートがあれば使い、空(空白だけを含む)なら既定の告知文 ---
+$post = mkpost(301);
+check('公開時の告知文: テンプレートが無ければ既定(タイトルと URL)', letsblog_sns_publish_text($post) === "新しい記事\nhttps://blog.example.test/?p=301");
+run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '【新着】{title} {url}', 'pv' => '']));
+check('公開時の告知文: テンプレートの差し込み項目が値に置き換わる', letsblog_sns_publish_text($post) === '【新着】新しい記事 https://blog.example.test/?p=301');
+$GLOBALS['t_posts'][302] = (object) ['ID' => 302, 'post_type' => 'post', 'post_password' => '', 'post_title' => 'A &amp; B <b>強調</b>', 'post_status' => 'publish'];
+check('公開時の告知文: タイトルは既定と同じく、タグを除きエンティティを戻した値で差し込む', letsblog_sns_publish_text($GLOBALS['t_posts'][302]) === '【新着】A & B 強調 https://blog.example.test/?p=302');
+run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => " \n\t ", 'pv' => '']));
+check('公開時の告知文: 空白だけのテンプレートは空と同じで既定の告知文', letsblog_sns_publish_text($post) === "新しい記事\nhttps://blog.example.test/?p=301");
+
+// --- 公開時の告知を実際に X へ投稿する(AC2/AC3): 置き換えた本文が届く。空なら既定の告知文 ---
+run_sns('sns', ['config', 'set'], [], valid_config());
+run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '【新着】{title} {url}', 'pv' => '']));
+mkpost(310);
+letsblog_sns_announce_post(310);
+check('告知: テンプレートの差し込み項目が値に置き換わって X へ投稿される', last_tweet_text() === '【新着】新しい記事 https://blog.example.test/?p=310', last_tweet_text());
+run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => '', 'pv' => '']));
+mkpost(311);
+letsblog_sns_announce_post(311);
+check('告知: テンプレートが空なら、既定の告知文(タイトルと URL)で投稿される', last_tweet_text() === "新しい記事\nhttps://blog.example.test/?p=311", last_tweet_text());
+
+// --- 文字数の上限(AC4): 超えるときは URL を残して切り詰める ---
+$url = 'https://blog.example.test/?p=320';
+check('切り詰め: 上限以内ならそのまま', letsblog_sns_fit_text("短い\n{$url}", 500, 'mb_strlen') === "短い\n{$url}");
+check('切り詰め: 上限ちょうどならそのまま', letsblog_sns_fit_text(str_repeat('a', 10), 10, 'mb_strlen') === str_repeat('a', 10));
+$fit = letsblog_sns_fit_text(str_repeat('あ', 100) . "\n{$url}", 60, 'mb_strlen');
+check('切り詰め: 末尾の URL を残して先頭を「…」で切り詰める', mb_strlen($fit) <= 60 && str_ends_with($fit, "…\n{$url}"), $fit);
+check('切り詰め: 上限に収まる中で、先頭をできるだけ残す', mb_strlen($fit) === 60, (string) mb_strlen($fit));
+$fit = letsblog_sns_fit_text("見出し {$url} " . str_repeat('い', 100), 60, 'mb_strlen');
+check('切り詰め: URL が途中にあるときは、URL の後ろから先に削る(URL と先頭は残る)', mb_strlen($fit) <= 60 && str_starts_with($fit, "見出し {$url} ") && str_ends_with($fit, '…'), $fit);
+$fit = letsblog_sns_fit_text(str_repeat('う', 100) . " {$url} " . str_repeat('え', 100), 40, 'mb_strlen');
+check('切り詰め: 後ろを削りきっても足りなければ、先頭を削る(URL は残る)', mb_strlen($fit) <= 40 && str_contains($fit, $url) && str_contains($fit, '…'), $fit);
+$fit = letsblog_sns_fit_text(str_repeat('お', 100), 30, 'mb_strlen');
+check('切り詰め: URL が無ければ、上限まで「…」つきで切る', mb_strlen($fit) === 30 && str_ends_with($fit, '…'), $fit);
+$longUrl = 'https://blog.example.test/' . str_repeat('x', 100);
+$fit = letsblog_sns_fit_text("タイトル\n{$longUrl}", 50, 'mb_strlen');
+check('切り詰め: URL だけで上限を超えるときは、上限で切る', mb_strlen($fit) === 50, (string) mb_strlen($fit));
+$fit = letsblog_sns_fit_text("{$url}", 10, 'mb_strlen');
+check('切り詰め: URL しか無く上限を超えるときも、上限で切る', mb_strlen($fit) === 10, $fit);
+$fit = letsblog_sns_fit_text("{$url}\n" . str_repeat('か', 100), mb_strlen($url) + 1, 'mb_strlen');
+check('切り詰め: 先頭が URL なら、後ろをすべて削って URL だけを残す', $fit === $url || $fit === "{$url}…", $fit);
+
+// X: 重み付き 280(全角は 2、URL は 23)
+check('X: 全角140文字ちょうど(重み 280)は切り詰めない', letsblog_x_fit_text(str_repeat('あ', 140)) === str_repeat('あ', 140));
+check('X: 全角141文字(重み 282)は切り詰める', x_weight(letsblog_x_fit_text(str_repeat('あ', 141))) <= 280 && letsblog_x_fit_text(str_repeat('あ', 141)) !== str_repeat('あ', 141));
+check('X: 半角280文字は切り詰めない', letsblog_x_fit_text(str_repeat('a', 280)) === str_repeat('a', 280));
+check('X: URL は実際の長さによらず 23 で数える', letsblog_x_weighted_length("\n" . 'https://blog.example.test/' . str_repeat('x', 200)) === 24);
+$text = str_repeat('a', 257) . "\n" . 'https://blog.example.test/' . str_repeat('y', 80);
+$fit = letsblog_x_fit_text($text);
+check('X: 半角257文字+改行+URL(重み 281)は切り詰め、URL は残す', x_weight($fit) <= 280 && str_ends_with($fit, 'https://blog.example.test/' . str_repeat('y', 80)) && str_contains($fit, '…'), $fit);
+$text = str_repeat('a', 256) . "\n" . 'https://blog.example.test/z';
+check('X: 半角256文字+改行+URL(重み 280)は切り詰めない', letsblog_x_fit_text($text) === $text);
+check('X: 判定は全角記号・半角カナの区別を含め、検証側の数え方と一致する', letsblog_x_weighted_length('ｱ→—…あ') === x_weight('ｱ→—…あ'), (string) letsblog_x_weighted_length('ｱ→—…あ'));
+
+run_sns('sns', ['templates', 'set'], [], templates_json(['publish' => "{title}\n" . str_repeat('あ', 300) . "\n{url}", 'pv' => '']));
+mkpost(330);
+letsblog_sns_announce_post(330);
+$posted = last_tweet_text();
+check('告知: X の上限を超えるテンプレートは、URL を残して切り詰めて投稿される', x_weight($posted) <= 280 && str_ends_with($posted, "\nhttps://blog.example.test/?p=330") && str_contains($posted, '…') && str_starts_with($posted, '新しい記事'), $posted);
+
+// Threads: 500 文字。既定の告知文でも、PV 達成の告知のように末尾が URL でなくても URL を残す
+check('Threads の上限は500文字', LETSBLOG_THREADS_TEXT_LIMIT === 500);
+$fit = letsblog_threads_fit_text(str_repeat('か', 600) . "\n{$url}");
+check('Threads: 500文字を超える告知文は URL を残して切り詰める', mb_strlen($fit) <= 500 && str_ends_with($fit, "…\n{$url}"), (string) mb_strlen($fit));
+$fit = letsblog_threads_fit_text("タイトル\n{$url}\n累計5000PV を達成しました" . str_repeat('き', 600));
+check('Threads: URL が末尾でなくても URL を残す', mb_strlen($fit) <= 500 && str_contains($fit, $url), (string) mb_strlen($fit));
+check('Threads: 500文字以内ならそのまま', letsblog_threads_fit_text("短い\n{$url}") === "短い\n{$url}");
+check('各 SNS の送信処理に文字数の上限への調整が登録されている(X・Threads)', isset(letsblog_sns_senders()['x']['fit'], letsblog_sns_senders()['threads']['fit']) && !isset(letsblog_sns_senders()['facebook']['fit']));
+$GLOBALS['t_options'][LETSBLOG_OPTION_SNS_LOG] = [];
+
 if ($failures) {
     echo count($failures) . ' 件失敗:' . "\n";
     foreach ($failures as $f) {

@@ -1059,13 +1059,14 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
                                                         ├─→ at-preview-exclusive ──┤
                                                         ├─→ at-threads-exclusive ──┤
                                                         ├─→ at-facebook-exclusive ─┤
+                                                        ├─→ at-x-exclusive ────────┤
                                                         └─→ at-llm-exclusive ──────┤
                                                               └─→ at-analytics-exclusive ─┘
 ```
 
 `at-main` / `at-timezone-exclusive` / `at-llm-exclusive` は `at-provision` にのみ依存し、互いに
 並行して走る。`at-analytics-exclusive` は `at-llm-exclusive` の完了を待ち(`at-provision` ではない)、
-`at-destructive` は `at-main` と6つの専用レーンすべての完了を待つ
+`at-destructive` は `at-main` と7つの専用レーンすべての完了を待つ
 (`apps/web/playwright.config.ts` の `projects[].dependencies`)。
 
 | 段階 | 中身 | 担当 |
@@ -1081,7 +1082,8 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 | `at-preview-exclusive` | `@site-isolation:preview` のシナリオ。プレビュー検証用の共有サイト(`at65previewprobe`)を別プロジェクトへ紐づけるため、別ファイルの背景と並列だと紐付けが409で落ちる。`workers: 1` の専用レーンに集約 | #1632 |
 | `at-threads-exclusive` | `@stub-isolation:threads` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`threads-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1579 |
 | `at-facebook-exclusive` | `@stub-isolation:facebook` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`facebook-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1580 |
-| `at-destructive` | `@destructive` のシナリオ。`at-main` と6つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
+| `at-x-exclusive` | `@stub-isolation:x` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`project-sns-x` / `site-letsblog-sns-announce` / `project-sns-templates` の各シナリオが `x-stub` の単一のグローバル状態を初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1583 |
+| `at-destructive` | `@destructive` のシナリオ。`at-main` と7つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
 
 ### なぜ `@destructive` を別段階にするか(#929)
 
