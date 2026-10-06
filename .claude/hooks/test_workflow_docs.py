@@ -639,6 +639,48 @@ class ReadOnlyStagesIncludeReportBug(unittest.TestCase):
         self.assertIn('"report-bug"', match.group(1))
 
 
+class CloseIssueDocsMatchGuard(unittest.TestCase):
+    """#1659: CLAUDE.md の表と `guard.py` の定数が `close-issue` について一致する。"""
+
+    @staticmethod
+    def _guard():
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "guard_docs_check", os.path.join(HOOKS_DIR, "guard.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_skill_file_exists_with_frontmatter(self):
+        text = read(".claude/skills/close-issue/SKILL.md")
+        self.assertIn("name: close-issue", text)
+        self.assertIn("model: sonnet", text)
+
+    def test_read_only_stages_table_has_close_issue_row(self):
+        text = read(".claude/CLAUDE.md")
+        section = text.split("# Read-Only Stages", 1)[1].split("\n---", 1)[0]
+        row = re.search(r"\|\s*`close-issue`\s*\|([^\n]*)\|", section)
+        self.assertIsNotNone(row, "Read-Only Stages に close-issue の行が無い")
+        for token in ("status::Done", "Backlog", "Ready", "Inbox"):
+            self.assertIn(token, row.group(1))
+
+    def test_legal_transitions_table_has_marker_gated_rows_matching_guard(self):
+        text = read(".claude/CLAUDE.md")
+        section = text.split("### Legal Transitions", 1)[1].split("\n---", 1)[0]
+        guard = self._guard()
+        for (frm, to), skills in guard.MARKER_GATED_STATUS_TRANSITIONS.items():
+            for skill in sorted(skills):
+                with self.subTest(frm=frm, to=to, skill=skill):
+                    self.assertRegex(
+                        section,
+                        r"\|\s*Marker-gated\s*\|\s*`%s → %s`\s*\|[^\n]*`%s`" % (frm, to, skill),
+                    )
+
+    def test_guard_read_only_skills_include_close_issue(self):
+        self.assertIn("close-issue", self._guard().READ_ONLY_SKILLS)
+
+
 class ModelSelectionIncludesReportBug(unittest.TestCase):
     """Requirement 8: `CLAUDE.md` → Model Selection の opus 一覧に `report-bug`(#1434)。"""
 

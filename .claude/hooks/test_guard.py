@@ -4391,10 +4391,14 @@ class CloseEpicMarkerGatedTransition(unittest.TestCase):
     def test_close_epic_is_a_read_only_skill(self):
         self.assertIn("close-epic", self._guard_module().READ_ONLY_SKILLS)
 
-    def test_marker_gated_constant_maps_inbox_done_to_close_epic(self):
+    def test_marker_gated_constant_maps_transitions_to_skill_sets(self):
         self.assertEqual(
             self._guard_module().MARKER_GATED_STATUS_TRANSITIONS,
-            {("Inbox", "Done"): "close-epic"},
+            {
+                ("Inbox", "Done"): {"close-epic", "close-issue"},
+                ("Backlog", "Done"): {"close-issue"},
+                ("Ready", "Done"): {"close-issue"},
+            },
         )
 
     def test_inbox_to_done_is_not_in_unconditional_transitions(self):
@@ -4454,6 +4458,80 @@ class CloseEpicMarkerGatedTransition(unittest.TestCase):
                 self.assertIsNone(
                     self._bash(StatusTransitionValidity.transition(frm, to), root)
                 )
+
+
+class CloseIssueMarkerGatedTransition(unittest.TestCase):
+    """#1659: Inbox/Backlog/Ready -> Done は `close-issue` のマーカーがあるときだけ許される。"""
+
+    SESSION = "close-issue-test-session"
+    PUT = "glab api projects/:id/issues/1389 --method PUT "
+
+    @classmethod
+    def cmd(cls, frm, to="Done"):
+        return cls.PUT + '-f "remove_labels=status::%s" -f "add_labels=status::%s"' % (frm, to)
+
+    def _bash(self, command, root):
+        return _run_in_root("bash", {"command": command}, root, self.SESSION)
+
+    def _prompt(self, text, root):
+        env_backup = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        try:
+            return run_hook("prompt", {"prompt": text, "session_id": self.SESSION, "cwd": root})
+        finally:
+            if env_backup is not None:
+                os.environ["CLAUDE_PROJECT_DIR"] = env_backup
+
+    def test_close_issue_is_a_read_only_skill(self):
+        self.assertIn("close-issue", CloseEpicMarkerGatedTransition._guard_module().READ_ONLY_SKILLS)
+
+    def test_allowed_with_close_issue_marker(self):
+        root, _ = _stage_root("close-issue", self.SESSION)
+        for frm in ("Inbox", "Backlog", "Ready"):
+            with self.subTest(frm=frm):
+                self.assertIsNone(self._bash(self.cmd(frm), root))
+
+    def test_denied_without_marker(self):
+        for frm in ("Inbox", "Backlog", "Ready"):
+            with self.subTest(frm=frm):
+                self.assertIsNotNone(run_hook("bash", bash_payload(self.cmd(frm))))
+
+    def test_denied_with_other_stage_marker(self):
+        for skill in ("close-epic", "report-bug", "ready-issue", "triage-backlog", "discover-issues"):
+            for frm in ("Backlog", "Ready"):
+                with self.subTest(skill=skill, frm=frm):
+                    root, _ = _stage_root(skill, self.SESSION)
+                    self.assertIsNotNone(self._bash(self.cmd(frm), root))
+
+    def test_close_epic_marker_still_allows_inbox_to_done(self):
+        root, _ = _stage_root("close-epic", self.SESSION)
+        self.assertIsNone(self._bash(self.cmd("Inbox"), root))
+
+    def test_in_progress_review_to_done_denied_even_with_marker(self):
+        # QA -> Done は complete-issue 用の無条件の正当遷移(LEGAL_STATUS_TRANSITIONS)で、
+        # マーカーの有無に関わらず許される。close-issue のマーカーが足すものではない。
+        root, _ = _stage_root("close-issue", self.SESSION)
+        for frm in ("In Progress", "Review"):
+            with self.subTest(frm=frm):
+                self.assertIsNotNone(self._bash(self.cmd(frm), root))
+
+    def test_marker_does_not_allow_other_skipped_transitions(self):
+        root, _ = _stage_root("close-issue", self.SESSION)
+        for frm, to in (("Inbox", "In Progress"), ("Backlog", "QA"), ("Ready", "Review")):
+            with self.subTest(frm=frm, to=to):
+                self.assertIsNotNone(self._bash(self.cmd(frm, to), root))
+
+    def test_marker_does_not_allow_one_sided_or_overwrite(self):
+        root, _ = _stage_root("close-issue", self.SESSION)
+        self.assertIsNotNone(self._bash(self.PUT + "-f add_labels=status::Done", root))
+        self.assertIsNotNone(self._bash(self.PUT + "-f remove_labels=status::Backlog", root))
+        self.assertIsNotNone(self._bash(self.PUT + "-f labels=status::Done", root))
+
+    def test_slash_command_sets_marker_and_plain_prompt_clears_it(self):
+        root = tempfile.mkdtemp()
+        self._prompt("/close-issue #1389 #1191", root)
+        self.assertIsNone(self._bash(self.cmd("Backlog"), root))
+        self._prompt("はい", root)
+        self.assertIsNotNone(self._bash(self.cmd("Backlog"), root))
 
 
 if __name__ == "__main__":
