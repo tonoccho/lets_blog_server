@@ -4534,5 +4534,85 @@ class CloseIssueMarkerGatedTransition(unittest.TestCase):
         self.assertIsNotNone(self._bash(self.cmd("Backlog"), root))
 
 
+class UnquotedNewlineSeparator(unittest.TestCase):
+    """#1667: クォート外の改行は `;` と同じコマンド区切りである。
+
+    shlex は改行を空白として扱うため、2行目のコマンドが1行目の引数として
+    読まれ、argv[0] で判定する検査(labels= 上書き禁止、--squash 必須)を
+    すり抜けていた。
+    """
+
+    OVERWRITE = 'glab api "projects/:id/issues/1" --method PUT -f "labels=bug"'
+    MERGE = "glab mr merge 12 --remove-source-branch"
+
+    @staticmethod
+    def _guard():
+        hooks_dir = os.path.dirname(HOOK)
+        if hooks_dir not in sys.path:
+            sys.path.insert(0, hooks_dir)
+        import guard
+        return guard
+
+    def _argvs(self, command):
+        return [argv for argv, _ in self._guard().split_commands(command)]
+
+    def test_labels_overwrite_on_second_line_is_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload(self.OVERWRITE)))
+        reason = run_hook("bash", bash_payload("echo ok\n" + self.OVERWRITE))
+        self.assertIsNotNone(reason, "2行目の labels= 上書きが素通り")
+
+    def test_merge_without_squash_on_second_line_is_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload(self.MERGE)))
+        reason = run_hook("bash", bash_payload("echo ok\n" + self.MERGE))
+        self.assertIsNotNone(reason, "2行目の --squash 無しマージが素通り")
+
+    def test_explain_reports_two_commands_for_newline_separated(self):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "echo ok\ngit status"],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIn("解析: 2 個のコマンド", proc.stdout)
+
+    def test_split_commands_separates_unquoted_newline(self):
+        self.assertEqual(
+            [["echo", "ok"], ["git", "status"]],
+            self._argvs("echo ok\ngit status"))
+
+    def test_newline_inside_quotes_is_not_a_separator(self):
+        for command, expected in (
+            ('glab issue note 1 -m "1行目\n2行目"',
+             [["glab", "issue", "note", "1", "-m", "1行目\n2行目"]]),
+            ("echo 'a\nb'", [["echo", "a\nb"]]),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(expected, self._argvs(command))
+
+    def test_quoted_newline_then_real_newline(self):
+        self.assertEqual(
+            [["echo", "a\nb"], ["git", "status"]],
+            self._argvs('echo "a\nb"\ngit status'))
+
+    def test_heredoc_parse_is_unchanged(self):
+        self.assertEqual(
+            [["cat", "<<", "EOF"]], self._argvs("cat <<EOF\nsafe text; rm -rf /tmp/foo\nEOF"))
+        self.assertEqual(
+            [["cat", "<<", "EOF"], ["git", "status"]],
+            self._argvs("cat <<EOF\nbody\nEOF\ngit status"))
+
+    def test_backslash_newline_continuation_is_not_split_into_two_commands(self):
+        """#1666 の行の継続は区切りにしない(継続の正規化自体は #1666 の範囲)。
+
+        `\\` + 改行が、新しい区切りの導入によって「引数が空のコマンド」を
+        増やしたり、継続の前後を別コマンドに割ったりしないことだけを確かめる。
+        """
+        argvs = self._argvs("git \\\nstatus")
+        self.assertNotIn([], argvs)
+        self.assertEqual(1, len([a for a in argvs if a]), argvs)
+
+    def test_trailing_and_blank_newlines_add_no_empty_command(self):
+        self.assertEqual([["echo", "ok"]], self._argvs("echo ok\n\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

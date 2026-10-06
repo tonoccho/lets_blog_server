@@ -592,6 +592,48 @@ def split_glued_separator(token):
     return [token]
 
 
+def separate_unquoted_newlines(command):
+    """クォートの外にある改行を ` ; ` に置き換える(#1667)。
+
+    shlex は改行を空白として扱うため、そのままでは2行目のコマンドが1行目の
+    引数になり、argv[0] で判定する検査をすり抜ける。bash と同じく、クォート外の
+    改行は `;` と同じ区切りとして扱う。シングル/ダブルクォートの中の改行と、
+    行末の `\\` + 改行(行の継続)はそのまま残す。クォートが閉じていない場合も
+    そのまま返し、後段の shlex が ValueError で None へ倒す。
+    """
+    if "\n" not in command:
+        return command
+    out = []
+    quote = None
+    i = 0
+    n = len(command)
+    while i < n:
+        c = command[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif quote == '"':
+            if c == "\\" and i + 1 < n:
+                out.append(c)
+                i += 1
+                c = command[i]
+            elif c == '"':
+                quote = None
+        elif c == "\\" and i + 1 < n:
+            out.append(c)
+            i += 1
+            c = command[i]
+        elif c in "'\"":
+            quote = c
+        elif c == "\n":
+            out.append(" ; ")
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def split_commands(command):
     """コマンド文字列を「実行される個々のコマンド」のトークン列へ分解する。
 
@@ -608,7 +650,8 @@ def split_commands(command):
     コマンドとして取り出すことはしない(完全性は主張しない。CLAUDE.md →
     Enforcement → What the guards are, and are not)。
     """
-    lexer = shlex.shlex(strip_fd_numbers(strip_heredoc_bodies(command)),
+    lexer = shlex.shlex(strip_fd_numbers(
+        separate_unquoted_newlines(strip_heredoc_bodies(command))),
                         posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
