@@ -36,7 +36,12 @@ function uniqueSuffix(): string {
 }
 
 function docker(args: string[]): string {
-  return execFileSync('docker', args, { encoding: 'utf8', timeout: 180_000 }).trim();
+  // 共有の開発 DB は mysqldump が既定の maxBuffer(1MB)を超える(ENOBUFS)ため、上限を引き上げる。
+  return execFileSync('docker', args, {
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 256 * 1024 * 1024,
+  }).trim();
 }
 
 function wpCli(siteKey: string, args: string[]): string {
