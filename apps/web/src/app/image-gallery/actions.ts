@@ -7,11 +7,13 @@ import {
   bulkDeleteGeneratedImages,
   createGeneratedImageFolder,
   deleteGeneratedImage,
+  editGeneratedImage,
   getGeneratedImage,
   listGeneratedImages,
   setGeneratedImageFolder,
   updateGeneratedImageTags,
   type GeneratedImageBulkDeleteResult,
+  type GeneratedImageCrop,
   type GeneratedImageDetail,
   type GeneratedImageFolder,
   type GeneratedImageSummary,
@@ -85,6 +87,21 @@ export async function setGeneratedImageFolderAction(
 ): Promise<GeneratedImageDetail> {
   await requireSession();
   const result = await setGeneratedImageFolder(id, folderId);
+  revalidatePath("/image-gallery");
+  return result;
+}
+
+/**
+ * 画像を回転・反転・切り抜きして、新しい画像として保存する(issue #1655)。認可は上記参照(ログイン必須)。
+ * 画像ごとの認可(プロジェクトのメンバーまたは admin)は media-service が判定し、非メンバーは403になる。
+ */
+export async function editGeneratedImageAction(
+  id: number,
+  operations: string[],
+  crop: GeneratedImageCrop | null,
+): Promise<GeneratedImageDetail> {
+  await requireSession();
+  const result = await editGeneratedImage(id, operations, crop);
   revalidatePath("/image-gallery");
   return result;
 }

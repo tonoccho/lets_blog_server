@@ -18,6 +18,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
 
 /**
  * 記事投稿時に画像を長編基準でリサイズし(issue #291)、あわせてEXIF等の埋め込みメタ情報
@@ -109,7 +110,54 @@ public class ImageResizeService {
     public ReencodedImage reencodeKeepingResolution(byte[] originalBytes, String mimeType) {
         BufferedImage decoded = decodeWithinPixelLimit(originalBytes);
         int orientation = isJpeg(mimeType) ? readJpegOrientation(originalBytes) : 1;
-        BufferedImage output = applyOrientation(decoded, orientation);
+        return encodeKeepingFormat(applyOrientation(decoded, orientation), mimeType);
+    }
+
+    /**
+     * 画像を回転・反転・切り抜きする(issue #1655)。操作は並べた順に適用し、切り抜きは操作後の画像の座標で
+     * 指定する。拡大・縮小はせず、出力の画素数は操作の結果どおり。メタ情報は残さず、形式は元のまま
+     * ({@link #reencodeKeepingResolution}と同じ書き出し)。操作も切り抜きも無い・切り抜きが範囲外・
+     * 読めない/大きすぎる画像は{@link InvalidImageUploadException}。
+     */
+    public ReencodedImage applyEdits(
+            byte[] originalBytes, String mimeType, List<ImageEditOperation> operations, ImageCropRegion crop) {
+        boolean hasOperations = operations != null && !operations.isEmpty();
+        if (!hasOperations && crop == null) {
+            throw new InvalidImageUploadException("編集内容がありません。");
+        }
+        BufferedImage current = applyOrientation(
+                decodeWithinPixelLimit(originalBytes), isJpeg(mimeType) ? readJpegOrientation(originalBytes) : 1);
+        if (hasOperations) {
+            for (ImageEditOperation operation : operations) {
+                current = switch (operation) {
+                    case ROTATE_CW -> rotate90Cw(current);
+                    case ROTATE_CCW -> rotate90Ccw(current);
+                    case FLIP_HORIZONTAL -> flipHorizontal(current);
+                    case FLIP_VERTICAL -> flipVertical(current);
+                };
+            }
+        }
+        if (crop != null) {
+            current = crop(current, crop);
+        }
+        return encodeKeepingFormat(current, mimeType);
+    }
+
+    private BufferedImage crop(BufferedImage src, ImageCropRegion region) {
+        if (region.x() < 0 || region.y() < 0 || region.width() < 1 || region.height() < 1
+                || (long) region.x() + region.width() > src.getWidth()
+                || (long) region.y() + region.height() > src.getHeight()) {
+            throw new InvalidImageUploadException("切り抜き範囲が画像の外にあります。");
+        }
+        BufferedImage dst = new BufferedImage(region.width(), region.height(), imageType(src));
+        dst.setRGB(0, 0, region.width(), region.height(),
+                src.getRGB(region.x(), region.y(), region.width(), region.height(), null, 0, region.width()),
+                0, region.width());
+        return dst;
+    }
+
+    /** 形式を維持して書き出す(JPEGは品質0.95のJPEG、PNGはPNG)。 */
+    private ReencodedImage encodeKeepingFormat(BufferedImage output, String mimeType) {
         try {
             ResizeResult encoded = encode(output, mimeType, false, UPLOAD_JPEG_QUALITY);
             if (encoded == null) {

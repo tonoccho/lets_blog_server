@@ -591,6 +591,30 @@ export function uploadGeneratedImage(projectId: number, file: File): Promise<Gen
   });
 }
 
+/** 画像の編集(issue #1655)の切り抜き範囲。画素単位で、座標は操作を適用した後の画像の左上が原点。 */
+export interface GeneratedImageCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 画像を回転・反転・切り抜きして、新しい画像として保存する(issue #1655)。操作は並べた順に適用し、
+ * 切り抜きは操作後の画像の座標で指定する。元の画像は変わらず、新しい画像は元のタグ・フォルダ・種別を引き継ぐ。
+ */
+export function editGeneratedImage(
+  id: number,
+  operations: string[],
+  crop: GeneratedImageCrop | null,
+): Promise<GeneratedImageDetail> {
+  return apiFetch<GeneratedImageDetail>(`/api/generated-images/${id}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operations, crop }),
+  });
+}
+
 export function deleteGeneratedImage(id: number): Promise<void> {
   return apiFetch<void>(`/api/generated-images/${id}`, { method: 'DELETE' });
 }

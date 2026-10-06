@@ -104,6 +104,8 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/generated-images/bulk-delete"),
                 // issue #1599
                 new Endpoint("POST", "/api/generated-images/upload"),
+                // issue #1655
+                new Endpoint("POST", "/api/generated-images/1/edit"),
                 // issue #1493
                 new Endpoint("PUT", "/api/generated-images/1/folder"),
                 new Endpoint("GET", "/api/generated-images/folders"),

@@ -13,6 +13,7 @@ import {
   setGeneratedImageFolderAction,
   updateGeneratedImageTagsAction,
 } from "./actions";
+import { ImageEditDialog } from "./ImageEditDialog";
 import { GALLERY_PAGE_SIZE } from "./pageSize";
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -144,6 +145,10 @@ export function ImageGalleryGrid({
   const [isSavingFolder, startFolderTransition] = useTransition();
   /** 「この画像の設定をコピー」ボタンの一時的なフィードバック表示(issue #437)。 */
   const [settingsCopied, setSettingsCopied] = useState(false);
+  /** 編集画面を開いているか(issue #1655)。 */
+  const [editing, setEditing] = useState(false);
+  /** 編集結果を新しい画像として保存した旨の表示(issue #1655)。詳細を閉じると消える。 */
+  const [editSavedMessage, setEditSavedMessage] = useState<string | null>(null);
   // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
   // 一致させるため、issue #1362と同じ形。issue #1363)。個人設定TZがあるときはSSR/
   // クライアントで常に同じ文字列になるためこのフラグを見ない。
@@ -356,6 +361,8 @@ export function ImageGalleryGrid({
     setSelectedId(id);
     setDetail(null);
     setError(null);
+    setEditing(false);
+    setEditSavedMessage(null);
     setNewTag("");
     startTransition(async () => {
       try {
@@ -371,6 +378,15 @@ export function ImageGalleryGrid({
     setSelectedId(null);
     setDetail(null);
     setError(null);
+    setEditing(false);
+    setEditSavedMessage(null);
+  }
+
+  /** 編集結果が新しい画像として保存された。一覧は今の絞り込みのまま取り直す(新しい画像が先頭に現れる)。 */
+  function handleEditSaved(saved: GeneratedImageDetail) {
+    setEditing(false);
+    setEditSavedMessage(`新しい画像として保存しました(ID ${saved.id})`);
+    applyFilter(activeTag, activeFolder, activeSource);
   }
 
   function handleDelete(id: number) {
@@ -770,6 +786,16 @@ export function ImageGalleryGrid({
         </div>
       )}
 
+      {selectedId !== null && editing && detail && (
+        <ImageEditDialog
+          imageId={detail.id}
+          width={detail.width}
+          height={detail.height}
+          onSaved={handleEditSaved}
+          onCancel={() => setEditing(false)}
+        />
+      )}
+
       {selectedId !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -782,6 +808,15 @@ export function ImageGalleryGrid({
             <div className="mb-4 flex items-start justify-between gap-4">
               <h2 className="text-lg font-semibold">生成画像の詳細</h2>
               <div className="flex items-center gap-3">
+                {detail && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="text-neutral-600 hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100"
+                  >
+                    編集
+                  </button>
+                )}
                 {detail && (
                   <button
                     type="button"
@@ -811,6 +846,11 @@ export function ImageGalleryGrid({
               className="mb-4 w-full rounded border border-neutral-200 dark:border-neutral-800"
             />
 
+            {editSavedMessage && (
+              <p role="status" className="mb-4 text-sm text-green-700 dark:text-green-400">
+                {editSavedMessage}
+              </p>
+            )}
             {isPending && <p className="text-neutral-500 dark:text-neutral-400">読み込み中…</p>}
             {error && <p className="text-red-600">{error}</p>}
             {detail && (

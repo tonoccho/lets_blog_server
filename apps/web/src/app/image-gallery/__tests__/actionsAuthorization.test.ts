@@ -36,6 +36,7 @@ const listGeneratedImages = jest.fn();
 const bulkDeleteGeneratedImages = jest.fn();
 const createGeneratedImageFolder = jest.fn();
 const setGeneratedImageFolder = jest.fn();
+const editGeneratedImage = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   getGeneratedImage: (...a: unknown[]) => getGeneratedImage(...a),
   deleteGeneratedImage: (...a: unknown[]) => deleteGeneratedImage(...a),
@@ -44,6 +45,7 @@ jest.mock('@/lib/apiClient', () => ({
   bulkDeleteGeneratedImages: (...a: unknown[]) => bulkDeleteGeneratedImages(...a),
   createGeneratedImageFolder: (...a: unknown[]) => createGeneratedImageFolder(...a),
   setGeneratedImageFolder: (...a: unknown[]) => setGeneratedImageFolder(...a),
+  editGeneratedImage: (...a: unknown[]) => editGeneratedImage(...a),
 }));
 
 import {
@@ -51,6 +53,7 @@ import {
   createGeneratedImageFolderAction,
   setGeneratedImageFolderAction,
   deleteGeneratedImageAction,
+  editGeneratedImageAction,
   fetchGalleryImagesPageAction,
   getGeneratedImageAction,
   updateGeneratedImageTagsAction,
@@ -261,5 +264,31 @@ describe('フォルダの Server Action(issue #1493)', () => {
 
     await expect(createGeneratedImageFolderAction('海', null)).rejects.toThrow('403');
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+/** issue #1655: 画像の編集(新しい画像として保存)の Server Action もログイン必須。権限は media-service が判定する。 */
+describe('editGeneratedImageAction(issue #1655)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('未ログインは /login へ送り、編集しない', async () => {
+    getServerSession.mockResolvedValue(null);
+
+    await expect(editGeneratedImageAction(1, ['ROTATE_CW'], null)).rejects.toThrow('NEXT_REDIRECT:/login');
+    expect(editGeneratedImage).not.toHaveBeenCalled();
+  });
+
+  it('ログイン済みなら編集を依頼し、ギャラリーを再検証して結果を返す', async () => {
+    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    editGeneratedImage.mockResolvedValue({ id: 9 });
+    const crop = { x: 1, y: 2, width: 3, height: 4 };
+
+    const result = await editGeneratedImageAction(1, ['ROTATE_CW'], crop);
+
+    expect(result).toEqual({ id: 9 });
+    expect(editGeneratedImage).toHaveBeenCalledWith(1, ['ROTATE_CW'], crop);
+    expect(revalidatePath).toHaveBeenCalledWith('/image-gallery');
   });
 });

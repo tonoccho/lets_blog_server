@@ -78,6 +78,8 @@ class RateLimitUploadBucketSyncTest {
             "/api/generated-images/1",
             "/api/generated-images/1/tags",
             "/api/generated-images/1/file",
+            // #1655: 編集結果の保存はJSONの小さな要求(画像バイナリは送らない)なのでapi-global
+            "/api/generated-images/1/edit",
             "/api/projects/1/ai/generate-image-prompt",
             // 近似パス(部分一致・末尾一致だと誤ってupload-endpointに巻き込まれるもの)
             "/api/projects/1/bulk-management/uploads",
