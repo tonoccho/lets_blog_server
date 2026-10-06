@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
 import * as actions from '../actions'
 import { GALLERY_PAGE_SIZE } from '../pageSize'
@@ -16,6 +16,12 @@ jest.mock('../actions', () => ({
 }))
 
 const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
+
+// issue #1658: 1 ページ分(GALLERY_PAGE_SIZE 枚)の描画待ちが、他の jest・gradle・AT と同時に走る
+// 高負荷時に、waitFor の既定(1 秒)とテストの既定(5 秒)に収まらず失敗した。待ちを広げるだけで、
+// アサーションは変えない。
+jest.setTimeout(30_000)
+configure({ asyncUtilTimeout: 10_000 })
 
 function image(id: number, tags: string[] = []): GeneratedImageSummary {
   return {
