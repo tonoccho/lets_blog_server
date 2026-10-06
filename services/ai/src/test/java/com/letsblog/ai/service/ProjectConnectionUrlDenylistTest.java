@@ -33,7 +33,8 @@ import static org.mockito.Mockito.verify;
 class ProjectConnectionUrlDenylistTest {
 
     private static final Set<String> ALLOWED_STACK_NAMES = Set.of(
-            "ollama", "comfyui", "comfyui-cpu", "lbs-ollama", "lbs-comfyui", "lbs-comfyui-cpu");
+            "ollama", "ollama-cpu", "comfyui", "comfyui-cpu",
+            "lbs-ollama", "lbs-ollama-cpu", "lbs-comfyui", "lbs-comfyui-cpu");
 
     @Mock
     private ProjectAiSettingsRepository repository;
@@ -121,7 +122,9 @@ class ProjectConnectionUrlDenylistTest {
                 "http://ollama:11434/v1",
                 "http://comfyui:8188",
                 "http://comfyui-cpu:8188",
+                "http://ollama-cpu:11434",
                 "http://lbs-ollama:11434",
+                "http://lbs-ollama-cpu:11434",
                 "http://lbs-comfyui:8188",
                 "http://lbs-comfyui-cpu:8188",
                 "http://[2001:db8::1]:11434",
