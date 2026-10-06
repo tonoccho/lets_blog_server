@@ -118,7 +118,8 @@ class AmazonTagRenderServiceTest {
         String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, false);
 
         assertFalse(result.contains("<a "));
-        assertTrue(result.contains("<div class=\"lb-amazon-card\">"));
+        assertTrue(result.contains("<div class=\"lb-amazon-card\"><span class=\"lb-amazon-card-body\">"), result);
+        assertFalse(result.contains("<div class=\"lb-amazon-card-"), result);
     }
 
     @Test
@@ -213,6 +214,24 @@ class AmazonTagRenderServiceTest {
         assertEquals(1, EmbedMarkerTestSupport.closeCount(result));
         assertTrue(result.indexOf("<!-- lbs:embed ") < result.indexOf("lb-amazon-card\""));
         assertTrue(result.indexOf("lb-amazon-card\"") < result.indexOf("<!-- /lbs:embed -->"));
+    }
+
+    @Test
+    void render_既定のカードは_a_の中にブロック要素を持たず改行も含まない_wpautopで分断されない() {
+        stubTagDesign();
+        stubProduct(PRODUCT, Instant.parse("2026-09-08T20:03:35Z"));
+
+        String result = service().render("[amazon https://amazon.co.jp/dp/xxx]", 1L, true);
+
+        String card = result.substring(result.indexOf("<a class=\"lb-amazon-card\""), result.indexOf("</a>") + 4);
+        assertFalse(card.contains("<div"), card);
+        assertFalse(card.contains("\n"), card);
+        assertTrue(card.contains("<span class=\"lb-amazon-card-thumb\""), card);
+        assertTrue(card.contains("<span class=\"lb-amazon-card-body\"><span class=\"lb-amazon-card-name\">商品名</span>"), card);
+        assertTrue(card.contains("<span class=\"lb-amazon-card-summary\">概要</span>"), card);
+        assertTrue(card.contains("<span class=\"lb-amazon-card-price\">￥1000</span>"), card);
+        assertTrue(card.contains("<span class=\"lb-amazon-card-timestamp\">2026/09/08 20:03時点の価格です</span>"), card);
+        assertTrue(card.endsWith("<span class=\"lb-amazon-card-cta\">Amazonで見る</span></span></a>"), card);
     }
 
     @Test

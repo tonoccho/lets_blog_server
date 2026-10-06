@@ -633,10 +633,10 @@ function letsblog_embed_blogcard(array $data, ?string $template): ?string
         return letsblog_embed_fill($template, $v);
     }
     return '<a class="lb-blogcard" href="' . $v['url'] . '" target="_blank" rel="noopener noreferrer">'
-        . ($image !== '' ? '<div class="lb-blogcard-thumb" style="background-image:url(\'' . $v['imageUrl'] . '\')"></div>' : '')
-        . '<div class="lb-blogcard-body"><div class="lb-blogcard-title">' . $v['title'] . '</div>'
-        . '<div class="lb-blogcard-description">' . $v['description'] . '</div>'
-        . '<div class="lb-blogcard-site">' . $v['siteName'] . '</div></div></a>';
+        . ($image !== '' ? '<span class="lb-blogcard-thumb" style="background-image:url(\'' . $v['imageUrl'] . '\')"></span>' : '')
+        . '<span class="lb-blogcard-body"><span class="lb-blogcard-title">' . $v['title'] . '</span>'
+        . '<span class="lb-blogcard-description">' . $v['description'] . '</span>'
+        . '<span class="lb-blogcard-site">' . $v['siteName'] . '</span></span></a>';
 }
 
 /** Amazon。商品 URL は空(非本番サイトで投稿)か http(s)。それ以外は null。 */
@@ -664,15 +664,15 @@ function letsblog_embed_amazon(array $data, ?string $template): ?string
     $html = '<' . $tag . ' class="lb-amazon-card"'
         . ($link ? ' href="' . $v['productUrl'] . '" target="_blank" rel="noopener noreferrer nofollow sponsored"' : '') . '>';
     if ($image !== '') {
-        $html .= '<div class="lb-amazon-card-thumb" style="background-image:url(\'' . $v['imageUrl'] . '\')"></div>';
+        $html .= '<span class="lb-amazon-card-thumb" style="background-image:url(\'' . $v['imageUrl'] . '\')"></span>';
     }
-    $html .= '<div class="lb-amazon-card-body"><div class="lb-amazon-card-name">' . $v['productName'] . '</div>';
+    $html .= '<span class="lb-amazon-card-body"><span class="lb-amazon-card-name">' . $v['productName'] . '</span>';
     foreach (['summary' => 'summary', 'price' => 'price', 'priceTimestamp' => 'timestamp'] as $key => $class) {
         if ($v[$key] !== '') {
-            $html .= '<div class="lb-amazon-card-' . $class . '">' . $v[$key] . '</div>';
+            $html .= '<span class="lb-amazon-card-' . $class . '">' . $v[$key] . '</span>';
         }
     }
-    return $html . '<div class="lb-amazon-card-cta">Amazonで見る</div></div></' . $tag . '>';
+    return $html . '<span class="lb-amazon-card-cta">Amazonで見る</span></span></' . $tag . '>';
 }
 
 /** 目次の項目(text・href・children)から入れ子の <li> 群を組み立てる。形式が壊れていれば null。 */

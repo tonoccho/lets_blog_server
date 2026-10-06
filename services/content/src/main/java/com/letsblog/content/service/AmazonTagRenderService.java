@@ -156,22 +156,22 @@ public class AmazonTagRenderService {
             }
             html.append(">");
             if (imageUrl != null) {
-                html.append("<div class=\"lb-amazon-card-thumb\" style=\"background-image:url('")
-                        .append(escapedImageUrl).append("')\"></div>");
+                html.append("<span class=\"lb-amazon-card-thumb\" style=\"background-image:url('")
+                        .append(escapedImageUrl).append("')\"></span>");
             }
-            html.append("<div class=\"lb-amazon-card-body\">")
-                    .append("<div class=\"lb-amazon-card-name\">").append(productName).append("</div>");
+            html.append("<span class=\"lb-amazon-card-body\">")
+                    .append("<span class=\"lb-amazon-card-name\">").append(productName).append("</span>");
             if (!summary.isEmpty()) {
-                html.append("<div class=\"lb-amazon-card-summary\">").append(summary).append("</div>");
+                html.append("<span class=\"lb-amazon-card-summary\">").append(summary).append("</span>");
             }
             if (!price.isEmpty()) {
-                html.append("<div class=\"lb-amazon-card-price\">").append(price).append("</div>");
+                html.append("<span class=\"lb-amazon-card-price\">").append(price).append("</span>");
             }
             if (!priceTimestamp.isEmpty()) {
-                html.append("<div class=\"lb-amazon-card-timestamp\">").append(priceTimestamp).append("</div>");
+                html.append("<span class=\"lb-amazon-card-timestamp\">").append(priceTimestamp).append("</span>");
             }
-            html.append("<div class=\"lb-amazon-card-cta\">Amazonで見る</div>")
-                    .append("</div></").append(tag).append(">");
+            html.append("<span class=\"lb-amazon-card-cta\">Amazonで見る</span>")
+                    .append("</span></").append(tag).append(">");
             return EmbedMarker.wrap("AMAZON", markerData, html.toString(), block);
         } catch (IllegalArgumentException | ContentScrapingException e) {
             log.warn("[amazon]の展開に失敗したため通常のリンクにフォールバックします: url={}, error={}",

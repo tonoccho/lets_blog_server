@@ -173,6 +173,33 @@ class BlogCardTagRenderServiceTest {
     }
 
     @Test
+    void render_既定のカードは_a_の中にブロック要素を持たず改行も含まない_wpautopで分断されない() {
+        stubTagDesign();
+        stubCard("https://example.com/article", FULL_DATA);
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        String card = result.substring(result.indexOf("<a class=\"lb-blogcard\""), result.indexOf("</a>") + 4);
+        assertFalse(card.contains("<div"), card);
+        assertFalse(card.contains("\n"), card);
+        assertTrue(card.contains("<span class=\"lb-blogcard-thumb\""), card);
+        assertTrue(card.contains("<span class=\"lb-blogcard-body\"><span class=\"lb-blogcard-title\">記事のタイトル</span>"), card);
+        assertTrue(card.contains("<span class=\"lb-blogcard-description\">記事の説明</span>"), card);
+        assertTrue(card.contains("<span class=\"lb-blogcard-site\">サイト名</span></span></a>"), card);
+    }
+
+    @Test
+    void render_画像がなければ既定のカードに_thumb_を出さない() {
+        stubTagDesign();
+        stubCard("https://example.com/article", Map.of("title", "T"));
+
+        String result = service().render("[blogcard https://example.com/article]", 1L);
+
+        assertFalse(result.contains("<span class=\"lb-blogcard-thumb\""), result);
+        assertFalse(result.contains("<div class=\"lb-blogcard-"), result);
+    }
+
+    @Test
     void render_単独の行のタグは目印とカードを別のHTMLブロックにするため空行で区切る() {
         stubTagDesign();
         stubCard("https://example.com/article", FULL_DATA);

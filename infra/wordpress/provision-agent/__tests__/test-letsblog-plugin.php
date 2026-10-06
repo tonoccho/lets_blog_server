@@ -756,7 +756,7 @@ if (function_exists('letsblog_expand_custom_tags')) {
     $setSync(['tagDesigns' => [$design('BLOGCARD', null)]]);
     $out = letsblog_expand_custom_tags($old);
     check('embed: テンプレートが外れたら既定のブログカードで展開し直す',
-        $out === '<a class="lb-blogcard" href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer"><div class="lb-blogcard-thumb" style="background-image:url(\'https://example.com/og.png\')"></div><div class="lb-blogcard-body"><div class="lb-blogcard-title">タイトル</div><div class="lb-blogcard-description">説明</div><div class="lb-blogcard-site">サイト</div></div></a>');
+        $out === '<a class="lb-blogcard" href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer"><span class="lb-blogcard-thumb" style="background-image:url(\'https://example.com/og.png\')"></span><span class="lb-blogcard-body"><span class="lb-blogcard-title">タイトル</span><span class="lb-blogcard-description">説明</span><span class="lb-blogcard-site">サイト</span></span></a>');
     $noImg = letsblog_test_embed('BLOGCARD', ['title' => 't', 'description' => 'd', 'siteName' => 's', 'url' => 'https://e.com/', 'imageUrl' => ''], 'OLD');
     check('embed: 画像がなければ既定のカードに thumb を出さない', !str_contains(letsblog_expand_custom_tags($noImg), 'lb-blogcard-thumb'));
 
@@ -772,10 +772,10 @@ if (function_exists('letsblog_expand_custom_tags')) {
     check('embed: 非本番サイトで投稿した Amazon は商品 URL を空のまま展開する', str_contains(letsblog_expand_custom_tags(letsblog_test_embed('AMAZON', $nonProd, 'OLD')), '<a href=""></a>'));
     $setSync(['tagDesigns' => [$design('AMAZON', null)]]);
     $out = letsblog_expand_custom_tags($oldAmz);
-    check('embed: Amazon の既定の見た目(本番サイト)', $out === '<a class="lb-amazon-card" href="https://amazon.co.jp/dp/x" target="_blank" rel="noopener noreferrer nofollow sponsored"><div class="lb-amazon-card-thumb" style="background-image:url(\'https://m.media-amazon.com/i.jpg\')"></div><div class="lb-amazon-card-body"><div class="lb-amazon-card-name">商品 &amp; 名</div><div class="lb-amazon-card-summary">概要</div><div class="lb-amazon-card-price">￥1,000</div><div class="lb-amazon-card-timestamp">2026/09/08 20:03時点の価格です</div><div class="lb-amazon-card-cta">Amazonで見る</div></div></a>');
+    check('embed: Amazon の既定の見た目(本番サイト)', $out === '<a class="lb-amazon-card" href="https://amazon.co.jp/dp/x" target="_blank" rel="noopener noreferrer nofollow sponsored"><span class="lb-amazon-card-thumb" style="background-image:url(\'https://m.media-amazon.com/i.jpg\')"></span><span class="lb-amazon-card-body"><span class="lb-amazon-card-name">商品 &amp; 名</span><span class="lb-amazon-card-summary">概要</span><span class="lb-amazon-card-price">￥1,000</span><span class="lb-amazon-card-timestamp">2026/09/08 20:03時点の価格です</span><span class="lb-amazon-card-cta">Amazonで見る</span></span></a>');
     $bare = letsblog_test_embed('AMAZON', ['productName' => 'N', 'price' => '', 'summary' => '', 'productUrl' => '', 'imageUrl' => '', 'priceTimestamp' => ''], 'OLD');
     check('embed: Amazon の既定の見た目(非本番・項目なし)は div で、空の項目を出さない',
-        letsblog_expand_custom_tags($bare) === '<div class="lb-amazon-card"><div class="lb-amazon-card-body"><div class="lb-amazon-card-name">N</div><div class="lb-amazon-card-cta">Amazonで見る</div></div></div>');
+        letsblog_expand_custom_tags($bare) === '<div class="lb-amazon-card"><span class="lb-amazon-card-body"><span class="lb-amazon-card-name">N</span><span class="lb-amazon-card-cta">Amazonで見る</span></span></div>');
     $badAmzUrl = $amz;
     $badAmzUrl['productUrl'] = 'javascript:x';
     check('embed: Amazon の http(s) でない商品 URL は展開せず投稿時点の HTML のまま', letsblog_test_strip(letsblog_expand_custom_tags(letsblog_test_embed('AMAZON', $badAmzUrl, 'KEEP'))) === 'KEEP');

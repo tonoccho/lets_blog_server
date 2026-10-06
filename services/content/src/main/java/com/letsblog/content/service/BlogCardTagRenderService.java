@@ -132,14 +132,14 @@ public class BlogCardTagRenderService {
             html.append("<a class=\"lb-blogcard\" href=\"").append(escapedHref)
                     .append("\" target=\"_blank\" rel=\"noopener noreferrer\">");
             if (imageUrl != null) {
-                html.append("<div class=\"lb-blogcard-thumb\" style=\"background-image:url('")
-                        .append(escapedImageUrl).append("')\"></div>");
+                html.append("<span class=\"lb-blogcard-thumb\" style=\"background-image:url('")
+                        .append(escapedImageUrl).append("')\"></span>");
             }
-            html.append("<div class=\"lb-blogcard-body\">")
-                    .append("<div class=\"lb-blogcard-title\">").append(title).append("</div>")
-                    .append("<div class=\"lb-blogcard-description\">").append(description).append("</div>")
-                    .append("<div class=\"lb-blogcard-site\">").append(siteName).append("</div>")
-                    .append("</div></a>");
+            html.append("<span class=\"lb-blogcard-body\">")
+                    .append("<span class=\"lb-blogcard-title\">").append(title).append("</span>")
+                    .append("<span class=\"lb-blogcard-description\">").append(description).append("</span>")
+                    .append("<span class=\"lb-blogcard-site\">").append(siteName).append("</span>")
+                    .append("</span></a>");
             return EmbedMarker.wrap("BLOGCARD", markerData, html.toString(), block);
         } catch (IllegalArgumentException | ContentScrapingException e) {
             log.warn("[blogcard]の展開に失敗したため通常のリンクにフォールバックします: url={}, error={}",
