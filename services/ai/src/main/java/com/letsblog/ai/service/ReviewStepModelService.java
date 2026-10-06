@@ -119,6 +119,6 @@ public class ReviewStepModelService {
         return repository.findByProjectIdAndStepKey(projectId, stepKey)
                 .map(ProjectReviewStepSetting::getLlmModel)
                 .filter(m -> !m.isBlank())
-                .orElseGet(() -> llmModelService.getSelectedModel(projectId));
+                .orElseGet(() -> llmModelService.getSelectedModel(projectId, resolveProvider(projectId, stepKey)));
     }
 }

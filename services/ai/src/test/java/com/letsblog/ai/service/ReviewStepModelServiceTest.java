@@ -141,16 +141,28 @@ class ReviewStepModelServiceTest {
         when(repository.findByProjectIdAndStepKey(1L, ReviewStepKey.STYLE)).thenReturn(Optional.of(style));
 
         assertEquals("gpt-4o", service().resolveModel(1L, ReviewStepKey.STYLE));
-        verify(llmModelService, never()).getSelectedModel(any());
+        verify(llmModelService, never()).getSelectedModel(any(), any());
     }
 
     @Test
     void resolveModel_ステップ未設定ならプロジェクト既定へ委譲する() {
         when(repository.findByProjectIdAndStepKey(1L, ReviewStepKey.STYLE)).thenReturn(Optional.empty());
-        when(llmModelService.getSelectedModel(1L)).thenReturn("gpt-4o-mini");
+        when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OPENAI);
+        when(llmModelService.getSelectedModel(1L, AiProvider.OPENAI)).thenReturn("gpt-4o-mini");
 
         assertEquals("gpt-4o-mini", service().resolveModel(1L, ReviewStepKey.STYLE));
-        verify(llmModelService).getSelectedModel(1L);
+        verify(llmModelService).getSelectedModel(1L, AiProvider.OPENAI);
+    }
+
+    @Test
+    void resolveModel_工程のプロバイダーがプロジェクトと異なりモデル未指定ならその工程のプロバイダーのモデルを返す() {
+        ProjectReviewStepSetting style = new ProjectReviewStepSetting(1L, ReviewStepKey.STYLE);
+        style.setLlmProvider("CLAUDE");
+        when(repository.findByProjectIdAndStepKey(1L, ReviewStepKey.STYLE)).thenReturn(Optional.of(style));
+        when(llmModelService.getSelectedModel(1L, AiProvider.CLAUDE)).thenReturn("claude-sonnet");
+
+        assertEquals("claude-sonnet", service().resolveModel(1L, ReviewStepKey.STYLE));
+        verify(llmModelService, never()).getSelectedModel(any());
     }
 
     @Test
@@ -235,7 +247,8 @@ class ReviewStepModelServiceTest {
         ProjectReviewStepSetting style = new ProjectReviewStepSetting(1L, ReviewStepKey.STYLE);
         style.setLlmModel("");
         when(repository.findByProjectIdAndStepKey(1L, ReviewStepKey.STYLE)).thenReturn(Optional.of(style));
-        when(llmModelService.getSelectedModel(1L)).thenReturn("gpt-4o-mini");
+        when(llmModelService.getSelectedProvider(1L)).thenReturn(AiProvider.OPENAI);
+        when(llmModelService.getSelectedModel(1L, AiProvider.OPENAI)).thenReturn("gpt-4o-mini");
 
         assertEquals("gpt-4o-mini", service().resolveModel(1L, ReviewStepKey.STYLE));
     }
