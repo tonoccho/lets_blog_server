@@ -4614,5 +4614,66 @@ class UnquotedNewlineSeparator(unittest.TestCase):
         self.assertEqual([["echo", "ok"]], self._argvs("echo ok\n\n"))
 
 
+class MidWordHashIsNotAComment(unittest.TestCase):
+    """#1668: `#` は語の先頭にあるときだけコメントの開始である。
+
+    shlex 既定の commenters='#' は語の途中の `#`(`a#b`、URL のフラグメント)も
+    コメントとして行末まで捨て、同じ行の後ろのコマンドの検査をすり抜けていた。
+    """
+
+    OVERWRITE = 'glab api "projects/:id/issues/1" --method PUT -f "labels=bug"'
+    MERGE = "glab mr merge 1 --remove-source-branch"
+
+    @staticmethod
+    def _argvs(command):
+        hooks_dir = os.path.dirname(HOOK)
+        if hooks_dir not in sys.path:
+            sys.path.insert(0, hooks_dir)
+        import guard
+        return [argv for argv, _ in guard.split_commands(command)]
+
+    def test_merge_after_mid_word_hash_is_denied(self):
+        reason = run_hook("bash", bash_payload("echo a#b; " + self.MERGE))
+        self.assertIsNotNone(reason, "語の途中の # の後ろの --squash 無しマージが素通り")
+
+    def test_labels_overwrite_after_url_fragment_is_denied(self):
+        reason = run_hook(
+            "bash", bash_payload("curl https://x/#frag && " + self.OVERWRITE))
+        self.assertIsNotNone(reason, "URL フラグメントの後ろの labels= 上書きが素通り")
+
+    def test_mid_word_hash_is_part_of_the_word(self):
+        self.assertEqual([["echo", "a#b"]], self._argvs("echo a#b"))
+        self.assertEqual(
+            [["curl", "https://x/#frag"]], self._argvs("curl https://x/#frag"))
+        self.assertEqual([["echo", "foo#123"]], self._argvs("echo foo#123"))
+
+    def test_mid_word_hash_before_continuation_keeps_next_line(self):
+        # 行の継続の正規化(#1666)とは独立に、次の行が飲み込まれないことだけを見る。
+        (argv,) = self._argvs("echo a#b \\\nc")
+        self.assertEqual(["echo", "a#b"], argv[:2])
+        self.assertIn("c", "".join(argv[2:]))
+
+    def test_word_initial_hash_is_still_a_comment(self):
+        self.assertEqual([["echo", "a"]], self._argvs("echo a # c"))
+        self.assertEqual([], self._argvs("# comment"))
+        self.assertEqual(
+            [["echo", "a"], ["git", "status"]],
+            self._argvs("echo a # c\ngit status"))
+        self.assertEqual([["echo", "a"]], self._argvs("echo a;# c"))
+
+    def test_escaped_delimiter_before_hash_is_not_a_word_start(self):
+        reason = run_hook(
+            "bash", bash_payload("echo a\\ #x; " + self.MERGE))
+        self.assertIsNotNone(reason, "エスケープした空白の後ろの # で後続が素通り")
+        reason = run_hook(
+            "bash", bash_payload("echo a\\;#x; " + self.MERGE))
+        self.assertIsNotNone(reason, "エスケープした ; の後ろの # で後続が素通り")
+
+    def test_quoted_hash_stays_literal(self):
+        self.assertEqual([["echo", "a # b"]], self._argvs("echo 'a # b'"))
+        self.assertEqual([["echo", "a # b"]], self._argvs('echo "a # b"'))
+        self.assertEqual([["echo", "#x"]], self._argvs("echo \\#x"))
+
+
 if __name__ == "__main__":
     unittest.main()

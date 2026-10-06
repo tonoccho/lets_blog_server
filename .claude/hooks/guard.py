@@ -634,6 +634,55 @@ def separate_unquoted_newlines(command):
     return "".join(out)
 
 
+def strip_word_initial_comments(command):
+    """クォートの外で語の先頭にある `#` から行末までを取り除く(#1668)。
+
+    shlex の既定(commenters='#')は語の途中の `#`(`a#b`、URL のフラグメント)も
+    コメントとして行末まで捨て、同じ行の後ろのコマンドの検査をすり抜けた。bash では
+    `#` が語の先頭(文字列の先頭、空白・改行・`;` `|` `&` `(` の直後)にあるときだけ
+    コメントなので、その規則で自前に取り除き、shlex 側の commenters は空にする。
+    改行そのものは残す(後段が区切りとして扱う)。
+    """
+    if "#" not in command:
+        return command
+    out = []
+    quote = None
+    # 直前の文字が、エスケープされていない区切り(空白・改行・`;` `|` `&` `(`)か
+    # 文字列の先頭か。`a\\ #x` の `\\ ` は区切りではなく語の一部。
+    word_start = True
+    i = 0
+    n = len(command)
+    while i < n:
+        c = command[i]
+        was_start = word_start
+        word_start = False
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif quote == '"':
+            if c == "\\" and i + 1 < n:
+                out.append(c)
+                i += 1
+                c = command[i]
+            elif c == '"':
+                quote = None
+        elif c == "\\" and i + 1 < n:
+            out.append(c)
+            i += 1
+            c = command[i]
+        elif c in "'\"":
+            quote = c
+        elif c == "#" and was_start:
+            while i < n and command[i] != "\n":
+                i += 1
+            continue
+        else:
+            word_start = quote is None and c in " \t\n;|&("
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def split_commands(command):
     """コマンド文字列を「実行される個々のコマンド」のトークン列へ分解する。
 
@@ -651,9 +700,11 @@ def split_commands(command):
     Enforcement → What the guards are, and are not)。
     """
     lexer = shlex.shlex(strip_fd_numbers(
-        separate_unquoted_newlines(strip_heredoc_bodies(command))),
+        separate_unquoted_newlines(
+            strip_word_initial_comments(strip_heredoc_bodies(command)))),
                         posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""
     try:
         tokens = [t for raw in lexer for t in split_glued_separator(raw)]
     except ValueError:
