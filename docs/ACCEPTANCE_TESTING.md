@@ -566,6 +566,58 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 - `CLAUDE.md` → Test-First Implementation → **Never skip a test** が禁じる
   `--grep-invert` 等による除外の**唯一の例外**である(本決定、#1318)。
 
+#### `@requires-real-ai-cpu`: CPU 構成の ComfyUI で実生成する実機 AI レーン(#1401)
+
+`features/media/image-generation-cpu.feature` の1シナリオが、#1395 の CPU 構成(`docker-compose.yml` の
+`comfyui-cpu`、コンテナ `lbs-comfyui-cpu`)に対して**画像が実際に1枚生成されること**を確かめる。網羅ではなく
+「一応動く」ことの確認で、`@requires-gpu`(名称・意味とも据え置き、#1400)とは**別のタグ**である。
+
+| 項目 | 内容 |
+| --- | --- |
+| タグ | `@requires-real-ai-cpu`(+ `@destructive @slow @media @api`) |
+| 段階 | `at-destructive`(`workers: 1`)。システム全体の設定を書き換えるため、他シナリオと同時に走らない |
+| 向き先の切り替え | システム設定 `comfyui_base_url`(DB、環境変数より優先)を `http://lbs-comfyui-cpu:8188` へ書き、生成後に**必ず**元(スタブ)へ戻す。途中で落ちても `After` が戻す。`PlatformServiceClient` の 5 秒キャッシュを越えるため切り替えの前後で 6 秒待つ |
+| 前提 | CPU 構成のコンテナが起動していること。`docker compose --profile cpu up -d comfyui-cpu`。**起動していなければ明示的に失敗する**(暗黙のスキップにしない)。GPU 構成の `lbs-comfyui` は止めなくてよい(コンテナ名で指名する) |
+| チェックポイント | `stabilityai/sd-turbo` の `sd_turbo.safetensors`(約 5.2GB、1 ステップで生成できる蒸留モデル)。非ゲートで認証なしに取得でき、ライセンスは Stability AI Community License(研究・非商用・評価/テスト目的は無償、商用は年商 USD 1M 未満なら登録のうえ無償)。無ければシナリオが導入し、`comfyui_models` は保全ボリュームなので取得は**初回だけ**。導入したモデルは後片付けで消さない |
+| 生成パラメータ | 512x512・`steps=1`・`cfgScale=1.0`・`euler`/`simple`・batchSize=1。media のポーリング予算(batchSize=1 で 120 秒、`ComfyUiClient.MIN_POLL_ATTEMPTS`)を**広げずに**その中へ収める。収まらない場合は予算の見直しが要る(設計変更は #1111 の担当)と結論してシナリオが失敗する |
+| 消費する枠 | `POST /api/ai/image` を 1 回(`UPLOAD_RATE_LIMIT_REQUESTS=40`、現在の消費 12 に対し余裕あり) |
+
+**既定の実行・リリース検証からの除外。** 仕組みは `@requires-gpu` と同型で、生成時タグ式に載せる。
+
+- `test:at:fast` は `@slow` を除くので、このシナリオは含まれない。
+- リリース検証(`release-verify-tag.py`)の `web-test-at-clean` 手順は `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` を設定し、
+  `apps/web/playwright.config.ts` の生成時タグ式(`at-main` / `at-llm-exclusive` / `at-timezone-exclusive` /
+  `at-analytics-exclusive` / `at-preview-exclusive` / `at-threads-exclusive` / `at-facebook-exclusive` /
+  `at-destructive`。`@requires-gpu` の除外を持つ全レーン)が `and not @requires-real-ai-cpu` を足す。`bddgen`
+  は生成時に評価するので、環境変数を変えたら `.features-gen` を作り直すこと。
+- 除外したシナリオ(パスとシナリオ名)は `.feature` の `@requires-real-ai-cpu` から機械的に作り、リリース検証の
+  実行ログ(`==> @requires-real-ai-cpu のシナリオをリリース検証の対象から除外します(#1401)`)とタグの注釈
+  (`@requires-real-ai-cpu 除外(#1401):`)の両方に記録する。0 件のときも「該当なし」と明示する。
+- 除外指定なしの手動の全件実行(`test:at` / `test:at:clean`)では対象に含まれ、CPU 構成のコンテナが無ければ落ちる。
+  CPU 構成を常用しないホストで全件実行が煩わしい場合は、環境変数 `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` を付ける。
+- 新しい compose overlay や Playwright プロジェクトは増やしていない(既存の `at-destructive` と DB 設定の
+  往復で足りるため。`system-settings.feature` の LLM 切替シナリオと同じ定石)。
+- これは `CLAUDE.md` の **Never skip a test** が許す `@requires-gpu` の例外と**同型の、2つ目の生成時除外**である
+  (Issue #1401 要件6が求めたもの)。利用者の決定(#1401、2026-10-05)により、`CLAUDE.md` の例外に並べて記載した。
+- CPU 構成での実生成と所要時間の実測は、利用者の決定(#1401、2026-10-05)により当面実施しない(#1637)。
+  このシナリオは既定実行とリリース検証の対象外のまま置いておく。
+
+**実測所要時間(AC-2)。** 未測定。実装した環境(メモリ空き約 6GB、共有スタックがループと同居)では、
+CPU 構成のコンテナ起動と 5.2GB のモデル導入、fp32 の CPU 生成が共有スタックを圧迫し得るため実行しなかった。
+`.feature` と手順は書いてあるので、CPU 構成のコンテナを起動した環境で
+
+```bash
+cd apps/web && rm -rf .features-gen && npx bddgen && \
+  npx playwright test --reporter=list --project=at-destructive --no-deps -g "CPU構成のComfyUIへ"
+```
+
+を実行し、標準出力の `[real-ai-cpu] POST /api/ai/image 所要時間: N.N秒` を下表へ記録すること。
+120 秒を超えたらシナリオが失敗し、その場合は予算の見直し(#1111)が結論になる。
+
+| 日付 | ホスト CPU | `POST /api/ai/image` の所要時間 | 初回導入を含む総所要 |
+| --- | --- | --- | --- |
+| (未測定) | | | |
+
 #### チェックポイント導入シナリオが使うモデル(#936)
 
 `comfyui-checkpoints.feature` の導入シナリオは **283KB の safetensors**

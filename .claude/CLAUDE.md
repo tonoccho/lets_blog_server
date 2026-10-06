@@ -470,9 +470,15 @@ When a test fails, **fix the production code first**. Change the test only when 
 itself is demonstrably inappropriate (it asserts behavior the Acceptance Criteria do not require,
 or encodes an assumption this Issue deliberately changed) — and report which test and why.
 
-**The one exception** (user's decision, #1318, 2026-09-15): scenarios tagged `@requires-gpu` are
+**The first exception** (user's decision, #1318, 2026-09-15): scenarios tagged `@requires-gpu` are
 excluded from release verification via `AT_EXCLUDE_REQUIRES_GPU=1` in `apps/web/playwright.config.ts`
 (not `--grep-invert`), and the excluded list is recorded — see `docs/ACCEPTANCE_TESTING.md` → `@requires-gpu`.
+
+**The second exception, of the same shape** (user's decision, #1401, 2026-10-05): scenarios tagged
+`@requires-real-ai-cpu` (the real-AI lane against the CPU ComfyUI) are excluded from release
+verification via `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` in `apps/web/playwright.config.ts`, and the
+excluded list is recorded — see `docs/ACCEPTANCE_TESTING.md` → `@requires-real-ai-cpu`. Without that
+variable the scenario runs, and fails explicitly when the CPU ComfyUI is not up.
 
 ---
 

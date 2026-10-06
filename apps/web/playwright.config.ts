@@ -80,6 +80,19 @@ const atProvision = defineBddProject({
  */
 const excludeRequiresGpu = process.env.AT_EXCLUDE_REQUIRES_GPU === '1' ? ' and not @requires-gpu' : '';
 
+/**
+ * issue #1401: CPU 構成の ComfyUI(`lbs-comfyui-cpu`)と約 5GB のモデルを要する実機 AI レーン
+ * (`@requires-real-ai-cpu`、`media/image-generation-cpu.feature`)の除外。`@requires-gpu` とは
+ * 別のタグ・別の環境変数で、その意味には触れない。
+ *
+ * `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` のとき(リリース検証 `scripts/release-verify-tag.py` が設定する)
+ * だけ生成時タグ式から除外する。未設定(手動の `test:at` / `test:at:clean`)では対象に含まれ、
+ * CPU 構成の ComfyUI が起動していなければシナリオが明示的に失敗する(暗黙のスキップにしない)。
+ * `test:at:fast` は `@slow` を除くので、いずれにせよこのシナリオは含まれない。
+ */
+const excludeRequiresRealAiCpu =
+  process.env.AT_EXCLUDE_REQUIRES_REAL_AI_CPU === '1' ? ' and not @requires-real-ai-cpu' : '';
+
 /** 段階4: それ以外すべて。@destructive は含めない(下の at-destructive が最後にまとめて実行する)。
  * `@stub-isolation:llm`(下の at-llm-exclusive)、`@account-isolation:timezone`
  * (下の at-timezone-exclusive、issue #1374)、`@stub-isolation:analytics`
@@ -92,7 +105,7 @@ const atMain = defineBddProject({
     'not @stage:setup and not @stage:provision and not @destructive'
     + ' and not @stub-isolation:llm and not @account-isolation:timezone'
     + ' and not @stub-isolation:analytics and not @site-isolation:preview'
-    + excludeRequiresGpu,
+    + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -167,7 +180,7 @@ const atLlmExclusive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-llm-exclusive',
   outputDir: '.features-gen/at-llm-exclusive',
-  tags: '@stub-isolation:llm' + excludeRequiresGpu,
+  tags: '@stub-isolation:llm' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -230,7 +243,7 @@ const atTimezoneExclusive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-timezone-exclusive',
   outputDir: '.features-gen/at-timezone-exclusive',
-  tags: '@account-isolation:timezone' + excludeRequiresGpu,
+  tags: '@account-isolation:timezone' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -298,7 +311,7 @@ const atAnalyticsExclusive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-analytics-exclusive',
   outputDir: '.features-gen/at-analytics-exclusive',
-  tags: '@stub-isolation:analytics' + excludeRequiresGpu,
+  tags: '@stub-isolation:analytics' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -315,7 +328,7 @@ const atPreviewExclusive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-preview-exclusive',
   outputDir: '.features-gen/at-preview-exclusive',
-  tags: '@site-isolation:preview' + excludeRequiresGpu,
+  tags: '@site-isolation:preview' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -331,7 +344,7 @@ const atThreadsExclusive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-threads-exclusive',
   outputDir: '.features-gen/at-threads-exclusive',
-  tags: '@stub-isolation:threads' + excludeRequiresGpu,
+  tags: '@stub-isolation:threads' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -343,7 +356,7 @@ const atFacebookExclusive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-facebook-exclusive',
   outputDir: '.features-gen/at-facebook-exclusive',
-  tags: '@stub-isolation:facebook' + excludeRequiresGpu,
+  tags: '@stub-isolation:facebook' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**
@@ -390,7 +403,7 @@ const atDestructive = defineBddProject({
   ...BDD_COMMON,
   name: 'at-destructive',
   outputDir: '.features-gen/at-destructive',
-  tags: '@destructive and not @stage:setup and not @stage:provision' + excludeRequiresGpu,
+  tags: '@destructive and not @stage:setup and not @stage:provision' + excludeRequiresGpu + excludeRequiresRealAiCpu,
 });
 
 /**

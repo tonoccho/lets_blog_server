@@ -1436,6 +1436,97 @@ class NoExcludedScenariosIsStatedExplicitly(Harness):
         self.assertIn("該当なし", out, out)
 
 
+class RequiresRealAiCpuLaneIsExcludedFromReleaseVerification(Harness):
+    """#1401 要件6: 実機AI(CPU構成のComfyUI)レーンは `@requires-gpu` と同型の生成時タグ式で
+    リリース検証から除外し、除外した事実を実行ログとタグ注釈に残す。"""
+
+    FEATURE_REL = "apps/web/e2e/features/media/cpu-dummy.feature"
+    FEATURE_TEXT = (
+        "@media @slow\n"
+        "機能: CPU構成AIのダミー\n"
+        "\n"
+        "  @destructive @requires-real-ai-cpu\n"
+        "  シナリオ: CPU構成のAIが要るダミーシナリオ\n"
+        "    もし 何かする\n"
+        "    ならば 何か起きる\n"
+        "\n"
+        "  シナリオ: CPU構成が要らないダミーシナリオ\n"
+        "    もし 何かする\n"
+        "    ならば 何か起きる\n"
+    )
+
+    def test_web_test_at_clean_sets_the_exclusion_env_var(self):
+        step = {s["name"]: s for s in rvt.DEFAULT_STEPS}["web-test-at-clean"]
+        self.assertEqual("1", step.get("env", {}).get("AT_EXCLUDE_REQUIRES_REAL_AI_CPU"))
+        # @requires-gpu の除外は据え置き(#1401は既存タグの意味に触れない)。
+        self.assertEqual("1", step.get("env", {}).get("AT_EXCLUDE_REQUIRES_GPU"))
+
+    def test_scenario_and_feature_level_tags_are_found_mechanically(self):
+        tmp = tempfile.mkdtemp(prefix="rvt-cpu-features-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = os.path.join(tmp, self.FEATURE_REL)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.FEATURE_TEXT)
+        other = os.path.join(tmp, "apps/web/e2e/features/media/feature-level.feature")
+        with open(other, "w", encoding="utf-8") as f:
+            f.write(
+                "@requires-real-ai-cpu\n機能: フィーチャ単位\n\n"
+                "  シナリオ: 全部対象\n    もし 何かする\n    ならば 何か起きる\n"
+            )
+        self.assertEqual(
+            [
+                ("apps/web/e2e/features/media/cpu-dummy.feature", "CPU構成のAIが要るダミーシナリオ"),
+                ("apps/web/e2e/features/media/feature-level.feature", "全部対象"),
+            ],
+            rvt.find_requires_real_ai_cpu_scenarios(tmp),
+        )
+
+    def test_requires_gpu_scan_does_not_pick_up_the_cpu_lane_tag(self):
+        tmp = tempfile.mkdtemp(prefix="rvt-cpu-features-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        path = os.path.join(tmp, self.FEATURE_REL)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.FEATURE_TEXT)
+        self.assertEqual([], rvt.find_requires_gpu_scenarios(tmp))
+
+    def test_excluded_cpu_lane_scenario_appears_in_run_log_and_tag_message(self):
+        commit(self.origin.seed, "add requires-real-ai-cpu fixture (#1401)", {self.FEATURE_REL: self.FEATURE_TEXT})
+        git(["push", "origin", "develop"], cwd=self.origin.seed)
+        table = self.write_step_table(self.default_steps())
+        r = self.run_script(
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn("@requires-real-ai-cpu", out, out)
+        self.assertIn("CPU構成のAIが要るダミーシナリオ", out, out)
+        self.assertNotIn("CPU構成が要らないダミーシナリオ", out, out)
+        version_tags = [t for t in self.origin.tags() if t != "0.3.0"]
+        self.assertEqual(1, len(version_tags), version_tags)
+        msg = git(["tag", "-l", "-n99", version_tags[0]], cwd=self.origin.bare).stdout
+        self.assertIn("@requires-real-ai-cpu 除外(#1401)", msg, msg)
+        self.assertIn("CPU構成のAIが要るダミーシナリオ", msg, msg)
+        self.assertNotIn("CPU構成が要らないダミーシナリオ", msg, msg)
+
+    def test_empty_cpu_lane_exclusion_is_stated_explicitly(self):
+        table = self.write_step_table(self.default_steps())
+        r = self.run_script(
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": table,
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+            },
+        )
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertIn("@requires-real-ai-cpu", out, out)
+        self.assertIn("該当なし", out, out)
+
+
 class RealShapedStepEndToEndSkipIsCaughtByParser(Harness):
     """要件5(統合): counts_parser 配線が main() の実行を通じて実際に効くこと
     (exit codeが0でも、パーサが skipped>0 を検出したら失敗する)。"""
