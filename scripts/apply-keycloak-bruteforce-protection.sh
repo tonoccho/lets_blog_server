@@ -23,6 +23,15 @@
 #    (このスクリプト自身に値をハードコードせず、realm-export.jsonを正として読む。
 #    値がずれて2箇所を個別に直す事故を防ぐため)。
 #
+# ■ editUsernameAllowed も同じ経路で反映する(#1592)
+# メールアドレス更新は #1192 の方針で username も Keycloak へ PUT する。realm の
+# editUsernameAllowed が false だと error-user-attribute-read-only で拒否され 502 になるため、
+# realm-export.json の値(true)をこのスクリプトで稼働中レルムへ反映する。
+# 反映は稼働中 Keycloak の変更であり、実行前に利用者の明示的な確認を得ること
+# (CLAUDE.md → Autonomous Task Execution の live-system mutation)。確認なしに実行しない。
+# 代替は scripts/rebuild-acceptance-env.sh --yes(ゼロ構築。realm-export.json から再インポート)。
+# 反映済みなら PUT せず「変更なし」で終わる(冪等)。
+#
 # ■ 使い方
 #   ./scripts/apply-keycloak-bruteforce-protection.sh
 #
@@ -93,7 +102,8 @@ DESIRED_JSON="$(
     quickLoginCheckMilliSeconds,
     maxDeltaTimeSeconds,
     failureFactor,
-    maxSecondaryAuthFailures
+    maxSecondaryAuthFailures,
+    editUsernameAllowed
   }' "$REALM_EXPORT_FILE"
 )"
 
@@ -111,7 +121,12 @@ UPDATED_REALM_JSON="$(
   echo "$CURRENT_REALM_JSON" | jq --argjson desired "$DESIRED_JSON" '. * $desired'
 )"
 
-echo "brute force detection の設定を反映します (PUT /admin/realms/$REALM)..."
+if [ "$(echo "$UPDATED_REALM_JSON" | jq -S .)" = "$(echo "$CURRENT_REALM_JSON" | jq -S .)" ]; then
+  echo "既に realm-export.json と一致しています(変更なし)。"
+  exit 0
+fi
+
+echo "brute force detection / editUsernameAllowed の設定を反映します (PUT /admin/realms/$REALM)..."
 HTTP_STATUS="$(
   curl -sk -o /tmp/apply-keycloak-bruteforce-protection.response.json -w '%{http_code}' \
     -X PUT "$API_BASE_URL/auth/admin/realms/$REALM" \
@@ -133,5 +148,6 @@ curl -sk "$API_BASE_URL/auth/admin/realms/$REALM" -H "Authorization: Bearer $ADM
     failureFactor,
     waitIncrementSeconds,
     maxFailureWaitSeconds,
-    permanentLockout
+    permanentLockout,
+    editUsernameAllowed
   }'

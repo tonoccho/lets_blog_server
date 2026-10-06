@@ -144,5 +144,17 @@ class RealmExportOfflineSessionPolicyTest(unittest.TestCase):
         self.assertIs(self.realm["revokeRefreshToken"], False)
 
 
+class RealmExportEditUsernameAllowedTest(unittest.TestCase):
+    """#1592: メール更新は #1192 の方針で username も PUT するため、Keycloak 側で
+    username の編集を許可しておく必要がある(false だと error-user-attribute-read-only で 502)。
+    Web UI から到達できない realm 設定なのでここで表現する。
+    """
+
+    def test_edit_username_is_allowed(self):
+        with open(REALM_EXPORT, encoding="utf-8") as f:
+            realm = json.load(f)
+        self.assertIs(realm["editUsernameAllowed"], True)
+
+
 if __name__ == "__main__":
     unittest.main()
