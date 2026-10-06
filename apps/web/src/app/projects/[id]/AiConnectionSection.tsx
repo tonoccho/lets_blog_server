@@ -28,7 +28,7 @@ function errorText(err: unknown): string {
 }
 
 /**
- * Ollama(LLMタブ)/ ComfyUI(画像生成タブ)の接続情報(issue #1504)。
+ * Ollama / ComfyUI の接続情報(issue #1504。#1669 で設定タブへ移した)。
  *
  * 接続先URLと出所(#1503のAPI)は速いので先に表示し、利用可否(#1499のAPI。疎通確認で最大数秒かかる)は
  * 別に取得して「確認中…」から差し替える。どちらもタブの表示時にクライアント側で取得し、失敗は

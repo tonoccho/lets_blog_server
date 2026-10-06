@@ -50,7 +50,7 @@ for (const name of [
   "ProjectAiModelsPanel", "ProjectAssetGenerationPanel", "ProjectImageGenerationPromptDefaultsForm",
   "ProjectImageGenerationSizeDefaultsForm", "ProjectArticleImageResizeDefaultForm",
   "ProjectImageContentFilterSettingsForm", "ProjectNameForm", "DeleteProjectButton", "ProjectUserManager",
-  "AddProjectUserModal",
+  "AddProjectUserModal", "AiConnectionSection", "ChatGptConnectionSection", "ClaudeConnectionSection",
 ]) {
   jest.mock(`../${name}`, () => ({ [name]: () => null }));
 }

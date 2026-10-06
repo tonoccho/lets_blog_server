@@ -11,7 +11,7 @@ import {
 } from '../support';
 
 /**
- * プロジェクト詳細画面「AI・アセット」タブの接続情報セクション(issue #1504)のステップ定義。
+ * プロジェクト詳細画面「設定」タブの接続情報セクション(issue #1504。#1669 で AI・アセットタブから移した)のステップ定義。
  * 他のai系ステップ定義ファイルと同様、ヘルパーはこのファイル内に閉じて持つ。
  */
 
@@ -43,11 +43,11 @@ function field(page: Page, provider: 'Ollama' | 'ComfyUI', term: string): Locato
 }
 
 /**
- * 「AI・アセット」タブを開き、Ollamaの接続情報が見えるまでクリックを再試行する
+ * 「設定」タブを開き、Ollamaの接続情報が見えるまでクリックを再試行する
  * (ハイドレーション前のクリック取りこぼし対策。aiReviewStepModelSettings.steps.tsと同じ)。
  */
 async function openAiTab(page: Page): Promise<void> {
-  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
+  const aiTab = page.getByRole('button', { name: '設定', exact: true });
   await expect(aiTab).toBeVisible({ timeout: 30_000 });
   const marker = page.getByRole('heading', { name: 'Ollamaの接続情報' });
   await expect(async () => {
@@ -56,24 +56,15 @@ async function openAiTab(page: Page): Promise<void> {
   }).toPass({ timeout: 30_000 });
 }
 
-When('接続情報パネル検証用のプロジェクトのAI・アセットタブのLLMタブを開く', async ({ ctx, page }) => {
+When('接続情報パネル検証用のプロジェクトの設定タブを開く', async ({ ctx, page }) => {
   await loginAsAdmin(page);
   await page.goto(`/projects/${ctx.connectionPanelProjectId}`, { waitUntil: 'commit' });
   await openAiTab(page);
 });
 
-When('画面を再読み込みしてLLMタブを開く', async ({ page }) => {
+When('画面を再読み込みして設定タブを開く', async ({ page }) => {
   await page.reload({ waitUntil: 'commit' });
   await openAiTab(page);
-});
-
-When('画像生成タブを開く', async ({ page }) => {
-  const tab = page.getByRole('button', { name: '画像生成', exact: true });
-  const marker = page.getByRole('heading', { name: 'ComfyUIの接続情報' });
-  await expect(async () => {
-    await tab.click();
-    await expect(marker).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
 });
 
 When(/^OllamaのURL入力欄に「(.+)」を入力して保存する$/, async ({ page }, value: string) => {

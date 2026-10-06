@@ -20,7 +20,7 @@ Given('応答時間予算の検証用に、AT-7 のテストとローカルの�
 });
 
 async function openBulkTab(page: Page, ctx: Record<string, unknown>, tab?: string): Promise<void> {
-  await openLocation(page, ctx, '一括管理');
+  await openLocation(page, ctx, 'メンテナンス');
   if (tab === undefined) return;
   const button = page.getByRole('button', { name: tab, exact: true });
   await expect(button).toBeVisible({ timeout: 30_000 });

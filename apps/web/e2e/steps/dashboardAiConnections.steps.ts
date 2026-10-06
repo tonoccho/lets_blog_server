@@ -59,10 +59,10 @@ Then('4行のどれにも「利用可能」か「利用不可」のバッジが�
   }
 });
 
-Then('AI接続状況のChatGPTの行は「利用不可」でAI・アセットタブへのリンクがある', async ({ page, ctx }) => {
+Then('AI接続状況のChatGPTの行は「利用不可」で設定タブへのリンクがある', async ({ page, ctx }) => {
   const chatGpt = row(page, 'ChatGPT');
   await expect(chatGpt.getByText('利用不可', { exact: true })).toBeVisible();
-  await expect(chatGpt.getByRole('link')).toHaveAttribute('href', `/projects/${ctx.aiWidgetProjectId as number}?tab=ai-models`);
+  await expect(chatGpt.getByRole('link')).toHaveAttribute('href', `/projects/${ctx.aiWidgetProjectId as number}?tab=settings`);
 });
 
 Then('AI接続状況のChatGPTの行は「利用可能」でリンクがない', async ({ page }) => {
@@ -71,9 +71,9 @@ Then('AI接続状況のChatGPTの行は「利用可能」でリンクがない',
   await expect(chatGpt.getByRole('link')).toHaveCount(0);
 });
 
-Then('プロジェクト詳細のAI・アセットタブが選択されている', async ({ page, ctx }) => {
-  await expect(page).toHaveURL(new RegExp(`/projects/${ctx.aiWidgetProjectId as number}\\?tab=ai-models`));
-  await expect(page.getByRole('button', { name: 'AI・アセット', exact: true })).toHaveAttribute('aria-pressed', 'true');
+Then('プロジェクト詳細の設定タブが選択されている', async ({ page, ctx }) => {
+  await expect(page).toHaveURL(new RegExp(`/projects/${ctx.aiWidgetProjectId as number}\\?tab=settings`));
+  await expect(page.getByRole('button', { name: '設定', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 After({ tags: '@ai' }, async ({ ctx, request }) => {

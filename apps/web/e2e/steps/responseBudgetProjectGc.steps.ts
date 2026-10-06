@@ -21,9 +21,9 @@ Given('ローカルの実 WordPress にどの投稿からも参照されない�
   registerCleanup(ctx, async () => deleteMedia(wpSlug(TARGET_SITE_KEY), id));
 });
 
-/** ガベージコレクションのタブを開き、環境を「ローカル」にしてスキャンボタンを返す(計測しない)。 */
+/** メンテナンスタブを開き、環境を「ローカル」にしてスキャンボタンを返す(計測しない)。 */
 async function openGcAndSelectLocal(page: Page, ctx: Record<string, unknown>) {
-  await openLocation(page, ctx, 'ガベージコレクション');
+  await openLocation(page, ctx, 'メンテナンス');
   const select = page.getByRole('combobox', { name: '環境' });
   await expect(select).toBeVisible({ timeout: 30_000 });
   await waitForHydrated(select);

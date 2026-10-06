@@ -46,15 +46,15 @@ When('情報表示レールの「操作ログ」タブを選んで Server Action
   record(ctx, timing.roundTripMs, '情報表示レールの操作ログ取得');
 });
 
-// ---- AI・アセットタブ(fetchAiConnectionsAction / fetchProjectConnectionsAction ほか) ----
+// ---- 設定タブの AI 接続情報(fetchAiConnectionsAction / fetchProjectConnectionsAction ほか) ----
 
 const claudeHeading = (page: Page): Locator => page.getByRole('heading', { name: 'Claudeの接続情報' });
 const section = (page: Page, title: string): Locator =>
   page.locator('section', { has: page.getByRole('heading', { name: title }) });
 
-/** 「AI・アセット」タブを開き、接続情報が見えるまでクリックを再試行する(タブを開くのはべき等)。 */
+/** 「設定」タブを開き、接続情報が見えるまでクリックを再試行する(タブを開くのはべき等)。 */
 async function selectAiTab(page: Page): Promise<void> {
-  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
+  const aiTab = page.getByRole('button', { name: '設定', exact: true });
   await expect(aiTab).toBeVisible({ timeout: 30_000 });
   await clickUntilVisible(aiTab, claudeHeading(page), { timeoutMs: 30_000 });
 }
@@ -73,32 +73,30 @@ async function waitForConnectionsLoaded(page: Page): Promise<void> {
 }
 
 When(
-  /^「(.+)」を開いて AI・アセットタブを選び Server Action の往復を計測する$/,
+  /^「(.+)」を開いて設定タブを選び Server Action の往復を計測する$/,
   async ({ page, ctx }, path: string) => {
     await page.goto(resolve(ctx, path), { waitUntil: 'commit' });
     const timing = await measureServerActionRoundTrip(page, async () => {
       await selectAiTab(page);
       await waitForConnectionsLoaded(page);
     });
-    // タブを開くと、LLM タブは次の Server Action を送る(ProjectAiModelsPanel / AiConnectionSection /
-    // ChatGptConnectionSection / ClaudeConnectionSection の mount 時の取得):
-    //   fetchLlmModelsAction・fetchLlmProviderAction・fetchReviewStepSettingsAction ... 3
-    //   fetchProjectConnectionsAction(Ollama)                                         ... 1
-    //   fetchAiConnectionsAction(Ollama の checkStatus・ChatGPT・Claude)              ... 3
-    // 計3+1+3=7本。宣言した2種類(計4本)を取りこぼしたまま通さないため、7本に届かなければ失敗させる。
+    // 設定タブを開くと、接続情報の4セクション(AiConnectionSection の Ollama・ComfyUI /
+    // ChatGptConnectionSection / ClaudeConnectionSection)が mount 時に次の Server Action を送る(#1669):
+    //   fetchProjectConnectionsAction(Ollama・ComfyUI)                     ... 2
+    //   fetchAiConnectionsAction(Ollama・ComfyUI の checkStatus・ChatGPT・Claude) ... 4
+    // 計2+4=6本。宣言した2種類を取りこぼしたまま通さないため、6本に届かなければ失敗させる。
     // 共通の計測は最遅の往復しか返さないので、本数はこのステップで確かめる。
-    // (ComfyUI の接続情報は「画像生成」サブタブで初めて mount されるので、ここには含まれない。)
     expect(
       timing.requestCount,
       `捕捉した Server Action の往復が少なすぎます(${timing.roundTripsMs.join(', ')}ms)。` +
         'fetchProjectConnectionsAction / fetchAiConnectionsAction を測り損ねている可能性があります'
-    ).toBeGreaterThanOrEqual(7);
+    ).toBeGreaterThanOrEqual(6);
     console.log(`AI接続情報の取得: 捕捉 ${timing.requestCount} 本 [${timing.roundTripsMs.join(', ')}]ms`);
     record(ctx, timing.roundTripMs, 'AI接続情報の取得');
   }
 );
 
-When(/^「(.+)」のAI・アセットタブを開いておく$/, async ({ page, ctx }, path: string) => {
+When(/^「(.+)」の設定タブを開いておく$/, async ({ page, ctx }, path: string) => {
   await page.goto(resolve(ctx, path), { waitUntil: 'commit' });
   await selectAiTab(page);
   // 取得(接続状態の表示)が終わってから操作する。

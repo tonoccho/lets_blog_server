@@ -11,7 +11,7 @@ import {
 } from '../support';
 
 /**
- * プロジェクト詳細画面「AI・アセット」タブのChatGPT接続情報セクション(issue #1506)のステップ定義。
+ * プロジェクト詳細画面「設定」タブのChatGPT接続情報セクション(issue #1506)のステップ定義。
  * 他のai系ステップ定義ファイルと同様、ヘルパーはこのファイル内に閉じて持つ。
  * 実OpenAIへはリクエストを送らない(保存はai-serviceのDBへ暗号化して入れるだけ)。
  */
@@ -43,9 +43,9 @@ function field(page: Page, term: string): Locator {
   return section(page).locator(`dt:has-text("${term}") + dd`);
 }
 
-/** 「AI・アセット」タブを開き、ChatGPTの接続情報が見えるまでクリックを再試行する(ハイドレーション前のクリック取りこぼし対策)。 */
+/** 「設定」タブを開き、ChatGPTの接続情報が見えるまでクリックを再試行する(ハイドレーション前のクリック取りこぼし対策)。 */
 async function openAiTab(page: Page): Promise<void> {
-  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
+  const aiTab = page.getByRole('button', { name: '設定', exact: true });
   await expect(aiTab).toBeVisible({ timeout: 30_000 });
   const marker = page.getByRole('heading', { name: 'ChatGPTの接続情報' });
   await expect(async () => {
@@ -54,13 +54,13 @@ async function openAiTab(page: Page): Promise<void> {
   }).toPass({ timeout: 30_000 });
 }
 
-When('ChatGPT接続検証用のプロジェクトのLLMタブを開く', async ({ ctx, page }) => {
+When('ChatGPT接続検証用のプロジェクトの設定タブを開く', async ({ ctx, page }) => {
   await loginAsAdmin(page);
   await page.goto(`/projects/${ctx.chatGptProjectId}`, { waitUntil: 'commit' });
   await openAiTab(page);
 });
 
-When('画面を再読み込みしてChatGPT接続検証用のLLMタブを開く', async ({ page }) => {
+When('画面を再読み込みしてChatGPT接続検証用の設定タブを開く', async ({ page }) => {
   await page.reload({ waitUntil: 'commit' });
   await openAiTab(page);
 });

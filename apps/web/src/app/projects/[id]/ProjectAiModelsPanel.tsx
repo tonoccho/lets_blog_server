@@ -20,9 +20,6 @@ import { LlmProviderPanel } from "./LlmProviderPanel";
 import { ReviewStepSettingsPanel } from "./ReviewStepSettingsPanel";
 import { ImageProviderPanel } from "./ImageProviderPanel";
 import { ComfyUiCheckpointTable } from "./ComfyUiCheckpointTable";
-import { AiConnectionSection } from "./AiConnectionSection";
-import { ChatGptConnectionSection } from "./ChatGptConnectionSection";
-import { ClaudeConnectionSection } from "./ClaudeConnectionSection";
 
 type Tab = "LLM" | "COMFYUI";
 
@@ -119,9 +116,6 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
       {tab === "LLM" &&
         (llmData ? (
           <div className="space-y-4">
-            <AiConnectionSection projectId={projectId} provider="OLLAMA" />
-            <ChatGptConnectionSection projectId={projectId} />
-            <ClaudeConnectionSection projectId={projectId} />
             {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} onChanged={handleProviderChanged} />}
             <LlmModelPanel
               key={llmModelVersion}
@@ -139,7 +133,6 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
       {tab === "COMFYUI" &&
         (comfyuiData ? (
           <div className="space-y-4">
-            <AiConnectionSection projectId={projectId} provider="COMFYUI" />
             {imageProviderData && <ImageProviderPanel projectId={projectId} initialData={imageProviderData} />}
             <ComfyUiCheckpointTable projectId={projectId} initialData={comfyuiData} />
           </div>

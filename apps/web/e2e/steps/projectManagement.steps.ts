@@ -203,6 +203,13 @@ When('そのプロジェクトを削除する', async ({ page, ctx }) => {
   // window.confirm()の確認ダイアログを承認しないと削除は実行されない。
   await loginAsAdmin(page);
   await page.goto(`/projects/${projectId}`);
+  // 削除ボタンはメンテナンスタブにある(issue #1669)。ハイドレーション前のクリックの空振りに備え、選択されるまで押す。
+  const maintenanceTab = page.getByRole('button', { name: 'メンテナンス', exact: true });
+  await expect(maintenanceTab).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    await maintenanceTab.click();
+    await expect(maintenanceTab).toHaveAttribute('aria-pressed', 'true', { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
   await expect(page.locator('button:has-text("プロジェクトを削除")')).toBeVisible();
   // issue #1386: goto直後はハイドレーション未完了でクリックが空振りしうるため、一覧へ遷移するまで
   // クリックし直す。確認ダイアログは再試行のたびに出るので毎回acceptする。

@@ -32,6 +32,8 @@ jest.mock('@/components/Tabs', () => ({
       <section data-testid="active-tab">{tabs[0].content}</section>
       {/* 「AI・アセット」タブ(issue #1408: ?imageJob の受け渡しを見る)。 */}
       <section data-testid="ai-models-tab">{tabs.find((t) => t.id === 'ai-models')?.content}</section>
+      {/* 全タブの中身を id ごとに描く(タブの振り分けを見る, issue #1669)。 */}
+      {tabs.map((t) => <section key={t.id} data-testid={`tab-${t.id}`}>{t.content}</section>)}
     </div>
   ),
 }))
@@ -41,10 +43,15 @@ jest.mock('../EnvironmentSlot', () => ({ EnvironmentSlot: () => null }))
 jest.mock('../MasterEnvironmentSelector', () => ({ MasterEnvironmentSelector: () => null }))
 jest.mock('../ProjectGithubRepositoryForm', () => ({ ProjectGithubRepositoryForm: () => null }))
 jest.mock('../ProjectApiKeysForm', () => ({ ProjectApiKeysForm: () => null }))
-jest.mock('../EnvironmentSyncPanel', () => ({ EnvironmentSyncPanel: () => null }))
-jest.mock('../BulkManagementPanel', () => ({ BulkManagementPanel: () => null }))
-jest.mock('../GarbageCollectionPanel', () => ({ GarbageCollectionPanel: () => null }))
-jest.mock('../ProjectAiModelsPanel', () => ({ ProjectAiModelsPanel: () => null }))
+jest.mock('../EnvironmentSyncPanel', () => ({ EnvironmentSyncPanel: () => <div data-testid="sync-panel" /> }))
+jest.mock('../BulkManagementPanel', () => ({ BulkManagementPanel: () => <div data-testid="bulk-panel" /> }))
+jest.mock('../GarbageCollectionPanel', () => ({ GarbageCollectionPanel: () => <div data-testid="gc-panel" /> }))
+jest.mock('../ProjectAiModelsPanel', () => ({ ProjectAiModelsPanel: () => <div data-testid="ai-models-panel" /> }))
+jest.mock('../AiConnectionSection', () => ({
+  AiConnectionSection: ({ provider }: { provider: string }) => <div data-testid={`connection-${provider}`} />,
+}))
+jest.mock('../ChatGptConnectionSection', () => ({ ChatGptConnectionSection: () => <div data-testid="connection-CHATGPT" /> }))
+jest.mock('../ClaudeConnectionSection', () => ({ ClaudeConnectionSection: () => <div data-testid="connection-CLAUDE" /> }))
 jest.mock('../ProjectAssetGenerationPanel', () => ({
   ProjectAssetGenerationPanel: ({ imageJobId }: { imageJobId?: number }) => (
     <div data-testid="asset-panel" data-image-job-id={imageJobId ?? ''} />
@@ -54,8 +61,8 @@ jest.mock('../ProjectImageGenerationPromptDefaultsForm', () => ({ ProjectImageGe
 jest.mock('../ProjectImageGenerationSizeDefaultsForm', () => ({ ProjectImageGenerationSizeDefaultsForm: () => null }))
 jest.mock('../ProjectArticleImageResizeDefaultForm', () => ({ ProjectArticleImageResizeDefaultForm: () => null }))
 jest.mock('../ProjectImageContentFilterSettingsForm', () => ({ ProjectImageContentFilterSettingsForm: () => null }))
-jest.mock('../ProjectNameForm', () => ({ ProjectNameForm: () => null }))
-jest.mock('../DeleteProjectButton', () => ({ DeleteProjectButton: () => null }))
+jest.mock('../ProjectNameForm', () => ({ ProjectNameForm: () => <div data-testid="name-form" /> }))
+jest.mock('../DeleteProjectButton', () => ({ DeleteProjectButton: () => <button>プロジェクトを削除</button> }))
 jest.mock('../ProjectUserManager', () => ({ ProjectUserManager: () => null }))
 jest.mock('../AddProjectUserModal', () => ({ AddProjectUserModal: () => <form data-testid="add-member-form" /> }))
 
@@ -73,15 +80,89 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
     getProject.mockResolvedValue({ id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null })
     render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
     expect(screen.getByRole('heading', { name: 'サンプル案件' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '一括管理' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'メンテナンス' })).toBeInTheDocument()
     expect(notFound).not.toHaveBeenCalled()
   })
 
-  it('概要タブに SNS 告知の設定画面へのリンクを出す(issue #1574)', async () => {
-    getProject.mockResolvedValue({ id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null })
-    render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
-    const link = within(screen.getByTestId('active-tab')).getByRole('link', { name: 'SNS 告知の設定' })
-    expect(link).toHaveAttribute('href', '/projects/7/settings/sns')
+  describe('タブの再編(issue #1669)', () => {
+    const project = { id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null }
+    const open = async () => {
+      getProject.mockResolvedValue(project)
+      return render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
+    }
+
+    it('タブは「概要」「設定」「AI・アセット」「メンバー」「メンテナンス」の順で、id は overview / settings / ai-models / members / maintenance', async () => {
+      await open()
+      expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual([
+        '概要',
+        '設定',
+        'AI・アセット',
+        'メンバー',
+        'メンテナンス',
+        'プロジェクトを削除',
+      ])
+      for (const id of ['overview', 'settings', 'ai-models', 'members', 'maintenance']) {
+        expect(screen.getByTestId(`tab-${id}`)).toBeInTheDocument()
+      }
+    })
+
+    it('メンテナンスタブに一括管理・ガベージコレクション・プロジェクト削除を置き、他のタブには削除ボタンが無い', async () => {
+      await open()
+      const tab = within(screen.getByTestId('tab-maintenance'))
+      expect(tab.getByTestId('bulk-panel')).toBeInTheDocument()
+      expect(tab.getByTestId('gc-panel')).toBeInTheDocument()
+      expect(tab.getByRole('button', { name: 'プロジェクトを削除' })).toBeInTheDocument()
+      for (const id of ['overview', 'settings', 'ai-models', 'members']) {
+        expect(within(screen.getByTestId(`tab-${id}`)).queryByRole('button', { name: 'プロジェクトを削除' })).toBeNull()
+      }
+      expect(screen.getAllByRole('button', { name: 'プロジェクトを削除' })).toHaveLength(1)
+    })
+
+    it('設定タブに全般(プロジェクト名・環境同期)・GitHub/APIキー・4つのAI接続を置き、AI・アセットタブには接続を置かない', async () => {
+      await open()
+      const settings = within(screen.getByTestId('tab-settings'))
+      expect(settings.getByTestId('name-form')).toBeInTheDocument()
+      expect(settings.getByTestId('sync-panel')).toBeInTheDocument()
+      for (const key of ['OLLAMA', 'COMFYUI', 'CHATGPT', 'CLAUDE']) {
+        expect(settings.getByTestId(`connection-${key}`)).toBeInTheDocument()
+      }
+      const ai = within(screen.getByTestId('tab-ai-models'))
+      expect(ai.getByTestId('ai-models-panel')).toBeInTheDocument()
+      expect(ai.queryByTestId(/^connection-/)).toBeNull()
+      // 概要には名前フォームも環境同期も置かない
+      const overview = within(screen.getByTestId('tab-overview'))
+      expect(overview.queryByTestId('name-form')).toBeNull()
+      expect(overview.queryByTestId('sync-panel')).toBeNull()
+    })
+
+    it('設定タブに SNS 告知・Google Analytics・Google AdSense の設定ページへのリンクを置き、概要タブには SNS 告知のカードを置かない(issue #1574 の移動)', async () => {
+      await open()
+      const settings = within(screen.getByTestId('tab-settings'))
+      expect(settings.getByRole('link', { name: 'SNS 告知の設定' })).toHaveAttribute('href', '/projects/7/settings/sns')
+      expect(settings.getByRole('link', { name: 'Google Analytics の設定' })).toHaveAttribute(
+        'href',
+        '/projects/7/settings/google-analytics',
+      )
+      expect(settings.getByRole('link', { name: 'Google AdSense の設定' })).toHaveAttribute('href', '/projects/7/settings/adsense')
+      expect(within(screen.getByTestId('tab-overview')).queryByRole('link', { name: 'SNS 告知の設定' })).toBeNull()
+    })
+
+    it.each([
+      ['overview', 'overview'],
+      ['settings', 'settings'],
+      ['ai-models', 'ai-models'],
+      ['members', 'members'],
+      ['maintenance', 'maintenance'],
+      ['bulk-management', 'maintenance'],
+      ['garbage-collection', 'maintenance'],
+      ['unknown-tab', 'unknown-tab'],
+    ])('?tab=%s のとき初期選択のタブは「%s」', async (query, expected) => {
+      getProject.mockResolvedValue(project)
+      const { container } = render(
+        await ProjectDetailPage({ params: Promise.resolve({ id: '7' }), searchParams: Promise.resolve({ tab: query }) }),
+      )
+      expect(container.querySelector('[data-default-tab]')).toHaveAttribute('data-default-tab', expected)
+    })
   })
 
   it('プロジェクトが取得できなければ notFound() になる(loading UI のまま止まらない)', async () => {

@@ -290,7 +290,7 @@ async function dismissDeleteConfirmation(
   const resource = ctx.bdcResource as Resource;
   await loginAsAdmin(page);
   await page.goto(`/projects/${ctx.bdcProjectId}`);
-  await page.getByRole("button", { name: "一括管理", exact: true }).click();
+  await page.getByRole("button", { name: "メンテナンス", exact: true }).click();
   if (resource !== "category") {
     await page
       .getByRole("button", { name: TAB_LABEL[resource], exact: true })

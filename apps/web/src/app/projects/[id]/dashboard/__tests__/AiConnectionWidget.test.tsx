@@ -26,7 +26,7 @@ const all = (over: Partial<Record<AiConnection['provider'], Partial<AiConnection
 ];
 
 const row = (name: string) => screen.getByRole('listitem', { name });
-const HREF = '/projects/7?tab=ai-models';
+const HREF = '/projects/7?tab=settings';
 
 describe('AiConnectionWidgetView(issue #1501)', () => {
   it('4行を表示名・バッジ・接続先情報つきで描く', () => {

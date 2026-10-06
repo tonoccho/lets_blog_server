@@ -62,7 +62,7 @@ export function AiConnectionWidgetView({
                     {available ? "利用可能" : "利用不可"}
                   </span>
                   {!available && (
-                    <Link href={`/projects/${projectId}?tab=ai-models`} className="underline">
+                    <Link href={`/projects/${projectId}?tab=settings`} className="underline">
                       接続を設定
                     </Link>
                   )}

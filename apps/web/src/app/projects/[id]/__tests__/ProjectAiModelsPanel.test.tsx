@@ -173,7 +173,7 @@ describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
   });
 });
 
-describe("ProjectAiModelsPanel の接続情報セクション(issue #1504)", () => {
+describe("ProjectAiModelsPanel には接続情報セクションを置かない(issue #1669: 設定タブへ移した)", () => {
   beforeEach(() => {
     fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
     fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
@@ -187,54 +187,19 @@ describe("ProjectAiModelsPanel の接続情報セクション(issue #1504)", () 
     });
   });
 
-  it("LLMタブにOllamaの接続情報が表示され、ComfyUIの接続情報は表示されない", async () => {
+  it("LLMタブにも画像生成タブにも、どの接続情報も表示せず接続情報の取得も行わない", async () => {
+    const { fireEvent } = await import("@testing-library/react");
     render(<ProjectAiModelsPanel projectId={1} />);
+    await screen.findByText("レビューステップ別のAIモデル設定");
+    for (const title of ["Ollamaの接続情報", "ChatGPTの接続情報", "Claudeの接続情報"]) {
+      expect(screen.queryByText(title)).not.toBeInTheDocument();
+    }
 
-    expect(await screen.findByText("Ollamaの接続情報")).toBeInTheDocument();
-    expect(await screen.findByText("http://ollama.default:11434/v1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
+    await screen.findByText("選択中のチェックポイント:", { exact: false });
     expect(screen.queryByText("ComfyUIの接続情報")).not.toBeInTheDocument();
-  });
-
-  it("LLMタブにChatGPTの接続情報が表示され、画像生成タブには表示されない(issue #1506)", async () => {
-    render(<ProjectAiModelsPanel projectId={1} />);
-
-    expect(await screen.findByText("ChatGPTの接続情報")).toBeInTheDocument();
-
-    const { fireEvent } = await import("@testing-library/react");
-    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
-    await screen.findByText("ComfyUIの接続情報");
-    expect(screen.queryByText("ChatGPTの接続情報")).not.toBeInTheDocument();
-  });
-
-  it("LLMタブにClaudeの接続情報が表示され、画像生成タブには表示されない(issue #1507)", async () => {
-    render(<ProjectAiModelsPanel projectId={1} />);
-
-    expect(await screen.findByText("Claudeの接続情報")).toBeInTheDocument();
-
-    const { fireEvent } = await import("@testing-library/react");
-    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
-    await screen.findByText("ComfyUIの接続情報");
-    expect(screen.queryByText("Claudeの接続情報")).not.toBeInTheDocument();
-  });
-
-  it("画像生成タブにComfyUIの接続情報が表示される", async () => {
-    render(<ProjectAiModelsPanel projectId={1} />);
-    await screen.findByText("Ollamaの接続情報");
-
-    const { fireEvent } = await import("@testing-library/react");
-    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
-
-    expect(await screen.findByText("ComfyUIの接続情報")).toBeInTheDocument();
-    expect(await screen.findByText("http://comfy.default:8188")).toBeInTheDocument();
-    expect(screen.queryByText("Ollamaの接続情報")).not.toBeInTheDocument();
-  });
-
-  it("接続情報の取得は、タブのデータが表示されるまで始まらない(初期表示を待たせない)", async () => {
-    fetchLlmModelsMock.mockReturnValue(new Promise(() => {}));
-    render(<ProjectAiModelsPanel projectId={1} />);
-
-    expect(screen.queryByText("Ollamaの接続情報")).not.toBeInTheDocument();
     expect(fetchAiConnectionsMock).not.toHaveBeenCalled();
+    expect(fetchProjectConnectionsMock).not.toHaveBeenCalled();
   });
 });
 

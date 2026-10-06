@@ -140,8 +140,7 @@ Given('応答時間予算の検証用に削除してよいプロジェクトが�
 });
 
 When('プロジェクト詳細画面でプロジェクトを削除して Server Action の往復を計測する', async ({ page, ctx }) => {
-  const id = projectId(ctx);
-  await page.goto(`/projects/${id}`);
+  await openLocation(page, ctx, 'メンテナンス');
   page.once('dialog', (dialog) => void dialog.accept());
   const button = page.getByRole('button', { name: 'プロジェクトを削除', exact: true });
   await expect(button).toBeVisible({ timeout: 30_000 });

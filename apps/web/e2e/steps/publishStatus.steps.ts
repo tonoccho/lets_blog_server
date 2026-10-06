@@ -402,7 +402,7 @@ When('一括管理画面のポスト\\/ページタブでステータス変更�
 
   await loginAsAdmin(page);
   await page.goto(`/projects/${ctx.statusProjectId as number}`);
-  await page.getByRole('button', { name: '一括管理', exact: true }).click();
+  await page.getByRole('button', { name: 'メンテナンス', exact: true }).click();
   await page.getByRole('button', { name: 'ポスト/ページ', exact: true }).click();
 
   const row = page.locator('tbody tr').filter({ hasText: slug });

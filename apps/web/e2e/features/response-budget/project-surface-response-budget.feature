@@ -10,7 +10,7 @@
   ## 計測する Server Action
 
   - 画面を開くと送られるもの: `fetchQueueJobsAction` / `fetchRecentOperationLogsAction`(情報表示レール)、
-    `fetchAiConnectionsAction` / `fetchProjectConnectionsAction`(AI・アセットタブの接続情報)
+    `fetchAiConnectionsAction` / `fetchProjectConnectionsAction`(設定タブの接続情報。#1669 で AI・アセットタブから移った)
   - 操作で送られるもの: `setClaudeApiKeyAction` / `clearClaudeApiKeyAction` /
     `setOpenAiApiKeyAction` / `clearOpenAiApiKeyAction` / `updateProjectConnectionAction` /
     `fetchGalleryImagesPageAction`(ギャラリーのタグ絞り込み)
@@ -39,39 +39,39 @@
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:fetchProjectConnectionsAction @budget-action:fetchAiConnectionsAction
-  シナリオ: AI・アセットタブの接続情報取得(Server Action)の往復が3秒以内に返る
-    もし 「/projects/{projectId}」を開いて AI・アセットタブを選び Server Action の往復を計測する
+  シナリオ: 設定タブの接続情報取得(Server Action)の往復が3秒以内に返る
+    もし 「/projects/{projectId}」を開いて設定タブを選び Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:setClaudeApiKeyAction
   シナリオ: Claude の APIキー保存(Server Action)の往復が3秒以内に返る
-    もし 「/projects/{projectId}」のAI・アセットタブを開いておく
+    もし 「/projects/{projectId}」の設定タブを開いておく
     かつ Anthropic APIキー欄に「sk-at-1544-set」を入れて接続し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:clearClaudeApiKeyAction
   シナリオ: Claude の接続解除(Server Action)の往復が3秒以内に返る
     前提 応答時間予算の検証用のプロジェクトに「claude-api-key」が「sk-at-1544-clear」で設定されている
-    もし 「/projects/{projectId}」のAI・アセットタブを開いておく
+    もし 「/projects/{projectId}」の設定タブを開いておく
     かつ Claude の接続を解除して Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:setOpenAiApiKeyAction
   シナリオ: ChatGPT の APIキー保存(Server Action)の往復が3秒以内に返る
-    もし 「/projects/{projectId}」のAI・アセットタブを開いておく
+    もし 「/projects/{projectId}」の設定タブを開いておく
     かつ OpenAI APIキー欄に「sk-at-1544-set」を入れて接続し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:clearOpenAiApiKeyAction
   シナリオ: ChatGPT の接続解除(Server Action)の往復が3秒以内に返る
     前提 応答時間予算の検証用のプロジェクトに「openai-api-key」が「sk-at-1544-clear」で設定されている
-    もし 「/projects/{projectId}」のAI・アセットタブを開いておく
+    もし 「/projects/{projectId}」の設定タブを開いておく
     かつ ChatGPT の接続を解除して Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:updateProjectConnectionAction
   シナリオ: Ollama の接続先URL保存(Server Action)の往復が3秒以内に返る
-    もし 「/projects/{projectId}」のAI・アセットタブを開いておく
+    もし 「/projects/{projectId}」の設定タブを開いておく
     かつ Ollama の接続先URLに「http://at-1544-ollama.invalid:11434/v1」を入れて保存し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 

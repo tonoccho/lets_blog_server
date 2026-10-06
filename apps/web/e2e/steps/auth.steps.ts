@@ -1088,6 +1088,8 @@ When('プロジェクト詳細を開く', async ({ page, request, ctx }) => {
 
 Then('プロジェクト名とメンバー一覧が表示される', async ({ page, ctx }) => {
   const projectName = ctx.tlcProjectName as string;
+  // プロジェクト名のフォームは設定タブにある(issue #1669)。
+  await page.locator('button:has-text("設定")').click();
   await expect(page.locator('input[name="name"]')).toHaveValue(projectName, { timeout: 10000 });
 
   await page.locator('button:has-text("メンバー")').click();

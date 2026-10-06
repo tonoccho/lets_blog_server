@@ -75,9 +75,9 @@ Then('記録の中にloading UIが描画された時点がある', async ({ page
   expect(seen, 'loading UI が一度も描画されませんでした').toBe(true);
 });
 
-Then('プロジェクト名と一括管理タブが表示される', async ({ page, ctx }) => {
+Then('プロジェクト名とメンテナンスタブが表示される', async ({ page, ctx }) => {
   await expect(page.getByRole('heading', { name: ctx.rlProjectName as string })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('button', { name: '一括管理', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'メンテナンス', exact: true })).toBeVisible();
 });
 
 Then('loading UIは表示されていない', async ({ page }) => {
