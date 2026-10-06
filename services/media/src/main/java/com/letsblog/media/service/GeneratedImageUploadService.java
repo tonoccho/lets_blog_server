@@ -25,6 +25,15 @@ public class GeneratedImageUploadService {
     /** アップロードできるファイルサイズの上限(20MB)。 */
     public static final int MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
+    /** タグ付けへ送る画像の長辺の上限(画素)。この寸法のJPEGは通常5MBを大きく下回る。 */
+    static final int TAGGING_MAX_LONG_EDGE_PX = 1568;
+
+    /** タグ付けへ送る画像のバイト数の上限(4MB)。プロバイダの上限5MBに対する余裕を見込む。 */
+    static final int TAGGING_MAX_BYTES = 4 * 1024 * 1024;
+
+    /** バイト数が上限を超えたとき、タグ付け用コピーを順に試す長辺(画素)。最後の長辺のJPEGは常に上限に収まる。 */
+    private static final int[] TAGGING_FALLBACK_LONG_EDGES_PX = {TAGGING_MAX_LONG_EDGE_PX, 1024, 640};
+
     /** 出所の値。generated_images.provider に入る。 */
     static final String PROVIDER_UPLOAD = "UPLOAD";
 
@@ -70,10 +79,33 @@ public class GeneratedImageUploadService {
      */
     private void requestAiTagging(GeneratedImage saved, Long projectId, ImageResizeService.ReencodedImage converted) {
         try {
-            uploadedImageTagService.tagAsync(saved.getId(), projectId, converted.mimeType(), converted.data());
+            ImageResizeService.ResizeResult forTagging = imageForTagging(converted);
+            uploadedImageTagService.tagAsync(saved.getId(), projectId, forTagging.mimeType(), forTagging.data());
         } catch (RuntimeException e) {
             log.warn("アップロード画像のAIタグ付けを依頼できませんでした(タグなしで登録します): {}", e.getMessage());
         }
+    }
+
+    /**
+     * タグ付けに送る画像を用意する(issue #1657)。LLMには1枚あたりの画像サイズ上限(例: Anthropic 5MB)があるため、
+     * 長辺が{@link #TAGGING_MAX_LONG_EDGE_PX}を超える画像は縮小コピー(不透明PNGはJPEG化)を送る。
+     * それでもバイト数が{@link #TAGGING_MAX_BYTES}を超える場合(寸法が小さい高エントロピー画像、縮小後も大きい
+     * 透過PNG)は、タグ付け用コピーだけを白背景のJPEGへ変換し、収まるまで長辺を小さくする。
+     * 保存する画像は縮小しない。収まる画像はそのまま送る。
+     */
+    private ImageResizeService.ResizeResult imageForTagging(ImageResizeService.ReencodedImage converted) {
+        int longEdge = Math.max(converted.width(), converted.height());
+        ImageResizeService.ResizeResult result = longEdge <= TAGGING_MAX_LONG_EDGE_PX
+                ? new ImageResizeService.ResizeResult(converted.data(), converted.mimeType())
+                : imageResizeService.resizeToLongEdge(
+                        converted.data(), converted.mimeType(), TAGGING_MAX_LONG_EDGE_PX, true);
+        for (int edge : TAGGING_FALLBACK_LONG_EDGES_PX) {
+            if (result.data().length <= TAGGING_MAX_BYTES) {
+                break;
+            }
+            result = imageResizeService.resizeToJpeg(converted.data(), converted.mimeType(), edge);
+        }
+        return result;
     }
 
     /** 先頭のバイト列からJPEG/PNGを判定する。どちらでもなければnull。 */

@@ -12,19 +12,27 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Random;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -204,9 +212,9 @@ class GeneratedImageUploadServiceTest {
         CreateGeneratedImageRequest request = captureRequest();
         ArgumentCaptor<byte[]> sent = ArgumentCaptor.forClass(byte[].class);
         verify(tagService).tagAsync(eq(42L), eq(7L), eq("image/jpeg"), sent.capture());
-        org.junit.jupiter.api.Assertions.assertArrayEquals(request.imageData(), sent.getValue());
-        org.junit.jupiter.api.Assertions.assertFalse(
-                new String(sent.getValue(), java.nio.charset.StandardCharsets.ISO_8859_1)
+        assertArrayEquals(request.imageData(), sent.getValue());
+        assertFalse(
+                new String(sent.getValue(), StandardCharsets.ISO_8859_1)
                         .contains(UploadImageFixtures.GPS_MARKER));
     }
 
@@ -216,7 +224,7 @@ class GeneratedImageUploadServiceTest {
         GeneratedImage saved = new GeneratedImage();
         saved.setId(42L);
         when(creationService.create(any())).thenReturn(saved);
-        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("full"))
+        doThrow(new TaskRejectedException("full"))
                 .when(tagService).tagAsync(any(), any(), any(), any());
 
         GeneratedImage result = service.upload(7L, UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, Color.RED, false)));
@@ -230,5 +238,109 @@ class GeneratedImageUploadServiceTest {
         assertThrows(InvalidImageUploadException.class, () -> service.upload(7L, new byte[] {1, 2, 3}));
 
         verifyNoInteractions(tagService);
+    }
+
+    private static final int FIVE_MB = 5 * 1024 * 1024;
+    private static final int FOUR_MB = 4 * 1024 * 1024;
+
+    /** 圧縮がほぼ効かないノイズ画像。alpha=trueなら画素ごとに乱数のアルファを持つ(透過PNGになる)。 */
+    private static BufferedImage noisy(int width, int height, boolean alpha) {
+        BufferedImage image = new BufferedImage(
+                width, height, alpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+        Random random = new Random(1);
+        int[] row = new int[width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                row[x] = random.nextInt();
+            }
+            image.setRGB(0, y, width, 1, row, 0, width);
+        }
+        return image;
+    }
+
+    /** アップロードして、保存画像のリクエストとタグ付けへ渡された(mime, bytes)を返す。 */
+    private record Tagged(CreateGeneratedImageRequest stored, String mime, byte[] sent) {
+    }
+
+    private Tagged uploadAndCaptureTagging(byte[] src) {
+        GeneratedImage saved = new GeneratedImage();
+        saved.setId(42L);
+        when(creationService.create(any())).thenReturn(saved);
+        service.upload(7L, src);
+        ArgumentCaptor<byte[]> sentBytes = ArgumentCaptor.forClass(byte[].class);
+        ArgumentCaptor<String> sentMime = ArgumentCaptor.forClass(String.class);
+        verify(tagService).tagAsync(eq(42L), eq(7L), sentMime.capture(), sentBytes.capture());
+        return new Tagged(captureRequest(), sentMime.getValue(), sentBytes.getValue());
+    }
+
+    private static void assertWithinTaggingLimit(Tagged tagged) throws IOException {
+        assertTrue(tagged.sent().length <= FOUR_MB,
+                "tagging copy must stay under the byte threshold: " + tagged.sent().length);
+        BufferedImage sent = ImageIO.read(new ByteArrayInputStream(tagged.sent()));
+        assertTrue(Math.max(sent.getWidth(), sent.getHeight()) <= 1568);
+    }
+
+    @Test
+    @DisplayName("5MBを超える画像は、縮小したコピーだけをタグ付けへ渡し、保存画像は元の解像度のまま(issue #1657)")
+    void 大きな画像はタグ付けにだけ縮小コピーを渡す() throws IOException {
+        byte[] src = UploadImageFixtures.png(noisy(2000, 1500, false));
+        assertTrue(src.length > FIVE_MB, "fixture must exceed 5MB");
+
+        Tagged tagged = uploadAndCaptureTagging(src);
+
+        assertEquals(2000, tagged.stored().width());
+        assertEquals(1500, tagged.stored().height());
+        assertEquals(2000, ImageIO.read(new ByteArrayInputStream(tagged.stored().imageData())).getWidth());
+        assertWithinTaggingLimit(tagged);
+        assertEquals("image/jpeg", tagged.mime());
+    }
+
+    @Test
+    @DisplayName("長辺が1568px以下でもバイト数が閾値を超える画像は、タグ付け用コピーだけを縮める(issue #1657)")
+    void 寸法が小さくてもバイト数が大きければ縮める() throws IOException {
+        byte[] src = UploadImageFixtures.png(noisy(1560, 1250, false));
+        assertTrue(src.length > FIVE_MB, "fixture must exceed 5MB: " + src.length);
+
+        Tagged tagged = uploadAndCaptureTagging(src);
+
+        assertEquals(1560, tagged.stored().width());
+        assertEquals(1250, tagged.stored().height());
+        assertEquals("image/png", tagged.stored().mimeType());
+        assertWithinTaggingLimit(tagged);
+    }
+
+    @Test
+    @DisplayName("1568px超の透過PNGは、縮小してもPNGで閾値を超えるなら、タグ付け用コピーだけJPEGにする(issue #1657)")
+    void 透過PNGが縮小後も大きければタグ付け用だけJPEG化する() throws IOException {
+        byte[] src = UploadImageFixtures.png(noisy(1700, 1300, true));
+        assertTrue(src.length > FIVE_MB, "fixture must exceed 5MB: " + src.length);
+
+        Tagged tagged = uploadAndCaptureTagging(src);
+
+        assertEquals(1700, tagged.stored().width());
+        assertEquals("image/png", tagged.stored().mimeType());
+        assertEquals("image/jpeg", tagged.mime());
+        assertWithinTaggingLimit(tagged);
+    }
+
+    @Test
+    @DisplayName("どの縮小を試しても閾値を超える場合は、最後の(最も小さい)コピーを渡す(issue #1657)")
+    void 縮小しても大きければ最後の結果を渡す() {
+        ImageResizeService resize = mock(ImageResizeService.class);
+        service = new GeneratedImageUploadService(resize, creationService, tagService);
+        byte[] src = UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, Color.RED, false));
+        when(resize.reencodeKeepingResolution(any(), any()))
+                .thenReturn(new ImageResizeService.ReencodedImage(new byte[FOUR_MB + 1], "image/png", 100, 100));
+        byte[] last = new byte[FOUR_MB + 3];
+        when(resize.resizeToJpeg(any(), any(), eq(1568)))
+                .thenReturn(new ImageResizeService.ResizeResult(new byte[FOUR_MB + 2], "image/jpeg"));
+        when(resize.resizeToJpeg(any(), any(), eq(1024)))
+                .thenReturn(new ImageResizeService.ResizeResult(new byte[FOUR_MB + 2], "image/jpeg"));
+        when(resize.resizeToJpeg(any(), any(), eq(640)))
+                .thenReturn(new ImageResizeService.ResizeResult(last, "image/jpeg"));
+
+        Tagged tagged = uploadAndCaptureTagging(src);
+
+        assertArrayEquals(last, tagged.sent());
     }
 }

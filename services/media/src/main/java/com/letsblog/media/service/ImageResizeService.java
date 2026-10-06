@@ -11,6 +11,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.ImageOutputStream;
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -97,6 +98,45 @@ public class ImageResizeService {
             log.warn("画像のリサイズ/メタ情報削除に失敗したため、元のバイト列のままアップロードします: {}", e.getMessage());
             return new ResizeResult(originalBytes, mimeType);
         }
+    }
+
+    /**
+     * 画像を長辺maxLongEdgePx以下に収め、透過の有無によらずJPEGへ書き出す(issue #1657。AIタグ付け用コピーを
+     * バイト数の上限に収めるため)。透過部分は白で塗りつぶす。元より大きくはしない。デコードや書き出しに
+     * 失敗した場合は元のバイト列をそのまま返す(他のリサイズと同じくベストエフォート)。
+     */
+    public ResizeResult resizeToJpeg(byte[] originalBytes, String mimeType, int maxLongEdgePx) {
+        try {
+            BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(originalBytes));
+            if (decoded == null) {
+                return new ResizeResult(originalBytes, mimeType);
+            }
+            BufferedImage output = decoded;
+            int longEdge = Math.max(decoded.getWidth(), decoded.getHeight());
+            if (longEdge > maxLongEdgePx) {
+                double scale = (double) maxLongEdgePx / longEdge;
+                output = scale(decoded, Math.max(1, (int) Math.round(decoded.getWidth() * scale)),
+                        Math.max(1, (int) Math.round(decoded.getHeight() * scale)));
+            }
+            byte[] jpeg = encodeJpeg(flattenOnWhite(output), JPEG_QUALITY);
+            return jpeg != null ? new ResizeResult(jpeg, "image/jpeg") : new ResizeResult(originalBytes, mimeType);
+        } catch (IOException | RuntimeException e) {
+            log.warn("画像のJPEG化に失敗したため、元のバイト列のまま扱います: {}", e.getMessage());
+            return new ResizeResult(originalBytes, mimeType);
+        }
+    }
+
+    private BufferedImage flattenOnWhite(BufferedImage image) {
+        BufferedImage rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = rgb.createGraphics();
+        try {
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, rgb.getWidth(), rgb.getHeight());
+            g.drawImage(image, 0, 0, null);
+        } finally {
+            g.dispose();
+        }
+        return rgb;
     }
 
     /**
