@@ -4534,6 +4534,104 @@ class CloseIssueMarkerGatedTransition(unittest.TestCase):
         self.assertIsNotNone(self._bash(self.cmd("Backlog"), root))
 
 
+class LineContinuation(unittest.TestCase):
+    """#1666: クォート外の `\\` + 改行は行の継続であり、コマンドの区切りではない。
+
+    継続を区切りと解析すると、複数行に分けた `remove_labels=` だけの呼び出し・
+    `--no-verify`・`labels=` が別コマンドの先頭として見え、検査をすり抜けていた。
+    """
+
+    def _split(self, command):
+        sys.path.insert(0, os.path.dirname(HOOK))
+        try:
+            import guard
+        finally:
+            sys.path.pop(0)
+        return guard.split_commands(command)
+
+    def _assert_same_verdict(self, multi, single):
+        one = run_hook("bash", bash_payload(single))
+        self.assertIsNotNone(one, "1行の形が拒否されない(前提が崩れている): %r" % single)
+        self.assertIsNotNone(run_hook("bash", bash_payload(multi)),
+                             "継続を含む形が素通りした: %r" % multi)
+
+    def test_remove_only_status_is_denied_across_continuation(self):
+        self._assert_same_verdict(
+            'glab api "projects/:id/issues/1365" --method PUT \\\n  -f "remove_labels=status::Backlog"',
+            'glab api "projects/:id/issues/1365" --method PUT -f "remove_labels=status::Backlog"',
+        )
+
+    def test_no_verify_is_denied_across_continuation(self):
+        self._assert_same_verdict(
+            "git commit \\\n  --no-verify -m x", "git commit --no-verify -m x")
+
+    def test_labels_overwrite_is_denied_across_continuation(self):
+        self._assert_same_verdict(
+            'glab api "projects/:id/issues/1" --method PUT \\\n  -f "labels=bug"',
+            'glab api "projects/:id/issues/1" --method PUT -f "labels=bug"',
+        )
+
+    def test_merge_without_squash_is_denied_across_continuation(self):
+        self._assert_same_verdict(
+            "glab mr merge 12 \\\n  --remove-source-branch",
+            "glab mr merge 12 --remove-source-branch",
+        )
+
+    def test_squash_on_second_line_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload(
+            "glab mr merge 12 \\\n  --squash --remove-source-branch")))
+
+    def test_continuation_joins_into_one_command(self):
+        parsed = self._split("git commit \\\n  --no-verify -m x")
+        self.assertEqual([(["git", "commit", "--no-verify", "-m", "x"], [])], parsed)
+
+    def test_continuation_inside_double_quotes_is_removed(self):
+        parsed = self._split('echo "ab\\\ncd"')
+        self.assertEqual([(["echo", "abcd"], [])], parsed)
+
+    def test_escaped_backslash_before_newline_is_not_a_continuation(self):
+        # `\\` + 改行: バックスラッシュ自体のエスケープなので、継続として取り除かない。
+        parsed = self._split("echo a\\\\\necho b")
+        self.assertIn("a\\", parsed[0][0])
+
+    def test_continuation_inside_single_quotes_is_literal(self):
+        parsed = self._split("echo 'ab\\\ncd'")
+        self.assertEqual([(["echo", "ab\\\ncd"], [])], parsed)
+
+    def test_heredoc_body_backslash_newline_is_unchanged(self):
+        parsed = self._split("cat <<EOF\nx \\\nrm -rf /\nEOF")
+        self.assertEqual([(["cat", "<<", "EOF"], [])], parsed)
+
+    def test_continuation_inside_comment_is_not_a_continuation(self):
+        # bash では `#` からその行末までがコメント。コメント内の `\\` + 改行は継続ではなく、
+        # 次の行は別コマンドのまま検査される(#1666 レビュー)。
+        command = "# note \\\ngit commit --no-verify -m x"
+        self.assertEqual([(["git", "commit", "--no-verify", "-m", "x"], [])],
+                         self._split(command))
+        self.assertIsNotNone(run_hook("bash", bash_payload(command)))
+
+    def test_comment_after_separator_is_not_a_continuation(self):
+        command = "echo a; # note \\\ngit commit --no-verify -m x"
+        self.assertIn(["git", "commit", "--no-verify", "-m", "x"],
+                      [argv for argv, _r in self._split(command)])
+
+    def test_hash_inside_a_word_is_not_a_comment(self):
+        # 語の途中の `#` はコメントではない: 継続は取り除かれる。
+        import guard
+        self.assertEqual("echo a#b c", guard.strip_line_continuations("echo a#b \\\nc"))
+
+    def test_hash_inside_double_quotes_still_joins(self):
+        import guard
+        self.assertEqual('echo "# xy"', guard.strip_line_continuations('echo "# x\\\ny"'))
+
+    def test_explain_counts_continuation_as_one_command(self):
+        proc = subprocess.run(
+            [sys.executable, HOOK, "explain", "git commit \\\n  --no-verify -m x"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(0, proc.returncode, proc.stderr)
+        self.assertIn("1 個のコマンド", proc.stdout)
+
+
 class UnquotedNewlineSeparator(unittest.TestCase):
     """#1667: クォート外の改行は `;` と同じコマンド区切りである。
 

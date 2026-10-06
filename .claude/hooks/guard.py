@@ -572,6 +572,53 @@ def strip_fd_numbers(command):
     return _FD_NUMBER.sub(lambda m: m.group(1) or "", command)
 
 
+def strip_line_continuations(command):
+    """クォート外・ダブルクォート内の `\\` + 改行(行の継続)を取り除く(#1666)。
+
+    bash は `\\` + 改行を読み飛ばして前後を1つの語列につなぐ。取り除かずに shlex へ
+    渡すと、継続の前後が別コマンドとして解析され、`remove_labels=` だけの呼び出し・
+    `--no-verify`・`labels=` の検査をすり抜けた。シングルクォート内は bash でも
+    文字どおりなので手を付けない。`\\\\` + 改行(エスケープされたバックスラッシュ)は
+    継続ではない。ヒアドキュメント本文は先に `strip_heredoc_bodies` で落としておくこと。
+    """
+    if "\\\n" not in command:
+        return command
+    out = []
+    quote = None
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            if command[i + 1] == "\n":
+                i += 2
+                continue
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if quote == '"':
+            if ch == '"':
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (not out or out[-1][-1] in " \t\n;|&("):
+            # 語頭の `#` はコメントで、行末までの `\\` + 改行は継続ではない。
+            end = command.find("\n", i)
+            end = n if end == -1 else end
+            out.append(command[i:end])
+            i = end
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 PROCESS_SUBSTITUTION_OPENERS = {"<(", ">("}
 
 
@@ -699,10 +746,14 @@ def split_commands(command):
     コマンドとして取り出すことはしない(完全性は主張しない。CLAUDE.md →
     Enforcement → What the guards are, and are not)。
     """
-    lexer = shlex.shlex(strip_fd_numbers(
+    # 順序: ヒアドキュメント本文を除く → 行の継続をつなぐ(#1666。コメント内の継続は
+    # つながない)→ 語の先頭の # から行末を除く(#1668)→ クォート外の改行を区切りに
+    # する(#1667)→ fd 番号を除く。継続を先につながないと、その改行が区切りになる。
+    normalized = strip_fd_numbers(
         separate_unquoted_newlines(
-            strip_word_initial_comments(strip_heredoc_bodies(command)))),
-                        posix=True, punctuation_chars=True)
+            strip_word_initial_comments(
+                strip_line_continuations(strip_heredoc_bodies(command)))))
+    lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
