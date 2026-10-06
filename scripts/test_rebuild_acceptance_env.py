@@ -141,6 +141,48 @@ lbs_publishing lbs_analytics lbs_platform lbs_log""".split()
 with open(LOG, "a", encoding="utf-8") as f:
     f.write("\t".join(args) + "\n")
 
+_LINE = "\t".join(args)
+
+
+def _script_pid():
+    """親をたどり、rebuild-acceptance-env.sh を走らせている最上位の bash の pid を返す。"""
+    pid = os.getppid()
+    top = None
+    while pid > 1:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                cmd = f.read().decode("utf-8", "replace")
+            with open("/proc/%d/stat" % pid, encoding="utf-8") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except OSError:
+            break
+        if "rebuild-acceptance-env.sh" in cmd:
+            top = pid
+        elif top is not None:
+            break
+        pid = ppid
+    return top
+
+
+# FAKE_SIGNAL_ON=<部分文字列> / FAKE_SIGNAL=<TERM|INT>: その呼び出しの時点で、
+# 親スクリプトへシグナルを送る(中断の模擬。#1245)。
+_sig_on = os.environ.get("FAKE_SIGNAL_ON", "")
+if _sig_on and _sig_on in _LINE:
+    import signal as _signal
+
+    _pid = _script_pid()
+    if _pid:
+        os.kill(_pid, getattr(_signal, "SIG" + os.environ.get("FAKE_SIGNAL", "TERM")))
+        time.sleep(0.2)
+    # 中断された呼び出しは副作用を起こさずに終わる(撤去の途中で中断された状況)。
+    sys.exit(143)
+
+# FAKE_FAIL_ON=<部分文字列>(`|` 区切りで複数): その呼び出しを副作用なしで失敗させる。
+for _frag in [x for x in os.environ.get("FAKE_FAIL_ON", "").split("|") if x]:
+    if _frag in _LINE:
+        sys.stderr.write("fake docker: injected failure for %r\n" % _frag)
+        sys.exit(1)
+
 
 def path(*p):
     return os.path.join(STATE, *p)
@@ -355,6 +397,16 @@ if args[:1] == ["exec"]:
             write_lines("kcusers", users)
             sys.stderr.write("Created new user with id 'fake-id'\n")
             sys.exit(0)
+        if " get users" in joined and "-q username=" in joined:
+            # ユーザー名での検索(後片付け用)。id は "id-<username>"。
+            want = joined.split("-q username=")[1].split()[0]
+            if want in read_lines("kcusers"):
+                print("id-" + want)
+            sys.exit(0)
+        if " delete users/" in joined:
+            uid = joined.split(" delete users/")[1].split()[0]
+            write_lines("kcusers", [u for u in read_lines("kcusers") if "id-" + u != uid])
+            sys.exit(0)
         if " get users" in joined:
             if os.environ.get("FAKE_KCADM_GET_USERS_FAILS") == "1":
                 # 本物のエラー(認可切れ・接続断など)を模す。SIGPIPE(141)とは違う、
@@ -394,6 +446,10 @@ if args[:1] == ["exec"]:
                 dbs.append(name)
             write_lines("mysqldbs", dbs)
             sys.exit(0)
+        if sql.upper().startswith("DROP DATABASE"):
+            name = sql.split("`")[1]
+            write_lines("mysqldbs", [d for d in read_lines("mysqldbs") if d != name])
+            sys.exit(0)
         if "SHOW DATABASES LIKE" in sql:
             prefix = "at_wipe_probe_"
             print("\n".join(d for d in read_lines("mysqldbs") if d.startswith(prefix)))
@@ -419,6 +475,10 @@ if args[:1] == ["exec"]:
             if slug not in sites:
                 sites.append(slug)
             write_lines("wpsites", sites)
+            sys.exit(0)
+        if "rm -rf" in joined:
+            slug = joined.split("/var/www/html/sites/")[1].split()[0].strip("'\"")
+            write_lines("wpsites", [s for s in read_lines("wpsites") if s != slug])
             sys.exit(0)
         if "ls " in joined:
             sites = read_lines("wpsites")
@@ -815,9 +875,15 @@ class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
         self.assertIn("@letsblog.local", self.text)
 
     def test_does_not_delete_accounts_by_name(self):
-        """ゼロ構築経路は、名指しでアカウントを削除する処理を持たない(#965 §2)。"""
-        self.assertNotIn("kcadm delete", self.text)
-        self.assertNotIn("delete users/", self.text)
+        """ゼロ構築経路は、名指しでアカウントを削除する処理を持たない(#965 §2)。
+
+        例外は #1245 の中断時の後片付け(`cleanup_probes`)だけで、そこはその実行が
+        作ったプローブを消す。それ以外の場所には削除処理を置かない。
+        """
+        m = re.search(r"^cleanup_probes\(\) \{\n.*?^\}\n", self.text, re.S | re.M)
+        outside = self.text.replace(m.group(0), "") if m else self.text
+        self.assertNotIn("kcadm delete", outside)
+        self.assertNotIn("delete users/", outside)
 
     def test_preserves_comfyui_models_and_says_why(self):
         self.assertRegex(self.text, r"readonly\s+PRESERVE_VOLUMES=\(\s*comfyui_models")
@@ -1756,6 +1822,125 @@ class VolumeDestructionFailureNamesTheReferencingContainer(RebuildScriptHarness)
         out = self.out(r)
         self.assertNotEqual(0, r.returncode, out)
         self.assertIn("まだ使用中の可能性があります", out)
+
+
+class InterruptedRunCleansUpItsOwnProbes(RebuildScriptHarness):
+    """#1245: 手順0の後・ボリューム破棄の完了前に中断されたら、その実行のプローブだけを消す。
+
+    中断は偽 docker が親スクリプトへシグナルを送る(FAKE_SIGNAL_ON)か、特定の呼び出しを
+    失敗させる(FAKE_FAIL_ON)ことで作る。後片付けの呼び出しは、作成の呼び出しとは
+    別の文字列(DROP DATABASE / rm -rf / delete users)なので、失敗の注入が干渉しない。
+    """
+
+    DELETE_MARKERS = ("DROP DATABASE", "rm -rf /var/www/html/sites/at-wipe-probe", "delete\tusers/")
+
+    def probe_leftovers(self):
+        return (
+            [u for u in self.read_state("kcusers") if u.startswith("at-wipe-probe-")],
+            [d for d in self.read_state("mysqldbs") if d.startswith("at_wipe_probe_")],
+            [s for s in self.read_state("wpsites") if s.startswith("at-wipe-probe-")],
+        )
+
+    def delete_calls(self):
+        return [c for c in self.docker_calls() if any(m in c for m in self.DELETE_MARKERS)]
+
+    def assert_interrupt_cleans_up(self, sig):
+        r = self.run_script("--yes", FAKE_SIGNAL_ON="--remove-orphans", FAKE_SIGNAL=sig)
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "中断したのに成功扱いになった:\n" + out)
+        self.assertEqual(([], [], []), self.probe_leftovers(), "プローブが残った:\n" + out)
+        # 中断より前にプローブを置いていたこと(後片付けが空振りではないこと)
+        self.assertTrue(
+            any("CREATE DATABASE" in c for c in self.docker_calls()), "プローブを置いていない"
+        )
+        self.assertTrue(self.delete_calls(), "後片付けの削除が一度も呼ばれていない:\n" + out)
+        return out
+
+    def test_sigterm_after_placing_probes_removes_all_three(self):
+        self.assert_interrupt_cleans_up("TERM")
+
+    def test_sigint_after_placing_probes_removes_all_three(self):
+        self.assert_interrupt_cleans_up("INT")
+
+    def test_cleanup_is_logged(self):
+        out = self.assert_interrupt_cleans_up("TERM")
+        self.assertRegex(out, r"後片付け")
+
+    def test_failure_during_placement_removes_only_the_probes_already_created(self):
+        """WordPress ディレクトリの作成で失敗 → Keycloak と MySQL の2つだけを消す。"""
+        r = self.run_script("--yes", FAKE_FAIL_ON="mkdir")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertEqual(([], [], []), self.probe_leftovers(), out)
+        calls = self.delete_calls()
+        self.assertTrue(any("delete\tusers/" in c for c in calls), "Keycloak の削除が無い:\n" + out)
+        self.assertTrue(any("DROP DATABASE" in c for c in calls), "MySQL の削除が無い:\n" + out)
+        self.assertFalse(
+            any("rm -rf" in c for c in calls), "作っていない WordPress ディレクトリを消そうとした:\n" + out
+        )
+
+    def test_failure_on_second_probe_removes_only_the_keycloak_user(self):
+        """MySQL の作成で失敗 → 作成済みの Keycloak ユーザーだけを消す。"""
+        r = self.run_script("--yes", FAKE_FAIL_ON="CREATE DATABASE")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertEqual(([], [], []), self.probe_leftovers(), out)
+        calls = self.delete_calls()
+        self.assertTrue(any("delete\tusers/" in c for c in calls), out)
+        self.assertFalse(any("DROP DATABASE" in c for c in calls), "作っていない DB を消そうとした")
+        self.assertFalse(any("rm -rf" in c for c in calls), "作っていないディレクトリを消そうとした")
+
+    def test_failure_before_any_probe_deletes_nothing(self):
+        """最初のプローブを作る前(Keycloak ログイン失敗)の終了では、何も消さない。"""
+        r = self.run_script("--yes", FAKE_FAIL_ON="config\tcredentials")
+        self.assertNotEqual(0, r.returncode, self.out(r))
+        self.assertEqual([], self.delete_calls())
+
+    def test_does_not_touch_other_runs_probes(self):
+        """他の実行のプローブ(別の PROBE_ID)には触れない。"""
+        self.write_state("kcusers", ["at-wipe-probe-1@letsblog.local"])
+        self.write_state(
+            "mysqldbs",
+            SERVICE_SCHEMAS + [s + "_test" for s in SERVICE_SCHEMAS] + ["at_wipe_probe_1"],
+        )
+        self.write_state("wpsites", ["at-wipe-probe-1"])
+        r = self.run_script("--yes", FAKE_SIGNAL_ON="--remove-orphans")
+        self.assertNotEqual(0, r.returncode, self.out(r))
+        self.assertEqual(["at-wipe-probe-1@letsblog.local"], self.read_state("kcusers"))
+        self.assertIn("at_wipe_probe_1", self.read_state("mysqldbs"))
+        self.assertEqual(["at-wipe-probe-1"], self.read_state("wpsites"))
+
+    def test_interrupt_after_volume_destruction_does_not_run_cleanup(self):
+        """ボリューム破棄の完了後(構築中)の中断では、後片付けをしない。"""
+        r = self.run_script("--yes", FAKE_SIGNAL_ON="\tup")
+        self.assertNotEqual(0, r.returncode, self.out(r))
+        self.assertEqual([], self.delete_calls())
+        self.assertNotIn("後片付け", self.out(r))
+
+    def test_successful_run_deletes_no_probe_individually(self):
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertEqual([], self.delete_calls())
+        self.assertNotIn("後片付け", self.out(r))
+
+    def test_failed_cleanup_prints_leftover_names_and_manual_commands(self):
+        r = self.run_script(
+            "--yes",
+            FAKE_SIGNAL_ON="--remove-orphans",
+            FAKE_FAIL_ON="DROP DATABASE|rm -rf|delete\tusers/",
+        )
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        m = re.search(r"at-wipe-probe-(\d+)@letsblog\.local", out)
+        self.assertIsNotNone(m, out)
+        pid = m.group(1)
+        self.assertIn("at-wipe-probe-%s@letsblog.local" % pid, out)
+        self.assertIn("at_wipe_probe_%s" % pid, out)
+        self.assertIn("/var/www/html/sites/at-wipe-probe-%s" % pid, out)
+        self.assertIn("DROP DATABASE", out)
+        self.assertIn("rm -rf", out)
+        self.assertIn("kcadm.sh delete users/", out)
+        self.assertIn("残っ", out)
 
 
 if __name__ == "__main__":

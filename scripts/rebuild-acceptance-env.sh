@@ -51,8 +51,12 @@
 #
 # 「消えていること」だけを見る検証は、**そもそも何も入っていなかった場合と区別できない**。
 # そこで撤去の直前に自分で3つのダミーを置き、構築後にそれが消えたことで破棄の成立を示す。
-# 消すのは docker compose の撤去とボリューム破棄であって、個別削除の処理は書かない
-# (ボリューム破棄で消えること自体が検証対象である)。
+# 消すのは docker compose の撤去とボリューム破棄であって、**正常系では**個別削除の処理を
+# 実行しない(ボリューム破棄で消えること自体が検証対象である)。
+# 例外は中断時の後片付け(#1245)だけ: 手順0で最初のプローブを作り始めてから手順1の
+# ボリューム破棄が完了するまでの間に中断・異常終了(SIGINT / SIGTERM / 非0終了)したら、
+# **その実行が実際に作ったプローブだけ**を消す。ボリューム破棄の完了後は後片付けを解除する。
+# SIGKILL・電源断はスクリプトが処理を差し挟めないので対象外。
 #
 # ■ 使い方
 #
@@ -305,23 +309,97 @@ for v in "${PRESERVE_VOLUMES[@]}"; do
   PRESERVE_VOLUMES_BEFORE["$v"]="$(volume_created_at "${VOLUME_PREFIX}${v}")"
 done
 
+# ---------------------------------------------------------------- 中断時の後片付け(#1245)
+#
+# 手順0で最初のプローブを作り始めてから、手順1のボリューム破棄が完了するまでの間だけ
+# 有効にする。作成に成功したものだけを PROBE_*_PLACED で覚え、その分だけを消す。
+# 破棄完了後は disarm_probe_cleanup で解除する(正常系ではプローブを個別削除しない。#965 §7)。
+PROBE_CLEANUP_ARMED=0
+PROBE_KC_PLACED=0
+PROBE_DB_PLACED=0
+PROBE_WP_PLACED=0
+
+cleanup_probes() {
+  local rc=$?
+  trap - EXIT INT TERM
+  [ "$PROBE_CLEANUP_ARMED" -eq 1 ] || exit "$rc"
+  PROBE_CLEANUP_ARMED=0
+  set +e
+  [ "$rc" -ne 0 ] || rc=1
+  echo "" >&2
+  echo "--- 中断: この実行が置いたプローブの後片付け ---" >&2
+  local left=()
+  local kc_id
+  if [ "$PROBE_KC_PLACED" -eq 1 ]; then
+    kc_id="$(kcadm get users -r "$KEYCLOAK_REALM" -q "username=${PROBE_KC_USER}" --fields id --format csv --noquotes 2>/dev/null | head -n1)"
+    if [ -n "$kc_id" ] && kcadm delete "users/${kc_id}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then
+      echo "  後片付け: Keycloak ユーザー ${PROBE_KC_USER} を削除しました" >&2
+    else
+      left+=("kc")
+    fi
+  fi
+  if [ "$PROBE_DB_PLACED" -eq 1 ]; then
+    if mysql_q "DROP DATABASE IF EXISTS \`${PROBE_MYSQL_DB}\`;" >/dev/null; then
+      echo "  後片付け: MySQL データベース ${PROBE_MYSQL_DB} を削除しました" >&2
+    else
+      left+=("db")
+    fi
+  fi
+  if [ "$PROBE_WP_PLACED" -eq 1 ]; then
+    if docker exec "$WORDPRESS_CONTAINER" sh -c "rm -rf ${PROBE_WP_DIR}" >/dev/null 2>&1; then
+      echo "  後片付け: WordPress ディレクトリ ${PROBE_WP_DIR} を削除しました" >&2
+    else
+      left+=("wp")
+    fi
+  fi
+  if [ "${#left[@]}" -gt 0 ]; then
+    echo "エラー: 後片付けに失敗しました。次のプローブが残っています。手で消してください:" >&2
+    local k
+    for k in "${left[@]}"; do
+      case "$k" in
+        kc)
+          echo "  残っています: Keycloak ユーザー ${PROBE_KC_USER}" >&2
+          echo "    docker exec ${KEYCLOAK_CONTAINER} /opt/keycloak/bin/kcadm.sh delete users/<id> -r ${KEYCLOAK_REALM}   # <id> は kcadm.sh get users -r ${KEYCLOAK_REALM} -q username=${PROBE_KC_USER} --fields id で調べる" >&2 ;;
+        db)
+          echo "  残っています: MySQL データベース ${PROBE_MYSQL_DB}" >&2
+          echo "    docker exec -i ${MYSQL_CONTAINER} mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -e \"DROP DATABASE \\\`${PROBE_MYSQL_DB}\\\`;\"" >&2 ;;
+        wp)
+          echo "  残っています: WordPress ディレクトリ ${PROBE_WP_DIR}" >&2
+          echo "    docker exec ${WORDPRESS_CONTAINER} sh -c 'rm -rf ${PROBE_WP_DIR}'" >&2 ;;
+      esac
+    done
+  fi
+  exit "$rc"
+}
+disarm_probe_cleanup() {
+  PROBE_CLEANUP_ARMED=0
+  trap - EXIT INT TERM
+}
+trap cleanup_probes EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # ---------------------------------------------------------------- 0. プローブ設置
 
 step "0/5 ウォッシュアウト・プローブを設置します"
 PROBES_PLACED=0
 if [ "$STACK_UP" -eq 1 ]; then
   kcadm_login || { echo "エラー: Keycloak 管理 CLI にログインできません" >&2; exit 1; }
+  PROBE_CLEANUP_ARMED=1
   kcadm create users -r "$KEYCLOAK_REALM" \
     -s "username=${PROBE_KC_USER}" -s "email=${PROBE_KC_USER}" -s enabled=true >/dev/null 2>&1 \
     || { echo "エラー: プローブの Keycloak ユーザーを作成できませんでした" >&2; exit 1; }
+  PROBE_KC_PLACED=1
   log "  作成: Keycloak ユーザー ${PROBE_KC_USER}"
 
   mysql_q "CREATE DATABASE IF NOT EXISTS \`${PROBE_MYSQL_DB}\`;" >/dev/null \
     || { echo "エラー: プローブの MySQL データベースを作成できませんでした" >&2; exit 1; }
+  PROBE_DB_PLACED=1
   log "  作成: MySQL データベース ${PROBE_MYSQL_DB}"
 
   docker exec "$WORDPRESS_CONTAINER" sh -c "mkdir -p ${PROBE_WP_DIR}" \
     || { echo "エラー: プローブの WordPress ディレクトリを作成できませんでした" >&2; exit 1; }
+  PROBE_WP_PLACED=1
   log "  作成: WordPress ディレクトリ ${PROBE_WP_DIR}"
 
   # 作成直後の存在確認。ここを省くと、後の「消えている」が
@@ -405,6 +483,8 @@ for v in "${DESTROY_VOLUMES[@]}"; do
     exit 1
   fi
 done
+# ボリューム破棄が完了した。以降のプローブ消失は破棄の成立の証拠なので、後片付けは行わない。
+disarm_probe_cleanup
 for v in "${PRESERVE_VOLUMES[@]}"; do
   log "  保全: ${VOLUME_PREFIX}${v}(削除しない)"
 done
