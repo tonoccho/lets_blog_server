@@ -146,8 +146,15 @@ When('システム全体のLLM接続設定を到達不能なURLへ変更する',
   const baseUrl = settings.find((s) => s.key === 'llm_ollama_base_url');
   expect(provider, 'llm_providerの設定項目が見つかりません').toBeDefined();
   expect(baseUrl, 'llm_ollama_base_urlの設定項目が見つかりません').toBeDefined();
+  // 書き換え前の接続先が到達不能URLなら、前回の実行の残骸である。復元値として記録すると
+  // 壊れた値を「元の値」と取り違えるため、記録も書き換えもせず失敗させる(After も書き込まない)。
+  expect(
+    baseUrl!.value,
+    `llm_ollama_base_urlが到達不能URL(${UNREACHABLE_LLM_BASE_URL})のままです。前回の実行の残骸のため、` +
+      '設定を手で元に戻してから実行し直してください。'
+  ).not.toBe(UNREACHABLE_LLM_BASE_URL);
   // DB由来でなければ(=環境変数フォールバック)、復元時は空文字を送ってDB設定を削除し、
-  // 環境変数へのフォールバックへ戻す。
+  // 環境変数へのフォールバックへ戻す。復元値はPUTより前にctxへ記録し、途中で失敗しても After で戻す。
   ctx.systemSettingsLlmOriginalProvider = provider!.source === 'DATABASE' ? provider!.value ?? '' : '';
   ctx.systemSettingsLlmOriginalBaseUrl = baseUrl!.source === 'DATABASE' ? baseUrl!.value ?? '' : '';
 
@@ -159,6 +166,15 @@ When('システム全体のLLM接続設定を到達不能なURLへ変更する',
 When('システム全体のLLM接続設定を元に戻す', async ({ ctx, request }) => {
   await putAppSettings(request, {
     llm_provider: (ctx.systemSettingsLlmOriginalProvider as string) ?? '',
+    llm_ollama_base_url: (ctx.systemSettingsLlmOriginalBaseUrl as string) ?? '',
+  });
+  ctx.systemSettingsLlmRestored = true;
+});
+
+After(async ({ ctx, request }) => {
+  if (ctx.systemSettingsLlmOriginalProvider === undefined || ctx.systemSettingsLlmRestored === true) return;
+  await putAppSettings(request, {
+    llm_provider: ctx.systemSettingsLlmOriginalProvider as string,
     llm_ollama_base_url: (ctx.systemSettingsLlmOriginalBaseUrl as string) ?? '',
   });
 });
