@@ -71,20 +71,20 @@ const DEFAULT_HTML_TEMPLATE: Record<EmbedTagType, string> = {
   TOC: "{{toc}}",
   BLOGCARD:
     '<a class="lb-blogcard" href="{{url}}" target="_blank" rel="noopener noreferrer">' +
-    '<div class="lb-blogcard-thumb" style="background-image:url(\'{{imageUrl}}\')"></div>' +
-    '<div class="lb-blogcard-body">' +
-    '<div class="lb-blogcard-title">{{title}}</div>' +
-    '<div class="lb-blogcard-description">{{description}}</div>' +
-    '<div class="lb-blogcard-site">{{siteName}}</div>' +
-    "</div></a>",
+    '<span class="lb-blogcard-thumb" style="background-image:url(\'{{imageUrl}}\')"></span>' +
+    '<span class="lb-blogcard-body">' +
+    '<span class="lb-blogcard-title">{{title}}</span>' +
+    '<span class="lb-blogcard-description">{{description}}</span>' +
+    '<span class="lb-blogcard-site">{{siteName}}</span>' +
+    "</span></a>",
   AMAZON:
     '<a class="lb-amazon-card" href="{{productUrl}}" target="_blank" rel="noopener noreferrer nofollow sponsored">' +
-    '<div class="lb-amazon-card-thumb" style="background-image:url(\'{{imageUrl}}\')"></div>' +
-    '<div class="lb-amazon-card-body">' +
-    '<div class="lb-amazon-card-name">{{productName}}</div>' +
-    '<div class="lb-amazon-card-price">{{price}}</div>' +
-    '<div class="lb-amazon-card-cta">Amazonで見る</div>' +
-    "</div></a>",
+    '<span class="lb-amazon-card-thumb" style="background-image:url(\'{{imageUrl}}\')"></span>' +
+    '<span class="lb-amazon-card-body">' +
+    '<span class="lb-amazon-card-name">{{productName}}</span>' +
+    '<span class="lb-amazon-card-price">{{price}}</span>' +
+    '<span class="lb-amazon-card-cta">Amazonで見る</span>' +
+    "</span></a>",
 };
 
 /**

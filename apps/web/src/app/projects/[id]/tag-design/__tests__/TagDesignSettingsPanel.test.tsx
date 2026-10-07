@@ -227,6 +227,19 @@ describe("TagDesignEditor のタグ種別切り替えとプリセット・色", 
     expect(amazonCss.value).toContain(".lb-amazon-card{");
   });
 
+  it("ブログカード・Amazon の標準HTMLテンプレートは <a> の中にブロック要素(div)を含まない", () => {
+    const unsaved = buildMultiTagSettings().map((setting) => ({ ...setting, htmlTemplate: null }));
+    render(<TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={unsaved} />);
+
+    for (const label of ["ブログカード", "Amazon商品カード"]) {
+      const row = screen.getAllByRole("row").find((r) => within(r).queryByText(label))!;
+      fireEvent.click(within(row).getByRole("button", { name: "編集" }));
+      const html = screen.getByRole("textbox", { name: /^HTMLテンプレート/ }) as HTMLTextAreaElement;
+      expect(html.value).toContain("<a ");
+      expect(html.value).not.toMatch(/<div/i);
+    }
+  });
+
   it("プリセットボタンを押すと選択状態の見た目が切り替わり、色が自動反映される(CSSを手で編集するまでの間)", () => {
     render(
       <TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={buildMultiTagSettings()} />
