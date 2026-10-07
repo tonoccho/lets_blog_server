@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * プロジェクトごとのLLM利用モデル/AIプロバイダーの一覧・選択を扱う(issue #376/#530)。
@@ -27,16 +28,29 @@ public class LlmModelService {
 
     private final ProjectAiSettingsService projectAiSettingsService;
     private final LlmConfigProvider llmConfigProvider;
+    private final ProviderModelCatalog providerModelCatalog;
 
-    public LlmModelService(ProjectAiSettingsService projectAiSettingsService, LlmConfigProvider llmConfigProvider) {
+    public LlmModelService(
+            ProjectAiSettingsService projectAiSettingsService, LlmConfigProvider llmConfigProvider,
+            ProviderModelCatalog providerModelCatalog) {
         this.projectAiSettingsService = projectAiSettingsService;
         this.llmConfigProvider = llmConfigProvider;
+        this.providerModelCatalog = providerModelCatalog;
     }
 
+    /**
+     * 選択肢は、プロジェクトの実効プロバイダーへ実際に問い合わせて得たモデルの一覧(issue #1674)。
+     * 取得に失敗したら、システム設定のリスト({@code availableModelsFor})に戻し、{@code fallback}で知らせる。
+     */
     public LlmModelListResponse listModelsForProject(Long projectId) {
         AiProvider provider = getSelectedProvider(projectId);
-        return new LlmModelListResponse(
-                llmConfigProvider.availableModelsFor(provider), getSelectedModel(projectId, provider));
+        llmConfigProvider.useProject(projectId);
+        Optional<List<String>> fetched = providerModelCatalog.fetch(provider);
+        String selected = getSelectedModel(projectId, provider);
+        if (fetched.isPresent()) {
+            return new LlmModelListResponse(fetched.get(), selected, false);
+        }
+        return new LlmModelListResponse(llmConfigProvider.availableModelsFor(provider), selected, true);
     }
 
     /** プロジェクトの選択中プロバイダーで使うモデルを返す(issue #1644)。 */

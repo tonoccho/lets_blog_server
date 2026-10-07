@@ -48,6 +48,9 @@ export function LlmModelPanel({
     }
   }
 
+  // 取得した一覧に無くても、保存済みのモデルと選択中のモデルは選択肢に残す(保存済みの値を黙って失わせない、issue #1674)。
+  const options = Array.from(new Set([...data.availableModels, data.selected, modelName].filter((name) => name !== "")));
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
@@ -58,18 +61,29 @@ export function LlmModelPanel({
         <p className={`text-sm ${message.type === "error" ? "text-red-600" : "text-green-600"}`}>{message.text}</p>
       )}
 
-      {/* issue #1051: JS無効時のネイティブGETフォールバックで入力値がURLへ漏れることを防ぐため、
+      {data.fallback && (
+        <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
+          モデル一覧をプロバイダーから取得できなかったため、システム設定のモデル一覧を表示しています。
+        </p>
+      )}
+
+      {/* issue #1051: JS無効時のネイティブGETフォールバックでの意図しない送信を防ぐため、
           method="post"を明示する。送信自体はhandleSaveがpreventDefaultして処理する。 */}
       <form onSubmit={handleSave} method="post" className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-neutral-600 dark:text-neutral-400">モデル名(例: gpt-4o-mini)</span>
-          <input
+          <span className="text-neutral-600 dark:text-neutral-400">LLMのモデル</span>
+          <select
+            aria-label="LLMのモデル"
             value={modelName}
             onChange={(e) => setModelName(e.target.value)}
-            placeholder="gpt-4o-mini"
-            required
             className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
-          />
+          >
+            {options.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
         </label>
         <button
           type="submit"
@@ -79,21 +93,6 @@ export function LlmModelPanel({
           {saving ? "保存中…" : "保存"}
         </button>
       </form>
-
-      {data.availableModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 text-xs">
-          {data.availableModels.map((name) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => setModelName(name)}
-              className="rounded bg-neutral-100 dark:bg-neutral-800 px-2 py-1 text-neutral-700 dark:text-neutral-300"
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

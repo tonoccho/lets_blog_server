@@ -52,7 +52,8 @@ public class LlmClient {
     public static final String OLLAMA_URL_REQUIRED =
             "Ollamaの接続先が設定されていません。プロジェクトのAI・アセットまたはシステム設定で接続先を設定してください。";
 
-    private static final String ANTHROPIC_VERSION = "2023-06-01";
+    /** Anthropic APIの{@code anthropic-version}ヘッダー(モデル一覧の取得にも使う、issue #1674)。 */
+    public static final String ANTHROPIC_VERSION = "2023-06-01";
 
     /**
      * 一部のプロバイダ経由で推論(thinking)系モデルを利用した場合に出力へ混入しうる

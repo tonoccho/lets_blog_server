@@ -1,5 +1,5 @@
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
-import { Then, When } from './fixtures';
+import { Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken, loginAsAdmin } from '../support';
 import { STUB_URLS } from '../support/stubs';
 
@@ -34,6 +34,8 @@ interface AiProjectFixture {
 interface LlmModelListResult {
   availableModels: string[];
   selected: string;
+  /** 一覧をプロバイダーから取得できず、システム設定の一覧に戻したとき true(issue #1674)。 */
+  fallback?: boolean;
 }
 
 /** `GET /__control/state`(llmスタブ)の応答。`recentModels` はスタブ固有の拡張状態。 */
@@ -251,7 +253,7 @@ function selectedModelLine(page: Page) {
   return page.locator('p', { hasText: '選択中のモデル:' });
 }
 
-/** 「AI・アセット」タブを開き、LLMのモデル入力欄が見えるまでクリックを再試行する(ハイドレーション前のクリック取りこぼし対策)。 */
+/** 「AI・アセット」タブを開き、LLMのモデル欄が見えるまでクリックを再試行する(ハイドレーション前のクリック取りこぼし対策)。 */
 When('プロジェクト詳細の「AI・アセット」のLLM画面を開く', async ({ ctx, page }) => {
   await loginAsAdmin(page);
   await page.goto(`/projects/${currentProjectId(ctx)}`, { waitUntil: 'commit' });
@@ -272,23 +274,111 @@ When(/^画面でAIプロバイダーを「(.+)」に切り替える$/, async ({ 
   await expect(page.getByText('保存しました。').first()).toBeVisible({ timeout: 30_000 });
 });
 
-When(/^画面でモデル名「(.+)」を保存する$/, async ({ ctx, page }, name: string) => {
-  const actual = `${name}-${unique()}`;
-  savedUiModels(ctx)[name] = actual;
-  const input = page.getByLabel('モデル名(例: gpt-4o-mini)');
-  await expect(input).toBeVisible({ timeout: 30_000 });
-  await input.fill(actual);
-  const submit = input.locator('xpath=ancestor::form[1]').getByRole('button', { name: '保存', exact: true });
+/** LLMのモデル欄(`<select>`。issue #1674でテキスト入力欄から変えた)。 */
+function modelSelect(page: Page) {
+  return page.getByLabel('LLMのモデル', { exact: true });
+}
+
+When(/^画面でモデル「(.+)」を選んで保存する$/, async ({ ctx, page }, name: string) => {
+  savedUiModels(ctx)[name] = name;
+  const select = modelSelect(page);
+  await expect(select).toBeVisible({ timeout: 30_000 });
+  await expect(select.locator('option', { hasText: name })).toHaveCount(1, { timeout: 30_000 });
+  await select.selectOption(name);
+  const submit = select.locator('xpath=ancestor::form[1]').getByRole('button', { name: '保存', exact: true });
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
-  await expect(selectedModelLine(page)).toContainText(actual, { timeout: 30_000 });
+  await expect(selectedModelLine(page)).toContainText(name, { timeout: 30_000 });
+});
+
+/** 保存済みのモデル名をAPIで用意する(画面からは選べない値を、保存済みの状態として作る)。 */
+async function saveModelViaApi(ctx: Record<string, unknown>, request: APIRequestContext, name: string) {
+  const response = await request.put(`/api/projects/${currentProjectId(ctx)}/ai-models/llm/models/selection`, {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: { modelName: name },
+  });
+  expect(
+    response.ok(),
+    `LLMモデルの保存に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  savedUiModels(ctx)[name] = name;
+}
+
+async function selectProviderViaApi(ctx: Record<string, unknown>, request: APIRequestContext, provider: string | null) {
+  const response = await request.put(`/api/projects/${currentProjectId(ctx)}/ai-models/llm/provider/selection`, {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: { provider },
+  });
+  expect(
+    response.ok(),
+    `LLMプロバイダーの切り替えに失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+}
+
+Given(/^AI設定用のプロジェクトのClaudeのモデルが「(.+)」に保存されている$/, async ({ ctx, request }, name: string) => {
+  await selectProviderViaApi(ctx, request, 'CLAUDE');
+  await saveModelViaApi(ctx, request, name);
+});
+
+Given(/^AI設定用のプロジェクトのOllamaのモデルが「(.+)」に保存されている$/, async ({ ctx, request }, name: string) => {
+  await selectProviderViaApi(ctx, request, 'OLLAMA');
+  await saveModelViaApi(ctx, request, name);
+});
+
+Given(/^AI設定用のプロジェクトのOllama接続先が「(.+)」に設定されている$/, async ({ ctx, request }, baseUrl: string) => {
+  const response = await request.put(`/api/projects/${currentProjectId(ctx)}/ai-models/connections`, {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: { ollamaBaseUrl: baseUrl },
+  });
+  expect(response.ok(), `接続先の設定に失敗しました (status=${response.status()}): ${await response.text()}`).toBe(true);
+});
+
+Then(
+  /^画面のモデル欄はドロップダウンで、選択肢に「(.+)」と「(.+)」が含まれる$/,
+  async ({ page }, first: string, second: string) => {
+    const select = modelSelect(page);
+    await expect(select).toBeVisible({ timeout: 30_000 });
+    expect(await select.evaluate((el) => el.tagName), 'モデル欄が<select>ではありません').toBe('SELECT');
+    for (const name of [first, second]) {
+      await expect(select.locator('option', { hasText: name })).toHaveCount(1, { timeout: 30_000 });
+    }
+  }
+);
+
+Then(
+  /^モデルの一覧のAPIの選択肢は「(.+)」と「(.+)」だけである$/,
+  async ({ ctx, request }, first: string, second: string) => {
+    const list = await fetchLlmModelList(request, await adminToken(request), currentProjectId(ctx));
+    expect(list.availableModels, `取得した一覧=${JSON.stringify(list)}`).toEqual([first, second]);
+    expect(list.fallback, 'プロバイダーから取得できているのにfallbackになっている').toBeFalsy();
+  }
+);
+
+Then('画面に、モデル一覧を取得できなかった旨が表示される', async ({ page }) => {
+  await expect(page.getByText('モデル一覧をプロバイダーから取得できなかった').first()).toBeVisible({ timeout: 30_000 });
+});
+
+Then('画面のモデル欄の選択肢に、LLMスタブが返すモデルは含まれない', async ({ page }) => {
+  const options = await modelSelect(page).locator('option').allTextContents();
+  const stubModels = options.filter((name) => name.startsWith('e2e-stub-gpt-') || name.startsWith('e2e-stub-ollama-'));
+  expect(stubModels, `選択肢=${JSON.stringify(options)}`).toEqual([]);
+});
+
+Then(/^画面のモデル欄の選択肢に「(.+)」が含まれる$/, async ({ page }, name: string) => {
+  await expect(modelSelect(page).locator('option', { hasText: name })).toHaveCount(1, { timeout: 30_000 });
+});
+
+Then('画面の保存ボタンとAIプロバイダーの選択は操作できる', async ({ page }) => {
+  const submit = modelSelect(page).locator('xpath=ancestor::form[1]').getByRole('button', { name: '保存', exact: true });
+  await expect(submit).toBeEnabled({ timeout: 30_000 });
+  await expect(page.getByLabel('AIプロバイダー(このプロジェクトの既定)')).toBeEnabled({ timeout: 30_000 });
 });
 
 Then(/^画面の選択中のモデルが「(.+)」になっている$/, async ({ ctx, page }, name: string) => {
   const actual = savedUiModels(ctx)[name];
   expect(actual, `画面で保存していないモデル名です: ${name}`).toBeDefined();
   await expect(selectedModelLine(page)).toContainText(actual, { timeout: 30_000 });
-  await expect(page.getByLabel('モデル名(例: gpt-4o-mini)')).toHaveValue(actual, { timeout: 30_000 });
+  await expect(modelSelect(page)).toHaveValue(actual, { timeout: 30_000 });
 });
 
 Then('画面の選択中のモデルがシステム既定のClaudeモデルになっている', async ({ page, request }) => {
@@ -300,7 +390,7 @@ Then('画面の選択中のモデルがシステム既定のClaudeモデルに�
   const claudeDefault = settings.find((s) => s.key === 'llm_claude_model')?.value;
   expect(claudeDefault, 'llm_claude_model の値が取得できません').toBeTruthy();
   await expect(selectedModelLine(page)).toContainText(claudeDefault as string, { timeout: 30_000 });
-  await expect(page.getByLabel('モデル名(例: gpt-4o-mini)')).toHaveValue(claudeDefault as string, { timeout: 30_000 });
+  await expect(modelSelect(page)).toHaveValue(claudeDefault as string, { timeout: 30_000 });
 });
 
 Then(

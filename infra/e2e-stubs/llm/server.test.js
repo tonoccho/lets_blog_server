@@ -219,3 +219,28 @@ test('pull: 履歴は直近50件までに切り詰める', async () => {
   assert.equal(pullRequests.length, 50);
   assert.equal(pullRequests[0], 'm-2');
 });
+
+// ---------------------------------------------------------------- モデル一覧(issue #1674)
+
+test('models: GET /v1/models は OpenAI 形式で2件以上のモデルIDを返す', async () => {
+  const r = await fetch(`${base}/v1/models`);
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.object, 'list');
+  const ids = body.data.map((m) => m.id);
+  assert.ok(ids.length >= 2, `ids=${ids}`);
+  assert.deepEqual(ids, ['e2e-stub-gpt-a', 'e2e-stub-gpt-b']);
+});
+
+test('models: GET /api/tags は Ollama 形式で2件以上のモデル名を返す', async () => {
+  const r = await fetch(`${base}/api/tags`);
+  assert.equal(r.status, 200);
+  const names = (await r.json()).models.map((m) => m.name);
+  assert.ok(names.length >= 2, `names=${names}`);
+  assert.deepEqual(names, ['e2e-stub-ollama-a:1b', 'e2e-stub-ollama-b:1b']);
+});
+
+test('models: POST /v1/models は一覧ではない(404)', async () => {
+  const r = await fetch(`${base}/v1/models`, { method: 'POST', body: '{}' });
+  assert.equal(r.status, 404);
+});

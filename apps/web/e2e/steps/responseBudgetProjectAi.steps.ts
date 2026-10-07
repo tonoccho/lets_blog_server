@@ -62,12 +62,13 @@ When(
 );
 
 When(
-  /^AIモデル管理のLLMモデル名を「([^」]+)」にして保存し Server Action の往復を計測する$/,
-  async ({ page, ctx }, modelName: string) => {
+  'AIモデル管理のLLMモデルを一覧の先頭の候補にして保存し Server Action の往復を計測する',
+  async ({ page, ctx }) => {
     await openAiTab(page, ctx);
-    const input = page.getByPlaceholder('gpt-4o-mini');
+    // issue #1674: モデル欄はドロップダウン。先頭の候補を選ぶ(一覧の中身には依存しない)。
+    const input = page.getByLabel('LLMのモデル', { exact: true });
     await waitForHydrated(input);
-    await input.fill(modelName);
+    await input.selectOption({ index: 0 });
     const submit = input.locator('xpath=ancestor::form[1]').getByRole('button', { name: '保存', exact: true });
     await expect(submit).toBeEnabled({ timeout: 30_000 });
     await measureAndRecord(page, ctx, 'LLMモデルの選択', async () => {

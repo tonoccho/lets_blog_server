@@ -37,7 +37,7 @@
   @budget-action:selectLlmModelAction
   シナリオ: LLMモデルの選択(Server Action)の往復が3秒以内に返る
     前提 応答時間予算の検証用のプロジェクトがある
-    もし AIモデル管理のLLMモデル名を「e2e-1477-budget-model」にして保存し Server Action の往復を計測する
+    もし AIモデル管理のLLMモデルを一覧の先頭の候補にして保存し Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
 
   @budget-action:updateReviewStepSettingAction

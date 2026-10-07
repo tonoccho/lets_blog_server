@@ -3008,6 +3008,8 @@ export function getGenerationJob(id: number): Promise<GenerationJobDetail> {
 export interface LlmModelListResponse {
   availableModels: string[];
   selected: string;
+  /** プロバイダーから一覧を取得できず、システム設定のモデル一覧に戻したとき true(issue #1674)。 */
+  fallback?: boolean;
 }
 
 export function listLlmModels(projectId: number): Promise<LlmModelListResponse> {

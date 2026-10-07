@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { ProjectAiModelsPanel } from "../ProjectAiModelsPanel";
 import {
   fetchLlmModelsAction,
@@ -219,10 +219,10 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     });
   });
 
-  it("プロバイダーを切り替えると、切り替え先のモデルが選択中・入力欄・候補チップに表示される", async () => {
+  it("プロバイダーを切り替えると、切り替え先のモデルが選択中・ドロップダウン・選択肢に表示される", async () => {
     const { fireEvent } = await import("@testing-library/react");
     render(<ProjectAiModelsPanel projectId={1} />);
-    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+    await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
     fetchLlmModelsMock.mockResolvedValue({
       selected: "claude-3-5-haiku-20241022",
@@ -232,17 +232,18 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
       target: { value: "CLAUDE" },
     });
 
-    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("claude-3-5-haiku-20241022"));
+    await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("claude-3-5-haiku-20241022"));
     expect(screen.getByText("選択中のモデル:").parentElement).toHaveTextContent("claude-3-5-haiku-20241022");
-    expect(screen.getByRole("button", { name: "claude-opus" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "gpt-4o" })).not.toBeInTheDocument();
+    const llmModelSelect = screen.getByLabelText("LLMのモデル");
+    expect(within(llmModelSelect).getByRole("option", { name: "claude-opus" })).toBeInTheDocument();
+    expect(within(llmModelSelect).queryByRole("option", { name: "gpt-4o" })).not.toBeInTheDocument();
   });
 
   it("プロバイダーの保存に失敗したときはモデルを再取得しない", async () => {
     const { fireEvent } = await import("@testing-library/react");
     selectProviderMock.mockResolvedValue({ error: "失敗" });
     render(<ProjectAiModelsPanel projectId={1} />);
-    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+    await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
     fetchLlmModelsMock.mockClear();
 
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), {
@@ -258,7 +259,7 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     const selectModelMock = selectLlmModelAction as jest.MockedFunction<typeof selectLlmModelAction>;
     selectModelMock.mockReset().mockResolvedValue({});
     render(<ProjectAiModelsPanel projectId={1} />);
-    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+    await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
     let resolveStale!: (v: LlmModelListResponse) => void;
     fetchLlmModelsMock.mockReset();
@@ -268,23 +269,23 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
     await waitFor(() => expect(resolveStale).toBeDefined());
 
-    fireEvent.change(screen.getByPlaceholderText("gpt-4o-mini"), { target: { value: "gpt-4o" } });
-    fireEvent.submit(screen.getByPlaceholderText("gpt-4o-mini").closest("form")!);
+    fireEvent.change(screen.getByLabelText("LLMのモデル"), { target: { value: "gpt-4o" } });
+    fireEvent.submit(screen.getByLabelText("LLMのモデル").closest("form")!);
     await waitFor(() => expect(selectModelMock).toHaveBeenCalledWith(1, "gpt-4o"));
-    await waitFor(() => expect(screen.getByText("選択中のモデル:").parentElement).toHaveTextContent(/gpt-4o$/));
+    await waitFor(() => expect(screen.getByText("選択中のモデル:")).toHaveTextContent(/選択中のモデル: gpt-4o$/));
 
     await act(async () => {
       resolveStale({ selected: "gpt-4o-mini", availableModels: ["gpt-4o-mini", "gpt-4o"] });
     });
 
-    expect(screen.getByText("選択中のモデル:").parentElement).toHaveTextContent(/gpt-4o$/);
-    expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o");
+    expect(screen.getByText("選択中のモデル:")).toHaveTextContent(/選択中のモデル: gpt-4o$/);
+    expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o");
   });
 
   it("プロバイダーの「保存しました。」は、モデルの再取得が完了してから表示する(ATが古い画面で先へ進まないように)", async () => {
     const { fireEvent, act } = await import("@testing-library/react");
     render(<ProjectAiModelsPanel projectId={1} />);
-    await waitFor(() => expect(screen.getByPlaceholderText("gpt-4o-mini")).toHaveValue("gpt-4o-mini"));
+    await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
     let resolveRefetch!: (v: LlmModelListResponse) => void;
     fetchLlmModelsMock.mockReset();

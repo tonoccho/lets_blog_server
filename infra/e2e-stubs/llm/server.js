@@ -655,6 +655,11 @@ async function streamPull(res, model) {
   res.end();
 }
 
+/** GET /v1/models が返すモデルID(issue #1674)。AT(model-selection / llm-model-dropdown)がこの値を前提にする。 */
+const LISTED_OPENAI_MODELS = ['e2e-stub-gpt-a', 'e2e-stub-gpt-b'];
+/** GET /api/tags が返すモデル名(issue #1674)。 */
+const LISTED_OLLAMA_MODELS = ['e2e-stub-ollama-a:1b', 'e2e-stub-ollama-b:1b'];
+
 createStub({
   name: 'llm',
   port: Number(process.env.PORT || 8080),
@@ -679,6 +684,19 @@ createStub({
       sendJson(res, 200, {
         models: [{ name: 'e2e-stub', model: 'e2e-stub', size: 4_000_000_000, size_vram: 0 }],
       });
+      return true;
+    }
+
+    // モデル一覧(issue #1674)。ai-service の ProviderModelCatalog が、プロジェクト画面のモデル
+    // ドロップダウンの選択肢を取るために叩く。決定的な2件ずつ(現在のモデルと異なるものを選べるように)。
+    // OpenAI / Anthropic 互換の GET /v1/models。
+    if (method === 'GET' && pathname === '/v1/models') {
+      sendJson(res, 200, { object: 'list', data: LISTED_OPENAI_MODELS.map((id) => ({ id, object: 'model', owned_by: 'e2e-stub' })) });
+      return true;
+    }
+    // Ollama のネイティブ GET /api/tags。
+    if (method === 'GET' && pathname === '/api/tags') {
+      sendJson(res, 200, { models: LISTED_OLLAMA_MODELS.map((name) => ({ name, model: name, size: 1_000_000 })) });
       return true;
     }
 
