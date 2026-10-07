@@ -83,6 +83,42 @@ Then(
   }
 );
 
+// issue #1143: AI生成フォームのプロンプト欄。aria-labelもnameも無いのでプレースホルダで選ぶ。
+// 「生成」は押さない(押すと処理キューにジョブが積まれ、LLMスタブが要る。#1586の範囲)。
+const AI_PROMPT_PLACEHOLDER = /背景を淡いグレーにして/;
+
+Then('ハイドレーション完了前のAI生成プロンプト欄は無効化されていて入力を受け付けない', async ({ page }) => {
+  const textarea = page.getByPlaceholder(AI_PROMPT_PLACEHOLDER);
+  // evaluate()はactionabilityを待たない(上のCSS欄のステップと同じ理由)。
+  const disabledRightAfterCommit = await textarea.evaluate(
+    (el) => (el as HTMLTextAreaElement).disabled
+  );
+  expect(
+    disabledRightAfterCommit,
+    '画面を開いた直後、ハイドレーション完了前のAI生成プロンプト欄がdisabledになっていません。' +
+      'mountedガードが外れていると、ネイティブな入力がReactのstateに入らず#1143の競合が再発します。'
+  ).toBe(true);
+});
+
+When(
+  /^ハイドレーション完了後にAI生成プロンプト欄へ「([^」]*)」と入力する$/,
+  async ({ page }, value: string) => {
+    const textarea = page.getByPlaceholder(AI_PROMPT_PLACEHOLDER);
+    await expect(textarea).toBeEnabled({ timeout: 15_000 });
+    await textarea.fill(value);
+  }
+);
+
+Then(
+  /^AI生成プロンプト欄には「([^」]*)」がそのまま残り、生成ボタンが有効になっている$/,
+  async ({ page }, expectedValue: string) => {
+    await expect(page.getByPlaceholder(AI_PROMPT_PLACEHOLDER)).toHaveValue(expectedValue);
+    await expect(page.getByRole('button', { name: '生成', exact: true })).toBeEnabled({
+      timeout: 15_000,
+    });
+  }
+);
+
 After({ tags: '@project' }, async ({ ctx, request }) => {
   const projectId = (ctx as ScenarioState).tagDesignProjectId as number | undefined;
   if (projectId === undefined) {

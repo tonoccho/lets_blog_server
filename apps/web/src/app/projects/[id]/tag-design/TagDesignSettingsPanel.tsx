@@ -213,6 +213,16 @@ function TagDesignGenerationForm({
   onSave: (result: GeneratedTagDesign) => Promise<string | null>;
 }) {
   const [prompt, setPrompt] = useState("");
+  // issue #1143(同種の競合 #1144 と同じ対策): SSR直後・ハイドレーション完了前のプロンプト欄は、
+  // 見た目上は操作できるのにReactのonChangeが未接続で、そこへ入力された値は`prompt`stateに入らない。
+  // その結果ハイドレーション後に欄が空へ戻り「生成」も無効のままになっていた。TagDesignEditorと同じ
+  // mountedガードで、マウント完了までdisabledにして入力口自体を無くす(ブラウザは無効な部品へキー入力を
+  // 配送しない)。「生成」ボタンは従来どおり`!prompt.trim()`で、空の間は前後とも無効のまま。
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
   const [isPending, startTransition] = useTransition();
   const [isSaving, startSaveTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -271,6 +281,7 @@ function TagDesignGenerationForm({
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
+        disabled={!mounted}
         rows={3}
         placeholder="例: 背景を淡いグレーにして、影を付けてカードっぽくしてください。"
         className="w-full rounded border border-neutral-300 dark:border-neutral-700 px-3 py-2 font-mono text-sm"

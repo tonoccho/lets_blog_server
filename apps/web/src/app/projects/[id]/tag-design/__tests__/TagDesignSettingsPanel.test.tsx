@@ -128,6 +128,70 @@ describe("TagDesignEditor のハイドレーション競合対策 (issue #1144)"
 });
 
 /**
+ * issue #1143: AI生成フォーム(TagDesignGenerationForm)のプロンプト欄も、#1144のCSS欄と同じく
+ * SSR直後(ハイドレーション完了前)に入力を受け付けてしまい、入力がReactのstateに入らず
+ * 「生成」ボタンが無効のままになる競合があった。CSS欄と同じmountedガードで守る。
+ */
+describe("AI生成フォームのハイドレーション競合対策 (issue #1143)", () => {
+  const PROMPT_PLACEHOLDER = "背景を淡いグレーにして";
+
+  function findPrompt(container: HTMLElement): HTMLTextAreaElement {
+    const textarea = Array.from(container.querySelectorAll("textarea")).find((el) =>
+      (el.getAttribute("placeholder") ?? "").includes(PROMPT_PLACEHOLDER)
+    );
+    expect(textarea).toBeDefined();
+    return textarea as HTMLTextAreaElement;
+  }
+
+  function findGenerateButton(container: HTMLElement): HTMLButtonElement {
+    const button = Array.from(container.querySelectorAll("button")).find(
+      (el) => el.textContent === "生成"
+    );
+    expect(button).toBeDefined();
+    return button as HTMLButtonElement;
+  }
+
+  it("ハイドレーション完了前(SSR直後)のプロンプト欄と「生成」ボタンはdisabledである", () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderServerHtml();
+
+    expect(findPrompt(container).disabled).toBe(true);
+    expect(findGenerateButton(container).disabled).toBe(true);
+  });
+
+  it("SSR→ハイドレーションを10回連続で行っても、毎回ハイドレーション後はプロンプト欄が有効で入力値が保持され、「生成」ボタンが有効になる", () => {
+    for (let i = 0; i < 10; i++) {
+      const container = document.createElement("div");
+      container.innerHTML = renderServerHtml();
+      document.body.appendChild(container);
+
+      const textarea = findPrompt(container);
+      const button = findGenerateButton(container);
+      expect(textarea.disabled).toBe(true);
+      expect(button.disabled).toBe(true);
+
+      const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+      act(() => {
+        hydrate(container);
+      });
+      errorSpy.mockRestore();
+
+      // ハイドレーション直後: 欄は有効になるが、プロンプトが空の間は「生成」は無効のまま
+      expect(textarea.disabled).toBe(false);
+      expect(button.disabled).toBe(true);
+
+      act(() => {
+        fireEvent.change(textarea, { target: { value: `緑にして-${i}` } });
+      });
+      expect(textarea.value).toBe(`緑にして-${i}`);
+      expect(button.disabled).toBe(false);
+
+      document.body.removeChild(container);
+    }
+  });
+});
+
+/**
  * 以下は#1144自体のスコープ外だが、scripts/check-changed-coverage.pyがファイル単位で
  * C1/C2分岐カバレッジを見るため、本ファイルを変更対象とした本Issueの機会に合わせて、
  * 既存の分岐(タグ種別ごとの標準CSS/プレビュー生成、プリセット選択、AI生成フォーム、
