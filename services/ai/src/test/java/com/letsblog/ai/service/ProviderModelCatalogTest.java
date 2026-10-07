@@ -313,6 +313,51 @@ class ProviderModelCatalogTest {
     }
 
     @Test
+    void 呼び出し側の待ち時間がタイムアウトより短ければそちらで打ち切る() {
+        when(configProvider.targetFor(AiProvider.OLLAMA)).thenReturn(new GuardedTarget(root, null));
+        stallingTags();
+
+        long started = System.nanoTime();
+        Optional<List<String>> result = catalog().fetch(AiProvider.OLLAMA, Duration.ofMillis(300));
+        long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+
+        assertEquals(Optional.empty(), result);
+        assertTrue(elapsedMillis < 2_000, "待ち時間の指定が効いていない: " + elapsedMillis + "ms");
+    }
+
+    @Test
+    void 呼び出し側の待ち時間がタイムアウトより長くてもタイムアウトを超えない() {
+        when(configProvider.targetFor(AiProvider.OLLAMA)).thenReturn(new GuardedTarget(root, null));
+        stallingTags();
+
+        long started = System.nanoTime();
+        Optional<List<String>> result = new ProviderModelCatalog(configProvider, Duration.ofMillis(300))
+                .fetch(AiProvider.OLLAMA, Duration.ofSeconds(30));
+        long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+
+        assertEquals(Optional.empty(), result);
+        assertTrue(elapsedMillis < 2_000, "タイムアウトを超えた: " + elapsedMillis + "ms");
+    }
+
+    @Test
+    void 待ち時間が残っていなければ問い合わせず空を返す() {
+        assertEquals(Optional.empty(), catalog().fetch(AiProvider.OLLAMA, Duration.ZERO));
+        verify(configProvider, never()).targetFor(AiProvider.OLLAMA);
+    }
+
+    private void stallingTags() {
+        server.createContext("/api/tags", exchange -> {
+            try {
+                Thread.sleep(3_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        server.start();
+    }
+
+    @Test
     void 既定のタイムアウトは応答時間予算の3秒以内である() {
         assertEquals(Duration.ofSeconds(2), ProviderModelCatalog.DEFAULT_TIMEOUT);
     }

@@ -308,4 +308,82 @@ describe("ReviewStepSettingsPanel", () => {
       expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "CLAUDE", "gpt-4o");
     });
   });
+
+  // issue #1676: 取得失敗の表示と、保存済みの値を一覧に無くても残す
+  const NOTICE = /モデル一覧をプロバイダーから取得できなかった/;
+
+  it("fallbackProvidersに載ったproviderの工程には、取得できなかった旨が出て、他の工程には出ない", () => {
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({
+          steps: [
+            { stepKey: "JAPANESE", provider: "OLLAMA", model: null },
+            { stepKey: "PROOFREADING", provider: "OPENAI", model: null },
+            { stepKey: "FACT_CHECK", provider: null, model: null },
+            { stepKey: "READER_PERSPECTIVE", provider: null, model: null },
+            { stepKey: "STYLE", provider: null, model: null },
+          ],
+          fallbackProviders: ["OLLAMA"],
+          defaultProvider: "OPENAI",
+        })}
+      />
+    );
+
+    expect(within(rowFor("日本語チェック")).getByText(NOTICE)).toBeInTheDocument();
+    expect(within(rowFor("校正チェック")).queryByText(NOTICE)).toBeNull();
+    expect(within(rowFor("校閲")).queryByText(NOTICE)).toBeNull();
+  });
+
+  it("provider未設定の工程は、既定providerが取得失敗のときだけ取得できなかった旨が出る", () => {
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({ fallbackProviders: ["OPENAI"], defaultProvider: "OPENAI" })}
+      />
+    );
+
+    expect(within(rowFor("校閲")).getByText(NOTICE)).toBeInTheDocument();
+  });
+
+  it("providerを切り替えると、切り替え先providerの取得状態で旨の表示が変わる", () => {
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({ fallbackProviders: ["CLAUDE"], defaultProvider: "OPENAI" })}
+      />
+    );
+    const row = rowFor("日本語チェック");
+    expect(within(row).queryByText(NOTICE)).toBeNull();
+
+    fireEvent.change(within(row).getByLabelText("日本語チェックのプロバイダー"), { target: { value: "CLAUDE" } });
+
+    expect(within(row).getByText(NOTICE)).toBeInTheDocument();
+  });
+
+  it("保存済みのモデルが候補に無くても、選択肢に残って選択状態になる", () => {
+    render(
+      <ReviewStepSettingsPanel
+        projectId={1}
+        initialData={initialData({
+          steps: [
+            { stepKey: "JAPANESE", provider: "OLLAMA", model: "e2e-unlisted-model" },
+            { stepKey: "PROOFREADING", provider: null, model: "gpt-not-in-list" },
+            { stepKey: "FACT_CHECK", provider: "OPENAI", model: "gpt-4o" },
+            { stepKey: "READER_PERSPECTIVE", provider: null, model: null },
+            { stepKey: "STYLE", provider: null, model: null },
+          ],
+        })}
+      />
+    );
+
+    const unlisted = within(rowFor("日本語チェック")).getByLabelText("日本語チェックのモデル") as HTMLSelectElement;
+    expect(unlisted.value).toBe("e2e-unlisted-model");
+    expect(within(unlisted).getAllByRole("option").map((o) => o.textContent)).toContain("e2e-unlisted-model");
+    const noProvider = within(rowFor("校正チェック")).getByLabelText("校正チェックのモデル") as HTMLSelectElement;
+    expect(noProvider.value).toBe("gpt-not-in-list");
+    // 一覧に在る保存済みの値は重複しない
+    const listed = within(rowFor("校閲")).getByLabelText("校閲のモデル") as HTMLSelectElement;
+    expect(within(listed).getAllByRole("option").filter((o) => o.textContent === "gpt-4o")).toHaveLength(1);
+  });
 });

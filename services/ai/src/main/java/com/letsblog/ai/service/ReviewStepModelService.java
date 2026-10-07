@@ -7,9 +7,12 @@ import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.ReviewStepSettingResponse;
 import com.letsblog.ai.dto.ReviewStepSettingsResponse;
 import com.letsblog.ai.repository.ProjectReviewStepSettingRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,14 +36,33 @@ public class ReviewStepModelService {
     private final ProjectReviewStepSettingRepository repository;
     private final LlmModelService llmModelService;
     private final LlmConfigProvider llmConfigProvider;
+    private final ProviderModelCatalog providerModelCatalog;
+    private final Duration fetchBudget;
 
+    /** 3プロバイダーへの問い合わせ全体の予算。応答時間予算の3秒(要件4)に収める。 */
+    static final Duration FETCH_BUDGET = Duration.ofMillis(2500);
+
+    @Autowired
     public ReviewStepModelService(
             ProjectReviewStepSettingRepository repository,
             LlmModelService llmModelService,
-            LlmConfigProvider llmConfigProvider) {
+            LlmConfigProvider llmConfigProvider,
+            ProviderModelCatalog providerModelCatalog) {
+        this(repository, llmModelService, llmConfigProvider, providerModelCatalog, FETCH_BUDGET);
+    }
+
+    /** テスト専用: 予算を差し替える。 */
+    ReviewStepModelService(
+            ProjectReviewStepSettingRepository repository,
+            LlmModelService llmModelService,
+            LlmConfigProvider llmConfigProvider,
+            ProviderModelCatalog providerModelCatalog,
+            Duration fetchBudget) {
+        this.fetchBudget = fetchBudget;
         this.repository = repository;
         this.llmModelService = llmModelService;
         this.llmConfigProvider = llmConfigProvider;
+        this.providerModelCatalog = providerModelCatalog;
     }
 
     /**
@@ -63,12 +85,31 @@ public class ReviewStepModelService {
                 .toList();
 
         var availableProviders = Arrays.stream(AiProvider.values()).map(Enum::name).toList();
+        // issue #1676: プロジェクトの実効接続先とAPIキーで、プロバイダーごとに問い合わせる(取得に失敗したら
+        // システム設定の一覧へ戻す)。接続先の宣言はリクエスト単位なので、問い合わせは順に行う。
+        llmConfigProvider.useProject(projectId);
         Map<String, List<String>> modelsByProvider = new LinkedHashMap<>();
+        List<String> fallbackProviders = new ArrayList<>();
+        // 全体で共有する期限。順に問い合わせるので、各回には残りだけを渡し、使い切ったら問い合わせない
+        // (取れなかったプロバイダーは代替一覧になりfallbackProvidersに載る)。
+        long deadline = System.nanoTime() + fetchBudget.toNanos();
         for (AiProvider provider : AiProvider.values()) {
-            modelsByProvider.put(provider.name(), llmConfigProvider.availableModelsFor(provider));
+            Duration remaining = Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
+            Optional<List<String>> fetched = providerModelCatalog.fetch(provider, remaining);
+            if (fetched.isPresent()) {
+                modelsByProvider.put(provider.name(), fetched.get());
+            } else {
+                modelsByProvider.put(provider.name(), llmConfigProvider.availableModelsFor(provider));
+                fallbackProviders.add(provider.name());
+            }
         }
+        AiProvider defaultProvider = llmConfigProvider.provider();
+        List<String> defaultModels = defaultProvider != null
+                ? modelsByProvider.get(defaultProvider.name())
+                : llmConfigProvider.availableModels();
         return new ReviewStepSettingsResponse(
-                steps, availableProviders, llmConfigProvider.availableModels(), modelsByProvider);
+                steps, availableProviders, defaultModels, modelsByProvider, fallbackProviders,
+                defaultProvider != null ? defaultProvider.name() : null);
     }
 
     /**

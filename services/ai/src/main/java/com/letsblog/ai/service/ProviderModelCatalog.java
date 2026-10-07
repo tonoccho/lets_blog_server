@@ -70,8 +70,21 @@ public class ProviderModelCatalog {
 
     /** 取得できたモデルの一覧(0件でもよい)。取得に失敗したら空のOptional。 */
     public Optional<List<String>> fetch(AiProvider provider) {
+        return fetch(provider, timeout);
+    }
+
+    /**
+     * {@link #fetch(AiProvider)}と同じだが、待ち時間を{@code maxWait}でも打ち切る(実際の待ち時間は
+     * 設定のタイムアウトと{@code maxWait}の短いほう)。複数のプロバイダーを順に問い合わせる呼び出し側が、
+     * 全体の予算の残りを渡すために使う。待ち時間が残っていなければ問い合わせず空を返す。
+     */
+    public Optional<List<String>> fetch(AiProvider provider, Duration maxWait) {
+        Duration effective = maxWait.compareTo(timeout) < 0 ? maxWait : timeout;
+        if (effective.isZero() || effective.isNegative()) {
+            return Optional.empty();
+        }
         try {
-            return Optional.of(query(provider));
+            return Optional.of(query(provider, effective));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("Model list request for {} was interrupted", provider);
@@ -82,7 +95,7 @@ public class ProviderModelCatalog {
         }
     }
 
-    private List<String> query(AiProvider provider) throws Exception {
+    private List<String> query(AiProvider provider, Duration timeout) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder().timeout(timeout).GET();
         String apiKey = provider == AiProvider.OLLAMA ? null : requireApiKey(provider);
         GuardedTarget target = configProvider.targetFor(provider);

@@ -13,12 +13,17 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.inOrder;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -38,9 +43,11 @@ class ReviewStepModelServiceTest {
     private LlmModelService llmModelService;
     @Mock
     private LlmConfigProvider llmConfigProvider;
+    @Mock
+    private ProviderModelCatalog providerModelCatalog;
 
     private ReviewStepModelService service() {
-        return new ReviewStepModelService(repository, llmModelService, llmConfigProvider);
+        return new ReviewStepModelService(repository, llmModelService, llmConfigProvider, providerModelCatalog);
     }
 
     @Test
@@ -251,5 +258,151 @@ class ReviewStepModelServiceTest {
         when(llmModelService.getSelectedModel(1L, AiProvider.OPENAI)).thenReturn("gpt-4o-mini");
 
         assertEquals("gpt-4o-mini", service().resolveModel(1L, ReviewStepKey.STYLE));
+    }
+
+    // ---- issue #1676: 工程別の候補を、プロバイダーから取得した一覧にする
+
+    @Test
+    void listSettings_各プロバイダーの候補はプロバイダーへ問い合わせた一覧で_プロジェクトを宣言してから問い合わせる() {
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(providerModelCatalog.fetch(eq(AiProvider.OLLAMA), any(Duration.class)))
+                .thenReturn(Optional.of(List.of("qwen2.5:7b-instruct", "llama3:8b")));
+        when(providerModelCatalog.fetch(eq(AiProvider.OPENAI), any(Duration.class))).thenReturn(Optional.of(List.of("gpt-a", "gpt-b")));
+        when(providerModelCatalog.fetch(eq(AiProvider.CLAUDE), any(Duration.class))).thenReturn(Optional.of(List.of("claude-x")));
+
+        ReviewStepSettingsResponse response = service().listSettings(1L);
+
+        assertEquals(List.of("qwen2.5:7b-instruct", "llama3:8b"), response.availableModelsByProvider().get("OLLAMA"));
+        assertEquals(List.of("gpt-a", "gpt-b"), response.availableModelsByProvider().get("OPENAI"));
+        assertEquals(List.of("claude-x"), response.availableModelsByProvider().get("CLAUDE"));
+        assertEquals(List.of(), response.fallbackProviders());
+        assertEquals("OLLAMA", response.defaultProvider());
+        // provider未設定の工程用は、システム既定プロバイダーの取得結果
+        assertEquals(List.of("qwen2.5:7b-instruct", "llama3:8b"), response.availableModels());
+        var order = inOrder(llmConfigProvider, providerModelCatalog);
+        order.verify(llmConfigProvider).useProject(1L);
+        order.verify(providerModelCatalog).fetch(eq(AiProvider.OLLAMA), any(Duration.class));
+    }
+
+    @Test
+    void listSettings_取得に失敗したプロバイダーはシステム設定の一覧に戻りfallbackProvidersに載る() {
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OPENAI);
+        when(providerModelCatalog.fetch(eq(AiProvider.OLLAMA), any(Duration.class))).thenReturn(Optional.empty());
+        when(providerModelCatalog.fetch(eq(AiProvider.OPENAI), any(Duration.class))).thenReturn(Optional.of(List.of("gpt-a")));
+        when(providerModelCatalog.fetch(eq(AiProvider.CLAUDE), any(Duration.class))).thenReturn(Optional.empty());
+        when(llmConfigProvider.availableModelsFor(AiProvider.OLLAMA)).thenReturn(List.of("qwen2.5:7b-instruct"));
+        when(llmConfigProvider.availableModelsFor(AiProvider.CLAUDE)).thenReturn(List.of("claude-default"));
+
+        ReviewStepSettingsResponse response = service().listSettings(1L);
+
+        assertEquals(List.of("qwen2.5:7b-instruct"), response.availableModelsByProvider().get("OLLAMA"));
+        assertEquals(List.of("gpt-a"), response.availableModelsByProvider().get("OPENAI"));
+        assertEquals(List.of("claude-default"), response.availableModelsByProvider().get("CLAUDE"));
+        assertEquals(List.of("OLLAMA", "CLAUDE"), response.fallbackProviders());
+        assertEquals(List.of("gpt-a"), response.availableModels());
+    }
+
+    @Test
+    void listSettings_既定プロバイダーの取得に失敗したときprovider未設定の工程用もシステム設定の一覧でfallbackに載る() {
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.CLAUDE);
+        when(providerModelCatalog.fetch(any(), any(Duration.class))).thenReturn(Optional.empty());
+        when(llmConfigProvider.availableModelsFor(any())).thenReturn(List.of("claude-default"));
+
+        ReviewStepSettingsResponse response = service().listSettings(1L);
+
+        assertEquals(List.of("claude-default"), response.availableModels());
+        assertTrue(response.fallbackProviders().contains("CLAUDE"));
+        assertEquals("CLAUDE", response.defaultProvider());
+    }
+
+    @Test
+    void listSettings_Claudeの候補はProviderModelCatalogが返すAnthropicの一覧になる() {
+        ProjectReviewStepSetting style = new ProjectReviewStepSetting(1L, ReviewStepKey.STYLE);
+        style.setLlmProvider("CLAUDE");
+        when(repository.findByProjectId(1L)).thenReturn(List.of(style));
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(providerModelCatalog.fetch(eq(AiProvider.OLLAMA), any(Duration.class))).thenReturn(Optional.of(List.of("o")));
+        when(providerModelCatalog.fetch(eq(AiProvider.OPENAI), any(Duration.class))).thenReturn(Optional.of(List.of("p")));
+        when(providerModelCatalog.fetch(eq(AiProvider.CLAUDE), any(Duration.class)))
+                .thenReturn(Optional.of(List.of("claude-sonnet-4", "claude-haiku-4")));
+
+        ReviewStepSettingsResponse response = service().listSettings(1L);
+
+        assertEquals(List.of("claude-sonnet-4", "claude-haiku-4"), response.availableModelsByProvider().get("CLAUDE"));
+        assertEquals(List.of(), response.fallbackProviders());
+    }
+
+    // ---- issue #1676 レビュー指摘: GET review-steps は全体で3秒以内(要件4)
+
+    /** 渡された待ち時間いっぱいブロックして失敗する(取得できないプロバイダー)。呼び出し回数と待ち時間を記録する。 */
+    private List<Duration> stubBlockingCatalog() {
+        List<Duration> requested = new CopyOnWriteArrayList<>();
+        when(providerModelCatalog.fetch(any(), any(Duration.class))).thenAnswer(invocation -> {
+            Duration wait = invocation.getArgument(1);
+            requested.add(wait);
+            Thread.sleep(Math.min(wait.toMillis(), 5_000));
+            return Optional.<List<String>>empty();
+        });
+        return requested;
+    }
+
+    private ReviewStepModelService boundedService(Duration budget) {
+        return new ReviewStepModelService(repository, llmModelService, llmConfigProvider, providerModelCatalog, budget);
+    }
+
+    @Test
+    void listSettings_全プロバイダーがブロックしても全体の所要時間は予算で有界で_取れなかった分は代替一覧になる() {
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(llmConfigProvider.availableModelsFor(any())).thenReturn(List.of("fallback-model"));
+        List<Duration> requested = stubBlockingCatalog();
+
+        long started = System.nanoTime();
+        ReviewStepSettingsResponse response = boundedService(Duration.ofMillis(600)).listSettings(1L);
+        long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+
+        assertTrue(elapsedMillis < 1_500, "所要時間が予算で有界でない: " + elapsedMillis + "ms");
+        assertEquals(List.of("OLLAMA", "OPENAI", "CLAUDE"), response.fallbackProviders());
+        assertEquals(List.of("fallback-model"), response.availableModelsByProvider().get("CLAUDE"));
+        assertEquals(List.of("fallback-model"), response.availableModels());
+        requested.forEach(wait -> assertTrue(wait.compareTo(Duration.ofMillis(600)) <= 0, wait.toString()));
+    }
+
+    @Test
+    void listSettings_予算を使い切った後のプロバイダーには残りのごく僅かな待ち時間しか渡さない() {
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OLLAMA);
+        when(llmConfigProvider.availableModelsFor(any())).thenReturn(List.of("fallback-model"));
+        List<Duration> requested = stubBlockingCatalog();
+
+        boundedService(Duration.ofMillis(300)).listSettings(1L);
+
+        assertEquals(3, requested.size(), requested.toString());
+        requested.subList(1, 3).forEach(wait -> assertTrue(wait.compareTo(Duration.ofMillis(50)) < 0, wait.toString()));
+    }
+
+    @Test
+    void selectSetting_も保存後の一覧取得が予算で有界() {
+        when(repository.findByProjectIdAndStepKey(1L, ReviewStepKey.JAPANESE)).thenReturn(Optional.empty());
+        when(repository.findByProjectId(1L)).thenReturn(List.of());
+        when(llmConfigProvider.provider()).thenReturn(AiProvider.OPENAI);
+        when(llmConfigProvider.availableModelsFor(any())).thenReturn(List.of("fallback-model"));
+        stubBlockingCatalog();
+
+        long started = System.nanoTime();
+        ReviewStepSettingsResponse response =
+                boundedService(Duration.ofMillis(600)).selectSetting(1L, ReviewStepKey.JAPANESE, "OPENAI", "gpt-4o");
+        long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+
+        assertTrue(elapsedMillis < 1_500, "所要時間が予算で有界でない: " + elapsedMillis + "ms");
+        assertEquals(List.of("OLLAMA", "OPENAI", "CLAUDE"), response.fallbackProviders());
+    }
+
+    @Test
+    void 既定の予算は応答時間予算の3秒未満である() {
+        assertTrue(ReviewStepModelService.FETCH_BUDGET.compareTo(Duration.ofSeconds(3)) < 0);
     }
 }

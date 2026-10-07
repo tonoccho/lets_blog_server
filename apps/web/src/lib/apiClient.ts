@@ -3067,6 +3067,10 @@ export interface ReviewStepSettingsResponse {
   availableModels: string[];
   /** providerごとの一覧(issue #1423)。工程のproviderで使えるモデル名だけを候補にする。 */
   availableModelsByProvider: Record<string, string[]>;
+  /** プロバイダーから一覧を取得できず、システム設定の一覧に戻したprovider(issue #1676)。 */
+  fallbackProviders?: string[];
+  /** provider未設定の工程が使うシステム既定provider(availableModelsの取得元)。 */
+  defaultProvider?: string | null;
 }
 
 export function listReviewStepSettings(projectId: number): Promise<ReviewStepSettingsResponse> {

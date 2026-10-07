@@ -405,3 +405,117 @@ Then(
     ).toContain(actual);
   }
 );
+
+// --------------------------------------------------------------- レビュー工程別のモデル(issue #1676)
+
+const REVIEW_STEP_KEY: Record<string, string> = {
+  日本語チェック: 'JAPANESE',
+  校正チェック: 'PROOFREADING',
+  校閲: 'FACT_CHECK',
+  読者視点でのチェック: 'READER_PERSPECTIVE',
+  文体チェック: 'STYLE',
+};
+
+function reviewStepRow(page: Page, label: string) {
+  return page.locator('tr', { hasText: label });
+}
+
+function reviewStepModelSelect(page: Page, label: string) {
+  return reviewStepRow(page, label).getByLabel(`${label}のモデル`);
+}
+
+async function saveReviewStepViaApi(
+  ctx: Record<string, unknown>,
+  request: APIRequestContext,
+  label: string,
+  provider: string,
+  model: string | null
+) {
+  const stepKey = REVIEW_STEP_KEY[label];
+  expect(stepKey, `未対応の工程名です: ${label}`).toBeDefined();
+  const response = await request.put(
+    `/api/projects/${currentProjectId(ctx)}/ai-models/llm/review-steps/${stepKey}`,
+    { headers: { Authorization: `Bearer ${await adminToken(request)}` }, data: { provider, model } }
+  );
+  expect(
+    response.ok(),
+    `工程の設定の保存に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+}
+
+Given(
+  /^AI設定用のプロジェクトの「([^」]+)」の工程が、プロバイダー「([^」]+)」で保存されている$/,
+  async ({ ctx, request }, label: string, provider: string) => {
+    await saveReviewStepViaApi(ctx, request, label, provider, null);
+  }
+);
+
+Given(
+  /^AI設定用のプロジェクトの「(.+)」の工程が、プロバイダー「(.+)」、モデル「(.+)」で保存されている$/,
+  async ({ ctx, request }, label: string, provider: string, model: string) => {
+    await saveReviewStepViaApi(ctx, request, label, provider, model);
+  }
+);
+
+Then(
+  /^画面の「(.+)」の工程のモデル欄の選択肢は「(.+)」と「(.+)」だけである$/,
+  async ({ page }, label: string, first: string, second: string) => {
+    const select = reviewStepModelSelect(page, label);
+    await expect(select).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () =>
+          (await select.locator('option').evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value)))
+            .filter((v) => v !== ''),
+        { timeout: 30_000 }
+      )
+      .toEqual([first, second]);
+  }
+);
+
+When(
+  /^画面で「(.+)」の工程のモデルに「(.+)」を選んで保存する$/,
+  async ({ page }, label: string, model: string) => {
+    const select = reviewStepModelSelect(page, label);
+    await expect(select.locator('option', { hasText: model })).toHaveCount(1, { timeout: 30_000 });
+    await select.selectOption(model);
+    // 保存(Server Action)の往復まで待つ。待たずに再読み込みすると保存が打ち切られる。
+    const saved = page.waitForResponse((response) => {
+      const request = response.request();
+      return (
+        request.method() === 'POST' &&
+        !!request.headers()['next-action'] &&
+        (request.postData() ?? '').includes(JSON.stringify(model))
+      );
+    });
+    await reviewStepRow(page, label).getByRole('button', { name: '保存' }).click();
+    await saved;
+  }
+);
+
+Then(
+  /^画面の「(.+)」の工程のモデルが「(.+)」で選択されている$/,
+  async ({ page }, label: string, model: string) => {
+    await expect(reviewStepModelSelect(page, label)).toHaveValue(model, { timeout: 30_000 });
+  }
+);
+
+Then(/^画面の「(.+)」の工程に、モデル一覧を取得できなかった旨が表示される$/, async ({ page }, label: string) => {
+  await expect(reviewStepRow(page, label).getByText('モデル一覧をプロバイダーから取得できなかった')).toBeVisible({
+    timeout: 30_000,
+  });
+});
+
+Then(
+  /^画面の「(.+)」の工程のモデル欄の選択肢に、LLMスタブが返すモデルは含まれない$/,
+  async ({ page }, label: string) => {
+    const options = await reviewStepModelSelect(page, label).locator('option').allTextContents();
+    const stubModels = options.filter((n) => n.startsWith('e2e-stub-gpt-') || n.startsWith('e2e-stub-ollama-'));
+    expect(stubModels, `選択肢=${JSON.stringify(options)}`).toEqual([]);
+  }
+);
+
+Then(/^画面の「(.+)」の工程のモデル欄と保存ボタンは操作できる$/, async ({ page }, label: string) => {
+  await expect(reviewStepModelSelect(page, label)).toBeEnabled({ timeout: 30_000 });
+  await expect(reviewStepRow(page, label).getByRole('button', { name: '保存' })).toBeEnabled({ timeout: 30_000 });
+});

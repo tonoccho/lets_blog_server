@@ -72,6 +72,8 @@ export function ReviewStepSettingsPanel({
               availableProviders={initialData.availableProviders}
               availableModels={initialData.availableModels}
               availableModelsByProvider={initialData.availableModelsByProvider}
+              fallbackProviders={initialData.fallbackProviders ?? []}
+              defaultProvider={initialData.defaultProvider ?? null}
               onSaved={applySaved}
             />
           ))}
@@ -87,6 +89,8 @@ function ReviewStepRow({
   availableProviders,
   availableModels,
   availableModelsByProvider,
+  fallbackProviders,
+  defaultProvider,
   onSaved,
 }: {
   projectId: number;
@@ -94,6 +98,8 @@ function ReviewStepRow({
   availableProviders: string[];
   availableModels: string[];
   availableModelsByProvider: Record<string, string[]>;
+  fallbackProviders: string[];
+  defaultProvider: string | null;
   onSaved: (updated: ReviewStepSetting) => void;
 }) {
   const [provider, setProvider] = useState(step.provider ?? "");
@@ -103,7 +109,12 @@ function ReviewStepRow({
   const label = STEP_LABEL[step.stepKey];
   // issue #1423: 選択中のproviderで使えるモデルだけを候補にする。未設定(または一覧が無い)の
   // ときはシステム既定providerの一覧。
-  const modelOptions = (provider && availableModelsByProvider?.[provider]) || availableModels;
+  const listedOptions = (provider && availableModelsByProvider?.[provider]) || availableModels;
+  // issue #1676: 保存済みのモデルが一覧に無くても、選択肢に残して選択状態にする。
+  const modelOptions = model && !listedOptions.includes(model) ? [...listedOptions, model] : listedOptions;
+  // issue #1676: 選択中のprovider(未設定ならシステム既定provider)の一覧を取得できなかったとき、その旨を出す。
+  const effectiveProvider = provider || defaultProvider;
+  const listFallback = effectiveProvider !== null && fallbackProviders.includes(effectiveProvider);
 
   // issue #1423: providerを変えたとき、選択中のモデルが新providerの候補に無ければ未設定へ
   // クリアする(旧providerのモデル名が新providerと組で保存されるのを防ぐ)。
@@ -169,6 +180,11 @@ function ReviewStepRow({
             </option>
           ))}
         </select>
+        {listFallback && (
+          <p role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+            モデル一覧をプロバイダーから取得できなかったため、システム設定のモデル一覧を表示しています。
+          </p>
+        )}
       </td>
       <td className="py-1.5">
         <button
