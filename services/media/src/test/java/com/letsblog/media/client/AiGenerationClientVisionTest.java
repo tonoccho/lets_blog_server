@@ -4,6 +4,7 @@ import com.letsblog.common.auth.ServiceTokenClient;
 import com.letsblog.media.ai.AiServiceException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -42,7 +43,8 @@ class AiGenerationClientVisionTest {
         Mockito.when(tokens.getAccessToken()).thenReturn("svc-token");
         client = new AiGenerationClient(
                 RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort(),
-                new OutboundAuthHeaders(new MockHttpServletRequest(), tokens));
+                new OutboundAuthHeaders(new MockHttpServletRequest(), tokens),
+                CircuitBreakerRegistry.ofDefaults());
     }
 
     @AfterEach

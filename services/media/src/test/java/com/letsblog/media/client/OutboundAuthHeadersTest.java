@@ -2,6 +2,7 @@ package com.letsblog.media.client;
 
 import com.letsblog.common.auth.ServiceTokenClient;
 import com.letsblog.media.service.ProjectNotFoundException;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -136,7 +137,8 @@ class OutboundAuthHeadersTest {
         when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
         responseBody = "{\"result\":\"ok\"}";
         AiGenerationClient client = new AiGenerationClient(
-                RestClient.builder(), baseUrl(), new OutboundAuthHeaders(new MockHttpServletRequest(), serviceTokenClient));
+                RestClient.builder(), baseUrl(), new OutboundAuthHeaders(new MockHttpServletRequest(), serviceTokenClient),
+                CircuitBreakerRegistry.ofDefaults());
         AtomicReference<String> result = new AtomicReference<>();
 
         onPlainThread(() -> result.set(client.generate(null, "p", null)));

@@ -4,9 +4,11 @@ import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.common.client.SyncCallProfile;
 import com.letsblog.common.client.SyncServiceClient;
 import com.letsblog.common.client.SyncServiceException;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -32,11 +34,27 @@ public class AiGenerationClient {
     private final SyncServiceClient client;
     private final OutboundAuthHeaders authHeaders;
 
+    @Autowired
     public AiGenerationClient(
             RestClient.Builder builder, @Value("${app.ai-service-uri}") String aiServiceUri,
             OutboundAuthHeaders authHeaders) {
         this.client = SyncServiceClient.builder(builder, "ai-service", aiServiceUri)
                 .profile(SyncCallProfile.LLM)
+                .build();
+        this.authHeaders = authHeaders;
+    }
+
+    /**
+     * テスト用(issue #1665): JVM共有のレジストリではなく、渡した{@link CircuitBreakerRegistry}を使う。
+     * 共有ブレーカーは同じ{@code "ai-service"}を呼ぶ全クライアントで状態を共有するため、あるテストの5xxが
+     * 別テストを「circuit breaker open」で落とす。本番(Springが使うコンストラクタ)の挙動は変えない。
+     */
+    AiGenerationClient(
+            RestClient.Builder builder, String aiServiceUri, OutboundAuthHeaders authHeaders,
+            CircuitBreakerRegistry circuitBreakerRegistry) {
+        this.client = SyncServiceClient.builder(builder, "ai-service", aiServiceUri)
+                .profile(SyncCallProfile.LLM)
+                .circuitBreakerRegistry(circuitBreakerRegistry)
                 .build();
         this.authHeaders = authHeaders;
     }
