@@ -22,27 +22,13 @@ jest.mock('@/lib/apiClient', () => ({
 jest.mock('@/lib/session', () => ({ requireAdminSession: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('@/components/Breadcrumb', () => ({ Breadcrumb: () => <nav /> }));
 jest.mock('../../ProjectSectionNav', () => ({ ProjectSectionNav: () => null }));
-jest.mock('../../EnvironmentSlot', () => ({
-  EnvironmentSlot: ({
-    environment,
-    site,
-    candidateSites,
-  }: {
-    environment: string;
-    site: { siteKey: string } | null;
-    candidateSites: unknown[];
-  }) => (
-    <div data-testid={`slot-${environment}`}>
-      {site ? site.siteKey : '未設定'}:{candidateSites.length}
-    </div>
-  ),
-}));
+jest.mock('@/app/sites/actions', () => ({ checkSiteConnectionAction: jest.fn() }));
 jest.mock('../GoogleAnalyticsWidget', () => ({ GoogleAnalyticsWidget: () => <p>GAレポート</p> }));
 jest.mock('../AdSenseWidget', () => ({ AdSenseWidget: () => <p>AdSenseレポート</p> }));
 
 import ProjectDashboardPage from '../page';
 
-const site = (id: number, siteKey: string) => ({ id, siteKey, name: siteKey, baseUrl: 'https://x' });
+const site = (id: number, siteKey: string) => ({ id, siteKey, name: `名前-${siteKey}`, baseUrl: 'https://x' });
 
 describe('プロジェクトダッシュボード page.tsx(issue #1500: 環境設定ウィジェット)', () => {
   let errorSpy: jest.SpyInstance;
@@ -66,13 +52,22 @@ describe('プロジェクトダッシュボード page.tsx(issue #1500: 環境�
 
   const renderPage = async () => render(await ProjectDashboardPage({ params: Promise.resolve({ id: '7' }) }));
 
-  it('「環境設定」ウィジェットにlocal/test/productionの3スロットを候補サイト付きで描く', async () => {
+  it('「環境設定」ウィジェットにlocal/test/productionの3環境を表示専用で描く', async () => {
     await renderPage();
 
     expect(screen.getByRole('heading', { name: '環境設定' })).toBeInTheDocument();
-    expect(screen.getByTestId('slot-local')).toHaveTextContent('未設定:2');
-    expect(screen.getByTestId('slot-test')).toHaveTextContent('test-key:2');
-    expect(screen.getByTestId('slot-production')).toHaveTextContent('prod-key:2');
+    expect(screen.getByRole('heading', { name: 'ローカル環境' })).toBeInTheDocument();
+    expect(screen.getByText('test-key')).toBeInTheDocument();
+    expect(screen.getByText('prod-key')).toBeInTheDocument();
+    expect(screen.getByText('未設定')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('環境設定ウィジェットはサイト一覧を取得しない(紐付けの候補が不要になったため)', async () => {
+    await renderPage();
+
+    expect(listSites).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('GA/AdSenseの取得が失敗しても環境設定ウィジェットは表示される', async () => {
@@ -81,31 +76,8 @@ describe('プロジェクトダッシュボード page.tsx(issue #1500: 環境�
 
     await renderPage();
 
-    expect(screen.getByTestId('slot-production')).toHaveTextContent('prod-key');
+    expect(screen.getByText('prod-key')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '環境設定' })).toBeInTheDocument();
-  });
-
-  it('サイト一覧の取得に失敗したら握り潰さず記録し、環境設定ウィジェットは表示する', async () => {
-    listSites.mockRejectedValue(new Error('sites down'));
-
-    await renderPage();
-
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('サイト一覧'), expect.any(Error));
-    expect(screen.getByTestId('slot-local')).toHaveTextContent('未設定:0');
-  });
-
-  it('サイト一覧の取得に失敗したら「候補サイトなし」と区別できる失敗表示を出す', async () => {
-    listSites.mockRejectedValue(new Error('sites down'));
-
-    await renderPage();
-
-    expect(screen.getByRole('alert')).toHaveTextContent('サイト一覧を取得できませんでした');
-  });
-
-  it('サイト一覧の取得に成功したら失敗表示は出さない', async () => {
-    await renderPage();
-
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('プロジェクト取得に失敗したら記録してnotFoundになる', async () => {

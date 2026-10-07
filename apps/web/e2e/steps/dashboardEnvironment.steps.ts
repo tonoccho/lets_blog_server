@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import { Given, Then, When } from './fixtures';
+import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken, loginAsAdmin } from '../support';
 
 /**
@@ -43,23 +43,6 @@ When('環境設定ウィジェットを見るためにダッシュボードを�
   await expect(widget(page)).toBeVisible({ timeout: 30_000 });
 });
 
-When('環境設定ウィジェットで本番環境にサイトを紐付ける', async ({ page, ctx }) => {
-  const production = slot(widget(page), 'production');
-  await production
-    .locator('select[aria-label="本番環境に紐付けるサイト"]')
-    .selectOption(String(ctx.penvProductionSiteId as number));
-  await production.locator('button:has-text("紐付ける")').click();
-});
-
-When('ダッシュボードを再読み込みする', async ({ page }) => {
-  await page.reload();
-  await expect(widget(page)).toBeVisible({ timeout: 30_000 });
-});
-
-When('プロジェクト詳細の概要タブを開く', async ({ page, ctx }) => {
-  await page.goto(`/projects/${ctx.penvProjectId as number}`);
-});
-
 Then(/^環境設定ウィジェットの(テスト|本番)環境に紐付いたサイトのキーが表示される$/, async ({ page, ctx }, label: string) => {
   const key = (label === 'テスト' ? ctx.penvTestSiteKey : ctx.penvProductionSiteKey) as string;
   await expect(slot(widget(page), ENV_LABEL[label]).getByText(key, { exact: true })).toBeVisible({ timeout: 10_000 });
@@ -69,21 +52,65 @@ Then(/^環境設定ウィジェットの(ローカル|本番)環境は未設定�
   await expect(slot(widget(page), ENV_LABEL[label]).getByText('未設定', { exact: true })).toBeVisible();
 });
 
-Then('本番環境にサイトが紐付いたことがAPIでわかる', async ({ request, ctx }) => {
+Given('資格情報が誤っているサイトがテスト環境にAPIで紐付いている', async ({ request, ctx }) => {
   const headers = await adminHeaders(request);
-  await expect
-    .poll(async () => {
-      const res = await request.get(`/api/projects/${ctx.penvProjectId as number}`, { headers });
-      return ((await res.json()) as { productionSite: { id: number } | null }).productionSite?.id;
-    })
-    .toBe(ctx.penvProductionSiteId);
+  const siteKey = `e2e-1671-connfail-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const created = await request.post('/api/sites', {
+    headers,
+    data: {
+      name: `E2E 1671 ${siteKey}`,
+      siteKey,
+      cmsType: 'WORDPRESS',
+      credentials: {
+        transport: 'SSH',
+        baseUrl: 'http://wrong.invalid',
+        sshHost: 'wrong.invalid',
+        sshUser: 'nouser',
+        wpPath: '/nowhere',
+        sshPrivateKeyPem:
+          '-----BEGIN OPENSSH PRIVATE KEY-----\ne2e-1671-fixture-not-a-real-key\n-----END OPENSSH PRIVATE KEY-----',
+      },
+    },
+  });
+  expect(created.ok(), `サイト登録に失敗しました (status=${created.status()})`).toBe(true);
+  const siteId = ((await created.json()) as { id: number }).id;
+  ctx.dashConnFailSiteId = siteId;
+  const bound = await request.post(`/api/projects/${ctx.penvProjectId as number}/environments`, {
+    headers,
+    data: { environment: 'test', siteId },
+  });
+  expect(bound.ok(), `環境の紐付けに失敗しました (status=${bound.status()})`).toBe(true);
 });
 
-Then('概要タブの本番環境に紐付いたサイトのキーが表示される', async ({ page, ctx }) => {
-  const key = ctx.penvProductionSiteKey as string;
-  const production = page
-    .locator('div.rounded-lg')
-    .filter({ has: page.getByRole('heading', { name: '本番環境', exact: true }) })
-    .first();
-  await expect(production.getByText(key, { exact: true })).toBeVisible({ timeout: 10_000 });
+Then('環境設定ウィジェットに紐付けのセレクトと紐付け・切離しのボタンが表示されない', async ({ page }) => {
+  const scope = widget(page);
+  await expect(scope.locator('select')).toHaveCount(0);
+  await expect(scope.getByRole('button', { name: /紐付ける|切離し/ })).toHaveCount(0);
+});
+
+Then('環境設定ウィジェットのテスト環境に疎通確認の結果は表示されていない', async ({ page }) => {
+  const test = slot(widget(page), 'test');
+  await expect(test.getByRole('button', { name: '疎通確認' })).toBeVisible();
+  await expect(test.getByText('FAILED', { exact: true })).toHaveCount(0);
+  await expect(test.getByText('SUCCESS', { exact: true })).toHaveCount(0);
+});
+
+When('環境設定ウィジェットのテスト環境で疎通確認を押す', async ({ page }) => {
+  await slot(widget(page), 'test').getByRole('button', { name: '疎通確認' }).click();
+});
+
+Then('環境設定ウィジェットのテスト環境に疎通確認の失敗と理由が表示される', async ({ page }) => {
+  const test = slot(widget(page), 'test');
+  await expect(test.getByText('FAILED', { exact: true })).toBeVisible({ timeout: 30_000 });
+  const reason = test.locator('span.text-red-700').nth(1);
+  await expect(reason).toBeVisible();
+  expect(((await reason.textContent()) ?? '').trim().length).toBeGreaterThan(0);
+});
+
+After({ tags: '@project' }, async ({ ctx, request }) => {
+  const siteId = ctx.dashConnFailSiteId as number | undefined;
+  if (siteId === undefined) {
+    return;
+  }
+  await request.delete(`/api/sites/${siteId}`, { headers: await adminHeaders(request) });
 });

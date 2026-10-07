@@ -2,13 +2,11 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import {
   getProject,
-  listSites,
   listProjectUsers,
   getProjectGoogleAnalyticsReport,
   getProjectAdSenseReport,
   type GoogleAnalyticsReport,
   type AdSenseReport,
-  type Site,
   type ProjectUser,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
@@ -55,13 +53,8 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
     };
   }
 
-  const [project, sitesResult, membersResult, gaReport, adsenseReport] = await Promise.all([
+  const [project, membersResult, gaReport, adsenseReport] = await Promise.all([
     getProject(projectId).catch(logAndFallback("プロジェクト情報", null)),
-    // 環境設定ウィジェットの候補サイト。GA/AdSenseの取得失敗とは独立に扱う。
-    listSites().then(
-      (list) => ({ list, failed: false }),
-      (err: unknown) => ({ list: logAndFallback<Site[]>("サイト一覧", [])(err), failed: true }),
-    ),
     // メンバーウィジェット。取得失敗を「0人」に見せないよう、失敗は別に持つ。
     listProjectUsers(projectId).then(
       (list) => ({ list, failed: false }),
@@ -90,7 +83,7 @@ export default async function ProjectDashboardPage({ params }: { params: Promise
 
       <ProjectSectionNav projectId={projectId} active="dashboard" />
 
-      <EnvironmentWidget project={project} candidateSites={sitesResult.list} sitesError={sitesResult.failed} />
+      <EnvironmentWidget project={project} />
 
       <MembersWidget projectId={projectId} members={membersResult.list} fetchFailed={membersResult.failed} />
 
