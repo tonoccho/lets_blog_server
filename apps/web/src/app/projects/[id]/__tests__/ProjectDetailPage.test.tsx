@@ -135,6 +135,13 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
       expect(overview.queryByTestId('sync-panel')).toBeNull()
     })
 
+    it('設定タブに「モデル設定」の案内カードを置かない(issue #1670)', async () => {
+      await open()
+      const settings = within(screen.getByTestId('tab-settings'))
+      expect(settings.queryByRole('heading', { name: 'モデル設定' })).toBeNull()
+      expect(settings.queryByText(/AI・アセット」タブから切り替えられます/)).toBeNull()
+    })
+
     it('設定タブに SNS 告知・Google Analytics・Google AdSense の設定ページへのリンクを置き、概要タブには SNS 告知のカードを置かない(issue #1574 の移動)', async () => {
       await open()
       const settings = within(screen.getByTestId('tab-settings'))
@@ -186,13 +193,20 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
       ['localSite', { localSite: site }],
       ['testSite', { testSite: site }],
       ['productionSite', { productionSite: site }],
-    ])('%s が紐付いていてメンバーが0人なら、メンバーが居ない旨とメンバー追加の操作を示す', async (_name, bound) => {
+    ])('%s が紐付いていてメンバーが0人なら、メンバーが居ない旨とメンバータブへのリンクを示し、メンバー追加の操作は置かない(issue #1670)', async (_name, bound) => {
       getProject.mockResolvedValue({ ...baseProject, ...bound })
       await open()
       const tab = within(screen.getByTestId('active-tab'))
       expect(tab.getByText(/メンバーがいません/)).toBeInTheDocument()
-      expect(tab.getByTestId('add-member-form')).toBeInTheDocument()
+      expect(tab.queryByTestId('add-member-form')).not.toBeInTheDocument()
+      expect(tab.getByRole('link', { name: 'メンバータブ' })).toHaveAttribute('href', '/projects/7?tab=members')
       expect(tab.queryByText(/先にサイトを紐付け/)).not.toBeInTheDocument()
+    })
+
+    it('メンバータブにはメンバー追加のフォームを置く', async () => {
+      getProject.mockResolvedValue({ ...baseProject, testSite: site })
+      await open()
+      expect(within(screen.getByTestId('tab-members')).getByTestId('add-member-form')).toBeInTheDocument()
     })
 
     it('サイトが1つも紐付いていなければ、先にサイトを紐付けるよう促し、メンバー追加は促さない', async () => {

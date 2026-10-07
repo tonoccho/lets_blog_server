@@ -136,9 +136,11 @@ Then('概要タブにメンバーが居ない旨の案内が表示される', as
   await expect(page.getByText(NOTICE_NO_MEMBERS)).toBeVisible();
 });
 
-Then('その案内からメンバー追加の操作へ進める', async ({ page }) => {
-  await expect(page.getByRole('combobox', { name: 'ユーザーを追加' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '追加', exact: true })).toBeVisible();
+Then('その案内からメンバータブへ進めて、概要タブにメンバー追加のフォームは無い', async ({ page }) => {
+  // メンバー追加の入口はメンバータブだけ(#1670)。概要タブにはリンクだけがある。
+  await expect(page.getByRole('link', { name: 'メンバータブ', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'ユーザーを追加' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '追加', exact: true })).toHaveCount(0);
 });
 
 Then('概要タブに先にサイトを紐付けるよう促す案内が表示される', async ({ page }) => {
