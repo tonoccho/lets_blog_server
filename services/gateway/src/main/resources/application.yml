@@ -91,6 +91,12 @@ app:
         uri: ${AI_SERVICE_URI:http://ai:8080}
         paths:
           - /api/projects/*/ai-models/connections
+      # Ollamaモデルのpull開始(OllamaPullController、issue #1675)もai-serviceが持つ(GenerationJobの所有者)。
+      # 同じ理由で、media向けproject-ai-models-imageより先にマッチさせる。
+      - id: project-ai-models-ollama-pull
+        uri: ${AI_SERVICE_URI:http://ai:8080}
+        paths:
+          - /api/projects/*/ai-models/ollama/pull
       # ProjectDashboardController(プロジェクトダッシュボードのGA/AdSenseレポート取得)は
       # analytics-serviceへ移設した(#578)。パス自体は/api/projects/**配下のまま(既存フロントのURLを
       # 変えないため)。より広い/api/projects/**(下のprojectルート)より先にここでマッチさせる

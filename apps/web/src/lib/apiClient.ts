@@ -3139,6 +3139,23 @@ export function updateProjectConnections(
   });
 }
 
+/**
+ * Ollamaのモデルのpull(インストール)の開始結果(issue #1675)。jobIdは進捗をポーリングするGenerationJobのID。
+ * 同じモデルがすでに実行中のときは新しく始めず、実行中のジョブのIDをalreadyRunning=trueで返す。
+ */
+export interface PullOllamaModelResponse {
+  jobId: number;
+  alreadyRunning: boolean;
+}
+
+export function pullOllamaModel(projectId: number, model: string): Promise<PullOllamaModelResponse> {
+  return apiFetch<PullOllamaModelResponse>(`/api/projects/${projectId}/ai-models/ollama/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+}
+
 /** selectedはプロジェクト単位の上書き値(未設定時null)。未設定時はComfyUIとして扱われる。 */
 export interface ImageProviderListResponse {
   availableProviders: string[];

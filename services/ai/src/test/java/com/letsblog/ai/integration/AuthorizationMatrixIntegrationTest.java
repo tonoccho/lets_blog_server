@@ -94,6 +94,7 @@ class AuthorizationMatrixIntegrationTest {
                 // -- ProjectConnectionController(issue #1503) --
                 new Endpoint("GET", "/api/projects/1/ai-models/connections"),
                 new Endpoint("PUT", "/api/projects/1/ai-models/connections"),
+                new Endpoint("POST", "/api/projects/1/ai-models/ollama/pull"),
 
                 // -- GenerationJobController --
                 new Endpoint("GET", "/api/generation-jobs"),

@@ -67,6 +67,7 @@ import {
   listAiConnections,
   getProjectConnections,
   updateProjectConnections,
+  pullOllamaModel,
   scanMediaGarbage,
   deleteMediaGarbage,
   getGenerationJob,
@@ -1063,6 +1064,21 @@ export async function deleteComfyUiCheckpointAction(
   try {
     const job = await deleteComfyUiCheckpoint(projectId, fileName);
     return { jobId: job.id };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Ollamaのモデルのpull(インストール)を開始する(issue #1675)。ジョブを作ってすぐ返り、進捗はジョブをポーリングして読む。 */
+export async function pullOllamaModelAction(
+  projectId: number,
+  model: string
+): Promise<{ jobId?: number; alreadyRunning?: boolean; error?: string }> {
+  await requireAdminSession();
+
+  try {
+    const result = await pullOllamaModel(projectId, model);
+    return { jobId: result.jobId, alreadyRunning: result.alreadyRunning };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

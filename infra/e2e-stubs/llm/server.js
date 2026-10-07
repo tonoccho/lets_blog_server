@@ -585,6 +585,76 @@ function describeImage(model, url) {
   };
 }
 
+// ------------------------------------ Ollama の POST /api/pull(issue #1675)
+
+/**
+ * Ollama のモデル pull(`POST /api/pull`、NDJSON のストリーミング応答)。ai-service の
+ * OllamaPullJobRunner が叩く。受け入れ環境では実 Ollama を起動しない(#1090)ので、これが代わりに受ける。
+ * 受け取ったモデル名を `/__control/state` の `pullRequests` に残し、「実効接続先へそのモデル名で
+ * pull が送られた」を受け入れテストが確かめられるようにする(`recentModels` と同じ理由で履歴にして50件に切り詰める)。
+ *
+ * 応答はモデル名で決まる(決定性のため、時刻や乱数は使わない):
+ *   - `fail` を含む    : 進捗を1行流してから `{"error": …}` を流して終わる(ストリームの途中の失敗)
+ *   - `missing` を含む : HTTP 404 と `{"error": …}`(Ollama が存在しないモデルに返す形)
+ *   - `slow` を含む    : 数秒かけて completed / total を流してから success(画面で進捗を観測できる)
+ *   - それ以外         : すぐに進捗を流して success
+ */
+const PULL_REQUESTS_LIMIT = 50;
+let pullRequests = [];
+const PULL_ERROR = 'pull model manifest: file does not exist';
+/** slow のときの1歩ごとの待ち(ms)と歩数。合計およそ5秒で、画面のポーリング(2秒)に複数回かかる。 */
+const PULL_SLOW_STEP_MS = 500;
+const PULL_SLOW_STEPS = 10;
+const PULL_LAYER_TOTAL = 1_000_000;
+
+function recordPull(body) {
+  let model = '';
+  try {
+    const parsed = JSON.parse(body || '{}');
+    // 現行のフィールドは model、古い形式は name。
+    model = String(parsed.model || parsed.name || '');
+  } catch {
+    // 解析できないボディでも応答は返す。
+  }
+  pullRequests.push(model);
+  if (pullRequests.length > PULL_REQUESTS_LIMIT) {
+    pullRequests.shift();
+  }
+  return model;
+}
+
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function pullProgressLine(completed) {
+  return JSON.stringify({
+    status: 'pulling e2e-stub-layer',
+    digest: 'sha256:e2e-stub-layer',
+    total: PULL_LAYER_TOTAL,
+    completed,
+  });
+}
+
+async function streamPull(res, model) {
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+  res.write(`${JSON.stringify({ status: 'pulling manifest' })}\n`);
+  if (model.includes('fail')) {
+    res.write(`${JSON.stringify({ error: PULL_ERROR })}\n`);
+    res.end();
+    return;
+  }
+  const steps = model.includes('slow') ? PULL_SLOW_STEPS : 2;
+  for (let step = 1; step <= steps; step++) {
+    if (model.includes('slow')) {
+      await sleepMs(PULL_SLOW_STEP_MS);
+    }
+    // 最後の1歩の手前までを進捗として流す(100%の行は success の直前に置かない)。
+    res.write(`${pullProgressLine(Math.floor((PULL_LAYER_TOTAL * step) / (steps + 1)))}\n`);
+  }
+  res.write(`${JSON.stringify({ status: 'verifying sha256 digest' })}\n`);
+  res.write(`${JSON.stringify({ status: 'success' })}\n`);
+  res.end();
+}
+
 createStub({
   name: 'llm',
   port: Number(process.env.PORT || 8080),
@@ -594,8 +664,13 @@ createStub({
   onReset: () => {
     recentModels = [];
     imageRequests = [];
+    pullRequests = [];
   },
-  extraState: () => ({ recentModels: [...recentModels], imageRequests: [...imageRequests] }),
+  extraState: () => ({
+    recentModels: [...recentModels],
+    imageRequests: [...imageRequests],
+    pullRequests: [...pullRequests],
+  }),
   async handle({ method, pathname, body, res, sendJson }) {
     // Ollama固有の GET /api/ps(issue #1397)。platform-service の「連携サービスの状況」が
     // ロード中モデルの size_vram から演算デバイスを解決する。決定性のため、VRAMに載っていない
@@ -604,6 +679,16 @@ createStub({
       sendJson(res, 200, {
         models: [{ name: 'e2e-stub', model: 'e2e-stub', size: 4_000_000_000, size_vram: 0 }],
       });
+      return true;
+    }
+
+    if (method === 'POST' && pathname === '/api/pull') {
+      const model = recordPull(body);
+      if (model.includes('missing')) {
+        sendJson(res, 404, { error: PULL_ERROR });
+        return true;
+      }
+      await streamPull(res, model);
       return true;
     }
 

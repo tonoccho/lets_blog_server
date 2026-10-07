@@ -17,17 +17,20 @@ jest.mock('@/lib/session', () => ({
 const listAiConnections = jest.fn();
 const getProjectConnections = jest.fn();
 const updateProjectConnections = jest.fn();
+const pullOllamaModel = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   ...jest.requireActual('@/lib/apiClient'),
   listAiConnections: (...args: unknown[]) => listAiConnections(...args),
   getProjectConnections: (...args: unknown[]) => getProjectConnections(...args),
   updateProjectConnections: (...args: unknown[]) => updateProjectConnections(...args),
+  pullOllamaModel: (...args: unknown[]) => pullOllamaModel(...args),
 }));
 
 import {
   fetchAiConnectionsAction,
   fetchProjectConnectionsAction,
   updateProjectConnectionAction,
+  pullOllamaModelAction,
 } from '../actions';
 
 describe('接続情報のServer Action(issue #1504)', () => {
@@ -82,5 +85,23 @@ describe('接続情報のServer Action(issue #1504)', () => {
 
     updateProjectConnections.mockRejectedValueOnce('plain');
     await expect(updateProjectConnectionAction(7, 'OLLAMA', 'x')).resolves.toEqual({ error: 'plain' });
+  });
+
+  it('pullOllamaModelActionは管理者セッションを要求し、ジョブIDと実行中かどうかを返す(issue #1675)', async () => {
+    pullOllamaModel.mockResolvedValue({ jobId: 31, alreadyRunning: true });
+
+    const result = await pullOllamaModelAction(7, 'llama3');
+
+    expect(requireAdminSession).toHaveBeenCalled();
+    expect(pullOllamaModel).toHaveBeenCalledWith(7, 'llama3');
+    expect(result).toEqual({ jobId: 31, alreadyRunning: true });
+  });
+
+  it('pullOllamaModelActionは失敗をerrorとして返す(Error以外の例外も文字列にする)', async () => {
+    pullOllamaModel.mockRejectedValueOnce(new Error('APIエラー (403): forbidden'));
+    await expect(pullOllamaModelAction(7, 'x')).resolves.toEqual({ error: 'APIエラー (403): forbidden' });
+
+    pullOllamaModel.mockRejectedValueOnce('plain');
+    await expect(pullOllamaModelAction(7, 'x')).resolves.toEqual({ error: 'plain' });
   });
 });

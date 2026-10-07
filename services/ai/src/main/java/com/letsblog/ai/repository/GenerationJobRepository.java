@@ -18,4 +18,7 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, Lo
      * {@link com.letsblog.ai.service.StaleGenerationJobSweepService}参照)。
      */
     List<GenerationJob> findByStatusAndUpdatedAtBefore(String status, LocalDateTime updatedAtBefore);
+
+    /** 指定した種別・状態のジョブ(Ollamaモデルのpullの二重開始の検出に使う、issue #1675)。 */
+    List<GenerationJob> findByTypeAndStatus(String type, String status);
 }

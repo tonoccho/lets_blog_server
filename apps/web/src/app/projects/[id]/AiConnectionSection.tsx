@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AiConnection, ConnectionSource, ProjectConnectionsResponse } from "@/lib/apiClient";
+import { OllamaModelPullForm } from "./OllamaModelPullForm";
 import { fetchAiConnectionsAction, fetchProjectConnectionsAction, updateProjectConnectionAction } from "./actions";
 
 type Provider = "OLLAMA" | "COMFYUI";
@@ -162,6 +163,7 @@ export function AiConnectionSection({ projectId, provider }: { projectId: number
           {message.text}
         </p>
       )}
+      {provider === "OLLAMA" && <OllamaModelPullForm projectId={projectId} />}
     </section>
   );
 }

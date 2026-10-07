@@ -144,3 +144,78 @@ test('data URL でない image_url は画像として数えるが素性は空と
   assert.equal(imageRequests[0].bytes, 0);
   assert.equal(imageRequests[0].mimeType, null);
 });
+
+// ------------------------------------ Ollama の POST /api/pull(issue #1675)
+
+const pull = (model) =>
+  fetch(`${base}/api/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, stream: true }),
+  });
+const ndjson = async (response) =>
+  (await response.text()).split('\n').filter((line) => line !== '').map((line) => JSON.parse(line));
+
+test('pull: 通常のモデル名は進捗(completed/total)を流して最後に success を返し、受け取ったモデル名を state に残す', async () => {
+  await reset();
+  const r = await pull('e2e-pull-ok:1b');
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type'), /ndjson/);
+  const lines = await ndjson(r);
+  assert.ok(lines.some((l) => l.total > 0 && l.completed > 0 && l.completed < l.total), JSON.stringify(lines));
+  assert.deepEqual(lines[lines.length - 1], { status: 'success' });
+  assert.deepEqual((await state()).pullRequests, ['e2e-pull-ok:1b']);
+});
+
+test('pull: 古い形式の name フィールドでもモデル名を受け取る', async () => {
+  await reset();
+  await fetch(`${base}/api/pull`, { method: 'POST', body: JSON.stringify({ name: 'legacy-name:1b' }) });
+  assert.deepEqual((await state()).pullRequests, ['legacy-name:1b']);
+});
+
+test('pull: モデル名に fail を含むとストリームの途中で error 行を返して終わる', async () => {
+  await reset();
+  const lines = await ndjson(await pull('e2e-pull-fail:1b'));
+  assert.equal(lines[0].status, 'pulling manifest');
+  assert.ok(typeof lines[lines.length - 1].error === 'string' && lines[lines.length - 1].error !== '');
+  assert.ok(!lines.some((l) => l.status === 'success'));
+});
+
+test('pull: モデル名に missing を含むとHTTP 404 と error を返す', async () => {
+  await reset();
+  const r = await pull('e2e-pull-missing:1b');
+  assert.equal(r.status, 404);
+  assert.match((await r.json()).error, /file does not exist/);
+});
+
+test('pull: モデル名に slow を含むと時間をかけて進捗を流す(画面で進捗を観測できる)', async () => {
+  await reset();
+  const started = Date.now();
+  const lines = await ndjson(await pull('e2e-pull-slow:1b'));
+  assert.ok(Date.now() - started >= 2500, `elapsed ${Date.now() - started}ms`);
+  assert.ok(lines.filter((l) => l.total > 0).length >= 5);
+  assert.deepEqual(lines[lines.length - 1], { status: 'success' });
+});
+
+test('pull: 本文が壊れていても空のモデル名として受け、success を返す', async () => {
+  await reset();
+  const r = await fetch(`${base}/api/pull`, { method: 'POST', body: 'not json' });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await ndjson(r)).pop(), { status: 'success' });
+});
+
+test('pull: reset で受信したモデル名の履歴を空にする', async () => {
+  await pull('e2e-pull-ok:1b');
+  await reset();
+  assert.deepEqual((await state()).pullRequests, []);
+});
+
+test('pull: 履歴は直近50件までに切り詰める', async () => {
+  await reset();
+  for (let i = 0; i < 52; i++) {
+    await (await pull(`m-${i}`)).text();
+  }
+  const { pullRequests } = await state();
+  assert.equal(pullRequests.length, 50);
+  assert.equal(pullRequests[0], 'm-2');
+});

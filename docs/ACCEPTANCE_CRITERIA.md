@@ -794,7 +794,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全121件)
+### 10.5 Server Action(全122件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -817,6 +817,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/projects/[id]/actions.ts`<br>`fetchTermComparisonAction`<br>`deleteMediaGarbageAction`<br>`fetchPostComparisonAction`<br>`fetchPostStatusesAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
 | `app/projects/[id]/actions.ts`<br>`applyToEnvironmentAction`<br>`applyToAllEnvironmentsAction`<br>`syncAllTermsToMasterAction`<br>`runBulkOperationUploadAction`<br>`fetchStatusComparisonAction`<br>`reconcileStateAction`<br>`syncTermToMasterAction`<br>`editTermAndSyncAction`<br>`deleteTermEverywhereAction`<br>`deleteSlugEverywhereAction`<br>`deletePostEverywhereAction`<br>`updatePostStatusEverywhereAction`<br>`uploadProjectAssetImageAction` | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | 利用者の判断(2026-10-01)で再分類。複数環境への逐次の WordPress REST 呼び出しを含み、#1477 の実測で3秒を超えた(#1552)。構造的に3秒に収まらないため、サイト自動構築・環境間同期と同じく #1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
 | `app/projects/[id]/actions.ts`<br>`fetchAiConnectionsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。**既定どおり予算対象**(#1544)。ただし ai-service の疎通確認を呼び、`AiConnectionService` はプロバイダーごとに最大3秒のタイムアウトを持つため、到達できないプロバイダーがあると**構造的に3秒を超えうる**。受け入れ環境で超過が観測され分類の変更(予算対象外 / 非同期ハンドオフ待ち)が要るときは、利用者の判断を仰ぐ(分類の例外は利用者が決める) | 予算対象 |
+| `app/projects/[id]/actions.ts`<br>`pullOllamaModelAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。Ollamaのモデルのpull(#1675)は非同期のGenerationJobで、このActionはジョブを作ってすぐ返す(pull自体は待たない)。**既定どおり予算対象** | 予算対象 |
 | `app/projects/[id]/actions.ts`<br>`installComfyUiCheckpointAction`(ComfyUI チェックポイントの導入) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。数GBのモデルを外部から取得し、`media/comfyui-checkpoints.feature` は `@timeout:600000`。サイト自動構築と同じ形で、利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
 | `app/projects/[id]/actions.ts`<br>`generateImagePromptAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/projects/[id]/actions.ts`<br>`requestProjectImageJobAction`<br>`fetchImageJobResultAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。画像生成を非同期ジョブとして**受け付けるまで**の操作と、完了したジョブの結果の画像IDを読む操作(#1408)。生成そのものは #1404 のキューが担い、これらは受付と読み取りだけ(利用者が予算対象と決定、2026-10-06、#1623) | 予算対象 |

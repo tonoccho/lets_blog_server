@@ -52,6 +52,7 @@ import {
   listAiConnections,
   getProjectConnections,
   updateProjectConnections,
+  pullOllamaModel,
   setProjectOpenAiApiKey,
   clearProjectOpenAiApiKey,
   setProjectClaudeApiKey,
@@ -539,6 +540,18 @@ describe('AI接続情報・接続先の上書き(issue #1504)', () => {
     expect(url).toContain('/api/projects/7/ai-models/connections')
     expect(init.method).toBe('PUT')
     expect(JSON.parse(String(init.body))).toEqual({ comfyuiBaseUrl: '' })
+  })
+
+  it('pullOllamaModelはモデル名をJSONでPOSTし、ジョブIDと実行中かどうかを返す(issue #1675)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ jobId: 31, alreadyRunning: false }))
+
+    const result = await pullOllamaModel(7, 'qwen2.5:7b-instruct')
+
+    expect(result).toEqual({ jobId: 31, alreadyRunning: false })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/ai-models/ollama/pull')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ model: 'qwen2.5:7b-instruct' })
   })
 })
 

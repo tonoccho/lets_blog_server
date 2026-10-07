@@ -16,6 +16,8 @@ jest.mock("../actions", () => ({
   fetchAiConnectionsAction: jest.fn(),
   fetchProjectConnectionsAction: jest.fn(),
   updateProjectConnectionAction: jest.fn(),
+  pullOllamaModelAction: jest.fn(),
+  fetchGenerationJobAction: jest.fn(),
 }));
 
 const fetchConnectionsMock = fetchAiConnectionsAction as jest.MockedFunction<typeof fetchAiConnectionsAction>;
@@ -197,6 +199,22 @@ describe("AiConnectionSection の表示", () => {
 
     expect(await screen.findByText("利用可否の確認に失敗しました: timeout")).toBeInTheDocument();
     expect(screen.getByText("http://ollama.default:11434/v1")).toBeInTheDocument();
+  });
+});
+
+describe("AiConnectionSection のOllamaモデルのインストール(issue #1675)", () => {
+  it("Ollamaの接続セクションにはモデル名の入力欄とインストールボタンがある", async () => {
+    render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
+
+    expect(await screen.findByLabelText("インストールするOllamaモデル名")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "インストール" })).toBeInTheDocument();
+  });
+
+  it("ComfyUIの接続セクションにはモデルのインストール欄を出さない", async () => {
+    render(<AiConnectionSection projectId={3} provider="COMFYUI" />);
+
+    await screen.findByText("http://comfy.default:8188");
+    expect(screen.queryByLabelText("インストールするOllamaモデル名")).not.toBeInTheDocument();
   });
 });
 

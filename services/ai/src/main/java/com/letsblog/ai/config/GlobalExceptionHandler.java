@@ -7,6 +7,7 @@ import com.letsblog.ai.service.ForbiddenException;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
 import com.letsblog.ai.service.IdentityServiceUnavailableException;
 import com.letsblog.ai.service.InvalidConnectionUrlException;
+import com.letsblog.ai.service.InvalidOllamaModelNameException;
 import com.letsblog.ai.service.InvalidReviewInputException;
 import com.letsblog.common.web.ErrorResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,12 @@ public class GlobalExceptionHandler {
     /** プロジェクト単位の接続先URLの形式エラー(issue #1503)。保存はされない。 */
     @ExceptionHandler(InvalidConnectionUrlException.class)
     public ResponseEntity<ErrorResponse> handleInvalidConnectionUrl(InvalidConnectionUrlException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** Ollamaのモデル名が空・不正(issue #1675)。pullは開始されない。 */
+    @ExceptionHandler(InvalidOllamaModelNameException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidOllamaModelName(InvalidOllamaModelNameException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 

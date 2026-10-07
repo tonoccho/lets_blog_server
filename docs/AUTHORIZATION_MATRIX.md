@@ -1116,6 +1116,7 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | PUT .../llm/review-steps/{stepKey} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。同上。provider/modelが空ならそのステップの上書きを解除する(`ProjectLlmModelController.java`) |
 | GET .../connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1503 で追加**。プロジェクト単位のOllama / ComfyUI接続先の上書き値と解決結果(`ProjectConnectionController.java`)。他行のrequireAdminと違いプロジェクトメンバー判定 |
 | PUT .../connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1503 で追加**。空文字で上書きを解除、http/https以外・空白/制御文字を含むURLは400で保存しない。**issue #1518 で宛先制限(拒否リスト)を追加**: クラウドメタデータ・リンクローカル(`169.254.0.0/16`・`fe80::/10`・`fd00:ec2::254`・`metadata.google.internal`)、loopback・未指定(`127.0.0.0/8`・`::1`・`0.0.0.0`・`::`・`localhost`・`*.localhost`)、docker-compose.ymlの内部サービス名・コンテナ名(Ollama / ComfyUI系を除く)を指すURLは、admin・メンバーを問わず400で保存しない。10進・16進・省略形・IPv4射影IPv6の別表記も正規化して判定する。ホスト名のDNS解決はしない。LANのプライベートアドレスとOllama / ComfyUIのサービス名・コンテナ名は許可 |
+| POST .../ollama/pull | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1675 で追加**。プロジェクトの実効Ollama接続先へモデルをpullするGenerationJobを開始する(`OllamaPullController.java`)。モデル名が空・不正なら400。同じモデルが実行中なら新しく始めず実行中のジョブを返す |
 
 ## ProjectApiKeyController (25エンドポイント、ベースパス `/api/projects/{projectId}/api-keys`)
 
