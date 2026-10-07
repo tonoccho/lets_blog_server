@@ -41,10 +41,10 @@ class MediaGarbageCollectionJobRunnerTest {
 
     @Test
     void runDelete_全件成功で完了しAuditLogを記録する() {
-        runner().runDelete(123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1", "Bearer token");
+        runner().runDelete(123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1");
 
-        verify(cmsBridgeClient).deleteMedia(1L, "local", "10", "Bearer token");
-        verify(cmsBridgeClient).deleteMedia(1L, "local", "20", "Bearer token");
+        verify(cmsBridgeClient).deleteMedia(1L, "local", "10");
+        verify(cmsBridgeClient).deleteMedia(1L, "local", "20");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture());
@@ -59,7 +59,7 @@ class MediaGarbageCollectionJobRunnerTest {
     void runDelete_対象が空でも完了として報告する() {
         // deleted/failuresが両方空になる分岐(mediaIds自体が空のケース)。ループが1回も
         // 回らないためreportProgressは呼ばれず、statusはdoneになる。
-        runner().runDelete(123L, 1L, "local", List.of(), 9L, "keycloak-sub-1", "Bearer token");
+        runner().runDelete(123L, 1L, "local", List.of(), 9L, "keycloak-sub-1");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture());
@@ -69,10 +69,10 @@ class MediaGarbageCollectionJobRunnerTest {
 
     @Test
     void runDelete_一部失敗しても完了しfailuresを記録する() {
-        doThrow(new RuntimeException("削除エラー")).when(cmsBridgeClient).deleteMedia(1L, "local", "20", "Bearer token");
-        doNothing().when(cmsBridgeClient).deleteMedia(1L, "local", "10", "Bearer token");
+        doThrow(new RuntimeException("削除エラー")).when(cmsBridgeClient).deleteMedia(1L, "local", "20");
+        doNothing().when(cmsBridgeClient).deleteMedia(1L, "local", "10");
 
-        runner().runDelete(123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1", "Bearer token");
+        runner().runDelete(123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(generationJobClient).updateStatus(eq(123L), eq("done"), resultPayloadCaptor.capture());
@@ -87,9 +87,9 @@ class MediaGarbageCollectionJobRunnerTest {
         // 各アイテムの削除はループ内でtry/catchされるため、全件失敗でも(0件成功でも)ループ自体は
         // 最後まで完走し、AuditLogは記録される(0件成功はGenerationJobのstatusを"failed"にする
         // 判定にのみ影響する)。
-        doThrow(new RuntimeException("削除エラー")).when(cmsBridgeClient).deleteMedia(1L, "local", "10", "Bearer token");
+        doThrow(new RuntimeException("削除エラー")).when(cmsBridgeClient).deleteMedia(1L, "local", "10");
 
-        runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1", "Bearer token");
+        runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1");
 
         ArgumentCaptor<String> resultPayloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(generationJobClient).updateStatus(eq(123L), eq("failed"), resultPayloadCaptor.capture());
@@ -107,7 +107,7 @@ class MediaGarbageCollectionJobRunnerTest {
         doThrow(new RuntimeException("予期しない失敗")).when(auditLogService)
                 .log(any(), any(), any(), any(), any(), any(), any(), any());
 
-        runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1", "Bearer token");
+        runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1");
 
         verify(generationJobClient).updateStatus(eq(123L), eq("failed"), anyString());
     }

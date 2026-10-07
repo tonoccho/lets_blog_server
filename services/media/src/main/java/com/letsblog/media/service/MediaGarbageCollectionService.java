@@ -80,7 +80,7 @@ public class MediaGarbageCollectionService {
                 bearerToken);
 
         mediaGarbageCollectionJobRunner.runDelete(
-                job.id(), projectId, environment, mediaIds, actorId, actorKeycloakSub, bearerToken);
+                job.id(), projectId, environment, mediaIds, actorId, actorKeycloakSub);
         return job;
     }
 

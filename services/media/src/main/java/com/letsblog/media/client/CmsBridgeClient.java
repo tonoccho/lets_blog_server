@@ -1,5 +1,6 @@
 package com.letsblog.media.client;
 
+import com.letsblog.common.auth.ServiceTokenClient;
 import com.letsblog.common.client.ServiceAuthHeaders;
 import com.letsblog.common.client.SyncCallProfile;
 import com.letsblog.common.client.SyncServiceClient;
@@ -26,7 +27,10 @@ import org.springframework.web.client.RestClient;
  * publishing-service側に留まり、media-serviceへは一切渡らない。media-serviceは「このsite/projectに
  * 対して操作してほしい」という依頼のみを送る。
  *
- * <p>認証はstage1/stage2と同じ方式(呼び出し元ユーザーのBearerトークンをそのまま転送)だが、
+ * <p>認証は、{@link #deleteMedia}を除きstage1/stage2と同じ方式(呼び出し元ユーザーのBearerトークンを
+ * そのまま転送)。{@link #deleteMedia}だけは{@code @Async}の長時間ループから呼ばれ、起動時の
+ * ユーザートークンが失効しうるため、{@link ServiceTokenClient}のClient Credentialsトークンを使う
+ * (issue #1249、docs/SYNC_SERVICE_CALLS.mdのissue #1083と同形の例外)。
  * このクライアントは同期呼び出し({@link com.letsblog.media.controller.MediaController}の
  * アップロード、{@code MediaGarbageCollectionService#scan})と非同期呼び出し
  * ({@code MediaGarbageCollectionJobRunner}の削除ループ、バックグラウンドスレッド)の両方から
@@ -43,9 +47,12 @@ import org.springframework.web.client.RestClient;
 public class CmsBridgeClient {
 
     private final SyncServiceClient client;
+    private final ServiceTokenClient serviceTokenClient;
 
     public CmsBridgeClient(
-            RestClient.Builder builder, @Value("${app.publishing-service-uri}") String publishingServiceUri) {
+            RestClient.Builder builder, @Value("${app.publishing-service-uri}") String publishingServiceUri,
+            ServiceTokenClient serviceTokenClient) {
+        this.serviceTokenClient = serviceTokenClient;
         this.client = SyncServiceClient.builder(builder, "publishing-service", publishingServiceUri)
                 .profile(SyncCallProfile.RENDER) // 大きめのメディアファイル転送を伴うため、単純なJSON APIより長めの30秒
                 .build();
@@ -116,11 +123,18 @@ public class CmsBridgeClient {
         }
     }
 
-    public void deleteMedia(Long projectId, String environment, String mediaId, String bearerToken) {
+    /**
+     * メディアを削除する(issue #1249)。{@code @Async}のGC削除ループから呼ばれ、ジョブ起動から
+     * 数分以上後になりうるため、起動時のユーザーBearerトークン(Keycloakの{@code accessTokenLifespan}、
+     * 既定300秒で失効)ではなく、呼び出しのたびに{@link ServiceTokenClient}から得るmedia-service自身の
+     * Client Credentialsトークンを付ける。publishing-serviceの内部ブリッジはユーザーの権限を見ない。
+     */
+    public void deleteMedia(Long projectId, String environment, String mediaId) {
         try {
             client.delete(
                     "/api/internal/publishing/projects/{projectId}/media/{mediaId}?environment={environment}",
-                    new Object[] {projectId, mediaId, environment}, ServiceAuthHeaders.forwardedBearer(bearerToken));
+                    new Object[] {projectId, mediaId, environment},
+                    ServiceAuthHeaders.clientCredentials(serviceTokenClient));
         } catch (SyncServiceException e) {
             throw new CmsBridgeException("publishing-serviceのメディア削除呼び出しに失敗しました: " + e.getMessage(), e);
         }

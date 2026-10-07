@@ -23,10 +23,10 @@ import java.util.Map;
  * <p>元の実装は{@code Site}/{@code CmsAdapter}/{@code GenerationJobRepository}へ直接アクセスして
  * いたが、これらはこのissueの移設対象ではない(あるいはlegacy-apiが引き続き所有する)ため、
  * {@link CmsBridgeClient}(CMS操作)・{@link GenerationJobClient}(ジョブ進捗)経由のHTTP呼び出しへ
- * 置き換えた。監査ログ記録に必要なactorId/actorKeycloakSub、およびlegacy-api呼び出し用の
- * Bearerトークンは、いずれもHTTPリクエストにスコープされる情報のため、コントローラで同期的に
- * 取得した値をこのバックグラウンドスレッドの生存期間全体で引き回す
- * (元のactorId/actorKeycloakSub引き回しと同じ理由・パターンにbearerTokenを追加しただけ)。
+ * 置き換えた。監査ログ記録に必要なactorId/actorKeycloakSubは、HTTPリクエストにスコープされる情報の
+ * ため、コントローラで同期的に取得した値をこのバックグラウンドスレッドの生存期間全体で引き回す。
+ * ユーザーのBearerトークンは引き回さない(長いループの途中で失効するため、issue #1249)。
+ * publishing-service呼び出しは{@link CmsBridgeClient#deleteMedia}がClient Credentialsトークンで行う。
  */
 @Service
 public class MediaGarbageCollectionJobRunner {
@@ -52,7 +52,7 @@ public class MediaGarbageCollectionJobRunner {
 
     @Async("mediaGarbageCollectionExecutor")
     public void runDelete(Long jobId, Long projectId, String environment, List<String> mediaIds,
-            Long actorId, String actorKeycloakSub, String bearerToken) {
+            Long actorId, String actorKeycloakSub) {
         long[] lastReportedAt = {0L};
         List<String> deleted = new ArrayList<>();
         Map<String, String> failures = new LinkedHashMap<>();
@@ -60,7 +60,7 @@ public class MediaGarbageCollectionJobRunner {
             for (int i = 0; i < mediaIds.size(); i++) {
                 String mediaId = mediaIds.get(i);
                 try {
-                    cmsBridgeClient.deleteMedia(projectId, environment, mediaId, bearerToken);
+                    cmsBridgeClient.deleteMedia(projectId, environment, mediaId);
                     deleted.add(mediaId);
                 } catch (RuntimeException e) {
                     log.warn("メディア削除に失敗しました(jobId={}, mediaId={}): {}", jobId, mediaId, e.getMessage());

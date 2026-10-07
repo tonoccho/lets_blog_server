@@ -149,6 +149,6 @@ class MediaGarbageCollectionServiceTest {
         assertEquals("media_garbage_collection_delete", response.type());
 
         verify(mediaGarbageCollectionJobRunner).runDelete(
-                123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1", "Bearer token");
+                123L, 1L, "local", List.of("10", "20"), 9L, "keycloak-sub-1");
     }
 }

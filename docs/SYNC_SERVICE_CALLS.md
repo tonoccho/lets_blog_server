@@ -104,6 +104,15 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 待たずに`clientCredentials`へ切り替えた。同じ呼び出し先の`POST /api/generation-jobs`(ジョブ作成、
 同期リクエスト内で完結し失効の余地が無い)は引き続き`forwardedBearer`のまま。
 
+**例外(issue #1249)**: media(`CmsBridgeClient#deleteMedia`)の
+`DELETE /api/internal/publishing/projects/{projectId}/media/{mediaId}`も同じ理由で`clientCredentials`へ
+切り替えた。`MediaGarbageCollectionJobRunner`の`@Async`削除ループは、削除対象が多いと起動時の
+ユーザーBearerトークンの寿命(既定300秒)を超え、途中から401で失敗していた。publishing-serviceの
+`CmsMediaBridgeController`は呼び出し元ユーザーの権限を見ず(認可はジョブ起動時にmedia-service側で済む)、
+`/api/internal/**`は有効なJWTだけを求めるため、ユーザーコンテキストは元々不要だった。トークンは
+呼び出しごとに`ServiceTokenClient`から得る。同じクライアントの同期呼び出し(`uploadMedia`・`scanMedia`・
+`resolveProjectIdBySiteKey`)は失効の余地が無く`forwardedBearer`のまま。
+
 ## 呼び出し一覧
 
 「移行」列: 本PR(#581)で`SyncServiceClient`へ移行済みは「済」、既存の個別実装のまま(次善策として
@@ -165,7 +174,7 @@ ai-service へ移設済みのエンドポイントを legacy-api に問い合わ
 
 | 呼び出し元 | エンドポイント | プロファイル | リトライ | サーキットブレーカー | フォールバック | 移行 |
 |---|---|---|---|---|---|---|
-| media(`CmsBridgeClient`) | `POST /api/internal/publishing/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}` | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、レビュー指摘対応でパスも/api/internal/cms/**から/api/internal/publishing/**へ変更、C12対応は維持) |
+| media(`CmsBridgeClient`) | `POST /api/internal/publishing/sites/{site}/media`(multipart)・`GET .../media-scan`・`DELETE .../media/{id}`(DELETEのみ`clientCredentials`、issue #1249) | RENDER(30秒、大きめのメディア転送のため) | GETのみ | あり(`publishing-service`) | 明確なエラー(CMS操作の成否を呼び出し元へ確実に伝える必要があるため) | 済(issue #709でlegacy-apiからpublishing-serviceへ呼び出し先を切り替え、レビュー指摘対応でパスも/api/internal/cms/**から/api/internal/publishing/**へ変更、C12対応は維持) |
 | project(`CmsProvisioningBridgeClient`) | `POST /api/internal/project/cms/test-connection`・`install-wp-cli`・`has-author-capability`・`list-active-plugins`・`provision`・`export-database`・`export-media`・`export-themes` | (未移行、既存は固定タイムアウト。接続3秒・読み取り60秒) | - | - | (未整理、既存はconnection-check系のみ機能縮退=失敗結果を返す、それ以外は明確なエラー) | 未(issue #710でlegacy-apiからpublishing-serviceへ呼び出し先を切り替えたが、`SyncServiceClient`への移行は既定プロファイル(最長RENDER30秒)ではSSH/wp-cliのエクスポート処理に対して読み取りタイムアウトが不足する可能性があるため見送り、既存の固定タイムアウトRestClientを維持) |
 | ai(`PublishingServiceClient`) | `GET /api/internal/ai/projects/{id}/existing-categories`・`existing-categories-with-parents`・`existing-tags` | (未移行、既存は10秒) | - | - | 機能縮退(取得失敗時は空リストへフォールバック、カテゴリ/タグ提示はメタデータ提案の補助情報のため) | 未(issue #574ではlegacy-apiの`AiBridgeController`が所有していたが、`CmsAdapterFactory`/`cms/*`の所有権がpublishing-serviceへ移った(issue #707)ため、issue #711でこの3エンドポイントのみ`LegacyApiBridgeClient`から分離・切り替え) |
 
