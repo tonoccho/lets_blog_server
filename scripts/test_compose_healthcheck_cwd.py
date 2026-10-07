@@ -292,6 +292,8 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 "facebook-stub",
                 # LinkedIn のスタブ(#1581)。
                 "linkedin-stub",
+                # はてなブックマークのスタブ(#1582)。
+                "hatena-stub",
                 # ComfyUI スタブ(#1106)。GPU を持たないホストでも画像生成の経路を
                 # 検証できるようにするため、7本目として追加した。
                 "comfyui-stub",

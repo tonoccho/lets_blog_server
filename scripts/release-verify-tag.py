@@ -785,6 +785,26 @@ DEFAULT_STEPS = [
         "touches_stack": True,
     },
     {
+        # letsblog プラグインのはてなブックマーク送信処理(OAuth 1.0a の署名・URL のブックマークとコメントの切り詰め・URL なしや 401 の理由の履歴)のテスト(issue #1582)。
+        # 実行方法の理由は上の provision-agent-php-test と同じ。
+        "name": "letsblog-hatena-php-test",
+        "argv": [
+            "timeout",
+            "300",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "php",
+            "-v",
+            "%CHECKOUT%/infra/wordpress:/tmp/wp:ro",
+            "lets_blog_server-wordpress:latest",
+            "/tmp/wp/provision-agent/__tests__/test-letsblog-hatena.php",
+        ],
+        "cwd": "",
+        "touches_stack": True,
+    },
+    {
         "name": "backend-expose-mysql",
         "argv": [
             "docker",

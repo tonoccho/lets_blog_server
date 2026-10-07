@@ -2067,6 +2067,48 @@ export function disconnectProjectLinkedIn(projectId: number): Promise<void> {
 }
 
 /**
+ * プロジェクト設定画面のはてなブックマーク接続(issue #1582)。応答の形は X と同じ(トークンもアプリの秘密も含まない)。
+ * OAuth 1.0a なので、認可から戻ったときに渡すのは state・リクエストトークン(oauth_token)・verifier(oauth_verifier)。
+ */
+export function getProjectHatenaConnection(projectId: number): Promise<XConnectionView> {
+  return apiFetch<XConnectionView>(`/api/projects/${projectId}/sns/hatena`);
+}
+
+/** consumer key / secret は認可の間だけバックエンドのメモリに置かれる(保存されない)。 */
+export function startProjectHatenaAuthorization(
+  projectId: number,
+  input: { clientId: string; clientSecret: string; redirectUri: string }
+): Promise<{ authorizeUrl: string }> {
+  return apiFetch<{ authorizeUrl: string }>(`/api/projects/${projectId}/sns/hatena/authorize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function completeProjectHatenaAuthorization(
+  projectId: number,
+  input: { state: string; oauthToken: string; oauthVerifier: string }
+): Promise<{ projectId: number; accountName: string }> {
+  return apiFetch<{ projectId: number; accountName: string }>(`/api/projects/${projectId}/sns/hatena/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function testProjectHatenaPost(projectId: number): Promise<{ success: boolean; error: string | null }> {
+  return apiFetch<{ success: boolean; error: string | null }>(`/api/projects/${projectId}/sns/hatena/test`, {
+    method: 'POST',
+  });
+}
+
+/** 切断。本番サイトのプラグインからはてなブックマークの設定を消す。 */
+export function disconnectProjectHatena(projectId: number): Promise<void> {
+  return apiFetch<void>(`/api/projects/${projectId}/sns/hatena`, { method: 'DELETE' });
+}
+
+/**
  * プロジェクト設定画面の Facebook ページ接続(issue #1580)。応答の形は X と同じ(トークンもアプリの秘密も含まない)。
  * 個人アカウントには投稿しないので、認可のあとに投稿先のページを選ぶ(pages / page)。
  */

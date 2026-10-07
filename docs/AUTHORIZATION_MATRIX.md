@@ -1305,6 +1305,21 @@ project-service所有(issue #1581)。プロジェクト設定画面の「LinkedI
 | POST /api/projects/{projectId}/sns/linkedin/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
 | DELETE /api/projects/{projectId}/sns/linkedin | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 切断。本番サイトのプラグインから LinkedIn の設定を消す |
 
+## ProjectSnsHatenaController (5エンドポイント、ベースパス `/api/projects/{projectId}/sns/hatena`)
+
+project-service所有(issue #1582)。プロジェクト設定画面の「はてなブックマーク」欄(公式はてなアカウントの接続・切断)向けAPI。
+`ProjectSnsController`(X)と同じ方式で、OAuth 1.0a のアクセストークンとその秘密は本番サイトの letsblog プラグインへ送るだけで、
+アプリは保存せず、どの応答にも載せない。consumer secret とリクエストトークンの秘密は認可の間だけメモリに持つ。コールバックは認可を始めた本人・
+同じプロジェクトだけを受け付ける(`SnsHatenaService#completeAuthorization`)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/sns/hatena | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 接続状態・接続できない理由・告知履歴。本番サイトに届かないときは「取得できない」として返す |
+| POST /api/projects/{projectId}/sns/hatena/authorize | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 認可の開始。はてなブックマーク の認可画面の URL を返す |
+| POST /api/projects/{projectId}/sns/hatena/callback | requireAdmin | 401 | 403 | 認可OK | 現状維持 | Next.js 側コールバックからのサーバー間呼び出し。アカウント名だけを返す |
+| POST /api/projects/{projectId}/sns/hatena/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
+| DELETE /api/projects/{projectId}/sns/hatena | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 切断。本番サイトのプラグインから はてなブックマーク の設定を消す |
+
 ## ProjectSnsFacebookController (7エンドポイント、ベースパス `/api/projects/{projectId}/sns/facebook`)
 
 project-service所有(issue #1580)。プロジェクト設定画面の「Facebook」欄(公式 Facebook ページの接続・切断)向けAPI。

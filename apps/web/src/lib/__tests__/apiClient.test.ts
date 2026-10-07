@@ -73,6 +73,11 @@ import {
   completeProjectLinkedInAuthorization,
   testProjectLinkedInPost,
   disconnectProjectLinkedIn,
+  getProjectHatenaConnection,
+  startProjectHatenaAuthorization,
+  completeProjectHatenaAuthorization,
+  testProjectHatenaPost,
+  disconnectProjectHatena,
   getProjectFacebookConnection,
   startProjectFacebookAuthorization,
   completeProjectFacebookAuthorization,
@@ -1165,6 +1170,72 @@ describe('プロジェクトの LinkedIn 接続(issue #1581)', () => {
 
     const [url, init] = calls()[0]
     expect(url).toContain('/api/projects/7/sns/linkedin')
+    expect(init.method).toBe('DELETE')
+  })
+})
+
+describe('プロジェクトのはてなブックマーク接続(issue #1582)', () => {
+  it('getProjectHatenaConnectionは接続状態を取得する', async () => {
+    const view = { connectable: true, reason: null, siteName: '本番', status: null, log: null }
+    fetchMock.mockResolvedValue(jsonResponse(view))
+
+    await expect(getProjectHatenaConnection(7)).resolves.toEqual(view)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/hatena')
+    expect(url).not.toContain('/sns/x')
+    expect(init.method ?? 'GET').toBe('GET')
+  })
+
+  it('startProjectHatenaAuthorizationはconsumerの情報とリダイレクト先をPOSTし認可URLを受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ authorizeUrl: 'https://hatena.example/authorize' }))
+
+    const result = await startProjectHatenaAuthorization(7, {
+      clientId: 'consumer-key',
+      clientSecret: 'consumer-secret',
+      redirectUri: 'https://localhost/connect/hatena/callback',
+    })
+
+    expect(result).toEqual({ authorizeUrl: 'https://hatena.example/authorize' })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/hatena/authorize')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      clientId: 'consumer-key',
+      clientSecret: 'consumer-secret',
+      redirectUri: 'https://localhost/connect/hatena/callback',
+    })
+  })
+
+  it('completeProjectHatenaAuthorizationはstateとリクエストトークンとverifierをPOSTしアカウント名を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ projectId: 7, accountName: "Let's Blog E2E" }))
+
+    const result = await completeProjectHatenaAuthorization(7, { state: '7.abc', oauthToken: 'rt', oauthVerifier: 'v' })
+
+    expect(result).toEqual({ projectId: 7, accountName: "Let's Blog E2E" })
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/hatena/callback')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ state: '7.abc', oauthToken: 'rt', oauthVerifier: 'v' })
+  })
+
+  it('testProjectHatenaPostはテスト投稿をPOSTし結果を受け取る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true, error: null }))
+
+    await expect(testProjectHatenaPost(7)).resolves.toEqual({ success: true, error: null })
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/hatena/test')
+    expect(init.method).toBe('POST')
+  })
+
+  it('disconnectProjectHatenaはDELETEで切断する', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 204, statusText: 'No Content', text: async () => '', headers: { get: () => null } } as unknown as Response)
+
+    await disconnectProjectHatena(7)
+
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/sns/hatena')
     expect(init.method).toBe('DELETE')
   })
 })

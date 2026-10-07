@@ -2015,6 +2015,17 @@ class LetsblogLinkedInPhpTestStep(unittest.TestCase):
         self.assertTrue(any(a.endswith("/provision-agent/__tests__/test-letsblog-linkedin.php") for a in argv), argv)
 
 
+class LetsblogHatenaPhpTestStep(unittest.TestCase):
+    """issue #1582: はてなブックマーク送信処理の PHP テストもリリース検証で走らせる(手順表に無いと誰も実行しない、#1418)。"""
+
+    def test_step_runs_the_hatena_test_through_the_wordpress_image(self):
+        step = next((s for s in rvt.DEFAULT_STEPS if s["name"] == "letsblog-hatena-php-test"), None)
+        self.assertIsNotNone(step, "はてなブックマーク送信処理のPHPテストがリリース検証で実行されない")
+        argv = step["argv"]
+        self.assertIn("lets_blog_server-wordpress:latest", argv)
+        self.assertTrue(any(a.endswith("/provision-agent/__tests__/test-letsblog-hatena.php") for a in argv), argv)
+
+
 class ProvisionAgentPhpTestsStep(unittest.TestCase):
     """issue #1418: provision-agent の PHP テストをリリース検証で走らせる。
 

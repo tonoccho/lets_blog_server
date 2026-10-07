@@ -752,6 +752,7 @@ if (function_exists('add_filter')) {
  * send(callable(array $cred, string $text, int $now): array{ok: bool, error: ?string, cred: array, needs_reconnect?: bool})。
  * account_name(アカウントの表示名)はどの SNS でも任意で受け取る。
  * fit(任意)は告知文をその SNS の文字数の上限に収める関数名(issue #1583)。
+ * test_url(任意。true なら `sns test` の告知文にサイトの URL を付ける。URL をブックマークする SNS 向け。issue #1582)。
  */
 function letsblog_sns_senders(?string $sns = null, ?array $definition = null): array
 {
@@ -1453,6 +1454,158 @@ letsblog_sns_register_sender('linkedin', [
     'int_fields' => ['expires_at'],
     'send' => 'letsblog_linkedin_send',
     'fit' => 'letsblog_linkedin_fit_text',
+]);
+
+// ---- はてなブックマーク(issue #1582。OAuth 1.0a。consumer secret・アクセストークン・その秘密を暗号化して持つ) ----
+
+/** はてなブックマークのコメントの上限(文字数)。API のドキュメントには上限の記載が無く、はてなブックマークの仕様(100文字)に合わせる。 */
+const LETSBLOG_HATENA_COMMENT_LIMIT = 100;
+
+/** API のベース URL。変えられるのは wp-config.php の定数だけ(e2e でスタブへ向けるため)。アプリから送る設定では変えられない。 */
+function letsblog_hatena_api_base(): string
+{
+    return rtrim(defined('LETSBLOG_HATENA_API_BASE_URL') ? (string) LETSBLOG_HATENA_API_BASE_URL : 'https://bookmark.hatenaapis.com', '/');
+}
+
+/**
+ * OAuth 1.0a の署名(HMAC-SHA1。RFC 5849)。$params は署名の対象すべて(oauth_* と本文・クエリのパラメータ。oauth_signature は除く)。
+ */
+function letsblog_hatena_oauth_signature(string $method, string $url, array $params, string $consumerSecret, string $tokenSecret): string
+{
+    $pairs = [];
+    foreach ($params as $name => $value) {
+        $pairs[] = [rawurlencode((string) $name), rawurlencode((string) $value)];
+    }
+    usort($pairs, fn(array $a, array $b): int => strcmp($a[0], $b[0]) ?: strcmp($a[1], $b[1]));
+    $normalized = implode('&', array_map(fn(array $pair): string => $pair[0] . '=' . $pair[1], $pairs));
+    $base = strtoupper($method) . '&' . rawurlencode($url) . '&' . rawurlencode($normalized);
+    $key = rawurlencode($consumerSecret) . '&' . rawurlencode($tokenSecret);
+    return base64_encode(hash_hmac('sha1', $base, $key, true));
+}
+
+/** 署名つきの Authorization ヘッダ(秘密は署名の計算にだけ使い、ヘッダには載せない)。 */
+function letsblog_hatena_oauth_header(string $method, string $url, array $bodyParams, array $cred, int $timestamp, string $nonce): string
+{
+    $oauth = [
+        'oauth_consumer_key' => $cred['consumer_key'],
+        'oauth_nonce' => $nonce,
+        'oauth_signature_method' => 'HMAC-SHA1',
+        'oauth_timestamp' => (string) $timestamp,
+        'oauth_token' => $cred['access_token'],
+        'oauth_version' => '1.0',
+    ];
+    $oauth['oauth_signature'] = letsblog_hatena_oauth_signature(
+        $method, $url, array_merge($bodyParams, $oauth), $cred['consumer_secret'], $cred['access_token_secret']
+    );
+    ksort($oauth);
+    $parts = [];
+    foreach ($oauth as $name => $value) {
+        $parts[] = $name . '="' . rawurlencode((string) $value) . '"';
+    }
+    return 'OAuth ' . implode(', ', $parts);
+}
+
+/** 失敗の理由として履歴に残す短い説明。秘密は含まない(応答の message か oauth_problem だけを使う)。 */
+function letsblog_hatena_describe_failure(string $what, $response): string
+{
+    if (is_wp_error($response)) {
+        return "はてなブックマークに接続できません({$what})";
+    }
+    $code = (int) wp_remote_retrieve_response_code($response);
+    $raw = (string) wp_remote_retrieve_body($response);
+    $reason = null;
+    $body = json_decode($raw, true);
+    if (is_array($body) && is_string($body['message'] ?? null)) {
+        $reason = $body['message'];
+    } else {
+        parse_str($raw, $form);
+        if (is_string($form['oauth_problem'] ?? null)) {
+            $reason = $form['oauth_problem'];
+        }
+    }
+    $suffix = $reason === null || $reason === '' ? '' : ': ' . mb_substr($reason, 0, 200);
+    return "はてなブックマークの{$what}に失敗しました(HTTP {$code}{$suffix})";
+}
+
+/**
+ * 告知文を、ブックマークする URL とコメントに分ける。URL は告知文の中の最後の有効な http(s) の URL
+ * (スキームが http / https でない・ホストが無いものは URL とみなさない)。コメントは告知文から URL を除いたもの
+ * (空白・改行は1つの空白にまとめる)。有効な URL が無ければ url は null。
+ *
+ * @return array{comment: string, url: ?string}
+ */
+function letsblog_hatena_split_text(string $text): array
+{
+    $url = null;
+    $offset = 0;
+    if (preg_match_all('#https?://[\x21-\x7E]+#', $text, $found, PREG_OFFSET_CAPTURE) > 0) {
+        foreach (array_reverse($found[0]) as [$candidate, $position]) {
+            $parts = parse_url($candidate);
+            if (filter_var($candidate, FILTER_VALIDATE_URL) !== false
+                && in_array($parts['scheme'] ?? '', ['http', 'https'], true) && ($parts['host'] ?? '') !== '') {
+                $url = $candidate;
+                $offset = (int) $position;
+                break;
+            }
+        }
+    }
+    if ($url !== null) {
+        $text = substr($text, 0, $offset) . ' ' . substr($text, $offset + strlen($url));
+    }
+    return ['comment' => trim((string) preg_replace('/\s+/u', ' ', $text)), 'url' => $url];
+}
+
+/** コメントを上限(100文字)に収める。超えるときは末尾に「…」を付けて上限まで切る(letsblog_sns_fit_text)。 */
+function letsblog_hatena_fit_comment(string $comment): string
+{
+    return letsblog_sns_fit_text($comment, LETSBLOG_HATENA_COMMENT_LIMIT, 'mb_strlen');
+}
+
+/**
+ * 記事の URL をブックマークし、告知文をコメントにする(POST /rest/1/my/bookmark。OAuth 1.0a で署名)。
+ * 投稿の要件を満たさないとき(認証情報が空・告知文に有効な URL が無い)は API を呼ばず、理由を返す。
+ * API が HTTP 401 を返したときは認証が失効しているので要再接続にする。400・429 などは理由だけを返し、要再接続にはしない。
+ */
+function letsblog_hatena_send(array $cred, string $text, int $now): array
+{
+    $fail = fn(string $error, bool $reconnect = false): array => ['ok' => false, 'error' => $error, 'cred' => $cred, 'needs_reconnect' => $reconnect];
+    foreach (['consumer_key', 'consumer_secret', 'access_token', 'access_token_secret'] as $field) {
+        if (!is_string($cred[$field] ?? null) || $cred[$field] === '') {
+            return $fail("はてなブックマークの認証情報({$field})が空のため、投稿しません");
+        }
+    }
+    $parts = letsblog_hatena_split_text($text);
+    if ($parts['url'] === null) {
+        return $fail('告知文に有効な http(s) の URL が無いため、はてなブックマークへは投稿しません');
+    }
+    $params = ['url' => $parts['url']];
+    $comment = letsblog_hatena_fit_comment($parts['comment']);
+    if ($comment !== '') {
+        $params['comment'] = $comment;
+    }
+    $url = letsblog_hatena_api_base() . '/rest/1/my/bookmark';
+    $response = wp_remote_request($url, [
+        'method' => 'POST',
+        'timeout' => 15,
+        'headers' => [
+            'Authorization' => letsblog_hatena_oauth_header('POST', $url, $params, $cred, $now, bin2hex(random_bytes(16))),
+            'Content-Type' => 'application/x-www-form-urlencoded',
+        ],
+        'body' => http_build_query($params, '', '&', PHP_QUERY_RFC3986),
+    ]);
+    $status = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+    if ($status !== 200 && $status !== 201) {
+        return $fail(letsblog_hatena_describe_failure('投稿', $response), $status === 401);
+    }
+    return ['ok' => true, 'error' => null, 'cred' => $cred, 'needs_reconnect' => false];
+}
+
+letsblog_sns_register_sender('hatena', [
+    'secret_fields' => ['consumer_secret', 'access_token', 'access_token_secret'],
+    'required' => ['consumer_key', 'consumer_secret', 'access_token', 'access_token_secret'],
+    'send' => 'letsblog_hatena_send',
+    // 接続テストの告知文にサイトの URL を付ける(ブックマークする URL が要るため)。
+    'test_url' => true,
 ]);
 
 // ---- 公開時の告知(issue #1575)。公開の検知は WordPress 側で行い、Let's Blog が止まっていても告知できる ----
@@ -2356,7 +2509,11 @@ if (defined('WP_CLI') && WP_CLI) {
                     return;
                 }
                 $now = time();
-                $result = letsblog_sns_announce($sns, 'test', null, 'Let\'s Blog の接続テストです(' . gmdate('Y-m-d H:i:s', $now) . ' UTC)', $now);
+                $text = 'Let\'s Blog の接続テストです(' . gmdate('Y-m-d H:i:s', $now) . ' UTC)';
+                if (!empty((letsblog_sns_senders()[$sns] ?? [])['test_url'])) {
+                    $text .= "\n" . home_url('/');
+                }
+                $result = letsblog_sns_announce($sns, 'test', null, $text, $now);
                 if (!$result['ok']) {
                     WP_CLI::error((string) $result['error']);
                     return;

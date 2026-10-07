@@ -180,6 +180,16 @@ services:
     ports:
       - "127.0.0.1:18092:8080"
 
+  # はてなブックマーク(OAuth 1.0a + ブックマーク REST API。issue #1582)。letsblog プラグインのブックマーク送信処理(POST /rest/1/my/bookmark)と、
+  # project-service のはてな接続(リクエストトークン・認可画面・アクセストークン・自分の情報)の向き先。OAuth 1.0a の署名を実際に検証する。
+  # プラグインは wp-config.php の定数 LETSBLOG_HATENA_API_BASE_URL(http://hatena-stub:8080)でここへ向ける。
+  hatena-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-hatena-stub
+    command: ["node", "/app/hatena/server.js"]
+    ports:
+      - "127.0.0.1:18093:8080"
+
   # ComfyUI(issue #1106)。実機は NVIDIA ランタイムが要り、1枚あたり数十秒かかるため、
   # batch size 16 の枚数検証も「リピートごとに seed が変わる」ことの確認も実行時間に乗らない。
   # スタブが引き受けるのは枚数と seed の決定的な検証だけで、画像の見た目は再現しない。
@@ -307,6 +317,11 @@ services:
       LINKEDIN_API_BASE_URL: http://linkedin-stub:8080
       LINKEDIN_TOKEN_URL: http://linkedin-stub:8080/oauth/v2/accessToken
       LINKEDIN_AUTHORIZE_URL: http://127.0.0.1:18092/oauth/v2/authorization
+      # はてなブックマークの接続(#1582)も同じ方式。認可画面はホストから見える 127.0.0.1:18093 の hatena-stub へ向ける。
+      HATENA_REQUEST_TOKEN_URL: http://hatena-stub:8080/oauth/initiate
+      HATENA_ACCESS_TOKEN_URL: http://hatena-stub:8080/oauth/token
+      HATENA_AUTHORIZE_URL: http://127.0.0.1:18093/oauth/authorize
+      HATENA_PROFILE_URL: http://hatena-stub:8080/applications/my.json
     depends_on:
       x-stub:
         condition: service_healthy
@@ -315,6 +330,8 @@ services:
       facebook-stub:
         condition: service_healthy
       linkedin-stub:
+        condition: service_healthy
+      hatena-stub:
         condition: service_healthy
 
   # publishing-service も GitHub の Pull Request / contents / comments API を使う(#1333)。

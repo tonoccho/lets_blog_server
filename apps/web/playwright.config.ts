@@ -67,8 +67,8 @@ const atProvision = defineBddProject({
   ...BDD_COMMON,
   name: 'at-provision',
   outputDir: '.features-gen/at-provision',
-  // `@stub-isolation:threads`(下の at-threads-exclusive、issue #1579)と `@stub-isolation:facebook`(at-facebook-exclusive、issue #1580)、`@stub-isolation:x`(at-x-exclusive、issue #1583)、`@stub-isolation:linkedin`(at-linkedin-exclusive、issue #1581)は専用レーンへ集めるので除く。
-  tags: '@stage:provision and not @stub-isolation:threads and not @stub-isolation:facebook and not @stub-isolation:x and not @stub-isolation:linkedin',
+  // `@stub-isolation:threads`(下の at-threads-exclusive、issue #1579)と `@stub-isolation:facebook`(at-facebook-exclusive、issue #1580)、`@stub-isolation:x`(at-x-exclusive、issue #1583)、`@stub-isolation:linkedin`(at-linkedin-exclusive、issue #1581)、`@stub-isolation:hatena`(at-hatena-exclusive、issue #1582)は専用レーンへ集めるので除く。
+  tags: '@stage:provision and not @stub-isolation:threads and not @stub-isolation:facebook and not @stub-isolation:x and not @stub-isolation:linkedin and not @stub-isolation:hatena',
 });
 
 /**
@@ -384,6 +384,18 @@ const atLinkedinExclusive = defineBddProject({
 });
 
 /**
+ * issue #1582: はてなブックマークの告知(`project/project-sns-hatena.feature`)の専用レーン。
+ * 理由は at-threads-exclusive と同じ(`hatena-stub` の単一のグローバル状態を全シナリオが初期化・検証する)。
+ * `workers: 1` の専用プロジェクトへ集めて直列化する。
+ */
+const atHatenaExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-hatena-exclusive',
+  outputDir: '.features-gen/at-hatena-exclusive',
+  tags: '@stub-isolation:hatena' + excludeRequiresGpu + excludeRequiresRealAiCpu,
+});
+
+/**
  * 段階5: `@destructive` のシナリオ(issue #929)。
  *
  * 環境の状態を壊すシナリオを**最後に、それだけで**実行する。
@@ -636,12 +648,19 @@ export default defineConfig({
       workers: 1,
     },
     {
+      // at-main とは並列に走る。hatena-stub の共有状態に触れるため、at-destructive はこれの完了も待つ(issue #1582)。
+      ...atHatenaExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-provision'],
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
       // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive /
       // at-timezone-exclusive / at-analytics-exclusive も共有状態に触れるため、at-main と
       // 同様に完了を待ってから始める(issue #1188、issue #1374、issue #1372)。
-      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive', 'at-threads-exclusive', 'at-facebook-exclusive', 'at-x-exclusive', 'at-linkedin-exclusive'],
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive', 'at-threads-exclusive', 'at-facebook-exclusive', 'at-x-exclusive', 'at-linkedin-exclusive', 'at-hatena-exclusive'],
       // この段階の**内部**も直列化する(issue #1387)。dependencies は他プロジェクトの
       // 完了しか担保せず、24シナリオ同士は既定の並列度でそのまま走っていた。それぞれが
       // 別のサービスを止めるため互いの停止に巻き込まれ、2026-09-23 のリリース検証で

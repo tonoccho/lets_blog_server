@@ -92,6 +92,12 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/sns/linkedin/callback"),
                 new Endpoint("POST", "/api/projects/1/sns/linkedin/test"),
                 new Endpoint("DELETE", "/api/projects/1/sns/linkedin"),
+                // -- ProjectSnsHatenaController(issue #1582) --
+                new Endpoint("GET", "/api/projects/1/sns/hatena"),
+                new Endpoint("POST", "/api/projects/1/sns/hatena/authorize"),
+                new Endpoint("POST", "/api/projects/1/sns/hatena/callback"),
+                new Endpoint("POST", "/api/projects/1/sns/hatena/test"),
+                new Endpoint("DELETE", "/api/projects/1/sns/hatena"),
 
                 // -- ProjectSnsFacebookController(issue #1580) --
                 new Endpoint("GET", "/api/projects/1/sns/facebook"),

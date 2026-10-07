@@ -126,6 +126,13 @@ app:
   linkedin-api-base-url: ${LINKEDIN_API_BASE_URL:https://api.linkedin.com}
   linkedin-token-url: ${LINKEDIN_TOKEN_URL:https://www.linkedin.com/oauth/v2/accessToken}
   linkedin-authorize-url: ${LINKEDIN_AUTHORIZE_URL:https://www.linkedin.com/oauth/v2/authorization}
+  # プロジェクトのはてなブックマーク(公式アカウント)の接続(issue #1582、HatenaApiClient。OAuth 1.0a)。リクエストトークンの取得 URL、
+  # アクセストークンへの交換 URL、利用者のブラウザを遷移させる認可画面の URL、自分の情報(アカウント名)の URL。
+  # 受け入れテストでは hatena-stub へ向ける(docker-compose.e2e-stubs.yml)。
+  hatena-request-token-url: ${HATENA_REQUEST_TOKEN_URL:https://www.hatena.com/oauth/initiate}
+  hatena-access-token-url: ${HATENA_ACCESS_TOKEN_URL:https://www.hatena.com/oauth/token}
+  hatena-authorize-url: ${HATENA_AUTHORIZE_URL:https://www.hatena.ne.jp/oauth/authorize}
+  hatena-profile-url: ${HATENA_PROFILE_URL:https://n.hatena.com/applications/my.json}
 
 # KeycloakのJWT検証。identity-service/log-writer/media-service/ai-service/content-serviceの
 # SecurityConfig/JwtDecoderConfigと同じ理由により、issuer-uriによる自動設定は使わずJWKS取得先と

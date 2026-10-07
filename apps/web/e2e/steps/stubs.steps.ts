@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Before, Given, Then, When } from './fixtures';
@@ -31,6 +32,27 @@ Before({ tags: '@stub' }, async () => {
 const responses = new Map<string, string[]>();
 
 /** 各スタブの「読み取り専用で決定的な」代表リクエスト。 */
+/** はてなスタブの OAuth 1.0a 署名(HMAC-SHA1)つき Authorization ヘッダ。nonce と timestamp は固定。 */
+function hatenaProbeAuthorization(): string {
+  const enc = (v: string) => encodeURIComponent(v).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const oauth: Record<string, string> = {
+    oauth_consumer_key: 'e2e-hatena-consumer-key',
+    oauth_nonce: 'e2e-hatena-probe-nonce',
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: '1760000000',
+    oauth_token: 'e2e-hatena-token',
+    oauth_version: '1.0',
+  };
+  const normalized = Object.keys(oauth)
+    .sort()
+    .map((k) => `${enc(k)}=${enc(oauth[k])}`)
+    .join('&');
+  const baseString = `GET&${enc(`${STUB_URLS.hatena}/applications/my.json`)}&${enc(normalized)}`;
+  const key = `${enc('e2e-hatena-consumer-secret')}&${enc('e2e-hatena-token-secret')}`;
+  oauth.oauth_signature = createHmac('sha1', key).update(baseString).digest('base64');
+  return 'OAuth ' + Object.keys(oauth).sort().map((k) => `${k}="${enc(oauth[k])}"`).join(', ');
+}
+
 const PROBES: Record<StubName, { path: string; method: string; body?: unknown; headers?: Record<string, string> }> = {
   llm: {
     path: '/chat/completions',
@@ -93,6 +115,13 @@ const PROBES: Record<StubName, { path: string; method: string; body?: unknown; h
     path: '/v2/userinfo',
     method: 'GET',
     headers: { Authorization: 'Bearer e2e-linkedin-token' },
+  },
+  // はてなブックマーク(#1582)。OAuth 1.0a の署名つきリクエスト。nonce と timestamp を固定すれば署名も固定なので、
+  // 同じ呼び出しは常に同じ応答になる(スタブは署名を実際に検証する)。
+  hatena: {
+    path: '/applications/my.json',
+    method: 'GET',
+    headers: { Authorization: hatenaProbeAuthorization() },
   },
 };
 

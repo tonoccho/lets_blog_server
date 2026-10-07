@@ -434,6 +434,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 | `threads-stub` | Threads API(認可画面・トークン交換・長期トークン化と更新・投稿(作成→公開)・自分の情報。#1579) | WordPress の wp-config 定数 `LETSBLOG_THREADS_API_BASE_URL`(letsblog プラグイン)、`THREADS_API_BASE_URL` / `THREADS_AUTHORIZE_URL`(project) | 18090 |
 | `facebook-stub` | Facebook(Graph API)(認可画面・コード交換・長期ユーザートークン化・管理しているページの一覧・ページのフィードへの投稿。個人アカウントには投稿できない。#1580) | WordPress の wp-config 定数 `LETSBLOG_FACEBOOK_API_BASE_URL`(letsblog プラグイン)、`FACEBOOK_API_BASE_URL` / `FACEBOOK_AUTHORIZE_URL`(project) | 18091 |
 | `linkedin-stub` | LinkedIn API(認可画面・トークン交換(refresh token は返さない)・userinfo の sub と名前・ugcPosts への投稿(ARTICLE + originalUrl)。接続したメンバー本人のプロフィールだけ。#1581) | WordPress の wp-config 定数 `LETSBLOG_LINKEDIN_API_BASE_URL`(letsblog プラグイン)、`LINKEDIN_API_BASE_URL` / `LINKEDIN_TOKEN_URL` / `LINKEDIN_AUTHORIZE_URL`(project) | 18092 |
+| `hatena-stub` | はてなブックマーク(OAuth 1.0a のリクエストトークン・認可画面・アクセストークン・自分の情報・`POST /rest/1/my/bookmark` へのブックマーク追加。HMAC-SHA1 の署名を実際に検証し、コメントは100文字まで。#1582) | WordPress の wp-config 定数 `LETSBLOG_HATENA_API_BASE_URL`(letsblog プラグイン)、`HATENA_REQUEST_TOKEN_URL` / `HATENA_ACCESS_TOKEN_URL` / `HATENA_AUTHORIZE_URL` / `HATENA_PROFILE_URL`(project) | 18093 |
 
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
@@ -1062,13 +1063,14 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
                                                         ├─→ at-facebook-exclusive ─┤
                                                         ├─→ at-x-exclusive ────────┤
                                                         ├─→ at-linkedin-exclusive ─┤
+                                                        ├─→ at-hatena-exclusive ───┤
                                                         └─→ at-llm-exclusive ──────┤
                                                               └─→ at-analytics-exclusive ─┘
 ```
 
 `at-main` / `at-timezone-exclusive` / `at-llm-exclusive` は `at-provision` にのみ依存し、互いに
 並行して走る。`at-analytics-exclusive` は `at-llm-exclusive` の完了を待ち(`at-provision` ではない)、
-`at-destructive` は `at-main` と8つの専用レーンすべての完了を待つ
+`at-destructive` は `at-main` と9つの専用レーンすべての完了を待つ
 (`apps/web/playwright.config.ts` の `projects[].dependencies`)。
 
 | 段階 | 中身 | 担当 |
@@ -1086,7 +1088,8 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 | `at-facebook-exclusive` | `@stub-isolation:facebook` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`facebook-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1580 |
 | `at-x-exclusive` | `@stub-isolation:x` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`project-sns-x` / `site-letsblog-sns-announce` / `project-sns-templates` の各シナリオが `x-stub` の単一のグローバル状態を初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1583 |
 | `at-linkedin-exclusive` | `@stub-isolation:linkedin` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`linkedin-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1581 |
-| `at-destructive` | `@destructive` のシナリオ。`at-main` と8つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
+| `at-hatena-exclusive` | `@stub-isolation:hatena` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`hatena-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1582 |
+| `at-destructive` | `@destructive` のシナリオ。`at-main` と9つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
 
 ### なぜ `@destructive` を別段階にするか(#929)
 

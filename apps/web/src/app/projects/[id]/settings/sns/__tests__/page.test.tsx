@@ -4,6 +4,7 @@ import {
   getProject,
   getProjectFacebookConnection,
   getProjectFacebookPages,
+  getProjectHatenaConnection,
   getProjectLinkedInConnection,
   getProjectPvRules,
   getProjectSnsTemplates,
@@ -21,6 +22,7 @@ jest.mock("@/lib/apiClient", () => ({
   getProjectThreadsConnection: jest.fn(),
   getProjectFacebookConnection: jest.fn(),
   getProjectFacebookPages: jest.fn(),
+  getProjectHatenaConnection: jest.fn(),
   getProjectLinkedInConnection: jest.fn(),
   getProjectPvRules: jest.fn(),
   getProjectSnsTemplates: jest.fn(),
@@ -61,6 +63,14 @@ jest.mock("../../../ProjectSnsLinkedInSection", () => ({
   ProjectSnsLinkedInSection: (props: unknown) => {
     linkedinSectionProps(props);
     return <div data-testid="linkedin-section" />;
+  },
+}));
+
+const hatenaSectionProps = jest.fn();
+jest.mock("../../../ProjectSnsHatenaSection", () => ({
+  ProjectSnsHatenaSection: (props: unknown) => {
+    hatenaSectionProps(props);
+    return <div data-testid="hatena-section" />;
   },
 }));
 
@@ -115,6 +125,7 @@ describe("ProjectSnsSettingsPage", () => {
     (getProjectThreadsConnection as jest.Mock).mockResolvedValue(view);
     (getProjectFacebookConnection as jest.Mock).mockResolvedValue(view);
     (getProjectLinkedInConnection as jest.Mock).mockResolvedValue(view);
+    (getProjectHatenaConnection as jest.Mock).mockResolvedValue(view);
     (getProjectPvRules as jest.Mock).mockResolvedValue(pvView);
     (getProjectSnsTemplates as jest.Mock).mockResolvedValue(templatesView);
   });
@@ -365,6 +376,53 @@ describe("ProjectSnsSettingsPage", () => {
 
       expect(screen.getByTestId("sns-section")).toBeInTheDocument();
       expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
+    });
+  });
+  describe("はてなブックマークの欄(issue #1582)", () => {
+    it("取得したはてなブックマークの接続状態とはてなブックマーク用のコールバックURLを欄へ渡す", async () => {
+      await renderPage();
+
+      expect(screen.getByTestId("hatena-section")).toBeInTheDocument();
+      expect(hatenaSectionProps).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 5,
+          view,
+          callbackUrl: "https://localhost/connect/hatena/callback",
+          connectedBanner: false,
+          errorBanner: undefined,
+        })
+      );
+    });
+
+    it("はてなブックマークの接続完了(connected=hatena)ははてなブックマーク欄にだけバナーを出す", async () => {
+      await renderPage({ connected: "hatena" });
+
+      expect(hatenaSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: true }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+      expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ connectedBanner: false }));
+    });
+
+    it("はてなブックマークの失敗(sns=hatena)ははてなブックマーク欄にだけ理由を出し、X 欄には出さない", async () => {
+      await renderPage({ error: "user_refused", sns: "hatena" });
+
+      expect(hatenaSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: "user_refused" }));
+      expect(sectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+      expect(linkedinSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("X の失敗ははてなブックマーク欄には出さない", async () => {
+      await renderPage({ error: "invalid_state" });
+
+      expect(hatenaSectionProps).toHaveBeenCalledWith(expect.objectContaining({ errorBanner: undefined }));
+    });
+
+    it("はてなブックマークの接続状態を取得できなくても画面は描き、欄へはnullを渡す", async () => {
+      (getProjectHatenaConnection as jest.Mock).mockRejectedValue(new Error("502"));
+
+      await renderPage();
+
+      expect(screen.getByTestId("sns-section")).toBeInTheDocument();
+      expect(hatenaSectionProps).toHaveBeenCalledWith(expect.objectContaining({ view: null }));
     });
   });
 });
