@@ -1,6 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import { ArticleReviewPullRequestList } from "../ArticleReviewPullRequestList";
 
+jest.mock("../actions", () => ({ startArticleReviewAction: jest.fn() }));
+
 const pullRequests = [
   {
     number: 201,
@@ -20,7 +22,7 @@ const pullRequests = [
 
 describe("ArticleReviewPullRequestList(issue #1340)", () => {
   it("各PRを番号・タイトル・ブランチ名・作成日時付きの行で表示する", () => {
-    render(<ArticleReviewPullRequestList pullRequests={pullRequests} timezone="Asia/Tokyo" />);
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />);
 
     const row = screen.getByRole("row", { name: /#201/ });
     expect(within(row).getByText("記事サンプル")).toBeInTheDocument();
@@ -31,13 +33,13 @@ describe("ArticleReviewPullRequestList(issue #1340)", () => {
   });
 
   it("作成日時は渡されたタイムゾーンで表示される", () => {
-    render(<ArticleReviewPullRequestList pullRequests={pullRequests.slice(0, 1)} timezone="America/New_York" />);
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests.slice(0, 1)} timezone="America/New_York" />);
 
     expect(screen.getByText("2026/9/29 23:00:00")).toBeInTheDocument();
   });
 
   it("各行にGitHubのPRページへの外部リンクがある", () => {
-    render(<ArticleReviewPullRequestList pullRequests={pullRequests} timezone="Asia/Tokyo" />);
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />);
 
     const link = within(screen.getByRole("row", { name: /#205/ })).getByRole("link", { name: /GitHub/ });
     expect(link).toHaveAttribute("href", "https://github.com/acme/blog/pull/205");
@@ -46,10 +48,17 @@ describe("ArticleReviewPullRequestList(issue #1340)", () => {
   });
 
   it("開いているPRが無いときは0件であることを表示し、失敗表示にはしない", () => {
-    render(<ArticleReviewPullRequestList pullRequests={[]} timezone={null} />);
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={[]} timezone={null} />);
 
     expect(screen.getByText("レビュー待ちの Pull Request はありません")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("各行に「レビュー」ボタンがある(issue #1345)", () => {
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />);
+
+    expect(screen.getAllByRole("button", { name: "レビュー" })).toHaveLength(2);
+    expect(within(screen.getByRole("row", { name: /#205/ })).getByRole("button", { name: "レビュー" })).toBeInTheDocument();
   });
 });

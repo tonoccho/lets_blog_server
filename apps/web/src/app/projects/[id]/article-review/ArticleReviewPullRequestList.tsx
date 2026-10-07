@@ -1,11 +1,14 @@
 import type { ArticleReviewPullRequest } from "@/lib/apiClient";
 import { ViewerDateTime } from "@/components/ViewerDateTime";
+import { ArticleReviewButton } from "./ArticleReviewButton";
 
-/** レビュー待ちの Pull Request を表で並べる(issue #1340)。日時は閲覧者のタイムゾーンで表示する。 */
+/** レビュー待ちの Pull Request を表で並べ、各行から「レビュー」を始められる(issue #1340、#1345)。日時は閲覧者のタイムゾーンで表示する。 */
 export function ArticleReviewPullRequestList({
+  projectId,
   pullRequests,
   timezone,
 }: {
+  projectId: number;
   pullRequests: ArticleReviewPullRequest[];
   timezone: string | null;
 }) {
@@ -25,6 +28,7 @@ export function ArticleReviewPullRequestList({
             <th className="px-4 py-2 font-medium">ブランチ</th>
             <th className="px-4 py-2 font-medium">作成日時</th>
             <th className="px-4 py-2 font-medium">リンク</th>
+            <th className="px-4 py-2 font-medium">レビュー</th>
           </tr>
         </thead>
         <tbody>
@@ -45,6 +49,9 @@ export function ArticleReviewPullRequestList({
                 >
                   GitHub で開く
                 </a>
+              </td>
+              <td className="px-4 py-2">
+                <ArticleReviewButton projectId={projectId} prNumber={pr.number} />
               </td>
             </tr>
           ))}

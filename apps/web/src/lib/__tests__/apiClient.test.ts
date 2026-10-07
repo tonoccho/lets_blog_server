@@ -43,6 +43,7 @@ import {
   streamConnectedServiceStatuses,
   listReviewStepSettings,
   listArticleReviewPullRequests,
+  startArticleReview,
   listProjectAdSenseAccounts,
   listUnifiedOperationLogs,
   getRouteStats,
@@ -512,6 +513,26 @@ describe('listArticleReviewPullRequests(issue #1340)', () => {
     fetchMock.mockResolvedValue(textResponse('bad gateway', 502, 'Bad Gateway'))
 
     await expect(listArticleReviewPullRequests(7)).rejects.toThrow('APIエラー (502)')
+  })
+})
+
+describe('startArticleReview(issue #1345)', () => {
+  it('PRのレビューAPIを POST で呼び、応答の testPostUrl を返す', async () => {
+    const body = { prNumber: 201, state: 'IN_REVIEW', testPostUrl: 'https://test.example/review-sample/', reviewedByUserId: 3, wpPostId: '9' }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await startArticleReview(7, 201)
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/article-review/pull-requests/201/review')
+    expect(init.method).toBe('POST')
+  })
+
+  it('サーバが返した失敗の理由(409)を含む例外として伝える', async () => {
+    fetchMock.mockResolvedValue(textResponse('テスト環境のサイトが紐づいていません', 409, 'Conflict'))
+
+    await expect(startArticleReview(7, 201)).rejects.toThrow('APIエラー (409): テスト環境のサイトが紐づいていません')
   })
 })
 

@@ -64,7 +64,7 @@ export default async function ProjectArticleReviewPage({ params }: { params: Pro
           Pull Request の取得に失敗しました。時間をおいて再読み込みするか、GitHub の認証設定を確認してください。
         </p>
       ) : (
-        <ArticleReviewPullRequestList pullRequests={pullRequests} timezone={timezone} />
+        <ArticleReviewPullRequestList projectId={projectId} pullRequests={pullRequests} timezone={timezone} />
       )}
     </div>
   );

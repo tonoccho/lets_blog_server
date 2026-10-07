@@ -1650,6 +1650,26 @@ export function listArticleReviewPullRequests(projectId: number): Promise<Articl
   return apiFetch<ArticleReviewPullRequest[]>(`/api/projects/${projectId}/article-review/pull-requests`);
 }
 
+/** レビュー開始(テスト環境への投稿)の応答(publishing-service、issue #1341)。 */
+export interface ArticleReviewResult {
+  prNumber: number;
+  state: string;
+  testPostUrl: string;
+  reviewedByUserId: number | null;
+  wpPostId: string | null;
+}
+
+/**
+ * PR の記事をテスト環境へ投稿してレビューを始める(issue #1345)。
+ * 未提出の PR(404)・テスト環境のサイト未紐づけ(409)などは、サーバが返した理由を含む例外になる。
+ */
+export function startArticleReview(projectId: number, prNumber: number): Promise<ArticleReviewResult> {
+  return apiFetch<ArticleReviewResult>(
+    `/api/projects/${projectId}/article-review/pull-requests/${prNumber}/review`,
+    { method: 'POST' }
+  );
+}
+
 export function updateProjectGithubRepository(
   id: number,
   githubRepository: string
