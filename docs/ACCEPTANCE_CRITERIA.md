@@ -795,7 +795,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全142件)
+### 10.5 Server Action(全146件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -810,6 +810,8 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/image-gallery/actions.ts`<br>`getGeneratedImageAction`<br>`fetchGalleryImagesPageAction`<br>`deleteGeneratedImageAction`<br>`bulkDeleteGeneratedImagesAction`<br>`updateGeneratedImageTagsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/image-gallery/actions.ts`<br>`createGeneratedImageFolderAction`<br>`setGeneratedImageFolderAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。画像のフォルダ作成・割り当て。データの読み書きが gateway を1〜数往復するだけの操作(利用者が予算対象と決定、2026-10-06、#1623) | 予算対象 |
+| `app/image-gallery/actions.ts`<br>`renameGeneratedImageFolderAction`<br>`getGeneratedImageFolderDeleteImpactAction`<br>`deleteGeneratedImageFolderAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。画像のフォルダの改名、削除の影響範囲(子孫フォルダ数と未分類へ戻る枚数)の読み取り、フォルダと子孫の削除(画像は消さず未分類へ戻す)。データの読み書きが gateway を1〜数往復するだけの操作(#1494。利用者が予算対象と決定、2026-10-08、#1678) | 予算対象 |
+| `app/image-gallery/actions.ts`<br>`editGeneratedImageAction` | — | — | 回転・反転・切り抜き・明るさ調整を media-service が同期で行い、新しい画像として保存する画像処理(`GeneratedImageEditService`)。時間は画像の大きさに依存するため、3秒の予算では測れない。**利用者が予算対象外と決定した(2026-10-08、#1678。#1623 の基準の「画像処理」)** | 予算対象外 |
 | `app/infoRailActions.ts`<br>`fetchQueueJobsAction`<br>`fetchRecentOperationLogsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。全画面の情報表示レールが処理キュー・操作ログを gateway から読むだけの操作(#1407)。**既定どおり予算対象**(#1544) | 予算対象 |
 | `app/login/actions.ts`<br>`startNoJsLoginAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/operation-logs/actions.ts`<br>`copyOperationTraceAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |

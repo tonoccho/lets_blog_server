@@ -144,3 +144,53 @@ When('画像ギャラリーでその画像の詳細を開いてフォルダへ�
   });
   recordResponseTime(ctx, timing.roundTripMs, '生成画像のフォルダ割り当て(Server Action)の往復');
 });
+
+When('画像ギャラリーでそのフォルダを改名し Server Action の往復を計測する', async ({ page, ctx }) => {
+  await openGallery(page, ctx);
+  const name = String(ctx.responseBudgetFolderName);
+  const renameButton = page.getByRole('button', { name: `「${name}」を改名` });
+  await expect(renameButton).toBeVisible({ timeout: 30_000 });
+  await waitForHydrated(renameButton);
+  await renameButton.click();
+  const renamed = `${name}R`;
+  await page.getByLabel(`「${name}」の新しい名前`).fill(renamed);
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await page.getByRole('button', { name: '改名を保存' }).click();
+    await expect(page.getByRole('button', { name: renamed, exact: true })).toBeVisible({ timeout: 30_000 });
+  });
+  recordResponseTime(ctx, timing.roundTripMs, '生成画像のフォルダ改名(Server Action)の往復');
+});
+
+When('画像ギャラリーでそのフォルダの削除を始めて確認をやめ Server Action の往復を計測する', async ({ page, ctx }) => {
+  await openGallery(page, ctx);
+  const name = String(ctx.responseBudgetFolderName);
+  const deleteButton = page.getByRole('button', { name: `「${name}」を削除` });
+  await expect(deleteButton).toBeVisible({ timeout: 30_000 });
+  await waitForHydrated(deleteButton);
+  // 影響範囲の取得(getGeneratedImageFolderDeleteImpactAction)のあと確認が出る。やめれば何も変えない。
+  let confirmed = false;
+  page.once('dialog', (dialog) => {
+    confirmed = true;
+    void dialog.dismiss();
+  });
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await deleteButton.click();
+    await expect.poll(() => confirmed, { timeout: 30_000 }).toBe(true);
+  });
+  recordResponseTime(ctx, timing.roundTripMs, '生成画像のフォルダ削除の影響範囲の取得(Server Action)の往復');
+});
+
+When('画像ギャラリーでそのフォルダを削除し Server Action の往復を計測する', async ({ page, ctx }) => {
+  await openGallery(page, ctx);
+  const name = String(ctx.responseBudgetFolderName);
+  const deleteButton = page.getByRole('button', { name: `「${name}」を削除` });
+  await expect(deleteButton).toBeVisible({ timeout: 30_000 });
+  await waitForHydrated(deleteButton);
+  page.once('dialog', (dialog) => void dialog.accept());
+  // 影響範囲の取得 → 確認 → 削除の順に Server Action が送られる。計測は往復の最大値(削除側を含む)。
+  const timing = await measureServerActionRoundTrip(page, async () => {
+    await deleteButton.click();
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0, { timeout: 30_000 });
+  });
+  recordResponseTime(ctx, timing.roundTripMs, '生成画像のフォルダ削除(Server Action)の往復');
+});
