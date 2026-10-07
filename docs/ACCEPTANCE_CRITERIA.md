@@ -760,7 +760,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 
 **注意(プログレッシブエンハンスメント)**: ハイドレーション前にフォームが送信されると、`next-action` ヘッダを持たない通常のフルページ POST になり、この計測では数えない(Server Action の往復として捕捉されない)。その場合、`measureServerActionRoundTrip` は往復を計測できずに失敗する(サイレントに通らない)。ハイドレーション前の送信は `retryClick` の撃ち直しで次のクリックに委ねる。
 
-### 10.4 画面の初回表示(全27ページ)
+### 10.4 画面の初回表示(全28ページ)
 
 計測点: **ウォームアップ後の2回目の `page.goto` の完了まで**(§10.2 の①)。閾値 3,000ms は全行共通。
 
@@ -787,6 +787,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/projects/[id]/posts` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/projects/[id]/settings/adsense` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/projects/[id]/settings/google-analytics` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
+| `/projects/[id]/settings/sns` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値。各 SNS の接続状態・PV 達成ルール・告知文テンプレートを読むだけの画面(状態の読み取り)。管理者限定。**利用者が予算対象と決定した(2026-10-08、#1662)** | 予算対象 |
 | `/projects/[id]/tags` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/setup` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値。未ログインで到達でき、遷移先(Keycloak / `/login`)へのリダイレクトまでを含む | 予算対象 |
 | `/sites` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
@@ -794,7 +795,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全122件)
+### 10.5 Server Action(全142件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -825,6 +826,13 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/projects/[id]/custom-tags/actions.ts`<br>`updateProjectCssSelectorPrefixAction`<br>`upsertProjectCustomTagAction`<br>`deleteProjectCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/projects/[id]/tag-design/actions.ts`<br>`saveTagDesignSettingAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/projects/[id]/tag-design/actions.ts`<br>`generateTagDesignAction` | — | — | タグデザインのAI生成を非同期ジョブとして要求する受付だけの操作になった(#1409。結果は処理キューの「結果を見る」から確認して `saveTagDesignSettingAction` で保存する)。生成そのものは外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
+| `app/projects/[id]/pvRuleActions.ts`<br>`addProjectPvRuleAction`<br>`deleteProjectPvRuleAction`<br>`resendProjectPvRulesAction` | — | — | ルールを DB に保存したあと、応答を返す前に本番 WordPress へ同期で送る(`PvRuleService.sync`: プラグイン状態の確認と `pv-config-set` / `pv-status` / `pv-rules-set` の wp-cli 3回。実 WordPress への書き込み)。削除は残り全件を送り、`resendProjectPvRulesAction` は本番 WordPress への再送そのもの。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
+| `app/projects/[id]/snsFacebookActions.ts`<br>`startProjectFacebookConnectionAction`<br>`selectProjectFacebookPageAction`<br>`testProjectFacebookPostAction`<br>`disconnectProjectFacebookAction` | — | — | Facebook の OAuth の接続開始(本番サイトのプラグイン状態の確認と認可画面への遷移)、OAuth 最終段で選んだページのトークンを本番 WordPress のプラグインへ wp-cli で書き込む(`runLetsblogSns config-set`)、本番サイトのプラグインから Facebook へ実際にテスト投稿する(外部 API)、本番 WordPress のプラグインから設定を消す(`runLetsblogSns config-clear`)。いずれも外部 API・実 WordPress。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
+| `app/projects/[id]/snsHatenaActions.ts`<br>`startProjectHatenaConnectionAction`<br>`testProjectHatenaPostAction`<br>`disconnectProjectHatenaAction` | — | — | はてなブックマークの OAuth の接続開始(はてなの API へリクエストトークンを取りに行く `HatenaApiClient.fetchRequestToken`)、本番サイトのプラグインからのテスト投稿(外部 API)、本番 WordPress のプラグインから設定を消す(`runLetsblogSns config-clear`)。いずれも外部 API・実 WordPress。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
+| `app/projects/[id]/snsLinkedInActions.ts`<br>`startProjectLinkedInConnectionAction`<br>`testProjectLinkedInPostAction`<br>`disconnectProjectLinkedInAction` | — | — | LinkedIn の OAuth の接続開始(本番サイトのプラグイン状態の確認と認可画面への遷移)、本番サイトのプラグインからのテスト投稿(外部 API)、本番 WordPress のプラグインから設定を消す(`runLetsblogSns config-clear`)。いずれも外部 API・実 WordPress。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
+| `app/projects/[id]/snsTemplateActions.ts`<br>`saveProjectSnsTemplatesAction`<br>`resendProjectSnsTemplatesAction` | — | — | テンプレートを保存したあと、応答を返す前に本番 WordPress へ同期で送る(`SnsTemplateService.sync`: プラグイン状態の確認と `templates-set`。実 WordPress への書き込み)。`resendProjectSnsTemplatesAction` は本番 WordPress への再送そのもの。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
+| `app/projects/[id]/snsThreadsActions.ts`<br>`startProjectThreadsConnectionAction`<br>`testProjectThreadsPostAction`<br>`disconnectProjectThreadsAction` | — | — | Threads の OAuth の接続開始(本番サイトのプラグイン状態の確認と認可画面への遷移)、本番サイトのプラグインからのテスト投稿(外部 API)、本番 WordPress のプラグインから設定を消す(`runLetsblogSns config-clear`)。いずれも外部 API・実 WordPress。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
+| `app/projects/[id]/snsXActions.ts`<br>`startProjectXConnectionAction`<br>`testProjectXPostAction` | — | — | X の OAuth の接続開始(本番サイトのプラグイン状態の確認と X の認可画面への遷移)、本番サイトのプラグインから X へ実際にテスト投稿する(外部 API)。いずれも外部 API の接続・OAuth。**利用者が予算対象外と決定した(2026-10-08、#1662。#1623 と同じ基準)** | 予算対象外 |
 | `app/projects/actions.ts`<br>`createProjectAction`<br>`deleteProjectAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/setup/actions.ts`<br>`setupAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/sites/[id]/edit/actions.ts`<br>`updateSiteAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |

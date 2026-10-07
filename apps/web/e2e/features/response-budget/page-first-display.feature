@@ -152,6 +152,13 @@
     もし ウォームアップ後に「/projects/{projectId}/settings/google-analytics」を開く
     ならば ページロードは「3000」ミリ秒以内に完了する
 
+  @budget-page:/projects/[id]/settings/sns
+  シナリオ: 「/projects/[id]/settings/sns」画面の初回表示が3秒以内に完了する
+    前提 応答時間予算の検証用のプロジェクトがある
+    かつ 応答時間予算の検証のために管理者としてログインしている
+    もし ウォームアップ後に「/projects/{projectId}/settings/sns」を開く
+    ならば ページロードは「3000」ミリ秒以内に完了する
+
   @budget-page:/projects/[id]/tags
   シナリオ: 「/projects/[id]/tags」画面の初回表示が3秒以内に完了する
     前提 応答時間予算の検証用のプロジェクトがある
