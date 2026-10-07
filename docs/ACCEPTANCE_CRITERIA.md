@@ -172,7 +172,7 @@ API: publishing `BulkManagementController`(23エンドポイント)
 | AC-BULK-003 | 記事の環境間比較 | 同上(記事) | `GET /bulk-management/posts/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › 投稿の比較が、環境間の差分を示す(投稿: マスターにのみ存在=対象環境に存在しない / 両環境に存在し公開状態が異なる。#1178) | 検証済(`@slow`) |
 | AC-BULK-004 | プラグインの環境間比較 | 環境間の構成差を把握できる | `GET /bulk-management/plugins/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › プラグインの比較が、環境間の構成差を示す(プラグイン: マスターにのみ有効=対象環境に未インストール / 有効状態が異なる。#1178) | 検証済(`@slow`) |
 | AC-BULK-005 | テーマの環境間比較 | 同上(テーマ) | `GET /bulk-management/themes/comparison` が差分を返す | `apps/web/e2e/features/bulk/resource-comparison.feature` › テーマの比較が、環境間の構成差を示す(テーマ: マスターにのみ存在・対象環境にのみ存在=それぞれ他方が未インストール。#1178) | 検証済(`@slow`) |
-| AC-BULK-006 | カテゴリの同期 | 環境を手作業で揃えなくてよい | `sync` / `sync-all` / `edit-sync` 後、比較の差分が解消する | — | 未着手 |
+| AC-BULK-006 | カテゴリの同期 | 環境を手作業で揃えなくてよい | `sync` / `sync-all` / `edit-sync` 後、比較の差分が解消する | `apps/web/e2e/features/bulk/environment-sync.feature`(sync=不足カテゴリが対象環境に作成され再比較で差分が消える / edit-sync=対象環境の内容がマスターに一致 / sync-all=不足・差異がすべて解消 / 部分失敗=成功分は反映され失敗が結果に示される。WordPress の実状態を wp-cli で確認。#1179) | 検証済(`@slow`) |
 | AC-BULK-007 | タグの同期 | 同上(タグ) | 同上 | — | 未着手 |
 | AC-BULK-008 | プラグイン/テーマの調整 | 環境の構成を揃えられる | `plugins/reconcile` `themes/reconcile` 後、比較の差分が解消する | — | 未着手(`@slow`) |
 | AC-BULK-009 | 一括削除 | 検証環境を作り直せる | `categories/delete-all` `tags/delete-all` `posts/delete-all` `plugins/delete-all` `themes/delete-all` の実行後、対象が空になる | — | 未着手(`@destructive`) |
