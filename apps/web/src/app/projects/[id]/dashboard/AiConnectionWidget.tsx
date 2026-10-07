@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Settings } from "lucide-react";
 import { listAiConnections, type AiConnection, type AiConnectionProvider } from "@/lib/apiClient";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 
@@ -24,7 +25,7 @@ function targetInfo(connection: AiConnection | undefined, apiKey: boolean): stri
   return connection?.targetUrl ?? "未設定";
 }
 
-/** ダッシュボードの「AI接続状況」ウィジェット(issue #1501)。表示のみ。 */
+/** ダッシュボードの「AI接続状況」ウィジェット(issue #1501)。利用可否に関わらず各行に設定タブへの歯車リンクを出す(issue #1672)。 */
 export function AiConnectionWidgetView({
   projectId,
   connections,
@@ -61,11 +62,13 @@ export function AiConnectionWidgetView({
                   >
                     {available ? "利用可能" : "利用不可"}
                   </span>
-                  {!available && (
-                    <Link href={`/projects/${projectId}?tab=settings`} className="underline">
-                      接続を設定
-                    </Link>
-                  )}
+                  <Link
+                    href={`/projects/${projectId}?tab=settings`}
+                    aria-label={`${label}の接続設定`}
+                    className="text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                  >
+                    <Settings aria-hidden="true" className="h-4 w-4" />
+                  </Link>
                 </div>
               </li>
             );

@@ -59,16 +59,34 @@ Then('4行のどれにも「利用可能」か「利用不可」のバッジが�
   }
 });
 
-Then('AI接続状況のChatGPTの行は「利用不可」で設定タブへのリンクがある', async ({ page, ctx }) => {
-  const chatGpt = row(page, 'ChatGPT');
-  await expect(chatGpt.getByText('利用不可', { exact: true })).toBeVisible();
-  await expect(chatGpt.getByRole('link')).toHaveAttribute('href', `/projects/${ctx.aiWidgetProjectId as number}?tab=settings`);
+Then('AI接続状況の4行のどれにも「<表示名>の接続設定」の歯車リンクがある', async ({ page, ctx }) => {
+  for (const name of ['Ollama', 'ComfyUI', 'ChatGPT', 'Claude']) {
+    const link = row(page, name).getByRole('link', { name: `${name}の接続設定`, exact: true });
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute('href', `/projects/${ctx.aiWidgetProjectId as number}?tab=settings`);
+  }
 });
 
-Then('AI接続状況のChatGPTの行は「利用可能」でリンクがない', async ({ page }) => {
+Then('AI接続状況に「接続を設定」のテキストリンクが無い', async ({ page }) => {
+  await expect(widget(page).getByText('接続を設定')).toHaveCount(0);
+});
+
+Then('AI接続状況のChatGPTの行は「利用不可」で「ChatGPTの接続設定」の歯車リンクがある', async ({ page, ctx }) => {
+  const chatGpt = row(page, 'ChatGPT');
+  await expect(chatGpt.getByText('利用不可', { exact: true })).toBeVisible();
+  await expect(chatGpt.getByRole('link', { name: 'ChatGPTの接続設定', exact: true })).toHaveAttribute(
+    'href',
+    `/projects/${ctx.aiWidgetProjectId as number}?tab=settings`,
+  );
+});
+
+Then('AI接続状況のChatGPTの行は「利用可能」で「ChatGPTの接続設定」の歯車リンクがある', async ({ page, ctx }) => {
   const chatGpt = row(page, 'ChatGPT');
   await expect(chatGpt.getByText('利用可能', { exact: true })).toBeVisible();
-  await expect(chatGpt.getByRole('link')).toHaveCount(0);
+  await expect(chatGpt.getByRole('link', { name: 'ChatGPTの接続設定', exact: true })).toHaveAttribute(
+    'href',
+    `/projects/${ctx.aiWidgetProjectId as number}?tab=settings`,
+  );
 });
 
 Then('プロジェクト詳細の設定タブが選択されている', async ({ page, ctx }) => {

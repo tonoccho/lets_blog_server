@@ -27,8 +27,9 @@ const all = (over: Partial<Record<AiConnection['provider'], Partial<AiConnection
 
 const row = (name: string) => screen.getByRole('listitem', { name });
 const HREF = '/projects/7?tab=settings';
+const gear = (name: string) => within(row(name)).getByRole('link', { name: `${name}の接続設定` });
 
-describe('AiConnectionWidgetView(issue #1501)', () => {
+describe('AiConnectionWidgetView(issue #1501 / #1672)', () => {
   it('4行を表示名・バッジ・接続先情報つきで描く', () => {
     render(<AiConnectionWidgetView projectId={7} connections={all()} failed={false} />);
 
@@ -41,7 +42,7 @@ describe('AiConnectionWidgetView(issue #1501)', () => {
     expect(within(row('Ollama')).getByText('利用可能')).toBeInTheDocument();
   });
 
-  it('configured=falseは利用不可で、4行とも ai-models タブへのリンクを出す', () => {
+  it('configured=falseは利用不可で、4行とも歯車リンクを出す', () => {
     const conns = all({
       OLLAMA: { configured: false, targetUrl: null },
       COMFYUI: { configured: false, targetUrl: null },
@@ -52,26 +53,36 @@ describe('AiConnectionWidgetView(issue #1501)', () => {
 
     for (const name of ['Ollama', 'ComfyUI', 'ChatGPT', 'Claude']) {
       expect(within(row(name)).getByText('利用不可')).toBeInTheDocument();
-      expect(within(row(name)).getByRole('link')).toHaveAttribute('href', HREF);
+      expect(gear(name)).toHaveAttribute('href', HREF);
     }
     expect(row('Ollama')).toHaveTextContent('未設定');
     expect(row('ChatGPT')).toHaveTextContent('APIキー未設定');
     expect(row('Claude')).toHaveTextContent('APIキー未設定');
   });
 
-  it('configured=trueでもstatus=ERRORは利用不可でリンクを出す', () => {
+  it('configured=trueでもstatus=ERRORは利用不可で歯車リンクを出す', () => {
     render(<AiConnectionWidgetView projectId={7} connections={all({ OLLAMA: { status: 'ERROR' } })} failed={false} />);
 
     expect(within(row('Ollama')).getByText('利用不可')).toBeInTheDocument();
-    expect(within(row('Ollama')).getByRole('link')).toHaveAttribute('href', HREF);
+    expect(gear('Ollama')).toHaveAttribute('href', HREF);
   });
 
-  it('利用可能の行(NORMAL / WARNING)にはリンクを出さない', () => {
+  it('利用可能の行(NORMAL / WARNING)にも歯車リンクを出す', () => {
     render(<AiConnectionWidgetView projectId={7} connections={all({ COMFYUI: { status: 'WARNING' } })} failed={false} />);
 
     expect(within(row('ComfyUI')).getByText('利用可能')).toBeInTheDocument();
     expect(within(row('Ollama')).getByText('利用可能')).toBeInTheDocument();
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    for (const name of ['Ollama', 'ComfyUI', 'ChatGPT', 'Claude']) {
+      expect(gear(name)).toHaveAttribute('href', HREF);
+    }
+    expect(screen.getAllByRole('link')).toHaveLength(4);
+  });
+
+  it('歯車アイコンは装飾(aria-hidden)で、「接続を設定」のテキストは出さない', () => {
+    render(<AiConnectionWidgetView projectId={7} connections={all({ OPENAI: { configured: false } })} failed={false} />);
+
+    expect(screen.queryByText('接続を設定')).not.toBeInTheDocument();
+    expect(gear('ChatGPT').querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('APIが1件欠いても定数の4行を維持し、欠けた行は利用不可にする', () => {
@@ -79,7 +90,7 @@ describe('AiConnectionWidgetView(issue #1501)', () => {
 
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
     expect(within(row('Claude')).getByText('利用不可')).toBeInTheDocument();
-    expect(within(row('Claude')).getByRole('link')).toHaveAttribute('href', HREF);
+    expect(gear('Claude')).toHaveAttribute('href', HREF);
   });
 
   it('取得失敗時は4行ではなく失敗表示を出す', () => {
@@ -88,6 +99,7 @@ describe('AiConnectionWidgetView(issue #1501)', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('AI接続状況を取得できませんでした');
     expect(screen.queryByRole('listitem', { name: 'Ollama' })).not.toBeInTheDocument();
     expect(screen.queryByText('利用不可')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 });
 
