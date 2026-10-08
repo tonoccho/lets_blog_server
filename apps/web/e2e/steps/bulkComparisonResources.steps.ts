@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { acquireSiteLock } from '../site-lock';
 
 /**
  * タグ・プラグイン・テーマ・投稿の環境間比較(issue #1178 / AT-7-2、AC-BULK-002〜005)の
@@ -290,6 +291,9 @@ function readPostStatus(siteSlug: string, slug: string): string | null {
 Given(
   'testをマスター環境、localを対象環境とする2つのWordPressサイトを持つリソース比較用プロジェクトがある',
   async ({ ctx, request }) => {
+    // 固定サイトの `active_plugins` などを複数ワーカーが同時に読み書きすると、互いの有効化が
+    // 失われる(#1694)。シナリオ全体(準備から After の後片付けまで)をロックで直列化する。
+    ctx.resSiteLockRelease = await acquireSiteLock('at7cmp');
     const projectId = await ensureProject(request);
     const master = await ensureManagedSite(request, MASTER_SITE_KEY);
     const target = await ensureManagedSite(request, TARGET_SITE_KEY);
@@ -518,4 +522,5 @@ After({ tags: '@bulk' }, async ({ ctx }) => {
       // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
     }
   }
+  (ctx.resSiteLockRelease as (() => void) | undefined)?.();
 });
