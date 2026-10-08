@@ -42,10 +42,13 @@ class ProjectControllerTest {
     private AdminAuthorizationService adminAuthorizationService;
     @Mock
     private SnsXService snsXService;
+    @Mock
+    private com.letsblog.project.service.ProjectEnvironmentSyncJobStarter projectEnvironmentSyncJobStarter;
 
     private ProjectController controller() {
         return new ProjectController(
-                projectService, projectEnvironmentSyncService, adminAuthorizationService, snsXService);
+                projectService, projectEnvironmentSyncService, projectEnvironmentSyncJobStarter,
+                adminAuthorizationService, snsXService);
     }
 
     private ProjectResponse responseWithProductionSite(Long siteId) {
@@ -144,6 +147,36 @@ class ProjectControllerTest {
         doThrow(new ForbiddenException("admin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
         assertThrows(ForbiddenException.class, () -> controller().syncEnvironment(1L, request));
+    }
+
+    // ---- issue #1697: 環境間同期の非同期受理 ----
+
+    @Test
+    void syncEnvironmentJob_adminなら202とジョブIDを返し同期は待たない() {
+        SyncEnvironmentRequest request = new SyncEnvironmentRequest("test", "local", List.of("db"));
+        java.time.LocalDateTime now = java.time.LocalDateTime.of(2026, 10, 9, 1, 2, 3);
+        when(projectEnvironmentSyncJobStarter.start(1L, request)).thenReturn(
+                new com.letsblog.common.client.GenerationJobSummary(21L, "environment_sync", "running", now, now));
+
+        ResponseEntity<com.letsblog.project.dto.GenerationJobResponse> response =
+                controller().syncEnvironmentJob(1L, request);
+
+        assertEquals(202, response.getStatusCode().value());
+        assertEquals(21L, response.getBody().id());
+        assertEquals("environment_sync", response.getBody().type());
+        assertEquals("running", response.getBody().status());
+        assertEquals("2026-10-09T01:02:03Z", String.valueOf(response.getBody().createdAt()));
+        verify(adminAuthorizationService).requireAdmin();
+        verifyNoInteractions(projectEnvironmentSyncService);
+    }
+
+    @Test
+    void syncEnvironmentJob_admin権限がなければForbiddenでジョブを作らない() {
+        SyncEnvironmentRequest request = new SyncEnvironmentRequest("test", "local", List.of("db"));
+        doThrow(new ForbiddenException("admin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller().syncEnvironmentJob(1L, request));
+        verifyNoInteractions(projectEnvironmentSyncJobStarter);
     }
 
     @Test

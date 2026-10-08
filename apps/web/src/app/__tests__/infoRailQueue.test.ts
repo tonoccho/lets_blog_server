@@ -1,5 +1,6 @@
 import {
   CUSTOM_TAG_GENERATION_JOB_TYPE,
+  ENVIRONMENT_SYNC_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
   SITE_PROVISIONING_JOB_TYPE,
@@ -212,5 +213,29 @@ describe('site provisioning job result link (#1696)', () => {
     ['non-numeric siteId', '{"siteId":"12"}'],
   ])('reads no site id from %s', (_label, payload) => {
     expect(readSiteId(payload)).toBeNull()
+  })
+})
+
+describe('environment sync job result link (#1697)', () => {
+  it('uses the job type written by the project service', () => {
+    expect(ENVIRONMENT_SYNC_JOB_TYPE).toBe('environment_sync')
+  })
+
+  it('sends a done sync to the settings tab of the project in the request payload', () => {
+    expect(
+      resolveResultHref('environment_sync', '{"projectId":7,"from":"test","to":"local","targets":["db"]}', 5)
+    ).toBe('/projects/7?tab=settings')
+  })
+
+  it('does not need the job id to reach the settings tab', () => {
+    expect(resolveResultHref('environment_sync', '{"projectId":7}')).toBe('/projects/7?tab=settings')
+  })
+
+  it.each([
+    ['null', null],
+    ['broken JSON', '{'],
+    ['no projectId', '{"from":"test"}'],
+  ])('gives no link when the request payload is %s', (_label, payload) => {
+    expect(resolveResultHref('environment_sync', payload, 5)).toBeNull()
   })
 })

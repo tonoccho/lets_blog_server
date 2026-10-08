@@ -2675,6 +2675,22 @@ export function syncProjectEnvironment(
   });
 }
 
+/**
+ * 環境間同期を、ジョブとして要求する(`POST /api/projects/{id}/environments/sync/jobs`、issue #1697)。
+ * 同期の完了(数分かかりうる)を待たずに受理されたジョブ(id・状態)が返る。状態と結果は
+ * `GET /api/generation-jobs/{id}` で引く。同期の {@link syncProjectEnvironment} は変えない(VSCode 拡張が使う)。
+ */
+export function startProjectEnvironmentSyncJob(
+  id: number,
+  input: { from: ProjectEnvironment; to: ProjectEnvironment; targets: EnvironmentSyncTarget[] }
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`/api/projects/${id}/environments/sync/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 export type BulkOperationType =
   | "CATEGORY_CREATE"
   | "CATEGORY_EDIT"

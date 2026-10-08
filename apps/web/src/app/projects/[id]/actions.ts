@@ -24,7 +24,7 @@ import {
   removeProjectUser,
   syncProjectUser,
   ProjectUserSyncSiteResult,
-  syncProjectEnvironment,
+  startProjectEnvironmentSyncJob,
   applyToEnvironment,
   applyToAllEnvironments,
   saveProjectGoogleAnalyticsClient,
@@ -648,9 +648,17 @@ export async function syncProjectUserAction(projectId: number, userId: number): 
 
 export interface SyncEnvironmentState {
   error?: string;
+  /** ジョブとして受理された。同期の完了ではない(完了は処理キューの「結果を見る」から辿る)。 */
   success?: boolean;
+  jobId?: number;
 }
 
+/**
+ * 環境間同期を、ジョブとして要求する(issue #1697)。同期の完了(数分かかりうる)を待たず、受理
+ * (`POST /api/projects/{id}/environments/sync/jobs`)の時点で返る。同期はまだ終わっていないので
+ * プロジェクトのページは再検証しない。同期API(`syncProjectEnvironment`)は VSCode 拡張のために残してあり、
+ * ここからは呼ばない。
+ */
 export async function syncEnvironmentAction(
   projectId: number,
   _prevState: SyncEnvironmentState,
@@ -673,13 +681,15 @@ export async function syncEnvironmentAction(
   }
 
   try {
-    await syncProjectEnvironment(projectId, { from, to, targets });
+    const job = await startProjectEnvironmentSyncJob(projectId, { from, to, targets });
+    if (job.status === "failed") {
+      // 実行枠と待ち行列が満杯のとき、ジョブは作られた上で failed として返る。
+      return { error: "環境間同期の待ち行列が満杯です。しばらくしてからもう一度要求してください。" };
+    }
+    return { success: true, jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-
-  revalidatePath(`/projects/${projectId}`);
-  return { success: true };
 }
 
 export interface BulkOperationState {

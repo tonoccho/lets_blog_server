@@ -25,6 +25,13 @@ class GenerationJobSourceClassifierTest {
     }
 
     @Test
+    void environment_syncはSYSTEM_JOBに分類する_issue1697() {
+        assertEquals("SYSTEM_JOB", GenerationJobSourceClassifier.classify("environment_sync"));
+        assertTrue(GenerationJobSourceClassifier.matches("SYSTEM_JOB", "environment_sync"));
+        assertFalse(GenerationJobSourceClassifier.matches("AI_JOB", "environment_sync"));
+    }
+
+    @Test
     void 未知の種別は例外にせずAI_JOBに分類する() {
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("something_new"));
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("draft"));

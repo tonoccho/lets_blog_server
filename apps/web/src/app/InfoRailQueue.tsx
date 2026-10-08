@@ -9,6 +9,7 @@ import { fetchQueueJobsAction } from "./infoRailActions";
 import {
   CHECKPOINT_DOWNLOAD_JOB_TYPE,
   CUSTOM_TAG_GENERATION_JOB_TYPE,
+  ENVIRONMENT_SYNC_JOB_TYPE,
   GARBAGE_COLLECTION_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
   SITE_PROVISIONING_JOB_TYPE,
@@ -37,6 +38,7 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   [STATIC_CONTENT_GENERATION_JOB_TYPE]: "queueTypeStaticContentGeneration",
   [TAG_DESIGN_GENERATION_JOB_TYPE]: "queueTypeTagDesignGeneration",
   [SITE_PROVISIONING_JOB_TYPE]: "queueTypeSiteProvisioning",
+  [ENVIRONMENT_SYNC_JOB_TYPE]: "queueTypeEnvironmentSync",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

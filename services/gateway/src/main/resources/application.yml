@@ -43,6 +43,14 @@ app:
         paths:
           - /api/projects/*/environments/sync
         response-timeout: 300s
+      # issue #1697: 環境間同期を非同期ジョブとして受理する口(POST /api/projects/{id}/environments/sync/jobs)。
+      # 上のproject-environment-syncは完全一致なのでこのパスは巻き込まれない。受理はジョブを1件作って
+      # 即座に返すだけなので、同期本体用の長いresponse-timeoutは与えず既定値を使う
+      # (project-site-managed-wordpress-jobsと同じ)。
+      - id: project-environment-sync-jobs
+        uri: ${PROJECT_SERVICE_URI:http://project:8080}
+        paths:
+          - /api/projects/*/environments/sync/jobs
       # 一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)を担う
       # BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonServiceは
       # publishing-serviceへ移設した(issue #708、Epic #551 C6-2。#577移設時の発見: 元のこのルート

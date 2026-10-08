@@ -17,6 +17,9 @@ export const TAG_DESIGN_GENERATION_JOB_TYPE = "tag_design_generation";
 /** サイト自動構築ジョブの種別(project の `ManagedSiteProvisioningJobStarter.JOB_TYPE`、#1479)。 */
 export const SITE_PROVISIONING_JOB_TYPE = "site_provisioning";
 
+/** 環境間同期ジョブの種別(project の `ProjectEnvironmentSyncJobStarter.JOB_TYPE`、#1697)。 */
+export const ENVIRONMENT_SYNC_JOB_TYPE = "environment_sync";
+
 export interface QueueJob {
   id: number;
   type: string;
@@ -68,6 +71,9 @@ function readProjectId(requestPayload: string | null): number | null {
  * - カスタムタグ・静的コンテンツ・タグデザインのAI生成(#1409): 生成結果はジョブの結果にだけあるので、
  *   リクエストの projectId / siteId から各機能の画面を決め、`jobId` でその結果を指す。`jobId` が無い、
  *   画面を決められない(カスタムタグでプロジェクトが無いなど)ときはリンクなし。
+ * - 環境間同期(#1697): リクエストの projectId から、そのプロジェクトの「設定」タブ(環境同期パネルがある)へ導く。
+ *   同期の結果は同期先サイトの状態そのものでジョブに載せる値が無いため、同期を要求した画面へ戻す。
+ *   projectId が読めなければリンクなし。
  * - 未知の種別: リンクなし。
  */
 export function resolveResultHref(type: string, requestPayload: string | null, jobId: number | null = null): string | null {
@@ -93,6 +99,10 @@ export function resolveResultHref(type: string, requestPayload: string | null, j
   if (type === GARBAGE_COLLECTION_JOB_TYPE) {
     const projectId = readProjectId(requestPayload);
     return projectId === null ? null : `/projects/${projectId}?tab=garbage-collection`;
+  }
+  if (type === ENVIRONMENT_SYNC_JOB_TYPE) {
+    const projectId = readProjectId(requestPayload);
+    return projectId === null ? null : `/projects/${projectId}?tab=settings`;
   }
   return null;
 }

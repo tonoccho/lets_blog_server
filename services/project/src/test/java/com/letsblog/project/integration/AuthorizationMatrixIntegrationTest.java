@@ -73,6 +73,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/projects/1/master-environment"),
                 new Endpoint("PUT", "/api/projects/1/github-repository"),
                 new Endpoint("POST", "/api/projects/1/environments/sync"),
+                new Endpoint("POST", "/api/projects/1/environments/sync/jobs"),
 
                 // -- ProjectSnsController(issue #1574) --
                 new Endpoint("GET", "/api/projects/1/sns/x"),

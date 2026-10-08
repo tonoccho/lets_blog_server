@@ -27,6 +27,7 @@ import {
   startCustomTagGenerationJob,
   startStaticContentGenerationJob,
   startManagedWordPressSiteJob,
+  startProjectEnvironmentSyncJob,
   startTagDesignGenerationJob,
   saveStaticContent,
   getSiteAdminPath,
@@ -775,6 +776,19 @@ describe('LLM生成の非同期ジョブAPI(issue #1409)', () => {
     expect(job.id).toBe(31)
     const [url, init] = calls()[0]
     expect(url).toMatch(/\/api\/sites\/managed-wordpress\/jobs$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual(input)
+  })
+
+  it('startProjectEnvironmentSyncJob は POST /api/projects/{id}/environments/sync/jobs へ入力を送り、同期APIは呼ばない (#1697)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 41, type: 'environment_sync', status: 'running' }, 202))
+    const input = { from: 'test' as const, to: 'local' as const, targets: ['db' as const, 'media' as const] }
+
+    const job = await startProjectEnvironmentSyncJob(7, input)
+
+    expect(job.id).toBe(41)
+    const [url, init] = calls()[0]
+    expect(url).toMatch(/\/api\/projects\/7\/environments\/sync\/jobs$/)
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual(input)
   })

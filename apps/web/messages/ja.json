@@ -60,7 +60,8 @@
     "queueTypeCustomTagGeneration": "カスタムタグ生成",
     "queueTypeStaticContentGeneration": "静的コンテンツ生成",
     "queueTypeTagDesignGeneration": "タグデザイン生成",
-    "queueTypeSiteProvisioning": "サイト自動構築"
+    "queueTypeSiteProvisioning": "サイト自動構築",
+    "queueTypeEnvironmentSync": "環境間同期"
   },
   "dashboard": {
     "title": "ダッシュボード",

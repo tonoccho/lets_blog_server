@@ -44,4 +44,20 @@ public class AsyncJobConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 環境間同期ジョブ(issue #1697)。同じ共有{@code lbs-wordpress}コンテナ1台に対するwp-cli/DBインポートなので、
+     * {@link #siteProvisioningExecutor}と同じ理由で小さい値(core 1 / max 2 / 待ち行列5)にする。
+     * 溢れた要求は受理側がジョブを{@code queue_full}のfailedにして返す。
+     */
+    @Bean(name = "environmentSyncExecutor")
+    public Executor environmentSyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(5);
+        executor.setThreadNamePrefix("environment-sync-");
+        executor.initialize();
+        return executor;
+    }
 }

@@ -1,5 +1,6 @@
 package com.letsblog.project.controller;
 
+import com.letsblog.project.dto.GenerationJobResponse;
 import com.letsblog.project.dto.ProjectCreateRequest;
 import com.letsblog.project.dto.ProjectEnvironmentBindRequest;
 import com.letsblog.project.dto.ProjectResponse;
@@ -9,6 +10,7 @@ import com.letsblog.project.dto.SyncEnvironmentRequest;
 import com.letsblog.project.dto.UpdateMasterEnvironmentRequest;
 import com.letsblog.project.dto.UpdateProjectGithubRepositoryRequest;
 import com.letsblog.project.service.AdminAuthorizationService;
+import com.letsblog.project.service.ProjectEnvironmentSyncJobStarter;
 import com.letsblog.project.service.ProjectEnvironmentSyncService;
 import com.letsblog.project.service.ProjectService;
 import com.letsblog.project.service.SnsXService;
@@ -43,16 +45,19 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final ProjectEnvironmentSyncService projectEnvironmentSyncService;
+    private final ProjectEnvironmentSyncJobStarter projectEnvironmentSyncJobStarter;
     private final AdminAuthorizationService adminAuthorizationService;
     private final SnsXService snsXService;
 
     public ProjectController(
             ProjectService projectService,
             ProjectEnvironmentSyncService projectEnvironmentSyncService,
+            ProjectEnvironmentSyncJobStarter projectEnvironmentSyncJobStarter,
             AdminAuthorizationService adminAuthorizationService,
             SnsXService snsXService) {
         this.projectService = projectService;
         this.projectEnvironmentSyncService = projectEnvironmentSyncService;
+        this.projectEnvironmentSyncJobStarter = projectEnvironmentSyncJobStarter;
         this.adminAuthorizationService = adminAuthorizationService;
         this.snsXService = snsXService;
     }
@@ -151,5 +156,18 @@ public class ProjectController {
         adminAuthorizationService.requireAdmin();
         projectEnvironmentSyncService.sync(id, request.from(), request.to(), request.targets());
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 環境間同期を非同期ジョブとして受理する(issue #1697)。同期の完了を待たずにジョブIDを返し、
+     * 状態と結果は{@code GET /api/generation-jobs/{id}}で引く。同期の{@link #syncEnvironment}は変えない。
+     * 認可は同じ(admin限定)。
+     */
+    @PostMapping("/{id}/environments/sync/jobs")
+    public ResponseEntity<GenerationJobResponse> syncEnvironmentJob(
+            @PathVariable Long id, @Valid @RequestBody SyncEnvironmentRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(projectEnvironmentSyncJobStarter.start(id, request)));
     }
 }

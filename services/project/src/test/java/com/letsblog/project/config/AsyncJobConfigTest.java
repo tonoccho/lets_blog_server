@@ -78,4 +78,17 @@ class AsyncJobConfigTest {
         assertEquals(beanName, staticQualifier);
         assertEquals(beanName, designQualifier);
     }
+
+    @Test
+    @DisplayName("environmentSyncExecutor は共有コンテナ1台を相手にするため core 1 / max 2 / 待ち行列 5 の小さい設定(issue #1697)")
+    void environmentSyncExecutorIsSmall() {
+        Executor executor = new AsyncJobConfig().environmentSyncExecutor();
+
+        ThreadPoolTaskExecutor pool = (ThreadPoolTaskExecutor) executor;
+        assertEquals(1, pool.getCorePoolSize());
+        assertEquals(2, pool.getMaxPoolSize());
+        assertEquals(5, pool.getThreadPoolExecutor().getQueue().remainingCapacity());
+        assertTrue(pool.getThreadNamePrefix().startsWith("environment-sync"));
+        pool.shutdown();
+    }
 }

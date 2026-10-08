@@ -60,7 +60,8 @@
     "queueTypeCustomTagGeneration": "Custom tag generation",
     "queueTypeStaticContentGeneration": "Static content generation",
     "queueTypeTagDesignGeneration": "Tag design generation",
-    "queueTypeSiteProvisioning": "Site provisioning"
+    "queueTypeSiteProvisioning": "Site provisioning",
+    "queueTypeEnvironmentSync": "Environment sync"
   },
   "dashboard": {
     "title": "Dashboard",

@@ -36,12 +36,14 @@ public final class GenerationJobSourceClassifier {
      *   <li>{@code comfyui_checkpoint_download}: 生成ではないが、AI機能(ComfyUI)のための
      *       モデルのダウンロードであり、AI機能の運用操作なのでAIに含める。</li>
      *   <li>{@code media_garbage_collection_delete}: 不要メディアの削除。AIではない。</li>
+     *   <li>{@code environment_sync}: プロジェクトの環境間同期(#1697)。AIではない。</li>
      * </ul>
      */
     private static final Map<String, String> CLASSIFICATION = Map.of(
             "image_generation", AI_JOB,
             "comfyui_checkpoint_download", AI_JOB,
-            "media_garbage_collection_delete", SYSTEM_JOB);
+            "media_garbage_collection_delete", SYSTEM_JOB,
+            "environment_sync", SYSTEM_JOB);
 
     /**
      * 未知・null の種別の既定。{@code generation_jobs}は元々AI処理のためのテーブルで、

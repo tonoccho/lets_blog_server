@@ -235,3 +235,27 @@ describe('fetchQueueJobsAction site provisioning (#1696)', () => {
     expect(result.jobs[0].resultHref).toBeNull()
   })
 })
+
+describe('fetchQueueJobsAction environment sync (#1697)', () => {
+  it('derives the done link from the request payload project id', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'environment_sync', 'done')])
+    mockGetJob.mockResolvedValue({ requestPayload: '{"projectId":7,"from":"test","to":"local","targets":["db"]}' })
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(9)
+    expect(result.jobs[0].resultHref).toBe('/projects/7?tab=settings')
+  })
+
+  it('gives no link when the detail cannot be read', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'environment_sync', 'done')])
+    mockGetJob.mockRejectedValue(new Error('404'))
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives no link to a running sync and fetches no detail for it', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'environment_sync', 'running')])
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+    expect(mockGetJob).not.toHaveBeenCalled()
+  })
+})

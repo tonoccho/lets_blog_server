@@ -176,14 +176,18 @@ export function EnvironmentSyncPanel({ projectId, project }: { projectId: number
         </fieldset>
 
         {state.error && <p className="text-red-600">{state.error}</p>}
-        {state.success && <p className="text-green-600">同期しました。</p>}
+        {state.success && (
+          <p className="text-green-600">
+            同期を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から確認できます。
+          </p>
+        )}
 
         <button
           type="submit"
           disabled={pending}
           className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
         >
-          {pending ? "同期中(数分かかる場合があります)…" : "同期する"}
+          {pending ? "要求中…" : "同期する"}
         </button>
       </form>
     </div>
