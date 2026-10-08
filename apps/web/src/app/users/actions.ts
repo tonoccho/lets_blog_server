@@ -36,7 +36,15 @@ export async function createUserAction(
   return { success: true };
 }
 
-export async function deleteUserAction(id: number) {
+export interface DeleteUserResult {
+  error?: string;
+}
+
+/**
+ * 失敗は例外ではなく `{ error }` で返す(`deleteSshKeyPairAction` と同じ形、issue #1383)。
+ * 呼び出し側が理由を画面に出せるようにするため。`requireAdminSession` の認可失敗は従来どおり伝わる。
+ */
+export async function deleteUserAction(id: number): Promise<DeleteUserResult> {
   await requireAdminSession();
 
   // session.user.idはKeycloakのsub(UUID)であり、ローカルの数値ユーザーIDではない(issue #784)。
@@ -47,12 +55,17 @@ export async function deleteUserAction(id: number) {
   // だけだと取得失敗時にundefined !== idとなってガードを素通りしてしまう。
   const viewer = await getViewerProfile();
   if (viewer == null) {
-    throw new Error("ログイン中のユーザー情報を取得できなかったため、削除を中止しました。");
+    return { error: "ログイン中のユーザー情報を取得できなかったため、削除を中止しました。" };
   }
   if (viewer.id === id) {
-    throw new Error("自分自身のアカウントは削除できません。");
+    return { error: "自分自身のアカウントは削除できません。" };
   }
 
-  await deleteUser(id);
+  try {
+    await deleteUser(id);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
   revalidatePath("/users");
+  return {};
 }

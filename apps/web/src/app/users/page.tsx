@@ -1,11 +1,10 @@
-import Link from "next/link";
 import { listUsers, listProjects, listAllProjectUsers } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone, getViewerProfile } from "@/lib/session";
 import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { UserForm } from "./UserForm";
-import { DeleteUserButton } from "./DeleteUserButton";
+import { UserRow } from "./UserRow";
 
 export default async function UsersPage() {
   await requireAdminSession();
@@ -72,24 +71,16 @@ export default async function UsersPage() {
             {users.map((user) => {
               const joinedProjects = userToProjects.get(user.id) ?? [];
               return (
-                <tr key={user.id} className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:shadow-sm transition-colors">
-                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
-                    {joinedProjects.length > 0 ? joinedProjects.join(", ") : "-"}
-                  </td>
-                  <td className="px-4 py-2">{user.email}</td>
-                  <td className="px-4 py-2 font-mono">{user.role}</td>
-                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">
-                    <ViewerDateTime iso={user.createdAt} personalTimeZone={timezone} />
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <div className="flex justify-end gap-3">
-                      <Link href={`/users/${user.id}/edit`} className="text-sm text-neutral-600 dark:text-neutral-400 hover:underline">
-                        編集
-                      </Link>
-                      {viewer != null && viewer.id !== user.id && <DeleteUserButton id={user.id} />}
-                    </div>
-                  </td>
-                </tr>
+                <UserRow
+                  key={user.id}
+                  id={user.id}
+                  email={user.email}
+                  role={user.role}
+                  projectsText={joinedProjects.length > 0 ? joinedProjects.join(", ") : "-"}
+                  canDelete={viewer != null && viewer.id !== user.id}
+                >
+                  <ViewerDateTime iso={user.createdAt} personalTimeZone={timezone} />
+                </UserRow>
               );
             })}
           </tbody>
