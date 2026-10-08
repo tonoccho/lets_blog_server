@@ -275,7 +275,12 @@ Given('プロジェクトへwpRole=editorのメンバーを追加している', 
  * (`site-provisioning.feature`の既存コメントと同種、#1017/#1078)ため、既にログイン済みなら
  * 再ログインせずナビゲーションだけ行う。
  */
-async function performSync(page: Page, ctx: Record<string, unknown>, projectId: number): Promise<void> {
+async function performSync(
+  page: Page,
+  ctx: Record<string, unknown>,
+  projectId: number,
+  target: 'themes' | 'plugins' | 'media' | 'db' = 'db'
+): Promise<void> {
   if (!ctx.esLoggedIn) {
     await loginAsAdmin(page);
     ctx.esLoggedIn = true;
@@ -291,7 +296,7 @@ async function performSync(page: Page, ctx: Record<string, unknown>, projectId: 
 
   await panel.locator('select[name="from"]').selectOption('test');
   await panel.locator('select[name="to"]').selectOption('local');
-  await panel.locator('input[name="targets"][value="db"]').check();
+  await panel.locator(`input[name="targets"][value="${target}"]`).check();
 
   page.once('dialog', (dialog) => dialog.accept());
   await panel.locator('button:has-text("同期する")').click();
@@ -370,6 +375,109 @@ Then('同期先のプライバシーポリシー等のコアオプション名�
   for (const name of CORE_OPTIONS_NOT_PREFIX_DATA) {
     expect(options.has(name), `${name}が同期先optionsに見つかりません(改名されてしまった可能性)`).toBe(true);
   }
+});
+
+// --------------------------------------------------------------- themes / plugins / media の同期(issue #1680)
+
+/** WordPressコンテナ内で対象サイトのwp-contentへ小さなファイルを置く(wp-cliにはテーマ/プラグインの雛形作成が無い)。 */
+function writeWpContentFile(siteKey: string, relativePath: string, content: string): void {
+  const dir = `/var/www/html/sites/${siteKey}/wp-content/${relativePath.slice(0, relativePath.lastIndexOf('/'))}`;
+  execFileSync(
+    'docker',
+    [
+      'exec', WORDPRESS_CONTAINER, 'sh', '-c',
+      `mkdir -p "${dir}" && printf '%s' "$1" > "/var/www/html/sites/${siteKey}/wp-content/${relativePath}"`,
+      'sh', content,
+    ],
+    { encoding: 'utf8', timeout: 30_000 }
+  );
+}
+
+Given('同期元にだけテーマがある', async ({ ctx }) => {
+  const fromSite = ctx.esFromSite as ManagedSiteFixture;
+  const toSite = ctx.esToSite as ManagedSiteFixture;
+  const slug = `e2e1680theme${uniqueSuffix()}`;
+  ctx.esThemeSlug = slug;
+  writeWpContentFile(fromSite.siteKey, `themes/${slug}/style.css`, `/*\nTheme Name: E2E 1680 ${slug}\nVersion: 1.0.0\n*/\n`);
+  writeWpContentFile(fromSite.siteKey, `themes/${slug}/index.php`, '<?php // E2E 1680 minimal theme\n');
+  expect(nonEmptyLines(wpCli(fromSite.siteKey, ['theme', 'list', '--field=name'])), '同期元にテーマが無い').toContain(slug);
+  expect(nonEmptyLines(wpCli(toSite.siteKey, ['theme', 'list', '--field=name'])), '同期先に最初からテーマがある').not.toContain(slug);
+});
+
+Given('同期元にだけプラグインがある', async ({ ctx }) => {
+  const fromSite = ctx.esFromSite as ManagedSiteFixture;
+  const toSite = ctx.esToSite as ManagedSiteFixture;
+  const slug = `e2e1680plugin${uniqueSuffix()}`;
+  ctx.esPluginSlug = slug;
+  writeWpContentFile(fromSite.siteKey, `plugins/${slug}/${slug}.php`, `<?php\n/*\nPlugin Name: E2E 1680 ${slug}\nVersion: 1.0.0\n*/\n`);
+  expect(nonEmptyLines(wpCli(fromSite.siteKey, ['plugin', 'list', '--field=name'])), '同期元にプラグインが無い').toContain(slug);
+  expect(nonEmptyLines(wpCli(toSite.siteKey, ['plugin', 'list', '--field=name'])), '同期先に最初からプラグインがある').not.toContain(slug);
+});
+
+// 1x1 の透過PNG
+const TINY_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+Given('同期元にだけメディアがある', async ({ ctx }) => {
+  const fromSite = ctx.esFromSite as ManagedSiteFixture;
+  const toSite = ctx.esToSite as ManagedSiteFixture;
+  const title = `e2e1680media${uniqueSuffix()}`;
+  ctx.esMediaTitle = title;
+  const tmpPath = `/tmp/${title}.png`;
+  execFileSync(
+    'docker',
+    ['exec', WORDPRESS_CONTAINER, 'sh', '-c', `printf '%s' "$1" | base64 -d > "$2"`, 'sh', TINY_PNG_BASE64, tmpPath],
+    { encoding: 'utf8', timeout: 30_000 }
+  );
+  wpCli(fromSite.siteKey, ['media', 'import', tmpPath, `--title=${title}`]);
+  execFileSync('docker', ['exec', WORDPRESS_CONTAINER, 'rm', '-f', tmpPath], { timeout: 30_000 });
+  expect(mediaFileNames(fromSite.siteKey, title).length, '同期元にメディアが無い').toBeGreaterThan(0);
+  expect(mediaFileNames(toSite.siteKey, title), '同期先に最初からメディアがある').toEqual([]);
+});
+
+/** タイトルで絞った添付ファイルの実ファイルパス(wp-content/uploads配下)。 */
+function mediaFileNames(siteKey: string, title: string): string[] {
+  const ids = nonEmptyLines(
+    wpCli(siteKey, ['post', 'list', '--post_type=attachment', '--post_status=any', `--s=${title}`, '--field=ID'])
+  );
+  return ids.map((id) => wpCli(siteKey, ['post', 'meta', 'get', id, '_wp_attached_file']));
+}
+
+When('環境同期パネルからテーマだけを同期元から同期先へ同期する', async ({ page, ctx }) => {
+  await performSync(page, ctx, ctx.esProjectId as number, 'themes');
+});
+
+When('環境同期パネルからプラグインだけを同期元から同期先へ同期する', async ({ page, ctx }) => {
+  await performSync(page, ctx, ctx.esProjectId as number, 'plugins');
+});
+
+When('環境同期パネルからメディアだけを同期元から同期先へ同期する', async ({ page, ctx }) => {
+  await performSync(page, ctx, ctx.esProjectId as number, 'media');
+});
+
+Then('同期先のテーマ一覧に同期元にだけあったテーマが現れる', async ({ ctx }) => {
+  const toSite = ctx.esToSite as ManagedSiteFixture;
+  expect(nonEmptyLines(wpCli(toSite.siteKey, ['theme', 'list', '--field=name']))).toContain(ctx.esThemeSlug as string);
+});
+
+Then('同期先のプラグイン一覧に同期元にだけあったプラグインが現れる', async ({ ctx }) => {
+  const toSite = ctx.esToSite as ManagedSiteFixture;
+  expect(nonEmptyLines(wpCli(toSite.siteKey, ['plugin', 'list', '--field=name']))).toContain(ctx.esPluginSlug as string);
+});
+
+Then('同期先のメディアライブラリに同期元にだけあったメディアが現れる', async ({ ctx }) => {
+  // `media`の同期はwp-content/uploadsのファイルを丸ごと揃えるもので、attachmentの投稿行(DB)は
+  // 運ぶ対象ではない(それは`db`の役割。`provision-agent/index.php`のSYNC_TARGET_DIRS)。
+  // したがって「現れる」はwp-cli(`wp eval`)で見たアップロードディレクトリ上の実ファイルの存在で判定する。
+  const fromSite = ctx.esFromSite as ManagedSiteFixture;
+  const toSite = ctx.esToSite as ManagedSiteFixture;
+  const expected = mediaFileNames(fromSite.siteKey, ctx.esMediaTitle as string);
+  expect(expected.length).toBeGreaterThan(0);
+  const exists = wpCli(toSite.siteKey, [
+    'eval',
+    `echo file_exists(wp_get_upload_dir()['basedir'] . '/${expected[0]}') ? 'yes' : 'no';`,
+  ]);
+  expect(exists, `同期先のuploadsに${expected[0]}がありません`).toBe('yes');
 });
 
 // --------------------------------------------------------------- メンバーの権限・wp-adminログイン
