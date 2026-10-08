@@ -1,6 +1,6 @@
 /** 実サイトの署名付きプレビューURL(issue #1562)のステップ。 */
 
-import { Given, Then, When } from '../support/gherkin';
+import { AfterScenario, Given, Then, When } from '../support/gherkin';
 import { w } from './common.steps';
 import * as apiClient from '../../src/apiClient';
 import { LetsblogPluginState, setLetsblogPluginState } from '../support/wordpress';
@@ -15,6 +15,16 @@ Given('サイトの letsblog プラグインが {string} である', (world, lab
   const state = STATES[label];
   if (!state) throw new Error(`未知のプラグイン状態です: ${label}`);
   setLetsblogPluginState(w(world).site.siteKey, state);
+  (world as { pluginTouchedSite?: string }).pluginTouchedSite = w(world).site.siteKey;
+});
+
+/**
+ * プラグイン状態を書き換えたシナリオは、成否にかかわらず導入済みへ戻す。戻さないと共有の
+ * at16probe が「要更新」のまま残り、後続の公開系シナリオが 409 になる(issue #1691)。
+ */
+AfterScenario((_tags, world) => {
+  const siteKey = (world as { pluginTouchedSite?: string }).pluginTouchedSite;
+  if (siteKey) setLetsblogPluginState(siteKey, 'installed');
 });
 
 When('題名 {string} の記事の署名付きプレビューURLを取得する', async (world, title) => {

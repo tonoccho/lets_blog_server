@@ -251,6 +251,14 @@ export function BeforeScenario(hook: BeforeScenarioHook): void {
   beforeHooks.push(hook);
 }
 
+/** シナリオの成否にかかわらず実行後に呼ばれるフック(シナリオが変えた共有環境を戻す用途)。 */
+export type AfterScenarioHook = (tags: string[], world: World) => void | Promise<void>;
+
+const afterHooks: AfterScenarioHook[] = [];
+export function AfterScenario(hook: AfterScenarioHook): void {
+  afterHooks.push(hook);
+}
+
 /**
  * 集めた `.feature` を jest の describe/test として登録する。
  * シナリオ名はレポートへそのまま出る(docs/ACCEPTANCE_TESTING.md §5)。
@@ -269,12 +277,18 @@ export function runFeatures(featuresDir: string): void {
           for (const hook of beforeHooks) {
             await hook(scenario.tags, world);
           }
-          for (const step of [...feature.background, ...scenario.steps]) {
-            try {
-              await runStep(step, world);
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              throw new Error(`[${step.keyword} ${step.text}] ${message}`);
+          try {
+            for (const step of [...feature.background, ...scenario.steps]) {
+              try {
+                await runStep(step, world);
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                throw new Error(`[${step.keyword} ${step.text}] ${message}`);
+              }
+            }
+          } finally {
+            for (const hook of afterHooks) {
+              await hook(scenario.tags, world);
             }
           }
         });
