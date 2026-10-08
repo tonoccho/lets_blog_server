@@ -1,6 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
 import { ConnectedServiceStatusPanel } from "../ConnectedServiceStatusPanel";
-import { formatDateTime } from "@/lib/formatDate";
 import type { ConnectedServiceStatusDetail } from "@/lib/apiClient";
 
 /**
@@ -13,8 +12,10 @@ import type { ConnectedServiceStatusDetail } from "@/lib/apiClient";
  * しか解決できないブラウザTZを使うため、マウント前は固定プレースホルダーを描く
  * (前例: ThemeSwitcher.tsx:23-58のmountedフラグ方式)。
  */
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn(() => "FORMATTED_CHECKED_AT"),
+jest.mock("@/components/ViewerDateTime", () => ({
+  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
+    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
+  ),
 }));
 
 /** jsdomは既定でEventSourceを持たない(#1362実装調査で確認済み)ため、SSE系のuseEffectは
@@ -67,7 +68,6 @@ describe("ConnectedServiceStatusPanel", () => {
   beforeEach(() => {
     FakeEventSource.instances.length = 0;
     (global as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-    (formatDateTime as jest.Mock).mockClear();
   });
 
   afterEach(() => {
@@ -75,26 +75,24 @@ describe("ConnectedServiceStatusPanel", () => {
     jest.restoreAllMocks();
   });
 
-  it("個人設定TZが設定されているとき、最終チェック時刻はformatDateTimeにそのTZを渡す(issue #1362、gateなし)", () => {
+  it("個人設定TZが設定されているとき、最終チェック時刻はViewerDateTimeへそのTZを渡す(issue #1362、#1367)", () => {
     const d = detail();
     render(
       <ConnectedServiceStatusPanel initialStatuses={[]} initialDetail={[d]} personalTimeZone="Asia/Tokyo" />
     );
 
-    expect(formatDateTime).toHaveBeenCalledWith(d.checkedAt, "Asia/Tokyo");
-    expect(screen.getByText("FORMATTED_CHECKED_AT")).toBeInTheDocument();
+    expect(screen.getByTestId("viewer-datetime")).toHaveTextContent(`VDT(${d.checkedAt}|Asia/Tokyo)`);
   });
 
   // 「マウント前は固定プレースホルダーを表示する」は
   // ConnectedServiceStatusPanel.mountGate.test.tsx で検証する(このファイルで検証しない
   // 理由は同ファイルの先頭コメント参照)。
 
-  it("個人設定TZが未設定のとき、マウント後はformatDateTimeをTZ引数無しで呼ぶ(issue #1362)", () => {
+  it("個人設定TZが未設定のとき、最終チェック時刻はViewerDateTimeへnullを渡す(issue #1362、#1367)", () => {
     const d = detail();
     render(<ConnectedServiceStatusPanel initialStatuses={[]} initialDetail={[d]} personalTimeZone={null} />);
 
-    expect(formatDateTime).toHaveBeenCalledWith(d.checkedAt);
-    expect(screen.getByText("FORMATTED_CHECKED_AT")).toBeInTheDocument();
+    expect(screen.getByTestId("viewer-datetime")).toHaveTextContent(`VDT(${d.checkedAt}|null)`);
   });
 
   it("個人設定TZが設定されているとき、最終更新時刻はtoLocaleTimeStringにそのTZを渡す(issue #1362)", () => {

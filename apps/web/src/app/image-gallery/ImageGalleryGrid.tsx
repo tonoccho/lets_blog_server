@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Sparkles, Upload } from "lucide-react";
 import type { GeneratedImageDetail, GeneratedImageFolder, GeneratedImageSummary } from "@/lib/apiClient";
-import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 import {
   bulkDeleteGeneratedImagesAction,
   createGeneratedImageFolderAction,
@@ -157,14 +157,6 @@ export function ImageGalleryGrid({
   const [editing, setEditing] = useState(false);
   /** 編集結果を新しい画像として保存した旨の表示(issue #1655)。詳細を閉じると消える。 */
   const [editSavedMessage, setEditSavedMessage] = useState<string | null>(null);
-  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
-  // 一致させるため、issue #1362と同じ形。issue #1363)。個人設定TZがあるときはSSR/
-  // クライアントで常に同じ文字列になるためこのフラグを見ない。
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
-  }, []);
 
   const allChecked = items.length > 0 && items.every((image) => checkedIds.has(image.id));
 
@@ -879,11 +871,7 @@ export function ImageGalleryGrid({
                     </div>
                   )}
                   <p className="text-neutral-400">
-                    {timezone
-                      ? formatDateTime(image.createdAt, timezone)
-                      : mounted
-                        ? formatDateTime(image.createdAt)
-                        : TIMEZONE_PENDING_PLACEHOLDER}
+                    <ViewerDateTime iso={image.createdAt} personalTimeZone={timezone} />
                   </p>
                 </div>
               </div>
@@ -1106,11 +1094,7 @@ export function ImageGalleryGrid({
                   )}
                   <dt className="font-semibold">作成日時</dt>
                   <dd className="text-neutral-600 dark:text-neutral-400">
-                    {timezone
-                      ? formatDateTime(detail.createdAt, timezone)
-                      : mounted
-                        ? formatDateTime(detail.createdAt)
-                        : TIMEZONE_PENDING_PLACEHOLDER}
+                    <ViewerDateTime iso={detail.createdAt} personalTimeZone={timezone} />
                   </dd>
                 </dl>
               </>

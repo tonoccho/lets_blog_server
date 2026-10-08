@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { ExternalLink, Settings } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { CmsType, Project, Site } from "@/lib/apiClient";
 import { resolveSiteAdminUrl } from "@/lib/siteAdminUrl";
-import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { DeleteSiteButton } from "./DeleteSiteButton";
 import { CheckConnectionButton } from "./CheckConnectionButton";
 
@@ -51,14 +51,6 @@ export function SiteListTable({
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("ALL");
   const [sortBy, setSortBy] = useState<SortColumn>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
-  // 一致させるため、issue #1362と同じ形。issue #1363)。個人設定TZがあるときはSSR/
-  // クライアントで常に同じ文字列になるためこのフラグを見ない。
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
-  }, []);
 
   const siteToProject = useMemo(() => {
     const map = new Map<number, ProjectBinding>();
@@ -259,11 +251,7 @@ export function SiteListTable({
                     </span>
                   </td>
                   <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">
-                    {timezone
-                      ? formatDateTime(site.createdAt, timezone)
-                      : mounted
-                        ? formatDateTime(site.createdAt)
-                        : TIMEZONE_PENDING_PLACEHOLDER}
+                    <ViewerDateTime iso={site.createdAt} personalTimeZone={timezone} />
                   </td>
                   <td className="px-4 py-2">
                     <CheckConnectionButton id={site.id} />

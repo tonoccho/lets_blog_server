@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SshKeyPairsPanel } from "../SshKeyPairsPanel";
 import { createSshKeyPairAction, deleteSshKeyPairAction } from "../actions";
 import type { SavedSshKeyPair } from "@/lib/apiClient";
-import { formatDateTime } from "@/lib/formatDate";
 
 /**
  * issue #1236: `new Date(keyPair.createdAt).toLocaleString("ja-JP")` を直接呼んでいたため、
@@ -14,8 +13,10 @@ import { formatDateTime } from "@/lib/formatDate";
  * しか解決できないブラウザTZを使うため、マウント前は固定プレースホルダーを描く
  * (前例: ThemeSwitcher.tsx:23-58のmountedフラグ方式)。
  */
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn(() => "FORMATTED_CREATED_AT"),
+jest.mock("@/components/ViewerDateTime", () => ({
+  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
+    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
+  ),
 }));
 
 /**
@@ -47,7 +48,6 @@ describe("SshKeyPairsPanel", () => {
   beforeEach(() => {
     createMock.mockReset();
     deleteMock.mockReset();
-    (formatDateTime as jest.Mock).mockClear();
     window.confirm = jest.fn();
   });
 
@@ -157,23 +157,21 @@ describe("SshKeyPairsPanel", () => {
     expect(screen.getByText("other-pair")).toBeInTheDocument();
   });
 
-  it("個人設定TZが設定されているとき、作成日時はformatDateTimeにそのTZを渡す(issue #1362、gateなし)", () => {
+  it("個人設定TZが設定されているとき、作成日時はViewerDateTimeへそのTZを渡す(issue #1362、#1367)", () => {
     const pair = keyPair({ createdAt: "2026-09-08T20:03:35" });
     render(<SshKeyPairsPanel keyPairs={[pair]} personalTimeZone="Asia/Tokyo" />);
 
-    expect(formatDateTime).toHaveBeenCalledWith(pair.createdAt, "Asia/Tokyo");
-    expect(screen.getByText("FORMATTED_CREATED_AT")).toBeInTheDocument();
+    expect(screen.getByTestId("viewer-datetime")).toHaveTextContent(`VDT(${pair.createdAt}|Asia/Tokyo)`);
   });
 
   // 「マウント前は固定プレースホルダーを表示する」は SshKeyPairsPanel.mountGate.test.tsx で
   // 検証する(このファイルで検証しない理由は同ファイルの先頭コメント参照)。
 
-  it("個人設定TZが未設定のとき、マウント後はformatDateTimeをTZ引数無しで呼ぶ(issue #1362)", () => {
+  it("個人設定TZが未設定のとき、作成日時はViewerDateTimeへnullを渡す(issue #1362、#1367)", () => {
     const pair = keyPair({ createdAt: "2026-09-08T20:03:35" });
     render(<SshKeyPairsPanel keyPairs={[pair]} personalTimeZone={null} />);
 
-    expect(formatDateTime).toHaveBeenCalledWith(pair.createdAt);
-    expect(screen.getByText("FORMATTED_CREATED_AT")).toBeInTheDocument();
+    expect(screen.getByTestId("viewer-datetime")).toHaveTextContent(`VDT(${pair.createdAt}|null)`);
   });
 
   /**

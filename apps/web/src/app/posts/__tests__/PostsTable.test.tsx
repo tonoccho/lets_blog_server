@@ -10,12 +10,13 @@ import type { PostSummary } from "@/lib/apiClient";
  * (理由は同ファイルの先頭コメント参照)。ここでは残り3分岐
  * (個人設定TZあり/未設定・マウント後/日時が無い)を確かめる。
  */
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn((iso: string, tz?: string | null) => `FORMATTED(${iso}|${tz})`),
+jest.mock("@/components/ViewerDateTime", () => ({
+  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
+    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
+  ),
 }));
 
 import { PostsTable } from "../PostsTable";
-import { formatDateTime } from "@/lib/formatDate";
 
 function post(overrides: Partial<PostSummary> = {}): PostSummary {
   return {
@@ -39,27 +40,23 @@ function dateCells(container: HTMLElement): [string, string] {
 }
 
 describe("PostsTable", () => {
-  it("個人設定TZが設定されているとき、最終投稿日時・公開予定日時ともformatDateTimeにそのTZを渡す(gateなし)", () => {
+  it("個人設定TZが設定されているとき、最終投稿日時・公開予定日時ともViewerDateTimeへそのTZを渡す(#1367)", () => {
     const p = post();
     const { container } = render(<PostsTable posts={[p]} timezone="Asia/Tokyo" />);
 
-    expect(formatDateTime).toHaveBeenCalledWith(p.lastPublishedAt, "Asia/Tokyo");
-    expect(formatDateTime).toHaveBeenCalledWith(p.publishScheduledAt, "Asia/Tokyo");
     expect(dateCells(container)).toEqual([
-      `FORMATTED(${p.lastPublishedAt}|Asia/Tokyo)`,
-      `FORMATTED(${p.publishScheduledAt}|Asia/Tokyo)`,
+      `VDT(${p.lastPublishedAt}|Asia/Tokyo)`,
+      `VDT(${p.publishScheduledAt}|Asia/Tokyo)`,
     ]);
   });
 
-  it("個人設定TZが未設定のとき、マウント後はformatDateTimeをTZ引数無しで呼ぶ(ブラウザTZへフォールバック)", () => {
+  it("個人設定TZが未設定のとき、ViewerDateTimeへnullを渡す(#1367)", () => {
     const p = post();
     const { container } = render(<PostsTable posts={[p]} timezone={null} />);
 
-    expect(formatDateTime).toHaveBeenCalledWith(p.lastPublishedAt);
-    expect(formatDateTime).toHaveBeenCalledWith(p.publishScheduledAt);
     expect(dateCells(container)).toEqual([
-      `FORMATTED(${p.lastPublishedAt}|undefined)`,
-      `FORMATTED(${p.publishScheduledAt}|undefined)`,
+      `VDT(${p.lastPublishedAt}|null)`,
+      `VDT(${p.publishScheduledAt}|null)`,
     ]);
   });
 

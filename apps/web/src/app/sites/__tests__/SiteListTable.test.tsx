@@ -3,8 +3,10 @@ import { ReactNode } from 'react'
 import { SiteListTable } from '../SiteListTable'
 import type { Site, Project } from '@/lib/apiClient'
 
-jest.mock('@/lib/formatDate', () => ({
-  formatDateTime: (date: string) => '2024-01-01 10:00',
+jest.mock('@/components/ViewerDateTime', () => ({
+  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
+    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
+  ),
 }))
 
 jest.mock('../DeleteSiteButton', () => ({
@@ -64,6 +66,23 @@ const mockProjects: Project[] = [
 ]
 
 describe('SiteListTable', () => {
+  it('renders each site createdAt through ViewerDateTime with the timezone as personalTimeZone (issue #1367)', () => {
+    render(
+      <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />
+    )
+
+    const cells = screen.getAllByTestId('viewer-datetime').map((el) => el.textContent)
+    expect(cells).toEqual([`VDT(${mockSites[0].createdAt}|Asia/Tokyo)`, `VDT(${mockSites[1].createdAt}|Asia/Tokyo)`])
+  })
+
+  it('passes null timezone through as personalTimeZone (issue #1367)', () => {
+    render(
+      <SiteListTable sites={[mockSites[0]]} projects={mockProjects} isAdmin={false} timezone={null} adminPath="wp-admin" />
+    )
+
+    expect(screen.getByTestId('viewer-datetime')).toHaveTextContent(`VDT(${mockSites[0].createdAt}|null)`)
+  })
+
   it('renders sites table', () => {
     render(
       <SiteListTable

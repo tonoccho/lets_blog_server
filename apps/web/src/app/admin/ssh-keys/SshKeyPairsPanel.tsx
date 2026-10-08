@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { GeneratedSshKeyPair, SavedSshKeyPair } from "@/lib/apiClient";
-import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { createSshKeyPairAction, deleteSshKeyPairAction } from "./actions";
 
 export function SshKeyPairsPanel({
@@ -38,9 +38,8 @@ export function SshKeyPairsPanel({
    * 初期化し直される。
    */
   const [items, setItems] = useState<SavedSshKeyPair[]>(keyPairs);
-  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
-  // 一致させるため、issue #1362)。個人設定TZがあるときはSSR/クライアントで常に同じ
-  // 文字列になるためこのフラグを見ない。
+  // ハイドレーション完了後にだけ生成ボタンを押せるようにするためのフラグ(issue #1413)。
+  // 日時表示のゲートは`ViewerDateTime`が持つ(issue #1367)。
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -205,11 +204,7 @@ export function SshKeyPairsPanel({
                       />
                     </td>
                     <td className="py-2 pr-4 whitespace-nowrap text-neutral-600 dark:text-neutral-400">
-                      {personalTimeZone
-                        ? formatDateTime(keyPair.createdAt, personalTimeZone)
-                        : mounted
-                          ? formatDateTime(keyPair.createdAt)
-                          : TIMEZONE_PENDING_PLACEHOLDER}
+                      <ViewerDateTime iso={keyPair.createdAt} personalTimeZone={personalTimeZone} />
                     </td>
                     <td className="py-2 pr-4">
                       <button

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import type { ConnectedServiceStatus, ConnectedServiceStatusDetail } from "@/lib/apiClient";
-import { formatDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
+import { ViewerDateTime } from "@/components/ViewerDateTime";
 
 const POLL_INTERVAL_MS = 30000;
 
@@ -48,14 +48,6 @@ export function ConnectedServiceStatusPanel({
   const [statuses, setStatuses] = useState(initialStatuses);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [live, setLive] = useState(false);
-  // 個人設定TZが未設定のときだけ使う(mounted前後でサーバー/クライアントの出力を
-  // 一致させるため、issue #1362)。個人設定TZがあるときはSSR/クライアントで常に同じ
-  // 文字列になるためこのフラグを見ない。
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
-  }, []);
   // 取得失敗を握り潰さず画面に出す(issue #876)。以前は `if (!res.ok) return;` で
   // 捨てていたため、認証エラー(401)でも「データが無い」ようにしか見えなかった。
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -216,11 +208,7 @@ export function ConnectedServiceStatusPanel({
                       {detail.targetUrl ?? "-"}
                     </td>
                     <td className="py-2 text-neutral-700 dark:text-neutral-300">
-                      {personalTimeZone
-                        ? formatDateTime(detail.checkedAt, personalTimeZone)
-                        : mounted
-                          ? formatDateTime(detail.checkedAt)
-                          : TIMEZONE_PENDING_PLACEHOLDER}
+                      <ViewerDateTime iso={detail.checkedAt} personalTimeZone={personalTimeZone} />
                     </td>
                   </tr>
                 ))}

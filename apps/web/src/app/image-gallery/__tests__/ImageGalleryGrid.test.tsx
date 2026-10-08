@@ -3,6 +3,12 @@ import { ImageGalleryGrid } from '../ImageGalleryGrid'
 import * as actions from '../actions'
 import type { GeneratedImageDetail, GeneratedImageSummary } from '@/lib/apiClient'
 
+jest.mock('@/components/ViewerDateTime', () => ({
+  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
+    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
+  ),
+}))
+
 jest.mock('../actions', () => ({
   getGeneratedImageAction: jest.fn(),
   deleteGeneratedImageAction: jest.fn(),
@@ -37,6 +43,34 @@ const DETAIL: GeneratedImageDetail = {
   loraName: 'anime-style',
   loraWeight: 0.8,
 }
+
+describe('ImageGalleryGrid 日時表示 (issue #1367)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
+  })
+
+  it('一覧の作成日時と詳細の作成日時をViewerDateTimeへtimezoneをpersonalTimeZoneとして渡して描画する', async () => {
+    render(<ImageGalleryGrid images={[SUMMARY]} timezone="Asia/Tokyo" />)
+    expect(screen.getAllByTestId('viewer-datetime').map((el) => el.textContent)).toEqual([
+      `VDT(${SUMMARY.createdAt}|Asia/Tokyo)`,
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
+    await waitFor(() => {
+      expect(screen.getAllByTestId('viewer-datetime')).toHaveLength(2)
+    })
+    expect(screen.getAllByTestId('viewer-datetime').map((el) => el.textContent)).toEqual([
+      `VDT(${SUMMARY.createdAt}|Asia/Tokyo)`,
+      `VDT(${DETAIL.createdAt}|Asia/Tokyo)`,
+    ])
+  })
+
+  it('timezoneがnullならnullをpersonalTimeZoneとして渡す', () => {
+    render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
+    expect(screen.getByTestId('viewer-datetime')).toHaveTextContent(`VDT(${SUMMARY.createdAt}|null)`)
+  })
+})
 
 describe('ImageGalleryGrid この画像の設定をコピー (issue #437)', () => {
   beforeEach(() => {
