@@ -150,7 +150,12 @@ app:
   # platform-serviceのConnectedServiceStatusServiceと同じ手法)。カテゴリ/タグ/プラグイン/
   # テーマの一覧取得(listing)は比較テーブル表示に使われる軽量な呼び出しなので短く、
   # 一括適用/zipアップロード(apply)は長時間処理になりうるため別値にできるようにする(要件1)。
-  wordpress-provision-listing-timeout-seconds: ${WORDPRESS_PROVISION_LISTING_TIMEOUT_SECONDS:5}
+  # issue #1428: 既定値は実測に基づく。AT-7の固定サイト(at7cmpmaster/at7cmptarget)に対する
+  # provision-agentの/themes(wp theme list)は20回連続で最大4.11秒(p95 4.06秒)、/plugins は
+  # 最大1.52秒だった(2026-10-08、他のATを並走させない状態)。旧既定値5秒では負荷が少し上がると
+  # リードタイムアウトして空一覧になり、比較表で「未インストール」になる。最大値の2倍(8.22秒)以上で
+  # 30秒以下の10秒にする。
+  wordpress-provision-listing-timeout-seconds: ${WORDPRESS_PROVISION_LISTING_TIMEOUT_SECONDS:10}
   wordpress-provision-apply-timeout-seconds: ${WORDPRESS_PROVISION_APPLY_TIMEOUT_SECONDS:120}
   # issue #1264: 同じprovision-agentを叩くWordPressAgentOperations(cms/agent)のRestClient向けの
   # 接続/リードタイムアウト。wp-cliの実行やメディアのアップロードを含むため、リードは長めにする。
