@@ -626,6 +626,108 @@ class BulkManagementServiceTest {
         assertEquals("local", results.get(0).getEnvironment());
     }
 
+    // ---- issue #1688: アセット画像の全環境アップロードの環境間並列 ----
+
+    private com.letsblog.publishing.cms.CmsAdapter bindThreeSitesForImageUpload(byte[] data) {
+        bindThreeManagedSites();
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(data, "image/png", 1300, true))
+                .thenReturn(new ImageResizeService.ResizeResult(data, "image/png"));
+        com.letsblog.publishing.cms.CmsAdapter adapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
+        return adapter;
+    }
+
+    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials credsFor(String siteKey) {
+        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds =
+                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
+                        "https://" + siteKey + ".test", "admin", "SSH");
+        when(siteService.getCredentials(siteKey)).thenReturn(creds);
+        return creds;
+    }
+
+    @Test
+    void uploadImageToAllEnvironments_環境ごとのアップロードが重なって走り_結果はENVIRONMENT_ORDER順_リサイズは1回() throws Exception {
+        BulkManagementService service = service();
+        byte[] data = new byte[]{1, 2, 3};
+        com.letsblog.publishing.cms.CmsAdapter adapter = bindThreeSitesForImageUpload(data);
+        credsFor("local-site");
+        credsFor("test-site");
+        credsFor("production-site");
+        OverlapProbe probe = new OverlapProbe(3);
+        when(adapter.uploadMedia(any(), any(), any(), any())).thenAnswer(invocation -> {
+            com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds = invocation.getArgument(0);
+            // localを最後に終わらせても、結果の並びは変わらない
+            if (creds.baseUrl().contains("local-site")) {
+                Thread.sleep(150);
+            }
+            probe.enter();
+            return new com.letsblog.publishing.cms.MediaUploadResult("1", creds.baseUrl() + "/cat.png");
+        });
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(1L, data, "cat.png", "image/png", 9L);
+
+        assertTrue(probe.allOverlapped(), "3環境のアップロードが重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+        assertEquals("https://local-site.test/cat.png", results.get(0).getValue());
+        verify(imageResizeService, org.mockito.Mockito.times(1)).resizeToLongEdge(data, "image/png", 1300, true);
+    }
+
+    @Test
+    void uploadImageToAllEnvironments_先頭環境の失敗でも他環境は最後まで実行され_順序は保たれる() {
+        BulkManagementService service = service();
+        byte[] data = new byte[]{1, 2, 3};
+        com.letsblog.publishing.cms.CmsAdapter adapter = bindThreeSitesForImageUpload(data);
+        credsFor("local-site");
+        // testは認証情報の解決自体が失敗する(並列タスク内に含まれる)
+        when(siteService.getCredentials("test-site")).thenThrow(new IllegalStateException("認証情報なし"));
+        credsFor("production-site");
+        when(adapter.uploadMedia(any(), any(), any(), any())).thenAnswer(invocation -> {
+            com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds = invocation.getArgument(0);
+            if (creds.baseUrl().contains("local-site")) {
+                throw new RuntimeException("接続に失敗しました");
+            }
+            Thread.sleep(100);
+            return new com.letsblog.publishing.cms.MediaUploadResult("1", creds.baseUrl() + "/cat.png");
+        });
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(1L, data, "cat.png", "image/png", 9L);
+
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+        assertEquals(List.of(BulkOperationStatus.FAILED, BulkOperationStatus.FAILED, BulkOperationStatus.SUCCESS),
+                results.stream().map(BulkOperationLog::getStatus).toList());
+        assertEquals("接続に失敗しました", results.get(0).getErrorMessage());
+        assertEquals("認証情報なし", results.get(1).getErrorMessage());
+        assertEquals("cat.png", results.get(1).getValue());
+        assertEquals("https://production-site.test/cat.png", results.get(2).getValue());
+    }
+
+    @Test
+    void uploadImageToAllEnvironments_紐付けられたサイトが登録されていない環境はスキップされる() {
+        BulkManagementService service = service();
+        byte[] data = new byte[]{1, 2, 3};
+        Project project = buildProject(10L, 20L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.empty());
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        when(imageResizeService.resizeToLongEdge(data, "image/png", 1300, true))
+                .thenReturn(new ImageResizeService.ResizeResult(data, "image/png"));
+        com.letsblog.publishing.cms.CmsAdapter adapter =
+                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds = credsFor("test-site");
+        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
+        when(adapter.uploadMedia(any(), any(), any(), any()))
+                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", creds.baseUrl() + "/cat.png"));
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(1L, data, "cat.png", "image/png", 9L);
+
+        assertEquals(List.of("test"), results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
     // ---- deletePostAtEnvironment / updatePostStatusAtEnvironment ----
 
     @Test

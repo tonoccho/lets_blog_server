@@ -232,7 +232,11 @@ public class BulkManagementService {
         byte[] resizedData = resized.data();
         String resizedContentType = resized.mimeType();
         String resizedFilename = withExtensionFor(filename, resizedContentType);
-        List<BulkOperationLog> results = new ArrayList<>();
+        // 環境ごとのアップロードは独立なので並列に走らせる(issue #1688。比較取得は#1474、書き込み系は#1687と
+        // 同じ共有Executor)。認証情報の解決とCMSアダプタの解決も各タスクの中で行う。結果はENVIRONMENT_ORDER順。
+        // saveLogは永続化せずBulkOperationLogを組み立てるだけなので、タスクの中(ワーカースレッド)で呼んでよい。
+        // タスクは実行時例外をFAILEDのログにして返すので、runAllが例外を投げることはない。
+        List<Supplier<BulkOperationLog>> tasks = new ArrayList<>();
         for (String environment : ENVIRONMENT_ORDER) {
             Long siteId = siteIdOf(project, environment);
             if (siteId == null) {
@@ -242,29 +246,30 @@ public class BulkManagementService {
             if (site == null) {
                 continue;
             }
-
-            String status;
-            String errorMessage = null;
-            String value;
-            try {
-                CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
-                CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
-                MediaUploadResult result =
-                        adapter.uploadMedia(credentials, resizedFilename, resizedContentType, resizedData);
-                status = BulkOperationStatus.SUCCESS.name();
-                value = result.url();
-            } catch (RuntimeException e) {
-                status = BulkOperationStatus.FAILED.name();
-                errorMessage = e.getMessage();
-                value = resizedFilename;
-                log.warn("アセット画像のアップロードに失敗しました(project={}, environment={}, site={}): {}",
-                        projectId, environment, site.getSiteKey(), errorMessage);
-            }
-            results.add(saveLog(projectId, BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, value,
-                    null, null, null, null, resizedFilename, null, null,
-                    environment, status, errorMessage, null, actorId));
+            tasks.add(() -> {
+                String status;
+                String errorMessage = null;
+                String value;
+                try {
+                    CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
+                    CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
+                    MediaUploadResult result =
+                            adapter.uploadMedia(credentials, resizedFilename, resizedContentType, resizedData);
+                    status = BulkOperationStatus.SUCCESS.name();
+                    value = result.url();
+                } catch (RuntimeException e) {
+                    status = BulkOperationStatus.FAILED.name();
+                    errorMessage = e.getMessage();
+                    value = resizedFilename;
+                    log.warn("アセット画像のアップロードに失敗しました(project={}, environment={}, site={}): {}",
+                            projectId, environment, site.getSiteKey(), errorMessage);
+                }
+                return saveLog(projectId, BulkOperationType.MEDIA_UPLOAD, BulkOperationSourceType.SLUG, value,
+                        null, null, null, null, resizedFilename, null, null,
+                        environment, status, errorMessage, null, actorId);
+            });
         }
-        return results;
+        return EnvironmentTasks.runAll(environmentFetchExecutor, tasks);
     }
 
     /** ファイル名の拡張子をmimeTypeに合わせて置き換える(JPEG変換時に.pngのまま送信しないため)。 */
