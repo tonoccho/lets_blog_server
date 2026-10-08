@@ -44,6 +44,8 @@ import {
   listReviewStepSettings,
   listArticleReviewPullRequests,
   startArticleReview,
+  approveArticleReview,
+  rejectArticleReview,
   listProjectAdSenseAccounts,
   listUnifiedOperationLogs,
   getRouteStats,
@@ -533,6 +535,48 @@ describe('startArticleReview(issue #1345)', () => {
     fetchMock.mockResolvedValue(textResponse('テスト環境のサイトが紐づいていません', 409, 'Conflict'))
 
     await expect(startArticleReview(7, 201)).rejects.toThrow('APIエラー (409): テスト環境のサイトが紐づいていません')
+  })
+})
+
+describe('approveArticleReview(issue #1346)', () => {
+  it('PRのレビュー完了APIを POST で呼び、応答の productionPostUrl と branchDeleted を返す', async () => {
+    const body = { prNumber: 201, state: 'PUBLISHED', productionPostUrl: 'https://prod.example/a/', wpPostId: '9', merged: true, branchDeleted: false }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await approveArticleReview(7, 201)
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/article-review/pull-requests/201/approve')
+    expect(init.method).toBe('POST')
+  })
+
+  it('サーバが返した失敗の理由(409)を含む例外として伝える', async () => {
+    fetchMock.mockResolvedValue(textResponse('レビュー中ではありません', 409, 'Conflict'))
+
+    await expect(approveArticleReview(7, 201)).rejects.toThrow('APIエラー (409): レビュー中ではありません')
+  })
+})
+
+describe('rejectArticleReview(issue #1346)', () => {
+  it('PRの差し戻しAPIを POST し、指摘事項を comment として JSON で送る', async () => {
+    const body = { prNumber: 201, state: 'CHANGES_REQUESTED', commentId: 5, rejectedByUserId: 3, rejectedAt: '2026-10-08T00:00:00Z' }
+    fetchMock.mockResolvedValue(jsonResponse(body))
+
+    const result = await rejectArticleReview(7, 201, '見出しを直してください')
+
+    expect(result).toEqual(body)
+    const [url, init] = calls()[0]
+    expect(url).toContain('/api/projects/7/article-review/pull-requests/201/reject')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(init.body as string)).toEqual({ comment: '見出しを直してください' })
+  })
+
+  it('サーバが返した失敗の理由(400)を含む例外として伝える', async () => {
+    fetchMock.mockResolvedValue(textResponse('指摘事項は必須です', 400, 'Bad Request'))
+
+    await expect(rejectArticleReview(7, 201, ' ')).rejects.toThrow('APIエラー (400): 指摘事項は必須です')
   })
 })
 

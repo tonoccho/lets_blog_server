@@ -1,7 +1,14 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ArticleReviewPullRequestList } from "../ArticleReviewPullRequestList";
 
-jest.mock("../actions", () => ({ startArticleReviewAction: jest.fn() }));
+const approveArticleReviewAction = jest.fn();
+jest.mock("../actions", () => ({
+  startArticleReviewAction: jest.fn(),
+  approveArticleReviewAction: (...args: unknown[]) => approveArticleReviewAction(...args),
+  rejectArticleReviewAction: jest.fn(),
+}));
+jest.mock("next/navigation", () => ({ useRouter: () => ({ refresh: jest.fn() }) }));
 
 const pullRequests = [
   {
@@ -60,5 +67,44 @@ describe("ArticleReviewPullRequestList(issue #1340)", () => {
 
     expect(screen.getAllByRole("button", { name: "レビュー" })).toHaveLength(2);
     expect(within(screen.getByRole("row", { name: /#205/ })).getByRole("button", { name: "レビュー" })).toBeInTheDocument();
+  });
+
+  it("各行に「レビュー完了」「記事差し戻し」の操作と指摘事項の入力欄がある(issue #1346)", () => {
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />);
+
+    expect(screen.getAllByRole("button", { name: "レビュー完了" })).toHaveLength(2);
+    const row = screen.getByRole("row", { name: /#205/ });
+    expect(within(row).getByRole("button", { name: "記事差し戻し" })).toBeInTheDocument();
+    expect(within(row).getByRole("textbox", { name: "指摘事項" })).toBeInTheDocument();
+  });
+
+  it("レビュー完了後に一覧からPRが消えても(取り直し)、その行は成功の結果つきで残る(issue #1346)", async () => {
+    approveArticleReviewAction.mockResolvedValue({ productionPostUrl: "https://prod.example/a/", branchDeleted: true });
+    const { rerender } = render(
+      <ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />
+    );
+
+    const row = screen.getByRole("row", { name: /#201/ });
+    await userEvent.click(within(row).getByRole("button", { name: "レビュー完了" }));
+    await userEvent.click(within(row).getByRole("button", { name: "実行する" }));
+    await within(row).findByRole("link", { name: /prod\.example/ });
+
+    // router.refresh() 後のサーバ描画: マージされたPR #201 は開いているPRの一覧から消えている
+    rerender(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests.slice(1)} timezone="Asia/Tokyo" />);
+
+    const kept = screen.getByRole("row", { name: /#201/ });
+    expect(within(kept).getByRole("link", { name: /prod\.example/ })).toHaveAttribute("href", "https://prod.example/a/");
+    expect(screen.getByRole("row", { name: /#205/ })).toBeInTheDocument();
+    expect(screen.queryByText("レビュー待ちの Pull Request はありません")).not.toBeInTheDocument();
+  });
+
+  it("操作していないPRは、取り直しで一覧から消えたらそのまま消える(issue #1346)", () => {
+    const { rerender } = render(
+      <ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />
+    );
+
+    rerender(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests.slice(1)} timezone="Asia/Tokyo" />);
+
+    expect(screen.queryByRole("row", { name: /#201/ })).not.toBeInTheDocument();
   });
 });

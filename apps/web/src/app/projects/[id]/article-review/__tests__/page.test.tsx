@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 const notFound = jest.fn(() => {
   throw new Error("NEXT_NOT_FOUND");
 });
-jest.mock("next/navigation", () => ({ notFound: () => notFound() }));
+jest.mock("next/navigation", () => ({ notFound: () => notFound(), useRouter: () => ({ refresh: jest.fn() }) }));
 
 const getProject = jest.fn();
 const listArticleReviewPullRequests = jest.fn();

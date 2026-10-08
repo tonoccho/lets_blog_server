@@ -1,8 +1,12 @@
+"use client";
+
+import { useState } from "react";
 import type { ArticleReviewPullRequest } from "@/lib/apiClient";
 import { ViewerDateTime } from "@/components/ViewerDateTime";
 import { ArticleReviewButton } from "./ArticleReviewButton";
+import { ArticleReviewDecision } from "./ArticleReviewDecision";
 
-/** レビュー待ちの Pull Request を表で並べ、各行から「レビュー」を始められる(issue #1340、#1345)。日時は閲覧者のタイムゾーンで表示する。 */
+/** レビュー待ちの Pull Request を表で並べ、各行から「レビュー」を始め、「レビュー完了」「記事差し戻し」で結果を返せる(issue #1340、#1345、#1346)。日時は閲覧者のタイムゾーンで表示する。 */
 export function ArticleReviewPullRequestList({
   projectId,
   pullRequests,
@@ -12,7 +16,13 @@ export function ArticleReviewPullRequestList({
   pullRequests: ArticleReviewPullRequest[];
   timezone: string | null;
 }) {
-  if (pullRequests.length === 0) {
+  // 操作が成功した PR は、取り直した一覧から消えても(レビュー完了はマージして閉じる)結果つきで残す
+  const [retained, setRetained] = useState<ArticleReviewPullRequest[]>([]);
+  const retain = (pr: ArticleReviewPullRequest) =>
+    setRetained((current) => (current.some((r) => r.number === pr.number) ? current : [...current, pr]));
+  const rows = [...pullRequests, ...retained.filter((r) => !pullRequests.some((pr) => pr.number === r.number))];
+
+  if (rows.length === 0) {
     return (
       <p className="text-sm text-neutral-600 dark:text-neutral-400">レビュー待ちの Pull Request はありません</p>
     );
@@ -29,10 +39,11 @@ export function ArticleReviewPullRequestList({
             <th className="px-4 py-2 font-medium">作成日時</th>
             <th className="px-4 py-2 font-medium">リンク</th>
             <th className="px-4 py-2 font-medium">レビュー</th>
+            <th className="px-4 py-2 font-medium">レビュー結果</th>
           </tr>
         </thead>
         <tbody>
-          {pullRequests.map((pr) => (
+          {rows.map((pr) => (
             <tr key={pr.number} className="border-b border-neutral-100 dark:border-neutral-800 last:border-b-0">
               <td className="px-4 py-2 whitespace-nowrap">#{pr.number}</td>
               <td className="px-4 py-2">{pr.title}</td>
@@ -52,6 +63,9 @@ export function ArticleReviewPullRequestList({
               </td>
               <td className="px-4 py-2">
                 <ArticleReviewButton projectId={projectId} prNumber={pr.number} />
+              </td>
+              <td className="px-4 py-2">
+                <ArticleReviewDecision projectId={projectId} prNumber={pr.number} onSucceeded={() => retain(pr)} />
               </td>
             </tr>
           ))}

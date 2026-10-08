@@ -24,7 +24,7 @@ export function ArticleReviewButton({ projectId, prNumber }: { projectId: number
         type="button"
         onClick={review}
         disabled={pending}
-        className="rounded bg-neutral-900 px-3 py-1 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
+        className="whitespace-nowrap rounded bg-neutral-900 px-3 py-1 text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
         {pending ? "テスト環境へ投稿しています…" : "レビュー"}
       </button>

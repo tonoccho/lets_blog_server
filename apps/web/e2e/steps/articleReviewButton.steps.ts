@@ -26,7 +26,7 @@ const rowOf = (page: Page, ctx: Record<string, unknown>): Locator =>
 When('記事レビュー画面でそのPRの「レビュー」を押す', async ({ ctx, page }) => {
   const row = rowOf(page, ctx);
   await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByRole('button', { name: 'レビュー' }).click();
+  await row.getByRole('button', { name: 'レビュー', exact: true }).click();
 });
 
 Then('記事レビュー画面のそのPRの行にテスト環境の投稿URLが新しいタブで開くリンクとして表示される', async ({ ctx, page }) => {

@@ -1670,6 +1670,52 @@ export function startArticleReview(projectId: number, prNumber: number): Promise
   );
 }
 
+/** レビュー完了(本番投稿・マージ・ブランチ削除)の応答(publishing-service、issue #1343)。 */
+export interface ArticleApproveResult {
+  prNumber: number;
+  state: string;
+  productionPostUrl: string;
+  wpPostId: string | null;
+  merged: boolean;
+  /** head ブランチを削除できたか。false でも公開・マージは成功している。 */
+  branchDeleted: boolean;
+}
+
+/**
+ * レビュー中の PR を本番環境へ投稿し、マージしてブランチを削除する(issue #1346)。取り消せない。
+ * レビュー中でない(409)・本番環境のサイト未紐づけ(409)などは、サーバが返した理由を含む例外になる。
+ */
+export function approveArticleReview(projectId: number, prNumber: number): Promise<ArticleApproveResult> {
+  return apiFetch<ArticleApproveResult>(
+    `/api/projects/${projectId}/article-review/pull-requests/${prNumber}/approve`,
+    { method: 'POST' }
+  );
+}
+
+/** 記事差し戻しの応答(publishing-service、issue #1344)。 */
+export interface ArticleRejectResult {
+  prNumber: number;
+  state: string;
+  commentId: number | null;
+  rejectedByUserId: number | null;
+  rejectedAt: string | null;
+}
+
+/**
+ * レビュー中の PR を、指摘事項を PR のコメントとして投稿して差し戻す(issue #1346)。
+ * サーバの入力名は `comment`。空白だけは 400、レビュー中でなければ 409 で、理由を含む例外になる。
+ */
+export function rejectArticleReview(projectId: number, prNumber: number, feedback: string): Promise<ArticleRejectResult> {
+  return apiFetch<ArticleRejectResult>(
+    `/api/projects/${projectId}/article-review/pull-requests/${prNumber}/reject`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment: feedback }),
+    }
+  );
+}
+
 export function updateProjectGithubRepository(
   id: number,
   githubRepository: string
