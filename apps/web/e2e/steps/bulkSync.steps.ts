@@ -5,7 +5,8 @@ import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
 
 /**
- * カテゴリの環境間同期(issue #1179 / AT-7-3、AC-BULK-006)のステップ定義。
+ * カテゴリの環境間同期(issue #1179 / AT-7-3、AC-BULK-006)と、
+ * タグの環境間同期(issue #1679 / AT-7-3b、AC-BULK-007)のステップ定義。
  *
  * 比較の兄弟 issue(#1177 / #1178)の `bulkComparison*.steps.ts` には依存しない(相乗りもしない)。
  * 差分の作り込みも結果の確認も、このファイルの wp-cli(`wordpress` コンテナ)で WordPress の
@@ -87,6 +88,17 @@ function wpCli(siteSlug: string, command: string): string {
     ['compose', 'exec', '-T', 'wordpress', 'sh', '-c', `cd /var/www/html/sites/${siteSlug} && wp --allow-root ${command}`],
     { cwd: REPO_ROOT, encoding: 'utf8', timeout: 180_000 }
   ).trim();
+}
+
+/** WordPress の実状態: スラッグでタグを1件読み直す。無ければ null。 */
+function readTag(siteSlug: string, termSlug: string): { name: string; description: string } | null {
+  const json = wpCli(siteSlug, `term list post_tag --slug='${termSlug}' --fields=name,description --format=json`);
+  const rows = JSON.parse(json || '[]') as { name: string; description: string }[];
+  return rows.length === 0 ? null : { name: rows[0].name, description: rows[0].description };
+}
+
+function createTag(siteSlug: string, name: string, termSlug: string, description: string): string {
+  return wpCli(siteSlug, `term create post_tag '${name}' --slug='${termSlug}' --description='${description}' --porcelain`);
 }
 
 /** WordPress の実状態: スラッグでカテゴリを1件読み直す。無ければ null。 */
@@ -190,9 +202,10 @@ async function postSync(
   request: APIRequestContext,
   s: SyncState,
   endpoint: string,
-  data?: Record<string, unknown>
+  data?: Record<string, unknown>,
+  resource: 'categories' | 'tags' = 'categories'
 ): Promise<void> {
-  const response = await request.post(`/api/projects/${s.projectId}/bulk-management/categories/${endpoint}`, {
+  const response = await request.post(`/api/projects/${s.projectId}/bulk-management/${resource}/${endpoint}`, {
     headers: { Authorization: `Bearer ${await adminToken(request)}` },
     data,
     timeout: SYNC_TIMEOUT_MS,
@@ -202,15 +215,19 @@ async function postSync(
 }
 
 /** 再比較: 全ページを辿り、スラッグごとの行を返す。 */
-async function compareAll(request: APIRequestContext, s: SyncState): Promise<Map<string, TermComparisonRow>> {
+async function compareAll(
+  request: APIRequestContext,
+  s: SyncState,
+  resource: 'categories' | 'tags' = 'categories'
+): Promise<Map<string, TermComparisonRow>> {
   const headers = { Authorization: `Bearer ${await adminToken(request)}` };
   const rows = new Map<string, TermComparisonRow>();
   for (let page = 0; ; page++) {
     const response = await request.get(
-      `/api/projects/${s.projectId}/bulk-management/categories/comparison?page=${page}`,
+      `/api/projects/${s.projectId}/bulk-management/${resource}/comparison?page=${page}`,
       { headers, timeout: 120_000 }
     );
-    expect(response.ok(), `カテゴリの比較に失敗しました (status=${response.status()}): ${await response.text()}`).toBe(
+    expect(response.ok(), `比較に失敗しました (status=${response.status()}): ${await response.text()}`).toBe(
       true
     );
     const body = (await response.json()) as TermComparisonPage;
@@ -427,6 +444,123 @@ After({ tags: '@bulk' }, async ({ ctx }) => {
       } catch {
         // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
       }
+      try {
+        const id = wpCli(site, `term list post_tag --slug='${slug}' --field=term_id`);
+        if (id !== '') {
+          wpCli(site, `term delete post_tag ${id}`);
+        }
+      } catch {
+        // 同上。
+      }
     }
+  }
+});
+
+// ---- タグ(issue #1679 / AC-BULK-007) ----
+
+Given('同期用に、マスター環境のサイトにだけタグがある', async ({ ctx }) => {
+  const s = state(ctx);
+  s.slug = uniqueTermSlug();
+  createTag(s.masterSite, `Sync tag missing ${s.slug}`, s.slug, 'master only');
+  register(s, s.slug, 'master only');
+  expect(readTag(s.targetSite, s.slug), '前提: 対象環境に既に存在します').toBeNull();
+});
+
+Given('同期用に、マスター環境と対象環境の両方に同じスラッグで説明文の異なるタグがある', async ({ ctx }) => {
+  const s = state(ctx);
+  s.slug = uniqueTermSlug();
+  createTag(s.masterSite, `Sync tag both ${s.slug}`, s.slug, 'master description');
+  createTag(s.targetSite, `Sync tag both ${s.slug}`, s.slug, 'target description');
+  register(s, s.slug, 'master description');
+  expect(readTag(s.targetSite, s.slug)?.description).toBe('target description');
+});
+
+Given('同期用に、マスター環境にだけあるタグと、両環境で説明文の異なるタグがある', async ({ ctx }) => {
+  const s = state(ctx);
+  s.missingSlug = uniqueTermSlug();
+  s.differingSlug = uniqueTermSlug();
+  createTag(s.masterSite, `Sync tag all missing ${s.missingSlug}`, s.missingSlug, 'missing on target');
+  createTag(s.masterSite, `Sync tag all differing ${s.differingSlug}`, s.differingSlug, 'master side');
+  createTag(s.targetSite, `Sync tag all differing ${s.differingSlug}`, s.differingSlug, 'target side');
+  register(s, s.missingSlug, 'missing on target');
+  register(s, s.differingSlug, 'master side');
+  expect(readTag(s.targetSite, s.missingSlug), '前提: 対象環境に既に存在します').toBeNull();
+});
+
+When('そのタグを同期する', async ({ ctx, request }) => {
+  const s = state(ctx);
+  await postSync(request, s, 'sync', { slug: s.slug }, 'tags');
+});
+
+When('そのタグの説明文を編集して同期する', async ({ ctx, request }) => {
+  const s = state(ctx);
+  s.editedDescription = 'edited description';
+  s.descriptions[s.slug as string] = s.editedDescription;
+  await postSync(
+    request,
+    s,
+    'edit-sync',
+    {
+      targetSlug: s.slug,
+      value: `Sync tag both ${s.slug}`,
+      slug: s.slug,
+      description: s.editedDescription,
+    },
+    'tags'
+  );
+});
+
+When('タグをすべて同期する', async ({ ctx, request }) => {
+  await postSync(request, state(ctx), 'sync-all', undefined, 'tags');
+});
+
+Then('対象環境のWordPressにそのタグがマスター環境と同じ内容で作成されている', async ({ ctx }) => {
+  const s = state(ctx);
+  const slug = s.slug as string;
+  const target = readTag(s.targetSite, slug);
+  expect(target, 'WordPress の対象環境にタグが作成されていません').not.toBeNull();
+  expect(target?.name).toBe(readTag(s.masterSite, slug)?.name);
+  expect(target?.description).toBe('master only');
+});
+
+Then('マスター環境のWordPressのそのタグの説明文が編集後の内容になっている', async ({ ctx }) => {
+  const s = state(ctx);
+  expect(readTag(s.masterSite, s.slug as string)?.description).toBe(s.editedDescription);
+});
+
+Then('対象環境のWordPressのそのタグの説明文がマスター環境と一致している', async ({ ctx }) => {
+  const s = state(ctx);
+  const slug = s.slug as string;
+  const target = readTag(s.targetSite, slug);
+  expect(target, 'WordPress の対象環境にタグがありません').not.toBeNull();
+  expect(target?.description).toBe(readTag(s.masterSite, slug)?.description);
+  expect(target?.description).toBe(s.editedDescription);
+});
+
+Then('再比較すると、そのタグに環境間の差分は無い', async ({ ctx, request }) => {
+  const s = state(ctx);
+  const rows = await compareAll(request, s, 'tags');
+  expectNoDiff(rows.get(s.slug as string), s.slug as string);
+});
+
+Then('対象環境のWordPressにマスター環境にだけあったタグが作成されている', async ({ ctx }) => {
+  const s = state(ctx);
+  const target = readTag(s.targetSite, s.missingSlug as string);
+  expect(target, 'WordPress の対象環境にタグが作成されていません').not.toBeNull();
+  expect(target?.description).toBe('missing on target');
+});
+
+Then('対象環境のWordPressの説明文の異なっていたタグがマスター環境と一致している', async ({ ctx }) => {
+  const s = state(ctx);
+  const slug = s.differingSlug as string;
+  expect(readTag(s.targetSite, slug)?.description).toBe('master side');
+  expect(readTag(s.masterSite, slug)?.description).toBe('master side');
+});
+
+Then('再比較すると、用意したすべてのタグに環境間の差分は無い', async ({ ctx, request }) => {
+  const s = state(ctx);
+  const rows = await compareAll(request, s, 'tags');
+  for (const slug of s.slugs) {
+    expectNoDiff(rows.get(slug), slug);
   }
 });
