@@ -1052,6 +1052,17 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
   llm-stub ga-stub adsense-stub brave-stub image-stub github-stub comfyui-stub
 ```
 
+### overlay を外して作られたコンテナの検出(#1683)
+
+`docker-compose.e2e-stubs.yml` を重ねずに `docker compose up -d <service>` でコンテナを作り直すと、
+そのコンテナだけが実サービスへ向き、AT は `422 SUBSCRIPTION_TOKEN_INVALID`(#1515)や
+`401 Incorrect API key provided: e2e-stub-key`(#1648)で散発的に落ちる。global-setup は
+イメージ鮮度確認(#1653)の直後に `scripts/check-stub-overlay.py` を呼び、compose プロジェクト
+`lets_blog_server` の各コンテナの `com.docker.compose.project.config_files` ラベルに
+`docker-compose.e2e-stubs.yml` が無いサービスがあれば、そのサービス名と作り直しのコマンドを示して中断する。
+`AT_STUB_OVERLAY_CHECK_BYPASS=1` で、該当サービス名を標準出力に記録したうえで続行できる。
+`docker-compose.shared-host.yml` の有無は見ない。
+
 ---
 
 ## 10. クリーンスレート実行と段階順序

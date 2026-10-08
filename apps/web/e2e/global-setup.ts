@@ -85,6 +85,10 @@ import {
  * 中断する。ACCEPTANCE_RESET のゼロ構築(・データ層リセット)の**後**、healthy待ちの前に置く
  * (ゼロ構築前の古いイメージで落とさないため)。判定ロジックはそこが唯一の実装。
  *
+ * issue #1683: 稼働中コンテナが docker-compose.e2e-stubs.yml を重ねて作られているかを
+ * scripts/check-stub-overlay.py が確認し、外れていれば作り直しのコマンドを示して中断する
+ * (外れたコンテナだけが実サービスへ向き、認証エラーで散発的に落ちるため)。鮮度確認の直後に置く。
+ *
  * 環境変数:
  *   ACCEPTANCE_RESET=data  : scripts/reset-acceptance-env.sh --yes(データ層のみ、約30秒)を実行してから始める
  *                            (入口は scripts/run-at-setup.sh。破壊的)
@@ -103,6 +107,8 @@ import {
  *                            エスケープハッチ。迂回したことは標準出力に記録される。
  *   AT_STALE_IMAGE_CHECK_BYPASS=1 : イメージ鮮度チェック(#1653)を迂回し、古いスタックのまま実行する。
  *                            古いサービス名と迂回したことは標準出力に記録される。
+ *   AT_STUB_OVERLAY_CHECK_BYPASS=1 : スタブ overlay 確認(#1683)を迂回する。overlay を重ねずに作られた
+ *                            コンテナ名と迂回したことは標準出力に記録される。
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
@@ -165,6 +171,19 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     throw new Error(
       'コンテナのイメージがワークツリーのコードより古いため、受け入れテストを開始しません。' +
         '再ビルドのコマンドは上のログを参照してください。'
+    );
+  }
+
+  console.log('[e2e] 稼働中コンテナがスタブ overlay を重ねて作られているか確認します');
+  try {
+    execFileSync('python3', [path.join(repoRoot, 'scripts', 'check-stub-overlay.py')], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+  } catch {
+    throw new Error(
+      'docker-compose.e2e-stubs.yml を重ねずに作られたコンテナがあるため、受け入れテストを開始しません。' +
+        '作り直しのコマンドは上のログを参照してください。'
     );
   }
 
