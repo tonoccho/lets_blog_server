@@ -791,7 +791,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全147件)
+### 10.5 Server Action(全149件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -822,6 +822,8 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/projects/[id]/actions.ts`<br>`requestProjectImageJobAction`<br>`fetchImageJobResultAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。画像生成を非同期ジョブとして**受け付けるまで**の操作と、完了したジョブの結果の画像IDを読む操作(#1408)。生成そのものは #1404 のキューが担い、これらは受付と読み取りだけ(利用者が予算対象と決定、2026-10-06、#1623) | 予算対象 |
 | `app/projects/[id]/actions.ts`<br>`uploadGeneratedImageAction` | — | — | 生成画像のアップロード。ファイルの大きさに応じて時間が延びるため、3秒の予算では測れない。**利用者が予算対象外と決定した(2026-10-06、#1623)** | 予算対象外 |
 | `app/projects/[id]/article-review/actions.ts`<br>`startArticleReviewAction` | — | — | 「レビュー」ボタン(#1345)。1つのリクエストの中で、GitHub から PR の記事と画像を読み(外部 API)、実 WordPress のテスト環境へ投稿して完了を待つ(`ArticleReviewPublishService.review`)。非同期への引き渡しは無く、時間は外部システムの応答に依存して読めない。利用者の基準(2026-10-08、#1623 / #1661 / #1662 / #1678)「ローカルの読み書きは予算対象、外部 API・実 WordPress への同期処理は予算対象外」による。`installLetsblogPluginAction` / `resyncLetsblogAction` と同じ扱い | 予算対象外 |
+| `app/projects/[id]/article-review/actions.ts`<br>`approveArticleReviewAction` | — | — | 「レビュー完了」(#1346)。1つのリクエストの中で、記事を本番環境の実 WordPress へ投稿し、GitHub の PR をマージして head ブランチを削除する(外部 API。`ArticleReviewApprovalService.approve`)。非同期への引き渡しは無く、時間は外部システムの応答に依存して読めない。利用者の基準(2026-10-08、#1623 / #1661 / #1662 / #1678)「ローカルの読み書きは予算対象、外部 API・実 WordPress への同期処理は予算対象外」による。`startArticleReviewAction` と同じ扱い | 予算対象外 |
+| `app/projects/[id]/article-review/actions.ts`<br>`rejectArticleReviewAction` | — | — | 「記事差し戻し」(#1346)。1つのリクエストの中で、指摘事項を GitHub の PR のコメントとして投稿する(外部 API。`ArticleReviewFeedbackService.reject`)。時間は GitHub の応答に依存して読めない。利用者の基準(2026-10-08、#1623 / #1661 / #1662 / #1678)「ローカルの読み書きは予算対象、外部 API・実 WordPress への同期処理は予算対象外」による。`startArticleReviewAction` と同じ扱い | 予算対象外 |
 | `app/projects/[id]/custom-tags/actions.ts`<br>`updateProjectCssSelectorPrefixAction`<br>`upsertProjectCustomTagAction`<br>`deleteProjectCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/projects/[id]/tag-design/actions.ts`<br>`saveTagDesignSettingAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/projects/[id]/tag-design/actions.ts`<br>`generateTagDesignAction` | — | — | タグデザインのAI生成を非同期ジョブとして要求する受付だけの操作になった(#1409。結果は処理キューの「結果を見る」から確認して `saveTagDesignSettingAction` で保存する)。生成そのものは外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
