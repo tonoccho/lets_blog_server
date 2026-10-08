@@ -160,6 +160,19 @@ When(
   }
 );
 
+// pull の受付だけを計る(ジョブを作ってすぐ返す)。モデル名は `slow` / `fail` / `missing` を含まないので、
+// 接続先の LLM スタブがすぐ success を返し、実 Ollama のモデルは取得されない(#1681)。
+When(
+  /^Ollamaのモデル名欄に「(.+)」を入れてインストールを押し Server Action の往復を計測する$/,
+  async ({ page, ctx }, model: string) => {
+    await page.getByLabel('インストールするOllamaモデル名').fill(model);
+    const timing = await measureServerActionRoundTrip(page, () =>
+      section(page, 'Ollamaの接続情報').getByRole('button', { name: 'インストール' }).click()
+    );
+    record(ctx, timing.roundTripMs, 'Ollamaのモデルのpull受付');
+  }
+);
+
 // ---- ギャラリー(fetchGalleryImagesPageAction) ----
 
 When(

@@ -88,3 +88,10 @@
     かつ 応答時間予算の検証用の完了した画像生成ジョブがある
     もし 処理キューの「結果を見る」と同じ経路でそのジョブの結果を開いて Server Action の往復を計測する
     ならば Server Action の往復は「3000」ミリ秒以内に返る
+
+  @budget-action:pullOllamaModelAction
+  シナリオ: Ollamaのモデルのpull受付(Server Action)の往復が3秒以内に返る
+    前提 応答時間予算の検証用のプロジェクトがある
+    もし 「/projects/{projectId}」の設定タブを開いておく
+    かつ Ollamaのモデル名欄に「e2e-budget-pull:1b」を入れてインストールを押し Server Action の往復を計測する
+    ならば Server Action の往復は「3000」ミリ秒以内に返る
