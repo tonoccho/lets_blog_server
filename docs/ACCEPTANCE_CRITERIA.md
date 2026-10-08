@@ -180,7 +180,7 @@ API: publishing `BulkManagementController`(23エンドポイント)
 | AC-BULK-011 | 一括適用 | 変更を全環境へ一度に流せる | `bulk-management/apply` / `apply-all` が対象環境へ反映される | — | 未着手 |
 | AC-BULK-012 | ファイルアップロード | 手元のファイルを公開先へ送れる | `bulk-management/upload` 後、公開先にファイルが存在する | — | 未着手 |
 | AC-BULK-013 | 生成画像のアップロード | ギャラリーの画像を記事素材にできる | `POST /api/projects/{id}/asset-images/{generatedImageId}/upload` 後、公開先メディアに現れる | — | 未着手 |
-| AC-BULK-014 | 一括削除の確認 | 取り消せない削除を、どの環境から消えるのかを知った上で承認できる | カテゴリ・タグ・プラグイン・テーマ・投稿の行削除の確認に、その項目が存在する環境の数と環境名が表示され、存在しない環境は含まれない(比較表の行データから求め、API・サーバの変更なし) | `apps/web/e2e/features/bulk/bulk-delete-confirmation.feature` › 5シナリオ(カテゴリ・タグ・プラグイン・投稿の2環境、およびテスト環境にだけあるカテゴリ)。単体: `apps/web/src/app/projects/[id]/__tests__/{Term,PluginTheme,Post}ComparisonTable.test.tsx`(#1181) | 実装済み(受け入れテストの実行結果は #1181 のレポート参照) |
+| AC-BULK-014 | 一括削除の確認 | 取り消せない削除を、どの環境から消えるのかを知った上で承認できる | カテゴリ・タグ・プラグイン・テーマ・投稿の行削除の確認に、その項目が存在する環境の数と環境名が表示され、存在しない環境は含まれない(比較表の行データから求め、API・サーバの変更なし) | `apps/web/e2e/features/bulk/bulk-delete-confirmation.feature` › 5シナリオ(カテゴリ・タグ・プラグイン・投稿の2環境、およびテスト環境にだけあるカテゴリ)。単体: `apps/web/src/app/projects/[id]/__tests__/{Term,PluginTheme,Post}ComparisonTable.test.tsx`(#1181) | 検証済(#1181) |
 
 ### 2.6 AI執筆支援 — `AI`
 
@@ -189,26 +189,26 @@ API: ai `AiController`, `ProjectLlmModelController`, `ProjectBraveSearchApiKeyCo
 
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
-| AC-AI-001 | 下書き生成 (`/api/ai/draft`) | 白紙から書き始めなくてよい | テーマを与えると記事の下書きが返る | `ai/generation.feature` › 下書き生成に見出しと要望を渡すと、スタブの決定的な下書きがそのまま返る(`@api`) | 実装済み(`@stub` `@api`) |
-| AC-AI-002 | 質問 (`/api/ai/ask`) | 執筆中の疑問をその場で解ける | 質問に対する回答が返る | `ai/generation.feature` › セクション生成に追加の指示を続けると、直前の生成を踏まえた壁打ちの再生成を依頼できる(`@api`)。`/api/ai/ask`(AiAskRequest)は history を持たないため、対象を history/message を持つ `/api/ai/section` の壁打ち再生成に合わせて検証する(issue #1146。feature内のコメント参照) | 実装済み(`@stub` `@api`) |
-| AC-AI-003 | タグ提案 (`/api/ai/tags`) | 分類を考える手間が減る | 本文からタグ候補が返る | `ai/tag-and-proofread.feature` › タグ提案が、本文に基づくカテゴリ候補とタグ候補として返る(`@api`) | 実装済み(`@stub` `@api`、issue #1004) |
-| AC-AI-004 | 校正 (`/api/ai/proofread`) | 誤字や言い回しを直せる | 本文に対する指摘が返る | `ai/tag-and-proofread.feature` › 校正チェックが、本文中の該当箇所を指す指摘として返る(`@api`) | 実装済み(`@stub` `@api`、issue #1004) |
-| AC-AI-005 | セクション生成 (`/api/ai/section`) | 見出し単位で書き足せる | 見出しを与えるとその節の本文が返る | `ai/generation.feature` › セクション生成が、指定した見出し配下の本文として返る(`@api`) | 実装済み(`@stub` `@api`) |
-| AC-AI-006 | Web検索付き質問 | 最新情報を踏まえた回答が得られる | Brave Search APIキー設定時、検索結果を根拠にした回答が返る。未設定・呼び出し失敗時はフェイルオープンし、検索結果なしで回答が返る(エラーにしない) | `ai/web-search.feature` › プロジェクトのBrave Search APIキーが設定されていると、壁打ちの回答がWeb検索結果を踏まえて生成される(`@api`)。同 › Brave Search呼び出しが失敗すると、壁打ちの回答はWeb検索結果なしでフェイルオープンする(`@api`) | 実装済み(`@stub` `@api`) |
-| AC-AI-007 | 画像プロンプト生成 | 記事に合う画像を頼みやすい | `POST /api/projects/{projectId}/ai/generate-image-prompt` が本文に沿ったプロンプトを返す | `ai/generation.feature` › 画像プロンプト生成が、記事内容に基づくプロンプト文字列を返す(`@api`) | 実装済み(`@stub` `@api`) |
-| AC-AI-008 | LLMプロバイダの選択 | 用途に応じてAIを切り替えられる | `PUT /ai-models/llm/provider/selection` の選択が、画像プロンプト生成に加えて執筆支援5機能(`/api/ai/draft`・`ask`・`section`・`tags`・`proofread`。本文の任意`projectId`で指す)の以後の生成にも使われる。優先順位はリクエストの`provider`指定 → プロジェクトの選択 → システム既定。`projectId`未指定はシステム既定へフォールバックする(issue #1495) | `ai/model-selection.feature` › プロバイダーを切り替えると、以後の生成が切り替え先へ向かう(`@api`)。同 › プロジェクトで選択したプロバイダーが執筆支援の<機能>でも使われる / リクエストのプロバイダー指定はプロジェクトの選択より優先される(<機能>) / projectIdを伴わない呼び出しはシステム既定で動きプロジェクトの選択の影響を受けない(<機能>)(いずれも下書き・Ask AI・セクション生成・タグ提案・校正チェックの5例、`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148、#1495) | 実装済み(`@stub` `@api`) |
-| AC-AI-009 | LLMモデルの選択 | 精度とコストを選べる | `PUT /ai-models/llm/models/selection` の選択が、画像プロンプト生成に加えて執筆支援5機能(`/api/ai/draft`・`ask`・`section`・`tags`・`proofread`。本文の任意`projectId`で指す)の以後の生成にも使われる。`projectId`未指定はシステム既定モデルへフォールバックする(issue #1495) | `ai/model-selection.feature` › 利用可能なLLMモデル一覧が取得でき、選択したモデルが以後の生成要求に反映される(`@api`)。同 › 選択したモデルが執筆支援の<機能>にも反映される(下書き・Ask AI・セクション生成・タグ提案・校正チェックの5例、`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148、#1495) | 実装済み(`@stub` `@api`) |
-| AC-AI-010 | Brave Search APIキー管理 | 検索機能を自分の鍵で使える | `GET/PUT/DELETE /api-keys/brave-search-api-key` の結果が検索付き質問の可否に反映される。保存後のキーは平文で再表示されない | `ai/web-search.feature` › プロジェクトのBrave Search APIキーを保存・削除でき、保存後のキーは平文で再表示されない(`@api`) | 実装済み(`@stub` `@api`) |
-| AC-AI-011 | 生成ジョブの照会 | 長い生成の進捗を追える | `GET /api/generation-jobs` と `/{id}` が状態(実行中/完了/失敗)を返す。AI執筆支援(draft/ask/section)は同期呼び出しで非同期ジョブ経路を持たないため、実ジョブを作る唯一の到達可能な経路(メディアガベージコレクション削除)を題材に検証する(issue #1151のDecision Record) | `ai/generation-job.feature` › 起動直後の生成ジョブは、ID照会でも一覧でも実行中として現れる / 削除できるメディアが1件も無いジョブは、最終的に失敗として理由付きで返る(`@api`)。完了状態は`media/media-garbage-collection.feature`で既に確認済み | 実装済み(`@api`、issue #1151) |
-| AC-AI-012 | LLMのレート制限 | 429でも生の例外ログではなく次の行動が分かる | LLMが429を返したとき、`AiServiceException`経由でHTTP 502・`error`にレート制限と分かる文言が返る | `ai/resilience.feature` › LLMが429を返したとき、利用者にレート制限と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
-| AC-AI-013 | LLMのタイムアウト/接続断 | 生成が固まらず再試行できる | LLMがタイムアウト/接続断したとき、速やかに失敗が返り、直後の通常リクエストは成功する | `ai/resilience.feature` › LLMがタイムアウトしたとき、UIが固まらず速やかに失敗が返り再試行できる(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
-| AC-AI-014 | LLM接続設定の不備 | 生成前に設定不備と分かる | プロバイダのAPIキーが未設定/不正なとき、LLM呼び出し前に設定不備の文言で失敗する | `ai/resilience.feature` › LLM接続設定が未設定/不正なとき、生成前に設定不備と分かるメッセージが出る(`@api`) | 実装済み(`@stub` `@api`、issue #1149) |
-| AC-AI-015 | LLM設定(`/ai-models/llm/**`)の非メンバー拒否 | 他人のプロジェクトのLLM設定を書き換えられない | 一般利用者は、対象プロジェクトのメンバーか否かに関わらず`requireAdmin()`により403で拒否される(現状の実装。是正は本Issueの対象外) | `ai/authorization.feature` › 一般利用者はプロジェクトのメンバーでなくてもLLM設定を読み書きできない(`@api`) | 実装済み(`@api`、issue #1150) |
-| AC-AI-016 | Brave Search APIキーの非メンバー拒否 | 他人のプロジェクトのBrave Search APIキーを読み書きできない | `requireProjectMemberOrAdmin(projectId)`により、メンバーでないプロジェクトへのGET/PUT/DELETEが403で拒否される。自分のプロジェクトでは読み書きできる | `ai/authorization.feature` › 自分がメンバーでないプロジェクトのBrave Search APIキーは読み書きできない(`@api`) | 実装済み(`@api`、issue #1150) |
-| AC-AI-017 | レビューステップ単位の指摘生成(`/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions`、`JAPANESE`/`PROOFREADING`) | 多段レビュー(#1210)のステップごとに、そのステップの観点だけの指摘が得られる | ステップキー・本文・projectIdを渡すと、そのステップキーと本文中に実在する該当箇所を持つ指摘一覧が返る。同じ本文・同じステップへの呼び出しは指摘の識別子(ステップキー+引用+指摘内容から導出、本文中の位置を含まない)が一致し、指摘箇所より前方への加筆があっても識別子は変わらない | `ai/review-step-suggestions.feature` › 「JAPANESE」/「PROOFREADING」ステップの指摘が、そのステップキーと本文中に実在する該当箇所を持って返る / 同じ本文・同じステップへの2回の呼び出しは指摘の識別子が一致する / 指摘箇所より前方に文字を挿入しても、同じ指摘の識別子は変わらない(`@api`) | 実装済み(`@stub` `@api`、issue #1213) |
-| AC-AI-018 | レビューステップ別のAIプロバイダー/モデル設定(プロジェクト詳細画面「AIモデル管理」カード・LLMタブの`ReviewStepSettingsPanel.tsx`、`/ai-models/llm/review-steps`、issue #1211のAPI) | 多段レビュー(#1210)のステップごとに使うプロバイダー/モデルを画面から設定できる | LLMタブに5つのレビューステップの行が#1211のAPIが返す順序(日本語チェック→校正チェック→校閲→読者視点でのチェック→文体チェック)で表示され、未設定のステップは「(プロジェクト既定を使用)」と表示される。provider/modelを選んで保存すると、表示が保存済みの値へ更新され、再読込後も残る。**対象外**(#1223へ切り出し): 設定を空へ戻す操作、保存失敗時のエラー表示 | `ai/review-step-model-settings.feature` › LLMタブに5つのレビューステップの行が#1211のAPIの順序・表示名で表示され、未設定は既定表示になる / ステップのproviderとmodelを選んで保存すると、リロード後もその値が表示される | 実装済み(issue #1212)。ステップ定義の解決(bddgen)は確認済みだが、実行環境にPlaywrightブラウザの起動に必要な共有ライブラリが無く(#1194)、実際のブラウザ実行による確認はできていない |
-| AC-AI-019 | 校閲ステップ(`FACT_CHECK`、Web検索を伴う事実確認。`/api/projects/{projectId}/ai/review-steps/FACT_CHECK/suggestions`) | 記事中の事実主張がWeb検索で裏取りされ、裏付けが取れない主張が出典つきで指摘される。Brave Searchが使えなくても他のステップ・ワークフローは失敗しない | `FACT_CHECK`・本文・projectIdを渡すと、ステップキーと本文中に実在する該当箇所を持つ指摘が返り、各指摘は判断の根拠にした出典(タイトルとURL)を含む。Brave Searchを利用できない(APIキー未設定・キーが拒否された・検索呼び出しが失敗した・検索結果が得られない)ときはHTTPエラーにせず、応答の`skipped=true`と`skipReason`で校閲を実行しなかったことと理由を返し、指摘0件(`skipped=false`)と区別できる。`skipped`/`skipReason`/`sources`は校閲だけが返し、他のステップ(AC-AI-017)の応答にはキーが現れない。方式は2回のLLM呼び出し(事実主張の抽出 → 主張ごとのWeb検索(最大3件) → 検索結果を踏まえた判定) | `ai/review-step-fact-check.feature` › 「FACT_CHECK」ステップの指摘が、ステップキーと本文中に実在する該当箇所を持って返る / 校閲の指摘は、判断の根拠となった出典のタイトルとURLを含む / プロジェクトのBrave Search APIキーがBrave Searchに拒否されると、校閲はエラーにならずスキップされる / Web検索が失敗すると、校閲はスキップされ、問題なしとは区別できる形で返る / 校閲以外のステップの応答には、スキップ情報も出典も含まれない(`@api`)。**APIキー未設定**のスキップは、受け入れテスト環境がシステム全体のキーを持ちフォールバックで検索に成功するため、Gherkinでは再現せず`AiAssistServiceTest`の`factCheck_APIキー未設定でWeb検索が使えないとき…`で検証 | 実装済み(`@stub` `@api`、issue #1214) |
-| AC-AI-020 | 読者視点でのチェック・文体チェックのステップ(`READER_PERSPECTIVE` / `STYLE`。`/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions`) | 多段レビュー(#1210)の残る2ステップも、AC-AI-017と同じ契約で指摘が得られる | `READER_PERSPECTIVE`(想定読者にとっての前提知識の飛躍・説明不足)/`STYLE`(文末表現の統一・一文の長さ・受動態の多用・トーンの一貫性)・本文・projectIdを渡すと、そのステップキーと本文中に実在する該当箇所を持つ指摘一覧が返る。同じ本文への2回の呼び出しで各指摘の識別子が一致する。応答の形・識別子の導出規則・`originalText`の実在チェックはAC-AI-017と同一で、`JAPANESE`/`PROOFREADING`の応答は変わらない | `ai/review-step-reader-style.feature` › 「READER_PERSPECTIVE」/「STYLE」ステップの指摘が、そのステップキーと本文中に実在する該当箇所を持って返る / 各ステップは同じ本文への2回の呼び出しで指摘の識別子が一致する(`@api`)。既存2ステップの不変は`ai/review-step-suggestions.feature`がそのまま通ることで確認 | 実装済み(`@stub` `@api`、issue #1221) |
+| AC-AI-001 | 下書き生成 (`/api/ai/draft`) | 白紙から書き始めなくてよい | テーマを与えると記事の下書きが返る | `ai/generation.feature` › 下書き生成に見出しと要望を渡すと、スタブの決定的な下書きがそのまま返る(`@api`) | 検証済(`@stub` `@api`) |
+| AC-AI-002 | 質問 (`/api/ai/ask`) | 執筆中の疑問をその場で解ける | 質問に対する回答が返る | `ai/generation.feature` › セクション生成に追加の指示を続けると、直前の生成を踏まえた壁打ちの再生成を依頼できる(`@api`)。`/api/ai/ask`(AiAskRequest)は history を持たないため、対象を history/message を持つ `/api/ai/section` の壁打ち再生成に合わせて検証する(issue #1146。feature内のコメント参照) | 検証済(`@stub` `@api`) |
+| AC-AI-003 | タグ提案 (`/api/ai/tags`) | 分類を考える手間が減る | 本文からタグ候補が返る | `ai/tag-and-proofread.feature` › タグ提案が、本文に基づくカテゴリ候補とタグ候補として返る(`@api`) | 検証済(`@stub` `@api`、issue #1004) |
+| AC-AI-004 | 校正 (`/api/ai/proofread`) | 誤字や言い回しを直せる | 本文に対する指摘が返る | `ai/tag-and-proofread.feature` › 校正チェックが、本文中の該当箇所を指す指摘として返る(`@api`) | 検証済(`@stub` `@api`、issue #1004) |
+| AC-AI-005 | セクション生成 (`/api/ai/section`) | 見出し単位で書き足せる | 見出しを与えるとその節の本文が返る | `ai/generation.feature` › セクション生成が、指定した見出し配下の本文として返る(`@api`) | 検証済(`@stub` `@api`) |
+| AC-AI-006 | Web検索付き質問 | 最新情報を踏まえた回答が得られる | Brave Search APIキー設定時、検索結果を根拠にした回答が返る。未設定・呼び出し失敗時はフェイルオープンし、検索結果なしで回答が返る(エラーにしない) | `ai/web-search.feature` › プロジェクトのBrave Search APIキーが設定されていると、壁打ちの回答がWeb検索結果を踏まえて生成される(`@api`)。同 › Brave Search呼び出しが失敗すると、壁打ちの回答はWeb検索結果なしでフェイルオープンする(`@api`) | 検証済(`@stub` `@api`) |
+| AC-AI-007 | 画像プロンプト生成 | 記事に合う画像を頼みやすい | `POST /api/projects/{projectId}/ai/generate-image-prompt` が本文に沿ったプロンプトを返す | `ai/generation.feature` › 画像プロンプト生成が、記事内容に基づくプロンプト文字列を返す(`@api`) | 検証済(`@stub` `@api`) |
+| AC-AI-008 | LLMプロバイダの選択 | 用途に応じてAIを切り替えられる | `PUT /ai-models/llm/provider/selection` の選択が、画像プロンプト生成に加えて執筆支援5機能(`/api/ai/draft`・`ask`・`section`・`tags`・`proofread`。本文の任意`projectId`で指す)の以後の生成にも使われる。優先順位はリクエストの`provider`指定 → プロジェクトの選択 → システム既定。`projectId`未指定はシステム既定へフォールバックする(issue #1495) | `ai/model-selection.feature` › プロバイダーを切り替えると、以後の生成が切り替え先へ向かう(`@api`)。同 › プロジェクトで選択したプロバイダーが執筆支援の<機能>でも使われる / リクエストのプロバイダー指定はプロジェクトの選択より優先される(<機能>) / projectIdを伴わない呼び出しはシステム既定で動きプロジェクトの選択の影響を受けない(<機能>)(いずれも下書き・Ask AI・セクション生成・タグ提案・校正チェックの5例、`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148、#1495) | 検証済(`@stub` `@api`) |
+| AC-AI-009 | LLMモデルの選択 | 精度とコストを選べる | `PUT /ai-models/llm/models/selection` の選択が、画像プロンプト生成に加えて執筆支援5機能(`/api/ai/draft`・`ask`・`section`・`tags`・`proofread`。本文の任意`projectId`で指す)の以後の生成にも使われる。`projectId`未指定はシステム既定モデルへフォールバックする(issue #1495) | `ai/model-selection.feature` › 利用可能なLLMモデル一覧が取得でき、選択したモデルが以後の生成要求に反映される(`@api`)。同 › 選択したモデルが執筆支援の<機能>にも反映される(下書き・Ask AI・セクション生成・タグ提案・校正チェックの5例、`@api`)。LLMスタブが受け取ったリクエストのmodelまで検査する(issue #1148、#1495) | 検証済(`@stub` `@api`) |
+| AC-AI-010 | Brave Search APIキー管理 | 検索機能を自分の鍵で使える | `GET/PUT/DELETE /api-keys/brave-search-api-key` の結果が検索付き質問の可否に反映される。保存後のキーは平文で再表示されない | `ai/web-search.feature` › プロジェクトのBrave Search APIキーを保存・削除でき、保存後のキーは平文で再表示されない(`@api`) | 検証済(`@stub` `@api`) |
+| AC-AI-011 | 生成ジョブの照会 | 長い生成の進捗を追える | `GET /api/generation-jobs` と `/{id}` が状態(実行中/完了/失敗)を返す。AI執筆支援(draft/ask/section)は同期呼び出しで非同期ジョブ経路を持たないため、実ジョブを作る唯一の到達可能な経路(メディアガベージコレクション削除)を題材に検証する(issue #1151のDecision Record) | `ai/generation-job.feature` › 起動直後の生成ジョブは、ID照会でも一覧でも実行中として現れる / 削除できるメディアが1件も無いジョブは、最終的に失敗として理由付きで返る(`@api`)。完了状態は`media/media-garbage-collection.feature`で既に確認済み | 検証済(`@api`、issue #1151) |
+| AC-AI-012 | LLMのレート制限 | 429でも生の例外ログではなく次の行動が分かる | LLMが429を返したとき、`AiServiceException`経由でHTTP 502・`error`にレート制限と分かる文言が返る | `ai/resilience.feature` › LLMが429を返したとき、利用者にレート制限と分かるメッセージが出る(`@api`) | 検証済(`@stub` `@api`、issue #1149) |
+| AC-AI-013 | LLMのタイムアウト/接続断 | 生成が固まらず再試行できる | LLMがタイムアウト/接続断したとき、速やかに失敗が返り、直後の通常リクエストは成功する | `ai/resilience.feature` › LLMがタイムアウトしたとき、UIが固まらず速やかに失敗が返り再試行できる(`@api`) | 検証済(`@stub` `@api`、issue #1149) |
+| AC-AI-014 | LLM接続設定の不備 | 生成前に設定不備と分かる | プロバイダのAPIキーが未設定/不正なとき、LLM呼び出し前に設定不備の文言で失敗する | `ai/resilience.feature` › LLM接続設定が未設定/不正なとき、生成前に設定不備と分かるメッセージが出る(`@api`) | 検証済(`@stub` `@api`、issue #1149) |
+| AC-AI-015 | LLM設定(`/ai-models/llm/**`)の非メンバー拒否 | 他人のプロジェクトのLLM設定を書き換えられない | 一般利用者は、対象プロジェクトのメンバーか否かに関わらず`requireAdmin()`により403で拒否される(現状の実装。是正は本Issueの対象外) | `ai/authorization.feature` › 一般利用者はプロジェクトのメンバーでなくてもLLM設定を読み書きできない(`@api`) | 検証済(`@api`、issue #1150) |
+| AC-AI-016 | Brave Search APIキーの非メンバー拒否 | 他人のプロジェクトのBrave Search APIキーを読み書きできない | `requireProjectMemberOrAdmin(projectId)`により、メンバーでないプロジェクトへのGET/PUT/DELETEが403で拒否される。自分のプロジェクトでは読み書きできる | `ai/authorization.feature` › 自分がメンバーでないプロジェクトのBrave Search APIキーは読み書きできない(`@api`) | 検証済(`@api`、issue #1150) |
+| AC-AI-017 | レビューステップ単位の指摘生成(`/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions`、`JAPANESE`/`PROOFREADING`) | 多段レビュー(#1210)のステップごとに、そのステップの観点だけの指摘が得られる | ステップキー・本文・projectIdを渡すと、そのステップキーと本文中に実在する該当箇所を持つ指摘一覧が返る。同じ本文・同じステップへの呼び出しは指摘の識別子(ステップキー+引用+指摘内容から導出、本文中の位置を含まない)が一致し、指摘箇所より前方への加筆があっても識別子は変わらない | `ai/review-step-suggestions.feature` › 「JAPANESE」/「PROOFREADING」ステップの指摘が、そのステップキーと本文中に実在する該当箇所を持って返る / 同じ本文・同じステップへの2回の呼び出しは指摘の識別子が一致する / 指摘箇所より前方に文字を挿入しても、同じ指摘の識別子は変わらない(`@api`) | 検証済(`@stub` `@api`、issue #1213) |
+| AC-AI-018 | レビューステップ別のAIプロバイダー/モデル設定(プロジェクト詳細画面「AIモデル管理」カード・LLMタブの`ReviewStepSettingsPanel.tsx`、`/ai-models/llm/review-steps`、issue #1211のAPI) | 多段レビュー(#1210)のステップごとに使うプロバイダー/モデルを画面から設定できる | LLMタブに5つのレビューステップの行が#1211のAPIが返す順序(日本語チェック→校正チェック→校閲→読者視点でのチェック→文体チェック)で表示され、未設定のステップは「(プロジェクト既定を使用)」と表示される。provider/modelを選んで保存すると、表示が保存済みの値へ更新され、再読込後も残る。**対象外**(#1223へ切り出し): 設定を空へ戻す操作、保存失敗時のエラー表示 | `ai/review-step-model-settings.feature` › LLMタブに5つのレビューステップの行が#1211のAPIの順序・表示名で表示され、未設定は既定表示になる / ステップのproviderとmodelを選んで保存すると、リロード後もその値が表示される | 検証済(issue #1212) |
+| AC-AI-019 | 校閲ステップ(`FACT_CHECK`、Web検索を伴う事実確認。`/api/projects/{projectId}/ai/review-steps/FACT_CHECK/suggestions`) | 記事中の事実主張がWeb検索で裏取りされ、裏付けが取れない主張が出典つきで指摘される。Brave Searchが使えなくても他のステップ・ワークフローは失敗しない | `FACT_CHECK`・本文・projectIdを渡すと、ステップキーと本文中に実在する該当箇所を持つ指摘が返り、各指摘は判断の根拠にした出典(タイトルとURL)を含む。Brave Searchを利用できない(APIキー未設定・キーが拒否された・検索呼び出しが失敗した・検索結果が得られない)ときはHTTPエラーにせず、応答の`skipped=true`と`skipReason`で校閲を実行しなかったことと理由を返し、指摘0件(`skipped=false`)と区別できる。`skipped`/`skipReason`/`sources`は校閲だけが返し、他のステップ(AC-AI-017)の応答にはキーが現れない。方式は2回のLLM呼び出し(事実主張の抽出 → 主張ごとのWeb検索(最大3件) → 検索結果を踏まえた判定) | `ai/review-step-fact-check.feature` › 「FACT_CHECK」ステップの指摘が、ステップキーと本文中に実在する該当箇所を持って返る / 校閲の指摘は、判断の根拠となった出典のタイトルとURLを含む / プロジェクトのBrave Search APIキーがBrave Searchに拒否されると、校閲はエラーにならずスキップされる / Web検索が失敗すると、校閲はスキップされ、問題なしとは区別できる形で返る / 校閲以外のステップの応答には、スキップ情報も出典も含まれない(`@api`)。**APIキー未設定**のスキップは、受け入れテスト環境がシステム全体のキーを持ちフォールバックで検索に成功するため、Gherkinでは再現せず`AiAssistServiceTest`の`factCheck_APIキー未設定でWeb検索が使えないとき…`で検証 | 検証済(`@stub` `@api`、issue #1214) |
+| AC-AI-020 | 読者視点でのチェック・文体チェックのステップ(`READER_PERSPECTIVE` / `STYLE`。`/api/projects/{projectId}/ai/review-steps/{stepKey}/suggestions`) | 多段レビュー(#1210)の残る2ステップも、AC-AI-017と同じ契約で指摘が得られる | `READER_PERSPECTIVE`(想定読者にとっての前提知識の飛躍・説明不足)/`STYLE`(文末表現の統一・一文の長さ・受動態の多用・トーンの一貫性)・本文・projectIdを渡すと、そのステップキーと本文中に実在する該当箇所を持つ指摘一覧が返る。同じ本文への2回の呼び出しで各指摘の識別子が一致する。応答の形・識別子の導出規則・`originalText`の実在チェックはAC-AI-017と同一で、`JAPANESE`/`PROOFREADING`の応答は変わらない | `ai/review-step-reader-style.feature` › 「READER_PERSPECTIVE」/「STYLE」ステップの指摘が、そのステップキーと本文中に実在する該当箇所を持って返る / 各ステップは同じ本文への2回の呼び出しで指摘の識別子が一致する(`@api`)。既存2ステップの不変は`ai/review-step-suggestions.feature`がそのまま通ることで確認 | 検証済(`@stub` `@api`、issue #1221) |
 
 ### 2.7 記事プランとGitHub Issue連携 — `PLAN`
 
@@ -598,17 +598,13 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 159 |
+| `検証済` | 182 |
 | `部分的に検証` | 3 |
 | `実装中` | 14 |
-| `実装済み` | 21 |
 | `既存spec` / `既存spec(部分)` | 3 |
-| `未着手` | 21 |
+| `未着手` | 19 |
 | `対象外`(§2 に行を持つもの) | 3 |
 | **§2 合計** | **224** |
-
-`実装済み` は §1 の状態の定義に無い。`AC-AI-*` の全20行がこの語を使っており、§1 の
-どの状態に当たるかは各行を担当する Issue の判断である。ここでは行の値どおりに数える。
 
 `検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
 `@fail`(不具合が直るまで失敗が期待値)のシナリオは無い(#955 の修正で最後の1件が外れた)。
@@ -632,8 +628,8 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | `POST` | 15 | | `ANA` | 6 | | `STUB` | 2 |
 | `BULK` | 14 | | | | | | |
 
-**受け入れテストが1件も無い領域**: `BULK`(13 機能ID、全行 `未着手`)。
-`AI` は全行が `実装済み` で、`検証済` の行は無い。
+**受け入れテストが1件も無い領域**: 無し。`BULK` は AC-BULK-014 だけが `検証済`で、残る13 機能IDは `未着手`。
+`AI` の全20行は `検証済`(2026-10-08 に対応シナリオを実行して確認。#1424)。
 
 > この節の件数は `scripts/test_acceptance_criteria_summary.py` が §2 の表から数え直して
 > 突き合わせる(#1133)。§2 の状態を変えたら、この節の件数も同じ変更で直すこと。

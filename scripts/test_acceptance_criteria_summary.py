@@ -23,8 +23,8 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 DOC = os.path.join(REPO_ROOT, "docs/ACCEPTANCE_CRITERIA.md")
 
 # §6 の状態別の表の行の見出し(§2 の状態欄の先頭語)。`既存spec(部分)` は `既存spec` に含める。
-# `実装済み` は §1 に定義の無い状態だが §2 に実在するので、数えなければ合計が合わない。
-STATES = ("検証済", "部分的に検証", "実装中", "実装済み", "既存spec", "未着手", "対象外")
+# §1 に定義の無い状態(`実装済み` など)は含めない。§2 に現れたら count_inventory が失敗する(#1424)。
+STATES = ("検証済", "部分的に検証", "実装中", "既存spec", "未着手", "対象外")
 
 
 def _read():
@@ -100,6 +100,13 @@ class AcceptanceCriteriaSummaryTest(unittest.TestCase):
     def test_totals_match_inventory(self):
         self.assertEqual(self.inv_total, self.sum_total)
         self.assertEqual(self.inv_total, self.sum_table_total)
+
+    def test_inventory_rejects_state_not_defined_in_section_1(self):
+        # `実装済み` は §1 に定義が無い。再び §2 に入ったら数える段階で失敗する(#1424)。
+        text = "\n## 2. 機能インベントリ\n| AC-AI-001 | 機能 | 価値 | 基準 | 対応 | 実装済み(`@api`) |\n\n## 3.\n"
+        with self.assertRaises(AssertionError) as ctx:
+            count_inventory(text)
+        self.assertIn("未知の状態", str(ctx.exception))
 
 
 if __name__ == "__main__":
