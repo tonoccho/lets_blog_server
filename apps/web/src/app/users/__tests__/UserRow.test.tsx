@@ -57,7 +57,8 @@ describe("UserRow / DeleteUserButton (issue #1383)", () => {
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
     await screen.findByText("自分自身のアカウントは削除できません。");
     expect(screen.getByText("a@example.com")).toBeTruthy();
-    const button = screen.getByRole("button", { name: "削除" }) as HTMLButtonElement;
+    // エラー表示と isPending の解除は別の render になりうる(負荷時は「削除中…」が残る)ため待つ
+    const button = (await screen.findByRole("button", { name: "削除" })) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
   });
 
