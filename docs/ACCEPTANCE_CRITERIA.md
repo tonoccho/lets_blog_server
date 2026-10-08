@@ -839,7 +839,7 @@ Reactの再描画時間まで含めてしまうため。`measureServerActionRoun
 | `app/sites/actions.ts`<br>`registerSiteAction`<br>`generateSshKeyPairAction`<br>`deleteSiteAction`<br>`checkSiteConnectionAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/sites/actions.ts`<br>`createManagedWordPressSiteAction`(サイト自動構築) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。gateway 60秒で現に応答が失われる。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
 | `app/sites/actions.ts`<br>`installWpCliAction`<br>`generateStaticContentAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
-| `app/sites/actions.ts`<br>`saveStaticContentAction` | — | — | 静的コンテンツの生成結果を確認した利用者の「保存」(#1409。既存の `static_content` への書き込み)。生成は `generateStaticContentAction` が非同期ジョブとして受け付ける。受け入れシナリオ(`@budget-action`)が未整備のため、予算対象に加える判断は #1661 で行う。 | 予算対象外 |
+| `app/sites/actions.ts`<br>`saveStaticContentAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。静的コンテンツの生成結果を確認した利用者の「保存」(#1409)は、既存の `static_content` への書き込みだけの操作で、外部システム(LLM・SSH・WordPress)に触れない(生成は `generateStaticContentAction` が非同期ジョブとして受け付ける)。軽い書き込みは予算対象にするという利用者の決定(2026-10-08、#1623 と同じ基準。#1661) | 予算対象 |
 | `app/users/[id]/edit/actions.ts`<br>`updateUserProfileAction`<br>`uploadAvatarAction`<br>`updatePreferencesAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/users/actions.ts`<br>`createUserAction`<br>`deleteUserAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 
