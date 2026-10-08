@@ -23,10 +23,26 @@ const REPO = '/repos/e2e-stub/acceptance';
 const STUB_TOKEN = 'e2e-stub-token';
 const LARGE_PNG_BYTES = 1024 * 1024 + 1024;
 
+/** この機能が読む応答 JSON のフィールド(API とスタブの応答で共用する)。 */
+interface ResponseJson {
+  number: number;
+  slug: string;
+  body: string;
+  frontMatter: {
+    title: string;
+    status: string;
+    categories: string[];
+    tags: string[];
+    featuredImage: string;
+    publishScheduledAt: string;
+  };
+  assets: { name: string; size: number }[];
+}
+
 interface ArticleResponse {
   status: number;
   text: string;
-  json: any;
+  json: ResponseJson;
 }
 
 interface ArticleFixture {
@@ -35,7 +51,7 @@ interface ArticleFixture {
   slug?: string;
 }
 
-async function stub(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function stub(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: ResponseJson }> {
   const res = await fetch(`${STUB_URLS.github}${pathname}`, {
     method,
     headers: {
@@ -128,13 +144,13 @@ async function fetchArticle(
     { headers: { Authorization: `Bearer ${token}` } }
   );
   const text = await response.text();
-  let json: any = null;
+  let json: ResponseJson | null = null;
   try {
     json = JSON.parse(text);
   } catch {
     json = null;
   }
-  return { status: response.status(), text, json };
+  return { status: response.status(), text, json: json as ResponseJson };
 }
 
 Given(

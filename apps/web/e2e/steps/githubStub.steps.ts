@@ -13,10 +13,40 @@ const GITHUB = STUB_URLS.github;
 const REPO = '/repos/e2e-stub/acceptance';
 const DEFAULT_TOKEN = 'e2e-stub-token';
 
+/** この機能が読むスタブ応答 JSON のフィールド。配列の応答は呼び出し側で StubItem[] として扱う。 */
+interface StubBody {
+  number: number;
+  head: { ref: string; sha: string };
+  base: { ref: string };
+  state: string;
+  mergeable: boolean;
+  merged: boolean;
+  default_branch: string;
+  encoding: string;
+  content: string;
+  sha: string;
+  size: number;
+}
+
+interface StubItem {
+  number: number;
+  filename: string;
+  body: string;
+}
+
+interface ComposeConfig {
+  services: {
+    publishing: {
+      environment: { GITHUB_API_BASE_URL: string };
+      depends_on: Record<string, unknown>;
+    };
+  };
+}
+
 interface StubResponse {
   status: number;
   headers: Headers;
-  body: any;
+  body: StubBody;
 }
 
 async function call(
@@ -42,7 +72,7 @@ const state: {
   head: string;
   files: string[];
   sha?: string;
-  compose?: any;
+  compose?: ComposeConfig;
 } = { head: '', files: [] };
 
 Given('GitHubスタブが起動している', async () => {
@@ -96,7 +126,7 @@ Then(
 Then('open のPR一覧に作成したPRが含まれる', async () => {
   const res = await call('GET', `${REPO}/pulls?state=open`);
   expect(res.status).toBe(200);
-  expect((res.body as any[]).map((p) => p.number)).toContain(createdNumber());
+  expect((res.body as unknown as StubItem[]).map((p) => p.number)).toContain(createdNumber());
 });
 
 Then('作成したPRの詳細は mergeable が true で merged が false である', async () => {
@@ -150,7 +180,7 @@ Then('ブランチ削除の応答は 204 である', async () => {
 When(/^シードのPR「(\d+)」の変更ファイル一覧を取得する$/, async ({}, n: string) => {
   const res = await call('GET', `${REPO}/pulls/${n}/files`);
   expect(res.status).toBe(200);
-  state.files = (res.body as any[]).map((f) => f.filename);
+  state.files = (res.body as unknown as StubItem[]).map((f) => f.filename);
 });
 
 Then(/^変更ファイルに「(.+)」が含まれる$/, async ({}, file: string) => {
@@ -213,7 +243,7 @@ Then(
   async ({}, n: string, first: string, second: string) => {
     const res = await call('GET', `${REPO}/issues/${n}/comments`);
     expect(res.status).toBe(200);
-    const bodies = (res.body as any[]).map((c) => c.body);
+    const bodies = (res.body as unknown as StubItem[]).map((c) => c.body);
     expect(bodies.slice(-2)).toEqual([first, second]);
   }
 );
@@ -245,11 +275,11 @@ When('e2eスタブのcompose設定を展開する', async () => {
 });
 
 Then('publishing サービスの GITHUB_API_BASE_URL は github-stub を指している', async () => {
-  expect(state.compose.services.publishing.environment.GITHUB_API_BASE_URL).toBe('http://github-stub:8080');
+  expect(state.compose!.services.publishing.environment.GITHUB_API_BASE_URL).toBe('http://github-stub:8080');
 });
 
 Then('publishing サービスは github-stub に depends_on している', async () => {
-  expect(Object.keys(state.compose.services.publishing.depends_on)).toContain('github-stub');
+  expect(Object.keys(state.compose!.services.publishing.depends_on)).toContain('github-stub');
 });
 
 /* ---- リセット(github-stub-reset.feature) ---- */
@@ -265,7 +295,7 @@ When('GitHubスタブをリセットする', async () => {
 
 Then(/^PR一覧の番号はシードの「(\d+)」「(\d+)」だけである$/, async ({}, a: string, b: string) => {
   const res = await call('GET', `${REPO}/pulls?state=all`);
-  expect((res.body as any[]).map((p) => p.number)).toEqual([Number(a), Number(b)]);
+  expect((res.body as unknown as StubItem[]).map((p) => p.number)).toEqual([Number(a), Number(b)]);
 });
 
 Then(/^PR「(\d+)」のコメント一覧は空である$/, async ({}, n: string) => {

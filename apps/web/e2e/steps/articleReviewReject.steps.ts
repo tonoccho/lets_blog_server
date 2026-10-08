@@ -21,10 +21,23 @@ const MYSQL_CONTAINER = 'lbs-mysql';
 /** 管理者とは別の利用者として挿入する提出者の ID の増分。 */
 const OTHER_USER_OFFSET = 900_000;
 
+/** 差し戻し応答の JSON。一覧(配列)の応答は呼び出し側で ReviewRow[] として扱う。 */
+interface ResponseJson {
+  state: string;
+  commentId: number;
+}
+
+interface ReviewRow {
+  articleSlug: string;
+  state: string;
+  rejectComment: string;
+  rejectedAt?: string;
+}
+
 interface ApiResponse {
   status: number;
   text: string;
-  json: any;
+  json: ResponseJson;
 }
 
 function projectId(ctx: Record<string, unknown>): number {
@@ -64,13 +77,13 @@ async function adminUserId(request: APIRequestContext): Promise<number> {
 
 async function call(response: Awaited<ReturnType<APIRequestContext['post']>>): Promise<ApiResponse> {
   const text = await response.text();
-  let json: any = null;
+  let json: ResponseJson | null = null;
   try {
     json = JSON.parse(text);
   } catch {
     json = null;
   }
-  return { status: response.status(), text, json };
+  return { status: response.status(), text, json: json as ResponseJson };
 }
 
 async function stubComments(pr: number): Promise<Array<{ id: number; body: string }>> {
@@ -209,15 +222,15 @@ Then(
   async ({ ctx }, slug: string, state: string, comment: string) => {
     const response = ctx.myReviewsResponse as ApiResponse;
     expect(response.status, `一覧の取得に失敗した: ${response.text}`).toBe(200);
-    const row = (response.json as any[]).find((r) => r.articleSlug === slug);
+    const row = (response.json as unknown as ReviewRow[]).find((r) => r.articleSlug === slug);
     expect(row, `一覧に記事「${slug}」が無い: ${response.text}`).toBeTruthy();
-    expect(row.state).toBe(state);
-    expect(row.rejectComment).toContain(comment);
-    expect(row.rejectedAt, '差し戻し時刻が無い').toBeTruthy();
+    expect(row!.state).toBe(state);
+    expect(row!.rejectComment).toContain(comment);
+    expect(row!.rejectedAt, '差し戻し時刻が無い').toBeTruthy();
   }
 );
 
 Then(/^一覧に記事「(.+)」は含まれない$/, async ({ ctx }, slug: string) => {
   const response = ctx.myReviewsResponse as ApiResponse;
-  expect((response.json as any[]).map((r) => r.articleSlug)).not.toContain(slug);
+  expect((response.json as unknown as ReviewRow[]).map((r) => r.articleSlug)).not.toContain(slug);
 });

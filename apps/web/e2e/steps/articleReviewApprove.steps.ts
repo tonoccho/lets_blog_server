@@ -33,10 +33,19 @@ interface ReviewFixture {
   slug: string;
 }
 
+/** この機能が読む応答 JSON のフィールド(API とスタブの応答で共用する)。 */
+interface ResponseJson {
+  prNumber: number;
+  number: number;
+  productionPostUrl?: string;
+  merged: boolean;
+  state: string;
+}
+
 interface ApiResponse {
   status: number;
   text: string;
-  json: any;
+  json: ResponseJson;
 }
 
 interface PrOptions {
@@ -55,7 +64,7 @@ async function adminToken(request: APIRequestContext): Promise<string> {
   return fetchAccessToken(request, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
 }
 
-async function stub(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function stub(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: ResponseJson }> {
   const res = await fetch(`${STUB_URLS.github}${pathname}`, {
     method,
     headers: {
@@ -129,13 +138,13 @@ function siteKeyOf(ctx: Record<string, unknown>): string {
 
 async function call(response: Awaited<ReturnType<APIRequestContext['post']>>): Promise<ApiResponse> {
   const text = await response.text();
-  let json: any = null;
+  let json: ResponseJson | null = null;
   try {
     json = JSON.parse(text);
   } catch {
     json = null;
   }
-  return { status: response.status(), text, json };
+  return { status: response.status(), text, json: json as ResponseJson };
 }
 
 function wpCli(siteKey: string, args: string[]): string {

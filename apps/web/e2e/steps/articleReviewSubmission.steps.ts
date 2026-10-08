@@ -22,10 +22,25 @@ import { STUB_URLS } from '../support/stubs';
 const REPO = '/repos/e2e-stub/acceptance';
 const STUB_TOKEN = 'e2e-stub-token';
 
+/** この機能が読む応答 JSON のフィールド(API とスタブの応答で共用する)。 */
+interface ResponseJson {
+  prNumber: number;
+  number: number;
+  url: string;
+  body: string;
+  submittedByUserId: number;
+  state: string;
+}
+
+interface StubPull {
+  number: number;
+  head: { ref: string };
+}
+
 interface SubmissionResponse {
   status: number;
   text: string;
-  json: any;
+  json: ResponseJson;
 }
 
 interface BranchFixture {
@@ -33,7 +48,7 @@ interface BranchFixture {
   firstPrNumber?: number;
 }
 
-async function stub(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function stub(method: string, pathname: string, body?: unknown): Promise<{ status: number; json: ResponseJson }> {
   const res = await fetch(`${STUB_URLS.github}${pathname}`, {
     method,
     headers: {
@@ -89,13 +104,13 @@ async function submit(
     data: { headBranch: head, githubIssueNumber: issueNumber, articleSlug: slug },
   });
   const text = await response.text();
-  let json: any = null;
+  let json: ResponseJson | null = null;
   try {
     json = JSON.parse(text);
   } catch {
     json = null;
   }
-  return { status: response.status(), text, json };
+  return { status: response.status(), text, json: json as ResponseJson };
 }
 
 async function adminUserId(request: APIRequestContext): Promise<number> {
@@ -105,9 +120,9 @@ async function adminUserId(request: APIRequestContext): Promise<number> {
   return ((await response.json()) as { id: number }).id;
 }
 
-async function openPullRequestsFor(head: string): Promise<any[]> {
+async function openPullRequestsFor(head: string): Promise<StubPull[]> {
   const res = await stub('GET', `${REPO}/pulls?state=open`);
-  return (res.json as any[]).filter((pr) => pr.head.ref === head);
+  return (res.json as unknown as StubPull[]).filter((pr) => pr.head.ref === head);
 }
 
 Given('開いているPRが無いプッシュ済みのブランチがスタブに用意されている', async ({ ctx }) => {
