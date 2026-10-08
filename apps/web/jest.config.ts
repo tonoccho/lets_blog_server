@@ -16,6 +16,14 @@ const config: Config = {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  // 負荷のあるホストでも落ちないようにする(#1692)。
+  //
+  // 既定ではワーカー数が「コア数 − 1」、1 テストのタイムアウトが 5 秒になる。無人ループや共有スタックで
+  // load average が高いホストで jsdom のワーカーを 7 本走らせると CPU を奪い合い、変更と無関係な
+  // スイートが 5 秒に触れて pre-commit が拒否された(#1677)。ワーカーを半分に減らして取り合いを抑え、
+  // タイムアウトは 20 秒へ引き上げる。テストの skip・リトライ・アサーションの緩和はしていない。
+  maxWorkers: '50%',
+  testTimeout: 20000,
   // テストとして拾うファイルを明示する(issue #994)。
   //
   // 既定の testMatch は `**/?(*.)+(spec|test).[jt]s?(x)` で rootDir(apps/web)全体に及ぶ。
