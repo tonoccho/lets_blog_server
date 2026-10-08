@@ -244,3 +244,38 @@ test('models: POST /v1/models は一覧ではない(404)', async () => {
   const r = await fetch(`${base}/v1/models`, { method: 'POST', body: '{}' });
   assert.equal(r.status, 404);
 });
+
+// ------------------------------------ タグデザイン生成の目印(issue #1586)
+
+const TAG_DESIGN_PROMPT = (user) =>
+  `タグのデザインを生成してください。\n${user}\n出力形式:\n1. CSSは\`\`\`css...\`\`\`で囲まれた形式で出力してください`;
+const cssBlock = (content) => /```css\s*\n([\s\S]*?)\n```/.exec(content)?.[1];
+const completionOf = async (prompt) => (await (await chat([{ role: 'user', content: prompt }])).json()).choices[0].message.content;
+
+test('タグデザイン生成: プロンプトの目印(e2e1409d...)を ```css ブロックに埋め込む', async () => {
+  const content = await completionOf(TAG_DESIGN_PROMPT('背景を淡いグレーに e2e1409dabc123x'));
+  assert.ok(cssBlock(content), '```css ブロックがある');
+  assert.ok(cssBlock(content).includes('e2e1409dabc123x'), 'CSS に目印が入っている');
+});
+
+test('タグデザイン生成: 目印ごとに CSS が異なる(並列シナリオと取り違えない)', async () => {
+  const a = cssBlock(await completionOf(TAG_DESIGN_PROMPT('e2e1409daaa1')));
+  const b = cssBlock(await completionOf(TAG_DESIGN_PROMPT('e2e1409dbbb2')));
+  assert.notEqual(a, b);
+  assert.ok(!a.includes('e2e1409dbbb2'));
+});
+
+test('目印の無いタグデザイン生成は従来どおり固定のCSSを返す', async () => {
+  const content = await completionOf(TAG_DESIGN_PROMPT('背景を淡いグレーに'));
+  assert.ok(cssBlock(content).includes('.e2e-stub-tag {'));
+  assert.ok(!content.includes('e2e1409d'));
+});
+
+test('カスタムタグ生成(目印 e2e1409g/e2e1409a)は従来どおり固定のCSSを返す', async () => {
+  for (const marker of ['e2e1409gzzz', 'e2e1409azzz']) {
+    const content = await completionOf(`カスタムタグを生成してください ${marker}`);
+    assert.ok(content.includes('```html'));
+    assert.ok(cssBlock(content).includes('.e2e-stub-tag {'));
+    assert.ok(!cssBlock(content).includes(marker));
+  }
+});

@@ -37,6 +37,30 @@ const CUSTOM_TAG_COMPLETION = [
   '',
 ].join('\n');
 
+/**
+ * タグデザイン生成(issue #1586)がプロンプトへ入れる、要求ごとの目印。
+ * `e2e1409d` は受け入れテスト(llmGenerationJob.steps.ts の requestTagDesignGenerationOnScreen)が
+ * 付ける接頭辞で、カスタムタグ生成(`e2e1409g` / `e2e1409a`)の目印とは別。接頭辞まで一致したものだけを
+ * 拾うので、カスタムタグ生成など目印を使わない呼び元は従来の {@link CUSTOM_TAG_COMPLETION} のまま。
+ * スタブの共有状態を書き換えず、プロンプトから目印を読むだけなので、並列のシナリオと奪い合わない。
+ */
+const TAG_DESIGN_MARKER_PATTERN = /e2e1409d[0-9a-z]+/;
+
+/** 目印入りのCSSを ```css ブロックで返す。TagDesignGenerationService の CSS_PATTERN に合わせる。 */
+function tagDesignMarkedCompletion(marker) {
+  return [
+    'E2Eスタブによるタグデザインの生成結果です。',
+    '',
+    '```css',
+    `.e2e-stub-tag-${marker} {`,
+    '  display: inline-block;',
+    '  padding: 4px 8px;',
+    '}',
+    '```',
+    '',
+  ].join('\n');
+}
+
 const DRAFT_COMPLETION = [
   '# E2Eスタブの下書き',
   '',
@@ -491,6 +515,10 @@ function completionFor(prompt) {
   const jsonCompletion = jsonFormatCompletionFor(prompt);
   if (jsonCompletion !== null) {
     return jsonCompletion;
+  }
+  const tagDesignMarker = TAG_DESIGN_MARKER_PATTERN.exec(prompt);
+  if (tagDesignMarker !== null && p.includes('```css')) {
+    return tagDesignMarkedCompletion(tagDesignMarker[0]);
   }
   if (prompt.includes('カスタムタグ') || p.includes('custom tag') || p.includes('```css')) {
     return CUSTOM_TAG_COMPLETION;

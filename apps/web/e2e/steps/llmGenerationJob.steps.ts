@@ -273,6 +273,32 @@ Then('タグデザイン画面に、生成結果が未保存として表示さ�
   await expect(block.locator('pre').first()).not.toBeEmpty();
 });
 
+/** 要求時にプロンプトへ入れた目印(`e2e1409d<suffix>`)。スタブがこれを生成CSSへ埋め込む。 */
+function tagDesignMarker(ctx: ScenarioState): string {
+  const marker = (ctx.llmMarkers as string[] | undefined)?.[0];
+  expect(marker, 'プロンプトに入れた目印がシナリオ状態にありません').toMatch(/^e2e1409d/);
+  return marker as string;
+}
+
+Then('未保存の生成結果に、プロンプトに入れた目印入りの生成CSSが表示される', async ({ ctx, page }) => {
+  const marker = tagDesignMarker(ctx);
+  await expect(page.getByTestId('tag-design-generated').locator('pre').first()).toContainText(marker, {
+    timeout: UI_TIMEOUT_MS,
+  });
+});
+
+Then(
+  '組み込みタグデザインの編集欄の[toc]のCSSに、プロンプトに入れた目印入りの生成CSSが表示される',
+  async ({ ctx, page }) => {
+    const marker = tagDesignMarker(ctx);
+    await page.getByRole('row').filter({ hasText: '[toc]' }).getByRole('button', { name: '編集' }).click();
+    const textarea = page.locator('textarea[name="customCss"]');
+    // CSS欄はハイドレーション完了(mounted)までdisabled(#1144)。値の読み取りも完了を待つ。
+    await expect(textarea).toBeEnabled({ timeout: UI_TIMEOUT_MS });
+    await expect(textarea).toHaveValue(new RegExp(marker), { timeout: UI_TIMEOUT_MS });
+  }
+);
+
 When('タグデザインの生成結果の「保存」を押す', async ({ page }) => {
   const save = page.getByTestId('tag-design-generated').getByRole('button', { name: '保存', exact: true });
   await expect(save).toBeVisible({ timeout: UI_TIMEOUT_MS });
