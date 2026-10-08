@@ -1016,6 +1016,32 @@ GA / AdSense / Brave / GitHub の資格情報は**プロジェクト単位のDB�
 気づかれずに残った。スタブを起動していないことは環境の不備であって、
 検証しなくてよい理由ではない。
 
+### 実 Brave の 422 が出たら、ai コンテナが e2e-stubs なしで作られている(#1515)
+
+`Brave Search呼び出しに失敗しました: 422 SUBSCRIPTION_TOKEN_INVALID` は**スタブの応答ではない**。
+`brave-stub` が `SUBSCRIPTION_TOKEN_INVALID` を返すのは `e2e-stub-invalid-key` のときだけで、
+ステータスは 401(上の表)。422 なら `ai` が実 Brave(`https://api.search.brave.com`)へ到達している。
+`BraveSearchClient` の向き先は `app.brave-search-base-url`(`BRAVE_SEARCH_BASE_URL`)だけで決まるので、
+コードではなく `ai` コンテナが `docker-compose.e2e-stubs.yml` を重ねずに作られたことを疑う。
+
+見分け方:
+
+```bash
+docker inspect lbs-ai --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}'
+docker inspect lbs-ai --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E 'BRAVE_SEARCH_BASE_URL|SPRING_PROFILES_ACTIVE'
+```
+
+正しい構成は、`config_files` に `docker-compose.yml`・`docker-compose.e2e-stubs.yml`・
+`docker-compose.shared-host.yml` が並び、`BRAVE_SEARCH_BASE_URL=http://brave-stub:8080` と
+`SPRING_PROFILES_ACTIVE=e2e-stubs` が見えること。どちらかが欠けていれば戻す:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml -f docker-compose.shared-host.yml \
+  up -d --force-recreate ai
+```
+
+(80/443 を共有しないホストでは `shared-host` を除く。§12 参照。)
+
 ### スタブを直したら再起動する
 
 ソースはコンテナへ**マウント**されているが、Node はプロセス起動時に読み込む。
