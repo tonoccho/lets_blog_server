@@ -1,3 +1,16 @@
+# 鮮度確認(scripts/check-image-freshness.py, #1686)が読む、ソース内容のスタンプ。
+# ビルド本体とは独立したステージで、ここの COPY はビルドコンテキスト全体(ソースパス表)と
+# 同じ集合にすること(単体テスト DockerfileStampStages が照合する)。最終イメージの末尾に
+# 1層足すだけなので、ビルドキャッシュを壊さない。
+FROM wordpress:php8.3-apache AS stamp
+WORKDIR /ctx
+COPY . /ctx
+# 追跡されない node_modules(packages/ 配下の npm install 済み)は数えない。
+RUN cd /ctx && find . -name node_modules -prune -o -type f -print | sed 's|^\./||' | LC_ALL=C sort \
+    | while IFS= read -r f; do \
+        printf '%s  %s\n' "$({ printf 'blob %s\0' "$(wc -c < "$f")"; cat "$f"; } | sha1sum | cut -d' ' -f1)" "$f"; \
+    done | sha1sum | cut -d' ' -f1 > /lbs-source-stamp
+
 FROM wordpress:php8.3-apache
 
 # WP-CLI・MySQLクライアント(DB作成用)を追加する。
@@ -27,5 +40,8 @@ COPY provision-agent /var/www/provision-agent
 COPY letsblog-plugin /var/www/letsblog-plugin
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
+
+# 鮮度確認用のソース内容スタンプ(#1686)。末尾に置き、上の層のキャッシュに影響させない。
+COPY --from=stamp /lbs-source-stamp /etc/lbs-source-stamp
 
 ENTRYPOINT ["start.sh"]

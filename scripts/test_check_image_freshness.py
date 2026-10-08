@@ -40,16 +40,26 @@ def iso(epoch):
     )
 
 
-def fakes(image_created, commits, running=None, missing_image=()):
+def fakes(image_created, commits, running=None, missing_image=(), stamps=None, trees=None):
     """`_docker` / `_git` の代わりを返す。
 
     image_created: {service: epoch}。running に無い/ここに無いサービスは稼働していない扱い。
     commits: {service: (epoch, hash)} 。無いサービスはコミットが触れていない(git が空を返す)。
+    stamps: {service: 内容スタンプ}。イメージに焼き込まれたスタンプ(#1686)。無いサービスは
+        スタンプを持たない(古いイメージ)扱いで、`docker exec cat` が失敗する。
+    trees: {service: [(リポジトリルート相対パス, blob sha), ...]}。`HEAD` の `git ls-tree` の結果。
     """
+    stamps = stamps or {}
+    trees = trees or {}
     running = set(image_created) if running is None else set(running)
     paths_to_service = {tuple(v): k for k, v in cif.SERVICE_SOURCE_PATHS.items()}
 
     def _docker(args):
+        if args[0] == "exec":
+            svc = args[1][4:]
+            if svc in stamps:
+                return 0, stamps[svc] + "\n", ""
+            return 1, "", "cat: can't open '%s': No such file or directory" % cif.STAMP_PATH
         if args[0] == "ps":
             svc = [a for a in args if a.startswith("label=com.docker.compose.service=")][0]
             svc = svc.split("=", 2)[2]
@@ -67,15 +77,189 @@ def fakes(image_created, commits, running=None, missing_image=()):
         raise AssertionError("unexpected docker args: %r" % (args,))
 
     def _git(args, cwd):
-        assert args[:2] == ["log", "-1"], args
         paths = tuple(args[args.index("--") + 1:])
         svc = paths_to_service[paths]
+        if args[0] == "ls-tree":
+            assert args[1:4] == ["-r", "-z", "HEAD"], args
+            return 0, "".join(
+                "100644 blob %s\t%s\0" % (sha, path) for path, sha in trees.get(svc, [])
+            ), ""
+        assert args[:2] == ["log", "-1"], args
         if svc not in commits:
             return 0, "", ""
         ts, h = commits[svc]
         return 0, "%d %s\n" % (ts, h), ""
 
     return _docker, _git
+
+
+def sha1(text):
+    import hashlib
+
+    return hashlib.sha1(text.encode()).hexdigest()
+
+
+def blob(n):
+    """テスト用の blob sha(40桁の16進)。"""
+    return sha1("blob-%s" % n)
+
+
+def expected_stamp(entries):
+    """イメージ側のスタンプと同じ定義: `<blob sha>  <コンテキスト相対パス>\n` のパス順の sha1。"""
+    return sha1("".join("%s  %s\n" % (sha, path) for path, sha in sorted(entries)))
+
+
+MEDIA_TREE = [("services/media/A.java", blob(1)), ("packages/x/B.java", blob(2))]
+MEDIA_STAMP = expected_stamp(MEDIA_TREE)
+
+
+class SourceStamp(unittest.TestCase):
+    """内容スタンプ(#1686): イメージに焼き込まれる値と、HEAD から計算する値の定義。"""
+
+    def head_stamp(self, service, tree):
+        d, g = fakes({service: T0}, {}, trees={service: tree})
+        with mock.patch.object(cif, "_git", g):
+            return cif.head_source_stamp(service, REPO_ROOT)
+
+    def test_stamp_is_sha1_of_sorted_blob_lines(self):
+        self.assertEqual(self.head_stamp("media", MEDIA_TREE), MEDIA_STAMP)
+
+    def test_order_of_git_output_does_not_matter(self):
+        self.assertEqual(self.head_stamp("media", list(reversed(MEDIA_TREE))), MEDIA_STAMP)
+
+    def test_web_paths_are_relative_to_the_build_context(self):
+        tree = [("apps/web/package.json", blob(3)), ("apps/web/Dockerfile", blob(4))]
+        self.assertEqual(
+            self.head_stamp("web", tree),
+            expected_stamp([("package.json", blob(3)), ("Dockerfile", blob(4))]),
+        )
+
+    def test_wordpress_paths_are_relative_to_the_build_context(self):
+        tree = [("infra/wordpress/start.sh", blob(5))]
+        self.assertEqual(
+            self.head_stamp("wordpress", tree), expected_stamp([("start.sh", blob(5))])
+        )
+
+    def test_publishing_plugin_keeps_repository_relative_path(self):
+        tree = [("infra/wordpress/letsblog-plugin/p.php", blob(6))]
+        self.assertEqual(self.head_stamp("publishing", tree), expected_stamp(tree))
+
+    def test_path_with_tab_or_non_blob_entries_are_handled(self):
+        d, g = fakes({"media": T0}, {})
+
+        def _git(args, cwd):
+            return 0, "120000 blob %s\tservices/media/link\x00100755 blob %s\tgradlew\0" % (
+                blob(7), blob(8)), ""
+
+        with mock.patch.object(cif, "_git", _git):
+            self.assertEqual(
+                cif.head_source_stamp("media", REPO_ROOT),
+                expected_stamp([("gradlew", blob(8))]),
+            )
+
+    def test_no_tracked_file_returns_none(self):
+        self.assertIsNone(self.head_stamp("media", []))
+
+    def test_git_failure_raises(self):
+        def _git(args, cwd):
+            return 128, "", "fatal: bad"
+
+        with mock.patch.object(cif, "_git", _git):
+            with self.assertRaises(cif.FreshnessError):
+                cif.head_source_stamp("media", REPO_ROOT)
+
+
+class ImageStamp(unittest.TestCase):
+    def read(self, out, code=0):
+        def _docker(args):
+            if args[0] == "ps":
+                return 0, "cid-media\n", ""
+            self.assertEqual(args, ["exec", "cid-media", "cat", cif.STAMP_PATH])
+            return code, out, "" if code == 0 else "No such file"
+
+        with mock.patch.object(cif, "_docker", _docker):
+            return cif.image_stamp("media")
+
+    def test_reads_stamp_from_running_container(self):
+        self.assertEqual(self.read(MEDIA_STAMP + "\n"), MEDIA_STAMP)
+
+    def test_missing_file_means_no_stamp(self):
+        self.assertIsNone(self.read("", code=1))
+
+    def test_malformed_content_means_no_stamp(self):
+        self.assertIsNone(self.read("not-a-sha\n"))
+
+    def test_not_running_means_no_stamp(self):
+        with mock.patch.object(cif, "_docker", lambda a: (0, "", "")):
+            self.assertIsNone(cif.image_stamp("media"))
+
+    def test_docker_ps_failure_raises_unavailable(self):
+        with mock.patch.object(cif, "_docker", lambda a: (1, "", "daemon down")):
+            with self.assertRaises(cif.DockerUnavailable):
+                cif.image_stamp("media")
+
+
+class DockerfileStampStages(unittest.TestCase):
+    """各 Dockerfile の `stamp` ステージが取り込むパスは、対応表と一致する(#1686)。
+
+    ずれると、イメージ側のスタンプと HEAD から計算する値が永久に食い違い、ビルドし直しても
+    「古い」が消えない。
+    """
+
+    CONTEXT = {"web": "apps/web", "wordpress": "infra/wordpress"}
+
+    def stamp_copy_sources(self, service):
+        import re
+
+        context = self.CONTEXT.get(service, "")
+        dockerfile = os.path.join(
+            REPO_ROOT, context or os.path.join("services", service), "Dockerfile"
+        )
+        with open(dockerfile, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        sources = []
+        in_stamp = False
+        for line in lines:
+            if re.match(r"^FROM\s", line):
+                in_stamp = bool(re.search(r"\sAS\s+stamp\s*$", line, re.I))
+                continue
+            if in_stamp and line.startswith("COPY "):
+                parts = line.split()[1:]
+                sources.extend(parts[:-1])
+        return sorted(os.path.normpath(os.path.join(context, p)) for p in sources)
+
+    def test_every_dockerfile_has_a_stamp_stage_matching_the_table(self):
+        for service, paths in cif.SERVICE_SOURCE_PATHS.items():
+            expected = sorted(
+                os.path.normpath(p) for p in (["infra/wordpress"] if service == "wordpress" else paths)
+            )
+            actual = self.stamp_copy_sources(service)
+            if service == "wordpress":
+                # `COPY . /ctx`: コンテキスト全体
+                expected = ["infra/wordpress"]
+            self.assertEqual(actual, expected, service)
+
+    def test_stamp_ignores_untracked_node_modules(self):
+        """packages/ 配下の npm install 済み node_modules(追跡されない)を数えない(#1686)。
+
+        数えると、`npm install` した作業ツリーでは HEAD から計算する値と永久に一致しない。
+        """
+        for service in cif.SERVICE_SOURCE_PATHS:
+            context = self.CONTEXT.get(service) or os.path.join("services", service)
+            with open(os.path.join(REPO_ROOT, context, "Dockerfile"), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("-name node_modules -prune", text, service)
+
+    def test_every_dockerfile_installs_the_stamp_into_the_final_image(self):
+        import re
+
+        for service in cif.SERVICE_SOURCE_PATHS:
+            context = self.CONTEXT.get(service) or os.path.join("services", service)
+            with open(os.path.join(REPO_ROOT, context, "Dockerfile"), encoding="utf-8") as f:
+                text = f.read()
+            self.assertRegex(
+                text, r"COPY --from=stamp \S+ %s\b" % re.escape(cif.STAMP_PATH), service
+            )
 
 
 class SourcePathTable(unittest.TestCase):
@@ -176,6 +360,96 @@ class FindStale(unittest.TestCase):
             {"gateway": (T0, "g"), "media": (T0, "m"), "ai": (T0, "a")},
         )
         self.assertEqual(sorted(s["service"] for s in stale), ["gateway", "media"])
+
+
+class FindStaleByContent(unittest.TestCase):
+    """スタンプを持つイメージは、作成時刻ではなく内容で判定する(#1686)。"""
+
+    def run_find(self, created, commits, stamps, trees):
+        d, g = fakes(created, commits, stamps=stamps, trees=trees)
+        with mock.patch.object(cif, "_docker", d), mock.patch.object(cif, "_git", g):
+            return cif.find_stale(cwd=REPO_ROOT)
+
+    def test_same_content_is_fresh_even_if_commit_is_newer_than_image(self):
+        """ビルドキャッシュが効いて作成時刻が古いままでも、内容が同じなら古くない(AC1)。"""
+        stale = self.run_find(
+            {"media": T0 - 100},
+            {"media": (T0, "abc1234")},
+            {"media": MEDIA_STAMP},
+            {"media": MEDIA_TREE},
+        )
+        self.assertEqual(stale, [])
+
+    def test_different_content_is_stale_even_if_image_is_newer_than_commit(self):
+        """内容が違えば、作成時刻が新しくても古い(AC2)。"""
+        stale = self.run_find(
+            {"media": T0 + 100},
+            {"media": (T0, "abc1234")},
+            {"media": sha1("older")},
+            {"media": MEDIA_TREE},
+        )
+        self.assertEqual([s["service"] for s in stale], ["media"])
+        self.assertEqual(stale[0]["image_stamp"], sha1("older"))
+        self.assertEqual(stale[0]["head_stamp"], MEDIA_STAMP)
+
+    def test_stamped_and_unstamped_services_are_judged_independently(self):
+        stale = self.run_find(
+            {"media": T0 - 100, "ai": T0 - 100},
+            {"media": (T0, "m"), "ai": (T0, "a")},
+            {"media": MEDIA_STAMP},
+            {"media": MEDIA_TREE},
+        )
+        self.assertEqual([s["service"] for s in stale], ["ai"])  # ai はスタンプ無し: 時刻比較
+
+    def test_stamped_service_without_tracked_files_is_fresh(self):
+        stale = self.run_find(
+            {"media": T0 - 100}, {"media": (T0, "m")}, {"media": MEDIA_STAMP}, {}
+        )
+        self.assertEqual(stale, [])
+
+    def test_unstamped_image_still_uses_created_time(self):
+        """スタンプを持たないイメージは従来どおり作成時刻で判定する(AC3)。"""
+        stale = self.run_find(
+            {"media": T0 - 100}, {"media": (T0, "abc1234")}, {}, {"media": MEDIA_TREE}
+        )
+        self.assertEqual([s["service"] for s in stale], ["media"])
+        self.assertEqual(stale[0]["commit"], "abc1234")
+
+
+class CheckByContent(unittest.TestCase):
+    def run_check(self, created, commits, stamps, trees, env=None):
+        d, g = fakes(created, commits, stamps=stamps, trees=trees)
+        with mock.patch.object(cif, "_docker", d), mock.patch.object(cif, "_git", g), \
+                mock.patch.dict(os.environ, env or {}, clear=False):
+            if not env:
+                os.environ.pop(cif.BYPASS_ENV, None)
+            return cif.check(cwd=REPO_ROOT)
+
+    def test_rebuilt_from_cache_passes(self):
+        ok, _ = self.run_check(
+            {"media": T0 - 100}, {"media": (T0, "abc")}, {"media": MEDIA_STAMP}, {"media": MEDIA_TREE}
+        )
+        self.assertTrue(ok)
+
+    def test_content_mismatch_aborts_and_shows_rebuild_command(self):
+        ok, msg = self.run_check(
+            {"media": T0 + 100}, {"media": (T0, "abc")}, {"media": sha1("old")}, {"media": MEDIA_TREE}
+        )
+        self.assertFalse(ok)
+        self.assertIn("media", msg)
+        self.assertIn("up -d --build media", msg)
+        self.assertIn(sha1("old")[:12], msg)
+        self.assertIn(MEDIA_STAMP[:12], msg)
+        self.assertIn(cif.BYPASS_ENV, msg)
+
+    def test_bypass_logs_content_mismatch_and_continues(self):
+        ok, msg = self.run_check(
+            {"media": T0 + 100}, {"media": (T0, "abc")}, {"media": sha1("old")},
+            {"media": MEDIA_TREE}, env={cif.BYPASS_ENV: "1"},
+        )
+        self.assertTrue(ok)
+        self.assertIn("media", msg)
+        self.assertIn(cif.BYPASS_ENV, msg)
 
 
 class Check(unittest.TestCase):

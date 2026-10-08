@@ -19,12 +19,35 @@
 
     python3 scripts/check-image-freshness.py
 
+## 内容スタンプ(#1686、利用者が 2026-10-08 に決定。上の「古い」の定義を置き換える)
+
+ビルドキャッシュが全面的に効くと、ソースの中身が同じでもイメージは作り直されず `Created` が
+古いままなので、作成時刻の比較は「作り直したのに古い」を出し続ける。そこで各イメージに、
+ソースの**内容**から決まる値(スタンプ)を焼き込み、`HEAD` の同じパスの内容と比べる。
+
+- 値: `<blob sha1>  <ビルドコンテキスト相対パス>\n` を、パスのバイト順に並べた全体の sha1。
+  blob sha1 は git のオブジェクト id と同じ(`blob <size>\0<内容>` の sha1)なので、
+  イメージ側(各 Dockerfile の `stamp` ステージ)は `sha1sum` だけで、`HEAD` 側は
+  `git ls-tree -r HEAD` だけで同じ値になる。
+- SHA ではなくハッシュを選んだ理由: コミット SHA はソースに触れないコミット(docs など)でも
+  変わり、キャッシュが効いてもスタンプが変わる(=誤検知が戻る)。内容のハッシュは内容が同じなら
+  同じで、ビルドキャッシュの層も壊さない(`stamp` ステージはビルド本体と独立で、最終イメージの
+  末尾に1つ層を足すだけ)。
+- ラベルでなくイメージ内のファイル(`STAMP_PATH`)にした理由: ラベルの値は compose の
+  `${VAR}` 補間か `ARG` でしか渡せず、ハッシュは呼び出し側が計算して環境変数で渡すことになる
+  (Requirement 3: 呼び出し側に何も要求しない、に反する)。Dockerfile の `RUN` で計算した値は
+  ファイルにしかできない。稼働中コンテナから `docker exec cat` で読む。
+- スタンプを持たないイメージ(#1686 より前に作られたもの)は、従来の作成時刻の比較にフォールバックする。
+- 未コミットの変更は見ない(#1653 と同じ)。ただしイメージ側はビルドコンテキストの実ファイルを
+  数えるので、ソースパス配下の追跡されていないファイルは「古い」の原因になりうる。
+
 単体テスト: `python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'`
 (`scripts/test_check_image_freshness.py` のモジュール docstring に、Gherkin ではなく
 ここで検証する理由を書いてある)。
 """
 
 import datetime
+import hashlib
 import os
 import re
 import subprocess
@@ -35,6 +58,8 @@ REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
 BYPASS_ENV = "AT_STALE_IMAGE_CHECK_BYPASS"
 COMPOSE_PROJECT_NAME = "lets_blog_server"
+# 各 Dockerfile の `stamp` ステージが書き込み、最終イメージへ COPY するファイル(#1686)。
+STAMP_PATH = "/etc/lbs-source-stamp"
 
 # ---------------------------------------------------------------- サービス→ソースパス表
 #
@@ -96,6 +121,9 @@ SERVICE_SOURCE_PATHS["web"] = [
 # `COPY uploads.ini`(L24)、`COPY provision-agent`(L26)、`COPY letsblog-plugin`(L27)、
 # `COPY start.sh`(L28)。bind mount は named volume のみでソースを覆わない。
 SERVICE_SOURCE_PATHS["wordpress"] = ["infra/wordpress"]
+
+# ビルドコンテキストのリポジトリ内の位置(スタンプのパスはコンテキスト相対)。無ければリポジトリルート。
+_CONTEXT_DIR = {"web": "apps/web", "wordpress": "infra/wordpress"}
 
 
 # ---------------------------------------------------------------- 外部コマンドの境界
@@ -212,6 +240,60 @@ def image_created(service):
     return created
 
 
+def _running_container(service):
+    """サービスの稼働中コンテナ id。稼働していなければ None。"""
+    code, out, err = _docker(
+        [
+            "ps",
+            "-q",
+            "--filter",
+            "label=com.docker.compose.project=%s" % COMPOSE_PROJECT_NAME,
+            "--filter",
+            "label=com.docker.compose.service=%s" % service,
+        ]
+    )
+    if code != 0:
+        raise DockerUnavailable(err.strip() or "docker ps に失敗しました")
+    return out.split()[0] if out.split() else None
+
+
+def image_stamp(service):
+    """稼働中コンテナのイメージに焼き込まれた内容スタンプ。無い(古いイメージ等)なら None。"""
+    cid = _running_container(service)
+    if not cid:
+        return None
+    code, out, _err = _docker(["exec", cid, "cat", STAMP_PATH])
+    stamp = out.strip() if code == 0 else ""
+    return stamp if re.fullmatch(r"[0-9a-f]{40}", stamp) else None
+
+
+def head_source_stamp(service, cwd):
+    """`HEAD` のソースパスの内容スタンプ(定義はモジュール docstring)。追跡ファイルが無ければ None。"""
+    code, out, err = _git(
+        ["ls-tree", "-r", "-z", "HEAD", "--"] + list(SERVICE_SOURCE_PATHS[service]), cwd
+    )
+    if code != 0:
+        raise FreshnessError("git ls-tree に失敗しました: %s" % err.strip())
+    prefix = _CONTEXT_DIR.get(service, "")
+    prefix = prefix + "/" if prefix else ""
+    entries = []
+    for rec in out.split("\0"):
+        if not rec:
+            continue
+        meta, _, path = rec.partition("\t")
+        mode, kind, sha = meta.split()
+        if kind != "blob" or mode == "120000":
+            continue  # find -type f が数えるのは通常ファイルだけ
+        if prefix and path.startswith(prefix):
+            path = path[len(prefix):]
+        entries.append((path.encode(), sha))
+    if not entries:
+        return None
+    entries.sort()
+    text = b"".join(b"%s  %s\n" % (sha.encode(), path) for path, sha in entries)
+    return hashlib.sha1(text).hexdigest()
+
+
 def latest_commit(paths, cwd):
     """`paths` に触れた最新コミットの (コミット時刻, 短縮ハッシュ)。無ければ None。"""
     code, out, err = _git(["log", "-1", "--format=%ct %h", "--"] + list(paths), cwd)
@@ -232,6 +314,12 @@ def find_stale(cwd=None):
         created = image_created(service)
         if created is None:
             continue  # 稼働していない。起動の有無は healthy 待ちの責務。
+        stamp = image_stamp(service)
+        if stamp is not None:
+            head = head_source_stamp(service, cwd)
+            if head is not None and head != stamp:
+                stale.append({"service": service, "image_stamp": stamp, "head_stamp": head})
+            continue  # スタンプを持つイメージは作成時刻を見ない(#1686)
         commit = latest_commit(paths, cwd)
         if commit is None:
             continue
@@ -253,12 +341,23 @@ def _fmt(epoch):
     )
 
 
-def _describe(stale):
-    return "\n".join(
-        "  - %s: イメージ作成 %s / 最新コミット %s (%s)"
-        % (s["service"], _fmt(s["image_created"]), _fmt(s["commit_time"]), s["commit"])
-        for s in stale
+def _describe_one(s):
+    if "image_stamp" in s:
+        return "  - %s: イメージのソース内容 %s / HEAD のソース内容 %s" % (
+            s["service"],
+            s["image_stamp"][:12],
+            s["head_stamp"][:12],
+        )
+    return "  - %s: イメージ作成 %s / 最新コミット %s (%s)" % (
+        s["service"],
+        _fmt(s["image_created"]),
+        _fmt(s["commit_time"]),
+        s["commit"],
     )
+
+
+def _describe(stale):
+    return "\n".join(_describe_one(s) for s in stale)
 
 
 def check(cwd=None):
