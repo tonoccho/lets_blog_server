@@ -2,6 +2,7 @@ package com.letsblog.publishing.service;
 
 import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsCredentials;
+import com.letsblog.publishing.config.EnvironmentFetchExecutorConfig;
 import com.letsblog.publishing.cms.ssh.WordPressSshOperations;
 import com.letsblog.publishing.domain.AuditLogAction;
 import com.letsblog.publishing.domain.BulkOperationLog;
@@ -14,6 +15,7 @@ import com.letsblog.publishing.dto.StatusComparisonRow;
 import com.letsblog.publishing.dto.StatusEnvironmentValue;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -23,6 +25,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 /**
  * プラグイン・テーマを3環境(ローカル/テスト/本番)で横断比較し、行(slug)ごとに
@@ -54,13 +60,28 @@ public class PluginThemeComparisonService {
     private final SiteService siteService;
     private final ProjectService projectService;
     private final WordPressSshOperations sshOperations;
+    private final ExecutorService environmentFetchExecutor;
 
+    /** 単体テスト用: 本番と同じ上限の専用Executorを内部で作る。 */
     public PluginThemeComparisonService(
             WordPressBulkManagementClient bulkManagementClient,
             BulkManagementService bulkManagementService,
             SiteService siteService,
             ProjectService projectService,
             WordPressSshOperations sshOperations) {
+        this(bulkManagementClient, bulkManagementService, siteService, projectService, sshOperations,
+                EnvironmentFetchExecutorConfig.newExecutor());
+    }
+
+    @Autowired
+    public PluginThemeComparisonService(
+            WordPressBulkManagementClient bulkManagementClient,
+            BulkManagementService bulkManagementService,
+            SiteService siteService,
+            ProjectService projectService,
+            WordPressSshOperations sshOperations,
+            ExecutorService environmentFetchExecutor) {
+        this.environmentFetchExecutor = environmentFetchExecutor;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkManagementService = bulkManagementService;
         this.siteService = siteService;
@@ -149,7 +170,10 @@ public class PluginThemeComparisonService {
         Project project = getProject(projectId);
         Map<String, EnvironmentInfos> byEnvironment = resolveInfosByEnvironment(project, isTheme);
 
-        List<BulkOperationLog> results = new ArrayList<>();
+        // 先に全変更を検証する。対象外の環境・サポート外の遷移は、どの環境にも書き込む前に
+        // IllegalArgumentExceptionで返す(並列実行では「途中まで反映済み」を作らないため)
+        Map<String, List<ReconcilePlan>> plansByEnvironment = new LinkedHashMap<>();
+        int index = 0;
         for (StateChangeRequest change : changes) {
             EnvironmentInfos envInfos = byEnvironment.get(change.environment());
             if (envInfos == null || envInfos.infos() == null) {
@@ -157,12 +181,36 @@ public class PluginThemeComparisonService {
                         change.environment() + "環境は対象外です(自動構築サイト・SSHのいずれも利用できません)");
             }
             String currentStatus = toValue(slug, envInfos).status();
-            for (BulkOperationType step : stepsFor(currentStatus, change.desiredStatus(), isTheme)) {
-                results.add(bulkManagementService.applyToEnvironment(
-                        projectId, change.environment(), step, slug, null, null, null, null, actorId));
-            }
+            plansByEnvironment.computeIfAbsent(change.environment(), k -> new ArrayList<>())
+                    .add(new ReconcilePlan(index++, change.environment(),
+                            stepsFor(currentStatus, change.desiredStatus(), isTheme)));
         }
+
+        // 環境間は並列、環境内(段階の順、同じ環境を複数指定された場合の変更の順)は直列(issue #1687)
+        List<Supplier<Map<Integer, List<BulkOperationLog>>>> tasks = new ArrayList<>();
+        for (List<ReconcilePlan> plans : plansByEnvironment.values()) {
+            tasks.add(() -> {
+                Map<Integer, List<BulkOperationLog>> logsByChange = new TreeMap<>();
+                for (ReconcilePlan plan : plans) {
+                    List<BulkOperationLog> logs = new ArrayList<>();
+                    for (BulkOperationType step : plan.steps()) {
+                        logs.add(bulkManagementService.applyToEnvironment(
+                                projectId, plan.environment(), step, slug, null, null, null, null, actorId));
+                    }
+                    logsByChange.put(plan.index(), logs);
+                }
+                return logsByChange;
+            });
+        }
+        // 結果ログは要求のchangesの順に並べる
+        Map<Integer, List<BulkOperationLog>> ordered = new TreeMap<>();
+        EnvironmentTasks.runAll(environmentFetchExecutor, tasks).forEach(ordered::putAll);
+        List<BulkOperationLog> results = new ArrayList<>();
+        ordered.values().forEach(results::addAll);
         return results;
+    }
+
+    private record ReconcilePlan(int index, String environment, List<BulkOperationType> steps) {
     }
 
     /**
@@ -196,7 +244,8 @@ public class PluginThemeComparisonService {
         Map<String, EnvironmentInfos> byEnvironment = resolveInfosByEnvironment(project, isTheme);
         BulkOperationType deleteType = isTheme ? BulkOperationType.THEME_DELETE : BulkOperationType.PLUGIN_DELETE;
 
-        List<BulkOperationLog> results = new ArrayList<>();
+        // 環境ごとの削除は独立なので並列に走らせる(issue #1687)。結果はENVIRONMENT_ORDER順
+        List<Supplier<BulkOperationLog>> tasks = new ArrayList<>();
         for (String environment : ENVIRONMENT_ORDER) {
             EnvironmentInfos envInfos = byEnvironment.get(environment);
             if (envInfos.infos() == null) {
@@ -206,9 +255,10 @@ public class PluginThemeComparisonService {
             if (NOT_INSTALLED.equals(status)) {
                 continue;
             }
-            results.add(bulkManagementService.applyToEnvironment(
+            tasks.add(() -> bulkManagementService.applyToEnvironment(
                     projectId, environment, deleteType, slug, null, null, null, null, actorId));
         }
+        List<BulkOperationLog> results = EnvironmentTasks.runAll(environmentFetchExecutor, tasks);
         if (results.isEmpty()) {
             throw new IllegalArgumentException("削除対象が見つかりません: " + slug);
         }
@@ -224,43 +274,59 @@ public class PluginThemeComparisonService {
     private Map<String, EnvironmentInfos> resolveInfosByEnvironment(Project project, boolean isTheme) {
         Map<String, EnvironmentInfos> result = new LinkedHashMap<>();
         Map<String, Map<String, CmsCredentials.WordPressCredentials>> sshGroupsByHost = new LinkedHashMap<>();
+        Map<String, CompletableFuture<EnvironmentInfos>> agentFetches = new LinkedHashMap<>();
 
-        for (String environment : ENVIRONMENT_ORDER) {
-            Site site = resolveSite(project, environment);
-            if (site == null) {
+        // 投入後に後続の処理が例外で中断しても、投入済みのagent取得を待ち終えてから例外を伝える
+        try {
+            for (String environment : ENVIRONMENT_ORDER) {
+                Site site = resolveSite(project, environment);
+                if (site == null) {
+                    result.put(environment, EnvironmentInfos.unavailable());
+                    continue;
+                }
+                if (site.isManagedWordpress()) {
+                    // 取得は並列に走らせ、環境の並び(LinkedHashMapの挿入順)はここで確定させる(issue #1687。#1474と同じ方針)
+                    result.put(environment, null);
+                    agentFetches.put(environment,
+                            EnvironmentTasks.submit(environmentFetchExecutor, () -> fetchViaAgent(site, isTheme)));
+                    continue;
+                }
+                SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
+                if (dataSource.hasSsh()) {
+                    String hostKey = hostKeyOf(dataSource.sshCredentials());
+                    sshGroupsByHost.computeIfAbsent(hostKey, k -> new LinkedHashMap<>())
+                            .put(environment, dataSource.sshCredentials());
+                    continue;
+                }
                 result.put(environment, EnvironmentInfos.unavailable());
-                continue;
             }
-            if (site.isManagedWordpress()) {
-                result.put(environment, fetchViaAgent(site, isTheme));
-                continue;
-            }
-            SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
-            if (dataSource.hasSsh()) {
-                String hostKey = hostKeyOf(dataSource.sshCredentials());
-                sshGroupsByHost.computeIfAbsent(hostKey, k -> new LinkedHashMap<>())
-                        .put(environment, dataSource.sshCredentials());
-                continue;
-            }
-            result.put(environment, EnvironmentInfos.unavailable());
-        }
 
-        for (Map<String, CmsCredentials.WordPressCredentials> group : sshGroupsByHost.values()) {
-            WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.PluginThemeInfo> fetchResult =
-                    sshOperations.fetchPluginsOrThemesForEnvironments(isTheme ? "theme" : "plugin", group);
-            for (String environment : group.keySet()) {
-                String error = fetchResult.errorByEnvironment().get(environment);
-                if (error != null) {
-                    logFetchError(project, environment, isTheme, error, fetchResult.stackTraceByEnvironment().get(environment));
-                    result.put(environment, EnvironmentInfos.error(error));
-                } else {
-                    List<PluginThemeInfo> infos = fetchResult.byEnvironment()
-                            .getOrDefault(environment, List.of()).stream()
-                            .map(info -> new PluginThemeInfo(info.name(), info.status()))
-                            .toList();
-                    result.put(environment, EnvironmentInfos.of(infos));
+            for (Map<String, CmsCredentials.WordPressCredentials> group : sshGroupsByHost.values()) {
+                WordPressSshOperations.EnvironmentFetchResult<WordPressSshOperations.PluginThemeInfo> fetchResult =
+                        sshOperations.fetchPluginsOrThemesForEnvironments(isTheme ? "theme" : "plugin", group);
+                for (String environment : group.keySet()) {
+                    String error = fetchResult.errorByEnvironment().get(environment);
+                    if (error != null) {
+                        logFetchError(project, environment, isTheme, error, fetchResult.stackTraceByEnvironment().get(environment));
+                        result.put(environment, EnvironmentInfos.error(error));
+                    } else {
+                        List<PluginThemeInfo> infos = fetchResult.byEnvironment()
+                                .getOrDefault(environment, List.of()).stream()
+                                .map(info -> new PluginThemeInfo(info.name(), info.status()))
+                                .toList();
+                        result.put(environment, EnvironmentInfos.of(infos));
+                    }
                 }
             }
+            // SSHの取得中にagent側も並行して進んでいる。既存キーへのputなので挿入順は変わらない
+            List<String> agentEnvironments = new ArrayList<>(agentFetches.keySet());
+            List<EnvironmentInfos> agentResults = EnvironmentTasks.awaitAll(new ArrayList<>(agentFetches.values()));
+            for (int i = 0; i < agentEnvironments.size(); i++) {
+                result.put(agentEnvironments.get(i), agentResults.get(i));
+            }
+        } catch (RuntimeException | Error e) {
+            EnvironmentTasks.awaitQuietly(agentFetches.values());
+            throw e;
         }
         return result;
     }

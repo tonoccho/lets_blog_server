@@ -272,4 +272,132 @@ class PostComparisonServiceTest {
         log.setCreatedAt(LocalDateTime.now());
         return log;
     }
+
+    // ---- issue #1687: 環境間の並列実行 ----
+
+    @Test
+    void deleteEverywhere_一覧取得も削除も環境間で重なって走り_結果はENVIRONMENT_ORDER順() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        Site localSite = buildSite(10L, "local-site");
+        Site testSite = buildSite(20L, "test-site");
+        Site productionSite = buildSite(30L, "production-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
+        CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
+        CmsCredentials.WordPressCredentials testCreds = creds("https://test.test");
+        CmsCredentials.WordPressCredentials productionCreds = creds("https://production.test");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+        when(siteService.getCredentials("test-site")).thenReturn(testCreds);
+        when(siteService.getCredentials("production-site")).thenReturn(productionCreds);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        OverlapProbe fetchProbe = new OverlapProbe(3);
+        when(cmsAdapter.listPosts(any(), eq("post"))).thenAnswer(invocation -> {
+            fetchProbe.enter();
+            return List.of(new CmsPostSummary("101", "こんにちは", "hello", "publish", "post"));
+        });
+        OverlapProbe deleteProbe = new OverlapProbe(3);
+        when(bulkManagementService.deletePostAtEnvironment(
+                eq(1L), any(), any(), eq("101"), eq("post"), eq("hello"), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    if (environment.equals("local")) {
+                        Thread.sleep(150);
+                    }
+                    deleteProbe.enter();
+                    BulkOperationLog log = buildLog();
+                    log.setEnvironment(environment);
+                    return log;
+                });
+
+        List<BulkOperationLog> results = service.deleteEverywhere(1L, "post", "hello", 9L);
+
+        assertTrue(fetchProbe.allOverlapped(), "3環境の一覧取得が重なって呼ばれていない(逐次実行)");
+        assertTrue(deleteProbe.allOverlapped(), "3環境の削除が重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void deleteEverywhere_1環境の削除が実行時例外でも他環境の削除は最後まで実行される() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildSite(10L, "local-site");
+        Site testSite = buildSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        when(siteService.getCredentials(any())).thenReturn(creds("https://x.test"));
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.listPosts(any(), eq("post"))).thenReturn(
+                List.of(new CmsPostSummary("101", "こんにちは", "hello", "publish", "post")));
+        when(bulkManagementService.deletePostAtEnvironment(
+                eq(1L), eq("local"), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("delete failed"));
+        when(bulkManagementService.deletePostAtEnvironment(
+                eq(1L), eq("test"), any(), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.sleep(100);
+                    return buildLog();
+                });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.deleteEverywhere(1L, "post", "hello", 9L));
+
+        assertEquals("delete failed", thrown.getMessage());
+        org.mockito.Mockito.verify(bulkManagementService).deletePostAtEnvironment(
+                1L, "test", testSite, "101", "post", "hello", 9L);
+    }
+
+    @Test
+    void deleteEverywhere_一覧取得に失敗した環境は他環境の削除を止めずスキップされる() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, 20L, null);
+        Site localSite = buildSite(10L, "local-site");
+        Site testSite = buildSite(20L, "test-site");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
+        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
+        CmsCredentials.WordPressCredentials localCreds = creds("https://local.test");
+        CmsCredentials.WordPressCredentials testCreds = creds("https://test.test");
+        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
+        when(siteService.getCredentials("test-site")).thenReturn(testCreds);
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        when(cmsAdapter.listPosts(localCreds, "post")).thenThrow(new IllegalStateException("fetch failed"));
+        when(cmsAdapter.listPosts(testCreds, "post")).thenReturn(
+                List.of(new CmsPostSummary("201", "こんにちは", "hello", "publish", "post")));
+        when(bulkManagementService.deletePostAtEnvironment(1L, "test", testSite, "201", "post", "hello", 9L))
+                .thenReturn(buildLog());
+
+        List<BulkOperationLog> results = service.deleteEverywhere(1L, "post", "hello", 9L);
+
+        assertEquals(1, results.size());
+        org.mockito.Mockito.verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.POST_FETCH), eq("local"), eq("fetch failed"), any());
+    }
+
+    @Test
+    void 一覧取得_後続環境の解決が失敗しても_投入済みの取得を待ち終えてから例外を投げる() {
+        PostComparisonService service = service();
+        Project project = buildProject(10L, 20L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenThrow(new IllegalStateException("resolve failed"));
+        when(siteService.getCredentials("local-site")).thenReturn(creds("https://local.test"));
+        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        java.util.concurrent.atomic.AtomicBoolean fetchFinished = new java.util.concurrent.atomic.AtomicBoolean();
+        when(cmsAdapter.listPosts(any(), eq("post"))).thenAnswer(invocation -> {
+            Thread.sleep(300);
+            fetchFinished.set(true);
+            return List.of();
+        });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.listComparison(1L, "post", 0, 20));
+
+        assertEquals("resolve failed", thrown.getMessage());
+        assertTrue(fetchFinished.get(), "投入済みの取得が終わる前に例外が呼び出し元へ伝わった(ワーカーが孤児になる)");
+    }
 }

@@ -12,6 +12,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 一括管理の環境間比較(TermComparisonService#resolveTermsByEnvironment)で、環境ごとの
  * agent経由取得を並列に行うための共有Executor(issue #1474)。
  *
+ * <p>issue #1687から、書き込み系(BulkManagementService#applyToAllEnvironments/#executeFromUpload、
+ * PluginThemeComparisonServiceの削除・反映と一覧取得、PostComparisonService#deleteEverywhere)の環境間並列にも
+ * 同じExecutorを使う。WordPressへの同時要求の総量を1つの上限で抑えるため専用プールは作らない。
+ * これらのタスクは別のタスクをこのプールへ投入して待つことはないので、プールの枯渇によるデッドロックはない。
+ *
  * 並列度の上限は{@value #MAX_PARALLELISM}。根拠: 1リクエストが並列にする対象は環境数(local/test/
  * production)の最大3。プールをリクエストをまたいで共有するため、同時に2リクエスト分(3×2)までを
  * 外部への同時取得数の総上限とし、それ以上は環境数に関わらずキューで待たせる。環境ごとに別のWordPress

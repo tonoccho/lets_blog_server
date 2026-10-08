@@ -573,4 +573,282 @@ class PluginThemeComparisonServiceTest {
                 eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("test"), eq("Connection refused"),
                 eq("java.io.IOException: Connection refused\n\tat ..."));
     }
+
+    // ---- issue #1687: 環境間の並列実行 ----
+
+    private void bindThreeManagedSites() {
+        Project project = buildProject(10L, 20L, 30L, "test");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
+    }
+
+    private BulkOperationLog logOf(String environment, BulkOperationType type) {
+        BulkOperationLog log = new BulkOperationLog();
+        log.setEnvironment(environment);
+        log.setOperationType(type);
+        return log;
+    }
+
+    @Test
+    void 一覧取得_managed環境ごとのagent取得が重なって走る() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        OverlapProbe probe = new OverlapProbe(3);
+        when(bulkManagementClient.listPlugins(any())).thenAnswer(invocation -> {
+            probe.enter();
+            return List.of(new PluginThemeInfo("akismet", "active"));
+        });
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertTrue(probe.allOverlapped(), "3環境の一覧取得が重なって呼ばれていない(逐次実行)");
+        assertEquals(1, page.items().size());
+    }
+
+    @Test
+    void 一覧取得_agent取得の実行時例外は並列でも呼び出し元へそのまま伝わる() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins("local-site")).thenThrow(new IllegalStateException("agent down"));
+        when(bulkManagementClient.listPlugins("test-site")).thenReturn(List.of());
+        when(bulkManagementClient.listPlugins("production-site")).thenReturn(List.of());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.listPluginComparison(1L, 0, 20));
+
+        assertEquals("agent down", thrown.getMessage());
+    }
+
+    @Test
+    void deletePluginEverywhere_環境ごとの削除が重なって走り_結果はENVIRONMENT_ORDER順() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins(any()))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
+        OverlapProbe probe = new OverlapProbe(3);
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), any(), eq(BulkOperationType.PLUGIN_DELETE), eq("akismet"), any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    if (environment.equals("local")) {
+                        Thread.sleep(150);
+                    }
+                    probe.enter();
+                    return logOf(environment, BulkOperationType.PLUGIN_DELETE);
+                });
+
+        List<BulkOperationLog> results = service.deletePluginEverywhere(1L, "akismet", 9L);
+
+        assertTrue(probe.allOverlapped(), "3環境の削除が重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void deleteThemeEverywhere_環境ごとの削除が重なって走り_結果はENVIRONMENT_ORDER順() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listThemes(any()))
+                .thenReturn(List.of(new PluginThemeInfo("twentytwentyfour", "inactive")));
+        OverlapProbe probe = new OverlapProbe(3);
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), any(), eq(BulkOperationType.THEME_DELETE), eq("twentytwentyfour"),
+                any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    if (environment.equals("local")) {
+                        Thread.sleep(150);
+                    }
+                    probe.enter();
+                    return logOf(environment, BulkOperationType.THEME_DELETE);
+                });
+
+        List<BulkOperationLog> results = service.deleteThemeEverywhere(1L, "twentytwentyfour", 9L);
+
+        assertTrue(probe.allOverlapped(), "3環境のテーマ削除が重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void deletePluginEverywhere_1環境の実行時例外でも他環境の削除は最後まで実行される() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins(any()))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), any(), eq(BulkOperationType.PLUGIN_DELETE), eq("akismet"), any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    if (environment.equals("local")) {
+                        throw new IllegalStateException("delete failed");
+                    }
+                    Thread.sleep(100);
+                    return logOf(environment, BulkOperationType.PLUGIN_DELETE);
+                });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.deletePluginEverywhere(1L, "akismet", 9L));
+
+        assertEquals("delete failed", thrown.getMessage());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "test", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "production", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
+    }
+
+    @Test
+    void reconcilePlugin_環境間は重なって走り_結果はchangesの順_環境内の段階順は保たれる() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins(any())).thenReturn(List.of());
+        OverlapProbe probe = new OverlapProbe(3);
+        java.util.concurrent.ConcurrentLinkedQueue<String> calls = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), any(), any(), eq("akismet"), any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    BulkOperationType type = invocation.getArgument(2);
+                    calls.add(environment + ":" + type);
+                    if (type == BulkOperationType.PLUGIN_INSTALL) {
+                        probe.enter();
+                    } else {
+                        // INSTALLより後に走ることが環境内の段階順の証拠になる
+                        Thread.sleep(50);
+                    }
+                    return logOf(environment, type);
+                });
+
+        // changesは local/test/production の逆順
+        List<BulkOperationLog> results = service.reconcilePlugin(1L, "akismet", List.of(
+                new StateChangeRequest("production", "ACTIVE"),
+                new StateChangeRequest("test", "ACTIVE"),
+                new StateChangeRequest("local", "ACTIVE")), 9L);
+
+        assertTrue(probe.allOverlapped(), "3環境の反映が重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of(
+                "production:PLUGIN_INSTALL", "production:PLUGIN_ACTIVATE",
+                "test:PLUGIN_INSTALL", "test:PLUGIN_ACTIVATE",
+                "local:PLUGIN_INSTALL", "local:PLUGIN_ACTIVATE"),
+                results.stream().map(r -> r.getEnvironment() + ":" + r.getOperationType()).toList());
+        for (String environment : List.of("local", "test", "production")) {
+            List<String> perEnvironment = calls.stream().filter(c -> c.startsWith(environment + ":")).toList();
+            assertEquals(List.of(environment + ":PLUGIN_INSTALL", environment + ":PLUGIN_ACTIVATE"), perEnvironment);
+        }
+    }
+
+    @Test
+    void reconcileTheme_環境間は重なって走る() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listThemes(any())).thenReturn(List.of());
+        OverlapProbe probe = new OverlapProbe(2);
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), any(), any(), eq("twentytwentyfour"), any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    BulkOperationType type = invocation.getArgument(2);
+                    if (type == BulkOperationType.THEME_INSTALL) {
+                        probe.enter();
+                    }
+                    return logOf(environment, type);
+                });
+
+        List<BulkOperationLog> results = service.reconcileTheme(1L, "twentytwentyfour", List.of(
+                new StateChangeRequest("test", "INACTIVE"),
+                new StateChangeRequest("local", "INACTIVE")), 9L);
+
+        assertTrue(probe.allOverlapped(), "2環境のテーマ反映が重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("test", "local"), results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void reconcilePlugin_1環境の実行時例外でも他環境の反映は最後まで実行される() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins(any())).thenReturn(List.of());
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), any(), any(), eq("akismet"), any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    String environment = invocation.getArgument(1);
+                    if (environment.equals("local")) {
+                        throw new IllegalStateException("install failed");
+                    }
+                    Thread.sleep(100);
+                    return logOf(environment, invocation.getArgument(2));
+                });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> service.reconcilePlugin(
+                1L, "akismet", List.of(
+                        new StateChangeRequest("local", "INACTIVE"),
+                        new StateChangeRequest("test", "INACTIVE")), 9L));
+
+        assertEquals("install failed", thrown.getMessage());
+        verify(bulkManagementService).applyToEnvironment(
+                1L, "test", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
+    }
+
+    @Test
+    void reconcilePlugin_同じ環境を複数指定しても環境内は直列で実行される() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins(any())).thenReturn(List.of());
+        java.util.concurrent.atomic.AtomicInteger running = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger maxRunning = new java.util.concurrent.atomic.AtomicInteger();
+        when(bulkManagementService.applyToEnvironment(
+                eq(1L), eq("local"), any(), eq("akismet"), any(), any(), any(), any(), eq(9L)))
+                .thenAnswer(invocation -> {
+                    maxRunning.accumulateAndGet(running.incrementAndGet(), Math::max);
+                    Thread.sleep(50);
+                    running.decrementAndGet();
+                    return logOf("local", invocation.getArgument(2));
+                });
+
+        List<BulkOperationLog> results = service.reconcilePlugin(1L, "akismet", List.of(
+                new StateChangeRequest("local", "INACTIVE"),
+                new StateChangeRequest("local", "INACTIVE")), 9L);
+
+        assertEquals(1, maxRunning.get());
+        assertEquals(2, results.size());
+    }
+
+    @Test
+    void reconcilePlugin_サポート外の遷移を含む場合は他の変更も実行せず例外() {
+        PluginThemeComparisonService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
+        when(bulkManagementClient.listPlugins("test-site"))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        when(bulkManagementClient.listPlugins("production-site")).thenReturn(List.of());
+
+        assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(1L, "akismet", List.of(
+                new StateChangeRequest("local", "ACTIVE"),
+                new StateChangeRequest("test", "NOT_INSTALLED")), 9L));
+
+        verify(bulkManagementService, never()).applyToEnvironment(
+                any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void 一覧取得_後続環境の解決が失敗しても_投入済みのagent取得を待ち終えてから例外を投げる() {
+        PluginThemeComparisonService service = service();
+        Project project = buildProject(10L, 20L, null, "test");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenThrow(new IllegalStateException("resolve failed"));
+        java.util.concurrent.atomic.AtomicBoolean fetchFinished = new java.util.concurrent.atomic.AtomicBoolean();
+        when(bulkManagementClient.listPlugins("local-site")).thenAnswer(invocation -> {
+            Thread.sleep(300);
+            fetchFinished.set(true);
+            return List.of();
+        });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.listPluginComparison(1L, 0, 20));
+
+        assertEquals("resolve failed", thrown.getMessage());
+        assertTrue(fetchFinished.get(), "投入済みのagent取得が終わる前に例外が呼び出し元へ伝わった(ワーカーが孤児になる)");
+    }
 }

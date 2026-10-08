@@ -1,6 +1,7 @@
 package com.letsblog.publishing.service;
 
 import com.letsblog.publishing.client.MediaSettingsBridgeClient;
+import com.letsblog.publishing.config.EnvironmentFetchExecutorConfig;
 import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
@@ -15,6 +16,7 @@ import com.letsblog.publishing.domain.Site;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,6 +28,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 /**
  * カテゴリ/タグ/プラグイン/テーマの操作を単一環境へ適用する({@link #applyToEnvironment})、
@@ -56,7 +60,9 @@ public class BulkManagementService {
     private final ProjectService projectService;
     private final ImageResizeService imageResizeService;
     private final MediaSettingsBridgeClient mediaSettingsBridgeClient;
+    private final ExecutorService environmentFetchExecutor;
 
+    /** 単体テスト用: 本番と同じ上限の専用Executorを内部で作る。 */
     public BulkManagementService(
             WordPressBulkManagementClient bulkManagementClient,
             BulkUploadStorageService bulkUploadStorageService,
@@ -66,6 +72,23 @@ public class BulkManagementService {
             ProjectService projectService,
             ImageResizeService imageResizeService,
             MediaSettingsBridgeClient mediaSettingsBridgeClient) {
+        this(bulkManagementClient, bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
+                projectService, imageResizeService, mediaSettingsBridgeClient,
+                EnvironmentFetchExecutorConfig.newExecutor());
+    }
+
+    @Autowired
+    public BulkManagementService(
+            WordPressBulkManagementClient bulkManagementClient,
+            BulkUploadStorageService bulkUploadStorageService,
+            SiteService siteService,
+            WordPressSshOperations sshOperations,
+            CmsAdapterFactory cmsAdapterFactory,
+            ProjectService projectService,
+            ImageResizeService imageResizeService,
+            MediaSettingsBridgeClient mediaSettingsBridgeClient,
+            ExecutorService environmentFetchExecutor) {
+        this.environmentFetchExecutor = environmentFetchExecutor;
         this.bulkManagementClient = bulkManagementClient;
         this.bulkUploadStorageService = bulkUploadStorageService;
         this.siteService = siteService;
@@ -105,22 +128,25 @@ public class BulkManagementService {
         }
         requireNonBlank(value, "slugを入力してください");
         Project project = getProject(projectId);
-        List<BulkOperationLog> results = new ArrayList<>();
+        // 環境ごとのインストールは独立なので並列に走らせる(issue #1687)。結果はENVIRONMENT_ORDER順
+        List<Supplier<BulkOperationLog>> tasks = new ArrayList<>();
         for (String environment : ENVIRONMENT_ORDER) {
             if (siteIdOf(project, environment) == null) {
                 continue;
             }
-            try {
-                Site site = resolveSite(project, environment);
-                results.add(applyToSite(projectId, environment, site, type, value,
-                        null, null, null, null, actorId));
-            } catch (IllegalArgumentException e) {
-                results.add(saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
-                        null, null, null, null, null, null, null,
-                        environment, BulkOperationStatus.FAILED.name(), e.getMessage(), null, actorId));
-            }
+            tasks.add(() -> {
+                try {
+                    Site site = resolveSite(project, environment);
+                    return applyToSite(projectId, environment, site, type, value,
+                            null, null, null, null, actorId);
+                } catch (IllegalArgumentException e) {
+                    return saveLog(projectId, type, BulkOperationSourceType.SLUG, value,
+                            null, null, null, null, null, null, null,
+                            environment, BulkOperationStatus.FAILED.name(), e.getMessage(), null, actorId);
+                }
+            });
         }
-        return results;
+        return EnvironmentTasks.runAll(environmentFetchExecutor, tasks);
     }
 
     public List<BulkOperationLog> executeFromUpload(
@@ -136,15 +162,18 @@ public class BulkManagementService {
         BulkUploadStorageService.StoredZip stored =
                 bulkUploadStorageService.store(projectId, bytes, file.getOriginalFilename());
 
-        List<BulkOperationLog> results = new ArrayList<>();
+        // 環境ごとの転送は独立なので並列に走らせる(issue #1687)。結果はENVIRONMENT_ORDER順
+        List<Supplier<BulkOperationLog>> tasks = new ArrayList<>();
         for (Map.Entry<String, Site> entry : environments) {
-            ZipApplyResult result = applyZipToSite(entry.getValue(), type, bytes, stored.originalFilename());
-            results.add(saveLog(projectId, type, BulkOperationSourceType.ZIP, stored.originalFilename(),
-                    null, null, null, null,
-                    stored.originalFilename(), stored.storagePath(), stored.sha256(),
-                    entry.getKey(), result.status(), result.errorMessage(), result.stackTrace(), actorId));
+            tasks.add(() -> {
+                ZipApplyResult result = applyZipToSite(entry.getValue(), type, bytes, stored.originalFilename());
+                return saveLog(projectId, type, BulkOperationSourceType.ZIP, stored.originalFilename(),
+                        null, null, null, null,
+                        stored.originalFilename(), stored.storagePath(), stored.sha256(),
+                        entry.getKey(), result.status(), result.errorMessage(), result.stackTrace(), actorId);
+            });
         }
-        return results;
+        return EnvironmentTasks.runAll(environmentFetchExecutor, tasks);
     }
 
     /**

@@ -24,6 +24,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -762,5 +763,130 @@ class BulkManagementServiceTest {
 
         assertDoesNotThrow(() -> service.logFetchFailure(1L, BulkOperationType.CATEGORY_FETCH, "test",
                 "Connection refused", "java.io.IOException: Connection refused\n\tat ..."));
+    }
+
+    // ---- issue #1687: 環境間の並列実行 ----
+
+    private void bindThreeManagedSites() {
+        Project project = buildProject(10L, 20L, 30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
+    }
+
+    @Test
+    void applyToAllEnvironments_環境ごとのインストールが重なって走り_結果はENVIRONMENT_ORDER順() {
+        BulkManagementService service = service();
+        bindThreeManagedSites();
+        OverlapProbe probe = new OverlapProbe(3);
+        when(bulkManagementClient.apply(any())).thenAnswer(invocation -> {
+            BulkApplyCommand command = invocation.getArgument(0);
+            // localを最後に終わらせても、結果の並びは変わらない
+            if (command.slug().equals("local-site")) {
+                Thread.sleep(150);
+            }
+            probe.enter();
+            return BulkApplyResult.success();
+        });
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertTrue(probe.allOverlapped(), "3環境のインストールが重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void applyToAllEnvironments_1環境の実行時例外でも他環境は最後まで実行され_例外は呼び出し元へ伝わる() {
+        BulkManagementService service = service();
+        bindThreeManagedSites();
+        when(bulkManagementClient.apply(any())).thenAnswer(invocation -> {
+            BulkApplyCommand command = invocation.getArgument(0);
+            if (command.slug().equals("local-site")) {
+                throw new IllegalStateException("agent down");
+            }
+            Thread.sleep(100);
+            return BulkApplyResult.success();
+        });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L));
+
+        assertEquals("agent down", thrown.getMessage());
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "test-site", "plugin_install", "akismet", null, null, null, null));
+        verify(bulkManagementClient).apply(new BulkApplyCommand(
+                "production-site", "plugin_install", "akismet", null, null, null, null));
+    }
+
+    @Test
+    void applyToAllEnvironments_対象外環境のFAILEDは並列でも環境順の位置に記録される() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, 30L);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        Site externalSite = buildExternalSite(20L, "external-site");
+        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
+        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
+        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
+        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results = service.applyToAllEnvironments(
+                1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
+
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+        assertEquals(List.of(BulkOperationStatus.SUCCESS, BulkOperationStatus.FAILED, BulkOperationStatus.SUCCESS),
+                results.stream().map(BulkOperationLog::getStatus).toList());
+    }
+
+    @Test
+    void executeFromUpload_環境ごとの転送が重なって走り_結果はENVIRONMENT_ORDER順() throws IOException {
+        BulkManagementService service = service();
+        bindThreeManagedSites();
+        MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1, 2});
+        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("p.zip")))
+                .thenReturn(new BulkUploadStorageService.StoredZip("1/a.zip", "abc", "p.zip"));
+        OverlapProbe probe = new OverlapProbe(3);
+        when(bulkManagementClient.applyZip(any(), eq("plugin_install"), any(byte[].class), eq("p.zip")))
+                .thenAnswer(invocation -> {
+                    if ("local-site".equals(invocation.getArgument(0))) {
+                        Thread.sleep(150);
+                    }
+                    probe.enter();
+                    return BulkApplyResult.success();
+                });
+
+        List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.PLUGIN_INSTALL, file, 9L);
+
+        assertTrue(probe.allOverlapped(), "3環境のzip転送が重なって呼ばれていない(逐次実行)");
+        assertEquals(List.of("local", "test", "production"),
+                results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void executeFromUpload_1環境の実行時例外でも他環境は最後まで実行され_例外は呼び出し元へ伝わる() throws IOException {
+        BulkManagementService service = service();
+        bindThreeManagedSites();
+        MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1, 2});
+        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("p.zip")))
+                .thenReturn(new BulkUploadStorageService.StoredZip("1/a.zip", "abc", "p.zip"));
+        when(bulkManagementClient.applyZip(any(), eq("plugin_install"), any(byte[].class), eq("p.zip")))
+                .thenAnswer(invocation -> {
+                    if ("test-site".equals(invocation.getArgument(0))) {
+                        throw new IllegalStateException("zip failed");
+                    }
+                    Thread.sleep(100);
+                    return BulkApplyResult.success();
+                });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.executeFromUpload(1L, BulkOperationType.PLUGIN_INSTALL, file, 9L));
+
+        assertEquals("zip failed", thrown.getMessage());
+        verify(bulkManagementClient).applyZip(eq("local-site"), eq("plugin_install"), any(byte[].class), eq("p.zip"));
+        verify(bulkManagementClient).applyZip(eq("production-site"), eq("plugin_install"), any(byte[].class), eq("p.zip"));
     }
 }
