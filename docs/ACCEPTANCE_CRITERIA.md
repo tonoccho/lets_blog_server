@@ -96,7 +96,7 @@ API: identity `UserController`, `RoleController`, `ProjectUserController` / cont
 | --- | --- | --- | --- | --- | --- |
 | AC-USR-001 | ユーザー一覧 (`/users`) | 誰がシステムを使えるか把握できる | 管理者は一覧を閲覧でき、非管理者はアクセスを拒否される | `features/auth/permissions.feature` › 非管理者は管理者専用ページへアクセスすると拒否される / 管理者は管理者専用ページへアクセスできる | 検証済 |
 | AC-USR-002 | ユーザー作成 | 新しいメンバーを迎え入れられる | `POST /api/users` でユーザーが作成され、一覧と Keycloak の双方に現れる | `features/identity/user-management.feature` › 管理者が新しいメンバーを登録でき、一覧とKeycloakの双方に現れる | 検証済 |
-| AC-USR-003 | ユーザー編集 (`/users/[id]/edit`) | 氏名・メール・所属を直せる | `PUT/PATCH /api/users/{id}` の変更が一覧へ反映される | `features/identity/user-management.feature` › 管理者がメンバーの表示名を編集できる / › 管理者がメンバーのメールアドレスを編集でき、一覧とKeycloakの双方に反映される / › 管理者が既に使われているメールアドレスへは変更できない | 部分的に検証。表示名は検証済。メールアドレス編集は#1192で実装済みだがGherkin 2件は未実行(検証用のAT環境が無いホストで作成)のため、AT環境での実行結果をもって検証済とする |
+| AC-USR-003 | ユーザー編集 (`/users/[id]/edit`) | 氏名・メール・所属を直せる | `PUT/PATCH /api/users/{id}` の変更が一覧へ反映される | `features/identity/user-management.feature` › 管理者がメンバーの表示名を編集できる / › 管理者がメンバーのメールアドレスを編集でき、一覧とKeycloakの双方に反映される / › 管理者が既に使われているメールアドレスへは変更できない | 検証済(メールアドレス編集の2シナリオは#1192で実装、2026-10-08 に AT 環境で実行し通過を確認、#1684) |
 | AC-USR-004 | ユーザー削除 | 不要なアカウントを消せる | `DELETE /api/users/{id}` 後、そのユーザーではログインできない | `features/identity/user-management.feature` › 管理者が一覧から不要なメンバーを削除でき、Keycloak側とも整合する | 検証済 |
 | AC-USR-005 | 無効化 / 再有効化 | 退職者を消さずに止められる | `deactivate` でログイン・API利用が拒否され、`reactivate` で戻る | `features/identity/user-deactivation.feature` › 管理者がアカウントを無効化でき、無効化されたアカウントではログインできない / 無効化したアカウントを再有効化でき、再びログインできる | 検証済 |
 | AC-USR-006 | ロール付与 / 剥奪 | 権限を後から変えられる | `POST/DELETE /api/users/{userId}/roles/{roleName}` の結果が `/me/permissions` に反映される | `features/identity/roles-and-permissions.feature` › ロールを付与/剥奪すると対象ユーザーのGET /api/identity/me/permissionsの内容が変わる / 権限(users.roleの付与/剥奪)の変化がUIのメニュー出し分けに反映される | 検証済 |
@@ -248,7 +248,7 @@ API: media `ImageGenerationController`, `GeneratedImageController`, `MediaContro
 | 機能ID | 機能 | 利用者から見た価値 | 受け入れ基準(要約) | 対応シナリオ | 状態 |
 | --- | --- | --- | --- | --- | --- |
 | AC-IMG-001 | 画像生成 (`POST /api/ai/image`) | 記事の挿絵を自分で用意しなくてよい | プロンプトから画像が生成され、ギャラリーに現れる | `features/media/image-generation.feature` › プロンプトを指定してComfyUIで画像を生成すると、生成画像の一覧に現れる / 生成に使ったプロンプト・サイズ・チェックポイントが生成画像の詳細に残る、`features/media/image-generation-chatgpt.feature` › 画像生成に失敗したときは理由が示され、壊れた画像レコードは残らない | 検証済(`@slow` は GPU 必須。`@stub` 経路は GPU 非搭載でも通る) |
-| AC-IMG-002 | 生成オプションの取得 | 選べる設定が画面に出る | `GET /api/ai/image-options` の内容が生成フォームの選択肢と一致する | `features/media/image-settings.feature` › 画像生成のデフォルトプロンプトを保存すると、次の生成の既定値になる(既定値の部分のみ) | 部分的に検証 |
+| AC-IMG-002 | 生成オプションの取得 | 選べる設定が画面に出る | `GET /api/ai/image-options` の内容が生成フォームの選択肢と一致する | `features/media/image-settings.feature` › 画像生成のデフォルトプロンプトを保存すると、次の生成の既定値になる(既定値の部分のみ) | 実装中(`GET /api/ai/image-options` の内容が生成フォームの選択肢と一致することは未検証。対応シナリオはデフォルトプロンプトの既定値の部分だけを見ている) |
 | AC-IMG-003 | ギャラリー一覧 (`/image-gallery`) | 生成済み画像を探せる | 生成済み画像が一覧に表示される | `features/media/image-gallery.feature` › 保存済みの生成画像がギャラリーに一覧表示される | 検証済(#1284で実測、2026-09-15) |
 | AC-IMG-004 | 画像詳細 | どのプロンプトで作ったか分かる | 詳細モーダルに生成パラメータが表示される | `features/media/image-gallery.feature` › 詳細モーダルに生成パラメータが表示される、`features/media/generated-image-seed.feature` › ComfyUIで生成した画像の詳細には、生成に使われたseedとバッチ内位置が表示される / ChatGPTで生成した画像の詳細にはseedが表示されず、再現できないと分かる | 検証済(#1284で実測、2026-09-15。サムネイルのクリックがハイドレーション完了前に取りこぼされる欠陥(#1283と同種)を修正) |
 | AC-IMG-005 | 画像削除 | 不要な画像を消せる | `DELETE /api/generated-images/{id}` 後、一覧から消える | `features/media/image-gallery.feature` › 画像を削除するとギャラリーから消え、ファイル実体も取得できなくなる | 検証済(#1284で実測、2026-09-15) |
@@ -283,7 +283,7 @@ VSCode 拡張だけにあるため、この節の受け入れ基準に対応す�
 | AC-DIAG-003 | SVG取得 | 図が記事に埋め込める | `GET /api/diagrams/{id}/svg` が描画済みSVGを返す | `features/diagram/diagram-storage.feature` › ダイアグラムを作成すると一覧に現れ、SVGを取得できる / ソースを更新すると、取り直したSVGは更新後の内容になる(キャッシュが残らないこと)/ ダイアグラムを削除すると一覧から消え、SVGは404になる | 検証済 |
 | AC-DIAG-004 | PlantUML レンダリング | テキストからUMLを描ける | `POST /api/render/plantuml` が図を返し、不正な記法はエラーになる | `features/diagram/plantuml-rendering.feature` › 妥当なPlantUMLソースを渡すと、ノード名を含む図がPNGとして返る / 不正な構文では、理由の分かるエラーが返り、生の500にはならない / 巨大な入力にはサイズ上限のエラーが返り、待たされ続けない | 検証済(返る画像は SVG ではなく PNG。中身は埋め込みメタデータと寸法で検証している) |
 | AC-DIAG-005 | recharts レンダリング | データからグラフを描ける | `POST /api/render/recharts` が図を返す | `features/diagram/recharts-rendering.feature` › チャート定義を渡すと、元データが反映されたSVGが返る / 系列の指定を欠いた定義ではエラーが返る | 検証済 |
-| AC-DIAG-006 | Penpot デザインファイル連携 | デザインを記事素材にできる | `POST /api/render/penpot/design-file` がデザインを取り込む | `features/diagram/penpot-unavailable.feature` › Penpot が起動していないとき、デザインファイルの要求は理由の分かるエラーになる | 部分的に検証(`@destructive`。Penpot は任意サービスなので **未起動時の振る舞い**を受け入れ基準にしている。成功経路は共有 Penpot に消せないファイルを残すため叩かない) |
+| AC-DIAG-006 | Penpot デザインファイル連携 | デザインを記事素材にできる | Penpot が起動していないとき、デザインファイルの要求は理由の分かるエラーになる | `features/diagram/penpot-unavailable.feature` › Penpot が起動していないとき、デザインファイルの要求は理由の分かるエラーになる | 検証済(`@destructive`、§4.1 参照。2026-10-08 に `at-destructive` で通過を確認、#1684) |
 | AC-DIAG-007 | draw.io 編集 | 図をGUIで描ける | 拡張の `addNewDiagram` / `editDiagram` で draw.io が開き、保存内容が `GET /api/diagrams/{id}` に反映される | `features/diagram/diagram-storage.feature` › drawio で描いた図を保存すると、あとから同じ内容を取り出して編集を続けられる(サービス側の契約)、`ext:diagrams/diagrams.feature` › ダイアグラムを作成し編集して一覧から参照できる(拡張のコマンド)、手動: チェックリスト §7 | 検証済(draw.io のエディタ操作は手動) |
 
 ### 2.10 カスタムタグ・テンプレート・コンテンツ設定 — `TAG`
@@ -556,8 +556,9 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | --- | --- | --- | --- |
 | AC-AUTH-005 | 期限切れのデバイスコードで `expired_token` が返る | 存在しないデバイスコードが拒否されることを検証 | 真に期限切れにするには Keycloak realm の `oauth2DeviceCodeLifespan`(既定600秒)を縮める必要がある。共有レルムの設定変更になるため見送った。拡張(`deviceAuth.ts`)が見ているのは「待ち続けずに失敗と分かること」なので、検証の目的は満たしている |
 | AC-AUTH-008 | 期限切れアクセストークンで401 | 復号できないセッションで保護ページに入れないことを検証 | 有効な署名を持つ期限切れトークンは、realm のアクセストークン寿命(既定5分)を待つか設定を変えないと作れない。署名が不正なトークンの拒否は AC-AUTH-007 が別途検証している |
+| AC-DIAG-006 | `POST /api/render/penpot/design-file` がデザインを取り込む | Penpot が起動していないとき、デザインファイルの要求が理由の分かるエラーになることを検証 | 成功経路は共有 Penpot に消せないファイルを残すため叩かない。Penpot は任意サービスなので未起動時の振る舞いを基準にした(#1684) |
 
-どちらも Keycloak の realm 設定を一時的に変更すれば検証できる。必要になった時点で、
+AC-AUTH-005 / 008 はどちらも Keycloak の realm 設定を一時的に変更すれば検証できる。必要になった時点で、
 設定変更と復元を含む `@slow` シナリオとして足すこと。
 
 ---
@@ -598,15 +599,14 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 182 |
-| `部分的に検証` | 3 |
+| `検証済` | 187 |
 | `実装中` | 14 |
 | `既存spec` / `既存spec(部分)` | 3 |
-| `未着手` | 19 |
+| `未着手` | 17 |
 | `対象外`(§2 に行を持つもの) | 3 |
 | **§2 合計** | **224** |
 
-`検証済` のうち2件は §4.1 のとおり受け入れ基準を狭めてある。
+`検証済` のうち3件は §4.1 のとおり受け入れ基準を狭めてある。
 `@fail`(不具合が直るまで失敗が期待値)のシナリオは無い(#955 の修正で最後の1件が外れた)。
 `AC-EXT-011` / `016` は実装側・スタブ側の不具合(#1004 / #998)のため自動化できず
 `未着手` のままにしてある——バグを期待値として固定しないため。

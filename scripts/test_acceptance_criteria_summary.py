@@ -24,7 +24,7 @@ DOC = os.path.join(REPO_ROOT, "docs/ACCEPTANCE_CRITERIA.md")
 
 # §6 の状態別の表の行の見出し(§2 の状態欄の先頭語)。`既存spec(部分)` は `既存spec` に含める。
 # §1 に定義の無い状態(`実装済み` など)は含めない。§2 に現れたら count_inventory が失敗する(#1424)。
-STATES = ("検証済", "部分的に検証", "実装中", "既存spec", "未着手", "対象外")
+STATES = ("検証済", "実装中", "既存spec", "未着手", "対象外")
 
 
 def _read():
@@ -90,7 +90,7 @@ class AcceptanceCriteriaSummaryTest(unittest.TestCase):
         self.assertEqual(dict(self.inv_states), dict(self.sum_states))
 
     def test_all_states_appear_in_summary(self):
-        # 実装中 / 部分的に検証 のように後から増えた状態が欄ごと欠けていないこと。
+        # 実装中 のように後から増えた状態が欄ごと欠けていないこと。
         for state, n in self.inv_states.items():
             self.assertIn(state, self.sum_states, f"{state} ({n}件) が §6 に無い")
 
