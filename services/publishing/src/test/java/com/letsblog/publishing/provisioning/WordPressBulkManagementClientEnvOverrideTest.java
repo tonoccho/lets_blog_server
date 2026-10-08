@@ -11,7 +11,6 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutorService;
@@ -85,7 +84,11 @@ class WordPressBulkManagementClientEnvOverrideTest {
 
             WordPressBulkManagementClient client = context.getBean(WordPressBulkManagementClient.class);
             Instant startedAt = Instant.now();
-            List<WordPressBulkManagementClient.CategoryInfo> unused = client.listCategories("site-a");
+            try {
+                client.listCategories("site-a");
+            } catch (org.springframework.web.client.ResourceAccessException expectedTimeout) {
+                // 打ち切り時刻の計測が目的。タイムアウトは失敗として伝わる(#1682)
+            }
             return Duration.between(startedAt, Instant.now()).toMillis();
         }
     }

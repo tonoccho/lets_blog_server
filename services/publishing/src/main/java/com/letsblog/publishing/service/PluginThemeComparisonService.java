@@ -1,5 +1,6 @@
 package com.letsblog.publishing.service;
 
+import com.letsblog.common.util.StackTraceUtil;
 import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.config.EnvironmentFetchExecutorConfig;
@@ -17,6 +18,7 @@ import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -288,7 +290,7 @@ public class PluginThemeComparisonService {
                     // 取得は並列に走らせ、環境の並び(LinkedHashMapの挿入順)はここで確定させる(issue #1687。#1474と同じ方針)
                     result.put(environment, null);
                     agentFetches.put(environment,
-                            EnvironmentTasks.submit(environmentFetchExecutor, () -> fetchViaAgent(site, isTheme)));
+                            EnvironmentTasks.submit(environmentFetchExecutor, () -> fetchViaAgent(project, environment, site, isTheme)));
                     continue;
                 }
                 SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
@@ -331,13 +333,19 @@ public class PluginThemeComparisonService {
         return result;
     }
 
-    private EnvironmentInfos fetchViaAgent(Site site, boolean isTheme) {
-        List<WordPressBulkManagementClient.PluginThemeInfo> infos = isTheme
-                ? bulkManagementClient.listThemes(site.getWpSlug())
-                : bulkManagementClient.listPlugins(site.getWpSlug());
-        return EnvironmentInfos.of(infos.stream()
-                .map(info -> new PluginThemeInfo(info.name(), info.status()))
-                .toList());
+    /** agent経由の取得失敗は空一覧にせず、SSH経路と同じくerror値にして作業ログへ記録する(#1682)。 */
+    private EnvironmentInfos fetchViaAgent(Project project, String environment, Site site, boolean isTheme) {
+        try {
+            List<WordPressBulkManagementClient.PluginThemeInfo> infos = isTheme
+                    ? bulkManagementClient.listThemes(site.getWpSlug())
+                    : bulkManagementClient.listPlugins(site.getWpSlug());
+            return EnvironmentInfos.of(infos.stream()
+                    .map(info -> new PluginThemeInfo(info.name(), info.status()))
+                    .toList());
+        } catch (RestClientException e) {
+            logFetchError(project, environment, isTheme, e.getMessage(), StackTraceUtil.toString(e));
+            return EnvironmentInfos.error(e.getMessage());
+        }
     }
 
     private String hostKeyOf(CmsCredentials.WordPressCredentials creds) {

@@ -7,6 +7,9 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -19,6 +22,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -50,33 +54,111 @@ class WordPressBulkManagementClientTest {
     }
 
     @Test
-    void listCategories_応答が無いと設定したリードタイムアウト以内に空リストで戻る() throws IOException {
+    void listCategories_応答が無いと設定したリードタイムアウト以内に失敗として伝える() throws IOException {
+        assertTimesOutQuickly(client -> client.listCategories("site-a"));
+    }
+
+    @Test
+    void listTags_応答が無いと設定したリードタイムアウト以内に失敗として伝える() throws IOException {
+        assertTimesOutQuickly(client -> client.listTags("site-a"));
+    }
+
+    @Test
+    void listPlugins_応答が無いと設定したリードタイムアウト以内に失敗として伝える() throws IOException {
+        assertTimesOutQuickly(client -> client.listPlugins("site-a"));
+    }
+
+    @Test
+    void listThemes_応答が無いと設定したリードタイムアウト以内に失敗として伝える() throws IOException {
+        assertTimesOutQuickly(client -> client.listThemes("site-a"));
+    }
+
+    @Test
+    void 一覧取得_エラー応答5xxは失敗として伝える() throws IOException {
+        startFixedStatusServer(500, "internal error", "text/plain");
+        WordPressBulkManagementClient client = newClient();
+
+        assertThrows(RestClientResponseException.class, () -> client.listCategories("site-a"));
+        assertThrows(RestClientResponseException.class, () -> client.listTags("site-a"));
+        assertThrows(RestClientResponseException.class, () -> client.listPlugins("site-a"));
+        assertThrows(RestClientResponseException.class, () -> client.listThemes("site-a"));
+    }
+
+    @Test
+    void 一覧取得_エラー応答4xxは失敗として伝える() throws IOException {
+        startFixedStatusServer(401, "unauthorized", "text/plain");
+        WordPressBulkManagementClient client = newClient();
+
+        assertThrows(RestClientResponseException.class, () -> client.listPlugins("site-a"));
+        assertThrows(RestClientResponseException.class, () -> client.listCategories("site-a"));
+    }
+
+    @Test
+    void 一覧取得_解釈できない応答はその他のRestClientExceptionとして失敗を伝える() throws IOException {
+        startFixedStatusServer(200, "not json", "text/plain");
+        WordPressBulkManagementClient client = newClient();
+
+        assertThrows(RestClientException.class, () -> client.listPlugins("site-a"));
+        assertThrows(RestClientException.class, () -> client.listTags("site-a"));
+    }
+
+    @Test
+    void 一覧取得_正常な0件の応答は失敗にならず空リストを返す() throws IOException {
+        startFixedStatusServer(200, "{\"plugins\":[],\"themes\":[],\"categories\":[],\"tags\":[]}",
+                "application/json");
+        WordPressBulkManagementClient client = newClient();
+
+        assertTrue(client.listPlugins("site-a").isEmpty());
+        assertTrue(client.listThemes("site-a").isEmpty());
+        assertTrue(client.listCategories("site-a").isEmpty());
+        assertTrue(client.listTags("site-a").isEmpty());
+    }
+
+    @Test
+    void 一覧取得失敗のログは失敗の種類を区別できる() throws IOException {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(WordPressBulkManagementClient.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            startFixedStatusServer(500, "internal error", "text/plain");
+            assertThrows(RestClientResponseException.class, () -> newClient().listPlugins("site-a"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+        assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == Level.WARN
+                && event.getFormattedMessage().contains("エラー応答")), "実際: " + appender.list);
+    }
+
+    private WordPressBulkManagementClient newClient() {
+        return new WordPressBulkManagementClient(baseUrl(), "token", SHORT_TIMEOUT, SHORT_TIMEOUT);
+    }
+
+    private void assertTimesOutQuickly(java.util.function.Consumer<WordPressBulkManagementClient> call)
+            throws IOException {
         startNeverRespondingServer();
-        WordPressBulkManagementClient client =
-                new WordPressBulkManagementClient(baseUrl(), "token", SHORT_TIMEOUT, SHORT_TIMEOUT);
+        WordPressBulkManagementClient client = newClient();
 
         Instant startedAt = Instant.now();
-        List<WordPressBulkManagementClient.CategoryInfo> result = client.listCategories("site-a");
+        assertThrows(ResourceAccessException.class, () -> call.accept(client));
         Duration elapsed = Duration.between(startedAt, Instant.now());
 
-        assertTrue(result.isEmpty(), "応答が無い場合は空リストで戻る");
         assertTrue(elapsed.toMillis() < NEVER_RESPONDS_SLEEP_MS,
                 "設定したリードタイムアウト(" + SHORT_TIMEOUT + ")以内に戻るはず。実際: " + elapsed);
     }
 
-    @Test
-    void listTags_応答が無いと設定したリードタイムアウト以内に空リストで戻る() throws IOException {
-        startNeverRespondingServer();
-        WordPressBulkManagementClient client =
-                new WordPressBulkManagementClient(baseUrl(), "token", SHORT_TIMEOUT, SHORT_TIMEOUT);
-
-        Instant startedAt = Instant.now();
-        List<WordPressBulkManagementClient.CategoryInfo> result = client.listTags("site-a");
-        Duration elapsed = Duration.between(startedAt, Instant.now());
-
-        assertTrue(result.isEmpty(), "応答が無い場合は空リストで戻る");
-        assertTrue(elapsed.toMillis() < NEVER_RESPONDS_SLEEP_MS,
-                "設定したリードタイムアウト(" + SHORT_TIMEOUT + ")以内に戻るはず。実際: " + elapsed);
+    private void startFixedStatusServer(int status, String body, String contentType) throws IOException {
+        httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        httpServer.createContext("/", exchange -> {
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", contentType);
+            exchange.sendResponseHeaders(status, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(bytes);
+            }
+        });
+        httpServer.start();
     }
 
     @Test
@@ -105,13 +187,13 @@ class WordPressBulkManagementClientTest {
         WordPressBulkManagementClient shortClient =
                 new WordPressBulkManagementClient(baseUrl(), "token", veryShort, veryShort);
         Instant shortStart = Instant.now();
-        shortClient.listCategories("site-a");
+        assertThrows(ResourceAccessException.class, () -> shortClient.listCategories("site-a"));
         Duration shortElapsed = Duration.between(shortStart, Instant.now());
 
         WordPressBulkManagementClient longClient =
                 new WordPressBulkManagementClient(baseUrl(), "token", longer, longer);
         Instant longStart = Instant.now();
-        longClient.listCategories("site-a");
+        assertThrows(ResourceAccessException.class, () -> longClient.listCategories("site-a"));
         Duration longElapsed = Duration.between(longStart, Instant.now());
 
         assertTrue(longElapsed.toMillis() > shortElapsed.toMillis() + 500,

@@ -257,6 +257,119 @@ class PluginThemeComparisonServiceTest {
         assertEquals("Connection refused", page.items().get(0).test().errorMessage());
     }
 
+    // ---- issue #1682: agent経由の一覧取得失敗はerror値になり作業ログに記録される ----
+
+    private void bindLocalAndTestManaged() {
+        Project project = buildProject(10L, 20L, null, "test");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+    }
+
+    @Test
+    void listPluginComparison_agentの読み取りタイムアウトはerror値になりPLUGIN_FETCHで記録する() {
+        PluginThemeComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listPlugins("local-site"))
+                .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
+        when(bulkManagementClient.listPlugins("test-site"))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).local().available());
+        assertEquals("Read timed out", page.items().get(0).local().errorMessage());
+        assertEquals("ACTIVE", page.items().get(0).test().status());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("local"), eq("Read timed out"), any());
+    }
+
+    @Test
+    void listThemeComparison_agentの読み取りタイムアウトはerror値になりTHEME_FETCHで記録する() {
+        PluginThemeComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listThemes("local-site"))
+                .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
+        when(bulkManagementClient.listThemes("test-site"))
+                .thenReturn(List.of(new PluginThemeInfo("twentytwenty", "active")));
+
+        StatusComparisonPage page = service.listThemeComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).local().available());
+        assertEquals("Read timed out", page.items().get(0).local().errorMessage());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.THEME_FETCH), eq("local"), eq("Read timed out"), any());
+    }
+
+    @Test
+    void listPluginComparison_agentが5xxを返した環境もerror値になり作業ログに記録する() {
+        PluginThemeComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listPlugins("local-site"))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        when(bulkManagementClient.listPlugins("test-site")).thenThrow(
+                new org.springframework.web.client.HttpServerErrorException(
+                        org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR));
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).test().available());
+        assertTrue(page.items().get(0).test().errorMessage().contains("500"));
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("test"), any(), any());
+    }
+
+    @Test
+    void listPluginComparison_agentが4xxを返した環境もerror値になる() {
+        PluginThemeComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listPlugins("local-site")).thenThrow(
+                new org.springframework.web.client.HttpClientErrorException(
+                        org.springframework.http.HttpStatus.UNAUTHORIZED));
+        when(bulkManagementClient.listPlugins("test-site"))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertFalse(page.items().get(0).local().available());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("local"), any(), any());
+    }
+
+    @Test
+    void listPluginComparison_agentがその他のRestClientExceptionを投げた環境もerror値になる() {
+        PluginThemeComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listPlugins("local-site"))
+                .thenThrow(new org.springframework.web.client.RestClientException("unexpected body"));
+        when(bulkManagementClient.listPlugins("test-site"))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertFalse(page.items().get(0).local().available());
+        assertEquals("unexpected body", page.items().get(0).local().errorMessage());
+    }
+
+    @Test
+    void listPluginComparison_agentが正常に0件を返した環境はエラーにならず未インストールになる() {
+        PluginThemeComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
+        when(bulkManagementClient.listPlugins("test-site"))
+                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertTrue(page.items().get(0).local().available());
+        assertEquals("NOT_INSTALLED", page.items().get(0).local().status());
+        verify(bulkManagementService, org.mockito.Mockito.never())
+                .logFetchFailure(any(), any(), any(), any(), any());
+    }
+
     // ---- reconcile: byEnvironment側の対象外分岐(L162) ----
 
     /** issue #1137レビュー対応: 対応する環境自体が存在しない(envInfos==null)分岐のカバレッジを補う。 */

@@ -147,7 +147,8 @@ public class WordPressBulkManagementClient {
 
     /**
      * 1環境分のカテゴリ一覧を取得する(比較テーブル・親カテゴリ解決に使用)。
-     * 取得に失敗した場合は空リストを返す(呼び出し元でエラーとして扱わず、単に該当なしとする)。
+     * 取得に失敗した場合(タイムアウト・エラー応答・その他)は空リストにせず{@link RestClientException}として伝える。
+     * 取得に成功して0件だった場合のみ空リストを返す。
      */
     public List<CategoryInfo> listCategories(String slug) {
         return listTerms("/categories", "categories", slug);
@@ -187,19 +188,20 @@ public class WordPressBulkManagementClient {
                     .toList();
         } catch (ResourceAccessException e) {
             log.warn("provision-agentへの接続がタイムアウトしました (uri={}, slug={}): {}", uri, slug, e.getMessage());
-            return List.of();
+            throw e;
         } catch (RestClientResponseException e) {
             log.warn("provision-agentがエラー応答を返しました (uri={}, slug={}, status={})", uri, slug, e.getStatusCode());
-            return List.of();
+            throw e;
         } catch (RestClientException e) {
-            return List.of();
+            log.warn("provision-agentの応答を処理できませんでした (uri={}, slug={}): {}", uri, slug, e.getMessage());
+            throw e;
         }
     }
 
     /**
      * 1環境分の、インストール済みプラグイン一覧(name+status)を取得する(比較テーブルに使用)。
      * 未インストールのプラグインはこの一覧に含まれない(呼び出し元で「一覧に無ければ未インストール」と判定する)。
-     * 取得に失敗した場合は空リストを返す。
+     * 取得に失敗した場合は空リストにせず{@link RestClientException}として伝える(0件の成功とは区別する)。
      */
     public List<PluginThemeInfo> listPlugins(String slug) {
         return listPluginsOrThemes("/plugins", "plugins", slug);
@@ -234,12 +236,13 @@ public class WordPressBulkManagementClient {
                     .toList();
         } catch (ResourceAccessException e) {
             log.warn("provision-agentへの接続がタイムアウトしました (uri={}, slug={}): {}", uri, slug, e.getMessage());
-            return List.of();
+            throw e;
         } catch (RestClientResponseException e) {
             log.warn("provision-agentがエラー応答を返しました (uri={}, slug={}, status={})", uri, slug, e.getStatusCode());
-            return List.of();
+            throw e;
         } catch (RestClientException e) {
-            return List.of();
+            log.warn("provision-agentの応答を処理できませんでした (uri={}, slug={}): {}", uri, slug, e.getMessage());
+            throw e;
         }
     }
 

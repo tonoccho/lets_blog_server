@@ -102,6 +102,103 @@ class TermComparisonServiceTest {
         assertFalse(page.items().get(0).production().available());
     }
 
+    // ---- issue #1682: agent経由の一覧取得失敗はerror値になり作業ログに記録される ----
+
+    private void bindLocalAndTestManaged() {
+        Project project = buildProject(10L, 20L, null, "test");
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+    }
+
+    @Test
+    void listCategoryComparison_agentの読み取りタイムアウトはerror値になりCATEGORY_FETCHで記録する() {
+        TermComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
+        when(bulkManagementClient.listCategories("test-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, null)));
+
+        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).local().available());
+        assertEquals("Read timed out", page.items().get(0).local().errorMessage());
+        assertTrue(page.items().get(0).test().available());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.CATEGORY_FETCH), eq("local"), eq("Read timed out"), any());
+    }
+
+    @Test
+    void listTagComparison_agentの読み取りタイムアウトはerror値になりTAG_FETCHで記録する() {
+        TermComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listTags("local-site"))
+                .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
+        when(bulkManagementClient.listTags("test-site"))
+                .thenReturn(List.of(new CategoryInfo("タグ", "tag", null, null)));
+
+        TermComparisonPage page = service.listTagComparison(1L, 0, 20);
+
+        assertEquals(1, page.items().size());
+        assertFalse(page.items().get(0).local().available());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.TAG_FETCH), eq("local"), eq("Read timed out"), any());
+    }
+
+    @Test
+    void listCategoryComparison_agentが5xxを返した環境もerror値になる() {
+        TermComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listCategories("local-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, null)));
+        when(bulkManagementClient.listCategories("test-site")).thenThrow(
+                new org.springframework.web.client.HttpServerErrorException(
+                        org.springframework.http.HttpStatus.BAD_GATEWAY));
+
+        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
+
+        assertFalse(page.items().get(0).test().available());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.CATEGORY_FETCH), eq("test"), any(), any());
+    }
+
+    @Test
+    void listTagComparison_agentが4xxやその他のRestClientExceptionでもerror値になる() {
+        TermComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listTags("local-site")).thenThrow(
+                new org.springframework.web.client.HttpClientErrorException(
+                        org.springframework.http.HttpStatus.FORBIDDEN));
+        when(bulkManagementClient.listTags("test-site"))
+                .thenThrow(new org.springframework.web.client.RestClientException("unexpected body"));
+
+        TermComparisonPage page = service.listTagComparison(1L, 0, 20);
+
+        assertEquals(0, page.items().size());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.TAG_FETCH), eq("local"), any(), any());
+        verify(bulkManagementService).logFetchFailure(
+                eq(1L), eq(BulkOperationType.TAG_FETCH), eq("test"), eq("unexpected body"), any());
+    }
+
+    @Test
+    void listCategoryComparison_agentが正常に0件を返した環境はエラーにならない() {
+        TermComparisonService service = service();
+        bindLocalAndTestManaged();
+        when(bulkManagementClient.listCategories("local-site")).thenReturn(List.of());
+        when(bulkManagementClient.listCategories("test-site"))
+                .thenReturn(List.of(new CategoryInfo("お知らせ", "oshirase", null, null)));
+
+        TermComparisonPage page = service.listCategoryComparison(1L, 0, 20);
+
+        assertTrue(page.items().get(0).local().available());
+        assertFalse(page.items().get(0).local().error());
+        assertEquals(null, page.items().get(0).local().slug());
+        verify(bulkManagementService, never()).logFetchFailure(any(), any(), any(), any(), any());
+    }
+
     @Test
     void listCategoryComparison_スラッグが異なれば名前が同じでも別行になる() {
         TermComparisonService service = service();

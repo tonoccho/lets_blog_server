@@ -1,5 +1,6 @@
 package com.letsblog.publishing.service;
 
+import com.letsblog.common.util.StackTraceUtil;
 import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.config.EnvironmentFetchExecutorConfig;
@@ -16,6 +17,7 @@ import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -393,7 +395,7 @@ public class TermComparisonService {
                 // 取得は並列に走らせ、環境の並び(LinkedHashMapの挿入順)は従来どおりここで確定させる(issue #1474)
                 result.put(environment, null);
                 agentFetches.put(environment,
-                        CompletableFuture.supplyAsync(() -> fetchViaAgent(site, isCategory), environmentFetchExecutor));
+                        CompletableFuture.supplyAsync(() -> fetchViaAgent(project, environment, site, isCategory), environmentFetchExecutor));
                 continue;
             }
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);
@@ -440,13 +442,19 @@ public class TermComparisonService {
         }
     }
 
-    private EnvironmentTerms fetchViaAgent(Site site, boolean isCategory) {
-        List<WordPressBulkManagementClient.CategoryInfo> infos = isCategory
-                ? bulkManagementClient.listCategories(site.getWpSlug())
-                : bulkManagementClient.listTags(site.getWpSlug());
-        return EnvironmentTerms.of(infos.stream()
-                .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
-                .toList());
+    /** agent経由の取得失敗は空一覧にせず、SSH経路と同じくerror値にして作業ログへ記録する(#1682)。 */
+    private EnvironmentTerms fetchViaAgent(Project project, String environment, Site site, boolean isCategory) {
+        try {
+            List<WordPressBulkManagementClient.CategoryInfo> infos = isCategory
+                    ? bulkManagementClient.listCategories(site.getWpSlug())
+                    : bulkManagementClient.listTags(site.getWpSlug());
+            return EnvironmentTerms.of(infos.stream()
+                    .map(info -> new CategoryInfo(info.name(), info.slug(), info.parentSlug(), info.description()))
+                    .toList());
+        } catch (RestClientException e) {
+            logFetchError(project, environment, isCategory, e.getMessage(), StackTraceUtil.toString(e));
+            return EnvironmentTerms.error(e.getMessage());
+        }
     }
 
     private String hostKeyOf(CmsCredentials.WordPressCredentials creds) {
