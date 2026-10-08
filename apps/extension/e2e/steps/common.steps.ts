@@ -14,7 +14,7 @@ import {
   adminAccessToken,
 } from '../support/env';
 import {
-  ensureManagedSite,
+  findManagedSite,
   ensureProductionManagedSite,
   ensureProject,
   bindEnvironment,
@@ -96,8 +96,16 @@ Given('受け入れテスト用のプロジェクトが存在する', async (wor
 Given('公開先のマネージドWordPressサイトが用意されている', async (world) => {
   const scope = w(world);
   if (!cachedSite) {
-    cachedSite = await ensureManagedSite(scope.token);
-    await bindEnvironment(scope.token, cachedProject!.id, 'test', cachedSite.id);
+    // サイトの構築はここではしない。acceptance.test.ts の beforeAll が用意済みのはず。
+    const site = await findManagedSite(scope.token);
+    if (!site) {
+      throw new Error(
+        '公開先のマネージドWordPressサイト(siteKey=at16probe)が見つかりません。' +
+          'acceptance.test.ts の beforeAll で用意されているはずです(beforeAll が失敗していないか確認してください)。'
+      );
+    }
+    await bindEnvironment(scope.token, cachedProject!.id, 'test', site.id);
+    cachedSite = site;
   }
   scope.site = cachedSite;
 });

@@ -102,15 +102,22 @@ async function createManagedSite(
 
 /**
  * 公開シナリオ用のマネージドWordPressサイトを用意する(冪等)。
- * 構築には数十秒〜数分かかるため、これを使うシナリオには `@slow` を付ける。
+ * 構築には数十秒〜数分かかるため、呼び出し元は acceptance.test.ts の beforeAll だけにする
+ * (全シナリオの前に1回。シナリオやステップの中では呼ばない)。ステップは
+ * `findManagedSite` で探して紐付けるだけにし、サイトの構築をシナリオに持ち込まない。
  */
 export async function ensureManagedSite(token: string): Promise<SiteFixture> {
-  const list = await call('GET', '/api/sites', token);
-  const existing = (list.json as SiteFixture[] | undefined)?.find((s) => s.siteKey === FIXTURE_SITE_KEY);
+  const existing = await findManagedSite(token);
   if (existing) return existing;
   return createManagedSite(
     token, FIXTURE_SITE_KEY, 'AT16 probe site', 'AT16 Probe', 'at16probeadmin', 'at16-probe@letsblog.local'
   );
+}
+
+/** `ensureManagedSite` が用意したサイトを探す。構築はしない(無ければ undefined)。 */
+export async function findManagedSite(token: string): Promise<SiteFixture | undefined> {
+  const list = await call('GET', '/api/sites', token);
+  return (list.json as SiteFixture[] | undefined)?.find((s) => s.siteKey === FIXTURE_SITE_KEY);
 }
 
 /**

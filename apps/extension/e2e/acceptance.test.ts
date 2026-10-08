@@ -10,6 +10,8 @@
 
 import * as path from 'path';
 import { BeforeScenario, runFeatures } from './support/gherkin';
+import { adminAccessToken, loggedInAdminContext } from './support/env';
+import { ensureManagedSite } from './support/api';
 import { requireStubs } from './support/stubs';
 
 // ステップ定義の登録。import した時点で Given/When/Then が登録される。
@@ -30,6 +32,19 @@ import './steps/previewSignedUrl.steps';
 import './steps/media.steps';
 import './steps/diagrams.steps';
 import './steps/failures.steps';
+
+/**
+ * 公開先のマネージドWordPressサイトは、全シナリオの前に1回だけここで用意する(issue #1309)。
+ * 構築には数十秒〜数分かかるため、シナリオの中では行わない。ステップ
+ * 「公開先のマネージドWordPressサイトが用意されている」は探して紐付けるだけで、
+ * 無ければここで用意されていないことを示して失敗する。`test:at` と `test:at:fast` の両方で動く。
+ * タイムアウトは jest.config.js の testTimeout が効く。
+ */
+beforeAll(async () => {
+  const context = await loggedInAdminContext();
+  const site = await ensureManagedSite(await adminAccessToken(context));
+  console.log(`[beforeAll] マネージドWordPressサイトを用意しました: ${site.siteKey} (id=${site.id})`);
+});
 
 /**
  * `@stub` が付いたシナリオは、スタブが起動していなければスキップではなく失敗させる
