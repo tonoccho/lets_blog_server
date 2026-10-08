@@ -2,6 +2,8 @@ package com.letsblog.publishing.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -9,7 +11,10 @@ import static org.mockito.Mockito.when;
 
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
+import com.letsblog.publishing.domain.ArticleReview;
 import com.letsblog.publishing.domain.ArticleReviewState;
+import com.letsblog.publishing.dto.ArticleReviewPullRequestResponse;
+import com.letsblog.publishing.repository.ArticleReviewRepository;
 import com.letsblog.publishing.dto.ArticleReviewResponse;
 import com.letsblog.publishing.dto.ArticleSubmissionRequest;
 import com.letsblog.publishing.dto.ArticleSubmissionResponse;
@@ -28,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /** {@link ArticleReviewController}の単体テスト(issue #1337)。 */
 @ExtendWith(MockitoExtension.class)
@@ -54,24 +60,81 @@ class ArticleReviewControllerTest {
     @Mock
     private ArticleReviewPublishService articleReviewPublishService;
 
+    @Mock
+    private ArticleReviewRepository articleReviewRepository;
+
     private ArticleReviewController controller() {
         return new ArticleReviewController(
                 adminAuthorizationService, currentActorService, projectServiceClient, githubPullRequestClient,
-                pullRequestArticleService, articleSubmissionService, articleReviewPublishService);
+                pullRequestArticleService, articleSubmissionService, articleReviewPublishService,
+                articleReviewRepository);
+    }
+
+    private static ArticleReview review(Long projectId, int prNumber, ArticleReviewState state) {
+        ArticleReview review = new ArticleReview();
+        ReflectionTestUtils.setField(review, "projectId", projectId);
+        ReflectionTestUtils.setField(review, "githubPrNumber", prNumber);
+        ReflectionTestUtils.setField(review, "state", state);
+        return review;
     }
 
     @Test
-    @DisplayName("認可後に操作者でGitHubアクセス情報を解決し、開いているPRの一覧を返す")
+    @DisplayName("認可後に操作者でGitHubアクセス情報を解決し、開いているPRの一覧を既存の項目のまま返す")
     void listPullRequests() {
         GithubAccess access = new GithubAccess("t", "octo", "blog");
-        List<GithubPullRequestSummary> prs = List.of(
-                new GithubPullRequestSummary(1, "記事", "article/a", "2026-09-01T00:00:00Z", "https://x/pull/1"));
         when(currentActorService.getCurrentActorId()).thenReturn(3L);
         when(projectServiceClient.resolveGithubAccess(7L, 3L)).thenReturn(access);
-        when(githubPullRequestClient.listOpenPullRequests(access)).thenReturn(prs);
+        when(githubPullRequestClient.listOpenPullRequests(access)).thenReturn(List.of(
+                new GithubPullRequestSummary(1, "記事", "article/a", "2026-09-01T00:00:00Z", "https://x/pull/1")));
 
-        assertThat(controller().listPullRequests(7L)).isEqualTo(prs);
+        assertThat(controller().listPullRequests(7L)).containsExactly(
+                new ArticleReviewPullRequestResponse(
+                        1, "記事", "article/a", "2026-09-01T00:00:00Z", "https://x/pull/1", null));
         verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+    }
+
+    @Test
+    @DisplayName("記録のあるPRはそのArticleReviewStateの名前、記録の無いPRはnullを状態に載せる(issue #1677)")
+    void listPullRequestsWithState() {
+        GithubAccess access = new GithubAccess("t", "octo", "blog");
+        when(currentActorService.getCurrentActorId()).thenReturn(3L);
+        when(projectServiceClient.resolveGithubAccess(7L, 3L)).thenReturn(access);
+        when(githubPullRequestClient.listOpenPullRequests(access)).thenReturn(List.of(
+                new GithubPullRequestSummary(1, "a", "article/a", "t1", "u1"),
+                new GithubPullRequestSummary(2, "b", "article/b", "t2", "u2"),
+                new GithubPullRequestSummary(3, "c", "article/c", "t3", "u3")));
+        when(articleReviewRepository.findByProjectId(7L)).thenReturn(List.of(
+                review(7L, 1, ArticleReviewState.IN_REVIEW),
+                review(7L, 3, ArticleReviewState.CHANGES_REQUESTED)));
+
+        assertThat(controller().listPullRequests(7L))
+                .extracting(ArticleReviewPullRequestResponse::number, ArticleReviewPullRequestResponse::state)
+                .containsExactly(
+                        tuple(1, ArticleReviewState.IN_REVIEW),
+                        tuple(2, null),
+                        tuple(3, ArticleReviewState.CHANGES_REQUESTED));
+    }
+
+    @Test
+    @DisplayName("別プロジェクトに同じPR番号の記録があっても、状態はそのプロジェクトの記録だけで決まる(issue #1677)")
+    void listPullRequestsIgnoresOtherProjects() {
+        GithubAccess access = new GithubAccess("t", "octo", "blog");
+        when(currentActorService.getCurrentActorId()).thenReturn(3L);
+        when(projectServiceClient.resolveGithubAccess(7L, 3L)).thenReturn(access);
+        when(githubPullRequestClient.listOpenPullRequests(access)).thenReturn(List.of(
+                new GithubPullRequestSummary(1, "a", "article/a", "t1", "u1"),
+                new GithubPullRequestSummary(2, "b", "article/b", "t2", "u2")));
+        // 実際のリポジトリは projectId で絞るが、取り違えがあっても別プロジェクトの行は採用しない
+        when(articleReviewRepository.findByProjectId(7L)).thenReturn(List.of(
+                review(7L, 1, ArticleReviewState.SUBMITTED),
+                review(8L, 2, ArticleReviewState.PUBLISHED)));
+
+        assertThat(controller().listPullRequests(7L))
+                .extracting(ArticleReviewPullRequestResponse::number, ArticleReviewPullRequestResponse::state)
+                .containsExactly(tuple(1, ArticleReviewState.SUBMITTED), tuple(2, null));
+        verify(articleReviewRepository).findByProjectId(7L);
+        verify(articleReviewRepository, never()).findByProjectIdAndGithubPrNumber(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test

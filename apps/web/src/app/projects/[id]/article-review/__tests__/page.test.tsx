@@ -39,7 +39,7 @@ describe("記事レビュー画面 page.tsx(issue #1340)", () => {
   it("リポジトリ設定済みならPR一覧を表示する", async () => {
     getProject.mockResolvedValue(project("acme/blog"));
     listArticleReviewPullRequests.mockResolvedValue([
-      { number: 201, title: "記事サンプル", headBranch: "article/x", createdAt: "2026-09-30T03:00:00Z", url: "https://github.com/acme/blog/pull/201" },
+      { number: 201, title: "記事サンプル", headBranch: "article/x", createdAt: "2026-09-30T03:00:00Z", url: "https://github.com/acme/blog/pull/201", state: null },
     ]);
     await render_();
 

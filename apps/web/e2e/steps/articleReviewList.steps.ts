@@ -83,3 +83,27 @@ Then('Pull Requestの取得に失敗したと表示される', async ({ page }) 
 Then(/^「(.+)」とは表示されない$/, async ({ page }, text: string) => {
   await expect(page.getByText(text)).toHaveCount(0);
 });
+
+/** 一覧の「状態」列(issue #1677)。列の位置は見出しから求め、列の増減に引きずられないようにする。 */
+async function stateCellOf(page: Page, row: ReturnType<typeof rowOf>) {
+  const headers = await page.getByRole('columnheader').allTextContents();
+  const index = headers.findIndex((text) => text.trim() === '状態');
+  expect(index, '一覧に「状態」列が無い').toBeGreaterThanOrEqual(0);
+  return row.getByRole('cell').nth(index);
+}
+
+Then(/^記事レビュー画面のそのPRの行の状態は「(.+)」である$/, async ({ ctx, page }, label: string) => {
+  const fixture = ctx.reviewFixture as { prNumber: number } | undefined;
+  if (!fixture) {
+    throw new Error('先に提出済みのPRを用意するステップを実行すること');
+  }
+  const row = rowOf(page, String(fixture.prNumber));
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(await stateCellOf(page, row)).toHaveText(label);
+});
+
+Then(/^レビュー待ち一覧のシードのPR「(\d+)」の状態は「(.+)」である$/, async ({ page }, number: string, label: string) => {
+  const row = rowOf(page, number);
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(await stateCellOf(page, row)).toHaveText(label);
+});

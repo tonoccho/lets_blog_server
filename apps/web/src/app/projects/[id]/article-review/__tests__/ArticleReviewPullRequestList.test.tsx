@@ -17,6 +17,7 @@ const pullRequests = [
     headBranch: "article/e2e-sample",
     createdAt: "2026-09-30T03:00:00Z",
     url: "https://github.com/acme/blog/pull/201",
+    state: "IN_REVIEW" as const,
   },
   {
     number: 205,
@@ -24,6 +25,7 @@ const pullRequests = [
     headBranch: "article/other",
     createdAt: "2026-09-29T15:30:00Z",
     url: "https://github.com/acme/blog/pull/205",
+    state: null,
   },
 ];
 
@@ -106,5 +108,35 @@ describe("ArticleReviewPullRequestList(issue #1340)", () => {
     rerender(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests.slice(1)} timezone="Asia/Tokyo" />);
 
     expect(screen.queryByRole("row", { name: /#201/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [null, "未提出"],
+    ["SUBMITTED", "提出済み"],
+    ["IN_REVIEW", "レビュー中"],
+    ["CHANGES_REQUESTED", "差し戻し"],
+    ["PUBLISHED", "公開済み"],
+  ] as const)("状態 %s の行は「状態」列に「%s」と表示される(issue #1677)", (state, label) => {
+    render(
+      <ArticleReviewPullRequestList
+        projectId={7}
+        pullRequests={[{ ...pullRequests[0], state }]}
+        timezone="Asia/Tokyo"
+      />
+    );
+
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    const index = headers.indexOf("状態");
+    expect(index).toBeGreaterThanOrEqual(0);
+    const cell = within(screen.getByRole("row", { name: /#201/ })).getAllByRole("cell")[index];
+    expect(cell).toHaveTextContent(label);
+  });
+
+  it("行ごとにその行の状態が表示される(issue #1677)", () => {
+    render(<ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />);
+
+    const index = screen.getAllByRole("columnheader").map((h) => h.textContent).indexOf("状態");
+    expect(within(screen.getByRole("row", { name: /#201/ })).getAllByRole("cell")[index]).toHaveTextContent("レビュー中");
+    expect(within(screen.getByRole("row", { name: /#205/ })).getAllByRole("cell")[index]).toHaveTextContent("未提出");
   });
 });

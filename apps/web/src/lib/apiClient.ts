@@ -1632,13 +1632,20 @@ export function deleteProject(id: number): Promise<void> {
   return apiFetch<void>(`/api/projects/${id}`, { method: 'DELETE' });
 }
 
-/** レビュー待ち(開いている)Pull Request 1件(publishing-service、issue #1337)。 */
+/** 記事レビューの状態名(publishing-service の `ArticleReviewState`、issue #1677)。 */
+export type ArticleReviewStateName = "SUBMITTED" | "IN_REVIEW" | "CHANGES_REQUESTED" | "PUBLISHED";
+
+/**
+ * レビュー待ち(開いている)Pull Request 1件(publishing-service、issue #1337)。
+ * `state` はそのプロジェクトでのレビュー状態で、`article_reviews` に記録の無い PR は null(issue #1677)。
+ */
 export interface ArticleReviewPullRequest {
   number: number;
   title: string;
   headBranch: string;
   createdAt: string;
   url: string;
+  state: ArticleReviewStateName | null;
 }
 
 /**

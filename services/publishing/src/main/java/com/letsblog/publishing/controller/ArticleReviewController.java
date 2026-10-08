@@ -2,12 +2,16 @@ package com.letsblog.publishing.controller;
 
 import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
+import com.letsblog.publishing.domain.ArticleReview;
+import com.letsblog.publishing.domain.ArticleReviewState;
+import com.letsblog.publishing.dto.ArticleReviewPullRequestResponse;
 import com.letsblog.publishing.dto.ArticleReviewResponse;
 import com.letsblog.publishing.dto.ArticleSubmissionRequest;
 import com.letsblog.publishing.dto.ArticleSubmissionResponse;
 import com.letsblog.publishing.dto.PullRequestArticleResponse;
 import com.letsblog.publishing.github.GithubPullRequestClient;
 import com.letsblog.publishing.github.GithubPullRequestSummary;
+import com.letsblog.publishing.repository.ArticleReviewRepository;
 import com.letsblog.publishing.service.AdminAuthorizationService;
 import com.letsblog.publishing.service.ArticleReviewPublishService;
 import com.letsblog.publishing.service.ArticleSubmissionService;
@@ -15,7 +19,9 @@ import com.letsblog.publishing.service.CurrentActorService;
 import com.letsblog.publishing.service.ForbiddenException;
 import com.letsblog.publishing.service.PullRequestArticleService;
 import jakarta.validation.Valid;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +45,7 @@ public class ArticleReviewController {
     private final PullRequestArticleService pullRequestArticleService;
     private final ArticleSubmissionService articleSubmissionService;
     private final ArticleReviewPublishService articleReviewPublishService;
+    private final ArticleReviewRepository articleReviewRepository;
 
     public ArticleReviewController(
             AdminAuthorizationService adminAuthorizationService,
@@ -47,7 +54,8 @@ public class ArticleReviewController {
             GithubPullRequestClient githubPullRequestClient,
             PullRequestArticleService pullRequestArticleService,
             ArticleSubmissionService articleSubmissionService,
-            ArticleReviewPublishService articleReviewPublishService) {
+            ArticleReviewPublishService articleReviewPublishService,
+            ArticleReviewRepository articleReviewRepository) {
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
         this.projectServiceClient = projectServiceClient;
@@ -55,16 +63,28 @@ public class ArticleReviewController {
         this.pullRequestArticleService = pullRequestArticleService;
         this.articleSubmissionService = articleSubmissionService;
         this.articleReviewPublishService = articleReviewPublishService;
+        this.articleReviewRepository = articleReviewRepository;
     }
 
     /**
      * プロジェクトのGitHubリポジトリで開いているPull Requestを返す。GitHubリポジトリ・トークンの
      * 未設定は409、GitHub側の認証失敗・権限不足は502として、原因の分かるメッセージで返る。
+     * 各PRには、このプロジェクトでのレビュー状態({@code state}、記録の無いPRはnull)を載せる(issue #1677)。
      */
     @GetMapping("/pull-requests")
-    public List<GithubPullRequestSummary> listPullRequests(@PathVariable Long projectId) {
+    public List<ArticleReviewPullRequestResponse> listPullRequests(@PathVariable Long projectId) {
         adminAuthorizationService.requireProjectMemberOrAdmin(projectId);
-        return githubPullRequestClient.listOpenPullRequests(resolveAccess(projectId));
+        List<GithubPullRequestSummary> pullRequests =
+                githubPullRequestClient.listOpenPullRequests(resolveAccess(projectId));
+        Map<Integer, ArticleReviewState> stateByPrNumber = new HashMap<>();
+        for (ArticleReview review : articleReviewRepository.findByProjectId(projectId)) {
+            if (projectId.equals(review.getProjectId())) {
+                stateByPrNumber.put(review.getGithubPrNumber(), review.getState());
+            }
+        }
+        return pullRequests.stream()
+                .map(pr -> ArticleReviewPullRequestResponse.of(pr, stateByPrNumber.get(pr.number())))
+                .toList();
     }
 
     /**
