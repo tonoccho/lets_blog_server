@@ -2,6 +2,7 @@ import {
   CUSTOM_TAG_GENERATION_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
+  SITE_PROVISIONING_JOB_TYPE,
   STATIC_CONTENT_GENERATION_JOB_TYPE,
   TAG_DESIGN_GENERATION_JOB_TYPE,
   buildCustomTagResultHref,
@@ -9,6 +10,8 @@ import {
   buildTagDesignResultHref,
   FAILURE_REASON_MAX_LENGTH,
   buildImageGenerationResultHref,
+  buildSiteProvisioningResultHref,
+  readSiteId,
   isActiveJobStatus,
   readFailureReason,
   readImageIds,
@@ -185,4 +188,29 @@ describe('LLM generation job result links (#1409)', () => {
       expect(resolveResultHref(type, '{"projectId":7,"siteId":3}')).toBeNull()
     }
   )
+})
+
+describe('site provisioning job result link (#1696)', () => {
+  it('uses the job type written by the project service', () => {
+    expect(SITE_PROVISIONING_JOB_TYPE).toBe('site_provisioning')
+  })
+
+  it('opens the edit screen of the created site', () => {
+    expect(buildSiteProvisioningResultHref(12)).toBe('/sites/12/edit')
+  })
+
+  it('reads the created site id from the done result', () => {
+    expect(readSiteId('{"siteId":12,"siteKey":"main"}')).toBe(12)
+  })
+
+  it.each([
+    ['null', null],
+    ['empty', ''],
+    ['broken JSON', '{'],
+    ['JSON null', 'null'],
+    ['no siteId', '{"phase":"registering"}'],
+    ['non-numeric siteId', '{"siteId":"12"}'],
+  ])('reads no site id from %s', (_label, payload) => {
+    expect(readSiteId(payload)).toBeNull()
+  })
 })

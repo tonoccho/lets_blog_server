@@ -1,6 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { waitForProvisionedSiteRow } from '../support/provisionedSiteRow';
 
 /**
  * サイト編集画面の管理画面パス(issue #1532)のステップ定義。
@@ -66,7 +67,7 @@ Given('管理画面パス検証用のマネージドWordPressサイトを構築�
   await page.locator('input[name="managedAdminEmail"]').fill(`e2e-${unique}@letsblog.local`);
   await page.locator('input[name="managedAdminPassword"]').fill('E2eProvision#Passw0rd1');
   await page.locator('button:has-text("構築する")').click();
-  await expect(page.locator(`tr:has-text("${siteKey}")`)).toBeVisible({ timeout: 240000 });
+  await waitForProvisionedSiteRow(page, siteKey);
   const list = await request.get('/api/sites', { headers: await adminHeaders(request) });
   const sites = (await list.json()) as { id: number; siteKey: string }[];
   const found = sites.find((s) => s.siteKey === siteKey);

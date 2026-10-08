@@ -107,13 +107,17 @@ export function ManagedWordPressForm({ users, templateCandidates }: { users: App
         />
       </div>
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-      {state.success && <p className="text-sm text-green-600">構築しました。</p>}
+      {state.success && (
+        <p className="text-sm text-green-600">
+          構築を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から作成されたサイトを開けます。
+        </p>
+      )}
       <button
         type="submit"
         disabled={pending}
         className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
       >
-        {pending ? "構築中(数分かかる場合があります)…" : "構築する"}
+        {pending ? "要求中…" : "構築する"}
       </button>
     </form>
   );

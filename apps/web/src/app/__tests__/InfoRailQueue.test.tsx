@@ -312,6 +312,7 @@ describe('InfoRailQueue (#1407)', () => {
     ['custom_tag_generation', 'カスタムタグ生成', 'Custom tag generation'],
     ['static_content_generation', '静的コンテンツ生成', 'Static content generation'],
     ['tag_design_generation', 'タグデザイン生成', 'Tag design generation'],
+    ['site_provisioning', 'サイト自動構築', 'Site provisioning'],
   ])('labels a %s job in Japanese and English instead of showing the raw type (#1409)', async (type, ja, en) => {
     mockFetch.mockResolvedValue({ jobs: [job({ id: 1, type, status: 'running' })], timeZone: 'UTC' })
     const { unmount } = setup('ja')

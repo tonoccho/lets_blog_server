@@ -8,9 +8,12 @@ import {
   STATIC_CONTENT_GENERATION_JOB_TYPE,
   TAG_DESIGN_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
+  SITE_PROVISIONING_JOB_TYPE,
   buildImageGenerationResultHref,
+  buildSiteProvisioningResultHref,
   readFailureReason,
   readImageIds,
+  readSiteId,
   resolveResultHref,
   type QueueJob,
 } from "./infoRailQueue";
@@ -51,6 +54,7 @@ export async function fetchRecentOperationLogsAction(): Promise<{
  * 所有者による絞り込みは API 側(#1406)。完了ジョブにだけ「結果を見る」の遷移先を付ける。
  * 遷移先にリクエスト内容(project ID・site ID)が要る種別だけ、詳細を取りに行く。詳細が読めなければリンクなし。
  * 失敗したジョブは詳細の `resultPayload.error` を失敗理由として載せる(#1571)。
+ * サイト自動構築は、完了したジョブの結果が示す作成済みサイトの編集画面を遷移先にする(#1696)。
  * 画像生成はリクエストに project ID が無いので、結果の最初の画像が属するプロジェクトを遷移先にする(#1408)。
  */
 export async function fetchQueueJobsAction(): Promise<{ jobs: QueueJob[]; timeZone: string | null }> {
@@ -68,12 +72,20 @@ export async function fetchQueueJobsAction(): Promise<{ jobs: QueueJob[]; timeZo
       }
       if (job.status !== "done") return { ...base, resultHref: null };
       if (job.type === IMAGE_GENERATION_JOB_TYPE) return { ...base, resultHref: await imageGenerationHref(job.id) };
+      if (job.type === SITE_PROVISIONING_JOB_TYPE) return { ...base, resultHref: await siteProvisioningHref(job.id) };
       if (!NEEDS_REQUEST_PAYLOAD.has(job.type)) return { ...base, resultHref: resolveResultHref(job.type, null) };
       const detail = await getGenerationJob(job.id).catch(() => null);
       return { ...base, resultHref: resolveResultHref(job.type, detail?.requestPayload ?? null, job.id) };
     }),
   );
   return { jobs, timeZone };
+}
+
+/** 結果に作成されたサイトのIDが無い・詳細が取得できないときは null。サイトはリクエストの時点では無いので、結果から導く(#1696)。 */
+async function siteProvisioningHref(jobId: number): Promise<string | null> {
+  const detail = await getGenerationJob(jobId).catch(() => null);
+  const siteId = readSiteId(detail?.resultPayload ?? null);
+  return siteId === null ? null : buildSiteProvisioningResultHref(siteId);
 }
 
 /** 画像が1枚も無い・所属プロジェクトが無い・取得できない(削除済みなど)ときは null。 */

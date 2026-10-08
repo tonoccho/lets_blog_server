@@ -8,7 +8,7 @@
   `GET /api/generation-jobs/{id}` で進行段階(`provisioning` → `registering`)と、完了後の
   結果(作成されたサイトのID)を取得する。同期APIは変えない(`site-provisioning.feature` の
   既存シナリオが無改変で通ることが、その保証である)。UIは本Issueの対象外で、
-  `ManagedWordPressForm` は同期APIを呼び続ける。
+  画面側の切り替えは #1696(`site-provisioning-web-job.feature`)で行った。
 
   ## 受け入れテストで確かめられない観点
 

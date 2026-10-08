@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Step, Then, When } from './fixtures';
+import { waitForProvisionedSiteRow } from '../support/provisionedSiteRow';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken, loginAsAdmin, createFixtureProject } from '../support';
 
 /**
@@ -102,23 +103,17 @@ async function fillManagedWordPressForm(
   return { siteKey, siteName };
 }
 
-/** WordPressの自動構築は完了まで数分かかる場合がある(ManagedWordPressForm.tsx参照)。 */
-async function waitForManagedWordPressCompletion(page: Page): Promise<void> {
-  await expect(page.getByText('構築しました。')).toBeVisible({ timeout: 240000 });
+/**
+ * WordPressの自動構築は完了まで数分かかる場合がある。フォームはジョブとして受理するだけで完了を待たない
+ * (issue #1696)ので、そのサイトの行が一覧に現れるまで待つ。
+ */
+async function waitForManagedWordPressCompletion(page: Page, siteKey: string): Promise<void> {
+  await waitForProvisionedSiteRow(page, siteKey);
 }
 
-/**
- * 構築完了を、新しく増えたそのサイトの行の出現で確かめる。
- *
- * `ManagedWordPressForm.tsx` の「構築しました。」は `useActionState` の結果表示であり、
- * 直前の送信が成功していると**次の送信が終わるまで表示されたまま**になる
- * (`formRef.current?.reset()` はフィールドをクリアするだけで、成功メッセージの表示状態は
- * リセットしない)。1つのページで複数サイトを続けて構築する場合、この表示に頼ると
- * 2件目以降の完了を待たずに次へ進んでしまう。行の出現はサイトキーごとに一意なので、
- * 何度目の構築でも取り違えない。
- */
+/** 構築完了を、そのサイトの行が一覧に現れることで確かめる(サイトキーごとに一意なので、何度目の構築でも取り違えない)。 */
 async function waitForSiteRow(page: Page, siteKey: string): Promise<void> {
-  await expect(page.locator(`tr:has-text("${siteKey}")`)).toBeVisible({ timeout: 240000 });
+  await waitForProvisionedSiteRow(page, siteKey);
 }
 
 /** フォーム入力から完了待ち・ID解決までを一括で行う(1シナリオで複数サイトを構築する場合に使う)。 */
@@ -149,8 +144,8 @@ When('WordPressを新規構築する', async ({ ctx, page }) => {
   ctx.provisionedSiteName = siteName;
 });
 
-Then('構築が完了した旨が表示される', async ({ page }) => {
-  await waitForManagedWordPressCompletion(page);
+Then('構築が完了し、そのサイトが一覧に現れる', async ({ ctx, page }) => {
+  await waitForManagedWordPressCompletion(page, ctx.provisionedSiteKey as string);
 });
 
 Then('一覧のそのサイト行で疎通確認が成功する', async ({ ctx, page }) => {

@@ -29,11 +29,11 @@ jest.mock('next-auth', () => ({
 jest.mock('@/lib/auth', () => ({ authOptions: {} }));
 
 const registerSite = jest.fn();
-const createManagedWordPressSite = jest.fn();
+const startManagedWordPressSiteJob = jest.fn();
 const checkSiteConnection = jest.fn();
 jest.mock('@/lib/apiClient', () => ({
   registerSite: (...a: unknown[]) => registerSite(...a),
-  createManagedWordPressSite: (...a: unknown[]) => createManagedWordPressSite(...a),
+  startManagedWordPressSiteJob: (...a: unknown[]) => startManagedWordPressSiteJob(...a),
   checkSiteConnection: (...a: unknown[]) => checkSiteConnection(...a),
   deleteSite: jest.fn(),
   updateSite: jest.fn(),
@@ -89,7 +89,7 @@ describe('sites の Server Action の認可(issue #824)', () => {
     it('createManagedWordPressSiteAction は /login へ送り、作成しない', async () => {
       await expect(createManagedWordPressSiteAction({}, managedForm()))
         .rejects.toThrow('NEXT_REDIRECT:/login');
-      expect(createManagedWordPressSite).not.toHaveBeenCalled();
+      expect(startManagedWordPressSiteJob).not.toHaveBeenCalled();
     });
 
     it('checkSiteConnectionAction は /login へ送り、外部への疎通確認をしない', async () => {
@@ -109,7 +109,7 @@ describe('sites の Server Action の認可(issue #824)', () => {
     it('createManagedWordPressSiteAction は / へ送り、作成しない', async () => {
       await expect(createManagedWordPressSiteAction({}, managedForm()))
         .rejects.toThrow('NEXT_REDIRECT:/');
-      expect(createManagedWordPressSite).not.toHaveBeenCalled();
+      expect(startManagedWordPressSiteJob).not.toHaveBeenCalled();
     });
 
     /** 疎通確認は admin 限定にしていない(UIもログイン済み全員に見せている)。 */
@@ -135,12 +135,12 @@ describe('sites の Server Action の認可(issue #824)', () => {
     });
 
     it('createManagedWordPressSiteAction は認可を通り、作成へ進む', async () => {
-      createManagedWordPressSite.mockResolvedValue(undefined);
+      startManagedWordPressSiteJob.mockResolvedValue({ id: 1, status: 'running' });
 
       await createManagedWordPressSiteAction({}, managedForm());
 
       expect(redirect).not.toHaveBeenCalled();
-      expect(createManagedWordPressSite).toHaveBeenCalled();
+      expect(startManagedWordPressSiteJob).toHaveBeenCalled();
     });
   });
 });

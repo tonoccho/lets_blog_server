@@ -14,6 +14,9 @@ export const STATIC_CONTENT_GENERATION_JOB_TYPE = "static_content_generation";
 /** タグデザインのAI生成ジョブの種別(project の `TextGenerationJobStarter.JOB_TYPE_TAG_DESIGN`、#1409)。 */
 export const TAG_DESIGN_GENERATION_JOB_TYPE = "tag_design_generation";
 
+/** サイト自動構築ジョブの種別(project の `ManagedSiteProvisioningJobStarter.JOB_TYPE`、#1479)。 */
+export const SITE_PROVISIONING_JOB_TYPE = "site_provisioning";
+
 export interface QueueJob {
   id: number;
   type: string;
@@ -124,6 +127,19 @@ export function buildTagDesignResultHref(projectId: number | null, jobId: number
   return projectId === null
     ? `/admin/tag-design?tagDesignJob=${jobId}`
     : `/projects/${projectId}/tags?tab=tag-design&tagDesignJob=${jobId}`;
+}
+
+/**
+ * サイト自動構築ジョブの「結果を見る」の遷移先(#1696)。作成されたサイトの編集画面を開く。
+ * 構築はリクエストにサイトIDを持たない(作る前なので)ため、完了したジョブの結果から読んだIDで組み立てる。
+ */
+export function buildSiteProvisioningResultHref(siteId: number): string {
+  return `/sites/${siteId}/edit`;
+}
+
+/** 完了したサイト自動構築ジョブの結果(`result_payload`)から、作成されたサイトのIDを読む。読めなければ null。 */
+export function readSiteId(resultPayload: string | null): number | null {
+  return readNumberField(resultPayload, "siteId");
 }
 
 /** 完了した画像生成ジョブの結果(`result_payload`)から、生成された画像のIDを読む。読めなければ空。 */

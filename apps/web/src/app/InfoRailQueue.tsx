@@ -11,6 +11,7 @@ import {
   CUSTOM_TAG_GENERATION_JOB_TYPE,
   GARBAGE_COLLECTION_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
+  SITE_PROVISIONING_JOB_TYPE,
   STATIC_CONTENT_GENERATION_JOB_TYPE,
   TAG_DESIGN_GENERATION_JOB_TYPE,
   isActiveJobStatus,
@@ -35,6 +36,7 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   [CUSTOM_TAG_GENERATION_JOB_TYPE]: "queueTypeCustomTagGeneration",
   [STATIC_CONTENT_GENERATION_JOB_TYPE]: "queueTypeStaticContentGeneration",
   [TAG_DESIGN_GENERATION_JOB_TYPE]: "queueTypeTagDesignGeneration",
+  [SITE_PROVISIONING_JOB_TYPE]: "queueTypeSiteProvisioning",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

@@ -59,7 +59,8 @@
     "queueTypeImageGeneration": "画像生成",
     "queueTypeCustomTagGeneration": "カスタムタグ生成",
     "queueTypeStaticContentGeneration": "静的コンテンツ生成",
-    "queueTypeTagDesignGeneration": "タグデザイン生成"
+    "queueTypeTagDesignGeneration": "タグデザイン生成",
+    "queueTypeSiteProvisioning": "サイト自動構築"
   },
   "dashboard": {
     "title": "ダッシュボード",

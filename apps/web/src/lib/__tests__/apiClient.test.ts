@@ -26,6 +26,7 @@ import {
   startProjectImageJob,
   startCustomTagGenerationJob,
   startStaticContentGenerationJob,
+  startManagedWordPressSiteJob,
   startTagDesignGenerationJob,
   saveStaticContent,
   getSiteAdminPath,
@@ -761,6 +762,21 @@ describe('LLM生成の非同期ジョブAPI(issue #1409)', () => {
     expect(url).toContain('/api/sites/3/static-content/generate/jobs')
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({ contentType: 'PRIVACY_POLICY' })
+  })
+
+  it('startManagedWordPressSiteJob は POST /api/sites/managed-wordpress/jobs へ入力を送り、同期APIは呼ばない (#1696)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 31, type: 'site_provisioning', status: 'running' }, 202))
+    const input = {
+      name: 'n', siteKey: 'k', title: 't', adminUser: 'u', adminEmail: 'a@b.c', adminPassword: 'p', locale: 'ja',
+    }
+
+    const job = await startManagedWordPressSiteJob(input)
+
+    expect(job.id).toBe(31)
+    const [url, init] = calls()[0]
+    expect(url).toMatch(/\/api\/sites\/managed-wordpress\/jobs$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual(input)
   })
 
   it('startTagDesignGenerationJob はプロジェクト個別とグローバルで別のパスへ送る', async () => {

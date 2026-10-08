@@ -203,3 +203,35 @@ describe('fetchQueueJobsAction LLM generation jobs (#1409)', () => {
     expect(result.jobs[0].resultHref).toBeNull()
   })
 })
+
+describe('fetchQueueJobsAction site provisioning (#1696)', () => {
+  it('links a done site provisioning job to the edit screen of the site named in its result', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'site_provisioning', 'done')])
+    mockGetJob.mockResolvedValue({ resultPayload: '{"siteId":12}' })
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(9)
+    expect(result.jobs[0].resultHref).toBe('/sites/12/edit')
+  })
+
+  it.each([
+    ['has no site id', { resultPayload: '{"phase":"registering"}' }],
+    ['has no result', { resultPayload: null }],
+  ])('gives no link when the done result %s', async (_label, detail) => {
+    mockListJobs.mockResolvedValue([job(9, 'site_provisioning', 'done')])
+    mockGetJob.mockResolvedValue(detail)
+    expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives no link when the detail of a done site provisioning job cannot be read', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'site_provisioning', 'done')])
+    mockGetJob.mockRejectedValue(new Error('404'))
+    expect((await fetchQueueJobsAction()).jobs[0].resultHref).toBeNull()
+  })
+
+  it('does not fetch the detail of a running site provisioning job and gives it no link', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'site_provisioning', 'running')])
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).not.toHaveBeenCalled()
+    expect(result.jobs[0].resultHref).toBeNull()
+  })
+})

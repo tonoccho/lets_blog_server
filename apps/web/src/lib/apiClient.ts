@@ -368,6 +368,20 @@ export function createManagedWordPressSite(input: ManagedWordPressSiteInput): Pr
   });
 }
 
+/**
+ * マネージドWordPressサイトの作成を、ジョブとして要求する(`POST /api/sites/managed-wordpress/jobs`、issue #1479 / #1696)。
+ * 構築の完了(実測で最大240秒)を待たずに受理されたジョブ(id・状態)が返る。進行段階と、完了後の結果
+ * (作成されたサイトのID)は `GET /api/generation-jobs/{id}` で引く。同期の {@link createManagedWordPressSite} は
+ * 変えない(VSCode 拡張が使う)。
+ */
+export function startManagedWordPressSiteJob(input: ManagedWordPressSiteInput): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>('/api/sites/managed-wordpress/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 export function deleteSite(id: number): Promise<void> {
   return apiFetch<void>(`/api/sites/${id}`, { method: 'DELETE' });
 }

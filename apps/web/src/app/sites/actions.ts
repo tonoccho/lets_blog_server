@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import {
   CmsType,
   checkSiteConnection,
-  createManagedWordPressSite,
+  startManagedWordPressSiteJob,
   deleteSite,
   generateSshKeyPair,
   startStaticContentGenerationJob,
@@ -128,10 +128,18 @@ export async function generateSshKeyPairAction(comment: string): Promise<Generat
 
 export interface CreateManagedWordPressSiteState {
   error?: string;
+  /** ジョブとして受理された。構築の完了ではない(完了は処理キューの「結果を見る」から辿る)。 */
   success?: boolean;
+  jobId?: number;
 }
 
-/** マネージドWordPressサイトを作成する。認可の判断は {@link registerSiteAction} と同じ(#824)。 */
+/**
+ * マネージドWordPressサイトの作成を、ジョブとして要求する(issue #1696)。認可の判断は {@link registerSiteAction} と同じ(#824)。
+ *
+ * 構築の完了(実測で最大240秒)を待たず、受理(`POST /api/sites/managed-wordpress/jobs`)の時点で返る。
+ * サイトはまだ無いので `/sites` は再検証しない。完了後は処理キューのジョブが作成されたサイトの編集画面へ導く。
+ * 同期API(`createManagedWordPressSite`)は VSCode 拡張のために残してあり、ここからは呼ばない。
+ */
 export async function createManagedWordPressSiteAction(
   _prevState: CreateManagedWordPressSiteState,
   formData: FormData
@@ -153,14 +161,16 @@ export async function createManagedWordPressSiteAction(
   }
 
   try {
-    await createManagedWordPressSite(
+    const job = await startManagedWordPressSiteJob(
       { name, siteKey, title, adminUser, adminEmail, adminPassword, locale, templateSiteId });
+    if (job.status === "failed") {
+      // 実行枠と待ち行列が満杯のとき、ジョブは作られた上で failed として返る。
+      return { error: "サイト構築の待ち行列が満杯です。しばらくしてからもう一度要求してください。" };
+    }
+    return { success: true, jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
-
-  revalidatePath("/sites");
-  return { success: true };
 }
 
 export async function deleteSiteAction(id: number) {
