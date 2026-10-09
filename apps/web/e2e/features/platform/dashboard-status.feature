@@ -21,7 +21,7 @@
     ならば サービス状態パネルに認証エラーは表示されず、1件以上のサービス状態がエラー表示なしで表示される
 
   # issue #1397: ComfyUI / Ollama が実際に使っている演算デバイスを管理者だけに見せる。
-  # @requires-gpu は付けない。e2e環境ではComfyUIスタブが devices[0].type = 'cpu'、
+  # 実機の GPU は要らない。e2e環境ではComfyUIスタブが devices[0].type = 'cpu'、
   # LLMスタブが /api/ps で size_vram = 0 のモデルを返すため、GPU非搭載ホストでも「cpu」と表示される。
   シナリオ: 管理者には連携サービスの状況のComfyUIの行に演算デバイスが表示される
     前提 管理者としてログインする
