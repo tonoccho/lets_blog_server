@@ -152,8 +152,16 @@ Then('構築が完了し、そのサイトが一覧に現れる', async ({ ctx, 
 Then('一覧のそのサイト行で疎通確認が成功する', async ({ ctx, page }) => {
   const row = page.locator(`tr:has-text("${ctx.provisionedSiteKey}")`);
   await expect(row).toBeVisible();
-  await row.locator('button:has-text("疎通確認")').click();
-  await expect(row.getByText('SUCCESS', { exact: true })).toBeVisible({ timeout: 15000 });
+  // 一覧は SSR で行とボタンが先に見えるが、ハイドレーション(特に負荷時の dev ビルド)が終わる前の
+  // クリックは onClick に届かず、server action が一度も発行されない(#1713 の再現トレースでは
+  // クリック後 15 秒間 test-connection の POST が 0 件で、行にはボタンだけが残った)。
+  // 疎通確認は副作用のない読み取りなので、結果が出るまでクリックごと再試行する。
+  const button = row.locator('button:has-text("疎通確認")');
+  await expect(async () => {
+    await button.click();
+    await expect(row.getByText('FAILED', { exact: true }), `疎通確認が FAILED を返した: ${await row.innerText()}`).toHaveCount(0);
+    await expect(row.getByText('SUCCESS', { exact: true })).toBeVisible({ timeout: 5000 });
+  }).toPass({ timeout: 60000, intervals: [1000] });
 });
 
 Then('プロビジョニング結果を後続シナリオへ公開する', async ({ ctx, request }) => {
