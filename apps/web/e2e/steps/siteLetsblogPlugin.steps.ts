@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { waitForSiteCreationPanel } from '../support/siteCreationPanel';
 import { waitForProvisionedSiteRow } from '../support/provisionedSiteRow';
 
 /**
@@ -38,7 +39,7 @@ function inSite(slug: string, command: string): string {
 Given('プラグイン状態検証用のマネージドWordPressサイトを構築しておく', async ({ ctx, page, request }) => {
   const unique = uniqueSuffix();
   const siteKey = `e2e1557-${unique}`;
-  await page.locator('id=site-creation').scrollIntoViewIfNeeded();
+  await waitForSiteCreationPanel(page);
   await page.locator('button:has-text("WordPressを新規構築")').click();
   await page.locator('input[name="managedName"]').fill(`E2E 1557 ${unique}`);
   await page.locator('input[name="managedSiteKey"]').fill(siteKey);

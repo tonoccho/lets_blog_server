@@ -1,6 +1,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { After, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { waitForSiteCreationPanel } from '../support/siteCreationPanel';
 import { waitForHydrated } from '../support/e2eFixtures';
 
 /**
@@ -31,7 +32,7 @@ async function fillManagedForm(page: Page, ctx: Record<string, unknown>): Promis
   const siteKey = `e2e1696-${unique}`;
   ctx.webJobSiteKey = siteKey;
   ctx.webJobSiteName = `E2E 1696 ${unique}`;
-  await page.locator('id=site-creation').scrollIntoViewIfNeeded();
+  await waitForSiteCreationPanel(page);
   await page.locator('button:has-text("WordPressを新規構築")').click();
   const nameInput = page.locator('input[name="managedName"]');
   await waitForHydrated(nameInput);

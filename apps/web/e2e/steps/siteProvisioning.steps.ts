@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Step, Then, When } from './fixtures';
+import { waitForSiteCreationPanel } from '../support/siteCreationPanel';
 import { waitForProvisionedSiteRow } from '../support/provisionedSiteRow';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken, loginAsAdmin, createFixtureProject } from '../support';
 
@@ -88,7 +89,7 @@ async function fillManagedWordPressForm(
   const siteKey = `${prefix}-${unique}`;
   const siteName = `E2E ${prefix} ${unique}`;
 
-  await page.locator('id=site-creation').scrollIntoViewIfNeeded();
+  await waitForSiteCreationPanel(page);
   await page.locator('button:has-text("WordPressを新規構築")').click();
   await page.locator('input[name="managedName"]').fill(siteName);
   await page.locator('input[name="managedSiteKey"]').fill(siteKey);
@@ -169,7 +170,7 @@ Then('サイト一覧の見出しと表が表示される', async ({ page }) => 
 });
 
 Then('サイト作成フォームへ到達できる', async ({ page }) => {
-  await page.locator('id=site-creation').scrollIntoViewIfNeeded();
+  await waitForSiteCreationPanel(page);
   await expect(page.locator('id=site-creation')).toBeVisible();
 
   // モード切替ボタン(「既存サイトを登録」/「WordPressを新規構築」)は常に存在する。

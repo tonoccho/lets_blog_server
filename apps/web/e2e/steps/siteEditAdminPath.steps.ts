@@ -1,6 +1,7 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
+import { waitForSiteCreationPanel } from '../support/siteCreationPanel';
 import { waitForProvisionedSiteRow } from '../support/provisionedSiteRow';
 
 /**
@@ -56,7 +57,7 @@ Given('管理画面パス検証用のサイトを登録しておく', async ({ r
 Given('管理画面パス検証用のマネージドWordPressサイトを構築しておく', async ({ ctx, page, request }) => {
   const unique = uniqueSuffix();
   const siteKey = `e2e1532-${unique}`;
-  await page.locator('id=site-creation').scrollIntoViewIfNeeded();
+  await waitForSiteCreationPanel(page);
   await page.locator('button:has-text("WordPressを新規構築")').click();
   await page.locator('input[name="managedName"]').fill(`E2E 1532 ${unique}`);
   await page.locator('input[name="managedSiteKey"]').fill(siteKey);
