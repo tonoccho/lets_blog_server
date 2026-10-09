@@ -69,7 +69,7 @@ public class ImageResizeService {
             return new ResizeResult(originalBytes, mimeType);
         }
         try {
-            BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(originalBytes));
+            BufferedImage decoded = decodeCheckingPixelLimit(originalBytes);
             if (decoded == null) {
                 return new ResizeResult(originalBytes, mimeType);
             }
@@ -94,6 +94,9 @@ public class ImageResizeService {
 
             ResizeResult encoded = encode(output, mimeType, convertOpaquePngToJpeg);
             return encoded != null ? encoded : new ResizeResult(originalBytes, mimeType);
+        } catch (InvalidImageUploadException e) {
+            // 画素数超過は元のバイト列に落とさず断る(issue #1717)。メタ情報が残り、巨大な画像がCMSへ届くため。
+            throw e;
         } catch (IOException | RuntimeException e) {
             log.warn("画像のリサイズ/メタ情報削除に失敗したため、元のバイト列のままアップロードします: {}", e.getMessage());
             return new ResizeResult(originalBytes, mimeType);
@@ -107,7 +110,7 @@ public class ImageResizeService {
      */
     public ResizeResult resizeToJpeg(byte[] originalBytes, String mimeType, int maxLongEdgePx) {
         try {
-            BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(originalBytes));
+            BufferedImage decoded = decodeCheckingPixelLimit(originalBytes);
             if (decoded == null) {
                 return new ResizeResult(originalBytes, mimeType);
             }
@@ -120,6 +123,8 @@ public class ImageResizeService {
             }
             byte[] jpeg = encodeJpeg(flattenOnWhite(output), JPEG_QUALITY);
             return jpeg != null ? new ResizeResult(jpeg, "image/jpeg") : new ResizeResult(originalBytes, mimeType);
+        } catch (InvalidImageUploadException e) {
+            throw e;
         } catch (IOException | RuntimeException e) {
             log.warn("画像のJPEG化に失敗したため、元のバイト列のまま扱います: {}", e.getMessage());
             return new ResizeResult(originalBytes, mimeType);
@@ -232,6 +237,33 @@ public class ImageResizeService {
             return new ReencodedImage(encoded.data(), encoded.mimeType(), output.getWidth(), output.getHeight());
         } catch (IOException e) {
             throw new InvalidImageUploadException("画像を変換できませんでした。");
+        }
+    }
+
+    /**
+     * ベストエフォートの経路({@link #resizeToLongEdge}/{@link #resizeToJpeg})用のデコード。ヘッダーの寸法で画素数を
+     * 確かめてから全体を読む(issue #1717)。上限超過は{@link InvalidImageUploadException}、{@code ImageIO}が
+     * 読めない形式はnull(呼び出し側が元のバイト列を返す)。読み取りの失敗は{@link IOException}。
+     */
+    private BufferedImage decodeCheckingPixelLimit(byte[] bytes) throws IOException {
+        ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes));
+        ImageReader reader = null;
+        try {
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) {
+                return null;
+            }
+            reader = readers.next();
+            reader.setInput(in, true, true);
+            if ((long) reader.getWidth(0) * reader.getHeight(0) > MAX_DECODE_SOURCE_PIXELS) {
+                throw new InvalidImageUploadException("画像の画素数が大きすぎます(上限6,400万画素)。");
+            }
+            return reader.read(0);
+        } finally {
+            if (reader != null) {
+                reader.dispose();
+            }
+            in.close();
         }
     }
 

@@ -227,11 +227,18 @@ public class BulkManagementService {
             Long projectId, byte[] data, String filename, String contentType, Long actorId) {
         Project project = getProject(projectId);
         int longEdgePx = mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(projectId);
-        ImageResizeService.ResizeResult resized =
-                imageResizeService.resizeToLongEdge(data, contentType, longEdgePx, true);
-        byte[] resizedData = resized.data();
-        String resizedContentType = resized.mimeType();
+        // 画素数が上限を超える画像は、どの環境へもアップロードせず環境ごとの失敗として返す(issue #1717)。
+        ImageResizeService.ResizeResult resized = null;
+        String rejection = null;
+        try {
+            resized = imageResizeService.resizeToLongEdge(data, contentType, longEdgePx, true);
+        } catch (InvalidImageUploadException e) {
+            rejection = e.getMessage();
+        }
+        byte[] resizedData = resized != null ? resized.data() : data;
+        String resizedContentType = resized != null ? resized.mimeType() : contentType;
         String resizedFilename = withExtensionFor(filename, resizedContentType);
+        final String rejectionMessage = rejection;
         // 環境ごとのアップロードは独立なので並列に走らせる(issue #1688。比較取得は#1474、書き込み系は#1687と
         // 同じ共有Executor)。認証情報の解決とCMSアダプタの解決も各タスクの中で行う。結果はENVIRONMENT_ORDER順。
         // saveLogは永続化せずBulkOperationLogを組み立てるだけなので、タスクの中(ワーカースレッド)で呼んでよい。
@@ -251,6 +258,9 @@ public class BulkManagementService {
                 String errorMessage = null;
                 String value;
                 try {
+                    if (rejectionMessage != null) {
+                        throw new IllegalStateException(rejectionMessage);
+                    }
                     CmsCredentials credentials = siteService.getCredentials(site.getSiteKey());
                     CmsAdapter adapter = cmsAdapterFactory.resolve(credentials.cmsType());
                     MediaUploadResult result =

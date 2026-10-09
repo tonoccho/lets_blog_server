@@ -161,4 +161,18 @@ class MediaControllerTest {
 
         verify(cmsBridgeClient, never()).uploadMedia(any(), anyString(), anyString(), any(), any());
     }
+
+    // ---- issue #1717 ----
+
+    @Test
+    void upload_画素数が上限を超える画像は断り_CMSへアップロードしない() {
+        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
+
+        assertThrows(com.letsblog.media.service.InvalidImageUploadException.class,
+                () -> controller().upload("main", new MockMultipartFile(
+                        "file", "bomb.png", "image/png",
+                        com.letsblog.media.testsupport.UploadImageFixtures.pngHeaderOnly(30000, 30000))));
+
+        verify(cmsBridgeClient, never()).uploadMedia(any(), anyString(), anyString(), any(), any());
+    }
 }

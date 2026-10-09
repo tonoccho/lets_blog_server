@@ -7,7 +7,9 @@ import org.springframework.stereotype.Service;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageReader;
 import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageInputStream;
 import javax.imageio.stream.ImageOutputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -33,6 +35,11 @@ public class ImageResizeService {
     private static final Logger log = LoggerFactory.getLogger(ImageResizeService.class);
     private static final int EXIF_ORIENTATION_TAG = 0x0112;
     private static final float JPEG_QUALITY = 0.85f;
+    /**
+     * デコードする画像の画素数の上限(6,400万画素。mediaの同名の上限と揃える)。圧縮の効く画像は数GBに伸長しうるため、
+     * デコードの前にヘッダーの寸法で断る(issue #1717)。
+     */
+    private static final long MAX_DECODE_SOURCE_PIXELS = 64_000_000L;
 
     /** リサイズ/エンコード結果。convertOpaquePngToJpeg指定時はmimeTypeが元と変わりうる。 */
     public record ResizeResult(byte[] data, String mimeType) {
@@ -54,7 +61,7 @@ public class ImageResizeService {
             return new ResizeResult(originalBytes, mimeType);
         }
         try {
-            BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(originalBytes));
+            BufferedImage decoded = decodeCheckingPixelLimit(originalBytes);
             if (decoded == null) {
                 return new ResizeResult(originalBytes, mimeType);
             }
@@ -79,6 +86,9 @@ public class ImageResizeService {
 
             ResizeResult encoded = encode(output, mimeType, convertOpaquePngToJpeg);
             return encoded != null ? encoded : new ResizeResult(originalBytes, mimeType);
+        } catch (InvalidImageUploadException e) {
+            // 画素数超過は元のバイト列に落とさず断る(issue #1717)。メタ情報が残り、巨大な画像がCMSへ届くため。
+            throw e;
         } catch (IOException | RuntimeException e) {
             log.warn("画像のリサイズ/メタ情報削除に失敗したため、元のバイト列のままアップロードします: {}", e.getMessage());
             return new ResizeResult(originalBytes, mimeType);
@@ -90,6 +100,33 @@ public class ImageResizeService {
      */
     public byte[] stripMetadata(byte[] originalBytes, String mimeType) {
         return resizeToLongEdge(originalBytes, mimeType, Integer.MAX_VALUE);
+    }
+
+    /**
+     * ベストエフォートの経路({@link #resizeToLongEdge})用のデコード。ヘッダーの寸法で画素数を
+     * 確かめてから全体を読む(issue #1717)。上限超過は{@link InvalidImageUploadException}、{@code ImageIO}が
+     * 読めない形式はnull(呼び出し側が元のバイト列を返す)。読み取りの失敗は{@link IOException}。
+     */
+    private BufferedImage decodeCheckingPixelLimit(byte[] bytes) throws IOException {
+        ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes));
+        ImageReader reader = null;
+        try {
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) {
+                return null;
+            }
+            reader = readers.next();
+            reader.setInput(in, true, true);
+            if ((long) reader.getWidth(0) * reader.getHeight(0) > MAX_DECODE_SOURCE_PIXELS) {
+                throw new InvalidImageUploadException("画像の画素数が大きすぎます(上限6,400万画素)。");
+            }
+            return reader.read(0);
+        } finally {
+            if (reader != null) {
+                reader.dispose();
+            }
+            in.close();
+        }
     }
 
     private boolean isJpeg(String mimeType) {

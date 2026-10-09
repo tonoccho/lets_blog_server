@@ -571,6 +571,31 @@ class BulkManagementServiceTest {
     }
 
     @Test
+    void uploadImageToAllEnvironments_画素数が上限を超える画像はどの環境へもアップロードせず失敗として返す() {
+        BulkManagementService service = new BulkManagementService(
+                bulkManagementClient,
+                bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
+                projectService, new ImageResizeService(), mediaSettingsBridgeClient);
+        Project project = buildProject(10L, 20L, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
+        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, OversizedImageFixtures.pngHeaderOnly(30000, 30000), "bomb.png", "image/png", 9L);
+
+        assertEquals(2, results.size());
+        for (BulkOperationLog log : results) {
+            assertEquals(BulkOperationStatus.FAILED, log.getStatus());
+            org.junit.jupiter.api.Assertions.assertTrue(log.getErrorMessage().contains("画素数"), log.getErrorMessage());
+        }
+        verify(adapter, never()).uploadMedia(any(), any(), any(), any());
+        verify(cmsAdapterFactory, never()).resolve(any());
+    }
+
+    @Test
     void uploadImageToAllEnvironments_JPEG変換された場合はファイル名拡張子とContentTypeもjpgに揃える() {
         BulkManagementService service = service();
         Project project = buildProject(10L, null, null);

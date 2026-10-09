@@ -13,6 +13,7 @@ import com.letsblog.publishing.service.ArticleReviewNotFoundException;
 import com.letsblog.publishing.service.BranchNotFoundException;
 import com.letsblog.publishing.service.ForbiddenException;
 import com.letsblog.publishing.service.IdentityServiceUnavailableException;
+import com.letsblog.publishing.service.InvalidImageUploadException;
 import com.letsblog.publishing.service.InvalidPlantUmlTagException;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
 import com.letsblog.publishing.service.ProjectNotFoundException;
@@ -163,6 +164,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1717: 画像の画素数が上限を超える。直せるのは送り手なので400で理由を返す。 */
+    @ExceptionHandler(InvalidImageUploadException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidImageUpload(InvalidImageUploadException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidPlantUmlTagException.class)

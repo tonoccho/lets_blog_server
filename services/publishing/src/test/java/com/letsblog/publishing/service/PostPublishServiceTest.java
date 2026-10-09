@@ -142,6 +142,19 @@ class PostPublishServiceTest {
     }
 
     @Test
+    void publish_画素数が上限を超える添付画像は断り_WordPressへ何も送らない() {
+        List<MultipartFile> images = List.of(new MockMultipartFile(
+                "images", "bomb.png", "image/png", OversizedImageFixtures.pngHeaderOnly(30000, 30000)));
+
+        RuntimeException e = assertThrows(RuntimeException.class,
+                () -> service.publish(command("my-article", "My Article", images, null)));
+
+        assertTrue(e.getMessage().contains("画素数"), e.getMessage());
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+    }
+
+    @Test
     void publish_画像が複数ある場合はslug連番でリネームされる() {
         when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
                 .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
