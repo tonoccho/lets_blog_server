@@ -179,6 +179,9 @@ public class UserService {
      */
     @Transactional
     public UserResponse setupInitialAdmin(String email, String password) {
+        // issue #1718: 確認からKeycloak作成・保存までを直列化する。ロックは確認より前、Keycloak呼び出しより前に
+        // 取る(負けた側はここで待たされ、勝者のコミット後に下のhasAnyUserで拒否されるのでKeycloakに何も残らない)。
+        userRepository.lockInitialSetup();
         if (hasAnyUser()) {
             throw new IllegalArgumentException("初回セットアップは既に完了しています");
         }

@@ -33,4 +33,14 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from User u where u.role = 'admin' and u.enabled = true order by u.id")
     List<User> lockEnabledAdmins();
+
+    /**
+     * 初回管理者セットアップを直列化するロック行(issue #1718)を取る。
+     *
+     * <p>{@code users}が空の間は行ロックの対象が無く、{@code COUNT(*) ... FOR UPDATE}はギャップロックで
+     * デッドロックしうるため、常に1行だけ存在する{@code initial_setup_lock}(V4)の行を使う。
+     * 必ず{@code @Transactional}の内側から、利用者の有無の確認より前に呼ぶこと。
+     */
+    @Query(value = "select id from initial_setup_lock where id = 1 for update", nativeQuery = true)
+    List<Integer> lockInitialSetup();
 }
