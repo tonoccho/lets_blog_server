@@ -68,7 +68,7 @@ const atProvision = defineBddProject({
   name: 'at-provision',
   outputDir: '.features-gen/at-provision',
   // `@stub-isolation:threads`(下の at-threads-exclusive、issue #1579)と `@stub-isolation:facebook`(at-facebook-exclusive、issue #1580)、`@stub-isolation:x`(at-x-exclusive、issue #1583)、`@stub-isolation:linkedin`(at-linkedin-exclusive、issue #1581)、`@stub-isolation:hatena`(at-hatena-exclusive、issue #1582)は専用レーンへ集めるので除く。
-  tags: '@stage:provision and not @stub-isolation:threads and not @stub-isolation:facebook and not @stub-isolation:x and not @stub-isolation:linkedin and not @stub-isolation:hatena',
+  tags: '@stage:provision and not @stub-isolation:threads and not @stub-isolation:facebook and not @stub-isolation:x and not @stub-isolation:linkedin and not @stub-isolation:hatena and not @site-isolation:letsblog-sync',
 });
 
 /**
@@ -396,6 +396,21 @@ const atHatenaExclusive = defineBddProject({
 });
 
 /**
+ * issue #1706: letsblog プラグインへの同期を起こすシナリオ(`project/site-letsblog-sync.feature`・
+ * `site-letsblog-custom-tag-markers.feature`・`site-letsblog-embed-markers.feature`)の専用レーン。
+ * グローバルタグ等の変更は全プロジェクトのサイトへ同期を送るため、他のシナリオが同時に走ると
+ * 同期が割り込み、payload とプラグイン status のハッシュが別世代になって落ちる。
+ * `at-main` と他の専用レーンの完了を待ち(`custom-tag/**` などグローバルタグを書くシナリオとも、サイトを使う他のレーンとも重ならない)、
+ * `workers: 1` で内部も直列化する。シナリオは `@stage:provision` なので at-provision からは除く。
+ */
+const atLetsblogSyncExclusive = defineBddProject({
+  ...BDD_COMMON,
+  name: 'at-letsblog-sync-exclusive',
+  outputDir: '.features-gen/at-letsblog-sync-exclusive',
+  tags: '@site-isolation:letsblog-sync' + excludeRequiresGpu + excludeRequiresRealAiCpu,
+});
+
+/**
  * 段階5: `@destructive` のシナリオ(issue #929)。
  *
  * 環境の状態を壊すシナリオを**最後に、それだけで**実行する。
@@ -655,12 +670,19 @@ export default defineConfig({
       workers: 1,
     },
     {
+      // サイトを使う他のレーンがすべて終わってから走る(同期の割り込みを避けるため)。at-destructive はこれの完了も待つ(issue #1706)。
+      ...atLetsblogSyncExclusive,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive', 'at-threads-exclusive', 'at-facebook-exclusive', 'at-x-exclusive', 'at-linkedin-exclusive', 'at-hatena-exclusive'],
+      workers: 1,
+    },
+    {
       ...atDestructive,
       use: { ...devices['Desktop Chrome'] },
       // at-destructive は「他に誰も走っていない」ことが前提(#929)。at-llm-exclusive /
       // at-timezone-exclusive / at-analytics-exclusive も共有状態に触れるため、at-main と
       // 同様に完了を待ってから始める(issue #1188、issue #1374、issue #1372)。
-      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive', 'at-threads-exclusive', 'at-facebook-exclusive', 'at-x-exclusive', 'at-linkedin-exclusive', 'at-hatena-exclusive'],
+      dependencies: ['at-main', 'at-llm-exclusive', 'at-timezone-exclusive', 'at-analytics-exclusive', 'at-preview-exclusive', 'at-threads-exclusive', 'at-facebook-exclusive', 'at-x-exclusive', 'at-linkedin-exclusive', 'at-hatena-exclusive', 'at-letsblog-sync-exclusive'],
       // この段階の**内部**も直列化する(issue #1387)。dependencies は他プロジェクトの
       // 完了しか担保せず、24シナリオ同士は既定の並列度でそのまま走っていた。それぞれが
       // 別のサービスを止めるため互いの停止に巻き込まれ、2026-09-23 のリリース検証で

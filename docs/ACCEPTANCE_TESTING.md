@@ -1125,7 +1125,7 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 
 `at-main` / `at-timezone-exclusive` / `at-llm-exclusive` は `at-provision` にのみ依存し、互いに
 並行して走る。`at-analytics-exclusive` は `at-llm-exclusive` の完了を待ち(`at-provision` ではない)、
-`at-destructive` は `at-main` と9つの専用レーンすべての完了を待つ
+`at-destructive` は `at-main` と10の専用レーンすべての完了を待つ
 (`apps/web/playwright.config.ts` の `projects[].dependencies`)。
 
 | 段階 | 中身 | 担当 |
@@ -1144,7 +1144,8 @@ npm run test:at:clean                 # 全撤去+ゼロ構築 → 段階順に�
 | `at-x-exclusive` | `@stub-isolation:x` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`project-sns-x` / `site-letsblog-sns-announce` / `project-sns-templates` の各シナリオが `x-stub` の単一のグローバル状態を初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1583 |
 | `at-linkedin-exclusive` | `@stub-isolation:linkedin` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`linkedin-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1581 |
 | `at-hatena-exclusive` | `@stub-isolation:hatena` のシナリオ(`@stage:provision` も付く。`at-provision` からは除外)。`hatena-stub` の単一のグローバル状態を全シナリオが初期化・検証するため、並列だと互いの記録を壊す。`workers: 1` の専用レーンに集約 | #1582 |
-| `at-destructive` | `@destructive` のシナリオ。`at-main` と9つの専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
+| `at-letsblog-sync-exclusive` | `@site-isolation:letsblog-sync` のシナリオ(`site-letsblog-sync` / `site-letsblog-custom-tag-markers` / `site-letsblog-embed-markers`。`@stage:provision` も付く。`at-provision` からは除外)。グローバルタグ等の変更は全プロジェクトのサイトへ同期を送るため、他のシナリオと並走すると同期が割り込み payload と status のハッシュが別世代になる。`at-main` と他のすべての専用レーンの完了を待ち、`workers: 1` の専用レーンに集約。検証は `--project=at-letsblog-sync-exclusive`(依存を含む) | #1706 |
+| `at-destructive` | `@destructive` のシナリオ。`at-main` と10の専用レーンの完了後に**最後に、それだけで**実行する | 各ドメインIssue |
 
 ### なぜ `@destructive` を別段階にするか(#929)
 

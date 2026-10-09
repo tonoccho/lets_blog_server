@@ -195,9 +195,20 @@ Then('同期検証のすべてのサイトのプラグインの status のハッ
         { timeout: 180_000, intervals: [2_000, 3_000, 5_000] }
       )
       .toBe('ok');
-    // 保存されている内容そのもののハッシュとも一致する(ハッシュだけ合わせて内容を保存していない、を防ぐ)
-    const payload = wpCli(site.siteKey, ['option', 'get', 'letsblog_sync_payload']);
-    expect(createHash('sha256').update(payload, 'utf8').digest('hex')).toBe(pluginStatus(site.siteKey).sync_hash);
+    // 保存されている内容そのもののハッシュとも一致する(ハッシュだけ合わせて内容を保存していない、を防ぐ)。
+    // payload と status は別々に読むので、間に別の同期が入ると別世代どうしを比べてしまう。
+    // 同じ poll の中で両方を読み、一致するまで再試行する(issue #1706)。
+    await expect
+      .poll(
+        () => {
+          const payload = wpCli(site.siteKey, ['option', 'get', 'letsblog_sync_payload']);
+          const payloadHash = createHash('sha256').update(payload, 'utf8').digest('hex');
+          const statusHash = pluginStatus(site.siteKey).sync_hash;
+          return payloadHash === statusHash ? 'ok' : `payload のハッシュ ${payloadHash} が status のハッシュ ${statusHash} と違う`;
+        },
+        { timeout: 60_000, intervals: [1_000, 2_000, 3_000] }
+      )
+      .toBe('ok');
   }
 });
 

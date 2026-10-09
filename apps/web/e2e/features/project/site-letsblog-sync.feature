@@ -1,5 +1,5 @@
 # language: ja
-@project
+@project @site-isolation:letsblog-sync
 機能: カスタムタグ・統合 CSS・プレフィックスの letsblog プラグインへの同期
 
   アプリでカスタムタグ・統合 CSS・プレフィックス・組み込みタグのデザインを変更すると、プラグインを導入した

@@ -1,5 +1,5 @@
 # language: ja
-@project
+@project @site-isolation:letsblog-sync
 機能: カスタムタグを目印付きで投稿し、letsblog プラグインが同期済みの定義で表示時に展開し直す
 
   カスタムタグを含む記事を投稿すると、投稿 HTML にタグの元情報が目印(HTML コメント)として残り、

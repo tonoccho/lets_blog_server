@@ -1,5 +1,5 @@
 # language: ja
-@project
+@project @site-isolation:letsblog-sync
 機能: 組み込みタグ(ブログカード・Amazon・目次)を目印付きで投稿し、letsblog プラグインが同期済みのデザインで表示時に適用し直す
 
   ブログカード・Amazon・目次を含む記事を投稿すると、投稿 HTML に取得したデータ(目次は見出しの構造)が
