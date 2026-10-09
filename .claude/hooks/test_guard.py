@@ -4534,6 +4534,56 @@ class CloseIssueMarkerGatedTransition(unittest.TestCase):
         self.assertIsNotNone(self._bash(self.cmd("Backlog"), root))
 
 
+class IssueUpdateStatusLabelIntegrity(unittest.TestCase):
+    """#1720: `glab issue update --label/--unlabel` も `glab api` の PUT と同じ規則で検査される。"""
+
+    SESSION = "issue-update-status-test-session"
+    UPD = "glab issue update 5 "
+
+    def _bash(self, command, root):
+        return _run_in_root("bash", {"command": command}, root, self.SESSION)
+
+    def test_add_only_status_is_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload(self.UPD + '--label "status::Done"')))
+
+    def test_remove_only_status_is_denied(self):
+        self.assertIsNotNone(run_hook("bash", bash_payload(self.UPD + '--unlabel "status::Inbox"')))
+
+    def test_every_flag_notation_is_checked(self):
+        for form in ("-l status::Done", "--label=status::Done", "-lstatus::Done",
+                     "-l=status::Done", "--label bug,status::Done"):
+            with self.subTest(form=form):
+                self.assertIsNotNone(run_hook("bash", bash_payload(self.UPD + form)))
+        for form in ("-u status::Inbox", "--unlabel=status::Inbox", "-ustatus::Inbox"):
+            with self.subTest(form=form):
+                self.assertIsNotNone(run_hook("bash", bash_payload(self.UPD + form)))
+
+    def test_legal_transition_is_allowed(self):
+        cmd = self.UPD + '--label "status::In Progress" --unlabel "status::Ready"'
+        self.assertIsNone(run_hook("bash", bash_payload(cmd)))
+
+    def test_illegal_transition_is_denied(self):
+        cmd = self.UPD + '--label "status::Review" --unlabel "status::Ready"'
+        self.assertIsNotNone(run_hook("bash", bash_payload(cmd)))
+
+    def test_marker_gated_transition(self):
+        cmd = self.UPD + '--label "status::Done" --unlabel "status::Inbox"'
+        self.assertIsNotNone(run_hook("bash", bash_payload(cmd)))
+        root, _ = _stage_root("close-issue", self.SESSION)
+        self.assertIsNone(self._bash(cmd, root))
+
+    def test_non_status_label_operation_is_allowed(self):
+        self.assertIsNone(run_hook("bash", bash_payload(self.UPD + "--label bug")))
+        self.assertIsNone(run_hook("bash", bash_payload(self.UPD + "--unlabel needs-decision")))
+
+    def test_explain_reflects_the_verdict(self):
+        out = subprocess.run(
+            [sys.executable, HOOK, "explain", self.UPD + '--label "status::Done"'],
+            capture_output=True, text=True,
+        ).stdout
+        self.assertNotIn("allow", out.split("判定:")[-1][:12])
+
+
 class LineContinuation(unittest.TestCase):
     """#1666: クォート外の `\\` + 改行は行の継続であり、コマンドの区切りではない。
 

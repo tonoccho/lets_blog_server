@@ -1594,39 +1594,50 @@ def check_status_label_integrity(command, payload=None):
                 "`add_labels=` と `remove_labels=` を使ってください。"
             )
 
-        added = fields.get("add_labels", "")
-        removed = fields.get("remove_labels", "")
-        if _has_status(added) and not _has_status(removed):
-            emit_deny(
-                "ステータスを足すだけの呼び出しです。GitLab CE のラベルに排他性は無いので"
-                "(スコープ付きラベルは Premium)、これでは `status::` が2つになります"
-                "(CLAUDE.md → How to change status)。"
-                "同じ呼び出しに `remove_labels=status::<現在の値>` を含めてください。"
-            )
-        if _has_status(removed) and not _has_status(added):
-            emit_deny(
-                "ステータスを外すだけの呼び出しです。`status::` が0個の Issue は"
-                "ボードのどの列にも現れず、`work-next` からも triage からも見えなくなります"
-                "(CLAUDE.md → How to change status)。"
-                "同じ呼び出しに `add_labels=status::<次の値>` を含めてください。"
-            )
+        _check_status_pair(fields.get("add_labels", ""), fields.get("remove_labels", ""), payload)
 
-        # ここまでで「片側だけの付け外し」は拒否済みなので、残るのは
-        # 「どちらも status:: を含まない(このステータス変更とは無関係)」か
-        # 「両方が status:: を含む(実際の遷移)」のどちらか。後者だけを遷移表で検証する。
-        old_status = _status_name(removed)
-        new_status = _status_name(added)
-        gate = MARKER_GATED_STATUS_TRANSITIONS.get((old_status, new_status), ())
-        if gate and payload is not None and read_stage(payload) in gate:
-            continue
-        if old_status and new_status and (old_status, new_status) not in LEGAL_STATUS_TRANSITIONS:
-            emit_deny(
-                "`status::%s → status::%s` は正当な遷移として定義されていません"
-                "(CLAUDE.md → How to change status → Legal Transitions)。"
-                "段を飛ばした遷移か、定義されていない差し戻しです。"
-                "定義済みの遷移の一覧は CLAUDE.md を参照してください。"
-                % (old_status, new_status)
-            )
+    # `glab issue update <n> --label/--unlabel`(#1720)。判定は上の PUT 経路と共有する。
+    for args in invokes(command, "glab", ("issue", "update")):
+        added, removed = _issue_update_label_args(args)
+        _check_status_pair(",".join(added), ",".join(removed), payload)
+
+
+def _check_status_pair(added, removed, payload):
+    """`added` / `removed`(カンマ区切りのラベル名)のステータス変更を検査する。
+
+    `glab api` の PUT と `glab issue update` が共有する判定(#1720)。拒否は `emit_deny` が行う。
+    """
+    if _has_status(added) and not _has_status(removed):
+        emit_deny(
+            "ステータスを足すだけの呼び出しです。GitLab CE のラベルに排他性は無いので"
+            "(スコープ付きラベルは Premium)、これでは `status::` が2つになります"
+            "(CLAUDE.md → How to change status)。"
+            "同じ呼び出しに `remove_labels=status::<現在の値>`(`--unlabel`)を含めてください。"
+        )
+    if _has_status(removed) and not _has_status(added):
+        emit_deny(
+            "ステータスを外すだけの呼び出しです。`status::` が0個の Issue は"
+            "ボードのどの列にも現れず、`work-next` からも triage からも見えなくなります"
+            "(CLAUDE.md → How to change status)。"
+            "同じ呼び出しに `add_labels=status::<次の値>`(`--label`)を含めてください。"
+        )
+
+    # ここまでで「片側だけの付け外し」は拒否済みなので、残るのは
+    # 「どちらも status:: を含まない(このステータス変更とは無関係)」か
+    # 「両方が status:: を含む(実際の遷移)」のどちらか。後者だけを遷移表で検証する。
+    old_status = _status_name(removed)
+    new_status = _status_name(added)
+    gate = MARKER_GATED_STATUS_TRANSITIONS.get((old_status, new_status), ())
+    if gate and payload is not None and read_stage(payload) in gate:
+        return
+    if old_status and new_status and (old_status, new_status) not in LEGAL_STATUS_TRANSITIONS:
+        emit_deny(
+            "`status::%s → status::%s` は正当な遷移として定義されていません"
+            "(CLAUDE.md → How to change status → Legal Transitions)。"
+            "段を飛ばした遷移か、定義されていない差し戻しです。"
+            "定義済みの遷移の一覧は CLAUDE.md を参照してください。"
+            % (old_status, new_status)
+        )
 
 
 def _short_flag_attached_value(arg, short):
