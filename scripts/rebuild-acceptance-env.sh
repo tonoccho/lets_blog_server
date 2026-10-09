@@ -25,6 +25,8 @@
 #   2. 構築        — docker compose up -d --build(ソースからビルド)
 #   3. 健全性待ち  — scripts/wait-for-stack-healthy.sh を再利用する(重複実装しない)
 #   4. 検証        — 破棄と構築が成立したことを確かめ、崩れていれば非0で終了する
+#   4+ 接続先      — e2e-clear-llm-db-overrides.sh --yes で LLM / ComfyUI の接続先をスタブへ向け、
+#                    platform の再起動後の healthy を待つ(#1703)
 #
 # ■ 安全装置(1)— 接続先を引数で差し替えられない
 #
@@ -737,6 +739,25 @@ fi
 if [ "$verify_failed" -ne 0 ]; then
   echo "" >&2
   echo "エラー: ゼロ構築が成立していません(上の NG を参照)。後続の段階は実行されません。" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------- 4+. スタブの接続先(#1703)
+#
+# ゼロ構築後は ConnectionDefaultsSeeder が本番の既定値(ollama / comfyui)を DB へ書く。#1567 以降
+# 接続先は DB だけで決まるので、スタブへ向けないと AI 系シナリオは起動していない実サービスへ出て落ちる。
+# 検証(4/5)が通った後、受け入れテストが始まる前にここで向ける。ConnectionDefaultsSeeder 自体は変えない。
+step "4+ スタブの接続先(LLM / ComfyUI)を DB へ投入します(e2e-clear-llm-db-overrides.sh)"
+if ! "$SCRIPT_DIR/e2e-clear-llm-db-overrides.sh" --yes; then
+  echo "エラー: LLM / ComfyUI の接続先をスタブへ向けられませんでした。" >&2
+  echo "       後続の段階は実行されません。単独で再実行できます:" >&2
+  echo "         ./scripts/e2e-clear-llm-db-overrides.sh --yes" >&2
+  exit 1
+fi
+# platform を再起動したので、healthy に戻るのを待つ。
+if ! COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT" "$SCRIPT_DIR/wait-for-stack-healthy.sh" --timeout "$HEALTH_TIMEOUT_SECONDS"; then
+  echo "エラー: 接続先の切り替え後に healthy になりませんでした(上のサービス名を参照)。" >&2
+  echo "       後続の段階は実行されません。" >&2
   exit 1
 fi
 

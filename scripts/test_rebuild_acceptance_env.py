@@ -1651,6 +1651,79 @@ class SharedHostProxyIsReapplied(RebuildScriptHarness):
         self.assertNotIn("共有プロキシの再適用に失敗", out)
 
 
+class PointsLlmEndpointsAtStubsAfterTheRebuild(RebuildScriptHarness):
+    """#1703: ゼロ構築の後、受け入れテストの開始前に、LLM / ComfyUI の接続先をスタブへ向ける。
+
+    ゼロ構築後は `ConnectionDefaultsSeeder` が本番の既定値(ollama / comfyui)を書く。
+    `e2e-clear-llm-db-overrides.sh --yes` が呼ばれないと、AI 系シナリオは実サービスへ出て落ちる。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.r = self.run_script("--yes")
+        self.out_text = self.out(self.r)
+
+    def seed_calls(self):
+        return [c for c in self.docker_calls() if "INSERT INTO lbs_platform.system_settings" in c]
+
+    def test_succeeds(self):
+        self.assertEqual(0, self.r.returncode, self.out_text)
+
+    def test_writes_both_stub_endpoints_to_the_database(self):
+        calls = self.seed_calls()
+        self.assertEqual(1, len(calls), "接続先の投入が1回ではない:\n" + self.out_text)
+        self.assertIn("'llm_ollama_base_url'", calls[0])
+        self.assertIn("'comfyui_base_url'", calls[0])
+
+    def test_restarts_platform_so_the_settings_cache_is_dropped(self):
+        calls = self.docker_calls()
+        self.assertIn("restart\tlbs-platform", calls)
+
+    def test_runs_after_the_stack_was_rebuilt_and_verified(self):
+        calls = self.docker_calls()
+        seed = next(i for i, c in enumerate(calls) if "INSERT INTO lbs_platform.system_settings" in c)
+        up = max(i for i, c in enumerate(calls) if c.startswith("compose") and "\tup" in c)
+        setup_status = max(i for i, c in enumerate(calls) if c.startswith("curl") and "setup-status" in c)
+        restart = calls.index("restart\tlbs-platform")
+        self.assertGreater(seed, up, "接続先の投入がスタックの起動より前に来ている")
+        self.assertGreater(seed, setup_status, "接続先の投入が構築後の検証より前に来ている")
+        self.assertGreater(restart, seed, "platform の再起動が投入より前に来ている")
+
+    def test_is_announced_between_verification_and_completion(self):
+        import re
+
+        verify = re.search(r"^--- 4/5 .*$", self.out_text, re.M)
+        point = re.search(r"^--- .*スタブ.*接続先.*$", self.out_text, re.M)
+        done = re.search(r"^--- 5/5 .*$", self.out_text, re.M)
+        self.assertTrue(verify and point and done, self.out_text)
+        self.assertLess(verify.start(), point.start())
+        self.assertLess(point.start(), done.start())
+
+    def test_waits_for_healthy_again_after_the_restart(self):
+        calls = self.docker_calls()
+        restart = calls.index("restart\tlbs-platform")
+        later_ps = [c for c in calls[restart + 1 :] if c.startswith("compose") and "\tps" in c]
+        self.assertTrue(later_ps, "platform の再起動後に healthy を待っていない")
+
+
+class LlmEndpointFailureStopsTheRebuild(RebuildScriptHarness):
+    """接続先をスタブへ向けられなければ、ゼロ構築は成功と報告しない(後続を走らせない)。"""
+
+    def test_fails_when_platform_restart_fails(self):
+        r = self.run_script("--yes", FAKE_FAIL_ON="restart\tlbs-platform")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        self.assertIn("e2e-clear-llm-db-overrides.sh", out)
+        self.assertIn("後続の段階は実行されません", out)
+        self.assertNotIn("5/5 完了", out)
+
+    def test_dry_run_does_not_touch_the_database_settings(self):
+        r = self.run_script()
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertEqual([], [c for c in self.docker_calls() if "system_settings" in c])
+        self.assertNotIn("restart\tlbs-platform", self.docker_calls())
+
+
 class WiredIntoTheCleanRun(unittest.TestCase):
     """受入基準: `test:at:clean` がゼロ構築を通る / `test:at` と `test:at:fast` は変わらない。"""
 

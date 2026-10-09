@@ -26,6 +26,15 @@ def encrypt_hex(base64_key, plain_text):
     return (iv + AESGCM(key).encrypt(iv, plain_text.encode("utf-8"), None)).hex()
 
 
+def decrypt_hex(base64_key, hex_value):
+    """`encrypt_hex` の逆。IV + 暗号文 + タグの16進文字列から平文を返す(#1703、事前検査が使う)。"""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    key = base64.b64decode(base64_key)
+    raw = bytes.fromhex(hex_value)
+    return AESGCM(key).decrypt(raw[:IV_LENGTH_BYTES], raw[IV_LENGTH_BYTES:], None).decode("utf-8")
+
+
 def main(argv):
     if len(argv) != 1:
         print("使い方: APP_ENCRYPTION_KEY=... e2e_encrypt_setting.py <平文>", file=sys.stderr)

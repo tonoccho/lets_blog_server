@@ -89,6 +89,11 @@ import {
  * scripts/check-stub-overlay.py が確認し、外れていれば作り直しのコマンドを示して中断する
  * (外れたコンテナだけが実サービスへ向き、認証エラーで散発的に落ちるため)。鮮度確認の直後に置く。
  *
+ * issue #1703: DB(lbs_platform.system_settings)の llm_ollama_base_url / comfyui_base_url がスタブを
+ * 向いているかを scripts/check-stub-endpoints.py が確認し、向いていなければ原因と対処のコマンド
+ * (e2e-clear-llm-db-overrides.sh --yes)を示して中断する(ゼロ構築直後は本番の既定値が入っており、
+ * AI 系シナリオが起動していない実サービスへ出て落ちるため)。DB に問い合わせるので healthy 待ちの後に置く。
+ *
  * 環境変数:
  *   ACCEPTANCE_RESET=data  : scripts/reset-acceptance-env.sh --yes(データ層のみ、約30秒)を実行してから始める
  *                            (入口は scripts/run-at-setup.sh。破壊的)
@@ -109,6 +114,8 @@ import {
  *                            古いサービス名と迂回したことは標準出力に記録される。
  *   AT_STUB_OVERLAY_CHECK_BYPASS=1 : スタブ overlay 確認(#1683)を迂回する。overlay を重ねずに作られた
  *                            コンテナ名と迂回したことは標準出力に記録される。
+ *   AT_STUB_ENDPOINT_CHECK_BYPASS=1 : DB の接続先スタブ確認(#1703)を迂回する。スタブを向いていない
+ *                            キーと迂回したことは標準出力に記録される。
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use?.baseURL ?? 'https://localhost';
@@ -193,6 +200,19 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     const timeoutSeconds = Number(process.env.E2E_HEALTH_TIMEOUT ?? '600');
     console.log('[e2e] 全サービスがhealthyになるまで待機します');
     waitForServicesHealthy(undefined, timeoutSeconds);
+  }
+
+  console.log('[e2e] DB の LLM / ComfyUI の接続先がスタブを向いているか確認します');
+  try {
+    execFileSync('python3', [path.join(repoRoot, 'scripts', 'check-stub-endpoints.py')], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+  } catch {
+    throw new Error(
+      'DB の LLM / ComfyUI の接続先がスタブを向いていないため、受け入れテストを開始しません。' +
+        '対処のコマンドは上のログを参照してください。'
+    );
   }
 
   const context = await request.newContext({ baseURL, ignoreHTTPSErrors: true });

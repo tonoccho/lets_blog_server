@@ -666,7 +666,8 @@ curl -s http://127.0.0.1:18087/__control/state | jq '.prompts[-1] | {seed, batch
 `scripts/e2e-clear-llm-db-overrides.sh` は `KEYS` の行を消したうえで、`llm_ollama_base_url`
 (`http://llm-stub:8080`)と `comfyui_base_url`(`http://comfyui-stub:8080`)をスタブの URL として
 DB へ投入する(暗号化は `scripts/e2e_encrypt_setting.py`。`APP_ENCRYPTION_KEY` は `.env` から読む)。
-comfyui-stub を使うシナリオの前に実行すること。
+comfyui-stub を使うシナリオの前に実行すること。ゼロ構築(`rebuild-acceptance-env.sh`)の最後に
+自動で実行される(#1703)ので、`test:at:clean` とリリース検証では手で実行する必要はない。
 
 ```bash
 ./scripts/e2e-clear-llm-db-overrides.sh --yes
@@ -1062,6 +1063,23 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
 `docker-compose.e2e-stubs.yml` が無いサービスがあれば、そのサービス名と作り直しのコマンドを示して中断する。
 `AT_STUB_OVERLAY_CHECK_BYPASS=1` で、該当サービス名を標準出力に記録したうえで続行できる。
 `docker-compose.shared-host.yml` の有無は見ない。
+
+### LLM / ComfyUI の接続先がスタブを向いていることの保証(#1703)
+
+ゼロ構築の直後、`ConnectionDefaultsSeeder` は本番の既定値(`http://ollama:11434/v1` /
+`http://comfyui:8188`)を DB へ書く(この挙動は変えない)。スタブへ向けないと AI 系シナリオは
+起動していない実 ollama を呼んで即座に失敗する(2026-10-09 のリリース検証で `at-provision` の 3 件が落ち、
+後続 989 件がスキップされた)。次の 2 段で防ぐ。
+
+| 段 | 何をするか |
+| --- | --- |
+| 自動で向ける | `scripts/rebuild-acceptance-env.sh` が、検証(4/5)の後・完了(5/5)の前に `e2e-clear-llm-db-overrides.sh --yes` を実行し、platform を再起動して healthy を待つ。リリース検証(`release-verify-tag.py`)も `test:at:clean`(`ACCEPTANCE_RESET=1`)もこのスクリプトを通るので、**ゼロ構築を伴う自動経路では手で実行する必要がない**。失敗するとゼロ構築ごと非0で終わる |
+| 開始前に確かめる | global-setup は healthy 待ちの後に `scripts/check-stub-endpoints.py` を呼ぶ。DB の `llm_ollama_base_url` / `comfyui_base_url` を `APP_ENCRYPTION_KEY` で復号し、スタブの URL(`http://llm-stub:8080` / `http://comfyui-stub:8080`)と厳密一致しなければ、原因と対処のコマンド(`./scripts/e2e-clear-llm-db-overrides.sh --yes`)を示して開始しない |
+
+ゼロ構築を伴わない実行(`test:at` / `test:at:fast`、既存スタックの再利用)では自動では向けないため、
+接続先を管理画面から変えた後などは上の事前検査で止まる。表示されたコマンドを実行してから再実行すること。
+`AT_STUB_ENDPOINT_CHECK_BYPASS=1` で、スタブを向いていないキーを標準出力に記録したうえで続行できる
+(#1683 の `AT_STUB_OVERLAY_CHECK_BYPASS` と同型)。DB に問い合わせられないとき(docker が無い等)は省略する。
 
 ---
 

@@ -26,6 +26,8 @@ DUMMY_FILES = {
         "MYSQL_ROOT_PASSWORD=dummy\n"
         "KEYCLOAK_ADMIN_USERNAME=admin\n"
         "KEYCLOAK_ADMIN_PASSWORD=admin\n"
+        # e2e-clear-llm-db-overrides.sh が暗号化に使う(AES-256 の鍵長 32 バイトの Base64。#1703)。
+        "APP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\n"
     ),
     "certs/localhost.crt": "dummy certificate\n",
     "certs/localhost.key": "dummy key\n",
