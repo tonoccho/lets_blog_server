@@ -4823,5 +4823,57 @@ class MidWordHashIsNotAComment(unittest.TestCase):
         self.assertEqual([["echo", "#x"]], self._argvs("echo \\#x"))
 
 
+class GlabApiFlagNotationForms(unittest.TestCase):
+    """#1721: pflag が同じ意味で受け付ける記法のどれでも、PUT 判定とラベル値の抽出が同じ結果になる。"""
+
+    BASE = "glab api projects/:id/issues/5 "
+    METHODS = ("--method PUT", "--method=PUT", "--method=put", "-X PUT", "-XPUT", "-X=PUT", "-Xput")
+
+    def _denied(self, cmd):
+        return run_hook("bash", bash_payload(cmd)) is not None
+
+    def test_labels_overwrite_denied_for_every_method_form(self):
+        for m in self.METHODS:
+            with self.subTest(method=m):
+                self.assertTrue(self._denied(self.BASE + m + ' -f "labels=bug"'))
+
+    def test_add_only_status_denied_for_every_field_form(self):
+        for f in ("--raw-field=add_labels=status::Done", "-fadd_labels=status::Done",
+                  "-f=add_labels=status::Done", "--field=add_labels=status::Done",
+                  "-Fadd_labels=status::Done", "--raw-field add_labels=status::Done"):
+            with self.subTest(field=f):
+                self.assertTrue(self._denied(self.BASE + "-X PUT " + f))
+
+    def test_add_only_status_denied_for_every_method_form(self):
+        for m in self.METHODS:
+            with self.subTest(method=m):
+                self.assertTrue(self._denied(self.BASE + m + ' -f "add_labels=status::Done"'))
+
+    def test_hotfix_denied_for_method_and_field_forms(self):
+        for m in ("--method=PUT", "-XPUT", "-X=PUT"):
+            with self.subTest(method=m):
+                self.assertTrue(self._denied(self.BASE + m + ' -f "add_labels=hotfix"'))
+        for f in ("--raw-field=add_labels=hotfix", "-fadd_labels=hotfix",
+                  "-f=remove_labels=hotfix"):
+            with self.subTest(field=f):
+                self.assertTrue(self._denied(self.BASE + "-X PUT " + f))
+
+    def test_paired_transition_allowed_with_alternate_forms(self):
+        for m in ("--method=PUT", "-XPUT"):
+            with self.subTest(method=m):
+                cmd = (self.BASE + m + ' -f "remove_labels=status::Ready"'
+                       ' -f "add_labels=status::In Progress"')
+                self.assertFalse(self._denied(cmd))
+        cmd = (self.BASE + "-X PUT --raw-field=remove_labels=status::Ready"
+               " -fadd_labels='status::In Progress'")
+        self.assertFalse(self._denied(cmd))
+
+    def test_non_put_methods_unchanged(self):
+        for m in ("--method=GET", "-XGET", "-X GET", "--method=POST", "-XPOST"):
+            with self.subTest(method=m):
+                self.assertFalse(self._denied(self.BASE + m + ' -f "labels=bug"'))
+        self.assertFalse(self._denied(self.BASE))
+
+
 if __name__ == "__main__":
     unittest.main()

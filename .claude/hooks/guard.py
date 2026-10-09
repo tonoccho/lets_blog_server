@@ -1490,26 +1490,58 @@ def check_merge_flags(command):
 LABEL_FIELD = re.compile(r"^(labels|add_labels|remove_labels)=(.*)$", re.S)
 
 
-def _label_fields(args):
-    """`-f`/`--field` で渡されたラベル関連の値を {key: value} で返す。"""
-    fields = {}
+def _flag_values(args, long_flag, short):
+    """`long_flag` / `-<short>` の値を、pflag が受け付ける記法のすべてで出現順に返す(#1721)。
+
+    `--long v` / `--long=v` / `-s v` / `-sv`(直結)/ `-s=v` を同じ値として扱う。
+    直結形は `_short_flag_attached_value` に任せる。
+    """
+    values = []
     i = 0
     while i < len(args):
         arg = args[i]
-        value = None
-        if arg in ("-f", "--field", "-F", "--raw-field"):
+        if arg in (long_flag, "-" + short):
             if i + 1 < len(args):
-                value = args[i + 1]
+                values.append(args[i + 1])
                 i += 1
-        elif arg.startswith("--field="):
-            value = arg[len("--field="):]
+        elif arg.startswith(long_flag + "="):
+            values.append(arg[len(long_flag) + 1:])
+        else:
+            attached = _short_flag_attached_value(arg, short)
+            if attached is not None:
+                values.append(attached)
         i += 1
-        if value is None:
-            continue
+    return values
+
+
+def _label_fields(args):
+    """`-f/-F/--field/--raw-field` で渡されたラベル関連の値を {key: value} で返す。"""
+    fields = {}
+    values = []
+    # `-f` は --raw-field、`-F` は --field の短縮形。4つの組み合わせをすべて拾う。
+    for long_flag, short in (("--field", "F"), ("--raw-field", "f"),
+                             ("--raw-field", "F"), ("--field", "f")):
+        values += _flag_values(args, long_flag, short)
+    for value in values:
         match = LABEL_FIELD.match(value)
         if match:
             fields[match.group(1)] = match.group(2)
     return fields
+
+
+def _issue_put_fields(args):
+    """`glab api ... issues/<n>` への PUT ならラベル関連の {key: value} を、そうでなければ None を返す。
+
+    `check_status_label_integrity` と `check_hotfix_label_immutability` が共有する(#1721)。
+    メソッドは `--method PUT`・`--method=PUT`・`-X PUT`・`-XPUT`・`-X=PUT`(大文字小文字不問)を
+    同じものとして扱い、複数あれば最後の指定が勝つ。
+    """
+    if not any(re.search(r"issues/\d+", a) for a in args):
+        return None
+    methods = _flag_values(args, "--method", "X")
+    if not methods or methods[-1].upper() != "PUT":
+        return None
+    return _label_fields(args)
 
 
 def _has_status(value):
@@ -1574,18 +1606,9 @@ def check_status_label_integrity(command, payload=None):
     for args in invokes(command, "glab", ()):
         # Issue への PUT だけが対象。作成(`glab issue create --label`)は遷移ではなく、
         # 最初のステータスはそこで付く。読み取りも対象外。
-        if "--method" not in args and "-X" not in args:
+        fields = _issue_put_fields(args)
+        if fields is None:
             continue
-        if not any(re.search(r"issues/\d+", a) for a in args):
-            continue
-        method = ""
-        for i, a in enumerate(args):
-            if a in ("--method", "-X") and i + 1 < len(args):
-                method = args[i + 1].upper()
-        if method != "PUT":
-            continue
-
-        fields = _label_fields(args)
 
         if "labels" in fields:
             emit_deny(
@@ -1730,18 +1753,9 @@ def check_hotfix_label_immutability(command):
 
     # `glab api projects/:id/issues/<n> --method PUT` の add_labels=/remove_labels=
     for args in invokes(command, "glab", ()):
-        if "--method" not in args and "-X" not in args:
+        fields = _issue_put_fields(args)
+        if fields is None:
             continue
-        if not any(re.search(r"issues/\d+", a) for a in args):
-            continue
-        method = ""
-        for i, a in enumerate(args):
-            if a in ("--method", "-X") and i + 1 < len(args):
-                method = args[i + 1].upper()
-        if method != "PUT":
-            continue
-
-        fields = _label_fields(args)
         added = fields.get("add_labels", "")
         removed = fields.get("remove_labels", "")
         if has_hotfix(added) or has_hotfix(removed):
