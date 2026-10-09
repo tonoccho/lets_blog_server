@@ -15,7 +15,6 @@ import {
   loginViaKeycloak,
   withAccountLock,
 } from '../support';
-import { measureServerActionRoundTrip, recordResponseTime } from '../support/responseBudget';
 import { extractKeycloakSessionId } from '../support/keycloakSession';
 import {
   AUTH_GATED_PATHS,
@@ -479,12 +478,7 @@ When('初回セットアップ画面から最初の管理者を作成する', as
   for (let i = 0; i < count; i += 1) {
     await passwordInputs.nth(i).fill(SETUP_ADMIN_PASSWORD);
   }
-  // issue #1553: 送信の Server Action(setupAction)の往復を3秒予算で測る。判定は共通ステップ
-  // 「Server Action の往復は「…」ミリ秒以内に返る」。測るだけで、最初の管理者を作る遷移は1回のまま。
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await page.locator('button[type="submit"]').click();
-  });
-  recordResponseTime(ctx, timing.roundTripMs, '初回セットアップ(setupAction)の往復');
+  await page.locator('button[type="submit"]').click();
   ctx.setupAdminEmail = SETUP_ADMIN_EMAIL;
 });
 

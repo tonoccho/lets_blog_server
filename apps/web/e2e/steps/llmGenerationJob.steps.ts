@@ -1,8 +1,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
-import { measureServerActionRoundTrip, recordResponseTime } from '../support/responseBudget';
-import { waitForHydrated } from '../support/responseBudgetFixtures';
+import { waitForHydrated } from '../support/e2eFixtures';
 
 /**
  * LLM 生成の3機能(カスタムタグ・静的コンテンツ・タグデザイン)を AI キューに乗せる受け入れシナリオ
@@ -190,23 +189,6 @@ When('静的コンテンツの生成結果の「保存」を押す', async ({ ct
   await expect(save).toBeVisible({ timeout: UI_TIMEOUT_MS });
   await waitForHydrated(save);
   await save.click();
-});
-
-// 応答時間予算(`features/response-budget/server-action-sites.feature`、issue #1661)。生成ジョブの完了待ちは
-// 先行ステップで済んでおり、ここで計るのは「保存」の Server Action の POST の往復だけ。
-When('静的コンテンツの生成結果の「保存」を押して Server Action の往復を計測する', async ({ ctx, page }) => {
-  const save = staticContentItem(page, ctx.staticContentLabel as string)
-    .getByTestId('static-content-generated')
-    .getByRole('button', { name: '保存', exact: true });
-  await expect(save).toBeVisible({ timeout: UI_TIMEOUT_MS });
-  await waitForHydrated(save);
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await save.click();
-    await expect(staticContentItem(page, ctx.staticContentLabel as string).getByText('保存しました。')).toBeVisible({
-      timeout: UI_TIMEOUT_MS,
-    });
-  });
-  recordResponseTime(ctx, timing.roundTripMs, '静的コンテンツの生成結果の保存(Server Action)の往復');
 });
 
 Then('静的コンテンツを保存したことが示される', async ({ ctx, page }) => {

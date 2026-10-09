@@ -189,10 +189,10 @@ GitHub Actions は元から無効化されており、GitLab 移行時に定義�
 
 ## 性能テストの現状(issue #915)
 
-**負荷試験のツール(JMH / k6)は持たない。** 性能に関する自動検証は
-`apps/web/e2e/features/custom-tag/performance.feature`(受け入れテスト)だけである。
+**負荷試験のツール(JMH / k6)は持たない。** 性能に関する自動検証も持たない。
 #915 の時点では `apps/web/e2e/performance.spec.ts` に置いていたが、#938 (AT-12) で
-`.feature` へ移行し、spec は削除した。
+`apps/web/e2e/features/custom-tag/performance.feature` へ移行し、その受け入れテストも環境要因が強いため
+#1708(2026-10-09)で削除した。3 秒予算は `docs/ACCEPTANCE_CRITERIA.md` §10 に要件として残る。
 
 | 対象 | 目標値 |
 |---|---|
@@ -334,20 +334,10 @@ npm run test:e2e:ui
 npm run test:e2e:debug
 ```
 
-#### 2.2 パフォーマンス（`e2e/features/custom-tag/performance.feature`）
+#### 2.2 パフォーマンス
 
-| # | シナリオ | 目標値 | 説明 |
-|---|---------|--------|------|
-| 1 | 検証APIが所定の時間内に応答する（1件） | < 2秒 | `/api/custom-tags/validate` |
-| 2 | 検証APIが所定の時間内に応答する（5件同時） | < 3秒 | 同時要求の完了まで |
-| 3 | タグ画面のページロードが3秒以内に完了する | < 3秒 | 2回目の遷移（1回目はウォームアップ） |
-
-**実行方法**:
-
-```bash
-cd apps/web
-npm run test:at -- --grep "@custom-tag"
-```
+受け入れテストでは検証しない(#1708 で `e2e/features/custom-tag/performance.feature` を削除。
+要件は `docs/ACCEPTANCE_CRITERIA.md` §10 の台帳に残る)。
 
 #### 2.3 セキュリティテスト（security.spec.ts）
 

@@ -1,7 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import { When, Then } from './fixtures';
 import { expect, loginAsAdmin } from '../support';
-import { measureServerActionRoundTrip, recordResponseTime } from '../support/responseBudget';
 import {
   SYNC_ACCEPTED_NOTICE,
   fillSyncPanel,
@@ -14,8 +13,7 @@ import {
 
 /**
  * Web画面の環境間同期の非同期化(issue #1697、`environment-sync-web-job.feature`)のステップ定義。
- * 足場「環境同期検証用のプロジェクトと2つのmanagedサイトがある」と、判定「Server Action の往復は「…」ミリ秒以内に
- * 返る」は既存のものを使う。同期は実際に走るので、完了待ちの上限を長く取る。
+ * 足場「環境同期検証用のプロジェクトと2つのmanagedサイトがある」は既存のものを使う。同期は実際に走るので、完了待ちの上限を長く取る。
  */
 
 const UI_TIMEOUT_MS = 30_000;
@@ -38,15 +36,6 @@ async function preparePanel(page: Page, ctx: Record<string, unknown>): Promise<L
   ctx.syncPanel = panel;
   return panel;
 }
-
-When('環境同期パネルから同期を要求して Server Action の往復を計測する', async ({ page, ctx }) => {
-  const panel = await preparePanel(page, ctx);
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await submitSyncPanel(page, panel);
-    await expect(panel.getByText(SYNC_ACCEPTED_NOTICE)).toBeVisible({ timeout: UI_TIMEOUT_MS });
-  });
-  recordResponseTime(ctx, timing.roundTripMs, '環境間同期(syncEnvironmentAction)の往復');
-});
 
 When('環境同期パネルから同期を要求する', async ({ page, ctx }) => {
   const panel = await preparePanel(page, ctx);

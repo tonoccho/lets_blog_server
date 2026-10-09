@@ -4,7 +4,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { After, Given, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
-import { waitForHydrated } from '../support/responseBudgetFixtures';
+import { waitForHydrated } from '../support/e2eFixtures';
 
 /**
  * バックアップからのリストア(backup-restore.feature)を支えるステップ定義

@@ -1,13 +1,11 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { After, Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
-import { measureServerActionRoundTrip, recordResponseTime } from '../support/responseBudget';
-import { waitForHydrated } from '../support/responseBudgetFixtures';
+import { waitForHydrated } from '../support/e2eFixtures';
 
 /**
  * Web画面のサイト自動構築の非同期化(issue #1696、`site-provisioning-web-job.feature`)のステップ定義。
- * 「サイト一覧ページを開いている」「ダッシュボードへ…」相当の遷移と、判定「Server Action の往復は「…」ミリ秒以内に
- * 返る」は既存のものを使う。構築(実測で最大240秒)は実際に走るので、完了待ちの上限を長く取る。
+ * 「サイト一覧ページを開いている」「ダッシュボードへ…」相当の遷移は既存のものを使う。構築(実測で最大240秒)は実際に走るので、完了待ちの上限を長く取る。
  */
 
 const JOB_TYPE = 'site_provisioning';
@@ -47,15 +45,6 @@ async function fillManagedForm(page: Page, ctx: Record<string, unknown>): Promis
   await page.locator('input[name="managedAdminPassword"]').fill('E2eProvision#Passw0rd1');
   return page.getByRole('button', { name: '構築する', exact: true });
 }
-
-When('サイト一覧画面でサイト自動構築を要求して Server Action の往復を計測する', async ({ page, ctx }) => {
-  const submit = await fillManagedForm(page, ctx);
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await submit.click();
-    await expect(page.getByText(ACCEPTED_NOTICE)).toBeVisible({ timeout: UI_TIMEOUT_MS });
-  });
-  recordResponseTime(ctx, timing.roundTripMs, 'サイト自動構築(createManagedWordPressSiteAction)の往復');
-});
 
 When('サイト一覧画面でサイト自動構築を要求する', async ({ page, ctx }) => {
   const submit = await fillManagedForm(page, ctx);

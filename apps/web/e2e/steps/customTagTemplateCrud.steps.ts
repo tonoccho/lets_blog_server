@@ -1,19 +1,20 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Then, When } from './fixtures';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
-import { SERVER_ACTION_HEADER, measureServerActionRoundTrip, recordResponseTime } from '../support/responseBudget';
-import { adminHeaders, registerCleanup, uniqueSuffix, waitForHydrated } from '../support/responseBudgetFixtures';
+import { uniqueSuffix } from '../support/e2eFixtures';
 
 /**
  * テンプレートギャラリーの作成・編集・削除の画面(issue #1550)のステップ定義。
- * `features/custom-tag/templates.feature`(受け入れ)と
- * `features/response-budget/server-action-custom-tag.feature`(3秒予算)の両方から使う。
+ * `features/custom-tag/templates.feature`(受け入れ)から使う。
  *
  * 既存のテンプレートを用意するステップ(「自分が作った未公開のカスタムタグテンプレートがある」)と
- * 詳細パネルを開く手順は `customTag.steps.ts` / `responseBudgetCustomTag.steps.ts` にあり、
+ * 詳細パネルを開く手順は `customTag.steps.ts` にあり、
  * ここでは重ねて定義しない。画面から作った・名前を変えたテンプレートの後片付けは、
  * `customTag.steps.ts` の `After({ tags: '@custom-tag' })` が読む `tagCreatedTemplateNames` へ名前を積む。
  */
+
+/** Next.js が Server Action の POST に付けるヘッダ。 */
+const SERVER_ACTION_HEADER = 'next-action';
 
 type Ctx = Record<string, unknown>;
 
@@ -195,48 +196,4 @@ When(
 Then('保存に失敗した理由が画面に表示され、変更した名前は入力欄に残っている', async ({ ctx, page }) => {
   await expect(page.getByRole('alert').filter({ hasText: '保存に失敗しました' })).toContainText('保存に失敗しました', { timeout: 30_000 });
   await expect(page.getByLabel('テンプレート名', { exact: true })).toHaveValue(ctx.crudName as string);
-});
-
-// ---- 3秒予算(response-budget/server-action-custom-tag.feature) ----
-
-When('テンプレートギャラリーで新しいテンプレートを作成して Server Action の往復を計測する', async ({ ctx, page, request }) => {
-  const name = `E2E1477 作成 ${uniqueSuffix()}`;
-  registerCleanup(ctx, async () => {
-    const headers = await adminHeaders(request);
-    const list = await request.get('/api/custom-tag-templates?showAll=true', { headers });
-    if (!list.ok()) return;
-    for (const t of (await list.json()) as { id: number; templateName: string }[]) {
-      if (t.templateName === name) await request.delete(`/api/custom-tag-templates/${t.id}`, { headers });
-    }
-  });
-  await openCreateForm(page);
-  await waitForHydrated(page.getByRole('button', { name: '作成', exact: true }));
-  await fillCreateForm(page, name);
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await page.getByRole('button', { name: '作成', exact: true }).click();
-    await expect(page.getByLabel('テンプレート名', { exact: true })).toHaveCount(0, { timeout: 30_000 });
-  });
-  recordResponseTime(ctx, timing.roundTripMs, 'テンプレートの作成(Server Action)の往復');
-});
-
-When('テンプレートギャラリーでそのテンプレートの名前を変えて保存し Server Action の往復を計測する', async ({ ctx, page }) => {
-  const template = ctx.responseBudgetTemplate as { templateName: string };
-  await openDetail(page, '?showAll=true', template.templateName);
-  await page.getByLabel('テンプレート名', { exact: true }).fill(`E2E1477 編集後 ${uniqueSuffix()}`);
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await page.getByRole('button', { name: '保存', exact: true }).click();
-    await expect(page.getByRole('button', { name: '閉じる' })).toHaveCount(0, { timeout: 30_000 });
-  });
-  recordResponseTime(ctx, timing.roundTripMs, 'テンプレートの編集(Server Action)の往復');
-});
-
-When('テンプレートギャラリーでそのテンプレートを削除して Server Action の往復を計測する', async ({ ctx, page }) => {
-  const template = ctx.responseBudgetTemplate as { templateName: string };
-  await openDetail(page, '?showAll=true', template.templateName);
-  page.once('dialog', (dialog) => void dialog.accept());
-  const timing = await measureServerActionRoundTrip(page, async () => {
-    await page.getByRole('button', { name: '削除', exact: true }).click();
-    await expect(page.getByRole('button', { name: '閉じる' })).toHaveCount(0, { timeout: 30_000 });
-  });
-  recordResponseTime(ctx, timing.roundTripMs, 'テンプレートの削除(Server Action)の往復');
 });

@@ -106,7 +106,7 @@ UI操作(コマンドパレット・Webview・キーバインド)は自動化せ
 一覧は実体から書き起こしたもので、`scripts/test_acceptance_domain_dirs.py` が
 実体とのずれを検出する。新しい領域を足すときは、ディレクトリと次の一覧を同時に更新する。
 
-- web(`apps/web/e2e/features/`): `ai` / `analytics` / `article-plan` / `auth` / `bulk` / `cross-cutting` / `custom-tag` / `diagram` / `identity` / `logging` / `media` / `platform` / `project` / `publishing` / `response-budget` / `ui-quality`
+- web(`apps/web/e2e/features/`): `ai` / `analytics` / `article-plan` / `auth` / `bulk` / `cross-cutting` / `custom-tag` / `diagram` / `identity` / `logging` / `media` / `platform` / `project` / `publishing` / `ui-quality`
 - 拡張(`apps/extension/e2e/features/`): `ai` / `articles` / `auth` / `cross-cutting` / `diagrams` / `media` / `projects`
 
 **揃えない理由(web `diagram` / 拡張 `diagrams`、web `project` / 拡張 `projects`)。**
@@ -353,7 +353,7 @@ Then('Keycloakのホスト型ログイン画面が表示される', async ({ pag
 | `custom-tag-generation.spec.ts` | AT-12 (#938) → AT-18 (#944) | **移行完了。spec は削除済み**。レスポンシブテスト1件(モバイル幅でのカスタムタグ生成フォーム操作)は AT-12 (#938) が移行先の判断を AT-18 (#944) へ委ねていた。AT-18 は横断的なレスポンシブ検証(`features/ui-quality/responsive.feature` › モバイル幅で主要な操作(ナビゲーション・フォーム送信)ができる、プロジェクト作成フォームで検証)を既に持っており、LLMバックエンド固有の生成フローの再検証はAT-18のスコープ外(個別機能の振る舞い)と判断し、個別移行はせず削除した |
 | `service-degradation.spec.ts` | AT-17 (#943) | **移行完了。spec は削除済み**(`features/cross-cutting/service-degradation.feature`) |
 | `security.spec.ts` | AT-17 (#943) | 未。ただし**カスタムタグ領域の5件は AT-12 (#938) が移行済み**(`features/custom-tag/generation.feature`・`templates.feature`)。残る CSRF・SQLインジェクション・入力サニタイズは AC-XC-008〜010 で #943 の担当 |
-| `performance.spec.ts` | AT-12 (#938) | **移行完了。spec は削除済み**(`features/custom-tag/performance.feature`)。#915 は「唯一の性能テストとして spec のまま維持する」と判断していたが、#938 の受け入れ基準が2つの閾値を `.feature` として要求したため、そちらが新しい判断になる。「Ollamaレスポンス時間が10秒以内であること」だけは移行先を持たせずに削除した(理由は同 feature の冒頭) |
+| `performance.spec.ts` | AT-12 (#938) | **移行完了。spec は削除済み**(`features/custom-tag/performance.feature` へ移したが、これも #1708 で削除。§18)。#915 は「唯一の性能テストとして spec のまま維持する」と判断していたが、#938 の受け入れ基準が2つの閾値を `.feature` として要求したため、そちらが新しい判断になる。「Ollamaレスポンス時間が10秒以内であること」だけは移行先を持たせずに削除した(理由は同 feature の冒頭) |
 
 ---
 
@@ -1971,19 +1971,8 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 要件5のとおり、既知の失敗も含めて1件でも failed / skipped / did not run / flaky があれば
 リリースを作らない。「ほぼ通った」を許容する経路は無い。
 
-**唯一の例外: 3秒予算のシナリオ(`@response-budget`)は、再試行で通れば合格とする**
-(利用者の決定、2026-10-02、#1554)。
-
-- **範囲**: `@response-budget` を持つ feature(`e2e/features/response-budget/*.feature`)だけ。
-  そのほかのシナリオの flaky は従来どおりゼロ許容で、1件でもあればリリースを作らない。
-  failed(`unexpected`)・skipped・did not run の扱いも変わらない。
-- **再試行の回数**: 最大2回。feature 単位の `@retries:2` で付ける(`playwright.config.ts` の全体の
-  `retries` は変えない)。最初の試行と2回の再試行のすべてで3秒を超えたシナリオは `unexpected` で、失敗になる。
-  閾値(3000ms)と判定は変えない。付け忘れ・ほかの feature への `@retries:` は
-  `scripts/check-response-budget-coverage.py` が失敗にする。
-- **記録先**: `release-verify-tag.py` は Playwright の JSON を `suites` からたどり、flaky の予算シナリオを
-  実行ログ(手順ごとと最後の要約)とタグの注釈に全件出す。feature のパス、シナリオ名、失敗した試行の
-  計測値(ms)を出し、0件のときも「0 件」と出す。
+**例外は無い。** かつて 3 秒予算のシナリオ(`@response-budget`)だけは再試行で通れば合格としていた(#1554)が、
+その受け入れテストごと #1708 で削除したので、この例外も `release-verify-tag.py` から無くなった(§18)。
 
 ### main へのマージ・develop への次期開発版数コミットが Issue の MR ではなく直接 push である理由
 
@@ -2197,7 +2186,29 @@ Reporter は製品の振る舞いではないため Gherkin ではなくサー�
 
 ---
 
-## 18. 参考
+## 18. 性能系(3 秒予算)の受け入れテストの削除(#1708)
+
+**利用者の判断による削除(2026-10-09)。** CLAUDE.md → Never skip a test の「失敗を黙らせる」ための skip・削除では
+ない。skip(`test.skip` 等)で残さず、テストとそれを強制する仕組みを丸ごと削除した。
+
+**理由**: 応答時間(3,000ms 以内)を測るテストは、ホストの負荷・並列度・レート制限に強く左右される。2026-10-09 の
+リリース検証でも負荷とレート制限に巻き込まれて落ちた(#1704 の調査)。製品の振る舞いの正しさではなく環境を測っていた。
+3 秒予算は `docs/ACCEPTANCE_CRITERIA.md` §10 の台帳に**要件(受け入れテストでは検証しない)**として残す。
+
+削除したもの:
+
+| 種類 | 削除したもの |
+| --- | --- |
+| feature | `apps/web/e2e/features/response-budget/*.feature`(16 本。`@response-budget` / `@budget-page:` / `@budget-action:`)、`features/custom-tag/performance.feature`(検証 API の応答時間・タグ画面のページロード) |
+| ステップ・サポート | `apps/web/e2e/steps/responseBudget*.steps.ts`、`apps/web/e2e/support/responseBudget*.ts`(`responseBudget.steps.ts` の共通ステップ「Server Action の往復は「…」ミリ秒以内に返る」等を含む)、`apps/web/e2e/responseBudget.test.ts`(計測ヘルパーの jest 単体テスト) |
+| 混在していた計測 | `auth/setup.feature`(`@budget-action:setupAction` と往復の判定)、`project/environment-sync-web-job.feature`・`project/site-provisioning-web-job.feature`(「3 秒以内に受理」の判定と計測ステップ。受理されること自体の検証は残した)。対応するステップ定義(`auth` / `customTag` / `customTagTemplateCrud` / `environmentSyncWebJob` / `llmGenerationJob` / `siteProvisioningWebJob`)の `measureServerActionRoundTrip` 呼び出し |
+| 強制する検査 | `scripts/check-response-budget-coverage.py`、`scripts/check-budget-target-list.py`、`scripts/response_budget_list.py` と単体テスト(`test_check_response_budget_coverage.py`、`test_check_budget_target_list.py`) |
+| リリース検証 | `scripts/release-verify-tag.py` の「再試行で通った予算シナリオ」の特別扱い(#1554。`find_budget_flaky` 等、ログ・タグ注釈の記録)と、その単体テスト。flaky はすべてゼロ許容に戻った |
+
+性能以外のステップ定義が使っていた `waitForHydrated` / `adminHeaders` / `uniqueSuffix` は、
+`apps/web/e2e/support/e2eFixtures.ts` へ移した。
+
+## 19. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

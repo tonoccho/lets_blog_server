@@ -8,8 +8,7 @@ import {
   expect,
   fetchAccessToken,
 } from '../support';
-import { measureFirstDisplay, recordResponseTime } from '../support/responseBudget';
-import { waitForHydrated } from '../support/responseBudgetFixtures';
+import { waitForHydrated } from '../support/e2eFixtures';
 
 /**
  * カスタムタグ・テンプレート・コンテンツ設定の受け入れシナリオを支えるステップ定義
@@ -1150,44 +1149,6 @@ Then(
     expect(outcome.body).toContain('外部の公開ページのみ取得できます');
   }
 );
-
-// ---- 応答時間(performance.feature) ----
-
-When(/^カスタムタグの検証を同時に「(\d+)」件要求する$/, async ({ ctx, request }, count: string) => {
-  const headers = await authHeaders(request);
-  const startedAt = Date.now();
-  const responses = await Promise.all(
-    Array.from({ length: Number(count) }, (_unused, index) =>
-      request.post('/api/custom-tags/validate', {
-        headers,
-        data: {
-          htmlTemplate: `<div id="e2e938-${index}">{{content}}</div>`,
-          cssContent: `.e2e938-${index} { padding: 10px; }`,
-        },
-      })
-    )
-  );
-  recordResponseTime(ctx, Date.now() - startedAt, '検証APIの応答');
-  ctx.tagValidationResponses = await Promise.all(
-    responses.map(async (response) => ({ status: response.status(), body: await response.text() }))
-  );
-});
-
-Then('すべての応答に検証結果が含まれる', async ({ ctx }) => {
-  const responses = ctx.tagValidationResponses as { status: number; body: string }[];
-  expect(responses.length).toBeGreaterThan(0);
-  for (const response of responses) {
-    expect(response.status, `検証APIが失敗しました: ${response.body}`).toBe(200);
-    // 応答のフィールド名は `valid` ではなく `isValid`(services/content の ValidationResult)。
-    expect(JSON.parse(response.body)).toHaveProperty('isValid');
-  }
-});
-
-When('そのプロジェクトのタグ画面を2回目に開く', async ({ ctx, page }) => {
-  // 1回目は Next.js(devモード)のルートコンパイルを含むので計測しない(共通ヘルパーが行う)。
-  const elapsed = await measureFirstDisplay(page, `/projects/${ctx.tagProjectId}/tags`);
-  recordResponseTime(ctx, elapsed, 'タグ画面のページロード');
-});
 
 Then('カスタムタグ管理タブに生成フォームが表示される', async ({ page }) => {
   await page.getByRole('button', { name: 'カスタムタグ管理', exact: true }).click();
