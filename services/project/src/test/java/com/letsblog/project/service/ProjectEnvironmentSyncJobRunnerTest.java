@@ -52,11 +52,14 @@ class ProjectEnvironmentSyncJobRunnerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final CurrentActorService currentActorService =
             new CurrentActorService(new MockHttpServletRequest(), mock(IdentityClient.class));
+    private JobHeartbeatTracker tracker;
     private ProjectEnvironmentSyncJobRunner runner;
 
     @BeforeEach
     void setUp() {
-        runner = new ProjectEnvironmentSyncJobRunner(syncService, currentActorService, generationJobClient, objectMapper);
+        tracker = new JobHeartbeatTracker(generationJobClient, objectMapper);
+        runner = new ProjectEnvironmentSyncJobRunner(
+                syncService, currentActorService, generationJobClient, objectMapper, tracker);
     }
 
     private JsonNode lastPayload(String status) throws Exception {
@@ -91,6 +94,49 @@ class ProjectEnvironmentSyncJobRunnerTest {
         assertEquals(3L, result.get("projectId").asLong());
         assertEquals("test", result.get("from").asText());
         assertEquals("local", result.get("to").asText());
+    }
+
+    @Test
+    @DisplayName("同期中のハートビートは syncing の段階を保って running を書く(#1724)")
+    void heartbeatKeepsSyncingPhase() throws Exception {
+        tracker.track(21L);
+        doAnswer(invocation -> {
+            tracker.heartbeat();
+            return null;
+        }).when(syncService).sync(any(), any(), any(), any());
+
+        runner.run(21L, 3L, REQUEST, ACTOR);
+
+        ArgumentCaptor<String> running = ArgumentCaptor.forClass(String.class);
+        verify(generationJobClient, org.mockito.Mockito.times(2)).updateStatus(eq(21L), eq("running"), running.capture());
+        assertEquals("syncing", objectMapper.readTree(running.getAllValues().get(1)).get("phase").asText());
+    }
+
+    @Test
+    @DisplayName("done を書いた後は追跡が外れ、ハートビートが running に戻さない(#1724)")
+    void noHeartbeatAfterDone() {
+        tracker.track(21L);
+
+        runner.run(21L, 3L, REQUEST, ACTOR);
+        tracker.heartbeat();
+
+        assertFalse(tracker.isTracked(21L));
+        // running は syncing の1回だけ(ハートビートの running は無い)
+        verify(generationJobClient, org.mockito.Mockito.times(1)).updateStatus(eq(21L), eq("running"), any());
+    }
+
+    @Test
+    @DisplayName("failed を書いた後も追跡が外れ、ハートビートが running に戻さない(#1724)")
+    void noHeartbeatAfterFailed() {
+        tracker.track(21L);
+        doThrow(new IllegalStateException("x")).when(syncService).sync(any(), any(), any(), any());
+
+        runner.run(21L, 3L, REQUEST, ACTOR);
+        tracker.heartbeat();
+
+        assertFalse(tracker.isTracked(21L));
+        verify(generationJobClient, org.mockito.Mockito.times(1)).updateStatus(eq(21L), eq("running"), any());
+        verify(generationJobClient).updateStatus(eq(21L), eq("failed"), any());
     }
 
     @Test

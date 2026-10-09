@@ -43,13 +43,20 @@ class ManagedSiteProvisioningJobStarterTest {
     private ManagedSiteProvisioningJobRunner runner;
     @Mock
     private CurrentActorService currentActorService;
+    @Mock
+    private JobHeartbeatTracker tracker;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ManagedSiteProvisioningJobStarter starter;
 
     @BeforeEach
     void setUp() {
-        starter = new ManagedSiteProvisioningJobStarter(generationJobClient, runner, currentActorService, objectMapper);
+        // 本物の tracker と同じく、終端の書き込みはその場で実行する。
+        org.mockito.Mockito.lenient().doAnswer(inv -> {
+            inv.<Runnable>getArgument(1).run();
+            return null;
+        }).when(tracker).complete(any(), any());
+        starter = new ManagedSiteProvisioningJobStarter(generationJobClient, runner, currentActorService, objectMapper, tracker);
     }
 
     @Test
@@ -110,5 +117,38 @@ class ManagedSiteProvisioningJobStarterTest {
         assertThrows(com.letsblog.common.client.GenerationJobBridgeException.class, () -> starter.start(REQUEST));
 
         verify(runner, never()).run(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("ランナーへ渡す前に追跡を始める(順番待ちの間もハートビートが打たれる。#1724)")
+    void tracksBeforeRunning() {
+        when(currentActorService.snapshot()).thenReturn(ACTOR);
+        when(generationJobClient.create(any(), any(), any()))
+                .thenReturn(new GenerationJobSummary(31L, "x", "running", NOW, NOW));
+
+        start();
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(tracker, runner);
+        order.verify(tracker).track(31L);
+        order.verify(runner).run(eq(31L), any(), any());
+    }
+
+    @Test
+    @DisplayName("満杯で拒否されたら failed の書き込みを tracker 経由で行い、追跡を外す(#1724)")
+    void queueFullCompletesThroughTracker() {
+        when(currentActorService.snapshot()).thenReturn(ACTOR);
+        when(generationJobClient.create(any(), any(), any()))
+                .thenReturn(new GenerationJobSummary(32L, "x", "running", NOW, NOW));
+        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any());
+
+        start();
+
+        verify(tracker).track(32L);
+        verify(tracker).complete(eq(32L), any());
+        verify(generationJobClient).updateStatus(eq(32L), eq("failed"), any());
+    }
+
+    private void start() {
+        starter.start(REQUEST);
     }
 }

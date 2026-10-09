@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service;
  * サイト自動構築ジョブ(issue #1479)の実行本体。受理側の{@link ManagedSiteProvisioningJobStarter}とは
  * {@code @Async}の自己呼び出し問題のため別クラス。進捗・完了・失敗は{@link GenerationJobClient#updateStatus}
  * (サービス自身のClient Credentials。#1083)でジョブへ反映するので、呼び出し元ユーザーのBearerは持たない。
- * 構築は最大240秒でai-serviceの滞留回収(既定15分)に収まるため、ハートビートは持たない。
+ * 構築自体は最大240秒だが、実行枠1・待ち行列5で前のジョブを待つ間はupdated_atが進まず滞留回収(既定15分)に
+ * かかりうるので、受理側が追跡を始め、{@link JobHeartbeatTracker}が生きている間ハートビートを打つ(#1724)。
+ * 終端の書き込みは{@link JobHeartbeatTracker#complete}を通し、ハートビートがdone/failedをrunningへ戻さないようにする。
  *
  * <p>進行段階は{@code provisioning} → {@code registering} → {@code done}。provision-agentの
  * {@code /provision}は1回のPOSTで完結し内部の進み具合を返さないので、この粒度が上限である。
@@ -39,16 +41,19 @@ public class ManagedSiteProvisioningJobRunner {
     private final CurrentActorService currentActorService;
     private final GenerationJobClient generationJobClient;
     private final ObjectMapper objectMapper;
+    private final JobHeartbeatTracker heartbeatTracker;
 
     public ManagedSiteProvisioningJobRunner(
             WordPressSiteProvisioningService provisioningService,
             CurrentActorService currentActorService,
             GenerationJobClient generationJobClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            JobHeartbeatTracker heartbeatTracker) {
         this.provisioningService = provisioningService;
         this.currentActorService = currentActorService;
         this.generationJobClient = generationJobClient;
         this.objectMapper = objectMapper;
+        this.heartbeatTracker = heartbeatTracker;
     }
 
     /** @param actor 受理側がリクエストスレッドで解決した操作者。監査ログとサイト登録の著者解決に使う。 */
@@ -59,14 +64,15 @@ public class ManagedSiteProvisioningJobRunner {
             // このスレッドではサービス自身のClient Credentialsを呼び出しの都度使う(#1723)。
             SiteResponse site = currentActorService.runAs(actor.withoutAuthorization(), () ->
                     provisioningService.createManagedSiteForJob(request, phase -> reportPhase(jobId, phase)));
-            generationJobClient.updateStatus(jobId, "done", toJson(donePayload(site)));
+            heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "done", toJson(donePayload(site))));
         } catch (RuntimeException e) {
             log.warn("Site provisioning job {} failed", jobId, e);
-            generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e)));
+            heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e))));
         }
     }
 
     private void reportPhase(Long jobId, String phase) {
+        heartbeatTracker.updatePhase(jobId, phase);
         generationJobClient.updateStatus(jobId, "running", toJson(JobProgressPayload.phase(phase)));
     }
 

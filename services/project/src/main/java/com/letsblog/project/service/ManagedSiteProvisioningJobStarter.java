@@ -29,16 +29,19 @@ public class ManagedSiteProvisioningJobStarter {
     private final ManagedSiteProvisioningJobRunner runner;
     private final CurrentActorService currentActorService;
     private final ObjectMapper objectMapper;
+    private final JobHeartbeatTracker heartbeatTracker;
 
     public ManagedSiteProvisioningJobStarter(
             GenerationJobClient generationJobClient,
             ManagedSiteProvisioningJobRunner runner,
             CurrentActorService currentActorService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            JobHeartbeatTracker heartbeatTracker) {
         this.generationJobClient = generationJobClient;
         this.runner = runner;
         this.currentActorService = currentActorService;
         this.objectMapper = objectMapper;
+        this.heartbeatTracker = heartbeatTracker;
     }
 
     /**
@@ -48,14 +51,16 @@ public class ManagedSiteProvisioningJobStarter {
     public GenerationJobSummary start(CreateManagedWordPressSiteRequest request) {
         ActorSnapshot actor = currentActorService.snapshot();
         GenerationJobSummary job = generationJobClient.create(JOB_TYPE, requestPayload(request), actor.authorization());
+        // 順番待ちの間も滞留回収されないよう、ランナーへ渡す前から追跡する(#1724)。
+        heartbeatTracker.track(job.id());
         try {
             runner.run(job.id(), request, actor);
         } catch (TaskRejectedException e) {
             // 実行枠と待ち行列が満杯。ジョブを作ってしまっているので、runningのまま取り残さず、
             // 理由が読めるfailedにする。応答も実際の状態(failed)を返す。
-            generationJobClient.updateStatus(job.id(), "failed", toJson(Map.of(
+            heartbeatTracker.complete(job.id(), () -> generationJobClient.updateStatus(job.id(), "failed", toJson(Map.of(
                     "error", "サイト構築の待ち行列が満杯です。しばらくしてからもう一度要求してください",
-                    "errorType", "queue_full")));
+                    "errorType", "queue_full"))));
             return new GenerationJobSummary(job.id(), job.type(), "failed", job.createdAt(), job.updatedAt());
         }
         return job;

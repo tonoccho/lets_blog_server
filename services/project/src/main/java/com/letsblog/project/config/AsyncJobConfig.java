@@ -4,11 +4,14 @@ import java.util.concurrent.Executor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /** 数分かかる処理をHTTPリクエストをブロックせずに実行するための専用スレッドプール(issue #1479)。 */
 @Configuration
 @EnableAsync
+/** ジョブのハートビート({@code JobHeartbeatTracker}の{@code @Scheduled})を動かす(issue #1724)。 */
+@EnableScheduling
 public class AsyncJobConfig {
 
     /**

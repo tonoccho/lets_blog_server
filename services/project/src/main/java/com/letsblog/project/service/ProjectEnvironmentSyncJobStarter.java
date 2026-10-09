@@ -26,29 +26,34 @@ public class ProjectEnvironmentSyncJobStarter {
     private final ProjectEnvironmentSyncJobRunner runner;
     private final CurrentActorService currentActorService;
     private final ObjectMapper objectMapper;
+    private final JobHeartbeatTracker heartbeatTracker;
 
     public ProjectEnvironmentSyncJobStarter(
             GenerationJobClient generationJobClient,
             ProjectEnvironmentSyncJobRunner runner,
             CurrentActorService currentActorService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            JobHeartbeatTracker heartbeatTracker) {
         this.generationJobClient = generationJobClient;
         this.runner = runner;
         this.currentActorService = currentActorService;
         this.objectMapper = objectMapper;
+        this.heartbeatTracker = heartbeatTracker;
     }
 
     /** <b>リクエストスレッドで</b>呼ぶこと。操作者をここで解決してランナーへ渡す(#1405、#1479と同じ)。 */
     public GenerationJobSummary start(Long projectId, SyncEnvironmentRequest request) {
         ActorSnapshot actor = currentActorService.snapshot();
         GenerationJobSummary job = generationJobClient.create(JOB_TYPE, requestPayload(projectId, request), actor.authorization());
+        // 順番待ちの間も滞留回収されないよう、ランナーへ渡す前から追跡する(#1724)。
+        heartbeatTracker.track(job.id());
         try {
             runner.run(job.id(), projectId, request, actor);
         } catch (TaskRejectedException e) {
             // 実行枠と待ち行列が満杯。runningのまま取り残さず、理由が読めるfailedにする。
-            generationJobClient.updateStatus(job.id(), "failed", toJson(Map.of(
+            heartbeatTracker.complete(job.id(), () -> generationJobClient.updateStatus(job.id(), "failed", toJson(Map.of(
                     "error", "環境間同期の待ち行列が満杯です。しばらくしてからもう一度要求してください",
-                    "errorType", "queue_full")));
+                    "errorType", "queue_full"))));
             return new GenerationJobSummary(job.id(), job.type(), "failed", job.createdAt(), job.updatedAt());
         }
         return job;

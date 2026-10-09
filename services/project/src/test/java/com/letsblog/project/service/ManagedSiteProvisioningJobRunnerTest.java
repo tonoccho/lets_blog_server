@@ -51,12 +51,14 @@ class ManagedSiteProvisioningJobRunnerTest {
     // 実物を使い、ジョブのスレッドでは操作者がスナップショットから引かれることを確かめる。
     private final CurrentActorService currentActorService =
             new CurrentActorService(new MockHttpServletRequest(), mock(IdentityClient.class));
+    private JobHeartbeatTracker tracker;
     private ManagedSiteProvisioningJobRunner runner;
 
     @BeforeEach
     void setUp() {
+        tracker = new JobHeartbeatTracker(generationJobClient, objectMapper);
         runner = new ManagedSiteProvisioningJobRunner(
-                provisioningService, currentActorService, generationJobClient, objectMapper);
+                provisioningService, currentActorService, generationJobClient, objectMapper, tracker);
     }
 
     private static SiteResponse site() {
@@ -99,6 +101,52 @@ class ManagedSiteProvisioningJobRunnerTest {
         assertEquals(7L, result.get("siteId").asLong());
         assertEquals("my-site", result.get("siteKey").asText());
         assertFalse(done.getValue().contains("pw\""));
+    }
+
+    @Test
+    @DisplayName("段階の通知はハートビートが保つ最新の段階にもなる(#1724)")
+    @SuppressWarnings("unchecked")
+    void heartbeatKeepsLatestPhase() throws Exception {
+        tracker.track(11L);
+        when(provisioningService.createManagedSiteForJob(eq(REQUEST), any())).thenAnswer(invocation -> {
+            invocation.getArgument(1, Consumer.class).accept("registering");
+            tracker.heartbeat();
+            return site();
+        });
+
+        runner.run(11L, REQUEST, ACTOR);
+
+        ArgumentCaptor<String> running = ArgumentCaptor.forClass(String.class);
+        verify(generationJobClient, org.mockito.Mockito.times(2)).updateStatus(eq(11L), eq("running"), running.capture());
+        assertEquals("registering", objectMapper.readTree(running.getAllValues().get(1)).get("phase").asText());
+    }
+
+    @Test
+    @DisplayName("done を書いた後は追跡が外れ、ハートビートが running に戻さない(#1724)")
+    void noHeartbeatAfterDone() {
+        tracker.track(11L);
+        when(provisioningService.createManagedSiteForJob(any(), any())).thenReturn(site());
+
+        runner.run(11L, REQUEST, ACTOR);
+        tracker.heartbeat();
+
+        assertFalse(tracker.isTracked(11L));
+        verify(generationJobClient, never()).updateStatus(eq(11L), eq("running"), any());
+        verify(generationJobClient).updateStatus(eq(11L), eq("done"), any());
+    }
+
+    @Test
+    @DisplayName("failed を書いた後も追跡が外れ、ハートビートが running に戻さない(#1724)")
+    void noHeartbeatAfterFailed() {
+        tracker.track(11L);
+        when(provisioningService.createManagedSiteForJob(any(), any())).thenThrow(new IllegalStateException("x"));
+
+        runner.run(11L, REQUEST, ACTOR);
+        tracker.heartbeat();
+
+        assertFalse(tracker.isTracked(11L));
+        verify(generationJobClient, never()).updateStatus(eq(11L), eq("running"), any());
+        verify(generationJobClient).updateStatus(eq(11L), eq("failed"), any());
     }
 
     @Test

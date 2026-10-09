@@ -33,22 +33,26 @@ public class ProjectEnvironmentSyncJobRunner {
     private final CurrentActorService currentActorService;
     private final GenerationJobClient generationJobClient;
     private final ObjectMapper objectMapper;
+    private final JobHeartbeatTracker heartbeatTracker;
 
     public ProjectEnvironmentSyncJobRunner(
             ProjectEnvironmentSyncService syncService,
             CurrentActorService currentActorService,
             GenerationJobClient generationJobClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            JobHeartbeatTracker heartbeatTracker) {
         this.syncService = syncService;
         this.currentActorService = currentActorService;
         this.generationJobClient = generationJobClient;
         this.objectMapper = objectMapper;
+        this.heartbeatTracker = heartbeatTracker;
     }
 
     /** @param actor 受理側がリクエストスレッドで解決した操作者。監査ログに使う(Bearerは持ち込まない。#1723)。 */
     @Async("environmentSyncExecutor")
     public void run(Long jobId, Long projectId, SyncEnvironmentRequest request, ActorSnapshot actor) {
         try {
+            heartbeatTracker.updatePhase(jobId, "syncing");
             generationJobClient.updateStatus(jobId, "running", toJson(JobProgressPayload.phase("syncing")));
             // 取り置いた利用者のBearerは5分で切れるので持ち込まない。サービス間ブリッジは、リクエストの無い
             // このスレッドではサービス自身のClient Credentialsを呼び出しの都度使う(#1723)。操作者は監査ログ用に束縛する。
@@ -56,10 +60,10 @@ public class ProjectEnvironmentSyncJobRunner {
                 syncService.sync(projectId, request.from(), request.to(), request.targets());
                 return null;
             });
-            generationJobClient.updateStatus(jobId, "done", toJson(donePayload(projectId, request)));
+            heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "done", toJson(donePayload(projectId, request))));
         } catch (RuntimeException e) {
             log.warn("Environment sync job {} failed", jobId, e);
-            generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e)));
+            heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e))));
         }
     }
 

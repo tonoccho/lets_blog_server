@@ -22,6 +22,13 @@ class AsyncJobConfigTest {
     }
 
     @Test
+    @DisplayName("ハートビートを動かすためスケジューリングが有効になっている(issue #1724)")
+    void schedulingEnabled() {
+        assertNotNull(AsyncJobConfig.class.getAnnotation(
+                org.springframework.scheduling.annotation.EnableScheduling.class));
+    }
+
+    @Test
     @DisplayName("siteProvisioningExecutor は共有コンテナ1台を相手にするため core 1 / max 2 / 待ち行列 5 の小さい設定")
     void siteProvisioningExecutorIsSmall() {
         Executor executor = new AsyncJobConfig().siteProvisioningExecutor();

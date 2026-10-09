@@ -136,7 +136,8 @@ class JobServiceTokenWiringTest {
         ProjectEnvironmentSyncService service = new ProjectEnvironmentSyncService(
                 projectRepository, siteRepository, siteService, syncClient, cmsClient, identityBridgeClient,
                 currentActorService);
-        return new ProjectEnvironmentSyncJobRunner(service, currentActorService, generationJobClient, objectMapper);
+        return new ProjectEnvironmentSyncJobRunner(service, currentActorService, generationJobClient, objectMapper,
+                new JobHeartbeatTracker(generationJobClient, objectMapper));
     }
 
     private static Site site(long id, boolean managed) {
@@ -198,7 +199,8 @@ class JobServiceTokenWiringTest {
                     Instant.now(), Instant.now(), "SUCCESS", true, false, null);
         });
         ManagedSiteProvisioningJobRunner runner = new ManagedSiteProvisioningJobRunner(
-                provisioningService, currentActorService, generationJobClient, objectMapper);
+                provisioningService, currentActorService, generationJobClient, objectMapper,
+                new JobHeartbeatTracker(generationJobClient, objectMapper));
 
         onPlainThread(() -> runner.run(
                 11L, new CreateManagedWordPressSiteRequest(
