@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { GarbageCollectionPanel } from '../GarbageCollectionPanel'
 import * as actions from '../actions'
+import { MAX_CONSECUTIVE_POLL_FAILURES } from '../useGenerationJobPolling'
 import type { Project, Site } from '@/lib/apiClient'
 
 jest.mock('../actions', () => ({
@@ -190,5 +191,64 @@ describe('GarbageCollectionPanel 削除', () => {
     await waitFor(() => {
       expect(screen.getByText('削除処理に失敗しました。')).toBeInTheDocument()
     })
+  })
+})
+
+describe('GarbageCollectionPanel 進捗の取得失敗(#1716)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    jest.useFakeTimers()
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  async function startDelete() {
+    ;(actions.fetchMediaGarbageScanAction as jest.Mock).mockResolvedValue({ data: SCAN_RESPONSE })
+    window.confirm = jest.fn(() => true)
+    ;(actions.deleteMediaGarbageAction as jest.Mock).mockResolvedValue({ jobId: 999 })
+    render(<GarbageCollectionPanel projectId={1} project={buildProject()} />)
+    fireEvent.change(getSelect('環境'), { target: { value: 'local' } })
+    fireEvent.click(screen.getByText('スキャン'))
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0)
+    })
+    fireEvent.click(screen.getByText('全選択'))
+    fireEvent.click(screen.getByText(/選択した2件を削除/))
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0)
+    })
+  }
+
+  it('取得が1回失敗しても続けて、done になれば完了を表示する', async () => {
+    ;(actions.fetchGenerationJobAction as jest.Mock)
+      .mockRejectedValueOnce(new Error('503'))
+      .mockResolvedValue({
+        id: 999,
+        type: 'media_garbage_collection_delete',
+        status: 'done',
+        requestPayload: null,
+        resultPayload: JSON.stringify({ deletedCount: 2, failedCount: 0, deletedMediaIds: ['10', '20'], failures: {} }),
+        createdAt: '',
+        updatedAt: '',
+      })
+    await startDelete()
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2000)
+    })
+
+    expect(screen.getByText('2件削除しました。')).toBeInTheDocument()
+  })
+
+  it('取得が続けて失敗したら、削除中の表示を解除し、確認できなかった理由を表示する', async () => {
+    ;(actions.fetchGenerationJobAction as jest.Mock).mockRejectedValue(new Error('503 Service Unavailable'))
+    await startDelete()
+    expect(screen.getByText('削除中…')).toBeInTheDocument()
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2000 * MAX_CONSECUTIVE_POLL_FAILURES)
+    })
+
+    expect(screen.queryByText('削除中…')).not.toBeInTheDocument()
+    expect(screen.getByText(/進捗を確認できませんでした.*503 Service Unavailable/)).toBeInTheDocument()
   })
 })

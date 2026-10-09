@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ComfyUiCheckpointTable } from "../ComfyUiCheckpointTable";
 import {
   fetchComfyUiCheckpointsAction,
@@ -7,6 +7,7 @@ import {
   deleteComfyUiCheckpointAction,
   fetchGenerationJobAction,
 } from "../actions";
+import { MAX_CONSECUTIVE_POLL_FAILURES } from "../useGenerationJobPolling";
 import type { ComfyUiCheckpointListResponse, GenerationJobDetail } from "@/lib/apiClient";
 
 /**
@@ -245,5 +246,65 @@ describe("ComfyUiCheckpointTable", () => {
       { timeout: 5000 }
     );
     expect(screen.queryByPlaceholderText("my-model.safetensors")).not.toBeInTheDocument();
+  });
+
+  describe("進捗の取得失敗(#1716)", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    async function startDelete() {
+      (window.confirm as jest.Mock).mockReturnValue(true);
+      deleteMock.mockResolvedValue({ jobId: 42 });
+      fetchListMock.mockResolvedValue(initialData());
+      render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
+      const otherRow = screen.getByText("other.safetensors").closest("tr") as HTMLElement;
+      fireEvent.click(within(otherRow).getByRole("button", { name: "削除" }));
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
+      return otherRow;
+    }
+
+    it("取得が1回失敗しても続けて、done になれば完了を表示する", async () => {
+      fetchJobMock.mockRejectedValueOnce(new Error("503")).mockResolvedValue(job({ status: "done" }));
+      await startDelete();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(screen.getByText("完了しました。")).toBeInTheDocument();
+    });
+
+    it("取得が続けて失敗したら、実行中の表示(削除中…)を解除し、確認できなかった理由を表示する", async () => {
+      fetchJobMock.mockRejectedValue(new Error("503 Service Unavailable"));
+      const row = await startDelete();
+      expect(within(row).getByRole("button", { name: "削除中…" })).toBeDisabled();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000 * MAX_CONSECUTIVE_POLL_FAILURES);
+      });
+
+      expect(within(row).getByRole("button", { name: "削除" })).toBeEnabled();
+      expect(screen.getByText(/進捗を確認できませんでした.*503 Service Unavailable/)).toBeInTheDocument();
+    });
+
+    it("インストールの進捗が確認できなくなったときも、インストール中の表示を解除する", async () => {
+      installMock.mockResolvedValue({ jobId: 7 });
+      fetchJobMock.mockRejectedValue(new Error("boom"));
+      fetchListMock.mockResolvedValue(initialData());
+      render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
+      fireEvent.click(screen.getByRole("button", { name: "+ 新規インストール" }));
+      fireEvent.change(screen.getByLabelText("ダウンロードURL"), { target: { value: "https://example.com/m.safetensors" } });
+      fireEvent.change(screen.getByLabelText(/保存ファイル名/), { target: { value: "m.safetensors" } });
+      fireEvent.click(screen.getByRole("button", { name: "インストール" }));
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000 * MAX_CONSECUTIVE_POLL_FAILURES);
+      });
+
+      expect(screen.getByRole("button", { name: "インストール" })).toBeEnabled();
+      expect(screen.getByText(/進捗を確認できませんでした.*boom/)).toBeInTheDocument();
+    });
   });
 });

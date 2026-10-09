@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Project, ProjectEnvironment, Site, UnreferencedMediaItem, GenerationJobDetail } from "@/lib/apiClient";
 import { fetchMediaGarbageScanAction, deleteMediaGarbageAction } from "./actions";
-import { useGenerationJobPolling } from "./useGenerationJobPolling";
+import { pollFailureMessage, useGenerationJobPolling } from "./useGenerationJobPolling";
 import { formatJobProgress, parseJobProgress, type JobProgress } from "./jobProgress";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
@@ -137,7 +137,12 @@ export function GarbageCollectionPanel({ projectId, project }: { projectId: numb
 
   const { startPolling } = useGenerationJobPolling(
     (job) => handleJobSettled(job),
-    (job) => setProgress(parseJobProgress(job.resultPayload))
+    (job) => setProgress(parseJobProgress(job.resultPayload)),
+    (error) => {
+      setDeleting(false);
+      setProgress(null);
+      setMessage({ type: "error", text: pollFailureMessage(error) });
+    }
   );
 
   async function handleDelete() {

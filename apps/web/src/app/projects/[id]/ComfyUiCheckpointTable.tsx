@@ -8,7 +8,7 @@ import {
   installComfyUiCheckpointAction,
   deleteComfyUiCheckpointAction,
 } from "./actions";
-import { useGenerationJobPolling } from "./useGenerationJobPolling";
+import { pollFailureMessage, useGenerationJobPolling } from "./useGenerationJobPolling";
 import { formatJobProgress, parseJobProgress, type JobProgress } from "./jobProgress";
 
 const SAFE_FILE_NAME = /^[A-Za-z0-9_.-]+$/;
@@ -55,7 +55,12 @@ export function ComfyUiCheckpointTable({
 
   const { startPolling } = useGenerationJobPolling(
     (job: GenerationJobDetail) => handleJobSettled(job),
-    (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload))
+    (job: GenerationJobDetail) => setProgress(parseJobProgress(job.resultPayload)),
+    (error: unknown) => {
+      setPendingAction(null);
+      setProgress(null);
+      setMessage({ type: "error", text: pollFailureMessage(error) });
+    }
   );
 
   async function handleSelect(checkpointName: string) {

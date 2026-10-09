@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { OllamaModelPullForm } from "../OllamaModelPullForm";
 import { fetchGenerationJobAction, pullOllamaModelAction } from "../actions";
+import { MAX_CONSECUTIVE_POLL_FAILURES } from "../useGenerationJobPolling";
 import type { GenerationJobDetail } from "@/lib/apiClient";
 
 /**
@@ -149,5 +150,42 @@ describe("OllamaModelPullForm", () => {
     submit("bad name;rm");
     expect(screen.getByRole("alert")).toHaveTextContent("モデル名の形式が不正です");
     expect(pullMock).not.toHaveBeenCalled();
+  });
+
+  describe("進捗の取得失敗(#1716)", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    async function start() {
+      pullMock.mockResolvedValue({ jobId: 31, alreadyRunning: false });
+      render(<OllamaModelPullForm projectId={3} />);
+      submit("llama3");
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
+    }
+
+    it("取得が1回失敗しても続けて、done になれば完了を表示する", async () => {
+      fetchJobMock.mockRejectedValueOnce(new Error("503")).mockResolvedValue(job({ status: "done" }));
+      await start();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(screen.getByText("「llama3」のインストールが完了しました。")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "インストール" })).toBeEnabled();
+    });
+
+    it("取得が続けて失敗したら、入力欄とボタンを使える状態に戻し、確認できなかった理由を表示する", async () => {
+      fetchJobMock.mockRejectedValue(new Error("503 Service Unavailable"));
+      await start();
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000 * MAX_CONSECUTIVE_POLL_FAILURES);
+      });
+
+      expect(screen.getByRole("button", { name: "インストール" })).toBeEnabled();
+      expect(screen.getByLabelText(INPUT)).toBeEnabled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/進捗を確認できませんでした.*503 Service Unavailable/);
+    });
   });
 });

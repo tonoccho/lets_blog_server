@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { GenerationJobDetail } from "@/lib/apiClient";
 import { pullOllamaModelAction } from "./actions";
-import { useGenerationJobPolling } from "./useGenerationJobPolling";
+import { pollFailureMessage, useGenerationJobPolling } from "./useGenerationJobPolling";
 import { formatJobProgress, parseJobProgress, type JobProgress } from "./jobProgress";
 
 /** Ollamaのモデル名(`name[:tag]`。`hf.co/user/repo:Q4_K_M` のような名前空間つきも含む)。サーバ側の検証と同じ形。 */
@@ -22,9 +22,17 @@ export function OllamaModelPullForm({ projectId }: { projectId: number }) {
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [message, setMessage] = useState<{ type: "error" | "success" | "info"; text: string } | null>(null);
 
-  const { startPolling } = useGenerationJobPolling(handleSettled, (job) =>
-    setProgress(parseJobProgress(job.resultPayload))
+  const { startPolling } = useGenerationJobPolling(
+    handleSettled,
+    (job) => setProgress(parseJobProgress(job.resultPayload)),
+    handlePollFailed
   );
+
+  function handlePollFailed(error: unknown) {
+    setPulling(null);
+    setProgress(null);
+    setMessage({ type: "error", text: pollFailureMessage(error) });
+  }
 
   function handleSettled(job: GenerationJobDetail) {
     const name = pulling;
