@@ -326,13 +326,24 @@ verify_failed=0
 # lbs_identity の roles / role_permissions は V2__seed_roles_and_permissions.sql が入れる
 # RBACの定義であり(issue #956)、これが空のほうが異常である。
 # マスタデータを投入するマイグレーションを足したら、ここにも足すこと。
+# platform-service の ConnectionDefaultsSeeder(#1567)が起動のたびに書く system_settings のキー。
+# ゼロ構築の直後に platform-service が起動して書く行は残骸ではないので数えない(#1701)。
+# 表まるごとではなくキーで除外する: 利用者が管理画面で保存した設定の残りは見逃さない。
+# シーダーのキーを変えたら、ここも変えること(test_rebuild_acceptance_env.py が突き合わせる)。
+SEEDED_SETTING_KEYS=(llm_ollama_base_url comfyui_base_url)
+seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
+seeded_in_list="${seeded_in_list%,}"
 for s in "${SERVICE_SCHEMAS[@]}"; do
   tables="$(mysql_q "SELECT table_name FROM information_schema.tables
                      WHERE table_schema='$s'
                        AND table_name NOT IN ('flyway_schema_history', 'roles', 'role_permissions');" || true)"
   total=0
   for t in $tables; do
-    c="$(mysql_q "SELECT COUNT(*) FROM \`$s\`.\`$t\`;" || echo 0)"
+    where=""
+    if [ "$s" = "lbs_platform" ] && [ "$t" = "system_settings" ]; then
+      where=" WHERE setting_key NOT IN ($seeded_in_list)"
+    fi
+    c="$(mysql_q "SELECT COUNT(*) FROM \`$s\`.\`$t\`${where};" || echo 0)"
     total=$(( total + c ))
   done
   if [ "$total" -ne 0 ]; then

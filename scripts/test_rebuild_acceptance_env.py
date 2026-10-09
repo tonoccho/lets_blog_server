@@ -126,6 +126,7 @@ FAKE_DOCKER = r'''#!/usr/bin/env python3
 """テスト用の docker スタブ。状態を FAKE_STATE 配下のファイルで持つ。"""
 import json
 import os
+import re
 import sys
 import time
 
@@ -461,6 +462,16 @@ if args[:1] == ["exec"]:
             dirty = os.environ.get("FAKE_DIRTY_SCHEMA", "")
             if dirty and ("'%s'" % dirty) in sql:
                 print("some_table")
+            if os.environ.get("FAKE_PLATFORM_SETTINGS") and "'lbs_platform'" in sql:
+                print("system_settings")
+            sys.exit(0)
+        if "`system_settings`" in sql:
+            # FAKE_PLATFORM_SETTINGS: system_settings に入っている setting_key(カンマ区切り)。
+            # スクリプトが NOT IN (...) で除外したキーを数えない、本物の MySQL と同じ振る舞い。
+            keys = [k for k in os.environ.get("FAKE_PLATFORM_SETTINGS", "").split(",") if k]
+            m = re.search(r"NOT IN \(([^)]*)\)", sql)
+            excluded = set(re.findall(r"'([^']*)'", m.group(1))) if m else set()
+            print(len([k for k in keys if k not in excluded]))
             sys.exit(0)
         if "SELECT COUNT(*)" in sql.upper():
             print("3")
@@ -1412,6 +1423,38 @@ class PostBuildVerification(RebuildScriptHarness):
         out = self.out(r)
         self.assertNotEqual(0, r.returncode, "スキーマにデータが残っているのに成功した:\n" + out)
         self.assertIn("lbs_content", out)
+
+    SEEDED = "llm_ollama_base_url,comfyui_base_url"
+
+    def test_accepts_the_rows_connection_defaults_seeder_writes_at_startup(self):
+        """#1701: platform-service が起動時に書く接続先の既定値 2 行は残骸ではない。"""
+        r = self.run_script("--yes", FAKE_PLATFORM_SETTINGS=self.SEEDED)
+        self.assertEqual(0, r.returncode, self.out(r))
+
+    def test_fails_when_system_settings_has_a_key_the_seeder_does_not_write(self):
+        r = self.run_script("--yes", FAKE_PLATFORM_SETTINGS=self.SEEDED + ",mail_host")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "シーダー以外のキーが残っているのに成功した:\n" + out)
+        self.assertIn("lbs_platform", out)
+
+    def test_seeded_keys_match_the_seeder_in_both_scripts(self):
+        """除外一覧が ConnectionDefaultsSeeder / AppSettingService のキーと食い違えば失敗する。"""
+        svc = os.path.join(REPO_ROOT, "services/platform/src/main/java/com/letsblog/platform/service")
+        with open(os.path.join(svc, "AppSettingService.java"), encoding="utf-8") as f:
+            settings = f.read()
+        with open(os.path.join(svc, "ConnectionDefaultsSeeder.java"), encoding="utf-8") as f:
+            seeder = f.read()
+        constants = re.findall(r"AppSettingService\.(\w+)|\b([A-Z_]+_BASE_URL)\b", seeder)
+        names = {a or b for a, b in constants if (a or b).endswith("_BASE_URL") and not (a or b).startswith("DEFAULT_")}
+        seeded = {re.search(r'%s\s*=\s*"([^"]+)"' % n, settings).group(1) for n in names}
+        self.assertEqual({"llm_ollama_base_url", "comfyui_base_url"}, seeded)
+        for script in ("rebuild-acceptance-env.sh", "reset-acceptance-env.sh"):
+            with self.subTest(script=script):
+                with open(os.path.join(REPO_ROOT, "scripts", script), encoding="utf-8") as f:
+                    body = f.read()
+                m = re.search(r"SEEDED_SETTING_KEYS=\(([^)]*)\)", body)
+                self.assertIsNotNone(m, "%s に SEEDED_SETTING_KEYS が無い" % script)
+                self.assertEqual(seeded, set(m.group(1).split()))
 
     def test_checks_the_test_schemas_were_recreated(self):
         """`*_test` は mysql_data ごと消えるので、02-create-test-schemas.sh による再作成を確認する。"""
