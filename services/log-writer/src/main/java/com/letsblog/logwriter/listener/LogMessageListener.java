@@ -28,6 +28,7 @@ public class LogMessageListener {
 
     /** audit_logs.changes(TEXT)の最大バイト数。 */
     private static final int CHANGES_MAX_BYTES = 65_535;
+    private static final int REMOTE_IP_MAX_LENGTH = 45;
 
     private final FrontendErrorLogRepository frontendErrorLogRepository;
     private final OperationLogRepository operationLogRepository;
@@ -86,7 +87,7 @@ public class LogMessageListener {
         entity.setResourceType(message.resourceType());
         entity.setResourceId(message.resourceId());
         entity.setChanges(truncateToColumnLimit(message.changes()));
-        entity.setRemoteIp(message.remoteIp());
+        entity.setRemoteIp(truncateRemoteIp(message.remoteIp()));
         entity.setUserAgent(message.userAgent());
         entity.setCreatedAt(parse(message.createdAt()));
         auditLogRepository.save(entity);
@@ -115,6 +116,18 @@ public class LogMessageListener {
             index += charCount;
         }
         return changes;
+    }
+
+    /**
+     * audit_logs.remote_ip(VARCHAR(45))の上限を超えるX-Forwarded-For由来の値でINSERTが失敗し、
+     * 監査レコードが失われるのを防ぐ(issue #1719)。先頭から上限文字数(コードポイント単位)に切り詰める。
+     */
+    private static String truncateRemoteIp(String remoteIp) {
+        if (remoteIp == null || remoteIp.codePointCount(0, remoteIp.length()) <= REMOTE_IP_MAX_LENGTH) {
+            return remoteIp;
+        }
+        log.warn("Audit log remoteIp exceeded {} characters and was truncated", REMOTE_IP_MAX_LENGTH);
+        return remoteIp.substring(0, remoteIp.offsetByCodePoints(0, REMOTE_IP_MAX_LENGTH));
     }
 
     private LocalDateTime parse(String value) {

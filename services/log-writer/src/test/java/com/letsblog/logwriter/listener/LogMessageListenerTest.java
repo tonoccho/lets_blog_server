@@ -154,4 +154,30 @@ class LogMessageListenerTest {
         verify(auditLogRepository).save(captor.capture());
         assertEquals("x".repeat(65_533), captor.getValue().getChanges());
     }
+
+    @Test
+    void onAuditLog_45文字を超えるremoteIpは45文字以内に切り詰めて保存する() {
+        String longIp = "2001:db8:85a3:0:0:8a2e:370:7334, 10.0.0.1, 10.0.0.2";
+        AuditLogMessage message = new AuditLogMessage(
+                1L, "s", "USER_DELETED", "USER", 2L, null, longIp, null, LocalDateTime.now().toString());
+
+        listener().onAuditLog(message);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertEquals(longIp.substring(0, 45), captor.getValue().getRemoteIp());
+    }
+
+    @Test
+    void onAuditLog_ちょうど45文字のremoteIpはそのまま保存する() {
+        String exact = "x".repeat(45);
+        AuditLogMessage message = new AuditLogMessage(
+                1L, "s", "USER_DELETED", "USER", 2L, null, exact, null, LocalDateTime.now().toString());
+
+        listener().onAuditLog(message);
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        assertEquals(exact, captor.getValue().getRemoteIp());
+    }
 }
