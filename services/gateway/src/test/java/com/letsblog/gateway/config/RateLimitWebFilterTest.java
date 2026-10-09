@@ -589,4 +589,27 @@ class RateLimitWebFilterTest {
 
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
     }
+
+    @Test
+    @DisplayName("制限の時間枠が明けると、同じクライアントの要求が再び受理される(#1714: 受け入れテストの実時間待ちの代替)")
+    void sameClientIsAcceptedAgainAfterRefreshPeriod() throws InterruptedException {
+        RateLimitProperties shortWindow = new RateLimitProperties();
+        shortWindow.setApiGlobal(new RateLimitProperties.Bucket(1, Duration.ofMillis(300)));
+        RateLimitWebFilter shortWindowFilter = new RateLimitWebFilter(shortWindow);
+
+        // 上限(1回)に達する。
+        StepVerifier.create(shortWindowFilter.filter(externalExchangeFor("/api/projects", "203.0.113.50"), chain))
+                .verifyComplete();
+        ServerWebExchange rejected = externalExchangeFor("/api/projects", "203.0.113.50");
+        StepVerifier.create(shortWindowFilter.filter(rejected, chain)).verifyComplete();
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, rejected.getResponse().getStatusCode());
+
+        // 時間枠が明けるまで実際に待つ(窓が300msなので、テストは1秒かからない)。
+        Thread.sleep(500);
+
+        ServerWebExchange accepted = externalExchangeFor("/api/projects", "203.0.113.50");
+        StepVerifier.create(shortWindowFilter.filter(accepted, chain)).verifyComplete();
+        assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, accepted.getResponse().getStatusCode());
+        verify(chain, times(2)).filter(org.mockito.ArgumentMatchers.any());
+    }
 }

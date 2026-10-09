@@ -192,6 +192,11 @@ whichever call lands last gets `429`, and a second full run within the same hour
 chosen" below (12, 24, 1.7x) are the state at the time of #1286 and are kept as the record of that
 decision.
 
+Update (issue #1714): `image-generation.feature` was deleted (its 2 `@slow` scenarios needed a real
+ComfyUI), so a full run now consumes **9**, all of it from the scenarios that run without `@slow`.
+The count's single source is now the comment above `FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION` in
+`apps/web/e2e/steps/cross-cutting.steps.ts`, not the deleted feature's header.
+
 Reproduced directly against the running `gateway` container (bypassing Playwright, since the
 bucket is process-wide and does not depend on which caller hits it) on 2026-09-15, with the
 acceptance-test overlay's `UPLOAD_RATE_LIMIT_REQUESTS` at its then-current state (unset, i.e. the

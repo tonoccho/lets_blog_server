@@ -409,7 +409,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 ### gateway の `upload-endpoint` 枠を受け入れテスト用に引き上げる(issue #1286)
 
 `upload-endpoint`(画像生成/アップロード、既定 **1時間に10回**、プロセス全体で1バケット)は
-#1132 では対象外だった。`image-generation.feature` 冒頭の内訳どおり、`@slow` を含む全件実行
+#1132 では対象外だった。当時の内訳(`image-generation.feature` 冒頭。#1714 で削除)どおり、`@slow` を含む全件実行
 (`test:at` / `test:at:clean`)の消費は11で、既定値の10を1つ超える(#1408 で
 `asset-image-batch-form.feature` が非同期経路へ移る前は12で2つ超過)。`@slow` を除いた
 通常実行(`test:at:fast`)は9で枠に収まるが、全件実行では必ずどれか1シナリオが
@@ -499,7 +499,7 @@ ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 �
 
 | 使うもの | 何を検証するか | シナリオ | タグ | 前提 |
 | --- | --- | --- | --- | --- |
-| 実機 `lbs-comfyui` | 実際に画像が生成できること、生成パラメータが記録に残ること、チェックポイントの一覧・導入・削除 | `features/media/image-generation.feature`、`features/media/comfyui-checkpoints.feature`(#936(AT-10)の 1・2 と 12〜14) | `@slow` | **GPU 必須**。無ければ明示的に失敗する(暗黙スキップにしない) |
+| 実機 `lbs-comfyui` | (受け入れテストでは検証しない。2026-10-09 に利用者の判断で削除、§20) 実際に画像が生成できること、生成パラメータが記録に残ること、チェックポイントの導入・削除 | なし。UAT の手順は §19.2 | なし | 実機の GPU / CPU の ComfyUI。結果が実機の AI に左右されるため |
 | `comfyui-stub` | batch size の枚数(1〜16)、リピートごとに seed が変わること、seed が生成画像に残ること、`/api/ai/image-options` の一覧 | `features/stubs/comfyui-stub.feature`、および #1101 / #1102 / #1103 / #1105 の枚数・seed のシナリオ | `@stub` | GPU 不要。**GPU 非搭載環境でも通る** |
 
 分ける理由は実行時間と決定性である。実機の生成は1枚あたり数十秒かかるため、
@@ -513,142 +513,13 @@ batch size 16 の枚数検証や batch count のリピート検証を実生成�
 スタブが再現しないもの: 画像の見た目、モデル固有の挙動、生成時間、VRAM の実際の解放。
 `/view` が返すのは 1×1 の PNG 固定である(`openai-image` スタブと同じバイト列)。
 
-#### `@requires-gpu`: リリース検証だけは除外する(#1318、利用者の決定 2026-09-15)
+#### `@requires-gpu` / `@requires-real-ai-cpu`(削除済み、#1714)
 
-`comfyui-checkpoints.feature` の導入・削除の2シナリオは、**受け入れテスト環境が実機 `lbs-comfyui`
-ではなく `comfyui-stub` を向いている限り、必ず失敗する。** そのため `scripts/release-verify-tag.py`
-によるリリース検証(`test:at:clean`)がゼロ許容で通せるよう、この2つには `@requires-gpu` を付けている。
-一覧取得のシナリオと `image-generation.feature` は(スタブを相手に)通るため対象にしていない。
-ただしスタブで通っている以上、これらは実機を検証していない — その是正は #1401(実機 AI レーン)が
-引き受ける。
-
-**除外の根拠(#1400 で再評価、2026-09-30)。** 当初(#1318、2026-09-15)の根拠は「このホストに GPU が
-無い」だったが、これはホスト依存で、実機に GPU がある日(2026-09-24 の報告では RTX 5070 Ti と稼働中の
-`lbs-comfyui` を確認。実装時のホストとは状態が異なる)には成立しない。除外の**現在の根拠は GPU の有無ではない**:
-
-| 事実 | 出典 |
-| --- | --- |
-| AT 環境は `docker-compose.yml` に `docker-compose.e2e-stubs.yml` を重ねて起動する | `scripts/rebuild-acceptance-env.sh` |
-| 前処理 `e2e-clear-llm-db-overrides.sh` が DB の `comfyui_base_url` を `http://comfyui-stub:8080` にする(環境変数 `COMFYUI_BASE_URL` は廃止した) | `scripts/e2e-clear-llm-db-overrides.sh` |
-| media は生成・一覧のたびに platform から baseUrl を取り直す | `services/media/src/main/java/com/letsblog/media/ai/ComfyUiClient.java` |
-| スタブの `/object_info` が返すチェックポイント一覧は固定値で、導入したものは決して現れない | `infra/e2e-stubs/comfyui/server.js` の `CHECKPOINTS` |
-
-したがって実機に GPU があり `lbs-comfyui` が稼働していても、AT が実機を向いていない以上
-2シナリオの結果は変わらない(一覧に導入分が現れず落ちる)。除外は**継続する**。
-継続の条件が消えるのは、AT 環境が実機 ComfyUI を向く構成(#1401)が入ったときである。
-
-実測の記録: 本 Issue の実装時点(2026-09-30)のホストには `nvidia-smi` も `/dev/nvidia*` も無く、
-`lbs-comfyui` は `Created` のまま起動しておらず、稼働中は `lbs-e2e-comfyui-stub` のみだった。
-共有スタックは初回セットアップ済みで、`at-main` の依存段階 `at-setup` は
-`test:at:clean`(共有スタックの初期化を伴う)でしか成立しない。初期化はループと共有する
-スタックを止めるため行わず、`--project=at-main --no-deps` で2シナリオを実行したところ、
-両方とも `Keycloakからのトークン取得に失敗しました (status=400): invalid_grant`
-(seed/provision を飛ばしたため検証用アカウントが無い)で落ちた。これは**シナリオ本来の
-失敗理由ではなく**、実機に対して通るかの測定としては無効である。よって「実機に対して通るか」は
-未測定であり、上の根拠はコード上の事実(DB の接続先がスタブである事実とスタブの固定一覧)と、
-#1400 への 2026-09-24 の利用者コメント(この結論を測定を待たず出せるとしたもの)による。
-実機 AI レーン(#1401)で実測すること。
-
-なお名称: このタグが実際に意味するのは「実機 ComfyUI を向いている必要がある」であり、演算デバイス
-(GPU/CPU、#1395)の話ではない。改名(例 `@requires-real-comfyui`)は仕組みと
-`release-verify-tag.py`・テストに波及するため、本 Issue では行わず #1401 で検討する。
-
-- **リリース検証(`release-verify-tag.py`)だけが除外する。** `web-test-at-clean` 手順は
-  `AT_EXCLUDE_REQUIRES_GPU=1` を設定して `test:at:clean` を実行し、
-  `apps/web/playwright.config.ts` の `at-main` / `at-destructive` の生成時タグ式
-  (`defineBddProject` の `tags`)がこの環境変数を見て `and not @requires-gpu` を足す。
-  `--grep-invert` では実現できない — `test:at:clean` が選ぶ `at-destructive` の
-  対象シナリオは依存プロジェクト `at-main` に属し、Playwright の `--grep` /
-  `--grep-invert` は依存プロジェクトのテストを絞り込まないため(#1318 Readiness評価で実測)。
-- **`test:at:clean` / `test:at` を手で実行したときは対象外にしない。** 環境変数を設定しない
-  限りタグ式は従来どおりで、GPU の無いホストでは方針(上表「GPU 必須。無ければ明示的に
-  失敗する」)どおり明示的に失敗する。暗黙のスキップではない。
-- 除外したシナリオ(パスとシナリオ名)は `.feature` の `@requires-gpu` から機械的に作り、
-  リリース検証の実行ログとタグの注釈(`build_tag_message()`)の両方に記録する。
-- `CLAUDE.md` → Test-First Implementation → **Never skip a test** が禁じる
-  `--grep-invert` 等による除外の**唯一の例外**である(本決定、#1318)。
-
-#### `@requires-real-ai-cpu`: CPU 構成の ComfyUI で実生成する実機 AI レーン(#1401)
-
-`features/media/image-generation-cpu.feature` の1シナリオが、#1395 の CPU 構成(`docker-compose.yml` の
-`comfyui-cpu`、コンテナ `lbs-comfyui-cpu`)に対して**画像が実際に1枚生成されること**を確かめる。網羅ではなく
-「一応動く」ことの確認で、`@requires-gpu`(名称・意味とも据え置き、#1400)とは**別のタグ**である。
-
-| 項目 | 内容 |
-| --- | --- |
-| タグ | `@requires-real-ai-cpu`(+ `@destructive @slow @media @api`) |
-| 段階 | `at-destructive`(`workers: 1`)。システム全体の設定を書き換えるため、他シナリオと同時に走らない |
-| 向き先の切り替え | システム設定 `comfyui_base_url`(DB、環境変数より優先)を `http://lbs-comfyui-cpu:8188` へ書き、生成後に**必ず**元(スタブ)へ戻す。途中で落ちても `After` が戻す。`PlatformServiceClient` の 5 秒キャッシュを越えるため切り替えの前後で 6 秒待つ |
-| 前提 | CPU 構成のコンテナが起動していること。`docker compose --profile cpu up -d comfyui-cpu`。**起動していなければ明示的に失敗する**(暗黙のスキップにしない)。GPU 構成の `lbs-comfyui` は止めなくてよい(コンテナ名で指名する) |
-| チェックポイント | `stabilityai/sd-turbo` の `sd_turbo.safetensors`(約 5.2GB、1 ステップで生成できる蒸留モデル)。非ゲートで認証なしに取得でき、ライセンスは Stability AI Community License(研究・非商用・評価/テスト目的は無償、商用は年商 USD 1M 未満なら登録のうえ無償)。無ければシナリオが導入し、`comfyui_models` は保全ボリュームなので取得は**初回だけ**。導入したモデルは後片付けで消さない |
-| 生成パラメータ | 512x512・`steps=1`・`cfgScale=1.0`・`euler`/`simple`・batchSize=1。media のポーリング予算(batchSize=1 で 120 秒、`ComfyUiClient.MIN_POLL_ATTEMPTS`)を**広げずに**その中へ収める。収まらない場合は予算の見直しが要る(設計変更は #1111 の担当)と結論してシナリオが失敗する |
-| 消費する枠 | `POST /api/ai/image` を 1 回(`UPLOAD_RATE_LIMIT_REQUESTS=40`、現在の消費 12 に対し余裕あり) |
-
-**既定の実行・リリース検証からの除外。** 仕組みは `@requires-gpu` と同型で、生成時タグ式に載せる。
-
-- `test:at:fast` は `@slow` を除くので、このシナリオは含まれない。
-- リリース検証(`release-verify-tag.py`)の `web-test-at-clean` 手順は `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` を設定し、
-  `apps/web/playwright.config.ts` の生成時タグ式(`at-main` / `at-llm-exclusive` / `at-timezone-exclusive` /
-  `at-analytics-exclusive` / `at-preview-exclusive` / `at-threads-exclusive` / `at-facebook-exclusive` /
-  `at-destructive`。`@requires-gpu` の除外を持つ全レーン)が `and not @requires-real-ai-cpu` を足す。`bddgen`
-  は生成時に評価するので、環境変数を変えたら `.features-gen` を作り直すこと。
-- 除外したシナリオ(パスとシナリオ名)は `.feature` の `@requires-real-ai-cpu` から機械的に作り、リリース検証の
-  実行ログ(`==> @requires-real-ai-cpu のシナリオをリリース検証の対象から除外します(#1401)`)とタグの注釈
-  (`@requires-real-ai-cpu 除外(#1401):`)の両方に記録する。0 件のときも「該当なし」と明示する。
-- 除外指定なしの手動の全件実行(`test:at` / `test:at:clean`)では対象に含まれ、CPU 構成のコンテナが無ければ落ちる。
-  CPU 構成を常用しないホストで全件実行が煩わしい場合は、環境変数 `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` を付ける。
-- 新しい compose overlay や Playwright プロジェクトは増やしていない(既存の `at-destructive` と DB 設定の
-  往復で足りるため。`system-settings.feature` の LLM 切替シナリオと同じ定石)。
-- これは `CLAUDE.md` の **Never skip a test** が許す `@requires-gpu` の例外と**同型の、2つ目の生成時除外**である
-  (Issue #1401 要件6が求めたもの)。利用者の決定(#1401、2026-10-05)により、`CLAUDE.md` の例外に並べて記載した。
-- CPU 構成での実生成と所要時間の実測は、利用者の決定(#1401、2026-10-05)により当面実施しない(#1637)。
-  このシナリオは既定実行とリリース検証の対象外のまま置いておく。
-
-**Ollama(CPU 構成)の1シナリオ(#1402)。** `features/ai/generation-ollama-cpu.feature` が、同じ `@requires-real-ai-cpu`
-(新しいタグ・環境変数・Playwright プロジェクトは増やしていない)で、#1585 の CPU 構成(`ollama-cpu`、コンテナ
-`lbs-ollama-cpu`)に対して**LLM の応答が返ること**を確かめる。`at-destructive`。
-
-- 既定の AT 構成では `ollama` / `ollama-model-init` は起動しない(#1090、`profiles: ["ollama"]`)。シナリオだけが
-  `docker compose -p lets_blog_server -f docker-compose.yml -f docker-compose.e2e-stubs.yml --profile ollama-cpu up -d ollama-cpu`
-  で明示起動し、自分が起動した場合に限り終了後に `docker stop` する。
-- 向き先はシステム設定 `llm_provider` / `llm_ollama_base_url`(`http://lbs-ollama-cpu:11434/v1`)/ `llm_ollama_model` を DB へ書き、
-  終了後(途中で落ちても `After`)に元へ戻す。
-- モデルは小さい `qwen2.5:0.5b-instruct`(約 400MB)を `docker exec lbs-ollama-cpu ollama pull` で用意する(`ollama_models` は保全ボリューム)。
-  `LLM_REQUEST_TIMEOUT_SECONDS`(120 秒)は広げない。呼び出しは短い本文の `POST /api/ai/tags`。
-- 除外・ログ記録は上記 ComfyUI のレーンと共通。**実機での実行と所要時間の記録は、利用者の決定(#1402、2026-10-05)により
-  当面実施しない(#1638)。所要時間は未測定。**
-
-**実測所要時間(AC-2)。** 未測定。実装した環境(メモリ空き約 6GB、共有スタックがループと同居)では、
-CPU 構成のコンテナ起動と 5.2GB のモデル導入、fp32 の CPU 生成が共有スタックを圧迫し得るため実行しなかった。
-`.feature` と手順は書いてあるので、CPU 構成のコンテナを起動した環境で
-
-```bash
-cd apps/web && rm -rf .features-gen && npx bddgen && \
-  npx playwright test --reporter=list --project=at-destructive --no-deps -g "CPU構成のComfyUIへ"
-```
-
-を実行し、標準出力の `[real-ai-cpu] POST /api/ai/image 所要時間: N.N秒` を下表へ記録すること。
-120 秒を超えたらシナリオが失敗し、その場合は予算の見直し(#1111)が結論になる。
-
-| 日付 | ホスト CPU | `POST /api/ai/image` の所要時間 | 初回導入を含む総所要 |
-| --- | --- | --- | --- |
-| (未測定) | | | |
-
-#### チェックポイント導入シナリオが使うモデル(#936)
-
-`comfyui-checkpoints.feature` の導入シナリオは **283KB の safetensors**
-(`hf-internal-testing/tiny-sd-pipe` の `text_encoder/model.safetensors`。URL は
-`apps/web/e2e/steps/media.steps.ts` の `TINY_CHECKPOINT_URL`)を落とす。
-#936 の当初方針は実生成と同じ SDXL base(約6.9GB)だったが、**導入シナリオが確かめるのは
-ダウンロードと配置が成立することだけ**であり、大きさは検証内容に関係しない。
-
-所要時間の実測(2026-09-07、この開発ホスト): ダウンロード開始からジョブ完了まで **9.5 秒**。
-同じ日に SDXL base 相当の 5.7MB を試したときは回線が 4KB/s まで落ちて 20 分見込みになり、
-Playwright の既定タイムアウトを超えた。フィーチャに `@timeout:600000` を付けてあるのは
-そのためで、モデルの大きさではなく回線の遅さに備えるものである。
-
-導入したファイルは `@media` の `After` が必ず削除する。`comfyui_models` ボリュームは
-ゼロ構築でも**保全される**(§10)ため、消さないと実行のたびに溜まる。
+実機の ComfyUI / Ollama を要したシナリオ(`@requires-gpu`、#1318 と、`@requires-real-ai-cpu`、#1401 / #1402)は、
+2026-10-09 の利用者の判断で削除した(§19)。対象シナリオが無くなったので、これらのタグ、生成時タグ式の除外
+(`apps/web/playwright.config.ts` の `AT_EXCLUDE_REQUIRES_GPU` / `AT_EXCLUDE_REQUIRES_REAL_AI_CPU`)、
+`scripts/release-verify-tag.py` の除外一覧の記録、`CLAUDE.md` → Never skip a test の2つの例外も消した。
+再び実機を要するシナリオを足すときは、同じ仕組みを復活させるのではなく、まず UAT で扱えないかを検討すること。
 
 投入したワークフローの seed と batch size は制御エンドポイントから読める。
 「リピートごとに seed が変わる」(#1102)ことは、生成された画像だけを見ても分からない。
@@ -2209,7 +2080,73 @@ Reporter は製品の振る舞いではないため Gherkin ではなくサー�
 性能以外のステップ定義が使っていた `waitForHydrated` / `adminHeaders` / `uniqueSuffix` は、
 `apps/web/e2e/support/e2eFixtures.ts` へ移した。
 
-## 19. 参考
+## 19. 実機 AI・実時間待ちの受け入れテストの削除と UAT 手順(#1714)
+
+### 19.1 削除したシナリオと理由
+
+**利用者の判断による削除(2026-10-09、#1709 の削除候補一覧の R1〜R5 を承認)。** CLAUDE.md → Never skip a test の
+「失敗を黙らせる」ための skip・削除ではない。skip で残さず、シナリオとそれを強制する仕組みを丸ごと削除した。
+
+**理由**: 結果が実機の GPU / CPU の AI や実時間の経過に左右され、製品の振る舞いを決定的に検証していなかった。
+Q1(クロスブラウザ)・Q2(フォーカスの視認性)・Q3(モバイル・タブレットの操作感)・Q4(演算デバイスの切り替え)は残すと決定した。
+
+| # | 削除したシナリオ | 理由 | 代わりの確認 |
+| --- | --- | --- | --- |
+| R1 | `media/comfyui-checkpoints.feature`「チェックポイントを導入すると、導入後の一覧に現れる」「選択中のチェックポイントは削除できず、選択していないものは削除できる」(`@requires-gpu`) | 実機 ComfyUI と実モデルのダウンロードが要る | §19.2 R1 |
+| R2 | `media/image-generation.feature` の2シナリオ(ファイルごと削除) | 実機 ComfyUI での生成が前提 | §19.2 R2 |
+| R3 | `media/image-generation-cpu.feature`(ファイルごと削除。`@requires-real-ai-cpu`) | CPU 構成の ComfyUI と約 5GB のモデルが要る | §19.2 R3 |
+| R4 | `ai/generation-ollama-cpu.feature`(ファイルごと削除。`@requires-real-ai-cpu`) | CPU 構成の Ollama とモデル取得が要る | §19.2 R4 |
+| R5 | `cross-cutting/rate-limit.feature`「制限の時間枠が明けると再び受理される」 | 実時間の経過(最大 60 秒超)を待つ | gateway の単体テスト(§19.3) |
+
+一緒に消したもの: ステップ定義 `steps/cpuAiGeneration.steps.ts`、`steps/ollamaCpuGeneration.steps.ts`、`media.steps.ts` の
+実機生成・導入・削除のステップ(と `After` の導入ファイル削除)、`cross-cutting.steps.ts` の時間枠待ちのステップ、
+`@requires-gpu` / `@requires-real-ai-cpu` の例外の仕組み(§9 の同名の節を参照)。残したシナリオ(チェックポイントの
+一覧取得と選択など、スタブで通るもの)はそのまま回る。
+
+`POST /api/ai/image`(upload-endpoint の枠)の消費は、`image-generation.feature` の削除で全件実行でも 9 になった
+(`docs/API_RATE_LIMITING.md` 参照)。
+
+### 19.2 UAT の手順(実機での確認)
+
+リリースの前などに、実機の環境で人が確かめる。いずれも本番相当のスタックで、スタブ(`docker-compose.e2e-stubs.yml`)を
+重ねていない構成で行う。
+
+**R1: ComfyUI チェックポイントの導入と削除**(AC-IMG-010)
+
+1. システム設定で画像生成に ComfyUI(実機 `lbs-comfyui`)を指定する。
+2. プロジェクトの管理画面を開き、「AI・アセット」タブ → 「AIモデル管理」 → 「画像生成」で ComfyUI のチェックポイントの一覧を表示する。
+3. 小さな safetensors の URL とファイル名を指定して導入する。ジョブが「完了しました。」になり、一覧に現れること。
+4. 選択中のチェックポイントの行の「削除」が押せず、理由(「選択中のチェックポイントは削除できません」)が示されること。
+5. 選択していない導入したチェックポイントを削除し、一覧から消えること(ComfyUI のモデル領域から消すこと)。
+
+**R2: 実機 ComfyUI での画像生成**(AC-IMG-001 / AC-IMG-009)
+
+1. ComfyUI を使うプロジェクトで、プロンプト(例: `an orange cat sitting on a blue chair`)を指定して画像を 1 枚生成する。
+2. 生成画像が画像ギャラリーの一覧に現れること。
+3. 別のプロンプトとサイズ(例: `a red bicycle in the rain`、512 x 512)で生成し、詳細にプロンプト・サイズ・使ったチェックポイント名が残ること。
+
+**R3: CPU 構成の ComfyUI での画像生成**
+
+1. `docker compose --profile cpu up -d comfyui-cpu` で CPU 構成の ComfyUI(`lbs-comfyui-cpu`)を起動する。
+2. システム設定の `comfyui_base_url` を `http://lbs-comfyui-cpu:8188` にする(確認後は元へ戻す)。
+3. `stabilityai/sd-turbo` の `sd_turbo.safetensors`(約 5.2GB)が無ければ導入する。
+4. 512x512・`steps=1`・`cfgScale=1.0`・`euler` / `simple`・batchSize=1 で画像を 1 枚生成し、media のポーリング予算(120 秒)以内に返り、
+   ギャラリーに現れること。所要時間を記録する。
+
+**R4: CPU 構成の Ollama でのタグ提案**
+
+1. CPU 構成の Ollama(`ollama-cpu`、コンテナ `lbs-ollama-cpu`)を起動し、`docker exec lbs-ollama-cpu ollama pull qwen2.5:0.5b-instruct` で小さなモデルを用意する。
+2. システム設定の `llm_provider` / `llm_ollama_base_url`(`http://lbs-ollama-cpu:11434/v1`)/ `llm_ollama_model`(`qwen2.5:0.5b-instruct`)を切り替える(確認後は元へ戻す)。
+3. 短い本文でタグ提案(`POST /api/ai/tags`)を 1 回呼び、`LLM_REQUEST_TIMEOUT_SECONDS`(120 秒)以内に応答が返ること。
+
+### 19.3 R5 の代わりのテスト
+
+`services/gateway/src/test/java/com/letsblog/gateway/config/RateLimitWebFilterTest.java` の
+`sameClientIsAcceptedAgainAfterRefreshPeriod`(表示名「制限の時間枠が明けると、同じクライアントの要求が再び受理される」)が、
+窓を短く(300ms)設定した `RateLimitWebFilter` に対して、上限に達して 429 になった同じクライアントが、窓が明けたあとに受理されることを確かめる。
+時計の注入は要らず、本番コードは変えていない。`./gradlew :services:gateway:test --tests '*RateLimitWebFilterTest'` で回る。
+
+## 20. 参考
 
 - [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) — 受け入れ基準カタログ(機能IDと検証状況)
 - `docker-compose.e2e-stubs.yml` / `infra/e2e-stubs/` — 外部依存スタブ(§9)

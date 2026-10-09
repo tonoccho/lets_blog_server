@@ -503,26 +503,6 @@ Then('その要求は受理される', async ({ ctx }) => {
   ).toBe(200);
 });
 
-/**
- * resilience4j の RateLimiter は `limit-refresh-period`(既定60秒)ごとに枠を戻す。
- * 待ち時間は最大でその1周期。固定の sleep ではなく、受理されるまで問い合わせて確かめる。
- */
-When('制限の時間枠が明けるまで待つ', async ({ ctx }) => {
-  const clientIp = ctx.rateLimitClientIp as string;
-  const deadline = Date.now() + 90_000;
-  let response = sendThroughGateway({ path: RATE_LIMITED_PATH, clientIp });
-  while (response.status === 429 && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
-    response = sendThroughGateway({ path: RATE_LIMITED_PATH, clientIp });
-  }
-  ctx.afterWindowResponse = response;
-});
-
-Then('同じクライアントの要求が再び受理される', async ({ ctx }) => {
-  const response = ctx.afterWindowResponse as GatewayResponse;
-  expect(response.status, '時間枠が明けても制限が解除されない').toBe(200);
-});
-
 // ------------------------------------------ 画像生成設定のレート制限(issue #999)
 
 /**
@@ -591,12 +571,15 @@ Then('全て200で返り、429は一度も返らない', async ({ ctx }) => {
  * いる上限を {@link gatewayUploadEndpointLimit} で読み、あらかじめ数えてある消費量から
  * 計算した必要最小値と比較するだけにする。
  *
- * 消費量の内訳(通常実行10 + `@slow`分2 = 12)は
- * `apps/web/e2e/features/media/image-generation.feature` 冒頭のコメントが唯一の値の
- * 出どころ(二重管理をしない)。1時間以内の再実行(AC2)も429無しでまかなうには、
+ * 消費量の内訳は、`POST /api/ai/image`(upload-endpoint)を叩くシナリオの数で、
+ * `image-batch-count.feature` が5、`image-generation-chatgpt.feature` が3、
+ * `image-settings.feature` が1の合計9。実機 ComfyUI で生成していた
+ * `image-generation.feature`(2シナリオ)は #1714 で削除したので、`@slow` 分の消費は無い。
+ * ここが唯一の値の出どころ(二重管理をしない)。シナリオを足したら数え直す。
+ * 1時間以内の再実行(AC2)も429無しでまかなうには、
  * 同じ1時間の枠の中で少なくとも2回分を吸収できる必要がある。
  */
-const FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION = 12; // apps/web/e2e/features/media/image-generation.feature 冒頭コメント参照
+const FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION = 9; // 上のコメントの内訳(5 + 3 + 1)
 const REQUIRED_UPLOAD_ENDPOINT_MINIMUM = FULL_RUN_UPLOAD_ENDPOINT_CONSUMPTION * 2; // 全件実行 + 1時間以内の再実行(issue #1286 AC1・AC2)
 
 Then('upload-endpointの枠が全件実行の消費を再実行込みでまかなえている', () => {

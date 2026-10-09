@@ -774,26 +774,6 @@ Then(
 /** 画像ギャラリーのURL。 */
 const IMAGE_GALLERY_PATH = '/image-gallery';
 
-/**
- * 検証用に導入する小さなチェックポイント(issue #936 シナリオ13・14)。
- *
- * #936 の方針は実生成に SDXL base(約6.9GB)を使うことだが、**導入シナリオが確かめるのは
- * ダウンロードと配置が成立することだけ**なので、Implementation Notes の
- * 「小さいモデルで検証する」に従って 283KB の safetensors を使う。
- * 6.9GB を毎回落とすのは受け入れテストの所要時間として現実的でない。
- *
- * ComfyUI のチェックポイント一覧は `checkpoints/` に置かれたファイル名をそのまま返すので、
- * 中身が拡散モデルとして完全である必要は無い(このシナリオは生成を行わない)。
- */
-const TINY_CHECKPOINT_URL =
-  'https://huggingface.co/hf-internal-testing/tiny-sd-pipe/resolve/main/text_encoder/model.safetensors';
-
-/** 導入先のファイル名。ComfyUiCheckpointTable の SAFE_FILE_NAME(英数字・_・-・.)に収める。 */
-const TINY_CHECKPOINT_FILE_NAME = 'e2e-936-tiny.safetensors';
-
-/** 非同期ジョブ(GenerationJob)の完了を待つときの上限。導入はダウンロードを伴う。 */
-const JOB_TIMEOUT_MS = 300_000;
-
 interface GeneratedImageDetail {
   id: number;
   prompt: string;
@@ -861,31 +841,6 @@ function firstGeneratedImageId(ctx: Record<string, unknown>): number {
   return result.images[0].id;
 }
 
-/** GenerationJob が done / failed になるまで待ち、最終状態を返す。 */
-async function waitForGenerationJob(
-  request: APIRequestContext,
-  jobId: number
-): Promise<{ status: string; resultPayload: string | null }> {
-  const token = await adminToken(request);
-  const deadline = Date.now() + JOB_TIMEOUT_MS;
-  let last: { status: string; resultPayload: string | null } = { status: 'unknown', resultPayload: null };
-  while (Date.now() < deadline) {
-    const response = await request.get(`/api/generation-jobs/${jobId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(
-      response.ok(),
-      `ジョブの取得に失敗しました (status=${response.status()}): ${await response.text()}`
-    ).toBe(true);
-    last = (await response.json()) as { status: string; resultPayload: string | null };
-    if (last.status !== 'running' && last.status !== 'pending') {
-      return last;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  throw new Error(`ジョブ ${jobId} が ${JOB_TIMEOUT_MS}ms 以内に終わりませんでした(最後の状態: ${last.status})`);
-}
-
 /**
  * タブ切り替え後にしか現れない要素(#1283 と同型)。`Tabs`(`src/components/Tabs.tsx`)は
  * クライアントコンポーネントで、タブボタン自体はサーバーレンダリングされて先に
@@ -921,7 +876,7 @@ async function openProjectTab(page: Page, projectId: number, tabLabel: string): 
   }).toPass({ timeout: 30_000 });
 }
 
-// ---- 画像生成(image-generation.feature) ----
+// ---- 画像生成(プロジェクトの準備) ----
 
 Given('画像生成にComfyUIを使うプロジェクトがある', async ({ ctx, request }) => {
   await createProjectWithImageProvider(request, ctx, 'COMFYUI', '936-comfyui');
@@ -933,42 +888,6 @@ When(
     await requestImageGeneration(request, ctx, { projectId: ctx.mediaProjectId, prompt, batchSize: 1 });
   }
 );
-
-When(
-  /^そのプロジェクトで「([^」]+)」を「(\d+)」x「(\d+)」で画像生成を要求する$/,
-  async ({ ctx, request }, prompt: string, width: string, height: string) => {
-    await requestImageGeneration(request, ctx, {
-      projectId: ctx.mediaProjectId,
-      prompt,
-      batchSize: 1,
-      width: Number(width),
-      height: Number(height),
-    });
-  }
-);
-
-Then(
-  /^生成された画像の詳細のプロンプトに「([^」]+)」が含まれる$/,
-  async ({ ctx, request }, prompt: string) => {
-    const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
-    // 画質プロンプト(プロジェクト/アプリの既定値)が末尾へ連結されるため前方一致では見ない。
-    expect(detail.prompt).toContain(prompt);
-  }
-);
-
-Then(
-  /^生成された画像の詳細のサイズは「(\d+)」x「(\d+)」である$/,
-  async ({ ctx, request }, width: string, height: string) => {
-    const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
-    expect(detail.width).toBe(Number(width));
-    expect(detail.height).toBe(Number(height));
-  }
-);
-
-Then('生成された画像の詳細にチェックポイント名が残っている', async ({ ctx, request }) => {
-  const detail = await fetchGeneratedImageDetail(request, firstGeneratedImageId(ctx));
-  expect(detail.checkpoint, '生成に使ったチェックポイントが記録されていません').toBeTruthy();
-});
 
 Then('ChatGPTの画像生成が呼ばれている', async ({ ctx }) => {
   const result = outcome(ctx);
@@ -2079,105 +1998,6 @@ When('一覧の先頭のチェックポイントを選択する', async ({ ctx, 
 Then('そのプロジェクトの選択中チェックポイントは選択したものになる', async ({ ctx, request }) => {
   const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
   expect(list.selected).toBe(ctx.mediaSelectedCheckpoint);
-});
-
-When('そのプロジェクトへ検証用の小さなチェックポイントを導入する', async ({ ctx, request }) => {
-  const token = await adminToken(request);
-  const response = await request.post(
-    `/api/projects/${ctx.mediaProjectId}/ai-models/comfyui/checkpoints/install`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      data: { downloadUrl: TINY_CHECKPOINT_URL, fileName: TINY_CHECKPOINT_FILE_NAME },
-    }
-  );
-  expect(
-    response.ok(),
-    `チェックポイントの導入開始に失敗しました (status=${response.status()}): ${await response.text()}`
-  ).toBe(true);
-  const job = (await response.json()) as { id: number };
-  ctx.mediaInstallJob = await waitForGenerationJob(request, job.id);
-  ctx.mediaInstalledCheckpoint = TINY_CHECKPOINT_FILE_NAME;
-});
-
-Then('導入のジョブは成功で終わる', async ({ ctx }) => {
-  const job = ctx.mediaInstallJob as { status: string; resultPayload: string | null };
-  expect(job.status, `導入ジョブが失敗しました: ${job.resultPayload}`).toBe('done');
-});
-
-Then('導入したチェックポイントがそのプロジェクトの一覧に現れる', async ({ ctx, request }) => {
-  const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
-  expect(list.checkpoints).toContain(ctx.mediaInstalledCheckpoint);
-});
-
-When('そのプロジェクトの管理画面でComfyUIチェックポイントの一覧を開く', async ({ ctx, page }) => {
-  // チェックポイント表は二段のタブの奥にある。プロジェクト詳細の「AI・アセット」タブを開き、
-  // その中の「AIモデル管理」パネルで「画像生成」サブタブへ切り替えて初めて取得・描画される
-  // (ProjectAiModelsPanel は開いたタブの分だけをクライアント側で取りに行く)。
-  await openProjectTab(page, ctx.mediaProjectId as number, 'AI・アセット');
-  await page.getByRole('button', { name: '画像生成', exact: true }).click();
-  await expect(page.getByText('選択中のチェックポイント:')).toBeVisible({ timeout: 30_000 });
-});
-
-/** チェックポイント名の行。表の1列目がその名前である行を選ぶ。 */
-function checkpointRow(page: Page, name: string) {
-  return page.locator('tr').filter({ has: page.locator(`td:has-text("${name}")`) });
-}
-
-Then('選択中のチェックポイントの削除ボタンは押せず、理由が示される', async ({ page }) => {
-  const selectedRow = page.locator('tr').filter({ has: page.getByText('選択中', { exact: true }) });
-  const deleteButton = selectedRow.getByRole('button', { name: '削除', exact: true });
-  await expect(deleteButton).toBeDisabled();
-  await expect(deleteButton).toHaveAttribute('title', '選択中のチェックポイントは削除できません');
-});
-
-/**
- * issue #1316: 導入したはずのチェックポイントが一覧に現れないケース(実機ComfyUIが
- * 応答していない、あるいはGPU無しホストでスタブが静的な一覧しか返さない場合)の
- * 防御線。「導入したチェックポイントがそのプロジェクトの一覧に現れる」の前提チェックが
- * 主たる検出経路だが、ここでも明示タイムアウトを与えておく — さもないと
- * `getByRole(...).click()` はタイムアウト指定を持たないロケーター操作として、
- * シナリオの`@timeout:600000`(`@slow`適用で30分)いっぱいまで無言でポーリングし続け、
- * 「明示的に失敗する」という docs/ACCEPTANCE_TESTING.md の方針に反してハングする。
- */
-const CHECKPOINT_ROW_TIMEOUT_MS = 30_000;
-
-When('導入したチェックポイントを画面から削除する', async ({ ctx, page }) => {
-  const name = ctx.mediaInstalledCheckpoint as string;
-  const row = checkpointRow(page, name);
-  await expect(
-    row,
-    `導入したはずのチェックポイント「${name}」が一覧に見つかりません` +
-      '(実機ComfyUIが応答していないか、GPU無しホストの可能性があります)'
-  ).toBeVisible({ timeout: CHECKPOINT_ROW_TIMEOUT_MS });
-  page.once('dialog', (dialog) => dialog.accept());
-  await row.getByRole('button', { name: '削除', exact: true }).click({ timeout: CHECKPOINT_ROW_TIMEOUT_MS });
-  await expect(page.getByText('完了しました。')).toBeVisible({ timeout: JOB_TIMEOUT_MS });
-});
-
-Then('導入したチェックポイントが一覧から消える', async ({ ctx, request }) => {
-  const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
-  expect(list.checkpoints).not.toContain(ctx.mediaInstalledCheckpoint);
-});
-
-/**
- * 導入したチェックポイントは ComfyUI のモデル領域に残るので、必ず消す。
- * このボリューム(`comfyui_models`)はゼロ構築でも**保全される**(モデルの再取得が
- * 現実的でないため。docs/ACCEPTANCE_TESTING.md §10)ので、後片付けをしないと
- * 実行のたびに増え続ける。
- */
-After({ tags: '@media' }, async ({ ctx, request }) => {
-  const projectId = ctx.mediaProjectId as number | undefined;
-  if (ctx.mediaInstalledCheckpoint === undefined || projectId === undefined) {
-    return;
-  }
-  const token = await adminToken(request);
-  const response = await request.delete(
-    `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${ctx.mediaInstalledCheckpoint as string}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (response.ok()) {
-    await waitForGenerationJob(request, ((await response.json()) as { id: number }).id);
-  }
 });
 
 /**

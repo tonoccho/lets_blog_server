@@ -473,15 +473,10 @@ When a test fails, **fix the production code first**. Change the test only when 
 itself is demonstrably inappropriate (it asserts behavior the Acceptance Criteria do not require,
 or encodes an assumption this Issue deliberately changed) — and report which test and why.
 
-**The first exception** (user's decision, #1318, 2026-09-15): scenarios tagged `@requires-gpu` are
-excluded from release verification via `AT_EXCLUDE_REQUIRES_GPU=1` in `apps/web/playwright.config.ts`
-(not `--grep-invert`), and the excluded list is recorded — see `docs/ACCEPTANCE_TESTING.md` → `@requires-gpu`.
-
-**The second exception, of the same shape** (user's decision, #1401, 2026-10-05): scenarios tagged
-`@requires-real-ai-cpu` (the real-AI lane against the CPU ComfyUI) are excluded from release
-verification via `AT_EXCLUDE_REQUIRES_REAL_AI_CPU=1` in `apps/web/playwright.config.ts`, and the
-excluded list is recorded — see `docs/ACCEPTANCE_TESTING.md` → `@requires-real-ai-cpu`. Without that
-variable the scenario runs, and fails explicitly when the CPU ComfyUI is not up.
+**No exceptions remain** (#1714, user's decision 2026-10-09): the generation-time exclusions of
+`@requires-gpu` (#1318) and `@requires-real-ai-cpu` (#1401) are removed, because the scenarios they
+covered were deleted by the user's decision (not skipped) and replaced by UAT steps — see
+`docs/ACCEPTANCE_TESTING.md` §19. Do not reintroduce a tag-based exclusion without the user's decision.
 
 ---
 

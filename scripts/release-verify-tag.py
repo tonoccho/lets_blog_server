@@ -546,17 +546,6 @@ DEFAULT_STEPS = [
             "ACCEPTANCE_RESET": "1",
             "AT_WORKTREE_CHECK_BYPASS": "1",
             "PLAYWRIGHT_JSON_OUTPUT_NAME": "%CHECKOUT%/apps/web/playwright-at-clean.json",
-            # #1318: このホストにはGPU(実機lbs-comfyui)が無く、`@requires-gpu`のシナリオ
-            # (comfyui-checkpoints.featureの導入・削除)は必ず落ちる。
-            # `apps/web/playwright.config.ts`はこの環境変数が1のときだけ、生成時タグ式
-            # (at-main/at-destructiveの`tags`)からこのタグを除外する。`--grep-invert`は
-            # 依存プロジェクトを絞り込まないため使えない(Readiness評価で実測)。
-            # test:at:clean/test:atそのものは変えない(手動実行では引き続き全シナリオが対象)。
-            "AT_EXCLUDE_REQUIRES_GPU": "1",
-            # #1401: CPU構成のComfyUI(lbs-comfyui-cpu)と約5GBのモデルを要する実機AIレーン
-            # (`@requires-real-ai-cpu`)も、同じ生成時タグ式の仕組みでリリース検証から除外する。
-            # 手動の全件実行(test:at / test:at:clean)では除外されず、前提が無ければ明示的に失敗する。
-            "AT_EXCLUDE_REQUIRES_REAL_AI_CPU": "1",
         },
         "counts_parser": "playwright_json",
         "counts_source": "apps/web/playwright-at-clean.json",
@@ -1047,94 +1036,6 @@ def run_handoff(handoff, main_worktree, log_dir):
     return r.returncode == 0, log_path
 
 
-# --------------------------------------------------------------------- @requires-gpu 除外一覧 (#1318)
-#: `.feature` の相対パス(隔離チェックアウトのルートから)。手書きしない — 実ファイルを
-#: 機械的に走査する(Issue 要件3)。
-REQUIRES_GPU_FEATURES_GLOB = os.path.join("apps", "web", "e2e", "features", "**", "*.feature")
-REQUIRES_GPU_TAG = "@requires-gpu"
-#: #1401: CPU構成のComfyUIで実生成する実機AIレーン。`@requires-gpu`とは別のタグで、意味も別。
-REQUIRES_REAL_AI_CPU_TAG = "@requires-real-ai-cpu"
-
-
-def _parse_feature_scenarios(text):
-    """簡易Gherkinパーサ。(フィーチャ単位のタグ, [(シナリオ名, シナリオ単位のタグ), ...])を返す。
-
-    このスクリプトが対象にするのは`@requires-gpu`の有無だけなので、ステップ本文
-    (前提/もし/ならば/かつ)や背景は無視する。タグ行はシナリオ/フィーチャの見出し行の
-    直前に連続して書かれる、このリポジトリの`.feature`の書式(#926)を前提にする。
-    """
-    feature_tags = []
-    scenarios = []
-    pending_tags = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("@"):
-            pending_tags.extend(line.split())
-            continue
-        if line.startswith("機能:") or line.startswith("Feature:"):
-            feature_tags = pending_tags
-            pending_tags = []
-            continue
-        for prefix in ("シナリオアウトライン:", "Scenario Outline:", "シナリオ:", "Scenario:"):
-            if line.startswith(prefix):
-                name = line[len(prefix):].strip()
-                scenarios.append((name, pending_tags))
-                pending_tags = []
-                break
-        else:
-            # 前提/もし/ならば/かつ・背景・説明文など。直前に置き場を失ったタグは捨てる。
-            pending_tags = []
-            continue
-        continue
-    return feature_tags, scenarios
-
-
-def find_requires_gpu_scenarios(checkout_dir):
-    """`@requires-gpu`が付いたシナリオを(フィーチャの相対パス, シナリオ名)の一覧で返す(#1318)。
-
-    フィーチャ単位のタグはそのフィーチャの全シナリオに継承させる。手書きの一覧を
-    保守する代わりに、隔離チェックアウトの`.feature`を実際に走査して機械的に作る
-    (Issue 要件3)。決定的な順序にするため、パス→ファイル内の出現順でソートする。
-    """
-    return _find_tagged_scenarios(checkout_dir, REQUIRES_GPU_TAG)
-
-
-def find_requires_real_ai_cpu_scenarios(checkout_dir):
-    """`@requires-real-ai-cpu`が付いたシナリオを(フィーチャの相対パス, シナリオ名)の一覧で返す(#1401)。
-
-    `find_requires_gpu_scenarios`と同じ走査を、別のタグに対して行う。
-    """
-    return _find_tagged_scenarios(checkout_dir, REQUIRES_REAL_AI_CPU_TAG)
-
-
-def _find_tagged_scenarios(checkout_dir, tag):
-    pattern = os.path.join(checkout_dir, REQUIRES_GPU_FEATURES_GLOB)
-    results = []
-    for path in sorted(glob.glob(pattern, recursive=True)):
-        with open(path, encoding="utf-8") as f:
-            text = f.read()
-        feature_tags, scenarios = _parse_feature_scenarios(text)
-        rel = os.path.relpath(path, checkout_dir).replace(os.sep, "/")
-        feature_has_tag = tag in feature_tags
-        for name, tags in scenarios:
-            if feature_has_tag or tag in tags:
-                results.append((rel, name))
-    return results
-
-
-def format_requires_gpu_exclusion_lines(excluded_scenarios):
-    """実行ログとタグ注釈の両方で使う、除外一覧の表示形を1か所にまとめる(#1318 要件3)。
-
-    0件のときも「該当なし」と明示する(何も出さないと、除外の仕組みが動いていない
-    のか、たまたま対象が無かったのかを後から区別できない)。
-    """
-    if not excluded_scenarios:
-        return ["  (該当なし)"]
-    return ["  - %s :: %s" % (rel, name) for rel, name in excluded_scenarios]
-
-
 # --------------------------------------------------------------------- evidence retention (要件9)
 #: 本番での既定。`docker compose logs` はメイン作業ツリーで実行する(共有スタックはそこにある)。
 DEFAULT_DOCKER_LOGS_COMMAND = {
@@ -1186,12 +1087,11 @@ def do_merge_and_check_tree(checkout_dir, main_tip, pinned_sha):
 
 def build_tag_message(
     p_sha, r_sha, main_before, merge_commit, tree_id, start_time, end_time, step_results,
-    excluded_scenarios=(), excluded_real_ai_cpu_scenarios=(),
 ):
     """#1305 要件7: P(develop 先頭)と R(版数コミット)の両方をタグメッセージに記録する。
 
-    #1318 要件3: リリース検証から除外した`@requires-gpu`シナリオの一覧も記録する。
-    #1401: 同様に`@requires-real-ai-cpu`シナリオの一覧も記録する。
+    (#1714: `@requires-gpu` / `@requires-real-ai-cpu` の対象シナリオが無くなったので、
+    除外一覧の記録は無い。)
     """
     lines = [
         "release-verify-tag.py による自動リリース",
@@ -1209,12 +1109,6 @@ def build_tag_message(
             "  - %s: rc=%s %s (%.1fs) %s"
             % (res.name, res.returncode, res.summary(), res.duration, res.command)
         )
-    lines.append("")
-    lines.append("@requires-gpu 除外(#1318):")
-    lines.extend(format_requires_gpu_exclusion_lines(excluded_scenarios))
-    lines.append("")
-    lines.append("@requires-real-ai-cpu 除外(#1401):")
-    lines.extend(format_requires_gpu_exclusion_lines(excluded_real_ai_cpu_scenarios))
     return "\n".join(lines)
 
 
@@ -1378,19 +1272,6 @@ def main(argv=None):
             )
             return 1
 
-        # #1318 要件3: web-test-at-clean が AT_EXCLUDE_REQUIRES_GPU=1 で除外する
-        # `@requires-gpu` シナリオの一覧を、Rの木から機械的に作って記録する
-        # (手書きしない)。手順を実行する前に確定させ、タグ注釈にもそのまま使う。
-        excluded_scenarios = find_requires_gpu_scenarios(checkout_dir)
-        out.write("==> @requires-gpu のシナリオをリリース検証の対象から除外します(#1318)\n")
-        for line in format_requires_gpu_exclusion_lines(excluded_scenarios):
-            out.write(line + "\n")
-        # #1401: 実機AIレーンも同様に、除外するシナリオを機械的に列挙して記録する。
-        excluded_real_ai_cpu = find_requires_real_ai_cpu_scenarios(checkout_dir)
-        out.write("==> @requires-real-ai-cpu のシナリオをリリース検証の対象から除外します(#1401)\n")
-        for line in format_requires_gpu_exclusion_lines(excluded_real_ai_cpu):
-            out.write(line + "\n")
-
         out.write("==> 手順を実行(ゼロ許容)\n")
         step_results = []
         overall_ok = True
@@ -1458,7 +1339,6 @@ def main(argv=None):
         tree_id = tree_of(checkout_dir, merge_commit)
         message = build_tag_message(
             p_sha, r_sha, main_now, merge_commit, tree_id, start_time, end_time, step_results,
-            excluded_scenarios, excluded_real_ai_cpu,
         )
         git(["tag", "-a", version, "-m", message, merge_commit], cwd=checkout_dir)
 
