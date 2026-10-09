@@ -2,7 +2,6 @@ package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.project.client.BearerScope;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
 import com.letsblog.project.dto.SiteResponse;
 import java.util.LinkedHashMap;
@@ -56,10 +55,10 @@ public class ManagedSiteProvisioningJobRunner {
     @Async("siteProvisioningExecutor")
     public void run(Long jobId, CreateManagedWordPressSiteRequest request, ActorSnapshot actor) {
         try {
-            SiteResponse site = currentActorService.runAs(actor, () ->
-                    // リクエストの無いスレッドなので、サービス間ブリッジが使うBearerを取り置いたものから渡す(#1558と同じ仕組み)。
-                    BearerScope.call(actor.authorization(), () ->
-                            provisioningService.createManagedSiteForJob(request, phase -> reportPhase(jobId, phase))));
+            // 取り置いた利用者のBearerは5分で切れるので持ち込まない。サービス間ブリッジは、リクエストの無い
+            // このスレッドではサービス自身のClient Credentialsを呼び出しの都度使う(#1723)。
+            SiteResponse site = currentActorService.runAs(actor.withoutAuthorization(), () ->
+                    provisioningService.createManagedSiteForJob(request, phase -> reportPhase(jobId, phase)));
             generationJobClient.updateStatus(jobId, "done", toJson(donePayload(site)));
         } catch (RuntimeException e) {
             log.warn("Site provisioning job {} failed", jobId, e);

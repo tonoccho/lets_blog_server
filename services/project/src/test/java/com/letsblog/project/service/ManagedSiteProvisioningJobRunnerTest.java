@@ -184,11 +184,12 @@ class ManagedSiteProvisioningJobRunnerTest {
     }
 
     @Test
-    @DisplayName("ジョブのスレッドでは、スナップショットのAuthorizationがサービス間呼び出し用のBearerとして引ける(リクエスト無し)")
-    void bearerBoundOnJobThread() throws Exception {
+    @DisplayName("ジョブのスレッドでは、取り置いた利用者のBearerをサービス間呼び出し用に束縛しない。操作者は引ける(#1723)")
+    void userBearerNotBoundOnJobThread() throws Exception {
         java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
         when(provisioningService.createManagedSiteForJob(any(), any())).thenAnswer(invocation -> {
-            seen.set(com.letsblog.project.client.BearerScope.current());
+            seen.set(com.letsblog.project.client.BearerScope.current() + "/"
+                    + currentActorService.getAuthorizationHeader() + "/" + currentActorService.getCurrentActorEmail());
             return site();
         });
 
@@ -196,7 +197,7 @@ class ManagedSiteProvisioningJobRunnerTest {
         t.start();
         t.join();
 
-        assertEquals("Bearer abc", seen.get());
+        assertEquals("null/null/a@example.com", seen.get());
         org.junit.jupiter.api.Assertions.assertNull(com.letsblog.project.client.BearerScope.current());
     }
 }

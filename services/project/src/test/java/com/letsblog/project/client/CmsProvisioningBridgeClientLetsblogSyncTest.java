@@ -29,6 +29,7 @@ class CmsProvisioningBridgeClientLetsblogSyncTest {
 
     @AfterEach
     void tearDown() {
+        org.springframework.web.context.request.RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
         }
@@ -51,12 +52,16 @@ class CmsProvisioningBridgeClientLetsblogSyncTest {
         });
         server.start();
         return new CmsProvisioningBridgeClient(
-                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), request);
+                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), request,
+                mock(com.letsblog.common.auth.ServiceTokenClient.class));
     }
 
     private HttpServletRequest requestWithBearer(String bearer) {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getHeader("Authorization")).thenReturn(bearer);
+        // リクエスト処理中の呼び出しを模す。リクエスト外はジョブのスレッド扱い(サービス自身のトークン。#1723)。
+        org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
+                new org.springframework.web.context.request.ServletRequestAttributes(request));
         return request;
     }
 

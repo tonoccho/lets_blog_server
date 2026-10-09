@@ -69,10 +69,11 @@ class ProjectEnvironmentSyncJobRunnerTest {
     @DisplayName("ジョブの完了で同期が実行され、syncing を running で通知してから done にする")
     void success() throws Exception {
         doAnswer(invocation -> {
-            // ジョブのスレッドでも操作者(監査ログの参照先)とBearerが引ける。
+            // ジョブのスレッドでも操作者(監査ログの参照先)が引ける。5分で切れる利用者のBearerは持ち込まない(#1723)。
             assertEquals(5L, currentActorService.getCurrentActorId());
-            assertEquals("Bearer abc", currentActorService.getAuthorizationHeader());
-            assertEquals("Bearer abc", BearerScope.current());
+            assertEquals("a@example.com", currentActorService.getCurrentActorEmail());
+            assertNull(currentActorService.getAuthorizationHeader());
+            assertNull(BearerScope.current());
             return null;
         }).when(syncService).sync(3L, "test", "local", List.of("db"));
 
@@ -161,11 +162,11 @@ class ProjectEnvironmentSyncJobRunnerTest {
     }
 
     @Test
-    @DisplayName("リクエストの無いスレッドでも、スナップショットのAuthorizationがBearerとして引ける")
-    void bearerBoundOnJobThread() throws Exception {
+    @DisplayName("リクエストの無いスレッドでも、取り置いた利用者のBearerはサービス間呼び出し用に束縛しない(#1723)")
+    void userBearerNotBoundOnJobThread() throws Exception {
         AtomicReference<String> seen = new AtomicReference<>();
         doAnswer(invocation -> {
-            seen.set(BearerScope.current());
+            seen.set(String.valueOf(BearerScope.current()) + "/" + currentActorService.getAuthorizationHeader());
             return null;
         }).when(syncService).sync(any(), any(), any(), any());
 
@@ -173,7 +174,7 @@ class ProjectEnvironmentSyncJobRunnerTest {
         t.start();
         t.join();
 
-        assertEquals("Bearer abc", seen.get());
+        assertEquals("null/null", seen.get());
     }
 
     @Test

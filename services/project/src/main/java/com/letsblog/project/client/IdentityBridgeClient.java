@@ -1,6 +1,7 @@
 package com.letsblog.project.client;
 
 import com.letsblog.project.service.IdentityServiceUnavailableException;
+import com.letsblog.common.auth.ServiceTokenClient;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
@@ -11,6 +12,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.context.request.RequestContextHolder;
 
 /**
  * identity-serviceが所有するドメイン({@code project_users}・利用者のGitHubトークン)へ
@@ -32,9 +34,12 @@ public class IdentityBridgeClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final RestClient restClient;
+    private final ServiceTokenClient serviceTokenClient;
 
     public IdentityBridgeClient(
-            RestClient.Builder builder, @Value("${app.identity-service-uri}") String identityServiceUri) {
+            RestClient.Builder builder, @Value("${app.identity-service-uri}") String identityServiceUri,
+            ServiceTokenClient serviceTokenClient) {
+        this.serviceTokenClient = serviceTokenClient;
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
@@ -79,13 +84,17 @@ public class IdentityBridgeClient {
     /**
      * ProjectEnvironmentSyncService#syncがDB同期後に呼ぶ、{@code project_users}の内容での
      * サイト向けWordPressユーザーロール再整合の依頼。
+     *
+     * <p>同期APIのリクエスト中は利用者のBearerを転送する。ジョブのスレッド(リクエストが無く、取り置いた
+     * 利用者のBearerは5分で失効する)ではBearerが渡されないので、サービス自身のClient Credentialsを使う(issue #1723)。
      */
     public void reconcileRolesForSite(Long projectId, Long siteId, String bearerToken) {
         try {
             restClient.post()
                     .uri("/api/internal/identity/project-users/{projectId}/sites/{siteId}/reconcile-roles",
                             projectId, siteId)
-                    .headers(headers -> setAuthorization(headers, bearerToken))
+                    .headers(headers -> setAuthorization(headers, outsideRequest() && isBlank(bearerToken)
+                            ? "Bearer " + serviceTokenClient.getAccessToken() : bearerToken))
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientException e) {
@@ -116,8 +125,16 @@ public class IdentityBridgeClient {
         }
     }
 
+    private static boolean outsideRequest() {
+        return RequestContextHolder.getRequestAttributes() == null;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     private void setAuthorization(HttpHeaders headers, String bearerToken) {
-        if (bearerToken != null && !bearerToken.isBlank()) {
+        if (!isBlank(bearerToken)) {
             headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
         }
     }

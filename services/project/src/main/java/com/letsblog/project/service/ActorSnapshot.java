@@ -17,4 +17,12 @@ public record ActorSnapshot(
         String userAgent,
         String authorization,
         boolean admin) {
+
+    /**
+     * 利用者のBearerを持ち越さない写し(issue #1723)。ジョブのスレッドから呼ぶサービス間ブリッジは、
+     * 5分で失効する利用者のトークンではなくサービス自身のClient Credentialsを使う。操作者・メール等は変えない。
+     */
+    public ActorSnapshot withoutAuthorization() {
+        return new ActorSnapshot(userId, keycloakSub, email, remoteIp, userAgent, null, admin);
+    }
 }

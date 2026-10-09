@@ -2,7 +2,6 @@ package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.project.client.BearerScope;
 import com.letsblog.project.dto.SyncEnvironmentRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -46,17 +45,17 @@ public class ProjectEnvironmentSyncJobRunner {
         this.objectMapper = objectMapper;
     }
 
-    /** @param actor 受理側がリクエストスレッドで解決した操作者。監査ログとサービス間呼び出しのBearerに使う。 */
+    /** @param actor 受理側がリクエストスレッドで解決した操作者。監査ログに使う(Bearerは持ち込まない。#1723)。 */
     @Async("environmentSyncExecutor")
     public void run(Long jobId, Long projectId, SyncEnvironmentRequest request, ActorSnapshot actor) {
         try {
             generationJobClient.updateStatus(jobId, "running", toJson(JobProgressPayload.phase("syncing")));
-            currentActorService.runAs(actor, () ->
-                    // リクエストの無いスレッドなので、サービス間ブリッジが使うBearerを取り置いたものから渡す(#1558と同じ仕組み)。
-                    BearerScope.call(actor.authorization(), () -> {
-                        syncService.sync(projectId, request.from(), request.to(), request.targets());
-                        return null;
-                    }));
+            // 取り置いた利用者のBearerは5分で切れるので持ち込まない。サービス間ブリッジは、リクエストの無い
+            // このスレッドではサービス自身のClient Credentialsを呼び出しの都度使う(#1723)。操作者は監査ログ用に束縛する。
+            currentActorService.runAs(actor.withoutAuthorization(), () -> {
+                syncService.sync(projectId, request.from(), request.to(), request.targets());
+                return null;
+            });
             generationJobClient.updateStatus(jobId, "done", toJson(donePayload(projectId, request)));
         } catch (RuntimeException e) {
             log.warn("Environment sync job {} failed", jobId, e);

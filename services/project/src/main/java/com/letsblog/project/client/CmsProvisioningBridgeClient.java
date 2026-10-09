@@ -7,6 +7,7 @@ import com.letsblog.project.cms.LetsblogSnsResult;
 import com.letsblog.project.cms.LetsblogSyncResult;
 import com.letsblog.project.cms.ProvisioningResult;
 import com.letsblog.project.cms.WpCliInstallResult;
+import com.letsblog.common.auth.ServiceTokenClient;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -19,6 +20,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.context.request.RequestContextHolder;
 
 /**
  * publishing-serviceの内部CMSブリッジ{@code /api/internal/project/cms/**}
@@ -48,10 +50,12 @@ public class CmsProvisioningBridgeClient {
 
     private final RestClient restClient;
     private final HttpServletRequest request;
+    private final ServiceTokenClient serviceTokenClient;
 
     public CmsProvisioningBridgeClient(
             RestClient.Builder builder, @Value("${app.publishing-service-uri}") String publishingServiceUri,
-            HttpServletRequest request) {
+            HttpServletRequest request, ServiceTokenClient serviceTokenClient) {
+        this.serviceTokenClient = serviceTokenClient;
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
@@ -195,8 +199,16 @@ public class CmsProvisioningBridgeClient {
 
     private void setAuthorization(HttpHeaders headers) {
         // 非同期の同期処理(issue #1558)には現在のリクエストが無いため、取り置いたトークンを優先する。
-        String bearerToken = BearerScope.current() != null
-                ? BearerScope.current() : request.getHeader(HttpHeaders.AUTHORIZATION);
+        // 取り置きも無いリクエスト外のスレッド(環境間同期・サイト自動構築のジョブ)では、5分で失効する利用者の
+        // トークンではなくサービス自身のClient Credentialsを使う(issue #1723)。
+        String bearerToken = BearerScope.current();
+        if (bearerToken == null && RequestContextHolder.getRequestAttributes() == null) {
+            headers.setBearerAuth(serviceTokenClient.getAccessToken());
+            return;
+        }
+        if (bearerToken == null) {
+            bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
+        }
         if (bearerToken != null && !bearerToken.isBlank()) {
             headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
         }

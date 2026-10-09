@@ -50,7 +50,8 @@ class CmsProvisioningBridgeClientSnsTest {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getHeader("Authorization")).thenReturn("Bearer req");
         return new CmsProvisioningBridgeClient(
-                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), request);
+                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), request,
+                mock(com.letsblog.common.auth.ServiceTokenClient.class));
     }
 
     @Test
