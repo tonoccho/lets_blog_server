@@ -8,8 +8,10 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface OperationLogRepository extends JpaRepository<OperationLog, Long> {
     Page<OperationLog> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
@@ -19,7 +21,14 @@ public interface OperationLogRepository extends JpaRepository<OperationLog, Long
 
     List<OperationLog> findByUserIdAndOperationIdOrderByCreatedAtAsc(Long userId, String operationId);
 
-    List<OperationLog> findByCreatedAtBefore(LocalDateTime threshold);
+    /**
+     * 閾値より古い行を最大{@code limit}件削除し、削除した件数を返す(issue #1727)。全件をメモリへ読み込まず、
+     * 1回の削除を短いトランザクションに収める。呼び出し側が0件または{@code limit}未満になるまで繰り返す。
+     */
+    @Modifying
+    @Transactional
+    @Query(value = "DELETE FROM operation_logs WHERE created_at < :threshold LIMIT :limit", nativeQuery = true)
+    int deleteBatchBefore(@Param("threshold") LocalDateTime threshold, @Param("limit") int limit);
 
     /** 管理者向け: 利用者を問わずoperationIdの全行(issue #1471)。 */
     List<OperationLog> findByOperationIdOrderByCreatedAtAsc(String operationId);

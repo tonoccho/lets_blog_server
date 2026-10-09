@@ -10,6 +10,7 @@ import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -36,8 +37,14 @@ public class OperationLogService {
 
     private static final int RETENTION_DAYS = 30;
 
+    static final int DEFAULT_DELETE_BATCH_SIZE = 10_000;
+
     private final OperationLogRepository repository;
     private final RabbitTemplate rabbitTemplate;
+
+    /** 1回の削除で消す最大件数(issue #1727)。溜まった件数が多くても1トランザクションを長くしない。 */
+    @Value("${log.retention.delete-batch-size:" + DEFAULT_DELETE_BATCH_SIZE + "}")
+    private int deleteBatchSize = DEFAULT_DELETE_BATCH_SIZE;
 
     public OperationLogService(OperationLogRepository repository, RabbitTemplate rabbitTemplate) {
         this.repository = repository;
@@ -101,13 +108,16 @@ public class OperationLogService {
      * 30日以上前のログを削除する。毎日UTC 03:00に自動実行する(監査ログの削除時刻とずらし、負荷を分散する)。
      */
     @Scheduled(cron = "0 0 3 * * *", zone = "UTC")
-    @Transactional
     public void deleteOldLogs() {
         LocalDateTime threshold = LocalDateTime.now().minus(RETENTION_DAYS, ChronoUnit.DAYS);
-        List<OperationLog> oldLogs = repository.findByCreatedAtBefore(threshold);
-        if (!oldLogs.isEmpty()) {
-            repository.deleteAll(oldLogs);
-            log.info("Deleted {} old operation logs before {}", oldLogs.size(), threshold);
+        long total = 0;
+        int deleted;
+        do {
+            deleted = repository.deleteBatchBefore(threshold, deleteBatchSize);
+            total += deleted;
+        } while (deleted >= deleteBatchSize);
+        if (total > 0) {
+            log.info("Deleted {} old operation logs before {}", total, threshold);
         }
     }
 }

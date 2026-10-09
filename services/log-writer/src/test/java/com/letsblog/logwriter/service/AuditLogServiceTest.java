@@ -1,10 +1,8 @@
 package com.letsblog.logwriter.service;
 
-import com.letsblog.logwriter.domain.AuditLog;
 import com.letsblog.logwriter.repository.AuditLogRepository;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -14,6 +12,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,24 +48,34 @@ class AuditLogServiceTest {
     }
 
     @Test
-    void deleteOldLogs_1年以上前のログのみ削除する() {
+    void deleteOldLogs_区切り件数ずつ端数の回で止まるまで削除する() {
         service = new AuditLogService(repository);
-        AuditLog oldLog = new AuditLog();
-        when(repository.findByCreatedAtBefore(any(LocalDateTime.class))).thenReturn(List.of(oldLog));
+        int batch = AuditLogService.DEFAULT_DELETE_BATCH_SIZE;
+        when(repository.deleteBatchBefore(any(LocalDateTime.class), eq(batch))).thenReturn(batch, batch, 3);
 
         service.deleteOldLogs();
 
-        verify(repository, times(1)).deleteAll(List.of(oldLog));
+        verify(repository, times(3)).deleteBatchBefore(any(LocalDateTime.class), eq(batch));
     }
 
     @Test
-    void deleteOldLogs_対象が無ければ削除処理を呼ばない() {
+    void deleteOldLogs_対象が無ければ1回で止まる() {
         service = new AuditLogService(repository);
-        when(repository.findByCreatedAtBefore(any(LocalDateTime.class))).thenReturn(List.of());
+        when(repository.deleteBatchBefore(any(LocalDateTime.class), anyInt())).thenReturn(0);
 
         service.deleteOldLogs();
 
-        verify(repository, times(0)).deleteAll(any());
+        verify(repository, times(1)).deleteBatchBefore(any(LocalDateTime.class), anyInt());
+    }
+
+    @Test
+    void deleteOldLogs_全件をメモリに読み込まない() {
+        service = new AuditLogService(repository);
+        when(repository.deleteBatchBefore(any(LocalDateTime.class), anyInt())).thenReturn(0);
+
+        service.deleteOldLogs();
+
+        verify(repository, never()).findAll();
     }
 
     @Test

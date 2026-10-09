@@ -5,6 +5,7 @@ import com.letsblog.logwriter.repository.AuditLogRepository;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,7 +23,13 @@ public class AuditLogService {
 
     private static final int RETENTION_DAYS = 365;
 
+    static final int DEFAULT_DELETE_BATCH_SIZE = 10_000;
+
     private final AuditLogRepository auditLogRepository;
+
+    /** 1回の削除で消す最大件数(issue #1727)。溜まった件数が多くても1トランザクションを長くしない。 */
+    @Value("${log.retention.delete-batch-size:" + DEFAULT_DELETE_BATCH_SIZE + "}")
+    private int deleteBatchSize = DEFAULT_DELETE_BATCH_SIZE;
 
     public AuditLogService(AuditLogRepository auditLogRepository) {
         this.auditLogRepository = auditLogRepository;
@@ -53,13 +60,16 @@ public class AuditLogService {
      * (業務時間を避けた低負荷時間帯として指定、spec/phase5/02-audit-log-archival.md 参照)。
      */
     @Scheduled(cron = "0 0 2 * * *", zone = "UTC")
-    @Transactional
     public void deleteOldLogs() {
         LocalDateTime threshold = LocalDateTime.now().minus(RETENTION_DAYS, ChronoUnit.DAYS);
-        var oldLogs = auditLogRepository.findByCreatedAtBefore(threshold);
-        if (!oldLogs.isEmpty()) {
-            auditLogRepository.deleteAll(oldLogs);
-            log.info("Deleted {} old audit logs before {}", oldLogs.size(), threshold);
+        long total = 0;
+        int deleted;
+        do {
+            deleted = auditLogRepository.deleteBatchBefore(threshold, deleteBatchSize);
+            total += deleted;
+        } while (deleted >= deleteBatchSize);
+        if (total > 0) {
+            log.info("Deleted {} old audit logs before {}", total, threshold);
         }
     }
 }
