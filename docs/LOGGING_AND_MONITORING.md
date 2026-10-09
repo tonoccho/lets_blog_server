@@ -58,6 +58,28 @@ includes `[%X{correlationId}]`) and are collected by docker's `json-file` driver
      `@RabbitListener` method and removes it afterward.
    - If a message has no correlation header, the consumer simply runs without setting MDC.
 
+### 処理 ID (processing ID)
+
+「処理 ID」は、1 回の処理(ブラウザの 1 操作、または 1 つの API リクエスト)を全ログ行で束ねる ID で、
+上で説明している既存の相関 ID にそのまま付けた呼び名である(改名はしない)。
+
+| 項目 | 内容 |
+| --- | --- |
+| 名前 | 処理 ID(= 相関 ID) |
+| HTTP ヘッダ | `X-Correlation-Id` |
+| MDC キー | `correlationId`(ログ行では `correlation_id=`) |
+| 形式 | `^[A-Za-z0-9-]{1,64}$`(英数字とハイフンのみ、1〜64 文字) |
+| 採番者 | Web 経由では Web の操作 ID。それ以外・形式不一致では gateway(UUID) |
+
+- **形式の検証**: gateway の `CorrelationIdWebFilter` と lbs-common の `CorrelationIdFilter` は、
+  受け取った `X-Correlation-Id` が上の形式に合わなければ(改行を含む、65 文字以上、許可外の文字)
+  その値を捨てて新しい UUID を採番する。捨てた値はログ偽造の元になりうるため、どのログにも出さない。
+- **Web の操作 ID との関係**: `apps/web/src/proxy.ts` が 1 回の画面操作ごとに `x-operation-id` を採番し
+  (`operation_logs.operation_id` と同じ値)、`apiRequest`(`apps/web/src/lib/apiClient.ts`)が
+  gateway へのすべての呼び出しでその値を `X-Correlation-Id` として送る(未認証の呼び出しでも、
+  操作 ID があれば送る)。このため操作 ID から gateway・下流サービスの `service request:` 行まで、
+  同じ ID で grep できる。
+
 ### Tracing a request end-to-end
 
 Pick a correlation ID (from a response header, or from any log line) and grep every service's

@@ -13,6 +13,7 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * サービス間で相関IDを引き継ぐためのフィルタ(#560。C13の基点)。
@@ -37,11 +38,15 @@ public class CorrelationIdWebFilter implements WebFilter {
 
     public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
 
+    /** 受け入れる処理IDの形式。これに合わない値(改行・過長・許可外の文字)は捨てて採番し直す。 */
+    private static final Pattern ACCEPTED_FORMAT = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String correlationId = request.getHeaders().getFirst(CORRELATION_ID_HEADER);
-        if (correlationId == null || correlationId.isBlank()) {
+        // 捨てた値はログ偽造の元になりうるため、どこにも出さない。
+        if (correlationId == null || !ACCEPTED_FORMAT.matcher(correlationId).matches()) {
             correlationId = UUID.randomUUID().toString();
         }
         String resolvedCorrelationId = correlationId;

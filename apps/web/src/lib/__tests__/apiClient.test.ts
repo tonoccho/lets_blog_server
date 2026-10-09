@@ -162,6 +162,45 @@ describe('apiFetch の成功経路', () => {
     expect(body).toMatchObject({ operationId: 'op-123', method: 'GET', statusCode: 200, success: true })
   })
 
+  it('gateway へ操作IDを X-Correlation-Id として送る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 1 }))
+
+    await getGeneratedImage(1)
+
+    const [, init] = calls()[0]
+    expect(init.headers?.['X-Correlation-Id']).toBe('op-123')
+  })
+
+  it('未認証の呼び出しでも操作IDがあれば X-Correlation-Id を送る', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ initialized: true }))
+
+    await getSetupStatus()
+
+    const [, init] = calls()[0]
+    expect(init.headers?.Authorization).toBeUndefined()
+    expect(init.headers?.['X-Correlation-Id']).toBe('op-123')
+  })
+
+  it('未認証で操作IDも無ければ X-Correlation-Id を送らない', async () => {
+    headersMock.mockResolvedValue({ get: () => null })
+    fetchMock.mockResolvedValue(jsonResponse({ initialized: true }))
+
+    await getSetupStatus()
+
+    const [, init] = calls()[0]
+    expect(init.headers?.['X-Correlation-Id']).toBeUndefined()
+  })
+
+  it('未認証でリクエストの外(headers() が例外)でも X-Correlation-Id を送らずに呼び出せる', async () => {
+    headersMock.mockRejectedValue(new Error('outside request scope'))
+    fetchMock.mockResolvedValue(jsonResponse({ initialized: true }))
+
+    await getSetupStatus()
+
+    const [, init] = calls()[0]
+    expect(init.headers?.['X-Correlation-Id']).toBeUndefined()
+  })
+
   it('x-operation-id が無ければ新しいIDを発番する', async () => {
     headersMock.mockResolvedValue({ get: () => null })
     fetchMock.mockResolvedValue(jsonResponse({ id: 1 }))

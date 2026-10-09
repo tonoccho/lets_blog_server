@@ -1533,3 +1533,37 @@ After({ tags: '@logging' }, async ({ ctx, request }) => {
   }
   ctx.at15SiteIds = [];
 });
+
+// ------------------------------------------- 操作IDが処理IDになる(issue #1728)
+
+const DOWNSTREAM_SERVICE_CONTAINERS = [
+  'lbs-identity', 'lbs-project', 'lbs-content', 'lbs-publishing', 'lbs-platform', 'lbs-media',
+  'lbs-analytics', 'lbs-ai',
+];
+
+function containerLogLines(container: string): string[] {
+  return execFileSync('sh', ['-c', `docker logs --tail 1000 ${container} 2>&1`], { encoding: 'utf8', timeout: 60_000 })
+    .split('\n');
+}
+
+Then('gatewayのログにその操作IDを処理IDとする行がある', async ({ ctx }) => {
+  const operationId = ctx.at15OperationId as string;
+  const found = await pollFor('gateway のログの処理ID', async () =>
+    containerLogLines('lbs-gateway').some(
+      (line) => line.includes('gateway request:') && line.includes(`correlation_id=${operationId}`)
+    ) || null
+  );
+  expect(found, `gateway のログに操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
+});
+
+Then('下流サービスの「service request:」行にその操作IDを処理IDとする行がある', async ({ ctx }) => {
+  const operationId = ctx.at15OperationId as string;
+  const found = await pollFor('下流サービスのログの処理ID', async () =>
+    DOWNSTREAM_SERVICE_CONTAINERS.some((container) =>
+      containerLogLines(container).some(
+        (line) => line.includes('service request:') && line.includes(`correlation_id=${operationId}`)
+      )
+    ) || null
+  );
+  expect(found, `下流サービスのログに操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
+});

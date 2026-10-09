@@ -194,6 +194,20 @@ async function currentOperationId(): Promise<string> {
   return hdrs.get(OPERATION_ID_HEADER) ?? crypto.randomUUID();
 }
 
+const CORRELATION_ID_HEADER = 'X-Correlation-Id';
+
+/**
+ * 未認証の呼び出し用に、proxy.tsが発番した操作IDだけを読む(無ければnull。発番はしない)。
+ * リクエストの外(ビルド時など)ではheaders()が例外を投げるため、その場合も送らないだけで済ませる。
+ */
+async function peekOperationId(): Promise<string | null> {
+  try {
+    return (await headers()).get(OPERATION_ID_HEADER);
+  } catch {
+    return null;
+  }
+}
+
 interface OperationLogEntryInput {
   operationId: string;
   method: string;
@@ -264,6 +278,8 @@ async function apiRequest(path: string, init?: ApiRequestInit): Promise<Response
   const startedAt = Date.now();
   // after()内ではRequest-time API(headers/cookies)を呼べないため、レンダリング中に読んでおく。
   const operationId = accessToken ? await currentOperationId() : null;
+  // 処理ID(X-Correlation-Id)として操作IDをgatewayへ引き継ぎ、操作ログとコンテナのログを同じIDで引けるようにする。
+  const correlationId = operationId ?? (await peekOperationId());
 
   const scheduleLog = (entry: OperationLogEntryInput) => {
     if (accessToken && operationId) {
@@ -277,6 +293,7 @@ async function apiRequest(path: string, init?: ApiRequestInit): Promise<Response
       ...requestInit,
       headers: {
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(correlationId ? { [CORRELATION_ID_HEADER]: correlationId } : {}),
         ...(requestInit.headers ?? {}),
       },
       cache: 'no-store',

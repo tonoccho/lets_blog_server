@@ -11,6 +11,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * サービス間で相関IDを引き継ぐためのフィルタ。リクエストヘッダ {@value #CORRELATION_ID_HEADER}
@@ -27,11 +28,15 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
     public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
     public static final String MDC_KEY = "correlationId";
 
+    /** 受け入れる処理IDの形式。これに合わない値(改行・過長・許可外の文字)は捨てて採番し直す。 */
+    private static final Pattern ACCEPTED_FORMAT = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String correlationId = request.getHeader(CORRELATION_ID_HEADER);
-        if (correlationId == null || correlationId.isBlank()) {
+        // 捨てた値はログ偽造の元になりうるため、どこにも出さない。
+        if (correlationId == null || !ACCEPTED_FORMAT.matcher(correlationId).matches()) {
             correlationId = UUID.randomUUID().toString();
         }
 

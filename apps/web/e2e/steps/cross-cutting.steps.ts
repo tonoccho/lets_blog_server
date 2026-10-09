@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import {
@@ -709,4 +710,40 @@ Then('応答ヘッダに採番された相関IDが付く', async ({ ctx }) => {
   const correlationId = response.headers['x-correlation-id'];
   expect(correlationId, '応答に相関IDが付いていない').toBeTruthy();
   expect(correlationId, `採番された相関IDがUUIDではない: ${correlationId}`).toMatch(UUID_PATTERN);
+});
+
+// ------------------------------------------------ 形式に合わない相関ID(issue #1728)
+
+When(/^相関IDとして「([^」]+)」を指定してgateway経由で要求する$/, async ({ ctx, request }, value: string) => {
+  ctx.rejectedCorrelationId = value;
+  ctx.correlationResponse = sendThroughGateway({
+    ...DOWNSTREAM_LOG_TRIGGER,
+    token: await adminToken(request),
+    headers: { 'X-Correlation-Id': value },
+  });
+});
+
+Then('応答ヘッダの相関IDは送った値ではなく新しいUUIDである', async ({ ctx }) => {
+  const response = ctx.correlationResponse as GatewayResponse;
+  const sent = ctx.rejectedCorrelationId as string;
+  const returned = response.headers['x-correlation-id'];
+  expect(returned, '応答に相関IDが付いていない').toBeTruthy();
+  expect(returned, '形式に合わない相関IDがそのまま採用されている').not.toBe(sent);
+  expect(returned, `採番された相関IDがUUIDではない: ${returned}`).toMatch(UUID_PATTERN);
+  ctx.correlationId = returned;
+});
+
+Then('gatewayと下流サービスのログに、送った値は現れず新しい相関IDが現れる', async ({ ctx }) => {
+  const sent = ctx.rejectedCorrelationId as string;
+  const issued = ctx.correlationId as string;
+  expect(waitForContainerLog(GATEWAY_CONTAINER_NAME, issued), `gateway のログに新しい相関ID(${issued})が無い`)
+    .toBe(true);
+  expect(waitForContainerLog(DOWNSTREAM_CONTAINER, issued), `下流サービスのログに新しい相関ID(${issued})が無い`)
+    .toBe(true);
+  for (const container of [GATEWAY_CONTAINER_NAME, DOWNSTREAM_CONTAINER]) {
+    const output = execFileSync(
+      'sh', ['-c', `docker logs --tail 400 ${container} 2>&1`], { encoding: 'utf8', timeout: 60_000 }
+    );
+    expect(output.includes(sent), `${container} のログに、拒否されるべき相関ID(${sent})が出ている`).toBe(false);
+  }
 });

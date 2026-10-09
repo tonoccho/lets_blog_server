@@ -29,3 +29,15 @@
       | サービス           | メソッド | パス                      | コンテナ       |
       | project-service    | POST    | /api/tag-design-settings  | lbs-project    |
       | publishing-service | GET     | /api/taxonomy/resolve     | lbs-publishing |
+
+  シナリオアウトライン: 形式に合わない相関IDは採用されず、新しいUUIDに置き換わり、送った値はログに残らない(issue #1728)
+    もし 相関IDとして「<値>」を指定してgateway経由で要求する
+    ならば 応答ヘッダの相関IDは送った値ではなく新しいUUIDである
+    かつ gatewayと下流サービスのログに、送った値は現れず新しい相関IDが現れる
+
+    例:
+      | 値                                                                  |
+      | has space in id                                                     |
+      | under_score_id                                                      |
+      | 日本語の相関ID                                                      |
+      | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   |
