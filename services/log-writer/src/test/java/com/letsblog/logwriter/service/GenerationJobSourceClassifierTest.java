@@ -32,6 +32,13 @@ class GenerationJobSourceClassifierTest {
     }
 
     @Test
+    void site_provisioningはSYSTEM_JOBに分類する_issue1700() {
+        assertEquals("SYSTEM_JOB", GenerationJobSourceClassifier.classify("site_provisioning"));
+        assertTrue(GenerationJobSourceClassifier.matches("SYSTEM_JOB", "site_provisioning"));
+        assertFalse(GenerationJobSourceClassifier.matches("AI_JOB", "site_provisioning"));
+    }
+
+    @Test
     void 未知の種別は例外にせずAI_JOBに分類する() {
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("something_new"));
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("draft"));
