@@ -32,7 +32,12 @@ export function ComfyUiCheckpointTable({
   const [progress, setProgress] = useState<JobProgress | null>(null);
 
   async function refresh() {
-    setData(await fetchComfyUiCheckpointsAction(projectId));
+    const result = await fetchComfyUiCheckpointsAction(projectId);
+    if (result.data) {
+      setData(result.data);
+    } else {
+      setMessage({ type: "error", text: `一覧の再取得に失敗しました: ${result.error}` });
+    }
   }
 
   function handleJobSettled(job: GenerationJobDetail) {

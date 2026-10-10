@@ -15,7 +15,7 @@ const data = { availableProviders: ["OLLAMA", "OPENAI", "CLAUDE"], selected: nul
 
 describe("LlmProviderPanel", () => {
   beforeEach(() => {
-    fetchMock.mockReset().mockResolvedValue({ ...data, selected: "CLAUDE" });
+    fetchMock.mockReset().mockResolvedValue({ data: { ...data, selected: "CLAUDE" } });
     selectMock.mockReset();
   });
 
@@ -38,6 +38,18 @@ describe("LlmProviderPanel", () => {
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "OPENAI" } });
 
     await screen.findByText("失敗");
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("保存後の再取得に失敗すると、onChanged を呼ばず失敗の理由を表示する(issue #1715)", async () => {
+    selectMock.mockResolvedValue({});
+    fetchMock.mockResolvedValue({ error: "再取得の失敗" });
+    const onChanged = jest.fn();
+    render(<LlmProviderPanel projectId={1} initialData={data} onChanged={onChanged} />);
+
+    fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
+
+    expect(await screen.findByText(/再取得の失敗/)).toBeInTheDocument();
     expect(onChanged).not.toHaveBeenCalled();
   });
 

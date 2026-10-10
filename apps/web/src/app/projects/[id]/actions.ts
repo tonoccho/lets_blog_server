@@ -948,9 +948,23 @@ export interface AiModelActionState {
   jobId?: number;
 }
 
-export async function fetchLlmModelsAction(projectId: number): Promise<LlmModelListResponse> {
+/** 取得系Server Actionの戻り値。本番のNext.jsは投げた例外のメッセージをクライアントへ渡さないため、失敗の理由は戻り値で運ぶ(issue #1715)。 */
+export interface FetchResult<T> {
+  data?: T;
+  error?: string;
+}
+
+async function toFetchResult<T>(load: () => Promise<T>): Promise<FetchResult<T>> {
+  try {
+    return { data: await load() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function fetchLlmModelsAction(projectId: number): Promise<FetchResult<LlmModelListResponse>> {
   await requireAdminSession();
-  return listLlmModels(projectId);
+  return toFetchResult(() => listLlmModels(projectId));
 }
 
 export async function selectLlmModelAction(
@@ -968,9 +982,9 @@ export async function selectLlmModelAction(
   return {};
 }
 
-export async function fetchLlmProviderAction(projectId: number): Promise<LlmProviderListResponse> {
+export async function fetchLlmProviderAction(projectId: number): Promise<FetchResult<LlmProviderListResponse>> {
   await requireAdminSession();
-  return listLlmProvider(projectId);
+  return toFetchResult(() => listLlmProvider(projectId));
 }
 
 export async function selectLlmProviderAction(
@@ -988,9 +1002,9 @@ export async function selectLlmProviderAction(
   return {};
 }
 
-export async function fetchReviewStepSettingsAction(projectId: number): Promise<ReviewStepSettingsResponse> {
+export async function fetchReviewStepSettingsAction(projectId: number): Promise<FetchResult<ReviewStepSettingsResponse>> {
   await requireAdminSession();
-  return listReviewStepSettings(projectId);
+  return toFetchResult(() => listReviewStepSettings(projectId));
 }
 
 export async function updateReviewStepSettingAction(
@@ -1010,9 +1024,9 @@ export async function updateReviewStepSettingAction(
   return {};
 }
 
-export async function fetchImageProviderAction(projectId: number): Promise<ImageProviderListResponse> {
+export async function fetchImageProviderAction(projectId: number): Promise<FetchResult<ImageProviderListResponse>> {
   await requireAdminSession();
-  return listImageProvider(projectId);
+  return toFetchResult(() => listImageProvider(projectId));
 }
 
 export async function selectImageProviderAction(
@@ -1030,9 +1044,9 @@ export async function selectImageProviderAction(
   return {};
 }
 
-export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<ComfyUiCheckpointListResponse> {
+export async function fetchComfyUiCheckpointsAction(projectId: number): Promise<FetchResult<ComfyUiCheckpointListResponse>> {
   await requireAdminSession();
-  return listComfyUiCheckpoints(projectId);
+  return toFetchResult(() => listComfyUiCheckpoints(projectId));
 }
 
 export async function selectComfyUiCheckpointAction(

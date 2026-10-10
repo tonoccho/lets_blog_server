@@ -93,7 +93,7 @@ describe("ComfyUiCheckpointTable", () => {
 
   it("未選択のチェックポイントを選択すると成功メッセージを表示し、一覧を再取得する", async () => {
     selectMock.mockResolvedValue({});
-    fetchListMock.mockResolvedValue(initialData({ selected: "other.safetensors" }));
+    fetchListMock.mockResolvedValue({ data: initialData({ selected: "other.safetensors" }) });
     render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
 
     const otherRow = screen.getByText("other.safetensors").closest("tr") as HTMLElement;
@@ -103,6 +103,17 @@ describe("ComfyUiCheckpointTable", () => {
       expect(screen.getByText("切り替えました。")).toBeInTheDocument();
     });
     expect(fetchListMock).toHaveBeenCalledWith(1);
+  });
+
+  it("選択後の一覧の再取得に失敗すると、失敗の理由を表示する(issue #1715)", async () => {
+    selectMock.mockResolvedValue({});
+    fetchListMock.mockResolvedValue({ error: "ComfyUIに接続できません" });
+    render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
+
+    const otherRow = screen.getByText("other.safetensors").closest("tr") as HTMLElement;
+    fireEvent.click(within(otherRow).getByRole("button", { name: "選択" }));
+
+    expect(await screen.findByText(/ComfyUIに接続できません/)).toBeInTheDocument();
   });
 
   it("選択に失敗するとエラーメッセージを表示する", async () => {
@@ -146,7 +157,7 @@ describe("ComfyUiCheckpointTable", () => {
     fetchJobMock.mockResolvedValue(
       job({ status: "failed", resultPayload: JSON.stringify({ error: "ファイル削除に失敗しました" }) })
     );
-    fetchListMock.mockResolvedValue(initialData());
+    fetchListMock.mockResolvedValue({ data: initialData() });
     render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
 
     const otherRow = screen.getByText("other.safetensors").closest("tr") as HTMLElement;
@@ -161,7 +172,7 @@ describe("ComfyUiCheckpointTable", () => {
     (window.confirm as jest.Mock).mockReturnValue(true);
     deleteMock.mockResolvedValue({ jobId: 43 });
     fetchJobMock.mockResolvedValue(job({ status: "failed", resultPayload: "not-json" }));
-    fetchListMock.mockResolvedValue(initialData());
+    fetchListMock.mockResolvedValue({ data: initialData() });
     render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
 
     const otherRow = screen.getByText("other.safetensors").closest("tr") as HTMLElement;
@@ -222,7 +233,7 @@ describe("ComfyUiCheckpointTable", () => {
         job({ status: "running", resultPayload: JSON.stringify({ phase: "downloading", percent: 40 }) })
       )
       .mockResolvedValueOnce(job({ status: "done", resultPayload: null }));
-    fetchListMock.mockResolvedValue(initialData());
+    fetchListMock.mockResolvedValue({ data: initialData() });
 
     render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
     fireEvent.click(screen.getByRole("button", { name: "+ 新規インストール" }));
@@ -255,7 +266,7 @@ describe("ComfyUiCheckpointTable", () => {
     async function startDelete() {
       (window.confirm as jest.Mock).mockReturnValue(true);
       deleteMock.mockResolvedValue({ jobId: 42 });
-      fetchListMock.mockResolvedValue(initialData());
+      fetchListMock.mockResolvedValue({ data: initialData() });
       render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
       const otherRow = screen.getByText("other.safetensors").closest("tr") as HTMLElement;
       fireEvent.click(within(otherRow).getByRole("button", { name: "削除" }));
@@ -290,7 +301,7 @@ describe("ComfyUiCheckpointTable", () => {
     it("インストールの進捗が確認できなくなったときも、インストール中の表示を解除する", async () => {
       installMock.mockResolvedValue({ jobId: 7 });
       fetchJobMock.mockRejectedValue(new Error("boom"));
-      fetchListMock.mockResolvedValue(initialData());
+      fetchListMock.mockResolvedValue({ data: initialData() });
       render(<ComfyUiCheckpointTable projectId={1} initialData={initialData()} />);
       fireEvent.click(screen.getByRole("button", { name: "+ 新規インストール" }));
       fireEvent.change(screen.getByLabelText("ダウンロードURL"), { target: { value: "https://example.com/m.safetensors" } });

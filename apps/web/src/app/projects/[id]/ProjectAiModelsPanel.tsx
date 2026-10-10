@@ -15,6 +15,7 @@ import {
   fetchImageProviderAction,
   fetchComfyUiCheckpointsAction,
 } from "./actions";
+import type { FetchResult } from "./actions";
 import { LlmModelPanel } from "./LlmModelPanel";
 import { LlmProviderPanel } from "./LlmProviderPanel";
 import { ReviewStepSettingsPanel } from "./ReviewStepSettingsPanel";
@@ -48,18 +49,42 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
   // 2回目の発火を無視し、本番と同じ「projectIdごとに1回だけ取得する」挙動に揃える。
   const fetchedProjectIdRef = useRef<number | null>(null);
 
+  // 取得に失敗した理由(issue #1715)。成功した部分は表示し、失敗した部分だけ理由を出す。
+  // タブを押し直すと、まだ取得できていない部分だけ再取得する。
+  const [llmErrors, setLlmErrors] = useState<string[]>([]);
+  const [imageErrors, setImageErrors] = useState<string[]>([]);
+
+  async function loadLlm() {
+    const [models, provider, reviewStep] = await Promise.all([
+      llmData === null ? fetchLlmModelsAction(projectId) : null,
+      llmProviderData === null ? fetchLlmProviderAction(projectId) : null,
+      reviewStepData === null ? fetchReviewStepSettingsAction(projectId) : null,
+    ]);
+    if (models?.data) setLlmData(models.data);
+    if (provider?.data) setLlmProviderData(provider.data);
+    if (reviewStep?.data) setReviewStepData(reviewStep.data);
+    setLlmErrors(errorsOf(models, provider, reviewStep));
+  }
+
+  async function loadImage() {
+    const [provider, checkpoints] = await Promise.all([
+      imageProviderData === null ? fetchImageProviderAction(projectId) : null,
+      comfyuiData === null ? fetchComfyUiCheckpointsAction(projectId) : null,
+    ]);
+    if (provider?.data) setImageProviderData(provider.data);
+    if (checkpoints?.data) setComfyuiData(checkpoints.data);
+    setImageErrors(errorsOf(provider, checkpoints));
+  }
+
   async function handleTabChange(nextTab: Tab) {
     setTab(nextTab);
-    if (nextTab === "LLM" && llmData === null) {
+    if (nextTab === "LLM" && (llmData === null || llmProviderData === null || reviewStepData === null)) {
       setLoadingTab(nextTab);
-      setLlmData(await fetchLlmModelsAction(projectId));
-      setLlmProviderData(await fetchLlmProviderAction(projectId));
-      setReviewStepData(await fetchReviewStepSettingsAction(projectId));
+      await loadLlm();
       setLoadingTab(null);
-    } else if (nextTab === "COMFYUI" && comfyuiData === null) {
+    } else if (nextTab === "COMFYUI" && (imageProviderData === null || comfyuiData === null)) {
       setLoadingTab(nextTab);
-      setImageProviderData(await fetchImageProviderAction(projectId));
-      setComfyuiData(await fetchComfyUiCheckpointsAction(projectId));
+      await loadImage();
       setLoadingTab(null);
     }
   }
@@ -77,7 +102,11 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
     if (modelSaveCountRef.current !== savesBefore) {
       return;
     }
-    setLlmData(fresh);
+    if (!fresh.data) {
+      setLlmErrors(errorsOf(fresh));
+      return;
+    }
+    setLlmData(fresh.data);
     setLlmModelVersion((v) => v + 1);
   }
 
@@ -87,9 +116,9 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
       return;
     }
     fetchedProjectIdRef.current = projectId;
-    fetchLlmModelsAction(projectId).then(setLlmData);
-    fetchLlmProviderAction(projectId).then(setLlmProviderData);
-    fetchReviewStepSettingsAction(projectId).then(setReviewStepData);
+    void loadLlm();
+    // loadLlm は毎回作り直される関数で、projectIdごとに1回だけ呼ぶ(上のref)ため依存に含めない。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   return (
@@ -113,10 +142,11 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
         ))}
       </div>
 
-      {tab === "LLM" &&
-        (llmData ? (
-          <div className="space-y-4">
-            {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} onChanged={handleProviderChanged} />}
+      {tab === "LLM" && (
+        <div className="space-y-4">
+          <FetchErrors messages={llmErrors} />
+          {llmProviderData && <LlmProviderPanel projectId={projectId} initialData={llmProviderData} onChanged={handleProviderChanged} />}
+          {llmData && (
             <LlmModelPanel
               key={llmModelVersion}
               projectId={projectId}
@@ -125,21 +155,40 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
                 modelSaveCountRef.current += 1;
               }}
             />
-            {reviewStepData && <ReviewStepSettingsPanel projectId={projectId} initialData={reviewStepData} />}
-          </div>
-        ) : (
-          <TabLoading loading={loadingTab === "LLM"} />
-        ))}
-      {tab === "COMFYUI" &&
-        (comfyuiData ? (
-          <div className="space-y-4">
-            {imageProviderData && <ImageProviderPanel projectId={projectId} initialData={imageProviderData} />}
-            <ComfyUiCheckpointTable projectId={projectId} initialData={comfyuiData} />
-          </div>
-        ) : (
-          <TabLoading loading={loadingTab === "COMFYUI"} />
-        ))}
+          )}
+          {reviewStepData && <ReviewStepSettingsPanel projectId={projectId} initialData={reviewStepData} />}
+          {!llmData && !llmProviderData && !reviewStepData && llmErrors.length === 0 && (
+            <TabLoading loading={loadingTab === "LLM"} />
+          )}
+        </div>
+      )}
+      {tab === "COMFYUI" && (
+        <div className="space-y-4">
+          <FetchErrors messages={imageErrors} />
+          {imageProviderData && <ImageProviderPanel projectId={projectId} initialData={imageProviderData} />}
+          {comfyuiData && <ComfyUiCheckpointTable projectId={projectId} initialData={comfyuiData} />}
+          {!imageProviderData && !comfyuiData && imageErrors.length === 0 && (
+            <TabLoading loading={loadingTab === "COMFYUI"} />
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function errorsOf(...results: (FetchResult<unknown> | null)[]): string[] {
+  return results.flatMap((r) => (r?.error ? [r.error] : []));
+}
+
+function FetchErrors({ messages }: { messages: string[] }) {
+  return (
+    <>
+      {messages.map((m, i) => (
+        <p key={i} role="alert" className="text-sm text-red-600">
+          取得に失敗しました: {m}(タブを押し直すと再取得します)
+        </p>
+      ))}
+    </>
   );
 }
 

@@ -35,7 +35,12 @@ export function ImageProviderPanel({
       setMessage({ type: "error", text: result.error });
       return;
     }
-    setData(await fetchImageProviderAction(projectId));
+    const refreshed = await fetchImageProviderAction(projectId);
+    if (!refreshed.data) {
+      setMessage({ type: "error", text: `一覧の再取得に失敗しました: ${refreshed.error}` });
+      return;
+    }
+    setData(refreshed.data);
     setMessage({ type: "success", text: "保存しました。" });
   }
 

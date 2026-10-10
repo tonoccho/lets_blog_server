@@ -39,7 +39,12 @@ export function LlmProviderPanel({
       setMessage({ type: "error", text: result.error });
       return;
     }
-    setData(await fetchLlmProviderAction(projectId));
+    const refreshed = await fetchLlmProviderAction(projectId);
+    if (!refreshed.data) {
+      setMessage({ type: "error", text: `一覧の再取得に失敗しました: ${refreshed.error}` });
+      return;
+    }
+    setData(refreshed.data);
     // モデル表示の再取得が終わってから成功を示す(それ以前に表示すると、利用者が古いモデル画面のまま
     // 続けて操作し、その保存を再取得結果が上書きしうる。issue #1644)。
     await onChanged?.();

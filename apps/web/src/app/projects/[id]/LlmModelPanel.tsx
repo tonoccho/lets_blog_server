@@ -27,7 +27,12 @@ export function LlmModelPanel({
   }, []);
 
   async function refresh() {
-    setData(await fetchLlmModelsAction(projectId));
+    const result = await fetchLlmModelsAction(projectId);
+    if (result.data) {
+      setData(result.data);
+    } else {
+      setMessage({ type: "error", text: `一覧の再取得に失敗しました: ${result.error}` });
+    }
   }
 
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {

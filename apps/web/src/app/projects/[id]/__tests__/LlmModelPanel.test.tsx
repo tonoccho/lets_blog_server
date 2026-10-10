@@ -110,7 +110,7 @@ describe("LlmModelPanel", () => {
 
   it("保存に成功すると成功メッセージを表示し、一覧を再取得する", async () => {
     selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue(initialData({ selected: "gpt-4o" }));
+    fetchMock.mockResolvedValue({ data: initialData({ selected: "gpt-4o" }) });
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -121,9 +121,19 @@ describe("LlmModelPanel", () => {
     expect(fetchMock).toHaveBeenCalledWith(1);
   });
 
+  it("保存後の一覧の再取得に失敗すると、失敗の理由を表示する(issue #1715)", async () => {
+    selectMock.mockResolvedValue({});
+    fetchMock.mockResolvedValue({ error: "再取得の失敗" });
+    render(<LlmModelPanel projectId={1} initialData={initialData()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByText(/再取得の失敗/)).toBeInTheDocument();
+  });
+
   it("ドロップダウンで選んだモデルを保存する(issue #1674)", async () => {
     selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue(initialData({ selected: "gpt-4o" }));
+    fetchMock.mockResolvedValue({ data: initialData({ selected: "gpt-4o" }) });
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.change(screen.getByLabelText("LLMのモデル"), { target: { value: "gpt-4o" } });
@@ -134,7 +144,7 @@ describe("LlmModelPanel", () => {
 
   it("保存後の再取得でfallbackが分かれば、その旨を表示する", async () => {
     selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue(initialData({ fallback: true }));
+    fetchMock.mockResolvedValue({ data: initialData({ fallback: true }) });
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -149,7 +159,7 @@ describe("LlmModelPanel(マウント後、issue #1414)", () => {
     selectMock.mockReset();
     fetchMock.mockReset();
     selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue({ data: initialData() });
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     const button = screen.getByRole("button", { name: "保存" });

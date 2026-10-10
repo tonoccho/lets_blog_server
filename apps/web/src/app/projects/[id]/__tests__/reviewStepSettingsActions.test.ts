@@ -43,7 +43,7 @@ describe('レビューステップ別LLM設定のServer Action(issue #1212)', ()
 
     expect(requireAdminSession).toHaveBeenCalled();
     expect(listReviewStepSettings).toHaveBeenCalledWith(7);
-    expect(result).toEqual(data);
+    expect(result).toEqual({ data });
   });
 
   it('updateReviewStepSettingActionは成功するとerrorを含まない結果を返す', async () => {
