@@ -16,6 +16,9 @@ dependencies {
     api 'com.fasterxml.jackson.core:jackson-annotations'
     api 'org.slf4j:slf4j-api'
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    // CorrelationIdRestClientCustomizer(#1730)がRestClientCustomizerを実装するために必要。
+    // 全サービスがspring-boot-starter-restclientで実体を提供するためcompileOnlyとする。
+    compileOnly 'org.springframework.boot:spring-boot-restclient'
     // CorrelationIdMessagePostProcessor/CorrelationIdListenerAdvice(#582)がMessage/MessagePostProcessor
     // 型を参照するために必要。全サービスがspring-boot-starter-amqp経由で実体を提供するため、
     // jakarta.servlet-apiと同じ方針でcompileOnlyとする。
@@ -36,6 +39,7 @@ dependencies {
 
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.springframework:spring-test'
+    testImplementation 'org.springframework.boot:spring-boot-restclient'
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
     testImplementation 'org.springframework.amqp:spring-amqp'
     testImplementation 'com.h2database:h2'

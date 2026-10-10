@@ -1567,3 +1567,23 @@ Then('下流サービスの「service request:」行にその操作IDを処理ID
   );
   expect(found, `下流サービスのログに操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
 });
+
+// content-service の ProjectBridgeClient は注入された RestClient.Builder から作る素の RestClient で、
+// ダッシュボードが開く GET /api/posts(PostController#list)が管理者でも必ず
+// `/api/internal/project/sites` を呼ぶ(issue #1730)。呼び出し先(project)の「service request:」行が
+// ダッシュボード操作の操作IDを処理IDとして持てば、ヘッダが伝わっている。
+Then(
+  'project-serviceの内部連携「sites」の「service request:」行にその操作IDを処理IDとする行がある',
+  async ({ ctx }) => {
+    const operationId = ctx.at15OperationId as string;
+    const found = await pollFor('project の内部連携ログの処理ID', async () =>
+      containerLogLines('lbs-project').some(
+        (line) =>
+          line.includes('service request:')
+          && line.includes('path=/api/internal/project/sites ')
+          && line.includes(`correlation_id=${operationId}`)
+      ) || null
+    );
+    expect(found, `project の内部連携(sites)のログに操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
+  }
+);

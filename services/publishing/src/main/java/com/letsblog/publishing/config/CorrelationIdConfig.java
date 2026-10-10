@@ -1,6 +1,7 @@
 package com.letsblog.publishing.config;
 
 import com.letsblog.common.web.CorrelationIdFilter;
+import com.letsblog.common.web.CorrelationIdRestClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -14,5 +15,11 @@ public class CorrelationIdConfig {
     @Bean
     public CorrelationIdFilter correlationIdFilter() {
         return new CorrelationIdFilter();
+    }
+
+    /** 注入されたRestClient.Builderから作るクライアントにも処理IDをX-Correlation-Idで載せる(issue #1730)。 */
+    @Bean
+    public CorrelationIdRestClientCustomizer correlationIdRestClientCustomizer() {
+        return new CorrelationIdRestClientCustomizer();
     }
 }
