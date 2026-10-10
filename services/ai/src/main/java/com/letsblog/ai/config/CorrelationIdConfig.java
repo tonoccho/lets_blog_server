@@ -1,5 +1,6 @@
 package com.letsblog.ai.config;
 
+import com.letsblog.common.scheduling.ScheduledTaskCorrelationConfigurer;
 import com.letsblog.common.web.CorrelationIdFilter;
 import com.letsblog.common.web.CorrelationIdRestClientCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -20,5 +21,11 @@ public class CorrelationIdConfig {
     @Bean
     public CorrelationIdRestClientCustomizer correlationIdRestClientCustomizer() {
         return new CorrelationIdRestClientCustomizer();
+    }
+
+    /** @Scheduledの実行ごとに新しい処理IDを採番し、完了行を出す(issue #1733)。 */
+    @Bean
+    public ScheduledTaskCorrelationConfigurer scheduledTaskCorrelationConfigurer() {
+        return new ScheduledTaskCorrelationConfigurer();
     }
 }
