@@ -23,9 +23,12 @@ not a silent omission.
 - **Health**: `/actuator/health` per service, aggregated by the gateway and the dashboard
   (issue #589).
 
-Logs go to the console in plain text (`logging.pattern.console` in each `application.yml`, which
-includes `[%X{correlationId}]`) and are collected by docker's `json-file` driver
-(`docker-compose.yml`). There is no file appender, no JSON encoder and no log aggregation backend.
+Logs go to the console as **one JSON object per line** (Spring Boot's built-in structured logging,
+`logging.structured.format.console: logstash` in each of the 10 `application.yml`, issue #1729) and
+are collected by docker's `json-file` driver (`docker-compose.yml`). There is no file appender, no
+extra JSON encoder dependency and no log aggregation backend. See
+[Structured JSON logs](#structured-json-logs-issue-1729) for the fields and
+[Analysing one processing ID](#analysing-one-processing-id-with-an-ai) for how to read them.
 
 ## Correlation ID and Distributed Tracing
 
@@ -93,6 +96,72 @@ Every hop carries the same ID: the gateway access log, each service's request du
 (next section), each `SyncServiceClient` call log, and RabbitMQ-triggered log lines. Sorted by
 timestamp, the output is the full path of one request, including the asynchronous parts.
 
+## Structured JSON logs (issue #1729)
+
+Every service, the gateway included, writes one JSON object per line to standard output, using
+Spring Boot's own structured logging (`logging.structured.format.console: logstash`; no dependency
+was added). The settings live in each `application.yml` and
+`StructuredLoggingContractTest` (lbs-common) fails when any directory under `services/` lacks them.
+
+```json
+{"@timestamp":"2026-10-10T01:00:00.123456Z","@version":"1","message":"service request: method=GET path=/api/posts status=200 duration_ms=42 correlation_id=3f9c...","logger_name":"com.letsblog.common.web.RequestDurationLoggingFilter","thread_name":"http-nio-8080-exec-1","level":"INFO","level_value":20000,"correlationId":"3f9c...","service":"lets-blog-content"}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `@timestamp` | Time of the line. The services run with `TZ: UTC` in `docker-compose.yml`, so it is UTC |
+| `level` | `TRACE` ... `ERROR` |
+| `service` | `spring.application.name`, added by `logging.structured.json.add.service` |
+| `logger_name`, `thread_name` | Logger and thread |
+| `message` | The text, including the completion-line `key=value` body below |
+| `correlationId` | The processing ID, present when it is in the MDC. The 9 servlet services get it from `CorrelationIdFilter` (and the RabbitMQ listener advice). The gateway is reactive and does not use the MDC, so its lines carry `correlation_id=` in `message` only |
+
+`spring.main.banner-mode` is `off` in every service so that no non-JSON line precedes the log.
+Stack traces are inside the line's `stack_trace` field, not on following lines.
+
+### Completion-line `key=value` convention
+
+What a unit of work did (operation, duration, outcome) is **not** a JSON field. It is written in the
+body of the unit's *completion line* as space-separated `key=value` pairs, so one line says what
+happened and how long it took. The existing lines are the model for new ones:
+
+- `service request: method=GET path=/api/posts status=200 duration_ms=42 correlation_id=...`
+- `gateway request: method=... path=... status=... duration_ms=... correlation_id=...`
+- `sync call: target=ai-service url=... operation=POST /api/... duration_ms=912 attempts=1 retried=false outcome=success`
+
+Rules for a new completion line: start with a fixed label and a colon (`sync call:`), then
+`key=value` pairs; use `duration_ms=<integer>`; put free-text values (like `operation=`) last or
+in a position the analysis script can still split on the next `key=`; do not put the processing ID in
+the body of a line that already has it as the `correlationId` field, except where the gateway's lack
+of an MDC requires `correlation_id=`. Levels follow the existing rules (slow or failed is `WARN`).
+`scripts/analyze_correlation_logs.py` reads `duration_ms=` and, for `service request:`,
+`gateway request:` and `sync call:`, the operation.
+
+## Analysing one processing ID with an AI
+
+`scripts/analyze_correlation_logs.py` takes a processing ID and prints, from the logs of all
+services, (1) the timeline, (2) the duration of each service / segment, (3) how many times the same
+target and operation was called (**a count of 2 or more is a duplicate**), and (4) the `WARN` /
+`ERROR` lines. It reads plain text and JSON lines mixed, with or without the `docker compose logs`
+`name-1  |` prefix, and matches the processing ID in the `correlationId` field, in `[<id>]` of the
+old plain pattern, or as `correlation_id=<id>` in the message.
+
+1. **Get the processing ID.** From the browser operation (`operation_logs.operation_id`, which is
+   sent as `X-Correlation-Id`, see [処理 ID](#処理-id-processing-id)), from a response's
+   `X-Correlation-Id` header, or from any log line.
+2. **Run the script.** The logs must cover the time of the operation (`--since` keeps it small):
+
+   ```bash
+   docker compose logs --no-color --since 30m | python3 scripts/analyze_correlation_logs.py <processing-id>
+   # or from a saved file
+   python3 scripts/analyze_correlation_logs.py <processing-id> docker-compose-logs.txt
+   ```
+3. **Give the output to the AI**, with the question ("why was this slow?", "was anything called
+   twice?", "what failed?"). The four sections are the whole input it needs; for a closer look give
+   it the matching lines too (`docker compose logs --no-color | grep <processing-id>`).
+
+Its tests: `python3 -m unittest discover -s scripts -t scripts -p 'test_*.py'`.
+
 ## Request duration log (issue #1470)
 
 `com.letsblog.common.web.RequestDurationLoggingFilter` (lbs-common) writes one line per request
@@ -158,7 +227,7 @@ sync call: target=ai-service url=http://ai:8080 operation=POST /api/internal/...
   breaker is `attempts=0`.
 - `outcome` is `success` or the simple name of the `SyncService*Exception` that was thrown.
 - Level: `INFO` for a successful call with no retry; `WARN` when a retry happened or the call
-  failed. The correlation ID comes from the log pattern (`[%X{correlationId}]`).
+  failed. The correlation ID comes from the MDC (the JSON line's `correlationId` field).
 
 ## Latency percentiles (issue #1470)
 
@@ -211,7 +280,7 @@ This was evaluated and deliberately deferred for now:
 ## Configuration and log levels
 
 Logging is configured per service in `application.yml` (`logging.level.*`,
-`logging.pattern.console`). Standard Logback levels apply: `ERROR` needs attention, `WARN` should
+`logging.structured.*`). Standard Logback levels apply: `ERROR` needs attention, `WARN` should
 be reviewed (this includes slow requests and retried/failed service calls above), `INFO` is the
 default, `DEBUG`/`TRACE` are for local investigation.
 
@@ -298,8 +367,8 @@ docker exec lbs-rabbitmq rabbitmqctl list_queues name messages | grep '\.dlq'
   `/stream` (skipped on purpose), or the service's `RequestDurationLoggingConfig` is missing
   (the contract test should have caught it).
 - **No correlation ID (`correlation_id=-`) on a line**: the request did not pass through
-  `CorrelationIdFilter`; check `CorrelationIdConfig` and that the service's
-  `logging.pattern.console` contains `%X{correlationId}`.
+  `CorrelationIdFilter`; check `CorrelationIdConfig`. (The JSON line then has no `correlationId`
+  field.)
 - **No `http.server.requests.percentile` meter**: the meter appears only after the first request
   has been served; check `management.metrics.distribution.percentiles` in `application.yml`.
 - **Metrics endpoint unreachable**: `curl http://localhost:8080/actuator/metrics` inside the
@@ -330,7 +399,7 @@ there and got lost".
 | --- | --- | --- |
 | `HttpLoggingFilter` writing `duration_ms` etc. in each service | The class never existed in any `*.java` | Replaced by `RequestDurationLoggingFilter` (above), with a different, narrower log line |
 | Request/response body logging, client IP, User-Agent, content type, query parameters | Never implemented | Bodies deliberately **not** adopted ([why](#why-request-bodies-are-not-logged)). Other fields are not logged either |
-| JSON logs via `logstash-logback-encoder` and `logback-spring.xml` (prod profile) | No `logback*.xml` and no `logstash` dependency in any `build.gradle` | Out of scope of #1470: nothing reads JSON until a log aggregation backend exists. File a new Issue when that is decided |
+| JSON logs via `logstash-logback-encoder` and `logback-spring.xml` (prod profile) | No `logback*.xml` and no `logstash` dependency in any `build.gradle` | Superseded by #1729: JSON logs now exist through Spring Boot's built-in structured logging (`logging.structured.format.console: logstash`), with no extra dependency. The reader is `scripts/analyze_correlation_logs.py` |
 | `GET /api/metrics/prometheus`, Prometheus scrape configuration | No `micrometer-registry-prometheus` anywhere; only `health,info,metrics` are exposed | Out of scope of #1470. Percentiles are served from `metrics` instead |
 | Application metrics `api.request.count`, `api.request.error`, `api.response.time`, `database.query.count`, `database.query.time` | Not defined anywhere. The real meter is `http.server.requests` | Use `http.server.requests` and its `.percentile` meter |
 | `legacy-api` as the service with JSON logging and `HttpLoggingFilter` | `services/legacy-api` does not exist (it was dismantled into the domain services) | References removed |
@@ -340,5 +409,5 @@ there and got lost".
 | Filebeat / Datadog / Splunk forwarding recipes | No such integration exists | Removed |
 | Alert rule examples (`api.request.error`, `api.response.time_p95`) | No alerting system exists | Removed |
 | Troubleshooting for `logback-spring.xml` and `/var/log/lets-blog-api/` permissions | Nothing to troubleshoot | Replaced by the checks below |
-| "JSON logging overhead", "async appenders" performance notes | No JSON logging | Removed |
+| "JSON logging overhead", "async appenders" performance notes | Not measured; no async appender | Removed |
 | Examples of `log.info("...", new Object[]{...})` "structured fields" | Not a structured-logging API; misleading | Removed |

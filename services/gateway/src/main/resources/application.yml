@@ -4,12 +4,20 @@ server:
 spring:
   application:
     name: gateway
+  # バナーはJSONでない行になるので出さない(#1729)。
+  main:
+    banner-mode: "off"
 
-# ログ時刻をJVM既定ゾーンに依存させずUTCに固定する(#1258)。Spring Bootの既定パターンは
-# %d{<dateformat>} に展開されるので、末尾の ", UTC" がlogbackのタイムゾーン指定になる。
+# 標準出力は1行1JSON(Spring Bootの構造化ログ、logstash形式)にする(#1729)。時刻は@timestamp
+# (ゾーンはcomposeのTZ=UTC)。gatewayはリアクティブでMDCを使わないため、処理IDはJSONの項目ではなく
+# 本文の correlation_id= で出る。
 logging:
-  pattern:
-    dateformat: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX, UTC"
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
 
 # ルーティング(#560)。Spring Cloud Gatewayはこの環境のSpring Boot 4.1系と非互換のため
 # (services/gateway/build.gradleのコメント参照)、独自のプロパティ構造(RouteProperties)

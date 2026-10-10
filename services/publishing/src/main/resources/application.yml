@@ -14,9 +14,15 @@ logging:
   level:
     root: INFO
     com.letsblog.publishing: DEBUG
-  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
-  pattern:
-    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z', UTC} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+  # 標準出力は1行1JSON(Spring Bootの構造化ログ、logstash形式)にする(#1729)。相関ID
+  # (issue #582、com.letsblog.common.web.CorrelationIdFilter)はMDCのキー correlationId のまま
+  # JSONの項目として出る。時刻は@timestamp(ゾーンはcomposeのTZ=UTC)。
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
 
 management:
   # issue #1470: http.server.requests の p95 / p99 をActuatorから読めるようにする。
@@ -51,6 +57,9 @@ springdoc:
 spring:
   application:
     name: lets-blog-publishing
+  # バナーはJSONでない行になるので出さない(#1729)。
+  main:
+    banner-mode: "off"
   servlet:
     multipart:
       # issue #1061: 未設定だとSpring Bootの既定(1ファイル1MB / リクエスト全体10MB)が効き、

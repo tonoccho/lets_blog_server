@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
  * 直すだけでは効果が無かった。フィルタ登録そのものの欠落を次に繰り返さないよう、
  * サービスのソースツリーを走査して検知する。
  *
- * <p>gatewayは対象外(理由は{@link CorrelationIdLoggingPatternContractTest}のJavadoc参照)。
+ * <p>gatewayは対象外: リアクティブ実装でMDCを使わず、相関IDをログの引数で渡すため(構造化ログ側の契約は{@link StructuredLoggingContractTest})。
  */
 class CorrelationIdFilterRegistrationContractTest {
 

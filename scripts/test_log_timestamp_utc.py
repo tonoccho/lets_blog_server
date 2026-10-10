@@ -6,11 +6,8 @@
 受け入れシナリオ(Gherkin)は `docker logs` や nginx のアクセスログを観測できない
 (apps/web/e2e は Web UI 越しにしか振る舞いを見ない)ため、設定ファイルの静的検査で表す。
 
-- JVM 10サービス: ログ時刻のゾーンをパターン側で UTC に固定する(JVM 既定ゾーン非依存)。
-  logback の `%d{pattern, UTC}` が固定の仕組み。
-- pattern サービス: `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`(UTC なので Z は固定文字)で、
-  相関ID `%X{correlationId}` などの既存フィールドを維持する。
-- gateway: Spring Boot 既定パターンのまま、`logging.pattern.dateformat` にゾーン指定を含める。
+- JVM 10サービス(#1729 で構造化ログに変更): 標準出力は logstash 形式の 1 行 1 JSON。
+  時刻は JSON の `@timestamp`、ゾーンは compose の `TZ: UTC`。
 - nginx: アクセスログ時刻は `$time_iso8601`(`$time_local` ではない)。
 """
 
@@ -23,25 +20,26 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PATTERN_SERVICES = [
+ALL_SERVICES = [
     "ai", "analytics", "content", "identity", "log-writer",
-    "media", "platform", "project", "publishing",
+    "media", "platform", "project", "publishing", "gateway",
 ]
-ALL_SERVICES = PATTERN_SERVICES + ["gateway"]
-
-UTC_ISO_DATE = "%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z', UTC}"
 
 
-def _logging(service):
+def _config(service):
+    """application.yml(platform / publishing は複数ドキュメント)を1つの dict に統合して返す。"""
     path = os.path.join(ROOT, "services", service, "src/main/resources/application.yml")
     with open(path, encoding="utf-8") as f:
         merged = {}
-        for doc in yaml.safe_load_all(f):  # platform / publishing は複数ドキュメント
-            merged.update(((doc or {}).get("logging") or {}).get("pattern") or {})
+        for doc in yaml.safe_load_all(f):
+            merged.update(doc or {})
         return merged
 
 
 class JvmServiceLogTimestamp(unittest.TestCase):
+    """#1729: 10サービスとも構造化ログ(logstash形式)。時刻の UTC 固定は compose の TZ=UTC と
+    構造化ログの @timestamp(UTC の ISO-8601)で保つ。"""
+
     def test_all_ten_services_are_covered(self):
         on_disk = {
             p.split(os.sep)[-5]
@@ -49,20 +47,22 @@ class JvmServiceLogTimestamp(unittest.TestCase):
         }
         self.assertEqual(set(ALL_SERVICES), on_disk)
 
-    def test_pattern_services_use_utc_iso8601_with_z(self):
-        for svc in PATTERN_SERVICES:
+    def test_all_services_use_structured_logstash_console(self):
+        for svc in ALL_SERVICES:
             with self.subTest(service=svc):
-                console = _logging(svc).get("console", "")
-                self.assertTrue(console.startswith(UTC_ISO_DATE), console)
+                fmt = (((_config(svc).get("logging") or {}).get("structured") or {}).get("format") or {})
+                self.assertEqual("logstash", fmt.get("console"))
 
-    def test_pattern_services_keep_correlation_id(self):
-        for svc in PATTERN_SERVICES:
+    def test_no_service_keeps_a_plain_console_pattern(self):
+        for svc in ALL_SERVICES:
             with self.subTest(service=svc):
-                self.assertIn("[%X{correlationId}]", _logging(svc).get("console", ""))
+                pattern = ((_config(svc).get("logging") or {}).get("pattern") or {})
+                self.assertNotIn("console", pattern)
 
-    def test_gateway_pins_dateformat_to_utc(self):
-        fmt = _logging("gateway").get("dateformat", "")
-        self.assertRegex(fmt, r"^yyyy-MM-dd'T'HH:mm:ss\.SSSXXX,\s*UTC$")
+    def test_compose_pins_jvm_services_to_utc(self):
+        with open(os.path.join(ROOT, "docker-compose.yml"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertGreaterEqual(len(re.findall(r"^\s+TZ: UTC\s*$", text, re.M)), 10)
 
 
 class NginxAccessLogTimestamp(unittest.TestCase):

@@ -5,9 +5,15 @@ logging:
   level:
     root: INFO
     com.letsblog.identity: DEBUG
-  # 相関ID(issue #582、com.letsblog.common.web.CorrelationIdFilter)をログ行に含める。
-  pattern:
-    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSS'Z', UTC} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+  # 標準出力は1行1JSON(Spring Bootの構造化ログ、logstash形式)にする(#1729)。相関ID
+  # (issue #582、com.letsblog.common.web.CorrelationIdFilter)はMDCのキー correlationId のまま
+  # JSONの項目として出る。時刻は@timestamp(ゾーンはcomposeのTZ=UTC)。
+  structured:
+    format:
+      console: logstash
+    json:
+      add:
+        service: ${spring.application.name}
 
 management:
   # issue #1470: http.server.requests の p95 / p99 をActuatorから読めるようにする。
@@ -44,6 +50,9 @@ springdoc:
 spring:
   application:
     name: identity
+  # バナーはJSONでない行になるので出さない(#1729)。
+  main:
+    banner-mode: "off"
   # issue #1241: アバターアップロード(POST /api/users/{id}/avatar)。未設定だとSpring Bootの
   # 既定1MBが黙って効いてしまう(#1061と同種の失敗)ため、要件通り20MBを明示する。
   servlet:
