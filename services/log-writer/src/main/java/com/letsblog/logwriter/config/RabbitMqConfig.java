@@ -1,6 +1,7 @@
 package com.letsblog.logwriter.config;
 
 import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
+import com.letsblog.common.messaging.CorrelationIdMessagePostProcessor;
 import com.letsblog.common.messaging.LogExchanges;
 import org.aopalliance.aop.Advice;
 import org.springframework.amqp.core.Binding;
@@ -10,6 +11,7 @@ import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.JacksonJavaTypeMapper;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.boot.amqp.autoconfigure.SimpleRabbitListenerContainerFactoryConfigurer;
@@ -168,6 +170,21 @@ public class RabbitMqConfig {
         JacksonJsonMessageConverter converter = new JacksonJsonMessageConverter();
         converter.setTypePrecedence(JacksonJavaTypeMapper.TypePrecedence.INFERRED);
         return converter;
+    }
+
+    /**
+     * log-writerが操作ログ・フロントエンドエラーログを発行する(OperationLogService/
+     * FrontendErrorLogService)ためのRabbitTemplate(issue #1735)。自動構成のRabbitTemplateには
+     * {@link CorrelationIdMessagePostProcessor}が付かず、処理ID(相関ID)のヘッダが落ちるため、
+     * 他の発行側サービスと同じく自前で組み立てて登録する。
+     */
+    @Bean
+    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, JacksonJsonMessageConverter converter) {
+        RabbitTemplate template = new RabbitTemplate(connectionFactory);
+        template.setMessageConverter(converter);
+        // 発行元スレッドのMDCにある相関ID(issue #582)をメッセージヘッダへ付与する。
+        template.setBeforePublishPostProcessors(new CorrelationIdMessagePostProcessor());
+        return template;
     }
 
     /**
