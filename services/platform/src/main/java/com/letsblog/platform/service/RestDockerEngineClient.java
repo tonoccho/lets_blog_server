@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,7 +56,7 @@ public class RestDockerEngineClient implements DockerEngineClient {
         JdkClientHttpRequestFactory factory =
                 new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build());
         factory.setReadTimeout(READ_TIMEOUT);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(factory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("docker-engine")).baseUrl(baseUrl).requestFactory(factory);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.letsblog.ai.github;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -30,7 +31,8 @@ public class GithubClient {
     public GithubClient(
             @Qualifier("githubRestClientBuilder") RestClient.Builder restClientBuilder,
             @Value("${app.github-api-base-url}") String baseUrl) {
-        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl);
+        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl)
+                .requestInterceptor(new ExternalCallLoggingInterceptor("github"));
         LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
         this.client = clonedBuilder.build();
     }

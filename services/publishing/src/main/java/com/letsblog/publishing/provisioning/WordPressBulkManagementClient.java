@@ -1,5 +1,6 @@
 package com.letsblog.publishing.provisioning;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -84,7 +85,7 @@ public class WordPressBulkManagementClient {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(timeout);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("wordpress-bulk")).baseUrl(baseUrl).requestFactory(requestFactory).build();
     }
 
     public BulkApplyResult apply(BulkApplyCommand command) {

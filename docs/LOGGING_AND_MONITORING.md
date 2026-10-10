@@ -229,6 +229,64 @@ sync call: target=ai-service url=http://ai:8080 operation=POST /api/internal/...
 - Level: `INFO` for a successful call with no retry; `WARN` when a retry happened or the call
   failed. The correlation ID comes from the MDC (the JSON line's `correlationId` field).
 
+## External call log (issue #1734)
+
+Calls to third-party APIs, LLMs, ComfyUI, Keycloak and other non-`SyncServiceClient` destinations
+write one line per call, from `ExternalCallLoggingInterceptor` (lbs-common, a
+`ClientHttpRequestInterceptor` attached to the `RestClient` builder):
+
+```
+external call: target=brave-search host=api.search.brave.com method=GET path=/res/v1/web/search status=200 duration_ms=412 outcome=success
+```
+
+- `target` is the logical name (table below), `host` the destination host, `path` the URI path
+  only. `status` is the response status, or `none` when the call threw. `duration_ms` is the time
+  until the response headers arrived (the body is not read by the interceptor).
+- `outcome` is `success`, `http_error` (status 400 or above) or the simple class name of the
+  exception that was thrown (`HttpTimeoutException`, `ConnectException`, ...). The exception is
+  rethrown unchanged.
+- Level: `INFO` for a success within the threshold; `WARN` for an exception, status 400 or above,
+  or `duration_ms` over the slow threshold (default 5000 ms, `LlmClient` 120000 ms). A slow call
+  gets a trailing ` slow=true`. The correlation ID comes from the MDC like every other line.
+- **Never logged**: query string, headers (`Authorization`, API keys), request/response bodies,
+  URL userinfo, exception messages. See [Why request bodies are not logged](#why-request-bodies-are-not-logged).
+- Internal service-to-service calls are out of scope: the callee's `service request:` line and the
+  caller's `sync call:` line cover them.
+
+### Targets
+
+| target | Call site (`services/<svc>/src/main/java/...` unless noted) |
+| --- | --- |
+| `llm` | ai `ai/LlmClient` (2 sites, slow threshold 120000 ms) |
+| `llm-connection-test` | ai `service/AiConnectionService` |
+| `brave-search` | ai `ai/BraveSearchClient` |
+| `github` | ai `github/GithubClient`, publishing `github/GithubPullRequestClient` |
+| `google-analytics` / `google-adsense` | analytics `analytics/GoogleAnalyticsClient`, `adsense/AdSenseClient` |
+| `keycloak-admin` | identity and platform `keycloak/KeycloakAdminClientConfig` (also the token calls made through the same builder) |
+| `keycloak-token` | identity `config/ServiceTokenClientConfig`, `packages/lbs-common` `auth/ServiceTokenClientConfig` |
+| `openai-image` / `comfyui` / `penpot` / `plantuml` | media `ai/ChatGptImageClient`, `ai/ComfyUiClient`, `ai/PenpotClient`, `render/PlantUmlClient` |
+| `compute-device-health` / `docker-engine` / `container-status` / `rabbitmq-management` / `gateway-status` / `connected-service-status` | platform `service/HttpComputeDeviceHealthProbe`, `RestDockerEngineClient`, `ContainerStatusService`, `RabbitMqQueueStatusService`, `LetsBlogServiceStatusService`, `ConnectedServiceStatusService` |
+| `wordpress-agent` / `wordpress-bulk` | project `provisioning/AgentRestClients`, publishing `cms/agent/WordPressAgentOperations`, `provisioning/WordPressBulkManagementClient` |
+| `x-api` / `linkedin-api` / `facebook-api` / `hatena-api` / `threads-api` | project `client/XApiClient`, `LinkedinApiClient`, `FacebookApiClient`, `HatenaApiClient`, `ThreadsApiClient` |
+
+### Contract test: finding a new call site
+
+`ExternalCallLoggingWiringContractTest` (lbs-common) scans every `.java` under
+`services/*/src/main/java` and `packages/*/src/main/java` for `RestClient.builder()` and compares
+each file with an allowlist (file, number of sites, target names). It fails when:
+
+- a file uses `RestClient.builder()` and is not on the allowlist (the message says what to do:
+  attach `new ExternalCallLoggingInterceptor("<target>")`, add the file to the allowlist in the
+  test and to the table above; internal destinations should use `SyncServiceClient` instead);
+- an allowlisted file has a different number of sites, or lacks the interceptor for a target;
+- an allowlisted file no longer exists.
+
+Clients that only clone an *injected* builder (`GithubClient`, `GithubPullRequestClient`,
+`WordPressAgentOperations`) have no `RestClient.builder()` and are listed explicitly with zero sites,
+so their wiring is checked too. `ai`'s `GithubClientConfig` bean builder is shared with the internal
+clients of that service, so it carries no interceptor (it would mislabel internal calls); `GithubClient`
+adds it on its own clone.
+
 ## Latency percentiles (issue #1470)
 
 Every service, **gateway included**, sets in `application.yml`:

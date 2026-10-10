@@ -1,5 +1,6 @@
 package com.letsblog.analytics.adsense;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.letsblog.analytics.client.GoogleApiFailureMessage;
@@ -46,6 +47,7 @@ public class AdSenseClient {
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     AdSenseClient(RestClient.Builder builder, String tokenUri, String dataApiBaseUrl) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("google-adsense"));
         this.client = builder.build();
         this.tokenUri = tokenUri;
         this.dataApiBaseUrl = dataApiBaseUrl;

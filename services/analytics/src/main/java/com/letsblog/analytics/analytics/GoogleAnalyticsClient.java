@@ -1,5 +1,6 @@
 package com.letsblog.analytics.analytics;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.letsblog.analytics.adsense.GoogleOAuthTokens;
@@ -50,6 +51,7 @@ public class GoogleAnalyticsClient {
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     GoogleAnalyticsClient(RestClient.Builder builder, String dataApiBaseUrl, String adminApiBaseUrl, String tokenUri) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("google-analytics"));
         this.client = builder.build();
         this.dataApiBaseUrl = dataApiBaseUrl;
         this.adminApiBaseUrl = adminApiBaseUrl;

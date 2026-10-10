@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.letsblog.common.scheduling.MdcPropagation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -122,7 +123,7 @@ public class ConnectedServiceStatusService {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("connected-service-status")).baseUrl(baseUrl).requestFactory(requestFactory);
     }
 
     /** 稼働状況(正常/警告/エラーの3値)のみを返す。全ログインユーザーが参照できる(issue #181)。 */

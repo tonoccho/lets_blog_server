@@ -1,5 +1,6 @@
 package com.letsblog.media.ai;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.media.config.LegacyJacksonRestClientConfig;
@@ -77,7 +78,7 @@ public class PenpotClient {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("penpot")).baseUrl(baseUrl).requestFactory(requestFactory);
     }
 
     public record DesignFile(String fileId, String projectId, String url) {

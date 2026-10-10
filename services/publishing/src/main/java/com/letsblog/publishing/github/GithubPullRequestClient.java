@@ -1,5 +1,6 @@
 package com.letsblog.publishing.github;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
 import com.letsblog.publishing.config.LegacyJacksonRestClientConfig;
@@ -49,7 +50,8 @@ public class GithubPullRequestClient {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        RestClient.Builder cloned = restClientBuilder.clone().baseUrl(baseUrl).requestFactory(requestFactory);
+        RestClient.Builder cloned = restClientBuilder.clone().baseUrl(baseUrl).requestFactory(requestFactory)
+                .requestInterceptor(new ExternalCallLoggingInterceptor("github"));
         LegacyJacksonRestClientConfig.preferJackson2(cloned);
         this.client = cloned.build();
     }

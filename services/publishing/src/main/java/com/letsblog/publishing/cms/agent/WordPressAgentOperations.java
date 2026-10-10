@@ -1,5 +1,6 @@
 package com.letsblog.publishing.cms.agent;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.publishing.cms.AuthCookie;
 import com.letsblog.publishing.cms.AuthorProvisioningRequest;
@@ -81,7 +82,8 @@ public class WordPressAgentOperations {
      * タイムアウトは設定しない。
      */
     WordPressAgentOperations(RestClient.Builder restClientBuilder, String baseUrl, String provisionToken) {
-        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl);
+        RestClient.Builder clonedBuilder = restClientBuilder.clone().baseUrl(baseUrl)
+                .requestInterceptor(new ExternalCallLoggingInterceptor("wordpress-agent"));
         LegacyJacksonRestClientConfig.preferJackson2(clonedBuilder);
         this.client = clonedBuilder.build();
         this.provisionToken = provisionToken;

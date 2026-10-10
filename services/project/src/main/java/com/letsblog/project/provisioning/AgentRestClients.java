@@ -1,5 +1,6 @@
 package com.letsblog.project.provisioning;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -25,6 +26,6 @@ final class AgentRestClients {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(readTimeout);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("wordpress-agent")).baseUrl(baseUrl).requestFactory(requestFactory).build();
     }
 }

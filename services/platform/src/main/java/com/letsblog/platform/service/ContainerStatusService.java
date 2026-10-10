@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.dto.ContainerStatusResponse;
@@ -94,7 +95,7 @@ public class ContainerStatusService {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("container-status")).baseUrl(baseUrl).requestFactory(requestFactory);
     }
 
     /**

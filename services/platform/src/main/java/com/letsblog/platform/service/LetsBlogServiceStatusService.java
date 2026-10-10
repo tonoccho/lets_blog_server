@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -111,7 +112,7 @@ public class LetsBlogServiceStatusService {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        return RestClient.builder().baseUrl(gatewayUri).requestFactory(requestFactory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("gateway-status")).baseUrl(gatewayUri).requestFactory(requestFactory);
     }
 
     /** チェック対象URL(ダッシュボードの詳細診断に出す)。 */

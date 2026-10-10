@@ -1,5 +1,6 @@
 package com.letsblog.media.ai;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.common.net.ForbiddenDestinationException;
@@ -140,6 +141,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
     ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider,
                   String checkpointName, int pollIntervalMs) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("comfyui"));
         this.builderTemplate = builder.clone();
         this.client = builder.build();
         this.configProvider = configProvider;

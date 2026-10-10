@@ -1,5 +1,6 @@
 package com.letsblog.platform.keycloak;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -25,7 +26,7 @@ public class KeycloakAdminClientConfig {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
 
-        RestClient.Builder builder = RestClient.builder().requestFactory(requestFactory);
+        RestClient.Builder builder = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("keycloak-admin")).requestFactory(requestFactory);
         return new KeycloakAdminClient(builder, properties);
     }
 }

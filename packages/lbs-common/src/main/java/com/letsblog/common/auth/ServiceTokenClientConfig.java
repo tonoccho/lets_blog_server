@@ -1,5 +1,6 @@
 package com.letsblog.common.auth;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,7 +53,7 @@ public class ServiceTokenClientConfig {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
 
-        RestClient.Builder builder = RestClient.builder().requestFactory(requestFactory);
+        RestClient.Builder builder = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("keycloak-token")).requestFactory(requestFactory);
         return new ServiceTokenClient(builder, tokenUri, clientId, clientSecret);
     }
 }

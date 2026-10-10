@@ -1,5 +1,6 @@
 package com.letsblog.ai.ai;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.ai.config.LegacyJacksonRestClientConfig;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,7 +23,7 @@ public class BraveSearchClient {
     private final RestClient client;
 
     public BraveSearchClient(@Value("${app.brave-search-base-url}") String baseUrl) {
-        RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
+        RestClient.Builder builder = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("brave-search")).baseUrl(baseUrl);
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         this.client = builder.build();
     }

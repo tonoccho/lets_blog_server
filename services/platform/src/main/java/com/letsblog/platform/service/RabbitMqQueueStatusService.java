@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -65,7 +66,7 @@ public class RabbitMqQueueStatusService {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(TIMEOUT);
-        RestClient.Builder builder = RestClient.builder().baseUrl(managementUri).requestFactory(requestFactory);
+        RestClient.Builder builder = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("rabbitmq-management")).baseUrl(managementUri).requestFactory(requestFactory);
         preferJackson2(builder);
         this.client = builder.build();
         this.managementUri = managementUri;

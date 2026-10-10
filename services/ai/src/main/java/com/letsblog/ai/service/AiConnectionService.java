@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.letsblog.common.scheduling.MdcPropagation;
 import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
@@ -76,7 +77,7 @@ public class AiConnectionService {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(DEFAULT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(DEFAULT_TIMEOUT);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("llm-connection-test")).baseUrl(baseUrl).requestFactory(requestFactory);
     }
 
     /**

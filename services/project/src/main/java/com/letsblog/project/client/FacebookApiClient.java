@@ -1,5 +1,6 @@
 package com.letsblog.project.client;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.project.config.LegacyJacksonRestClientConfig;
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ public class FacebookApiClient {
     /** テスト専用: RestClient.Builderを直接受け取るコンストラクタ。 */
     FacebookApiClient(RestClient.Builder builder, String apiBaseUrl, String authorizeUrl) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("facebook-api"));
         this.client = builder.baseUrl(apiBaseUrl).build();
         this.authorizeUrl = authorizeUrl;
     }

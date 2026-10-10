@@ -1,5 +1,6 @@
 package com.letsblog.ai.ai;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -261,7 +262,7 @@ public class LlmClient {
             JdkClientHttpRequestFactory requestFactory =
                     new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(requestTimeout).build());
             requestFactory.setReadTimeout(requestTimeout);
-            RestClient.Builder builder = RestClient.builder()
+            RestClient.Builder builder = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("llm", 120_000L))
                     .baseUrl(ANTHROPIC_BASE_URL)
                     .requestFactory(requestFactory)
                     .defaultHeader("x-api-key", apiKey)
@@ -316,7 +317,7 @@ public class LlmClient {
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(
                 PinnedHttpClients.builder(target.sniHost(), requestTimeout).build());
         requestFactory.setReadTimeout(requestTimeout);
-        RestClient.Builder builder = RestClient.builder()
+        RestClient.Builder builder = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("llm", 120_000L))
                 .baseUrl(target.baseUrl())
                 .requestFactory(requestFactory);
         if (apiKey != null) {

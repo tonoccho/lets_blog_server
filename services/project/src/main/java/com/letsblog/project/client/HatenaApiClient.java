@@ -1,5 +1,6 @@
 package com.letsblog.project.client;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.project.config.LegacyJacksonRestClientConfig;
 import java.net.URLDecoder;
@@ -59,6 +60,7 @@ public class HatenaApiClient {
     HatenaApiClient(RestClient.Builder builder, String requestTokenUrl, String accessTokenUrl, String authorizeUrl,
             String profileUrl) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("hatena-api"));
         this.client = builder.build();
         this.requestTokenUrl = requestTokenUrl;
         this.accessTokenUrl = accessTokenUrl;

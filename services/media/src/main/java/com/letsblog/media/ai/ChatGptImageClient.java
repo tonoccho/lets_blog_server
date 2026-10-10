@@ -1,5 +1,6 @@
 package com.letsblog.media.ai;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.letsblog.media.config.LegacyJacksonRestClientConfig;
@@ -45,6 +46,7 @@ public class ChatGptImageClient implements ImageGenerationProvider {
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
     ChatGptImageClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("openai-image"));
         this.client = builder.build();
         this.configProvider = configProvider;
     }

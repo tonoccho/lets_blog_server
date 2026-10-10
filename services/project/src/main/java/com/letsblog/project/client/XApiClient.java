@@ -1,5 +1,6 @@
 package com.letsblog.project.client;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -43,6 +44,7 @@ public class XApiClient {
     /** テスト専用: RestClient.Builderを直接受け取るコンストラクタ。 */
     XApiClient(RestClient.Builder builder, String apiBaseUrl, String authorizeUrl) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
+        builder.requestInterceptor(new ExternalCallLoggingInterceptor("x-api"));
         this.client = builder.baseUrl(apiBaseUrl).build();
         this.authorizeUrl = authorizeUrl;
     }

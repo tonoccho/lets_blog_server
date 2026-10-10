@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -31,7 +32,7 @@ public class HttpComputeDeviceHealthProbe implements ComputeDeviceHealthProbe {
         JdkClientHttpRequestFactory factory =
                 new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(TIMEOUT).build());
         factory.setReadTimeout(TIMEOUT);
-        return RestClient.builder().requestFactory(factory);
+        return RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("compute-device-health")).requestFactory(factory);
     }
 
     @Override
