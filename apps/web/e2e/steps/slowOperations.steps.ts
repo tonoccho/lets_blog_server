@@ -39,7 +39,11 @@ function localValue(page: Page, shiftMinutes: number): Promise<string> {
 
 /** 表の本体の各行について、`columnIndex` 番目のセルの数値(単位や桁区切りを除く)を返す。 */
 async function numericColumn(page: Page, tableTestId: string, columnIndex: number): Promise<number[]> {
-  const cells = await page.getByTestId(tableTestId).locator('tbody tr').evaluateAll(
+  const bodyRows = page.getByTestId(tableTestId).locator('tbody tr');
+  // 並べ替えのリンクは画面遷移を伴う。URL が変わった直後は新しい文書の表がまだ描画されておらず、
+  // 待たずに読むと行が0件に見える。最初の行が表示されるまで待ってから読む。
+  await expect(bodyRows.first(), `${tableTestId} の行が表示されません`).toBeVisible({ timeout: 30_000 });
+  const cells = await bodyRows.evaluateAll(
     (rows, index) => rows.map((row) => row.querySelectorAll('td')[index]?.textContent ?? ''),
     columnIndex
   );

@@ -1157,7 +1157,15 @@ function toDateTimeLocalValue(text: string, shiftMinutes: number): string {
 
 /** 一覧に表示されている各行の日時表示(`formatOperationLogDateTime` の出力)。 */
 async function displayedTimestamps(page: Page): Promise<string[]> {
-  const texts = await operationLogList(page).locator('span.w-36').allTextContents();
+  const timestamps = operationLogList(page).locator('span.w-36');
+  // ブラウザのタイムゾーンが解決するまで各行は仮表示「読み込み中…」(issue #1260)。
+  // 解決前に読むと日時として解釈できないので、仮表示が1つも残らなくなるまで待つ。
+  await expect(timestamps.first()).toBeVisible({ timeout: 30_000 });
+  await expect(
+    timestamps.filter({ hasText: '読み込み中' }),
+    '日時の仮表示「読み込み中…」が解消されません'
+  ).toHaveCount(0, { timeout: 30_000 });
+  const texts = await timestamps.allTextContents();
   return texts.map((text) => text.trim());
 }
 
@@ -1181,8 +1189,16 @@ Then('操作ログ画面を日時の範囲で絞ると、その範囲の行だ�
 
   // 範囲内: 最新の行が残り、範囲外の日時の行は1つも無い。
   await applyRange(start, end);
-  await expect(operationLogList(page).getByText(newest).first()).toBeVisible({ timeout: 30_000 });
-  for (const shown of await displayedTimestamps(page)) {
+  // 画面の取得は新しい順の50件まで。画面を開いている間も操作ログは増え続ける(情報レールの更新など)ので、
+  // 範囲内の新しい行に押し出されて「最新だった行」そのものは1ページ目から消えうる。行の存在ではなく、
+  // 範囲内の行が表示され、先頭が基準以降であること(範囲内の行が落とされていないこと)で確かめる。
+  await expect(operationLogList(page).locator('span.w-36').first()).toBeVisible({ timeout: 30_000 });
+  const inRange = await displayedTimestamps(page);
+  expect(
+    toDateTimeLocalValue(inRange[0], 0) >= toDateTimeLocalValue(newest, 0),
+    `範囲内の最新の行「${newest}」以降の行が先頭に表示されていません(先頭: ${inRange[0]})`
+  ).toBe(true);
+  for (const shown of inRange) {
     const local = toDateTimeLocalValue(shown, 0);
     expect(
       local >= start && local <= end,
