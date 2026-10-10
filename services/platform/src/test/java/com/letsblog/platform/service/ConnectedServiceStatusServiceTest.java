@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import org.slf4j.MDC;
 import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
@@ -807,5 +808,35 @@ class ConnectedServiceStatusServiceTest {
         return statuses.stream()
                 .collect(java.util.stream.Collectors.toMap(
                         ConnectedServiceStatusResponse::id, ConnectedServiceStatusResponse::status));
+    }
+
+    // ---- issue #1732: 並列の疎通確認も、呼び出し元の処理IDを引き継ぐ ----
+
+    @Test
+    void checkAll_並列の疎通確認は呼び出し元の処理IDを引き継ぐ() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        mockBraveSearchConfigured(true);
+        java.util.Set<String> seen = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        ConnectedServiceStatusService probing = new ConnectedServiceStatusService(
+                dataSource,
+                baseUrl -> {
+                    seen.add(String.valueOf(MDC.get("correlationId")));
+                    return RestClient.builder().baseUrl(COMFYUI_URL);
+                },
+                RestClient.builder().baseUrl(PLANTUML_URL), PLANTUML_URL,
+                RestClient.builder().baseUrl(WORDPRESS_URL), WORDPRESS_URL,
+                RestClient.builder().baseUrl(PENPOT_URL), PENPOT_URL,
+                systemSettingService, appSettingService,
+                letsBlogServiceStatusService, rabbitMqQueueStatusService,
+                baseUrl -> RestClient.builder().baseUrl(OLLAMA_URL));
+        MDC.put("correlationId", "cid-status");
+        try {
+            probing.checkAll();
+        } finally {
+            MDC.clear();
+        }
+
+        assertEquals(java.util.Set.of("cid-status"), seen);
     }
 }

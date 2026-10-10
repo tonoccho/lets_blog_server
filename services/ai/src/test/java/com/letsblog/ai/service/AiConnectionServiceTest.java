@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import org.slf4j.MDC;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
@@ -416,5 +417,25 @@ class AiConnectionServiceTest {
         assertEquals(Source.NONE, claude.source());
         assertFalse(claude.configured());
         assertEquals(Status.WARNING, claude.status());
+    }
+
+    // ---- issue #1732: 並列の疎通確認も、呼び出し元の処理IDを引き継ぐ ----
+
+    @Test
+    void listConnections_並列の疎通確認は呼び出し元の処理IDを引き継ぐ() {
+        allConfigured();
+        java.util.Set<String> seen = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        Function<String, RestClient.Builder> factory = baseUrl -> {
+            seen.add(String.valueOf(MDC.get("correlationId")));
+            return RestClient.builder().baseUrl(baseUrl);
+        };
+        MDC.put("correlationId", "cid-ai");
+        try {
+            service(factory, Duration.ofSeconds(3)).listConnections(1L);
+        } finally {
+            MDC.clear();
+        }
+
+        assertEquals(java.util.Set.of("cid-ai"), seen);
     }
 }

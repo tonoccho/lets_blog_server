@@ -1,5 +1,6 @@
 package com.letsblog.publishing.service;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import com.letsblog.common.util.StackTraceUtil;
 import com.letsblog.publishing.aop.AuditLog;
 import com.letsblog.publishing.cms.CmsCredentials;
@@ -395,7 +396,9 @@ public class TermComparisonService {
                 // 取得は並列に走らせ、環境の並び(LinkedHashMapの挿入順)は従来どおりここで確定させる(issue #1474)
                 result.put(environment, null);
                 agentFetches.put(environment,
-                        CompletableFuture.supplyAsync(() -> fetchViaAgent(project, environment, site, isCategory), environmentFetchExecutor));
+                        CompletableFuture.supplyAsync(
+                                MdcPropagation.supplier(() -> fetchViaAgent(project, environment, site, isCategory)),
+                                environmentFetchExecutor));
                 continue;
             }
             SiteService.SiteDataSource dataSource = siteService.resolveDataSource(site);

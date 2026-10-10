@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import org.slf4j.MDC;
 import com.letsblog.platform.dto.ComputeDevice;
 import com.letsblog.platform.dto.ComputeDeviceStatusResponse;
 import com.letsblog.platform.dto.ComputeDeviceStatusResponse.ApplyState;
@@ -885,5 +886,35 @@ class ComputeDeviceServiceTest {
         assertEquals(2, queued.size());
         assertEquals(HttpStatus.CONFLICT,
                 rejected(() -> service.apply("ollama", ComputeDevice.GPU)).status());
+    }
+
+    // ---- issue #1732: 切り替えを実行するスレッドも、適用を受け付けたリクエストの処理IDを引き継ぐ ----
+
+    @Test
+    void 適用の実行スレッドは受け付け時の処理IDを引き継ぎ_終了後は持ち越さない() throws Exception {
+        List<String> seen = new ArrayList<>();
+        docker = new FakeDocker() {
+            @Override
+            public void startContainer(String id) {
+                seen.add(String.valueOf(MDC.get("correlationId")));
+                super.startContainer(id);
+            }
+        };
+        docker.with(GPU, "running").with(CPU, "exited");
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            ComputeDeviceService service = service(pool);
+            MDC.put("correlationId", "cid-compute");
+
+            service.apply("comfyui", ComputeDevice.CPU);
+            MDC.clear();
+            pool.submit(() -> { }).get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            assertEquals(List.of("cid-compute"), seen);
+            assertNull(pool.submit(() -> MDC.get("correlationId")).get(5, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            MDC.clear();
+            pool.shutdownNow();
+        }
     }
 }

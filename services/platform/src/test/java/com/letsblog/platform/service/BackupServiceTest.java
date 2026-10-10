@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import org.slf4j.MDC;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.platform.config.BackupProperties;
 import com.letsblog.platform.keycloak.KeycloakAdminClient;
@@ -1039,5 +1040,28 @@ class BackupServiceTest {
 
             verify(spied, never()).queryClientVersion(anyString());
         }
+    }
+
+    // ---- issue #1732: 標準出力/標準エラーを読む裏のスレッドも、呼び出し元の処理IDを引き継ぐ ----
+
+    @org.junit.jupiter.api.Test
+    void readInBackground_裏のスレッドは呼び出し元の処理IDを引き継ぐ() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        java.io.InputStream source = new java.io.InputStream() {
+            @Override
+            public int read() {
+                seen.set(MDC.get("correlationId"));
+                return -1;
+            }
+        };
+        MDC.put("correlationId", "cid-backup");
+        try {
+            Thread reader = service.readInBackground(source, new ByteArrayOutputStream());
+            reader.join(5_000);
+        } finally {
+            MDC.clear();
+        }
+
+        org.junit.jupiter.api.Assertions.assertEquals("cid-backup", seen.get());
     }
 }

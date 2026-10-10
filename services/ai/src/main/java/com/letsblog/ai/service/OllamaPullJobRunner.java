@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -137,11 +138,13 @@ public class OllamaPullJobRunner {
             return thread;
         });
         long checkMs = Math.max(10, idleTimeout.toMillis() / 4);
-        watchdog.scheduleWithFixedDelay(() -> {
+        // 取り込みを始めたリクエストの処理IDをwatchdogのログへ引き継ぐ(issue #1732)
+        watchdog.scheduleWithFixedDelay(MdcPropagation.runnable(() -> {
             if (System.nanoTime() - lastLineAt.get() >= idleTimeout.toNanos() && stalled.compareAndSet(false, true)) {
+                log.warn("Ollama model pull job {} received nothing for {} ms; closing the stream", jobId, idleTimeout.toMillis());
                 lines.close();
             }
-        }, checkMs, checkMs, TimeUnit.MILLISECONDS);
+        }), checkMs, checkMs, TimeUnit.MILLISECONDS);
         try {
             readLines(jobId, lines, lastLineAt);
         } catch (RuntimeException e) {

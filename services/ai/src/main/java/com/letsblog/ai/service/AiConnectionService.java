@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
 import com.letsblog.ai.client.PlatformServiceClient.ProviderConnectionConfig;
@@ -107,7 +108,7 @@ public class AiConnectionService {
         AiConnectionResponse timedOut = new AiConnectionResponse(
                 provider, displayName, null, Source.NONE, Status.ERROR,
                 "タイムアウトしました(" + timeout.toMillis() + "ms)", false);
-        return CompletableFuture.supplyAsync(check).completeOnTimeout(timedOut, timeout.toMillis(), TimeUnit.MILLISECONDS);
+        return CompletableFuture.supplyAsync(MdcPropagation.supplier(check)).completeOnTimeout(timedOut, timeout.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     private AiConnectionResponse checkHttp(

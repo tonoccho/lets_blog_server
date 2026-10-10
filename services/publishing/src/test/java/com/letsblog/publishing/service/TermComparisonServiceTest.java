@@ -1,5 +1,10 @@
 package com.letsblog.publishing.service;
 
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import org.slf4j.MDC;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
@@ -901,5 +906,35 @@ class TermComparisonServiceTest {
                 java.util.concurrent.CompletionException.class, () -> service().listCategoryComparison(1L, 0, 20));
 
         assertTrue(thrown.getCause() instanceof OutOfMemoryError);
+    }
+
+    // ---- issue #1732: 並列取得のワーカーも、リクエストの処理IDを引き継ぐ ----
+
+    @org.junit.jupiter.api.AfterEach
+    void clearMdc() {
+        MDC.clear();
+    }
+
+    @Test
+    void listCategoryComparison_並列取得のワーカーは投入元の処理IDを引き継ぎ_終了後は持ち越さない() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            TermComparisonService service = new TermComparisonService(
+                    bulkManagementClient, bulkManagementService, siteService, projectService, sshOperations, executor);
+            bindLocalAndTestManaged();
+            List<String> seen = new CopyOnWriteArrayList<>();
+            when(bulkManagementClient.listCategories(any())).thenAnswer(invocation -> {
+                seen.add(String.valueOf(MDC.get("correlationId")));
+                return List.of();
+            });
+            MDC.put("correlationId", "cid-terms");
+
+            service.listCategoryComparison(1L, 0, 20);
+
+            assertEquals(List.of("cid-terms", "cid-terms"), seen);
+            assertEquals(null, executor.submit(() -> MDC.get("correlationId")).get(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
     }
 }

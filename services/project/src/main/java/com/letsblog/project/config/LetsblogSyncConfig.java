@@ -1,5 +1,6 @@
 package com.letsblog.project.config;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import org.springframework.context.annotation.Bean;
@@ -15,10 +16,11 @@ public class LetsblogSyncConfig {
 
     @Bean(name = "letsblogSyncExecutor", destroyMethod = "shutdown")
     public java.util.concurrent.ExecutorService letsblogSyncExecutor() {
-        return Executors.newSingleThreadExecutor(runnable -> {
+        // 保存のリクエストの処理IDを実行スレッドのログへ引き継ぐ(issue #1732)
+        return MdcPropagation.executorService(Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "letsblog-sync");
             thread.setDaemon(true);
             return thread;
-        });
+        }));
     }
 }

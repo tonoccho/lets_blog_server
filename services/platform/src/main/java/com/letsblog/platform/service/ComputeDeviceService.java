@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import com.letsblog.platform.dto.ComputeDevice;
 import com.letsblog.platform.dto.ComputeDeviceStatusResponse;
 import com.letsblog.platform.dto.ComputeDeviceStatusResponse.ApplyState;
@@ -134,7 +135,8 @@ public class ComputeDeviceService {
         this.docker = docker;
         this.probe = probe;
         targetList.forEach(target -> targets.put(target.id(), target));
-        this.executor = executor;
+        // 切り替えを受け付けたリクエストの処理IDを実行スレッドのログへ引き継ぐ(issue #1732)
+        this.executor = MdcPropagation.executor(executor);
         this.clock = clock;
         this.sleeper = sleeper;
         this.timeout = timeout;

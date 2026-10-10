@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.platform.ai.AiProvider;
@@ -185,7 +186,7 @@ public class ConnectedServiceStatusService {
 
     private CompletableFuture<ConnectedServiceStatusDetailResponse> checkAsync(
             String id, String name, Supplier<CheckOutcome> check) {
-        return CompletableFuture.supplyAsync(() -> runTimed(id, name, check));
+        return CompletableFuture.supplyAsync(MdcPropagation.supplier(() -> runTimed(id, name, check)));
     }
 
     private ConnectedServiceStatusDetailResponse runTimed(String id, String name, Supplier<CheckOutcome> check) {

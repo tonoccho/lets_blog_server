@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.scheduling.MdcPropagation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.platform.aop.AuditLog;
 import com.letsblog.platform.config.BackupProperties;
@@ -513,14 +514,15 @@ public class BackupService {
         }
     }
 
-    private Thread readInBackground(InputStream source, ByteArrayOutputStream sink) {
-        Thread thread = new Thread(() -> {
+    /** パッケージプライベート(テストから直接呼ぶ。issue #1732)。裏のスレッドへ呼び出し元の処理IDを引き継ぐ。 */
+    Thread readInBackground(InputStream source, ByteArrayOutputStream sink) {
+        Thread thread = new Thread(MdcPropagation.runnable(() -> {
             try {
                 source.transferTo(sink);
             } catch (IOException ignored) {
                 // プロセス終了に伴うストリームクローズは無視する
             }
-        });
+        }));
         thread.start();
         return thread;
     }

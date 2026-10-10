@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import org.slf4j.MDC;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.repository.GenerationJobRepository;
@@ -315,5 +316,35 @@ class OllamaPullJobRunnerTest {
         new OllamaPullJobRunner(repository, new ObjectMapper(), guard, clock::get).run(11L, root, false, "llama3");
 
         verify(repository, never()).save(any());
+    }
+
+    // ---- issue #1732: 無通信を見張るwatchdogのログも、取り込みを始めたリクエストの処理IDを持つ ----
+
+    @Test
+    void 無通信で打ち切るwatchdogのログは投入元の処理IDを持つ() {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(OllamaPullJobRunner.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        CountDownLatch release = new CountDownLatch(1);
+        respondThenStall(release);
+        OllamaPullJobRunner stalled = runner(clock::get, Duration.ofMillis(300));
+        MDC.put("correlationId", "cid-pull");
+        try {
+            stalled.run(11L, root, false, "llama3");
+        } finally {
+            MDC.clear();
+            release.countDown();
+            logger.detachAppender(appender);
+        }
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> fromWatchdog = appender.list.stream()
+                .filter(event -> "ollama-pull-watchdog".equals(event.getThreadName()))
+                .toList();
+        assertFalse(fromWatchdog.isEmpty(), "watchdogが打ち切りをログに出す");
+        assertTrue(fromWatchdog.stream()
+                .allMatch(event -> "cid-pull".equals(event.getMDCPropertyMap().get("correlationId"))));
     }
 }
