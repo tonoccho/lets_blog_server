@@ -354,7 +354,6 @@ class MeasurabilityClassifier(unittest.TestCase):
         "packages/lbs-common/src/main/java/com/example/common/Json.java",
         "apps/web/src/app/page.tsx",
         "apps/extension/src/config.ts",
-        "apps/mcp-server/src/tools/designSuggestion.js",
         # #1272: `.tsx` の Panel は拡張ホスト層の免除の対象外(apps/web に実測対象が多数ある)。
         "apps/web/src/app/admin/backup/BackupPanel.tsx",
     ]
@@ -369,6 +368,12 @@ class MeasurabilityClassifier(unittest.TestCase):
         "packages/api-client/src/generated/ai/project-llm-model-controller/"
         "project-llm-model-controller.ts",
         "packages/api-client/src/index.ts",
+        # #1722: テストランナーが jest でも JaCoCo でもない(mcp-server は mocha のみ、
+        # penpot-plugin はランナー無し)ので、レポートは原理的に生成されない。
+        "apps/mcp-server/src/server.js",
+        "apps/mcp-server/src/tools/designSuggestion.js",
+        "apps/penpot-plugin/src/plugin.ts",
+        "apps/penpot-plugin/src/ui.ts",
         # #1272: VSCode拡張ホストに依存する層(docs/COVERAGE_TARGETS.md の表)。
         "apps/extension/src/extension.ts",
         "apps/extension/src/askAiPanel.ts",

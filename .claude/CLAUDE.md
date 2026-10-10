@@ -449,7 +449,7 @@ Tests must cover the production code this Issue adds or changes to at least **90
   40) are a floor for legacy code and a separate concern. Do not lower them, and do not raise
   them as a side effect of an Issue. `scripts/git-hooks/pre-commit` checks this floor (#1040).
 - **Production code no coverage runner reaches** (`apps/*/webviews/`, `infra/e2e-stubs/**`,
-  `next.config.ts`) carries no numeric target; acceptance tests verify it. See **Enforcement** →
+  `next.config.ts`, `apps/mcp-server/src`, `apps/penpot-plugin/src`) carries no numeric target; acceptance tests verify it. See **Enforcement** →
   Coverage check; phase separation and test-first still apply.
 - **Neutral paths carry no numeric target** (#1380). `.claude/hooks/paths.py` →
   `NEUTRAL_PATTERNS` (`^scripts/`, `^\.claude/`, `^docs/`, …) is not production code, and no
@@ -914,7 +914,7 @@ python3 scripts/check-changed-coverage.py
 It gates only the trees a coverage runner walks — `services/**/src`, `packages/**/src`,
 `apps/*/src` (`MEASURABLE_PATTERNS` in the script); a missing report for a changed file there fails
 the check. Production code outside them (`apps/*/webviews/` plain `.js`, `infra/e2e-stubs/**`,
-`next.config.ts`) is **reported as unmeasurable and skipped**, and verified by the acceptance-test
+`next.config.ts`, `apps/mcp-server/src`, `apps/penpot-plugin/src`) is **reported as unmeasurable and skipped**, and verified by the acceptance-test
 layer instead. This is a **coverage** exemption only: `paths.py` still classes them as production, so
 phase separation and test-first apply in full. Rationale: `docs/WORKFLOW_RULE_RATIONALE.md` → Coverage check が測定不能なコードを失敗にしない理由.
 
