@@ -247,6 +247,40 @@ base from 12), so the same-hour re-run floor is **36** against the overlay's 40 
 headroom. Raise `UPLOAD_RATE_LIMIT_REQUESTS` in
 `docker-compose.e2e-stubs.yml` before adding any further upload-bucket scenario.
 
+##### Acceptance-test override (issue #1704)
+
+`docker-compose.e2e-stubs.yml` raised `api-global` (#1132) and `upload-endpoint` (#1286) but left
+`api-internal` and `operation-log-endpoint` at their production defaults. All acceptance-test
+workers share one administrator (`e2e-admin`), so every BFF call lands in the same
+`user:<sub>` `api-internal` bucket, and the BFF's operation-log writes (roughly 1:1 with
+`api-internal` traffic, #143) land in the one process-wide `operation-log-endpoint` bucket.
+
+Evidence: the 2026-10-09 release verification (develop `4787cbc8`) logged these gateway `429`s —
+`POST /api/operation-logs` 2,002, `GET /api/identity/me` 49, `/api/generation-jobs` 32,
+`/api/sites` 14, `/api/ssh-key-pairs` 14, `/api/users` 13, `/api/projects` 12,
+`POST /api/sites/managed-wordpress/jobs` 1; gateway 5xx: 0. Between 02:10:00 and 02:10:19 the
+`/sites` page's four fetches all failed together (a fixed window used up), which hides the
+site-creation panel and fails the `at-provision` site-provisioning scenarios.
+
+**Value chosen: `INTERNAL_API_RATE_LIMIT_REQUESTS=3000` and `OPERATION_LOG_RATE_LIMIT_REQUESTS=3000`.**
+The measured peak was about **900 req/min** of `api-internal` demand (02:09, excluding
+operation-logs) against a ceiling of 600, i.e. 1.5x over. 3000 gives >3x headroom over that peak
+so that an added worker or scenario does not immediately re-trip it. Operation-log writes track
+`api-internal` calls one-for-one, but the 2,002 rejected writes were *on top of* the 300 admitted
+per window, so the same 3000 ceiling is used. Production defaults (600 / 300) are unchanged;
+`scripts/test_compose_e2e_rate_limits.py` checks that the overlay raises both and that
+`docker-compose.yml` alone does not set them.
+
+Review of every bucket in `RateLimitWebFilter` (the other three, for test-time exhaustion):
+
+| Bucket | Production default | Test-time status |
+| --- | --- | --- |
+| `api-global` | 100/min per client IP | already raised to 1000 (#1132) |
+| `api-internal` | 600/min per JWT `sub` | **raised to 3000 (this issue)** |
+| `operation-log-endpoint` | 300/min process-wide | **raised to 3000 (this issue)** |
+| `upload-endpoint` | 10/hour process-wide | already raised to 40 (#1286); a full run consumes 18 (floor 36) |
+| `auth-endpoint` | 5/min process-wide | not raised: no `429` on an auth path appears in the 2026-10-09 log, and `rate-limit.feature` relies on its tight default; auth status checks are already exempted by the filter |
+
 #### 4. Operation Log Rate Limiter (`operation-log-endpoint`)
 - **Default Limit**: 300 requests per 1 minute, **process-wide** (not partitioned)
 - **Environment Variable**: `OPERATION_LOG_RATE_LIMIT_REQUESTS` (default: 300),

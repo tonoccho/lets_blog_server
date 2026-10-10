@@ -93,6 +93,12 @@ services:
     environment:
       API_RATE_LIMIT_REQUESTS: "1000"
       UPLOAD_RATE_LIMIT_REQUESTS: "40"
+      # api-internal(BFF→gateway、JWT の sub ごと)と operation-log-endpoint(プロセス全体で1バケット)
+      # も同じ理由で引き上げる(issue #1704)。全ワーカーが e2e-admin 1 人に相乗りするため、
+      # 既定値(600 / 300 回/分)では at-provision が 429 で落ちる。本番既定値はここでは変えない。
+      # 値の根拠は docs/API_RATE_LIMITING.md「Acceptance-test override (issue #1704)」を参照。
+      INTERNAL_API_RATE_LIMIT_REQUESTS: "3000"
+      OPERATION_LOG_RATE_LIMIT_REQUESTS: "3000"
       # 内部APIへの故障注入(#1519)を有効にする。GET /api/projects/{id}/users をプロジェクトID
       # 単位で503にできる制御パス(/api/__fault-injection/...)がこの構成にだけ現れる。
       # 本番構成(このファイルを重ねない)ではこの変数が無く、フィルタ自体が作られない。

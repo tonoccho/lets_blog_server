@@ -419,6 +419,15 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 サービスにだけ効く。値の根拠(消費の内訳とヘッドルームの計算)は `docs/API_RATE_LIMITING.md`
 「Acceptance-test override (issue #1286)」を参照。
 
+### gateway の `api-internal` / `operation-log-endpoint` 枠を受け入れテスト用に引き上げる(issue #1704)
+
+全ワーカーが管理者 `e2e-admin` 1 人に相乗りするため、`api-internal`(既定 600回/分、JWT の sub ごと)
+と `operation-log-endpoint`(既定 300回/分、プロセス全体)が並列実行で尽き、`at-provision` の
+サイト構築シナリオが 429 で落ちた(2026-10-09 のリリース検証)。`docker-compose.e2e-stubs.yml` の
+`gateway:` で `INTERNAL_API_RATE_LIMIT_REQUESTS` と `OPERATION_LOG_RATE_LIMIT_REQUESTS` をどちらも
+**3000** にした。**本番の既定値は変えていない**(`docker-compose.yml` 単体には影響しない)。
+値の根拠と全バケットの確認結果は `docs/API_RATE_LIMITING.md`「Acceptance-test override (issue #1704)」を参照。
+
 ### 何をスタブ化しているか
 
 | スタブ | 置き換える依存 | 向き先を決める環境変数 | ホスト公開 |
