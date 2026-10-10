@@ -193,6 +193,45 @@ service request: method=POST path=/api/media status=200 duration_ms=1873 correla
 - **A request that ends in an exception** is logged with `status=500` and the exception is
   rethrown unchanged.
 
+### DB query metrics (issue #1736)
+
+The `service request:` line also carries the DB usage of that request, so an N+1 or one slow query
+shows up in the log:
+
+```
+service request: method=GET path=/api/posts status=200 duration_ms=412 correlation_id=3f9c... db_queries=37 db_ms=355
+slow db query: duration_ms=612 threshold_ms=500 correlation_id=3f9c... sql=select p1_0.id from posts p1_0 where p1_0.site_id = ?
+repeated db query: count=36 threshold=10 correlation_id=3f9c... sql=select t1_0.id from tags t1_0 where t1_0.post_id = ?
+```
+
+- **How it is counted**: `DbQueryMetricsDataSourcePostProcessor` (lbs-common) wraps every `DataSource` bean
+  with a JDK dynamic proxy, so Hibernate, Spring Data, `JdbcTemplate` and Flyway are all counted the same
+  way, with no new dependency. `RequestDurationLoggingFilter` opens a per-request `DbQueryRecorder`
+  (a `ThreadLocal`) and closes it in `finally`. One `execute*` call is one query (a JDBC batch is one).
+  `db_ms` is the sum of the time spent inside those calls (not result-set reading).
+- **Only the SQL template is logged, never bind values.** Prepared statements are logged with their `?`
+  placeholders. For a plain `Statement`, string literals and numbers are replaced by `?` before logging.
+  Whitespace is collapsed so the same statement is one template.
+  Limitation: the plain-`Statement` mask is regex-based, so dollar-quoted strings and `E'...'` escape strings
+  may leave literal values in the logged template; prefer prepared statements for anything sensitive.
+- **`unwrap` bypasses counting**: `DataSource.unwrap(...)` / `Connection.unwrap(...)` return the underlying
+  object, and queries run through it are not counted.
+- **Slow query**: a single query **longer than** `app.db-metrics.slow-query-threshold-ms` (env
+  `APP_DB_METRICS_SLOW_QUERY_THRESHOLD_MS`), default **500 ms**, gets one `WARN slow db query:` line.
+  Rationale: half of the 1000 ms request threshold above, so one query can be the main cause of a slow
+  request; primary-key and indexed lookups take a few to tens of milliseconds, so 500 ms points to a
+  missing index, a table scan or lock wait.
+- **Repeated SQL (N+1)**: when the same template ran **at least** `app.db-metrics.repeat-threshold` times
+  (env `APP_DB_METRICS_REPEAT_THRESHOLD`) in one request, one `WARN repeated db query:` line is written per
+  template when the request ends, with the final `count`. Default **10**: fetching a handful of relations,
+  or a retry, is normal; a loop whose count grows with the page size is the N+1 shape, and one page is
+  usually dozens of rows.
+- **Registration**: both pieces are wired in each of the 9 JPA services' `config/RequestDurationLoggingConfig`;
+  `DbQueryMetricsRegistrationContractTest` detects JPA services from `build.gradle` (`data-jpa`) and fails
+  if one lacks the post processor or the filter thresholds.
+- **Not covered (out of scope)**: DB use inside `@Scheduled` jobs, RabbitMQ listeners and other threads
+  that no request started is not counted; neither is the database's own slow-query log.
+
 ### Why request bodies are not logged
 
 An earlier revision of this document described logging request and response bodies. That is

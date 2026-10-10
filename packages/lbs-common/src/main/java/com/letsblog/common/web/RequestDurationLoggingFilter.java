@@ -1,5 +1,6 @@
 package com.letsblog.common.web;
 
+import com.letsblog.common.db.DbQueryRecorder;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,6 +30,9 @@ import java.util.function.LongSupplier;
  * <p><b>WARN閾値</b>: 所要時間が閾値を<em>超えた</em>(ちょうどは含まない)リクエストをWARNで出す。
  * 既定値は{@link #DEFAULT_SLOW_THRESHOLD_MS}。
  *
+ * <p><b>DBクエリ</b>(issue #1736): 1行に{@code db_queries=}(回数)と{@code db_ms=}(合計ミリ秒)を載せる。
+ * 閾値を超えた単一クエリと同じSQLの繰り返し(N+1)は{@link DbQueryRecorder}が別にWARNを出す。
+ *
  * <p><b>出力しない経路</b>: {@code /actuator}配下と{@code /stream}で終わるパス(SSE)。
  * gatewayの{@code CorrelationIdWebFilter#isSkipLogging}と同じ。ヘルスチェックのポーリングで
  * ログを埋めず、長時間つながるストリームを「遅いリクエスト」として誤検知しないため。
@@ -51,18 +55,30 @@ public class RequestDurationLoggingFilter extends OncePerRequestFilter {
     private static final long NANOS_PER_MILLI = 1_000_000L;
 
     private final long slowThresholdMs;
+    private final long dbSlowQueryThresholdMs;
+    private final int dbRepeatThreshold;
     private final LongSupplier nanoClock;
 
     public RequestDurationLoggingFilter(long slowThresholdMs) {
-        this(slowThresholdMs, System::nanoTime);
+        this(slowThresholdMs, DbQueryRecorder.DEFAULT_SLOW_QUERY_THRESHOLD_MS,
+                DbQueryRecorder.DEFAULT_REPEAT_THRESHOLD);
+    }
+
+    /** DBクエリ記録の閾値(単一クエリのms / 同じSQLの繰り返し回数、issue #1736)つき。 */
+    public RequestDurationLoggingFilter(long slowThresholdMs, long dbSlowQueryThresholdMs, int dbRepeatThreshold) {
+        this(slowThresholdMs, dbSlowQueryThresholdMs, dbRepeatThreshold, System::nanoTime);
     }
 
     /** テスト用: 時計を差し替えて閾値の境界を実時間に依存せず検証する。 */
-    RequestDurationLoggingFilter(long slowThresholdMs, LongSupplier nanoClock) {
+    RequestDurationLoggingFilter(long slowThresholdMs, long dbSlowQueryThresholdMs, int dbRepeatThreshold,
+                                 LongSupplier nanoClock) {
         if (slowThresholdMs < 0) {
             throw new IllegalArgumentException("slowThresholdMs must not be negative: " + slowThresholdMs);
         }
+        DbQueryRecorder.validate(dbSlowQueryThresholdMs, dbRepeatThreshold);
         this.slowThresholdMs = slowThresholdMs;
+        this.dbSlowQueryThresholdMs = dbSlowQueryThresholdMs;
+        this.dbRepeatThreshold = dbRepeatThreshold;
         this.nanoClock = nanoClock;
     }
 
@@ -76,26 +92,30 @@ public class RequestDurationLoggingFilter extends OncePerRequestFilter {
         }
         long start = nanoClock.getAsLong();
         int status = HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+        DbQueryRecorder.begin(dbSlowQueryThresholdMs, dbRepeatThreshold);
         try {
             filterChain.doFilter(request, response);
             status = response.getStatus();
         } finally {
-            logRequest(request.getMethod(), path, status, (nanoClock.getAsLong() - start) / NANOS_PER_MILLI);
+            long durationMs = (nanoClock.getAsLong() - start) / NANOS_PER_MILLI;
+            logRequest(request.getMethod(), path, status, durationMs, DbQueryRecorder.end());
         }
     }
 
-    private void logRequest(String method, String path, int status, long durationMs) {
+    private void logRequest(String method, String path, int status, long durationMs,
+                            DbQueryRecorder.Summary db) {
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         if (correlationId == null || correlationId.isBlank()) {
             correlationId = "-";
         }
         if (durationMs > slowThresholdMs) {
             log.warn("service request: method={} path={} status={} duration_ms={} correlation_id={}"
-                            + " slow_threshold_ms={}",
-                    method, path, status, durationMs, correlationId, slowThresholdMs);
+                            + " db_queries={} db_ms={} slow_threshold_ms={}",
+                    method, path, status, durationMs, correlationId, db.queries(), db.totalMs(), slowThresholdMs);
         } else {
-            log.info("service request: method={} path={} status={} duration_ms={} correlation_id={}",
-                    method, path, status, durationMs, correlationId);
+            log.info("service request: method={} path={} status={} duration_ms={} correlation_id={}"
+                            + " db_queries={} db_ms={}",
+                    method, path, status, durationMs, correlationId, db.queries(), db.totalMs());
         }
     }
 

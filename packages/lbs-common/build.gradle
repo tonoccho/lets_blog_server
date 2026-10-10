@@ -43,6 +43,8 @@ dependencies {
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
     testImplementation 'org.springframework.amqp:spring-amqp'
     testImplementation 'com.h2database:h2'
+    // DbQueryMetricsSpringContextTest(#1736)が実プールのclose呼び出しを確認する。
+    testImplementation 'com.zaxxer:HikariCP'
     testImplementation 'org.hamcrest:hamcrest'
     // GenerationJobClientTest(#1483でmediaから移設)がassertjとlogbackのListAppenderを使う。
     testImplementation 'org.assertj:assertj-core'
