@@ -97,6 +97,11 @@ class ResetNotRunningContainerTest(unittest.TestCase):
         shutil.copy(
             os.path.join(HERE, SCRIPT_NAME), os.path.join(self.repo, "scripts", SCRIPT_NAME)
         )
+        os.makedirs(os.path.join(self.repo, "scripts", "lib"))
+        shutil.copy(
+            os.path.join(HERE, "lib", "migration-seeded-tables.sh"),
+            os.path.join(self.repo, "scripts", "lib", "migration-seeded-tables.sh"),
+        )
         write_exec(os.path.join(self.repo, "scripts", "wait-for-stack-healthy.sh"), FAKE_WAIT)
         with open(os.path.join(self.repo, ".env"), "w", encoding="utf-8") as f:
             f.write(

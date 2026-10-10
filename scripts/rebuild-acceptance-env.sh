@@ -75,6 +75,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$REPO_ROOT/.env"
+# shellcheck source=lib/migration-seeded-tables.sh
+source "$SCRIPT_DIR/lib/migration-seeded-tables.sh"
 
 # --- 固定値。ここを引数で差し替えられないことが安全装置そのもの ---
 readonly COMPOSE_PROJECT="lets_blog_server"
@@ -602,9 +604,8 @@ done
 
 # 4-3. 9スキーマに Flyway 管理テーブル以外のデータが無いこと。
 #
-# マイグレーションが投入するマスタデータは残っていて当然なので数えない。
-# lbs_identity の roles / role_permissions は V2__seed_roles_and_permissions.sql が入れる
-# RBAC の定義であり(#956)、これが空のほうが異常である。
+# マイグレーションが投入する行は残っていて当然なので、その分は数えない。どの表をどれだけ
+# 許すかは scripts/lib/migration-seeded-tables.sh の MIGRATION_SEEDED_TABLES が単一の定義(#1738)。
 # platform-service の ConnectionDefaultsSeeder(#1567)が起動のたびに書く system_settings のキー。
 # ゼロ構築の直後に platform-service が起動して書く行は残骸ではないので数えない(#1701)。
 # 表まるごとではなくキーで除外する: 利用者が管理画面で保存した設定の残りは見逃さない。
@@ -616,7 +617,7 @@ schema_dirty=0
 for s in "${SERVICE_SCHEMAS[@]}"; do
   tables="$(mysql_q "SELECT table_name FROM information_schema.tables
                      WHERE table_schema='$s'
-                       AND table_name NOT IN ('flyway_schema_history', 'roles', 'role_permissions');" || true)"
+                       AND table_name NOT IN ($(migration_seeded_not_in_sql));" || true)"
   total=0
   for t in $tables; do
     where=""
@@ -624,7 +625,9 @@ for s in "${SERVICE_SCHEMAS[@]}"; do
       where=" WHERE setting_key NOT IN ($seeded_in_list)"
     fi
     c="$(mysql_q "SELECT COUNT(*) FROM \`$s\`.\`$t\`${where};" || echo 0)"
-    total=$(( total + c ))
+    # マイグレーションが入れる件数(MIGRATION_SEEDED_TABLES)を超えた分だけを残骸として数える(#1738)。
+    c=$(( c - $(migration_seeded_max_rows "$t") ))
+    [ "$c" -gt 0 ] && total=$(( total + c ))
   done
   if [ "$total" -ne 0 ]; then
     echo "  NG: $s に ${total} 行残っています" >&2

@@ -464,6 +464,17 @@ if args[:1] == ["exec"]:
                 print("some_table")
             if os.environ.get("FAKE_PLATFORM_SETTINGS") and "'lbs_platform'" in sql:
                 print("system_settings")
+            if "'lbs_identity'" in sql:
+                # 本物の MySQL と同じく、NOT IN (...) で除外された表は返さない。
+                m = re.search(r"NOT IN \(([^)]*)\)", sql)
+                excluded = set(re.findall(r"'([^']*)'", m.group(1))) if m else set()
+                for t in ("flyway_schema_history", "roles", "role_permissions", "initial_setup_lock"):
+                    if t not in excluded:
+                        print(t)
+            sys.exit(0)
+        if "`initial_setup_lock`" in sql:
+            # FAKE_LOCK_ROWS: initial_setup_lock の行数(V4 が 1 行入れるので既定 1)。
+            print(os.environ.get("FAKE_LOCK_ROWS", "1"))
             sys.exit(0)
         if "`system_settings`" in sql:
             # FAKE_PLATFORM_SETTINGS: system_settings に入っている setting_key(カンマ区切り)。
@@ -1423,6 +1434,19 @@ class PostBuildVerification(RebuildScriptHarness):
         out = self.out(r)
         self.assertNotEqual(0, r.returncode, "スキーマにデータが残っているのに成功した:\n" + out)
         self.assertIn("lbs_content", out)
+
+    def test_accepts_the_one_row_the_initial_setup_lock_migration_inserts(self):
+        """#1738: V4 が常に 1 行入れる initial_setup_lock は残骸ではない。"""
+        r = self.run_script("--yes", FAKE_LOCK_ROWS="1")
+        out = self.out(r)
+        self.assertEqual(0, r.returncode, out)
+        self.assertNotIn("lbs_identity に", out)
+
+    def test_fails_when_initial_setup_lock_has_more_rows_than_the_migration_inserts(self):
+        r = self.run_script("--yes", FAKE_LOCK_ROWS="2")
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "余分な行があるのに成功した:\n" + out)
+        self.assertIn("lbs_identity", out)
 
     SEEDED = "llm_ollama_base_url,comfyui_base_url"
 
