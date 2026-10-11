@@ -236,22 +236,43 @@ VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後�
 | `OLLAMA_MAX_LOADED_MODELS` | `1`(固定) | 同時にロードするモデル数 |
 | `OLLAMA_CONTEXT_LENGTH` | `8192` | コンテキスト長。Ollama の既定は小さく、超過分は**黙って切り捨てられる**。伸ばすほど KV キャッシュが VRAM を食う |
 
-## GPU/メモリを満たさない環境向けの縮退起動(検討結果)
+## 周辺ツールのオプトイン起動と縮退起動(#1741)
 
-**結論: 本Issueでは新たなcompose profileは導入しない。**
+**結論: PlantUML・draw.io・phpMyAdmin は compose profile のオプトイン起動にし、既定の起動
+(`docker compose up -d` / `./startup.sh`、`COMPOSE_PROFILES` 未設定)では作らない。**
+以前は「`docker compose up -d` だけで全機能が使える」という開発者の前提を理由に
+profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの前提を変えた。
 
-- GPU要件については、README記載の通り `COMFYUI_IMAGE` を CPU向けタグに切り替えることで
-  既に縮退起動が可能(AI画像生成が低速になるだけで起動自体は成立する)。追加の仕組みは不要。
-- メモリ制約環境向けには、Penpot関連の6サービス(`penpot-frontend` / `penpot-backend` /
-  `penpot-mcp` / `penpot-exporter` / `penpot-postgres` / `penpot-valkey`。カスタムタグのAIデザイン生成機能でのみ使用)を
-  `profiles: ["design-tools"]` として opt-in 化する案を検討した(`mailcatch` は Penpot のものでは
-  なく Keycloak のパスワードリセットメールの送信先なので、この対象に含めず常時起動する。#1748)。しかし現状は
-  `docker compose up -d` だけで全機能が使えることが開発者の前提になっており、
-  デフォルト起動の挙動を変えると影響範囲が大きい。本Issueのスコープ(枠組み整備)を
-  超えるため、今回は見送る。
-- 将来的にメモリ制約環境向けの縮退起動を追加する場合は、上記Penpot 6サービスに
-  `profiles: ["design-tools"]` を付与し、`docker compose --profile design-tools up -d`
-  で明示的に含める形にするのが妥当(別Issueとして起票する)。
+| profile | サービス | 用途 | アイドル時のメモリ(参考) |
+|---|---|---|---|
+| `diagram` | `plantuml`、`drawio` | PlantUML 図のプレビュー・公開、draw.io エディタ | 約0.35〜0.9 GB |
+| `db-tools` | `phpmyadmin` | `/phpmyadmin/` での DB 確認 | 約0.01〜0.04 GB |
+
+- 有効にする: `.env` の `COMPOSE_PROFILES=diagram,db-tools`(`gpu` / `cpu` とはカンマで併記)、
+  または `docker compose --profile diagram up -d`。`.env.example` に例がある。
+- 受け入れテスト環境(`scripts/rebuild-acceptance-env.sh`)は `diagram` と `db-tools` を有効にして
+  起動する(`AT_PROFILES`)。受け入れテストは PlantUML・draw.io・phpMyAdmin を使うため。
+- 常時起動するサービスは、これらに `depends_on` しない(`scripts/test_compose_optin_profiles.py` が検査する)。
+- `scripts/wait-for-stack-healthy.sh --all` は `docker compose ps --all` に出るコンテナだけを待つので、
+  作られていないコンテナは待機対象から外れる(ComfyUI の `gpu` / `cpu` と同じ)。
+
+### 無効なときの各機能の振る舞い
+
+| 機能 | `diagram` / `db-tools` が無効なときの振る舞い |
+|---|---|
+| `/phpmyadmin/`(`db-tools`) | nginx は変数の upstream(`set $upstream_phpmyadmin`)と `resolver 127.0.0.11` で中継するので、起動自体は失敗しない。要求すると名前解決に失敗し、nginx 既定の **502 Bad Gateway** ページを返す(使い捨ての nginx で再現して確認)。スタックトレースは出ない。 |
+| `/drawio/`(`diagram`) | 同上。502 Bad Gateway。VS Code 拡張の図エディタ(iframe)は 502 のページを表示する。 |
+| PlantUML 図のプレビュー・公開(`diagram`) | content / publishing は media の `/api/render/plantuml` を呼ぶ。media の `PlantUmlClient` は HTTP 応答のある失敗だけを 502 に変換し、接続不能(`ResourceAccessException`)は変換しないので media は 500 を返す。content / publishing はこれを `InvalidPlantUmlTagException`(HTTP 400、「PlantUML図のレンダリングに失敗しました: …」)にする。画面は応答するがメッセージは 400 で、依存先の不通と分かりにくい。コードの読解による(plantuml を止めた実機では未確認)。#1759 に起票。 |
+| 管理画面「連携サービスの状況」の PlantUML 行 | 接続不能のため恒常的に「エラー」になる(コードの読解による)。意図した無効化と障害を区別できない。#1760 に起票。 |
+| ダッシュボードのコンテナ一覧 | 存在するコンテナだけを列挙するので、作られていないコンテナは出ない。 |
+| `ProjectAiSettingsService` の `DENIED_HOSTS` | compose のサービス名の一覧で、profile の有無に関係なく全サービス名を持つ。profile 化で食い違わない(`ProjectConnectionUrlDenylistTest` は `docker-compose.yml` の全サービスと照合する)。 |
+
+図のレンダリングを外部サービスのプラグインにする方針(Epic #1755)と整合する。
+
+### 将来の縮退起動
+
+GPU 要件は、README 記載のとおり `COMFYUI_IMAGE` を CPU 向けタグにして `cpu` profile を有効にすれば、
+低速になるだけで起動は成立する。Penpot 一式(6サービス)は #1752 で削除するので profile 化しない。
 
 ## docker-socket-proxy の権限(#1587)
 
@@ -525,8 +546,7 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 分割前の単一サービス `lbs-api`(約1.2 GiB)は #583 で削除された。
 
 JVM が9個に増えたぶん、1サービスあたりの実処理量に比べてベースラインの消費が大きい。
-メモリ制約環境では Penpot 7サービス(合計約4.3 GiB)を落とす縮退起動が最も効く
-(上記「Penpotスイート」の節を参照)。
+メモリ制約環境向けの周辺ツールのオプトイン起動は、上記「周辺ツールのオプトイン起動と縮退起動」を参照。
 
 ## comfyui のCPU実行構成(#1395)
 

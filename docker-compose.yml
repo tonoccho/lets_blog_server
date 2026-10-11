@@ -837,6 +837,9 @@ services:
     image: phpmyadmin/phpmyadmin
     container_name: lbs-phpmyadmin
     mem_limit: 128m
+    # 既定の起動では作らない(#1741)。DB を画面で確認するときだけ `COMPOSE_PROFILES=db-tools`
+    # (または `docker compose --profile db-tools up -d`)で起動する。
+    profiles: ["db-tools"]
     <<: *common-service
     environment:
       TZ: UTC
@@ -1259,6 +1262,8 @@ services:
     image: plantuml/plantuml-server:jetty
     container_name: lbs-plantuml
     mem_limit: 1g
+    # 既定の起動では作らない(#1741)。`COMPOSE_PROFILES=diagram` で draw.io とともに起動する。
+    profiles: ["diagram"]
     <<: *common-service
 
   drawio:
@@ -1268,6 +1273,8 @@ services:
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
     mem_limit: 512m
+    # 既定の起動では作らない(#1741)。`COMPOSE_PROFILES=diagram` で PlantUML とともに起動する。
+    profiles: ["diagram"]
     <<: *common-service
 
   # mcp-penpot:

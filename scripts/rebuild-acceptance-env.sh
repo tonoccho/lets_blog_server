@@ -240,6 +240,11 @@ COMPOSE_ARGS=(-p "$COMPOSE_PROJECT" -f "$REPO_ROOT/docker-compose.yml" -f "$REPO
 if [ "$SHARED_HOST" -eq 1 ]; then
   COMPOSE_ARGS+=(-f "$REPO_ROOT/docker-compose.shared-host.yml")
 fi
+# 受け入れテストが使うオプトイン profile(#1741)。diagram = PlantUML + draw.io、
+# db-tools = phpMyAdmin。docker-compose.yml が既定の起動から外しているので、ここで有効にする。
+# gpu / cpu(comfyui)はここに入れない。comfyui は OPTIONAL_SERVICES として別に起動する。
+readonly AT_PROFILES=(diagram db-tools)
+for p in "${AT_PROFILES[@]}"; do COMPOSE_ARGS+=(--profile "$p"); done
 compose() { docker compose "${COMPOSE_ARGS[@]}" "$@"; }
 
 # ---------------------------------------------------------------- 調査(ドライランと共通)

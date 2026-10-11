@@ -232,6 +232,14 @@ AI機能を実用速度で使うにはGPU(上記要件)を推奨する。
 `.env` の `COMPOSE_PROFILES=gpu` の行を有効にする(コメントアウトを外す)ことで、従来どおり
 `docker compose up -d` のまま `comfyui` が起動する。
 
+**PlantUML・draw.io・phpMyAdmin もオプトイン起動である(issue #1741)。** 既定の
+`docker compose up -d` / `./startup.sh` ではコンテナを作らない(アイドル時のメモリ約0.4〜0.9GB を使わない)。
+`.env` の `COMPOSE_PROFILES` に `diagram`(PlantUML と draw.io)、`db-tools`(phpMyAdmin)を
+カンマ区切りで指定する(例: `COMPOSE_PROFILES=diagram,db-tools`。`gpu` / `cpu` とも併記できる)。
+一回だけなら `docker compose --profile diagram up -d`。無効のとき `/drawio/` と `/phpmyadmin/` は
+502 Bad Gateway になり、PlantUML 図のプレビュー・公開はレンダリング失敗のエラーになる。
+詳細は [docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) の「周辺ツールのオプトイン起動と縮退起動」。
+
 ## 前提ソフトウェア要件
 
 | ソフトウェア | 用途 |
