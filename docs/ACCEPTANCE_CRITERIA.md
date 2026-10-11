@@ -376,7 +376,6 @@ API: platform `SystemSettingController`, `AppSettingController`, `BackupControll
 | AC-SYS-007 | バックアップのダウンロード | 環境を失っても復旧できる | `GET /api/backup/download` がリストア可能なアーカイブを返す。一般ユーザーは作成・ダウンロードできない | `features/platform/backup.feature` › バックアップを作成でき、ダウンロードしたアーカイブに全スキーマのダンプが含まれる / 一般ユーザーはバックアップの作成・ダウンロードができない | 検証済(issue #1156。親issue #940のシナリオ13・15を引き取る。`@destructive`。全スキーマのダンプ含有確認は、`BackupService#createBackup()`でMySQLスキーマ`lbs_log`のダンプ書き込みを一時的にスキップし「スキーマ lbs_log のダンプが含まれていません」で失敗することを実測してRedを確認した後、元に戻して再びGreenを確認済み。一般ユーザー拒否の確認は、同メソッドの`adminAuthorizationService.requireAdmin()`呼び出しを一時的にコメントアウトし、一般ユーザーでも200が返って`toBe(403)`が`Received: 200`で失敗することを実測してRedを確認した後、元に戻して再びGreenを確認済み。バックアップからのリストア(シナリオ14)は#1141/#1142の環境不整合により別issueへ分離しておりAC-SYS-008が対象) |
 | AC-SYS-008 | バックアップからのリストア | 実際に復旧できる | `POST /api/backup/restore` 後、バックアップ時点のデータが復元される。1つのMySQLスキーマのダンプが不正なアーカイブでは、失敗したスキーマ名を画面に示して止まり、以降の手順(Keycloak PostgreSQL)は実行されず、自動ロールバックもしない | `features/platform/backup-restore.feature` › 正しいアーカイブで復元すると、変更・削除した代表データがバックアップ時点に戻り、後から追加したものは消える / 1つのMySQLスキーマのダンプが不正なアーカイブで復元すると、失敗したスキーマを示して止まり、ロールバックされず、正しいアーカイブで復元し直せる | 検証済(issue #1157。2026-10-02 に実スタックで2シナリオとも通過。復元後の Keycloak ユーザーは、Keycloak API がキャッシュ値を返す(#1590)ため Keycloak PostgreSQL を直接読んで確認する。`@destructive` `@slow`。代表データ(project-service のプロジェクト、content-service のカスタムタグ、Keycloak のテスト用ユーザー)で確認する。共有スタックのDB全体を上書きするため、実行はスタックを占有できるときに `npm run test:at -- --project=at-destructive --no-deps --grep バックアップからのリストア` で行う) |
 | AC-SYS-009 | VSCode拡張の配布 | 拡張をサーバーから入手できる | `GET /api/system/vscode-extension` が `.vsix` を返す。ビルド物に`coverage/`や`src/`を含まない(#773の退行検知) | `features/platform/vscode-extension.feature` › ダウンロードした.vsixは妥当なVSIX(zip)である / ビルドされた.vsixにcoverage/やsrc/が含まれない(#773の退行検知) | 検証済(issue #1153。この開発ホストはfirefox/webkitの共有ライブラリが未導入で`npx playwright test`のglobalSetupがブラウザ起動確認自体で落ちるため、`npm run test:at:fast`はそのままでは動かない。`E2E_SKIP_BROWSER_CHECK=1`で起動確認を回避し、`--project=at-main --no-deps`(環境は既にシード済みのため)、`E2E_WORKERS=1`で実行し2件とも成功を確認した。ワーカー数を1にしたのは、並行実行するとビルド出力パスの競合で500になる既知の別バグ(#1190、このIssueのACの対象外)を踏むため。退行検知シナリオ(#773)はRedを実証済み: `.vscodeignore` の `coverage/**`/`src/**` 除外を一時的にコメントアウトし `npm run test:coverage`(`apps/extension`)でcoverage/を生成した状態で実行すると`extension/src/*.ts`と`extension/coverage/**`が同梱されて失敗することを確認し、除外を戻すと再び成功することを確認した。zip解析は当初python3をシェルアウトしていたが、Review指摘によりNode標準の`Buffer`だけでzipのセントラルディレクトリを読む実装に置き換えた) |
-| AC-SYS-011 | ComfyUI の演算デバイス(GPU / CPU)の切り替え(#1399) | 管理者が画面から GPU と CPU を選んで切り替えられ、GPU の無いホストでは CPU に固定される | 両構成(`lbs-comfyui` / `lbs-comfyui-cpu`)があるホストで、適用すると「適用中」の後に「完了」が表示され、選んだ構成だけが `running` になる。GPU 構成が無いホストは「CPU(固定)」と表示され、GPU は選べず、API へ直接送った GPU への適用も拒否されてコンテナは操作されない。選んだ構成が上限時間内に成功しないと失敗の理由が表示され、元の構成へ戻る。管理者以外には欄が表示されず、API は 403 | `features/platform/compute-device.feature` › 両構成があるホストでGPUからCPUへ切り替えると、適用中の後に完了が表示される / GPU構成が無いホストでは「CPU(固定)」と表示され、GPUは選べず理由が表示される / GPU構成が無いホストでGPUへの適用をAPIへ直接送っても拒否され、どのコンテナも操作されない / 選んだ構成が上限時間内に稼働しないと、失敗の理由が表示され元の構成に戻る / 一般ユーザーには演算デバイス欄が表示されない / 一般ユーザーは演算デバイスの参照APIも適用APIも403になる、`scripts/test_docker_socket_proxy.py`(AC5。proxy の書き込み許可) | 実装中(#1399。受け入れシナリオは Docker Engine API スタブ `infra/e2e-stubs/docker-engine` へ向けて書いたが、共有の受け入れ環境の platform / web を作り直して実行する工程は未実施で、シナリオは未実行。単体テストは通過。**docker-socket-proxy の書き込み許可は #1587 の結論待ち**: `POST: 0` + `ALLOW_START` / `ALLOW_STOP` では start / stop が 403 になることを実機のイメージで確認したため、`docker-compose.yml` は変更していない) |
 
 ### 2.13 ログと非同期経路 — `LOG`
 
@@ -592,7 +591,7 @@ AC-AUTH-005 / 008 はどちらも Keycloak の realm 設定を一時的に変更
 | AT-11 (#937) | ダイアグラムとレンダリング | AC-DIAG-001〜007 |
 | AT-12 (#938) | カスタムタグ・テンプレート・コンテンツ設定 | AC-TAG-001〜021 |
 | AT-13 (#939) | Analytics | AC-ANA-001〜006 |
-| AT-14 (#940) | システム設定・バックアップ・拡張配布・ダッシュボード | AC-SYS-001〜009、AC-SYS-011(#1399) |
+| AT-14 (#940) | システム設定・バックアップ・拡張配布・ダッシュボード | AC-SYS-001〜009 |
 | AT-15 (#941) | ログと非同期経路 | AC-LOG-001〜010(008〜010 は #941 で追加。ログ経路の障害耐性・停止中のログの扱い・閲覧と認可) |
 | AT-16 (#942) | VSCode拡張 | AC-EXT-001〜024(AC-EXT-019 は対象外。025〜028 は #1333 で追加) |
 | AT-17 (#943) | 認可・ルーティング・レート制限・相関ID・縮退 | AC-XC-001〜010 |
@@ -625,17 +624,17 @@ Epic #1333 の子 Issue と機能ID(各 Issue のシナリオは `apps/web/e2e/f
 
 ## 6. 集計
 
-§2 に列挙した機能ID: **235**。うち3件(AC-EXT-019、AC-POST-010・011)は対象外としたので、
-受け入れテストの対象は **232**。
+§2 に列挙した機能ID: **234**。うち3件(AC-EXT-019、AC-POST-010・011)は対象外としたので、
+受け入れテストの対象は **231**。
 
 | 状態 | 件数 |
 | --- | --- |
 | `検証済` | 198 |
-| `実装中` | 14 |
+| `実装中` | 13 |
 | `既存spec` / `既存spec(部分)` | 3 |
 | `未着手` | 17 |
 | `対象外`(§2 に行を持つもの) | 3 |
-| **§2 合計** | **235** |
+| **§2 合計** | **234** |
 
 `検証済` のうち3件は §4.1 のとおり受け入れ基準を狭めてある。
 `@fail`(不具合が直るまで失敗が期待値)のシナリオは無い(#955 の修正で最後の1件が外れた)。
@@ -651,7 +650,7 @@ Epic #1333 の子 Issue と機能ID(各 Issue のシナリオは `apps/web/e2e/f
 
 | 領域 | 件数 | | 領域 | 件数 | | 領域 | 件数 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `SET` | 3 | | `AI` | 20 | | `SYS` | 10 |
+| `SET` | 3 | | `AI` | 20 | | `SYS` | 9 |
 | `AUTH` | 10 | | `PLAN` | 14 | | `LOG` | 10 |
 | `USR` | 15 | | `IMG` | 16 | | `EXT` | 28 |
 | `PRJ` | 9 | | `DIAG` | 7 | | `XC` | 11 |
@@ -691,7 +690,7 @@ Epic #1333 の子 Issue と機能ID(各 Issue のシナリオは `apps/web/e2e/f
 | `/users/[id]/edit` | AC-USR-003, AC-USR-004, AC-USR-010 |
 | `/admin/roles` | AC-USR-007 |
 | `/admin/ssh-keys` | AC-SITE-010 |
-| `/admin/system-settings` | AC-SYS-005, AC-SYS-006, AC-SYS-011 |
+| `/admin/system-settings` | AC-SYS-005, AC-SYS-006 |
 | `/admin/backup` | AC-SYS-007, AC-SYS-008 |
 | `/admin/tag-design` | AC-TAG-014 |
 | `/projects` | AC-PRJ-001, AC-PRJ-002 |
@@ -828,7 +827,7 @@ Server Action の往復としては数えられない。
 | `app/admin/backup/actions.ts`<br>`restoreBackupAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。外部システム(WordPress / SSH / 複数環境)への往復を含み**超過しうる**。#1477 の実測で超過した場合は再判断する | 予算対象 |
 | `app/admin/roles/actions.ts`<br>`assignRoleAction`<br>`removeRoleAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/admin/ssh-keys/actions.ts`<br>`createSshKeyPairAction`<br>`deleteSshKeyPairAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
-| `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction`<br>`applyComputeDeviceAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作。`applyComputeDeviceAction` は適用を**受け付けた時点で返る**(platform-service が裏でコンテナの停止・起動・成功判定を進め、進行は別に取得する。#1399)ので、切り替えの完了までの時間(最大180秒)は含まない | 予算対象 |
+| `app/admin/system-settings/actions.ts`<br>`updateAppSettingsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/custom-tag-templates/actions.ts`<br>`createCustomTagTemplateAction`<br>`updateCustomTagTemplateAction`<br>`publishCustomTagTemplateAction`<br>`unpublishCustomTagTemplateAction`<br>`cloneCustomTagTemplateAction`<br>`applyCustomTagTemplateAction`<br>`deleteCustomTagTemplateAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |
 | `app/custom-tags/actions.ts`<br>`generateCustomTagAction` | — | — | カスタムタグのAI生成を非同期ジョブとして要求する受付だけの操作になった(#1409。生成と同時に保存はせず、結果は処理キューの「結果を見る」から確認して `upsertProjectCustomTagAction` で保存する)。生成そのものは外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う(画像生成の同期経路 `generateProjectImagesAction` は #1408 で非同期ジョブ `requestProjectImageJobAction` に置き換わり、削除済み)。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/custom-tags/actions.ts`<br>`validateCustomTagAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。データの読み書きが gateway を1〜数往復するだけの操作 | 予算対象 |

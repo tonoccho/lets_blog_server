@@ -256,8 +256,9 @@ VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後�
 ## docker-socket-proxy の権限(#1587)
 
 `docker-socket-proxy`(platform-service だけが到達できる `docker-socket-proxy-net` 上)は、
-**`GET /containers/json`、`GET /containers/<id>/json`、`POST /containers/<id>/(start|stop)` だけ**を通し、
-それ以外はすべて 403 にする。#1399(ComfyUI の演算デバイス切り替え)が start / stop を必要とするため。
+**`GET /containers/json` と `GET /containers/<id>/json` だけ**を通し、
+それ以外(start / stop を含むすべての POST、DELETE ほか)はすべて 403 にする。start / stop は #1399 / #1585
+(演算デバイス切り替え)のために #1587 で開けたが、その機能を #1744 で廃止したので閉じた。
 
 ### なぜ環境変数では足りないか
 
@@ -287,7 +288,7 @@ VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後�
   再起動ポリシーの判定(ワンショットジョブの「完了」表示)に使っているため。従来の `CONTAINERS=1` でも
   GET は通っていたので、読み取りの範囲は狭まっても、アプリが使う範囲は変わらない。
 - テスト: `python3 -m unittest scripts.test_docker_socket_proxy`(ダイジェスト固定、read-only マウント、
-  frontend が許可規則 3 本と最後の `deny` だけであること、許可・拒否するリクエストの例)。
+  frontend が許可規則 2 本と最後の `deny` だけであること(start / stop は 403)、許可・拒否するリクエストの例)。
 
 ### 実機での確認(2026-10-04)
 
@@ -311,8 +312,8 @@ docker run --rm --network lbs-1587-net curlimages/curl -s -o /dev/null -w '%{htt
 |---|---|
 | `GET /containers/json?all=true` | 200 |
 | `GET /containers/<id>/json` | 200 |
-| `POST /containers/<id>/stop` | 204 |
-| `POST /containers/<id>/start` | 204 |
+| `POST /containers/<id>/stop` | 403(#1744 で拒否に変更。確認時点の #1587 では 204) |
+| `POST /containers/<id>/start` | 403(同上) |
 | `POST /containers/create` | 403(コンテナは作られなかった) |
 | `DELETE /containers/<id>` | 403 |
 | `POST /containers/<id>/exec` | 403 |
@@ -542,107 +543,13 @@ nvidia デバイス予約は変数展開でもマージでも消せない(上記
 - モデル・出力ボリューム(`comfyui_models` / `comfyui_output`)は共有。両者は同時に起動しない前提。
 - 検証: `scripts/test_comfyui_gpu_profile.py`(compose契約テスト)。実機での生成は #1401。
 
-## 管理画面からの演算デバイス切り替え(GPU / CPU)(#1399)
+## 演算デバイス(GPU / CPU)の選択(#1744)
 
-管理者は `/admin/system-settings` の「演算デバイス(ComfyUI)」で、ComfyUI を GPU 構成と CPU 構成の
-どちらで動かすかを選んで適用できる。platform-service が Docker Engine API の
-`POST /containers/{id}/stop` と `POST /containers/{id}/start` だけで切り替える。
+管理画面からの演算デバイス切り替え(#1399 ComfyUI、#1585 Ollama)は廃止した。Ollama と ComfyUI は GPU 付きの
+別 PC で動かし、Let's Blog はそれらへ URL で接続する方針のため、同じホストの同梱コンテナを start / stop して
+切り替える仕組みは操作対象が無く、docker-socket-proxy の start / stop 権限も不要になった。
 
-- 両構成のコンテナ(`lbs-comfyui` と `lbs-comfyui-cpu`)を**事前に作っておく**。アプリは作成・削除・
-  作り直しをしない。待機側の作成は運用手順で、GPU ホスト(`COMPOSE_PROFILES=gpu`)では
-  `docker compose up -d` の後に一度だけ次を実行する(`.env.example` にも同じ手順を書いた)。
-
-  ```bash
-  docker compose --profile cpu create comfyui-cpu
-  ```
-
-- GPU の有無は、`lbs-comfyui` が存在するかで判定する(proxy の読み取り権限ではホストの GPU を直接
-  調べられない。GPU 構成のコンテナは GPU ホストでしか作らない運用)。無ければ CPU に固定し、GPU への適用は
-  API でも拒否する。`lbs-comfyui` だけがある場合は、CPU を選べない理由として上の作成手順を表示する。
-- 現在の構成は、動いているコンテナ(`running`)から判定する。DB に保存した選択値は使わない。
-- 適用は受け付けたらすぐ返り(202)、裏で「現在の構成を stop → 選んだ構成を start → 成功判定」を進める。
-  成功は選んだ構成が `running` かつ `http://comfyui:8188/system_stats` が HTTP 200。待つ上限は
-  `COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS`(既定 180)。成功しなければ選んだ構成を stop して元の構成を
-  start し直し、画面に失敗の段階と理由を出す。元の構成の再起動にも失敗したときは手動復旧のコマンドを表示する。
-  適用中の次の適用要求は 409 で拒否する。進行状態はメモリにだけ持つ(適用中に platform-service が
-  再起動した場合の引き継ぎは対象外)。
-- 向き先は `COMPUTE_DEVICE_DOCKER_BASE_URL`(既定は `DOCKER_SOCKET_PROXY_BASE_URL`)。受け入れ環境では
-  これだけを Docker Engine API のスタブ(`infra/e2e-stubs/docker-engine`)へ向け、ダッシュボードの
-  コンテナ一覧には影響させない。
-- 注意: 運用者が手で `docker compose up -d` を実行すると、有効なプロファイル側が再び起動して**両方が動いて
-  しまう場合がある**(同じネットワークエイリアス `comfyui` が重複する)。アプリはこれを自動では直さず、
-  画面に「GPU と CPU の両方が稼働中」と表示する。切り替えを適用すると片方に寄せられる。
-- 接続先を別ホストの ComfyUI に向けている場合(システム設定の `comfyui_base_url`)は対象外。切り替えるのは
-  同じ compose で同梱しているコンテナだけである。
-
-### Ollama の演算デバイス切り替え(#1585)
-
-ComfyUI と同じ機構(上記)を、独立した 2 つ目の対象 `ollama` として使う。API は
-`/api/system-settings/compute-devices/ollama`(参照)と `.../ollama/apply`(適用)。
-管理画面では「演算デバイス(ComfyUI)」と「演算デバイス(Ollama)」の 2 欄が並び、互いのコンテナには触れない。
-
-- **CPU 構成は別サービス `ollama-cpu`**(`container_name: lbs-ollama-cpu`)。`ollama` の runtime は
-  コンテナ作成時に固定されるため、`comfyui-cpu` と同様に別サービスにする。`runtime` は指定せず、
-  環境変数・ヘルスチェック(`ollama list`)・イメージは `ollama` と同じ。ネットワークエイリアス `ollama` を持つので
-  接続先 `http://ollama:11434` は不変。`ollama_models` ボリュームを共有するため、GPU 構成で取得済みの
-  モデルはそのまま使える(`ollama-model-init` は CPU 構成では走らせない)。
-- **`profiles: ["ollama-cpu"]` であり、`cpu` には入れない**。`cpu` に入れると、GPU の無いホストで
-  `COMPOSE_PROFILES=cpu` にしたとき `ollama`(runtime 空 = CPU)と二重に起動する。
-- **待機側コンテナの作成は運用手順**(アプリは実行しない)。GPU ホスト(`GPU_RUNTIME=nvidia`)で、
-  `docker compose up -d` の後に一度だけ次を実行する(`.env.example` にも同じ手順を書いた)。起動はしない。
-
-  ```bash
-  docker compose --profile ollama-cpu create ollama-cpu
-  ```
-
-- **GPU 構成の有無は `lbs-ollama` の `HostConfig.Runtime` が `nvidia` かで判定する**(`GET /containers/{id}/json`。
-  docker-socket-proxy が既に通している読み取り)。`GPU_RUNTIME` が空のホストでも `lbs-ollama` は存在する
-  (CPU 実行。#1396)ため、ComfyUI のようにコンテナの存在では判別できない。nvidia でなければ CPU 固定
-  (画面は「CPU(固定)」と理由を表示し、API への GPU 適用も拒否してコンテナを start / stop しない)。
-  このとき `lbs-ollama` 自身が CPU 構成として扱われる。`lbs-ollama-cpu` が無いときは、CPU を選べない理由として
-  上の作成手順を表示する。
-- **成功判定は「目的のコンテナが `running` かつヘルスチェックが `healthy`」**(`GET /containers/{id}/json` の
-  `State.Health.Status`)。Ollama のイメージには curl が無く、URL の疎通ではなくコンテナのヘルスチェックを使う。
-  切り替え・進行表示・失敗時の復帰・認可・上限時間(`COMPUTE_DEVICE_APPLY_TIMEOUT_SECONDS`)は ComfyUI と同じ。
-- ダッシュボードのコンテナ一覧(#1584)は `ollama` ↔ `ollama-cpu` を待機中の組として扱い、
-  稼働していない側を異常に数えない(`ContainerStatusService` の `ALTERNATIVE_PAIRS`)。
-- 検証: `scripts/test_ollama_cpu_profile.py`(compose 契約)、`features/platform/compute-device.feature`
-  (Ollama のシナリオ)。実機で LLM 要求が成功することの確認は #1402 の範囲である。
-
-### docker-socket-proxy の権限(start / stop だけを開ける)— 未確定(#1587)
-
-Epic #551 / #701 の方針(docker socket へ到達できるのは platform-service だけ)のうち、コンテナの
-**start / stop だけ**を開ける。作成・削除・exec・イメージ操作・`restart`(kill を含む `ALLOW_RESTARTS`)は
-開けない。当初の想定は「`POST: 0` を残し `ALLOW_START: 1` と `ALLOW_STOP: 1` だけを足す」だったが、
-**実機のイメージで確認したところ成立しなかった**ため、`docker-compose.yml` の proxy の権限はまだ変更していない
-(`POST: 0` のまま。この状態では start / stop は通らず、管理画面の適用は失敗として表示され元の構成のまま残る)。
-方式の決定は #1587。
-
-確認した環境: `tecnativa/docker-socket-proxy:latest`(image id `1f5038b54f06`)。使い捨てのネットワークに
-proxy を起動し、docker.sock の代わりに使い捨てのスタブ socket(受けたリクエストを記録して 200/204 を返すだけ)を
-マウントした。実際の docker.sock と共有スタックには触れていない。
-
-| 設定 | `GET /containers/json` | start | stop | `POST /containers/create` | `DELETE /containers/{id}` | `POST /containers/{id}/exec` | `POST /images/create` | restart / kill / pause |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `CONTAINERS=1 POST=0 ALLOW_START=1 ALLOW_STOP=1`(当初の想定) | 200 | **403** | **403** | 403 | 403 | 403 | 403 | 403 |
-| `CONTAINERS=1 POST=1 ALLOW_START=1 ALLOW_STOP=1` | 200 | 204 | 204 | **204(到達)** | **204(到達)** | **204(到達)** | 403 | **204(到達)** |
-| haproxy の `frontend` を許可リストへ差し替え(下) | 200 | 204 | 204 | 403 | 403 | 403 | 403 | 403 |
-
-原因は、イメージの `haproxy.cfg.template` の先頭が `http-request deny unless METH_GET || { env(POST) -m bool }`
-で、`ALLOW_*` の allow 規則より前に評価されること。`POST=0` では全 POST がそこで拒否され、`POST=1` にすると
-`CONTAINERS=1` が `/containers/` 配下の全 POST(create / exec / kill を含む)を通してしまう。
-
-3行目は、同じイメージの `haproxy.cfg.template` の `frontend dockerfrontend` だけを次に差し替えて
-read-only マウントした場合の結果で、期待どおり start / stop だけが通る(選択肢の一つとして #1587 に報告済み。
-**まだ採用していない**)。
-
-```
-frontend dockerfrontend
-    bind ${BIND_CONFIG}
-    http-request allow if METH_GET { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/json$ }
-    http-request allow if { method POST } { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/(start|stop)$ }
-    http-request deny
-    default_backend dockerbackend
-```
-
-方式が決まったら、同じ手順で実機の proxy に対して再確認し、このセクションの表を更新すること。
+GPU で動かすか CPU で動かすかは、GPU PC 側で Ollama / ComfyUI をどう起動するかで決める(Ollama は
+`--gpus` / runtime の指定、ComfyUI は `--cpu` の有無など)。Let's Blog 側に切り替えの操作は無い。
+連携サービスの状況(ダッシュボード)に出る Ollama / ComfyUI の演算デバイス表示(#1397)は、HTTP
+(`/api/ps`、`/system_stats`)で取得するだけなので残している。

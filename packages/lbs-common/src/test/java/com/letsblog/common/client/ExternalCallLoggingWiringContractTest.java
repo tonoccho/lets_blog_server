@@ -53,10 +53,6 @@ class ExternalCallLoggingWiringContractTest {
         add("services/media/src/main/java/com/letsblog/media/render/PlantUmlClient.java", "plantuml");
         add("services/platform/src/main/java/com/letsblog/platform/keycloak/KeycloakAdminClientConfig.java",
                 "keycloak-admin");
-        add("services/platform/src/main/java/com/letsblog/platform/service/HttpComputeDeviceHealthProbe.java",
-                "compute-device-health");
-        add("services/platform/src/main/java/com/letsblog/platform/service/RestDockerEngineClient.java",
-                "docker-engine");
         add("services/platform/src/main/java/com/letsblog/platform/service/ContainerStatusService.java",
                 "container-status");
         add("services/platform/src/main/java/com/letsblog/platform/service/RabbitMqQueueStatusService.java",

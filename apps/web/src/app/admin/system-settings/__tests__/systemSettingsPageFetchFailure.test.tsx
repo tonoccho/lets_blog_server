@@ -21,10 +21,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 const SESSION_EXPIRED = "セッションの有効期限が切れました。お手数ですが再度ログインしてください。";
 const DOWN = new Error("APIエラー (503): Service Unavailable");
 
-const api = { listAppSettings: jest.fn(), getComputeDeviceStatus: jest.fn() };
+const api = { listAppSettings: jest.fn() };
 jest.mock("@/lib/apiClient", () => ({
   listAppSettings: (...a: unknown[]) => api.listAppSettings(...a),
-  getComputeDeviceStatus: (...a: unknown[]) => api.getComputeDeviceStatus(...a),
 }));
 jest.mock("../AppSettingsPanel", () => ({ AppSettingsPanel: () => "PANEL" }));
 import Page from "../page";
@@ -35,16 +34,7 @@ describe("システム設定の取得失敗表示(issue #1235)", () => {
     jest.clearAllMocks();
     errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     getServerSession.mockResolvedValue({ user: { role: "admin" } });
-    api.getComputeDeviceStatus.mockResolvedValue({
-      target: "comfyui",
-      currentDevice: "GPU",
-      cpuFixed: false,
-      gpuSelectable: true,
-      cpuSelectable: true,
-      gpuUnavailableReason: null,
-      cpuUnavailableReason: null,
-      apply: { state: "IDLE", requestedDevice: null, message: null, startedAt: null, finishedAt: null },
-    });
+
   });
   afterEach(() => errorSpy.mockRestore());
 

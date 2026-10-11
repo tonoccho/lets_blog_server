@@ -88,12 +88,6 @@ class OllamaCpuComposeContract(unittest.TestCase):
             self.assertEqual(gpu["environment"][key], cpu["environment"][key], key)
         self.assertEqual(gpu["image"], cpu["image"])
 
-    def test_the_operator_procedure_is_documented(self):
-        command = "docker compose --profile ollama-cpu create ollama-cpu"
-        for path in (ENV_EXAMPLE, os.path.join(REPO_ROOT, "docs", "DOCKER_COMPOSE_ARCHITECTURE.md")):
-            with open(path, encoding="utf-8") as f:
-                self.assertIn(command, f.read(), path)
-
 
 if __name__ == "__main__":
     unittest.main()

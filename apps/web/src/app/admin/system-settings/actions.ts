@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { applyComputeDevice, updateAppSettings } from "@/lib/apiClient";
+import { updateAppSettings } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
 
 export interface UpdateAppSettingsFormState {
@@ -35,42 +35,6 @@ export async function updateAppSettingsAction(
 
   try {
     await updateAppSettings(settings);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-
-  revalidatePath("/admin/system-settings");
-  return { success: true };
-}
-
-export interface ApplyComputeDeviceFormState {
-  error?: string;
-  success?: boolean;
-}
-
-/**
- * ComfyUI・Ollamaの演算デバイス(GPU / CPU)を切り替える(issue #1399 / #1585)。対象はフォームの `target`。platform-serviceは要求を受け付けたら
- * すぐ返し、切り替えは裏で進む(進行は画面が再取得して表示する)。そのためこの操作は§10.5の
- * 3秒予算の対象である。
- */
-export async function applyComputeDeviceAction(
-  _prevState: ApplyComputeDeviceFormState,
-  formData: FormData
-): Promise<ApplyComputeDeviceFormState> {
-  await requireAdminSession();
-
-  const device = formData.get("device");
-  if (device !== "GPU" && device !== "CPU") {
-    return { error: "切り替え先として GPU か CPU を選んでください。" };
-  }
-
-  const target = formData.get("target");
-  if (target !== "comfyui" && target !== "ollama") {
-    return { error: "切り替える対象(ComfyUI か Ollama)が不明です。" };
-  }
-
-  try {
-    await applyComputeDevice(device, target);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

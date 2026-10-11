@@ -10,8 +10,8 @@ tecnativa/docker-socket-proxy の既定の haproxy 設定は、先頭で
 ALLOW_START / ALLOW_STOP を評価するため、`POST=0` のままでは start / stop も通らない。
 `POST=1` にすると create / exec / restart / kill などまで通る。そこで frontend だけを差し替えた
 haproxy.cfg.template を保持して read-only でマウントし、
-「GET /containers/json(と /containers/<id>/json)と、POST /containers/<id>/(start|stop) だけ許し、
-他はすべて拒否」にする。テンプレートの差し替えはイメージ内部のパスに依存するので、
+「GET /containers/json(と /containers/<id>/json)だけ許し、他はすべて拒否」にする。
+演算デバイス切り替えを廃止した(#1744)ので、start / stop も拒否する。テンプレートの差し替えはイメージ内部のパスに依存するので、
 イメージはダイジェストで固定する。
 
 ## 検査すること
@@ -119,7 +119,7 @@ class HaproxyTemplateTest(unittest.TestCase):
     def test_frontend_has_only_allow_rules_before_deny(self):
         http_requests = [l for l in self.body if l.startswith("http-request")]
         self.assertEqual(self.allow, http_requests[:-1])
-        self.assertEqual(3, len(self.allow))
+        self.assertEqual(2, len(self.allow))
 
     def test_frontend_does_not_depend_on_environment_variables(self):
         self.assertNotIn("env(", "\n".join(self.body))
@@ -134,13 +134,15 @@ class HaproxyTemplateTest(unittest.TestCase):
             ("GET", "/containers/json"),
             ("GET", "/v1.43/containers/json"),
             ("GET", "/containers/abc123_x-y.z/json"),
-            ("POST", "/containers/abc123/start"),
-            ("POST", "/v1.43/containers/lbs-comfyui/stop"),
         ]:
             self.assertTrue(allowed(self.rules, method, path), (method, path))
 
     def test_denied_requests(self):
         for method, path in [
+            ("POST", "/containers/abc123/start"),
+            ("POST", "/containers/abc123/stop"),
+            ("POST", "/v1.43/containers/lbs-comfyui/start"),
+            ("POST", "/v1.43/containers/lbs-comfyui/stop"),
             ("POST", "/containers/create"),
             ("DELETE", "/containers/abc123"),
             ("POST", "/containers/abc123/exec"),

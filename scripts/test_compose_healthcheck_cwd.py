@@ -297,8 +297,6 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 # ComfyUI スタブ(#1106)。GPU を持たないホストでも画像生成の経路を
                 # 検証できるようにするため、7本目として追加した。
                 "comfyui-stub",
-                # Docker Engine API のスタブ(#1399)。演算デバイス切り替えの向き先だけを差し替える。
-                "docker-engine-stub",
             },
             names,
         )

@@ -413,3 +413,31 @@ Then('一般ユーザーとしてアプリ設定の一覧を要求すると403�
   });
   expect(response.status(), `応答本文: ${await response.text()}`).toBe(403);
 });
+
+// ---- 演算デバイスの切り替えが無い(issue #1744) ----
+
+Then('システム設定画面に演算デバイスの切り替え欄が表示されない', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: /演算デバイス/ })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: /演算デバイス/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '適用する' })).toHaveCount(0);
+});
+
+When('管理者として演算デバイスComfyUIの参照APIを呼ぶ', async ({ request, ctx }) => {
+  const response = await request.get('/api/system-settings/compute-devices/comfyui', {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+  });
+  ctx.removedComputeDeviceReadStatus = response.status();
+});
+
+When('管理者として演算デバイスOllamaの適用APIを呼ぶ', async ({ request, ctx }) => {
+  const response = await request.post('/api/system-settings/compute-devices/ollama/apply', {
+    headers: { Authorization: `Bearer ${await adminToken(request)}` },
+    data: { device: 'CPU' },
+  });
+  ctx.removedComputeDeviceApplyStatus = response.status();
+});
+
+Then('演算デバイスの切り替えAPIはどちらも404を返す', async ({ ctx }) => {
+  expect(ctx.removedComputeDeviceReadStatus, '参照APIの応答').toBe(404);
+  expect(ctx.removedComputeDeviceApplyStatus, '適用APIの応答').toBe(404);
+});

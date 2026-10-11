@@ -6,10 +6,9 @@
 # イメージを更新するときは、イメージ内の同ファイルと差分を取って追随すること:
 #   docker run --rm --entrypoint cat <image> /usr/local/etc/haproxy/haproxy.cfg.template
 #
-# 差し替えた理由: イメージ既定の frontend は先頭で `deny unless METH_GET || env(POST)` と全 POST を
-# 拒否してから ALLOW_START / ALLOW_STOP を評価するため、POST=0 では start / stop も通らず、
-# POST=1 では create / exec / restart / kill まで通る。許すものを列挙する形にすれば、
-# 環境変数の評価順に左右されない。
+# 差し替えた理由: 許すものを列挙する形にすれば、環境変数(CONTAINERS / POST / ALLOW_*)の評価順に
+# 左右されない(#1587)。現在許すのは GET の /containers/json と /containers/<id>/json だけで、
+# POST(start / stop を含む)は許さない(演算デバイス切り替えを廃止したため、#1744)。
 #
 global
     log stdout format raw daemon "${LOG_LEVEL}"
@@ -62,8 +61,7 @@ frontend dockerfrontend
     # ダッシュボードのコンテナ一覧と、停止中コンテナの終了コード判定(ContainerStatusService)。
     http-request allow if METH_GET { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/json$ }
     http-request allow if METH_GET { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/json$ }
-    # コンテナの起動・停止だけ(#1399)。restart / kill / pause / exec / create / DELETE は許さない。
-    http-request allow if { method POST } { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/(start|stop)$ }
+    # 読み取りだけ。start / stop を含む POST、create / exec / restart / kill / DELETE は許さない(#1744)。
     http-request deny
     default_backend dockerbackend
 

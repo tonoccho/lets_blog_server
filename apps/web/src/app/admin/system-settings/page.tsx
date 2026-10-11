@@ -1,17 +1,12 @@
 import { requireAdminSession } from "@/lib/session";
-import { getComputeDeviceStatus, listAppSettings } from "@/lib/apiClient";
+import { listAppSettings } from "@/lib/apiClient";
 import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { AppSettingsPanel } from "./AppSettingsPanel";
-import { ComputeDevicePanel } from "./ComputeDevicePanel";
 
 export default async function AdminSystemSettingsPage() {
   await requireAdminSession();
-  const [settings, comfyUi, ollama] = await Promise.all([
-    loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []),
-    loadOrReport("admin/system-settings", "演算デバイス(ComfyUI)の状態", getComputeDeviceStatus("comfyui"), null),
-    loadOrReport("admin/system-settings", "演算デバイス(Ollama)の状態", getComputeDeviceStatus("ollama"), null),
-  ]);
+  const settings = await loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []);
 
   return (
     <div className="space-y-8">
@@ -24,12 +19,9 @@ export default async function AdminSystemSettingsPage() {
           この保存操作での変更が全てロールバックされます。
         </p>
       </div>
-      <FetchErrorNotice labels={failedLabels(settings, comfyUi, ollama)} />
+      <FetchErrorNotice labels={failedLabels(settings)} />
       {/* 取得失敗時に空の設定を表示すると、そのまま保存して既存値を消しかねないため描画しない */}
       {!settings.failed && <AppSettingsPanel settings={settings.data} />}
-      {/* 「保存する設定」とは別の「適用する操作」。取得できなければ操作させない */}
-      {comfyUi.data && <ComputeDevicePanel status={comfyUi.data} />}
-      {ollama.data && <ComputeDevicePanel status={ollama.data} />}
     </div>
   );
 }
