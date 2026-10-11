@@ -267,8 +267,9 @@ public class ComfyUiClient implements ImageGenerationProvider {
             images.add(new ComfyUiImage(filename, data, "image/png"));
         }
 
-        clearMemory(http, baseUrl);
-
+        // 生成後に VRAM の解放(/interrupt も /free も)は呼ばない。
+        // /interrupt は実行中の別の生成を中断するだけでメモリは解放しない。/free でアンロードすると、
+        // キューに後続の生成があるとき毎回モデルを再ロードして遅くなるため、メモリ管理は ComfyUI に任せる(#1747)。
         return images;
     }
 
@@ -587,21 +588,5 @@ public class ComfyUiClient implements ImageGenerationProvider {
         graph.set("9", saveImage);
 
         return graph;
-    }
-
-    private void clearMemory(RestClient http, String baseUrl) {
-        try {
-            log.debug("Clearing ComfyUI VRAM memory after generation completion");
-            ObjectNode body = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
-            http.post()
-                    .uri(baseUrl + "/api/interrupt")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .toBodilessEntity();
-            log.debug("ComfyUI VRAM memory cleared successfully");
-        } catch (Exception e) {
-            log.warn("Failed to clear ComfyUI VRAM memory: {}", e.getMessage());
-        }
     }
 }

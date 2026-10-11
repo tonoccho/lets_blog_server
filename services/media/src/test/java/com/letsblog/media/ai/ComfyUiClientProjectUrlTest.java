@@ -95,8 +95,6 @@ class ComfyUiClientProjectUrlTest {
                         MediaType.APPLICATION_JSON));
         server.expect(manyTimes(), requestTo(org.hamcrest.Matchers.startsWith(OVERRIDE + "/view")))
                 .andRespond(withSuccess(new byte[] {1, 2, 3}, MediaType.IMAGE_PNG));
-        server.expect(manyTimes(), requestTo(OVERRIDE + "/api/interrupt"))
-                .andRespond(withSuccess());
         ComfyUiGenerationParams params = new ComfyUiGenerationParams(
                 "a cat", "blurry", 20, 7.0, "euler", "normal", 1L, 512, 512, 1,
                 "checkpoint.safetensors", null, null, 7L);

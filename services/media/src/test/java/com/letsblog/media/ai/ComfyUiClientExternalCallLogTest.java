@@ -46,7 +46,6 @@ class ComfyUiClientExternalCallLogTest {
                         + "\"subfolder\":\"s\",\"type\":\"output\"}]}}}}", MediaType.APPLICATION_JSON));
         server.expect(requestTo(base + "/view?filename=a.png&subfolder=s&type=output"))
                 .andRespond(withSuccess(new byte[] {1, 2, 3}, MediaType.IMAGE_PNG));
-        server.expect(requestTo(base + "/api/interrupt")).andRespond(withSuccess());
         ComfyUiClient client = new ComfyUiClient(builder, new ImageGenerationConfigProvider() {
             @Override
             public String comfyUiBaseUrl(Long projectId) {
@@ -68,7 +67,7 @@ class ComfyUiClientExternalCallLogTest {
                 "a cat", "blurry", 20, 7.0, "euler", "normal", 1L, 512, 512, 1,
                 "checkpoint.safetensors", null, null));
 
-        assertEquals(4, appender.list.size(), "4回の呼び出しで4行");
+        assertEquals(3, appender.list.size(), "3回の呼び出しで3行");
         assertTrue(appender.list.stream().allMatch(e -> e.getFormattedMessage()
                 .startsWith("external call: target=comfyui host=comfyui.test method=")));
         assertTrue(appender.list.get(0).getFormattedMessage().contains("path=/prompt status=200"));

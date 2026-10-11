@@ -22,7 +22,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 /**
  * ComfyUiClientの回帰テスト(issue #1101)。MockRestServiceServerでComfyUIの
- * /prompt・/history・/view・/api/interrupt・/object_info/* を模擬する。
+ * /prompt・/history・/view・/object_info/* を模擬する。
  *
  * <p>#1101の中心は「ワークフローに埋め込まれるseedは、呼び出し側が決めた実値そのものである」
  * こと。同じseedを渡せば同じワークフローJSONが組み上がる(=ComfyUIが同じ画像を返す)ことを
@@ -78,7 +78,6 @@ class ComfyUiClientTest {
                             BASE_URL + "/view?filename=img" + i + ".png&subfolder=sub&type=output"))
                     .andRespond(withSuccess(new byte[]{(byte) i, 2, 3}, MediaType.IMAGE_PNG));
         }
-        server.expect(requestTo(BASE_URL + "/api/interrupt")).andRespond(withSuccess());
     }
 
     private JsonNode submittedGraph() throws Exception {
@@ -188,7 +187,6 @@ class ComfyUiClientTest {
                         MediaType.APPLICATION_JSON));
         server.expect(requestTo(BASE_URL + "/view?filename=only.png&subfolder=&type=output"))
                 .andRespond(withSuccess(new byte[]{7}, MediaType.IMAGE_PNG));
-        server.expect(requestTo(BASE_URL + "/api/interrupt")).andRespond(withSuccess());
 
         List<ComfyUiImage> images = client.generateImage(params(5L));
 
@@ -213,7 +211,6 @@ class ComfyUiClientTest {
                         MediaType.APPLICATION_JSON));
         server.expect(requestTo(BASE_URL + "/view?filename=late.png&subfolder=&type=output"))
                 .andRespond(withSuccess(new byte[]{7}, MediaType.IMAGE_PNG));
-        server.expect(requestTo(BASE_URL + "/api/interrupt")).andRespond(withSuccess());
 
         assertEquals("late.png", client.generateImage(params(5L)).get(0).fileName());
     }
@@ -229,19 +226,12 @@ class ComfyUiClientTest {
     }
 
     @Test
-    void VRAMクリアの失敗は生成結果に影響しない() {
-        server.expect(requestTo(BASE_URL + "/prompt"))
-                .andRespond(withSuccess("{\"prompt_id\":\"p1\"}", MediaType.APPLICATION_JSON));
-        server.expect(requestTo(BASE_URL + "/history/p1"))
-                .andRespond(withSuccess(
-                        "{\"p1\":{\"outputs\":{\"9\":{\"images\":[{\"filename\":\"a.png\"}]}}}}",
-                        MediaType.APPLICATION_JSON));
-        server.expect(requestTo(BASE_URL + "/view?filename=a.png&subfolder=&type=output"))
-                .andRespond(withSuccess(new byte[]{1}, MediaType.IMAGE_PNG));
-        server.expect(requestTo(BASE_URL + "/api/interrupt"))
-                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+    void 生成完了後にinterruptもfreeも呼ばない() {
+        // 登録していない呼び出し(/api/interrupt, /interrupt, /free, /api/free)はモックが AssertionError にする。
+        expectGeneration(2);
 
-        assertEquals(1, client.generateImage(params(5L)).size());
+        assertEquals(2, client.generateImage(params(5L)).size());
+        server.verify();
     }
 
     @Test

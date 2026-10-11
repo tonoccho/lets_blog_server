@@ -91,7 +91,6 @@ class ComfyUiClientImg2ImgTest {
             server.expect(requestTo(BASE_URL + "/view?filename=img" + i + ".png&subfolder=&type=output"))
                     .andRespond(withSuccess(new byte[] {1}, MediaType.IMAGE_PNG));
         }
-        server.expect(requestTo(BASE_URL + "/api/interrupt")).andRespond(withSuccess());
     }
 
     private JsonNode graph() throws Exception {
