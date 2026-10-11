@@ -446,7 +446,7 @@ docker compose stop keycloak-postgres mysql rabbitmq docker-socket-proxy
 # カットオーバーに直接関与しない補助サービスも、全停止の一貫性のため合わせて停止する
 docker compose stop wordpress phpmyadmin
 docker compose stop penpot-frontend penpot-backend penpot-exporter penpot-mcp \
-  penpot-postgres penpot-valkey penpot-mailcatch
+  penpot-postgres penpot-valkey mailcatch
 docker compose stop comfyui plantuml drawio
 
 docker compose ps   # 全コンテナがExited/Stoppedになっていることを確認
@@ -754,7 +754,7 @@ docker compose up -d reverse-proxy
 
 # 補助サービス
 docker compose up -d wordpress phpmyadmin
-docker compose up -d penpot-postgres penpot-valkey penpot-mailcatch
+docker compose up -d penpot-postgres penpot-valkey mailcatch
 docker compose up -d penpot-backend penpot-exporter penpot-mcp penpot-frontend
 docker compose up -d comfyui plantuml drawio
 
@@ -860,7 +860,7 @@ docker compose stop keycloak
 docker compose stop keycloak-postgres mysql rabbitmq docker-socket-proxy
 docker compose stop wordpress phpmyadmin
 docker compose stop penpot-frontend penpot-backend penpot-exporter penpot-mcp \
-  penpot-postgres penpot-valkey penpot-mailcatch
+  penpot-postgres penpot-valkey mailcatch
 docker compose stop comfyui plantuml drawio
 
 # 2. MySQL復元(全データベースを一度作り直してから流し込む)

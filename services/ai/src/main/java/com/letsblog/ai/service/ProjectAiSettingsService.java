@@ -36,13 +36,13 @@ public class ProjectAiSettingsService {
             "reverse-proxy", "web", "media", "ai", "content", "analytics", "platform", "project", "publishing",
             "log-writer", "gateway", "identity", "rabbitmq", "docker-socket-proxy", "mysql", "phpmyadmin",
             "keycloak-postgres", "keycloak", "penpot-frontend", "penpot-backend", "penpot-mcp",
-            "penpot-exporter", "penpot-postgres", "penpot-valkey", "penpot-mailcatch", "ollama-model-init",
+            "penpot-exporter", "penpot-postgres", "penpot-valkey", "mailcatch", "ollama-model-init",
             "plantuml", "drawio", "wordpress",
             "lbs-reverse-proxy", "lbs-web", "lbs-media", "lbs-ai", "lbs-content", "lbs-analytics",
             "lbs-platform", "lbs-project", "lbs-publishing", "lbs-log-writer", "lbs-gateway", "lbs-identity",
             "lbs-rabbitmq", "lbs-docker-socket-proxy", "lbs-mysql", "lbs-phpmyadmin", "lbs-keycloak-postgres",
             "lbs-keycloak", "lbs-penpot-frontend", "lbs-penpot-backend", "lbs-penpot-mcp",
-            "lbs-penpot-exporter", "lbs-penpot-postgres", "lbs-penpot-valkey", "lbs-penpot-mailcatch",
+            "lbs-penpot-exporter", "lbs-penpot-postgres", "lbs-penpot-valkey", "lbs-mailcatch",
             "lbs-ollama-model-init", "lbs-plantuml", "lbs-drawio", "lbs-wordpress");
 
     /** 10進・16進(0x)・8進(先頭0)のいずれかの数値表記(IPv4の1要素)。 */

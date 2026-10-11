@@ -243,13 +243,13 @@ VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後�
 - GPU要件については、README記載の通り `COMFYUI_IMAGE` を CPU向けタグに切り替えることで
   既に縮退起動が可能(AI画像生成が低速になるだけで起動自体は成立する)。追加の仕組みは不要。
 - メモリ制約環境向けには、Penpot関連の6サービス(`penpot-frontend` / `penpot-backend` /
-  `penpot-mcp` / `penpot-exporter` / `penpot-postgres` / `penpot-valkey` /
-  `penpot-mailcatch`。カスタムタグのAIデザイン生成機能でのみ使用)を
-  `profiles: ["design-tools"]` として opt-in 化する案を検討した。しかし現状は
+  `penpot-mcp` / `penpot-exporter` / `penpot-postgres` / `penpot-valkey`。カスタムタグのAIデザイン生成機能でのみ使用)を
+  `profiles: ["design-tools"]` として opt-in 化する案を検討した(`mailcatch` は Penpot のものでは
+  なく Keycloak のパスワードリセットメールの送信先なので、この対象に含めず常時起動する。#1748)。しかし現状は
   `docker compose up -d` だけで全機能が使えることが開発者の前提になっており、
   デフォルト起動の挙動を変えると影響範囲が大きい。本Issueのスコープ(枠組み整備)を
   超えるため、今回は見送る。
-- 将来的にメモリ制約環境向けの縮退起動を追加する場合は、上記Penpot 7サービスに
+- 将来的にメモリ制約環境向けの縮退起動を追加する場合は、上記Penpot 6サービスに
   `profiles: ["design-tools"]` を付与し、`docker compose --profile design-tools up -d`
   で明示的に含める形にするのが妥当(別Issueとして起票する)。
 
@@ -425,7 +425,7 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
 | `lbs-mysql` | 432 | 743 | 1g | - |
 | `lbs-rabbitmq` | 135 | 208 | 768m | - |
 
-残りは `reverse-proxy` / `phpmyadmin` 128m、`docker-socket-proxy` / `penpot-valkey` / `penpot-mailcatch` 64m、
+残りは `reverse-proxy` / `phpmyadmin` 128m、`docker-socket-proxy` / `penpot-valkey` / `mailcatch` 64m、
 `keycloak-postgres` 256m、`penpot-frontend` / `penpot-mcp` 256m、`penpot-exporter` 768m、`penpot-postgres` 384m、
 `plantuml` 1g、`drawio` 512m(`docker-compose.yml` を参照)。
 
@@ -494,7 +494,7 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 | `lbs-rabbitmq` | 148.6 MiB |
 | `lbs-penpot-mcp` | 125.8 MiB |
 | `lbs-penpot-postgres` | 108.2 MiB |
-| `lbs-penpot-mailcatch` | 43.3 MiB |
+| `lbs-mailcatch` | 43.3 MiB |
 | `lbs-phpmyadmin` | 42.8 MiB |
 | `lbs-keycloak-postgres` | 31.3 MiB |
 | `lbs-wordpress` | 27.6 MiB |

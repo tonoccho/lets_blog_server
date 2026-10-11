@@ -986,7 +986,7 @@ services:
       PENPOT_TELEMETRY_REFERER: docker-compose
       PENPOT_SMTP_DEFAULT_FROM: no-reply@example.com
       PENPOT_SMTP_DEFAULT_REPLY_TO: no-reply@example.com
-      PENPOT_SMTP_HOST: penpot-mailcatch
+      PENPOT_SMTP_HOST: mailcatch
       PENPOT_SMTP_PORT: 1025
       PENPOT_SMTP_USERNAME:
       PENPOT_SMTP_PASSWORD:
@@ -1056,12 +1056,12 @@ services:
       - TZ=UTC
       - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
 
-  penpot-mailcatch:
+  mailcatch:
     environment:
       TZ: UTC
     logging: *default-logging
     image: sj26/mailcatcher:latest
-    container_name: lbs-penpot-mailcatch
+    container_name: lbs-mailcatch
     mem_limit: 64m
     <<: *common-service
     expose:

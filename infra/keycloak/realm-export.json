@@ -1781,7 +1781,7 @@
     "starttls": "false",
     "auth": "false",
     "port": "1025",
-    "host": "penpot-mailcatch",
+    "host": "mailcatch",
     "from": "noreply@letsblog.local",
     "fromDisplayName": "Let's Blog",
     "ssl": "false"

@@ -20,8 +20,29 @@ identity-serviceがDBで保持する。[#561](https://github.com/tonoccho/lets_b
 
 **有効化済みのKeycloak標準機能**: OTP (TOTP)・パスワードリセットメール・パスワードポリシー
 
-SMTP設定は開発環境向けに `penpot-mailcatch`(MailCatcher。認証不要、`http://localhost:1080`で
+SMTP設定は開発環境向けに `mailcatch`(MailCatcher。認証不要、`http://localhost:1080`で
 受信メールを確認可能)を向いている。本番相当の環境では別途SMTP設定を上書きする必要がある。
+
+`mailcatch`(コンテナ名 `lbs-mailcatch`)は Penpot のためのものではなく、**Keycloak のパスワード
+リセットメールの送信先として常時起動するサービス**である(#1748。旧名 `penpot-mailcatch`)。
+Penpot を取り除いてもこのサービスは残す。
+
+### 既存の Keycloak の SMTP 宛先を `mailcatch` へ移す
+
+realm は初回起動時にだけ import される(`--import-realm` は既存の realm を上書きしない)ため、
+旧名 `penpot-mailcatch` を向いたままの既存の Keycloak DB は、`realm-export.json` を直しても
+変わらない。稼働中の Keycloak への変更なので、**利用者が内容を確認したうえで実行する**:
+
+```bash
+set -a; . ./.env; set +a   # KEYCLOAK_ADMIN_USERNAME / KEYCLOAK_ADMIN_PASSWORD を読む
+docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://localhost:8080/auth --realm master --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD"
+docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh update realms/letsblog -s 'smtpServer.host=mailcatch'
+```
+
+その後 `docker compose up -d`(旧 `lbs-penpot-mailcatch` が残る場合は `--remove-orphans`)で
+新しいコンテナへ切り替える。ログイン画面からパスワードリセットを要求し、
+`http://localhost:1080` にメールが届くことで確認できる。
 
 ## クライアントシークレットについて
 
