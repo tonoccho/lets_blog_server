@@ -392,6 +392,78 @@ docker inspect lbs-media --format '{{.State.OOMKilled}}'            # false
 curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # ヒープ上限(-Xmx1g 由来)
 ```
 
+## 全コンテナのメモリ上限(#1739)
+
+`docker-compose.yml` の全サービス(全 profiles)に `mem_limit` を、Spring Boot 10サービスに
+`JAVA_TOOL_OPTIONS: -Xmx...` を明示した。上限が無いと JVM はホストメモリの 1/4 を最大ヒープに取り、負荷時に G1 が
+ヒープを手放さず膨らむ(変更前の合計は約 30 GB)。`media` の方式(#1112)を全サービスへ広げたもの。
+`scripts/test_compose_memory_limits.py` が、全サービスの `mem_limit`、全 Spring Boot サービスの `-Xmx < mem_limit` を
+ベース単独とオーバーレイ重ね掛けの両方で検査する(サービスを足して上限を付け忘れると落ちる)。
+
+### 実測値と決めた上限
+
+実測は受け入れテスト(`at-main` 全件、スタブ overlay 重ね)実行中の `docker stats` を 5 秒ごとに採った値(MiB)。
+アイドルは実行開始直後、負荷時はその間の最大。
+
+| コンテナ | アイドル | 負荷時ピーク | `mem_limit` | `-Xmx` |
+|---|---:|---:|---|---|
+| `lbs-web`(`next dev`) | 406 | 2048 | 2g | - |
+| `lbs-platform` | 354 | 1059 | 1536m | 768m |
+| `lbs-content` | 414 | 822 | 1536m | 768m |
+| `lbs-ai` | 375 | 543 | 1g | 512m |
+| `lbs-analytics` | 346 | 426 | 1g | 512m |
+| `lbs-project` | 358 | 522 | 1g | 512m |
+| `lbs-publishing` | 368 | 470 | 1g | 512m |
+| `lbs-log-writer` | 369 | 583 | 1g | 512m |
+| `lbs-gateway` | 190 | 287 | 1g | 512m |
+| `lbs-identity` | 403 | 558 | 1g | 512m |
+| `lbs-media`(#1112 の値を維持) | 439 | 919 | 2g | 1g |
+| `lbs-keycloak` | 534 | 901 | 1536m | - |
+| `lbs-penpot-backend` | 1046 | 1057 | 4g | - |
+| `lbs-wordpress` | 31 | 968 | 1g | - |
+| `lbs-mysql` | 432 | 743 | 1g | - |
+| `lbs-rabbitmq` | 135 | 208 | 768m | - |
+
+残りは `reverse-proxy` / `phpmyadmin` 128m、`docker-socket-proxy` / `penpot-valkey` / `penpot-mailcatch` 64m、
+`keycloak-postgres` 256m、`penpot-frontend` / `penpot-mcp` 256m、`penpot-exporter` 768m、`penpot-postgres` 384m、
+`plantuml` 1g、`drawio` 512m(`docker-compose.yml` を参照)。
+
+根拠:
+
+- JVM サービスは、ヒープ上限 +(メタスペース・スレッド・ダイレクトバッファ)の余裕を 0.5 GiB 前後見て `mem_limit` を決めた。
+  `platform` / `content` はピークがヒープ 768m を使う負荷で 1 GiB 前後に達するため 1536m とした。`content` は同じコンテナで
+  Playwright の Chromium も動かす。
+- `wordpress` は WordPress のプロビジョニング中に 455 MiB で 512m に張り付いたため 1g に上げた(ピーク 968 MiB)。
+- `web` は AT 実行中のピークが 1.5g の上限に達したため 2g に上げた。開発モード(`next dev`)の値で、
+  lbs-web の本番ビルド化(別 Issue)で必要なら見直す。ピークが上限と同じ 2048 なのはページキャッシュを含むためで、
+  この実行では `OOMKilled` にはならなかった。
+- 実測の合計ピーク(lbs-* と e2e スタブ)は約 11.1 GiB(11,412 MiB。変更前の約 30 GB に対して)。
+
+### AI 系コンテナの上限と `.env` での上書き
+
+`ollama` / `ollama-cpu` / `comfyui` / `comfyui-cpu` は、ロードするモデルで必要量が大きく変わる(#1396 は VRAM に載らない
+大規模モデルを意図的にシステム RAM で動かす)ため、`.env` で上書きできる(既定値と説明は `.env.example`)。
+
+| 変数 | 既定 |
+|---|---|
+| `OLLAMA_MEM_LIMIT` | 16g |
+| `OLLAMA_CPU_MEM_LIMIT` | 24g |
+| `COMFYUI_MEM_LIMIT` | 16g |
+| `COMFYUI_CPU_MEM_LIMIT` | 16g |
+
+ホストの空きメモリを超える値は付けないこと。
+
+### 測定コマンド
+
+```bash
+# 上限の検査(契約テスト)
+python3 -m unittest scripts.test_compose_memory_limits
+# 負荷時: 受け入れテスト実行中に 5 秒ごとに採る
+docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' | grep '^lbs-'
+# 実行後、OOM で落ちたコンテナが無いこと(出力が空であること)
+for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKilled}}' $c; done | grep true
+```
+
 ## リソース実測
 
 全29コンテナを `docker compose up -d` で起動した状態で `docker stats --no-stream` を実測した値

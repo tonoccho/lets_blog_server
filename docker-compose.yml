@@ -14,6 +14,13 @@ x-logging: &default-logging
     max-size: "50m"
     max-file: "5"
 
+# 全サービスに mem_limit を付ける(#1739)。上限が無いと JVM はホストメモリの1/4を最大ヒープに取り、
+# 負荷時に G1 がヒープを手放さず膨らむ。Spring Boot 10サービスは JAVA_TOOL_OPTIONS の -Xmx を明示し、
+# mem_limit との差を非ヒープ(メタスペース・スレッド・ダイレクトバッファ、content/media は Chromium)の
+# 余裕にする。値と根拠(アイドル・負荷時の実測)は docs/DOCKER_COMPOSE_ARCHITECTURE.md「全コンテナのメモリ上限」。
+# deploy.resources.limits ではなく mem_limit を使う(media の既存方式、#1112)。
+# 新しいサービスを足すときも必ず付けること(scripts/test_compose_memory_limits.py が検査する)。
+# AI 系(ollama / ollama-cpu / comfyui / comfyui-cpu)は .env で上書きできる(.env.example 参照)。
 x-common-service: &common-service
   # restartを個別に上書きする場合は、ダッシュボードのコンテナ状態判定
   # (services/platform/.../ContainerStatusService、issue #725)に影響する点に注意。
@@ -45,6 +52,7 @@ services:
     logging: *default-logging
     image: nginx:alpine
     container_name: lbs-reverse-proxy
+    mem_limit: 128m
     <<: *common-service
     ports:
       - "80:80"
@@ -90,6 +98,7 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile
     container_name: lbs-web
+    mem_limit: 2g
     <<: *common-service
     environment:
       TZ: UTC
@@ -217,8 +226,10 @@ services:
       context: .
       dockerfile: services/ai/Dockerfile
     container_name: lbs-ai
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_ai?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_ai
@@ -264,8 +275,10 @@ services:
       context: .
       dockerfile: services/content/Dockerfile
     container_name: lbs-content
+    mem_limit: 1536m
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx768m
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_content?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_content
@@ -308,8 +321,10 @@ services:
       context: .
       dockerfile: services/analytics/Dockerfile
     container_name: lbs-analytics
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_analytics?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_analytics
@@ -353,6 +368,7 @@ services:
       context: .
       dockerfile: services/platform/Dockerfile
     container_name: lbs-platform
+    mem_limit: 1536m
     <<: [*common-service, *actuator-healthcheck]
     # 他サービスとの通信はlbs-net(x-common-serviceの既定)を維持しつつ、docker-socket-proxyへの
     # 到達性のためだけにdocker-socket-proxy-netへも参加する(issue #701。下のdocker-socket-proxy
@@ -361,6 +377,7 @@ services:
       - lbs-net
       - docker-socket-proxy-net
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx768m
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_platform
@@ -479,8 +496,10 @@ services:
       context: .
       dockerfile: services/project/Dockerfile
     container_name: lbs-project
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_project?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_project
@@ -538,8 +557,10 @@ services:
       context: .
       dockerfile: services/publishing/Dockerfile
     container_name: lbs-publishing
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_publishing?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: lbs_publishing
@@ -593,8 +614,10 @@ services:
       context: .
       dockerfile: services/log-writer/Dockerfile
     container_name: lbs-log-writer
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       <<: *rabbitmq-env
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/lbs_log?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
@@ -625,8 +648,10 @@ services:
       context: .
       dockerfile: services/gateway/Dockerfile
     container_name: lbs-gateway
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       LOG_SERVICE_URI: http://log-writer:8080
       # 画像生成・ダイアグラム・PlantUML/Recharts/Penpotレンダリングのルーティング先(#573)。
@@ -681,8 +706,10 @@ services:
       context: .
       dockerfile: services/identity/Dockerfile
     container_name: lbs-identity
+    mem_limit: 1g
     <<: [*common-service, *actuator-healthcheck]
     environment:
+      JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       # issue #786: 専用スキーマlbs_identityへ切り替えた(ADR-0004)。#561の受入基準にあった
       # 「lbs_identityをFlywayで管理する」が未達のまま、分割前のlets_blogを参照し続けていた。
@@ -714,6 +741,7 @@ services:
     logging: *default-logging
     image: rabbitmq:3-management-alpine
     container_name: lbs-rabbitmq
+    mem_limit: 768m
     <<: *common-service
     environment:
       TZ: UTC
@@ -743,6 +771,7 @@ services:
     # 新しいイメージの同ファイルと突き合わせること。
     image: tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: lbs-docker-socket-proxy
+    mem_limit: 64m
     restart: unless-stopped
     networks:
       - docker-socket-proxy-net
@@ -760,6 +789,7 @@ services:
     logging: *default-logging
     image: mysql:8.0
     container_name: lbs-mysql
+    mem_limit: 1g
     <<: *common-service
     # セッション/グローバルのタイムゾーンをコンテナOSの TZ に頼らず +00:00 に固定する(#1257)。
     # DATETIME DEFAULT/ON UPDATE CURRENT_TIMESTAMP 列がUTCで書かれることを保証する。
@@ -807,6 +837,7 @@ services:
     logging: *default-logging
     image: phpmyadmin/phpmyadmin
     container_name: lbs-phpmyadmin
+    mem_limit: 128m
     <<: *common-service
     environment:
       TZ: UTC
@@ -829,6 +860,7 @@ services:
     logging: *default-logging
     image: postgres:15
     container_name: lbs-keycloak-postgres
+    mem_limit: 256m
     <<: *common-service
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak"]
@@ -848,6 +880,7 @@ services:
     logging: *default-logging
     image: "quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.7.2}"
     container_name: lbs-keycloak
+    mem_limit: 1536m
     <<: *common-service
     command: ["start", "--import-realm"]
     environment:
@@ -899,6 +932,7 @@ services:
     logging: *default-logging
     image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-frontend
+    mem_limit: 256m
     <<: *common-service
     ports:
       - "9001:8080"
@@ -927,6 +961,7 @@ services:
     logging: *default-logging
     image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-backend
+    mem_limit: 4g
     <<: *common-service
     volumes:
       - penpot_assets:/opt/data/assets
@@ -965,12 +1000,14 @@ services:
     logging: *default-logging
     image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-mcp
+    mem_limit: 256m
     <<: *common-service
 
   penpot-exporter:
     logging: *default-logging
     image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
     container_name: lbs-penpot-exporter
+    mem_limit: 768m
     <<: *common-service
     depends_on:
       penpot-valkey:
@@ -986,6 +1023,7 @@ services:
     logging: *default-logging
     image: "postgres:15"
     container_name: lbs-penpot-postgres
+    mem_limit: 384m
     <<: *common-service
     stop_signal: SIGINT
     healthcheck:
@@ -1007,6 +1045,7 @@ services:
     logging: *default-logging
     image: valkey/valkey:8.1
     container_name: lbs-penpot-valkey
+    mem_limit: 64m
     <<: *common-service
     healthcheck:
       test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
@@ -1024,6 +1063,7 @@ services:
     logging: *default-logging
     image: sj26/mailcatcher:latest
     container_name: lbs-penpot-mailcatch
+    mem_limit: 64m
     <<: *common-service
     expose:
       - '1025'
@@ -1037,6 +1077,7 @@ services:
     logging: *default-logging
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: lbs-ollama
+    mem_limit: "${OLLAMA_MEM_LIMIT:-16g}"
     <<: *common-service
     # GPUはオプトイン(issue #1086 / R2)。
     #
@@ -1094,6 +1135,7 @@ services:
     logging: *default-logging
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: lbs-ollama-cpu
+    mem_limit: "${OLLAMA_CPU_MEM_LIMIT:-24g}"
     profiles: ["ollama-cpu"]
     <<: *common-service
     networks:
@@ -1123,6 +1165,7 @@ services:
     logging: *default-logging
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: lbs-ollama-model-init
+    mem_limit: 256m
     restart: "no"
     networks:
       - lbs-net
@@ -1167,6 +1210,7 @@ services:
     logging: *default-logging
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
     container_name: lbs-comfyui
+    mem_limit: "${COMFYUI_MEM_LIMIT:-16g}"
     profiles: ["gpu"]
     <<: *common-service
     volumes:
@@ -1200,6 +1244,7 @@ services:
     logging: *default-logging
     image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cpu}
     container_name: lbs-comfyui-cpu
+    mem_limit: "${COMFYUI_CPU_MEM_LIMIT:-16g}"
     profiles: ["cpu"]
     <<: *common-service
     networks:
@@ -1217,6 +1262,7 @@ services:
     logging: *default-logging
     image: plantuml/plantuml-server:jetty
     container_name: lbs-plantuml
+    mem_limit: 1g
     <<: *common-service
 
   drawio:
@@ -1225,6 +1271,7 @@ services:
     logging: *default-logging
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
+    mem_limit: 512m
     <<: *common-service
 
   # mcp-penpot:
@@ -1252,6 +1299,7 @@ services:
       context: ./infra/wordpress
       dockerfile: Dockerfile
     container_name: lbs-wordpress
+    mem_limit: 1g
     <<: *common-service
     environment:
       TZ: UTC
