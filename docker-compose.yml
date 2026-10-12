@@ -31,13 +31,18 @@ x-common-service: &common-service
   networks:
     - lbs-net
 
+# 猶予 = start_period + interval × retries = 120 + 10×5 = 170 秒(#1757)。
+# リリース検証ログの実測で起動は最長約 75 秒(content, 2026-10-11)。ゼロ構築の同時起動は
+# CPU の取り合いで遅れるため 2 倍強の余裕を取る。start_period 中の失敗は retries に数えられず、
+# healthy になれば即 healthy なので、正常時の起動は遅くならない。
+# 下限は scripts/test_compose_actuator_healthcheck_grace.py が検査する。
 x-actuator-healthcheck: &actuator-healthcheck
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
     interval: 10s
     timeout: 5s
     retries: 5
-    start_period: 30s
+    start_period: 120s
 
 x-rabbitmq-env: &rabbitmq-env
   RABBITMQ_HOST: rabbitmq
