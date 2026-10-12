@@ -96,8 +96,9 @@ DESTROYED_VOLUMES = [
     "generated_images",
     "avatar_images",
 ]
-PRESERVED_VOLUMES = ["ollama_models"]
-# #1746: 同梱の ComfyUI を廃止したので、スクリプトはこれらのボリュームを管理(破棄・保全)しない。
+PRESERVED_VOLUMES = []
+# #1745 / #1746: 同梱の Ollama と ComfyUI を廃止したので、スクリプトはこれらのボリュームを管理(破棄・保全)しない。
+REMOVED_OLLAMA_VOLUMES = ["ollama_models"]
 REMOVED_COMFYUI_VOLUMES = ["comfyui_models", "comfyui_output"]
 VOLUME_PREFIX = "lets_blog_server_"
 
@@ -906,21 +907,18 @@ class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
             with self.subTest(volume=v):
                 self.assertNotIn(v, self.text)
 
-    def test_preserves_ollama_models_and_says_why(self):
-        """#1089: ollama_models は保全対象で、理由が明文化されている。"""
-        self.assertIn(
-            "ollama_models",
-            re.search(r"readonly\s+PRESERVE_VOLUMES=\([^)]*\)", self.text, re.S).group(0),
-            "ollama_models が PRESERVE_VOLUMES に無い",
-        )
-        preserve_block = re.search(
-            r"保全するボリューム。.*?readonly\s+PRESERVE_VOLUMES=\([^)]*\)", self.text, re.S
-        )
-        self.assertIsNotNone(preserve_block, "PRESERVE_VOLUMES 直上のコメント塊が見つからない")
-        self.assertIn(
-            "ollama_models",
-            preserve_block.group(0),
-            "ollama_models を保全する理由のコメントが無い",
+    def test_does_not_mention_the_removed_ollama_models_volume(self):
+        """#1745: 同梱 Ollama を廃止したので、ollama_models は保全対象にも出てこない。"""
+        for v in REMOVED_OLLAMA_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertNotIn(v, self.text)
+
+    def test_preserves_no_volume(self):
+        """#1745 / #1746: 保全するボリュームは無い(モデル重みはどちらも GPU PC 側)。"""
+        self.assertEqual(
+            [],
+            re.search(r"readonly\s+PRESERVE_VOLUMES=\(([^)]*)\)", self.text, re.S).group(1).split(),
+            "保全対象が残っている",
         )
 
     def test_reuses_the_existing_health_wait(self):
@@ -955,18 +953,10 @@ class DryRunChangesNothing(RebuildScriptHarness):
     def test_lists_the_volumes_it_would_preserve(self):
         out = self.out(self.r)
         self.assertIn("保全するボリューム", out)
-        self.assertIn(VOLUME_PREFIX + "ollama_models", out, "ollama_models が保全リストに出ていない")
+        self.assertNotIn(VOLUME_PREFIX + "ollama_models", out, "廃止した ollama_models が保全リストに出ている")
         for v in REMOVED_COMFYUI_VOLUMES:
             self.assertNotIn(VOLUME_PREFIX + v, out, "廃止した %s が一覧に出ている(#1746)" % v)
-
-    def test_does_not_list_ollama_models_as_a_volume_to_destroy(self):
-        out = self.out(self.r)
-        destroy_section = out.split("保全するボリューム", 1)[0]
-        self.assertNotIn(
-            VOLUME_PREFIX + "ollama_models",
-            destroy_section,
-            "ollama_models が破棄するボリュームの一覧に出ている",
-        )
+        self.assertIn("なし", out.split("保全するボリューム", 1)[1].split("作成するプローブ", 1)[0])
 
     def test_lists_the_probes_it_would_create(self):
         out = self.out(self.r)
@@ -1280,27 +1270,13 @@ class VolumesAreDestroyedAndRecreated(RebuildScriptHarness):
                         self.assertNotIn(v, call)
 
     def test_ollama_models_is_never_removed(self):
-        """#1089: ollama_models は volume rm の対象にならない。"""
+        """#1089 / #1745: 廃止した旧 ollama_models が既存環境に残っていても、volume rm の対象にならない。"""
         self.run_script("--yes")
         for call in self.docker_calls():
             if call.startswith("volume\trm"):
                 with self.subTest(call=call):
                     self.assertNotIn("ollama_models", call)
 
-    def test_ollama_models_created_at_is_unchanged(self):
-        """#1089: ollama_models の CreatedAt が実行後も変わらないことを検証する。"""
-        r = self.run_script("--yes")
-        self.assertEqual(0, r.returncode, self.out(r))
-        self.assertEqual(
-            "2020-01-01T00:00:00Z",
-            self.volume_created_at("ollama_models"),
-            "保全対象の ollama_models が作り直されている",
-        )
-        self.assertRegex(
-            self.out(r),
-            r"OK:.*ollama_models.*保全",
-            "ollama_models の保全検証の OK ログが出ていない",
-        )
 
     def test_a_volume_that_cannot_be_destroyed_is_fatal_at_the_teardown(self):
         """手順1: `docker volume rm` が失敗したら、そこで名指しして止まる。
@@ -1425,9 +1401,15 @@ class PostBuildVerification(RebuildScriptHarness):
 
     SEEDED = "llm_ollama_base_url"
 
-    def test_accepts_the_rows_connection_defaults_seeder_writes_at_startup(self):
-        """#1701: platform-service が起動時に書く接続先の既定値(Ollama のみ。ComfyUI は #1746 で書かない)は残骸ではない。"""
+    def test_accepts_no_row_because_connection_defaults_seeder_writes_none(self):
+        """#1701 / #1745 / #1746: 起動時に書く接続先の既定値は無いので、system_settings の行は 1 行も許されない。"""
         r = self.run_script("--yes", FAKE_PLATFORM_SETTINGS=self.SEEDED)
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, "既定値を書かない時代に残った接続先の行を許した:\n" + out)
+        self.assertIn("lbs_platform", out)
+
+    def test_succeeds_when_system_settings_is_empty(self):
+        r = self.run_script("--yes")
         self.assertEqual(0, r.returncode, self.out(r))
 
     def test_fails_when_system_settings_has_a_key_the_seeder_does_not_write(self):
@@ -1446,7 +1428,7 @@ class PostBuildVerification(RebuildScriptHarness):
         constants = re.findall(r"AppSettingService\.(\w+)|\b([A-Z_]+_BASE_URL)\b", seeder)
         names = {a or b for a, b in constants if (a or b).endswith("_BASE_URL") and not (a or b).startswith("DEFAULT_")}
         seeded = {re.search(r'%s\s*=\s*"([^"]+)"' % n, settings).group(1) for n in names}
-        self.assertEqual({"llm_ollama_base_url"}, seeded)  # ComfyUI は既定値を書かない(#1746)
+        self.assertEqual(set(), seeded)  # Ollama は #1745、ComfyUI は #1746 で既定値を書かない
         for script in ("rebuild-acceptance-env.sh", "reset-acceptance-env.sh"):
             with self.subTest(script=script):
                 with open(os.path.join(REPO_ROOT, "scripts", script), encoding="utf-8") as f:
@@ -1653,7 +1635,7 @@ class SharedHostProxyIsReapplied(RebuildScriptHarness):
 class PointsLlmEndpointsAtStubsAfterTheRebuild(RebuildScriptHarness):
     """#1703: ゼロ構築の後、受け入れテストの開始前に、LLM / ComfyUI の接続先をスタブへ向ける。
 
-    ゼロ構築後は `ConnectionDefaultsSeeder` が本番の既定値(ollama / comfyui)を書く。
+    ゼロ構築後は `ConnectionDefaultsSeeder` が本番の既定値(comfyui だけ。ollama は #1745 で書かない)を書く。
     `e2e-clear-llm-db-overrides.sh --yes` が呼ばれないと、AI 系シナリオは実サービスへ出て落ちる。
     """
 
@@ -1905,13 +1887,13 @@ class LeftoverGpuProfileContainerDoesNotBlockTeardown(RebuildScriptHarness):
             "破棄・再作成されていない(#1293):\n" + self.out_text,
         )
 
-    def test_protected_volume_is_not_destroyed(self):
-        """受入基準: 保全対象(ollama_models)は、profile 付きコンテナの撤去に巻き込まれない。"""
-        self.assertEqual(
-            "2020-01-01T00:00:00Z",
-            self.volume_created_at("ollama_models"),
-            "保全対象の ollama_models まで作り直されている:\n" + self.out_text,
-        )
+    def test_removed_model_volumes_are_not_touched(self):
+        """#1745 / #1746: 旧 ollama_models などは管理対象外で、profile 付きコンテナの撤去でも消さない。"""
+        for call in self.docker_calls():
+            if call.startswith("volume\trm"):
+                with self.subTest(call=call):
+                    for v in REMOVED_OLLAMA_VOLUMES + REMOVED_COMFYUI_VOLUMES:
+                        self.assertNotIn(v, call)
 
 
 class VolumeDestructionFailureNamesTheReferencingContainer(RebuildScriptHarness):

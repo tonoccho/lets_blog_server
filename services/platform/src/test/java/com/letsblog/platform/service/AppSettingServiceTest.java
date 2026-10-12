@@ -445,6 +445,22 @@ class AppSettingServiceTest {
     }
 
     @Test
+    void システム設定にGPU_PCのLAN_URLを保存でき_OLLAMAの接続先として返る_issue1745() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+        org.mockito.ArgumentCaptor<SystemSetting> saved = org.mockito.ArgumentCaptor.forClass(SystemSetting.class);
+
+        service.updateSettings(Map.of("llm_ollama_base_url", "http://192.168.1.71:11434/v1"));
+
+        verify(repository).save(saved.capture());
+        assertEquals("llm_ollama_base_url", saved.getValue().getSettingKey());
+        assertEquals("http://192.168.1.71:11434/v1",
+                credentialCipher.decrypt(saved.getValue().getSettingValueEncrypted()));
+        when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.of(saved.getValue()));
+        assertEquals("http://192.168.1.71:11434/v1", service.baseUrlFor(AiProvider.OLLAMA));
+    }
+
+    @Test
     void updateSettings_llm_ollama_modelは形式チェックせず保存する() {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());

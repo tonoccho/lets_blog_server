@@ -45,7 +45,7 @@ SCRIPT = os.path.join(REPO_ROOT, "scripts", "connect-internet-egress.sh")
 #   - lbs-media: ChatGptImageClient(画像生成API)
 #   - lbs-platform: api.anthropic.com / api.openai.com
 #   - lbs-publishing: 記事プレビュー取得・WordPress SSH操作(管理対象サイトが外部ホストの場合)
-#   - lbs-wordpress / lbs-ollama: 既存(wordpress.org / registry.ollama.ai)
+#   - lbs-wordpress: 既存(wordpress.org)。同梱 Ollama は廃止した(#1745)
 EXPECTED_TARGET_CONTAINERS = {
     "lbs-ai",
     "lbs-analytics",
@@ -54,7 +54,6 @@ EXPECTED_TARGET_CONTAINERS = {
     "lbs-platform",
     "lbs-publishing",
     "lbs-wordpress",
-    "lbs-ollama",
 }
 
 FAKE_DOCKER = """#!/bin/bash

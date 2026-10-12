@@ -103,19 +103,15 @@ readonly DESTROY_VOLUMES=(
 
 # 保全するボリューム。
 #
-#   ollama_models  — Ollama のモデル重み(issue #1086)。約4.7GBあり、再取得に長時間かかる。
-#                    受け入れテストの LLM 呼び出しは llm-stub が受けるため(#1086 R7)、
-#                    テスト対象の状態でもない。実行をまたいで保持する
-#                    (CreatedAt が変わらないことを検証する)。
-#
-# ComfyUI は同梱をやめた(GPU PC へ URL で接続する、#1746)ので、そのボリューム(旧 ComfyUI 用の
-# 2つ)はここで管理しない。既存環境に残っている場合の手動削除は docs/EXTERNAL_COMFYUI.md の
-# 移行手順を参照(自動では消さない)。
+#   (なし)         — Ollama(#1745)も ComfyUI(#1746)も同梱をやめた(GPU PC へ URL で接続する)ので、
+#                    旧 Ollama 用・旧 ComfyUI 用のモデル重みのボリュームは
+#                    ここで管理しない。既存環境に残っている場合の手動削除は docs/EXTERNAL_OLLAMA.md と
+#                    docs/EXTERNAL_COMFYUI.md の移行手順を参照(自動では消さない)。
 #
 # mysql_data 内の *_test スキーマ(ホストからの ./gradlew test 用)は mysql_data ごと
 # 巻き添えで消えるが、構築時に infra/mysql/init/02-create-test-schemas.sh が本来の経路で
 # 作り直す。作り直されたことは手順4で確認する。
-readonly PRESERVE_VOLUMES=(ollama_models)
+readonly PRESERVE_VOLUMES=()
 
 readonly MYSQL_CONTAINER="lbs-mysql"
 readonly KEYCLOAK_CONTAINER="lbs-keycloak"
@@ -266,6 +262,9 @@ for v in "${PRESERVE_VOLUMES[@]}"; do
   created="$(volume_created_at "${VOLUME_PREFIX}${v}")"
   log "  - ${VOLUME_PREFIX}${v}${created:+ (CreatedAt ${created})}  ← モデル重み。再取得に長時間かかる"
 done
+if [ "${#PRESERVE_VOLUMES[@]}" -eq 0 ]; then
+  log "  - なし(同梱の Ollama / ComfyUI を廃止したため。#1745 / #1746)"
+fi
 
 step "作成するプローブ(撤去が成立したことの証拠)"
 if [ "$STACK_UP" -eq 1 ]; then
@@ -586,9 +585,13 @@ done
 # ゼロ構築の直後に platform-service が起動して書く行は残骸ではないので数えない(#1701)。
 # 表まるごとではなくキーで除外する: 利用者が管理画面で保存した設定の残りは見逃さない。
 # シーダーのキーを変えたら、ここも変えること(test_rebuild_acceptance_env.py が突き合わせる)。
-SEEDED_SETTING_KEYS=(llm_ollama_base_url)
-seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
-seeded_in_list="${seeded_in_list%,}"
+SEEDED_SETTING_KEYS=()
+# 既定値を書く接続先は無い(Ollama は #1745、ComfyUI は #1746 で同梱をやめた)。キーが増えたときだけ除外する。
+seeded_in_list=""
+if [ "${#SEEDED_SETTING_KEYS[@]}" -gt 0 ]; then
+  seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
+  seeded_in_list="${seeded_in_list%,}"
+fi
 schema_dirty=0
 for s in "${SERVICE_SCHEMAS[@]}"; do
   tables="$(mysql_q "SELECT table_name FROM information_schema.tables
@@ -598,7 +601,7 @@ for s in "${SERVICE_SCHEMAS[@]}"; do
   for t in $tables; do
     where=""
     if [ "$s" = "lbs_platform" ] && [ "$t" = "system_settings" ]; then
-      where=" WHERE setting_key NOT IN ($seeded_in_list)"
+      [ -n "$seeded_in_list" ] && where=" WHERE setting_key NOT IN ($seeded_in_list)"
     fi
     c="$(mysql_q "SELECT COUNT(*) FROM \`$s\`.\`$t\`${where};" || echo 0)"
     # マイグレーションが入れる件数(MIGRATION_SEEDED_TABLES)を超えた分だけを残骸として数える(#1738)。
@@ -723,9 +726,9 @@ fi
 
 # ---------------------------------------------------------------- 4+. スタブの接続先(#1703)
 #
-# ゼロ構築後は ConnectionDefaultsSeeder が Ollama の本番の既定値(ollama)を DB へ書く。ComfyUI は
-# 既定値を書かず未設定になる(#1746)。#1567 以降 接続先は DB だけで決まるので、スタブへ向けないと
-# AI 系シナリオは起動していない実サービス(または未設定)へ出て落ちる。
+# ゼロ構築後は ConnectionDefaultsSeeder が書く既定値は無い(Ollama は #1745、ComfyUI は #1746 で同梱をやめ、
+# どちらも未設定になる)。#1567 以降 接続先は DB だけで決まるので、スタブへ向けないと
+# AI 系シナリオは未設定のまま(または実サービス)へ出て落ちる。
 # 検証(4/5)が通った後、受け入れテストが始まる前にここで向ける。
 step "4+ スタブの接続先(LLM / ComfyUI)を DB へ投入します(e2e-clear-llm-db-overrides.sh)"
 if ! "$SCRIPT_DIR/e2e-clear-llm-db-overrides.sh" --yes; then

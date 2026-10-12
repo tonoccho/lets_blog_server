@@ -5,8 +5,9 @@
 
 #1567 以降、Ollama / ComfyUI の接続先は DB(`lbs_platform.system_settings` の
 `llm_ollama_base_url` / `comfyui_base_url`)だけで決まる。ゼロ構築後は `ConnectionDefaultsSeeder` が
-本番用の既定値(`http://ollama:11434/v1` / `http://comfyui:8188`)を書くため、
-`scripts/e2e-clear-llm-db-overrides.sh --yes` でスタブの URL へ入れ替えないと、AI 系シナリオは
+ComfyUI の本番用の既定値(`http://comfyui:8188`)を書き(Ollama は #1745 で既定値を書かず未設定になる)、
+スタブの URL へは
+`scripts/e2e-clear-llm-db-overrides.sh --yes` で入れ替えないと、AI 系シナリオは
 起動していない実サービスを呼んで落ちる(2026-10-09 のリリース検証)。
 
 ## 判定

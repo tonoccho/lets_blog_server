@@ -43,8 +43,6 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
-| `ollama` | 11434 | 非公開(platform/ai経由) | ローカルLLM(#1086)。GPUは**オプトイン**(下記)。`platform` が DB(`system_settings.llm_ollama_base_url`。無ければ起動時に `http://ollama:11434/v1` を書き込む)で接続先を解決し、ai-service がその設定で呼ぶ(環境変数 `LLM_OLLAMA_BASE_URL` は廃止した、#1567)。reverse-proxy は中継しない |
-| `ollama-model-init` | — | — | 既定モデルを起動時に取得するワンショット(#1086)。`restart: "no"` で終了コード0なら `ContainerStatusService`(#725)が「正常に完了したジョブ」として扱う |
 | `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
@@ -104,121 +102,22 @@ healthy を待つ。この循環のため、空の MySQL ボリュームから�
 (`lets_blog_server_mysql_data` ボリュームを削除し、クリーンな状態から
 `docker compose up -d` して全サービスがhealthyになることを確認する)。
 
-## GPU のオプトイン(#1086)
+## Ollama は同梱しない(#1745)
 
-`ollama` は GPU を**オプトインで**使う。仕組みは compose の1行だけである。
+Ollama のコンテナ・モデル取得用のワンショットコンテナ・モデル保存用ボリュームは、すべて廃止した。
+Ollama は GPU 付きの別 PC で動かし、Let's Blog は管理画面に設定した URL(例: `http://192.168.1.71:11434/v1`)
+へ OpenAI 互換の `/chat/completions` で接続する。GPU PC での用意(待ち受け・LAN 内限定の公開・モデル取得・推奨設定)と
+既存環境の移行は [EXTERNAL_OLLAMA.md](EXTERNAL_OLLAMA.md) を参照。
 
-```yaml
-  ollama:
-    runtime: ${GPU_RUNTIME:-}
-```
+接続先は DB(`system_settings.llm_ollama_base_url`)とプロジェクト単位の上書きだけで決まり、初回起動時にも
+既定値は書き込まれない(未設定のまま使うと「Ollama の接続先が設定されていません」というエラーになる)。
 
-- 既定(空)ならDockerの既定ランタイムで起動する。**NVIDIA ランタイムを持たないホストでも
-  `docker compose up -d` は成功する。**
-- GPU を使うホストは `.env` に `GPU_RUNTIME=nvidia` を書く。コマンドライン引数は不要で、
-  `docker compose up -d` のままGPUが使われる。
+## ComfyUI も同梱しない(#1746)
 
-無条件の `deploy.resources.reservations.devices` を写さないのは、それだと
-NVIDIA ランタイムのないホストで `could not select device driver "nvidia"` になり、サービス
-無指定の `docker compose up -d` がそこで**中断する**ためである(#1066 で、かつて同梱していた
-ComfyUI のコンテナで実際に起きた。ComfyUI は #1746 で同梱をやめた)。#1086 で実測した
-代替案の結果:
+ComfyUI も同様に、コンテナ・モデル・出力用のボリュームをすべて廃止した。GPU PC で動かす ComfyUI へ URL で接続する構成で、
+用意の手順と既存環境の移行は [docs/EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) を参照。
+接続先(`system_settings.comfyui_base_url`)にも既定値は書き込まれない。
 
-| 書き方 | 未搭載ホストでの挙動 |
-| --- | --- |
-| `count: ${N:-0}` | **失敗**。count が 0 でもデバイスドライバの選択は行われる |
-| `gpus: ${X:-}` | **失敗**。`services.ollama.gpus value must be 'all'` で検証に落ちる |
-| `runtime: ${GPU_RUNTIME:-}` | 成功。未指定は「Dockerの既定ランタイム」に倒れる |
-
-ComfyUI は同梱しない(#1746)。GPU PC で動かす ComfyUI へ URL で接続する構成で、用意の手順と
-既存環境の移行は [docs/EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) に書いた。
-
-## Ollama を CPU で動かす(大規模モデル)(#1396)
-
-`GPU_RUNTIME` は「GPU が無くても起動を失敗させない」ためだけでなく、**VRAM に載らない大規模
-モデルを、遅くてもシステム RAM で動かす**ための意図的な選択肢でもある。
-
-| 選択 | `.env` | 向く用途 |
-| --- | --- | --- |
-| 速度優先(既定) | `GPU_RUNTIME=nvidia` | 7B クラスを VRAM で速く動かす。ComfyUI と GPU を共有する |
-| 大規模モデル優先 | `GPU_RUNTIME=`(空) | VRAM(16GB 等)に載らないモデルを、システム RAM(この開発機は 125GiB)で動かす |
-
-どちらも `docker compose up -d` のままで、追加の `-f` や引数は要らない。`ollama` の compose 定義は
-1行(`runtime: ${GPU_RUNTIME:-}`)のままで、既定(`nvidia`)の挙動は変わらない。
-
-### 手順
-
-1. `.env` の `GPU_RUNTIME=` を空にし、`LLM_OLLAMA_MODEL` を大きなモデルへ変える(例: `qwen2.5:72b-instruct`)。
-2. `docker compose up -d`。`ollama` は runtime が変わるので作り直され、`ollama-model-init` が
-   新しいモデルを取得する。`ollama-model-init` は `up -d` のたびに再実行されるので、通常は
-   `--force-recreate ollama-model-init` は要らない。取得済みのまま作り直したいときだけ
-   `docker compose up -d --force-recreate ollama-model-init` を使う。
-3. 取得の進捗は `docker logs -f lbs-ollama-model-init`。
-4. 実行デバイスの確認: `docker exec lbs-ollama ollama ps` の `PROCESSOR` 列が `100% CPU` なら CPU 実行。
-
-### 所要時間とディスクの目安
-
-- 取得の**所要時間**は回線速度で決まる(目安: 100Mbps で 1GB あたり約 1.5 分)。既定の
-  `qwen2.5:7b-instruct` は約 4.7GB で数分、72B 級の 4bit 量子化は約 40GB 台で 1 時間前後を見込む。
-- **ディスク**はモデルサイズ分が `ollama_models` ボリュームに増える。モデルを切り替えても古い
-  モデルは消えないので、不要なら `docker exec lbs-ollama ollama rm <model>` で消す。
-- CPU 実行の**メモリ**はモデルサイズ + KV キャッシュがシステム RAM に載ること。
-
-### GPU 前提の既定値の読み替え
-
-`docker-compose.yml` の既定値は「単一 GPU を ComfyUI(GPU PC などで動かすもの)と共有する」前提で決めてある。CPU では制約が
-VRAM ではなくシステム RAM と帯域に変わる。
-
-| 変数 | GPU での意味(既定) | CPU で大規模モデルを動かすとき |
-| --- | --- | --- |
-| `OLLAMA_KEEP_ALIVE`(5m) | VRAM を ComfyUI に空けるため短くする | RAM は ComfyUI と取り合わないので長く(例: `30m`)して再ロードを避ける。大規模モデルは読み込み自体が遅い |
-| `OLLAMA_MAX_LOADED_MODELS`(1) | VRAM の取り合いを避ける | 大規模モデルは RAM を大きく占めるので 1 のままがよい |
-| `OLLAMA_CONTEXT_LENGTH`(8192) | 伸ばすほど KV キャッシュが VRAM を食う | RAM に余裕があれば伸ばせるが、伸ばすほど生成は遅くなる |
-
-### 応答遅延とタイムアウト
-
-CPU 実行の応答は GPU より桁違いに遅く(大規模モデルでは 1 秒あたり数トークン以下)、
-`LLM_REQUEST_TIMEOUT_SECONDS`(既定 120)では足りずに失敗しうる。`.env` で
-`LLM_REQUEST_TIMEOUT_SECONDS=600` など生成が終わる長さへ伸ばす。
-
-## Ollama のモデル取得と VRAM(#1086)
-
-モデルの初回取得は `ollama-model-init` が行う。手動の `ollama pull` は要らない。
-
-```bash
-# 取得の進捗(初回は数分。qwen2.5:7b-instruct は約4.7GB)
-docker logs -f lbs-ollama-model-init
-# 取得済みモデルの一覧
-docker exec lbs-ollama ollama list
-```
-
-`docker compose up -d` は、正常終了済み(`exited` / `ExitCode=0` / `restart: "no"`)の
-`ollama-model-init` を**毎回再実行する**(#1094 で実測: 実行前後で `FinishedAt` が
-`2026-09-25T10:17:08Z` → `2026-09-25T22:14:11Z` に更新され、`Starting` / `Started` が出力された)。
-`ollama pull` は冪等で、取得済みのモデルには即座に `success` を返し、モデルは変わらない。
-ただし `up -d` のたびに `ollama pull` が走るため、**起動のたびにレジストリへのネットワーク
-アクセスが発生する**。オフライン環境や細い回線ではこの点に注意する。
-
-そのため、モデルを消してしまった場合も、`LLM_OLLAMA_MODEL` を変えた場合も、追加の操作は
-要らない。`.env` を変えて `docker compose up -d` するだけで再取得される。
-`--force-recreate ollama-model-init` は不要である。
-
-```bash
-docker compose up -d
-```
-
-取得の完了前に AI 機能を叩くと、ai-service が Ollama の 404 を
-「モデル「…」がまだ利用できません。…取得の進捗は docker logs -f lbs-ollama-model-init で
-確認できます。」に変換して返す(`LlmClient`)。生の 404 は表示しない。
-
-VRAM は ComfyUI と共有する(単一GPU前提。ComfyUI を別の GPU PC で動かすなら共有しない)。ComfyUI は生成後に VRAM を解放するが
-(`ComfyUiClient#clearMemory`)、Ollama は既定でモデルを常駐させ続けるため、次の3つで抑える。
-
-| 変数 | 既定 | 意味 |
-| --- | --- | --- |
-| `OLLAMA_KEEP_ALIVE` | `5m` | 生成後にモデルをVRAMへ残す時間。**ComfyUI 側で VRAM 不足が出るなら `30s` へ下げる** |
-| `OLLAMA_MAX_LOADED_MODELS` | `1`(固定) | 同時にロードするモデル数 |
-| `OLLAMA_CONTEXT_LENGTH` | `8192` | コンテキスト長。Ollama の既定は小さく、超過分は**黙って切り捨てられる**。伸ばすほど KV キャッシュが VRAM を食う |
 
 ## 周辺ツールのオプトイン起動と縮退起動(#1741)
 
@@ -255,7 +154,7 @@ profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの�
 
 ### 将来の縮退起動
 
-ComfyUI は同梱しない(#1746)ので、このホストの GPU 要件は無い(同梱の Ollama を GPU で動かす場合を除く)。
+Ollama(#1745)も ComfyUI(#1746)も同梱しないので、このホストの GPU 要件は無い。
 Penpot 一式(6サービス)は #1752 で削除するので profile 化しない。
 
 ## docker-socket-proxy の権限(#1587)
@@ -444,18 +343,6 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
   lbs-web の本番ビルド化(別 Issue)で必要なら見直す。ピークが上限と同じ 2048 なのはページキャッシュを含むためで、
   この実行では `OOMKilled` にはならなかった。
 - 実測の合計ピーク(lbs-* と e2e スタブ)は約 11.1 GiB(11,412 MiB。変更前の約 30 GB に対して)。
-
-### AI 系コンテナの上限と `.env` での上書き
-
-`ollama` / `ollama-cpu` は、ロードするモデルで必要量が大きく変わる(#1396 は VRAM に載らない
-大規模モデルを意図的にシステム RAM で動かす)ため、`.env` で上書きできる(既定値と説明は `.env.example`)。
-
-| 変数 | 既定 |
-|---|---|
-| `OLLAMA_MEM_LIMIT` | 16g |
-| `OLLAMA_CPU_MEM_LIMIT` | 24g |
-
-ホストの空きメモリを超える値は付けないこと。
 
 ### 測定コマンド
 

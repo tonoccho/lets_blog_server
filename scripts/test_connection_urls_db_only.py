@@ -16,7 +16,7 @@ Playwright(Web UI)からは観測できない。`CLAUDE.md` → **Test-First Imp
 
 接続先は プロジェクト設定 → システム設定(DB) だけで決まり、環境変数では決まらない。
 したがって環境変数を渡す口(compose の `environment`、`.env.example`、手順書)も残さない。
-`ollama-model-init` が使うモデル名 `LLM_OLLAMA_MODEL` は接続先ではないので残す。
+既定モデル名 `LLM_OLLAMA_MODEL` は接続先ではないので残す(同梱 Ollama は #1745 で廃止)。
 受け入れテスト環境はスタブの URL を DB に投入する(DB の値は暗号化されるため SQL 直書きではなく
 `scripts/e2e_encrypt_setting.py` で `CredentialCipher` と同じ形式にする)。
 """
@@ -59,9 +59,8 @@ class ComposeHasNoConnectionUrlEnv(base.ComposeConfigHarness):
                 for var in REMOVED:
                     self.assertNotIn(var, env, "%s の environment に %s が残っている" % (name, var))
 
-    def test_model_name_variable_is_kept_for_ollama_model_init(self):
-        config = self.full_config(extra_env={"COMPOSE_PROFILES": "ollama"})["services"]
-        self.assertIn("LLM_OLLAMA_MODEL", config["ollama-model-init"]["environment"])
+    def test_model_name_variable_is_kept_for_platform(self):
+        config = self.full_config()["services"]
         self.assertIn("LLM_OLLAMA_MODEL", config["platform"]["environment"])
 
     def test_stub_overlay_defines_neither_variable(self):

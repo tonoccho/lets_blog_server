@@ -13,20 +13,20 @@ import java.util.Optional;
 
 /**
  * Ollama / ComfyUIの接続先は環境変数から読まず、DB(system_settings)だけで解決する(issue #1567)。
- * 起動時に、DBに値が無い場合に限り、コード内の既定値を書き込む。既にある値(利用者が設定した値・
+ * 起動時に、DBに値が無い場合に限り、コード内の既定値を書き込む仕組みである。既にある値(利用者が設定した値・
  * 受け入れテスト環境が投入したスタブのURL)は上書きしない。値は他のシステム設定と同じく
  * {@link CredentialCipher}で暗号化して保存する(暗号化値はFlywayのSQLでは作れないためJava側で書く)。
  *
- * <p>書き込むのはOllamaの接続先だけである。ComfyUIは同梱せず、GPU PCなど外部のサーバーへURLで接続する
- * ため、既定の接続先は無く、管理画面で設定されるまで「未設定」のままにする(issue #1746)。
- * 既存のDBにある{@code comfyui_base_url}(旧既定値の{@code http://comfyui:8188}を含む)は書き換えない。
+ * <p>現在、書き込む既定値は<b>無い</b>。OllamaもComfyUIも同梱せず、GPU PCなど外部のサーバーへURLで接続する
+ * ため、既定の接続先は無く、管理画面で設定されるまで「未設定」のままにする(Ollamaは issue #1745、ComfyUIは issue #1746)。
+ * 未設定のまま使うと、ai-service / media-service が「接続先が設定されていません」と返す。
+ * 既存のDBにある{@code llm_ollama_base_url}(旧既定値の{@code http://ollama:11434/v1}を含む)と
+ * {@code comfyui_base_url}(旧既定値の{@code http://comfyui:8188}を含む)は書き換えない(利用者が移行手順で直す)。
  *
- * <p>利用者が管理画面で値を消す(行の削除)と、その時点から次の起動までは「未設定」になる。
+ * <p>利用者が管理画面で値を消す(行の削除)と、その値は「未設定」になる。
  */
 @Component
 public class ConnectionDefaultsSeeder implements ApplicationRunner {
-
-    static final String DEFAULT_OLLAMA_BASE_URL = "http://ollama:11434/v1";
 
     private final SystemSettingRepository repository;
     private final CredentialCipher credentialCipher;
@@ -38,8 +38,8 @@ public class ConnectionDefaultsSeeder implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        // 既定値を持つ接続先は無い(上のJavadoc)。持たせるときだけ、ここへキーと値を足す。
         Map<String, String> defaults = new LinkedHashMap<>();
-        defaults.put(AppSettingService.LLM_OLLAMA_BASE_URL, DEFAULT_OLLAMA_BASE_URL);
         defaults.forEach(this::seedIfAbsent);
     }
 

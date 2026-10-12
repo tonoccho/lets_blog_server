@@ -74,7 +74,8 @@ TARGET_SERVICES="$REQUIRED_SERVICES"
 # docker-compose.yml で `restart: "no"` のサービスは全てここに載せること
 # (scripts/test_wait_all_one_shot.py が突き合わせて、載っていなければ落とす)。
 # 載せ忘れると --all が定常状態の exited を永久に待ち、必ずタイムアウトする。
-ONE_SHOT_JOBS="ollama-model-init"
+# 現在 `restart: "no"` のサービスは無いので空(判定の仕組みは将来の再導入のために残す)。
+ONE_SHOT_JOBS=""
 WAIT_ALL=0
 QUIET=0
 HTTP_ONLY=0
@@ -264,7 +265,7 @@ for service in targets:
     exit_code = c.get("ExitCode", 0)
 
     # 一回限りのジョブ(ワンショットコンテナ)は正常終了(exited, code 0)がゴール。
-    # 対象は bash 側の ONE_SHOT_JOBS(現在は ollama-model-init。issue #1439)。
+    # 対象は bash 側の ONE_SHOT_JOBS(現在は空。同梱 Ollama の ollama-model-init を #1745 で廃止した。issue #1439)。
     if service in ONE_SHOT_JOBS:
         if not (state == "exited" and exit_code == 0):
             pending.append(f"{service} (state={state}, exitCode={exit_code})")

@@ -980,37 +980,29 @@ Model qwen2.5:7b-instruct not found
 
 **Solution:**
 
-The default model (`LLM_OLLAMA_MODEL`, `qwen2.5:7b-instruct` unless changed in `.env`) is pulled
-automatically at startup by the `ollama-model-init` service, so a manual `ollama pull` is normally
-not needed. A manual pull is for a model other than the default, or for recovery.
+Ollama is not bundled: it runs on a separate GPU PC and Let's Blog connects to it by URL
+(see [External Ollama](EXTERNAL_OLLAMA.md)). Models are pulled **on the GPU PC**.
 
-1. **Check whether the automatic pull finished or failed**
+1. **Check which models are present (on the GPU PC)**
    ```bash
-   docker compose logs ollama-model-init
-   ```
-   The first start can take several minutes. If the pull failed, re-run it with
-   `docker compose up -d --force-recreate ollama-model-init`.
-
-2. **Check which models are present**
-   ```bash
-   docker exec lbs-ollama ollama list
+   ollama list
    ```
 
-3. **If the model is still missing (non-default model, or recovery), pull it manually**
+2. **If the model is missing, pull it on the GPU PC**
    ```bash
-   docker exec lbs-ollama ollama pull qwen2.5:7b-instruct
+   ollama pull qwen2.5:7b-instruct
    ```
 
    This may take several minutes depending on internet speed and model size.
-   Make sure `LLM_OLLAMA_MODEL` in `.env` matches the model you pulled.
+   Make sure the model name configured in Let's Blog matches the model you pulled.
 
-4. **Verify after pull**
+3. **Verify after pull**
    ```bash
-   docker exec lbs-ollama ollama list
+   ollama list
    # Should show qwen2.5:7b-instruct
    ```
 
-5. **Restart the LLM-calling service (`platform`)**
+4. **Restart the LLM-calling service (`platform`)**
    ```bash
    docker compose restart platform
    ```
@@ -1029,7 +1021,7 @@ not needed. A manual pull is for a model other than the default, or for recovery
 
 1. **Check model size**
    ```bash
-   docker exec lbs-ollama ollama list
+   ollama list   # run on the GPU PC
    ```
    
    Larger models (14b, 32b) are slower:
@@ -1039,15 +1031,14 @@ not needed. A manual pull is for a model other than the default, or for recovery
    
    Use smaller model if too slow.
 
-2. **Check GPU usage**
+2. **Check GPU usage (on the GPU PC)**
    ```bash
-   docker stats lbs-ollama
+   nvidia-smi
+   ollama ps
    ```
-   
-   If GPU not showing ~90%+ usage, GPU might not be properly configured.
-   (This applies only with `GPU_RUNTIME=nvidia`. With `GPU_RUNTIME=` (empty) Ollama runs on CPU;
-   `docker exec lbs-ollama ollama ps` shows `100% CPU` in that case. See
-   [Docker Compose Architecture](DOCKER_COMPOSE_ARCHITECTURE.md).)
+
+   If the GPU is not showing ~90%+ usage while generating, Ollama may be running on CPU.
+   See [External Ollama](EXTERNAL_OLLAMA.md).
 
 3. **Check system resources**
    - Running other processes?
@@ -1156,11 +1147,10 @@ Model running on CPU
 
 5. **Check container GPU access**
    ```bash
-   docker exec lbs-ollama nvidia-smi
+   nvidia-smi
    ```
    
-   Note: `docker exec lbs-ollama nvidia-smi` only applies with `GPU_RUNTIME=nvidia` (the default);
-   with `GPU_RUNTIME=` (empty) Ollama runs on CPU and has no GPU to show.
+   (Ollama and ComfyUI run on the GPU PC, not in this stack; run this on the GPU PC.)
 
 6. **Restart services after GPU is available**
    ```bash

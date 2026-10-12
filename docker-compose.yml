@@ -20,7 +20,6 @@ x-logging: &default-logging
 # 余裕にする。値と根拠(アイドル・負荷時の実測)は docs/DOCKER_COMPOSE_ARCHITECTURE.md「全コンテナのメモリ上限」。
 # deploy.resources.limits ではなく mem_limit を使う(media の既存方式、#1112)。
 # 新しいサービスを足すときも必ず付けること(scripts/test_compose_memory_limits.py が検査する)。
-# AI 系(ollama / ollama-cpu)は .env で上書きできる(.env.example 参照)。
 x-common-service: &common-service
   # restartを個別に上書きする場合は、ダッシュボードのコンテナ状態判定
   # (services/platform/.../ContainerStatusService、issue #725)に影響する点に注意。
@@ -398,14 +397,14 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_AVAILABLE_MODELS: ${LLM_AVAILABLE_MODELS:-gpt-4o-mini,gpt-4o,gpt-4.1-mini}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
-      # issue #1086: 既定プロバイダはローカルのOllama(外部LLMのAPIキーが無くてもAI執筆支援が動く)。
+      # issue #1086: 既定プロバイダはOllama(外部LLMのAPIキーが無くてもAI執筆支援が動く)。Ollamaは同梱せず、
+      # GPU PC で動かして URL で接続する(#1745。docs/EXTERNAL_OLLAMA.md)。
       # DB(system_settings)に llm_provider があればそちらが優先される。
       LLM_PROVIDER: ${LLM_PROVIDER:-OLLAMA}
       LLM_CLAUDE_MODEL: ${LLM_CLAUDE_MODEL:-claude-3-5-haiku-20241022}
       # OLLAMA専用の既定モデル(issue #1086)。Ollama / ComfyUI の接続先は環境変数では渡さない(issue #1567):
-      # プロジェクト設定かシステム設定(DB)だけで決まる。Ollama は DB に無ければ起動時に既定値
-      # (http://ollama:11434/v1)が書き込まれる。ComfyUI は同梱しない(GPU PC などの外部の URL を
-      # 管理画面で設定する。既定値は無い、issue #1746)。LLM_OLLAMA_BASE_URL / COMFYUI_BASE_URL は廃止した。
+      # プロジェクト設定かシステム設定(DB)だけで決まる。Ollama も ComfyUI も同梱せず、既定値は書き込まない
+      # (GPU PC などの外部の URL を管理画面で設定する。#1745 / #1746)。LLM_OLLAMA_BASE_URL / COMFYUI_BASE_URL は廃止した。
       LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       UPLOAD_RATE_LIMIT_REQUESTS: ${UPLOAD_RATE_LIMIT_REQUESTS:-10}
@@ -1068,116 +1067,6 @@ services:
     ports:
       - "1080:1080"
 
-  # ローカルLLM(issue #1086)。#376で一度削除したが、外部LLMのAPIキー無しでAI執筆支援を
-  # 動かすために復活させた。reverse-proxy経由の外部公開はせず、到達元はlbs-net内部のみ。
-  # モデルの取得はollama-model-init(下)が起動時に済ませる(手動のollama pullは不要)。
-  ollama:
-    logging: *default-logging
-    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
-    container_name: lbs-ollama
-    mem_limit: "${OLLAMA_MEM_LIMIT:-16g}"
-    <<: *common-service
-    # GPUはオプトイン(issue #1086 / R2)。
-    #
-    # 無条件の deploy.resources.reservations.devices は使わない。
-    # NVIDIAランタイムを持たないホストでは `could not select device driver "nvidia"` で
-    # 起動に失敗し、サービス無指定の `docker compose up -d` がそこで中断してしまう
-    # (docs/ACCEPTANCE_TESTING.md「GPUを持たないホスト」)。実測(#1086)では
-    # `count: 0` にしてもデバイスドライバの選択は行われるため回避できず、`gpus:` は
-    # 空値を受け付けない(services.x.gpus value must be 'all')。runtime だけが
-    # 「未指定ならDockerの既定ランタイム」に倒せる。
-    #
-    # GPUを持つホストは .env に GPU_RUNTIME=nvidia を書く。コマンドライン引数は要らないので
-    # `docker compose up -d` のままGPUが使われる。空にすると、VRAMに載らない大規模モデルを
-    # システムRAMで動かす意図的なCPU実行になる(#1396、docs/DOCKER_COMPOSE_ARCHITECTURE.md)。
-    runtime: ${GPU_RUNTIME:-}
-    environment:
-      TZ: UTC
-      # runtime=nvidia のときにnvidia-container-runtimeが参照する(runc既定では無視される)。
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      # issue #1086 / R6: 単一GPUをComfyUI(GPU PCなど外部で動かす場合は同じGPUを共有していれば)と
-      # 共有する。ComfyUIは生成後にVRAMを解放するが(ComfyUiClient#clearMemory)、Ollamaは既定で
-      # モデルを常駐させ続ける。常駐時間を短くし、同時ロードを1モデルに制限してVRAMの取り合いを避ける。
-      # ComfyUI側でOOMが出る場合は OLLAMA_KEEP_ALIVE=30s まで下げる(docs/DOCKER_COMPOSE_ARCHITECTURE.md)。
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
-      OLLAMA_MAX_LOADED_MODELS: "1"
-      # Ollamaの既定コンテキスト長は小さく、超過分は黙って切り捨てられる。下書き/校正の
-      # プロンプト長に耐える値を明示する。伸ばすほどKVキャッシュがVRAMを食うため、
-      # 7BクラスとComfyUIの共存を前提に8192とする(#1086)。
-      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
-    volumes:
-      - ollama_models:/root/.ollama
-    healthcheck:
-      # イメージにcurl/wgetは無い。ollama CLIが自分のAPIを叩くのでそれを使う。
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
-  # Ollama の CPU 構成(issue #1585)。管理画面からの GPU / CPU 切り替えは廃止した(#1744)。
-  #
-  # `ollama`(上)は runtime がコンテナ作成時に固定されるため、GPU と CPU は別サービスにしている。
-  # 同梱の Ollama 自体は別 PC への外部化(#1745)で扱う。
-  #
-  # `profiles: ["ollama-cpu"]` であり、`cpu` には入れない。`cpu` に入れると、GPU の無いホストで
-  # `COMPOSE_PROFILES=cpu` にしたとき `ollama`(runtime 空 = CPU)と二重に起動してしまう。
-  # `runtime` は指定しない(Docker の既定ランタイム = CPU)。`ollama` と同時には稼働させない
-  # (ネットワークエイリアス ollama が重複する)。接続先 http://ollama:11434 は不変。
-  # モデルは ollama_models を共有するので、GPU 構成で取得済みのモデルがそのまま使える。
-  ollama-cpu:
-    logging: *default-logging
-    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
-    container_name: lbs-ollama-cpu
-    mem_limit: "${OLLAMA_CPU_MEM_LIMIT:-24g}"
-    profiles: ["ollama-cpu"]
-    <<: *common-service
-    networks:
-      lbs-net:
-        aliases:
-          - ollama
-          - ollama-cpu
-    environment:
-      TZ: UTC
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
-      OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
-    volumes:
-      - ollama_models:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
-  # 既定モデルの初回取得(issue #1086 / R3)。取得済みなら即座に終了する冪等なワンショット。
-  # x-common-service は使わない。restart: unless-stopped が付くと ContainerStatusService
-  # (#725)が「正常に完了したワンショットジョブ」と見なせず、ダッシュボードが常時赤くなる。
-  # 判定条件は「終了コード0 かつ 再起動ポリシー no」。
-  ollama-model-init:
-    logging: *default-logging
-    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
-    container_name: lbs-ollama-model-init
-    mem_limit: 256m
-    restart: "no"
-    networks:
-      - lbs-net
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      TZ: UTC
-      OLLAMA_HOST: http://ollama:11434
-      LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "モデル ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct} を取得します(初回は数分かかります)"
-        ollama pull "$${LLM_OLLAMA_MODEL}"
-        ollama list
-
   plantuml:
     environment:
       TZ: UTC
@@ -1238,8 +1127,6 @@ volumes:
   keycloak_postgres:
   penpot_postgres:
   penpot_assets:
-  # Ollamaのモデル置き場(issue #1086)。docker data-rootは/home配下にあり容量に余裕がある。
-  ollama_models:
   wordpress_sites:
   bulk_upload_files:
   generated_images:

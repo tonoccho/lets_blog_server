@@ -27,7 +27,8 @@ public class ProjectAiSettingsService {
 
     /**
      * 拒否するホスト名(小文字、末尾のドットなし。issue #1518)。クラウドメタデータと、docker-compose.ymlの
-     * サービス名・container_nameのうちOllama(ollama / ollama-cpu とその lbs- 付き)以外。ComfyUIは同梱しない(issue #1746)ので例外に含めない。
+     * サービス名・container_name。OllamaもComfyUIも同梱しない(issue #1745 / #1746)ので、ollama / comfyui 系の名前は
+     * docker-compose.ymlに無く、ここにも含めない(GPU PCなど外部の接続先を妨げない)。
      * docker-compose.ymlとの食い違いはProjectConnectionUrlDenylistTestが検出する。
      */
     private static final Set<String> DENIED_HOSTS = Set.of(
@@ -36,14 +37,14 @@ public class ProjectAiSettingsService {
             "reverse-proxy", "web", "media", "ai", "content", "analytics", "platform", "project", "publishing",
             "log-writer", "gateway", "identity", "rabbitmq", "docker-socket-proxy", "mysql", "phpmyadmin",
             "keycloak-postgres", "keycloak", "penpot-frontend", "penpot-backend", "penpot-mcp",
-            "penpot-exporter", "penpot-postgres", "penpot-valkey", "mailcatch", "ollama-model-init",
+            "penpot-exporter", "penpot-postgres", "penpot-valkey", "mailcatch",
             "plantuml", "drawio", "wordpress",
             "lbs-reverse-proxy", "lbs-web", "lbs-media", "lbs-ai", "lbs-content", "lbs-analytics",
             "lbs-platform", "lbs-project", "lbs-publishing", "lbs-log-writer", "lbs-gateway", "lbs-identity",
             "lbs-rabbitmq", "lbs-docker-socket-proxy", "lbs-mysql", "lbs-phpmyadmin", "lbs-keycloak-postgres",
             "lbs-keycloak", "lbs-penpot-frontend", "lbs-penpot-backend", "lbs-penpot-mcp",
             "lbs-penpot-exporter", "lbs-penpot-postgres", "lbs-penpot-valkey", "lbs-mailcatch",
-            "lbs-ollama-model-init", "lbs-plantuml", "lbs-drawio", "lbs-wordpress");
+            "lbs-plantuml", "lbs-drawio", "lbs-wordpress");
 
     /** 10進・16進(0x)・8進(先頭0)のいずれかの数値表記(IPv4の1要素)。 */
     private static final Pattern IPV4_PART = Pattern.compile("0[xX][0-9a-fA-F]+|[0-9]+");

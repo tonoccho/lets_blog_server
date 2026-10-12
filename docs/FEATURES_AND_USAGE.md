@@ -160,12 +160,12 @@ Each site shows:
 
 ### Understanding AI Capabilities
 
-The default AI provider is the bundled **Ollama** container (`LLM_PROVIDER=OLLAMA`), so AI writing
+The default AI provider is **Ollama** running on a separate GPU PC (`LLM_PROVIDER=OLLAMA`), so AI writing
 assistance works locally without an external API key. You can switch to `OPENAI` or `CLAUDE` with
 `LLM_PROVIDER` in `.env` (a value saved on the system settings screen takes precedence).
 
 With Ollama, choose your model based on your hardware by setting `LLM_OLLAMA_MODEL` in `.env`
-(the default model is pulled automatically at startup by `ollama-model-init`):
+(pull the model on the GPU PC with `ollama pull`; see [External Ollama](EXTERNAL_OLLAMA.md)):
 
 | Model | Size | Speed | Quality | Use Case |
 |-------|------|-------|---------|----------|

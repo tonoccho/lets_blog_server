@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`wait-for-stack-healthy.sh --all` がワンショットジョブの終了状態を正しく判定すること(#1439)。
+"""`wait-for-stack-healthy.sh --all` のワンショットジョブの扱い(#1439、#1745 で追従)。
 
     python3 -m unittest discover -s scripts -t scripts -p 'test_wait_all_one_shot.py'
 
@@ -11,9 +11,10 @@
 
 ## 検査の仕方
 
-docker は PATH 上のスタブで、`ps` に対し `FAKE_PS` の内容を返す。全サービスが healthy で、
-`ollama-model-init` だけ状態を変えて `--all` を実行する。あわせて、docker-compose.yml の
-`restart: "no"` のサービスが全て ONE_SHOT_JOBS に載っていることを検査する(判定漏れの再発防止)。
+同梱 Ollama(`ollama-model-init`。唯一の `restart: "no"` だった)の廃止(#1745)で、ワンショットジョブは
+compose に無くなった。判定の仕組み(ONE_SHOT_JOBS)は将来の再導入に備えて残し、
+docker-compose.yml の `restart: "no"` のサービスが全て ONE_SHOT_JOBS に載っていることを検査する
+(判定漏れの再発防止)。docker は PATH 上のスタブで、`ps` に対し `FAKE_PS` の内容を返す。
 """
 
 import json
@@ -30,7 +31,6 @@ WAIT_SCRIPT = os.path.join(REPO_ROOT, "scripts", "wait-for-stack-healthy.sh")
 COMPOSE_FILE = os.path.join(REPO_ROOT, "docker-compose.yml")
 
 HEALTHY_SERVICES = ["reverse-proxy", "web", "gateway", "keycloak", "mysql"]
-JOB = "ollama-model-init"
 
 FAKE_DOCKER = """#!/bin/bash
 case "$*" in
@@ -38,16 +38,6 @@ case "$*" in
 esac
 exit 0
 """
-
-
-def ps_lines(job_state, job_exit_code, extra=()):
-    rows = [
-        {"Service": s, "State": "running", "Health": "healthy", "ExitCode": 0}
-        for s in HEALTHY_SERVICES
-    ]
-    rows.append({"Service": JOB, "State": job_state, "Health": "", "ExitCode": job_exit_code})
-    rows.extend(extra)
-    return "\n".join(json.dumps(r) for r in rows)
 
 
 def restart_no_services(compose_text):
@@ -102,53 +92,38 @@ class WaitAllOneShotTest(unittest.TestCase):
             capture_output=True, text=True, timeout=60, env=env, cwd=REPO_ROOT,
         )
 
-    def test_all_ok_when_job_exited_zero(self):
-        r = self.run_wait("--all", ps=ps_lines("exited", 0))
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-    def test_all_fails_when_job_exited_nonzero(self):
-        r = self.run_wait("--all", ps=ps_lines("exited", 1))
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn(JOB, r.stderr)
-
-    def test_all_keeps_waiting_while_job_running(self):
-        r = self.run_wait("--all", ps=ps_lines("running", 0))
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn(JOB, r.stderr)
-
-    def test_all_keeps_waiting_while_job_created(self):
-        r = self.run_wait("--all", ps=ps_lines("created", 0))
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn(JOB, r.stderr)
-
-    def test_default_mode_targets_unchanged(self):
-        # 既定モードは REQUIRED_SERVICES だけを見る。ジョブが exited でも判定に影響しない。
-        services = (
-            "reverse-proxy web gateway keycloak keycloak-postgres mysql rabbitmq "
-            "identity media ai content analytics project publishing platform log-writer"
-        ).split()
+    def test_all_ok_when_every_service_is_healthy(self):
         rows = [
             {"Service": s, "State": "running", "Health": "healthy", "ExitCode": 0}
-            for s in services
+            for s in HEALTHY_SERVICES
         ]
-        rows.append({"Service": JOB, "State": "exited", "Health": "", "ExitCode": 1})
-        r = self.run_wait(ps="\n".join(json.dumps(x) for x in rows))
+        r = self.run_wait("--all", ps="\n".join(json.dumps(x) for x in rows))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        # 必須サービスが1つ落ちれば従来どおり失敗する。
-        rows[1]["State"] = "exited"
-        rows[1]["Health"] = "unhealthy"
-        r = self.run_wait(ps="\n".join(json.dumps(x) for x in rows))
+
+    def test_all_fails_when_a_service_is_not_running(self):
+        rows = [
+            {"Service": s, "State": "running", "Health": "healthy", "ExitCode": 0}
+            for s in HEALTHY_SERVICES
+        ]
+        rows[1].update({"State": "exited", "Health": "", "ExitCode": 1})
+        r = self.run_wait("--all", ps="\n".join(json.dumps(x) for x in rows))
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(rows[1]["Service"], r.stderr)
+
+    def test_no_bundled_one_shot_job_remains(self):
+        """#1745: ollama-model-init の廃止で、restart: "no" のサービスは compose に無い。"""
+        with open(COMPOSE_FILE, encoding="utf-8") as f:
+            self.assertEqual([], restart_no_services(f.read()))
 
     def test_every_restart_no_service_is_registered_as_one_shot(self):
         with open(COMPOSE_FILE, encoding="utf-8") as f:
             jobs = restart_no_services(f.read())
-        self.assertIn(JOB, jobs, "パーサが restart: \"no\" のサービスを拾えていない")
         with open(WAIT_SCRIPT, encoding="utf-8") as f:
             m = re.search(r'^ONE_SHOT_JOBS="([^"]*)"', f.read(), re.M)
         self.assertIsNotNone(m, "wait-for-stack-healthy.sh に ONE_SHOT_JOBS=\"...\" が無い")
         registered = set(m.group(1).split())
         self.assertEqual(sorted(set(jobs) - registered), [])
+        self.assertNotIn("ollama-model-init", registered, "廃止したジョブが ONE_SHOT_JOBS に残っている")
 
     def test_restart_no_parser(self):
         text = (

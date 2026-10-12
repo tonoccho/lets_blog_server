@@ -211,13 +211,18 @@ cd apps/extension && npm audit --audit-level=moderate
 
 | 項目 | 要件 |
 |---|---|
-| GPU | このホストには**不要**。画像生成の ComfyUI は GPU 付きの別 PC(GPU PC)で動かし、URL で接続する(下記)。同梱の Ollama(ローカルLLM)を GPU で動かしたい場合だけ NVIDIA GPU を使う |
-| GPUドライバ | 同梱の Ollama を GPU で動かす場合のみ、NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
+| GPU | このホストには**不要**。LLM と画像生成のサーバーは別 PC(GPU PC)で動かし、URL で接続する(下記) |
+| GPUドライバ | このホストには不要(GPU PC 側で用意する) |
 | メモリ | **24GB以上を推奨**(全29コンテナ起動時の実測で約15GiB。ホストOS分の余裕を考慮するとこの程度が安全。以前は19コンテナ/約10.3GiBだったが、Epic #551 のマイクロサービス分割でサービス数が増えた。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
-| ディスク | Dockerイメージに加え、Ollamaのモデルファイルで数GB〜十数GB程度の空き容量が必要(ComfyUIのモデルは GPU PC 側) |
+| ディスク | Dockerイメージ分の空き容量が必要(AI のモデルファイルは別 PC 側に置く) |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 
-**ComfyUI(画像生成)は同梱しない(issue #1746)。** GPU 付きの別 PC で ComfyUI を起動し、管理画面の
+**Ollama(LLM)はこのホストに同梱しない(issue #1745)。**
+別の PC で Ollama を動かし、管理画面に URL
+(例: `http://192.168.1.71:11434/v1`)を設定してつなぐ。用意の仕方と既存環境の移行は
+[docs/EXTERNAL_OLLAMA.md](docs/EXTERNAL_OLLAMA.md) を参照。
+
+**ComfyUI(画像生成)も同梱しない(issue #1746)。** GPU 付きの別 PC で ComfyUI を起動し、管理画面の
 システム設定(またはプロジェクト設定)に URL(例: `http://192.168.1.71:8188`)を入れて接続する。
 このホストに GPU は要らない。ComfyUI の用意、LAN 内に限った公開、チェックポイント・LoRA の置き場、
 既存環境(同梱の ComfyUI を使っていた環境)の移行は [docs/EXTERNAL_COMFYUI.md](docs/EXTERNAL_COMFYUI.md) を参照。
@@ -237,7 +242,6 @@ ComfyUI の接続先が未設定のまま画像生成をすると、設定を促
 |---|---|
 | Git | リポジトリの取得 |
 | Docker Engine + Docker Compose(v2系) | 全サービスのコンテナ起動 |
-| NVIDIA Container Toolkit | (任意)同梱のOllamaコンテナへのGPUパススルー |
 | openssl | リバースプロキシ用の自己署名TLS証明書生成(Linux/macOSは標準搭載) |
 | Visual Studio Code | VSCode拡張機能(執筆・投稿)の利用 |
 
@@ -272,6 +276,8 @@ docker compose version   # Compose v2系であることを確認
 ```
 
 ### NVIDIA GPUドライバ + NVIDIA Container Toolkit
+
+**この節は GPU PC 側の参考である。** Ollama と ComfyUI はこのスタックに含まれないため、Let's Blog を動かすホストでは不要。GPU PC で Ollama / ComfyUI を Docker で動かす場合に使う。
 
 GPUドライバが未導入の場合は先にNVIDIA公式のGPUドライバをインストールし、`nvidia-smi`が
 動作することを確認する。

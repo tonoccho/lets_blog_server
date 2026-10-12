@@ -94,14 +94,47 @@ class RemoteLlmConfigProviderConnectionGuardTest {
     }
 
     @Test
-    void bundledOllamaNameIsAllowedByNameButNotByIpLiteral() {
+    void ollamaNameInsideDockerRangeIsRejectedBecauseThereIsNoBundledOllama_issue1745() {
         dns.put("ollama", "172.18.0.20");
-        dns.put("172.18.0.20", "172.18.0.20");
         project("http://ollama:11434/v1");
-        assertThat(provider.targetFor(AiProvider.OLLAMA).baseUrl()).isEqualTo("http://172.18.0.20:11434/v1");
-        project("http://172.18.0.20:11434/v1");
         assertThatThrownBy(() -> provider.targetFor(AiProvider.OLLAMA))
                 .isInstanceOf(ForbiddenDestinationException.class);
+    }
+
+    @Test
+    void gpuPcLanUrlInProjectSettingIsTheTargetCheckedByTheGuard_issue1745() {
+        dns.put("192.168.1.71", "192.168.1.71");
+        project("http://192.168.1.71:11434/v1");
+        GuardedTarget target = provider.targetFor(AiProvider.OLLAMA);
+        assertThat(target.baseUrl()).isEqualTo("http://192.168.1.71:11434/v1");
+        assertThat(resolved).containsExactly("192.168.1.71");
+    }
+
+    @Test
+    void gpuPcLanUrlInSystemSettingIsUsedAsIs_issue1745() {
+        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
+        when(client.resolveLlmConfig("OLLAMA", "Bearer t")).thenReturn(new PlatformServiceClient.LlmConfig(
+                "OLLAMA", "http://192.168.1.71:11434/v1", "", "m", List.of("m"), 10L));
+        provider.useProject(7L);
+        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn(null);
+        assertThat(provider.targetFor(AiProvider.OLLAMA).baseUrl()).isEqualTo("http://192.168.1.71:11434/v1");
+        assertThat(resolved).isEmpty();
+    }
+
+    @Test
+    void unsetOllamaUrlMakesGenerationFailWithAClearMessageAndNoConnection_issue1745() {
+        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
+        // platform は未設定のとき baseUrl を空で返す(既定値を書き込まない)。
+        when(client.resolveLlmConfig("OLLAMA", "Bearer t")).thenReturn(new PlatformServiceClient.LlmConfig(
+                "OLLAMA", "", "", "m", List.of("m"), 10L));
+        provider.useProject(7L);
+        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn(null);
+
+        assertThatThrownBy(() -> new LlmClient(provider).generate("hi", null, AiProvider.OLLAMA))
+                .isInstanceOf(AiServiceException.class)
+                .hasMessage(LlmClient.OLLAMA_URL_REQUIRED)
+                .hasMessageContaining("Ollama")
+                .hasMessageContaining("設定されていません");
     }
 
     @Test

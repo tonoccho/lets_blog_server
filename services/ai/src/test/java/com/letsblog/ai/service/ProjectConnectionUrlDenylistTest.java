@@ -32,9 +32,6 @@ import static org.mockito.Mockito.verify;
 @ExtendWith(MockitoExtension.class)
 class ProjectConnectionUrlDenylistTest {
 
-    private static final Set<String> ALLOWED_STACK_NAMES = Set.of(
-            "ollama", "ollama-cpu", "lbs-ollama", "lbs-ollama-cpu");
-
     @Mock
     private ProjectAiSettingsRepository repository;
 
@@ -110,7 +107,7 @@ class ProjectConnectionUrlDenylistTest {
     // ---- AC4: 許可 ----
 
     @Test
-    void LANとOllamaのサービス名は許可する() {
+    void LANと廃止した同梱サービス名ollamaとcomfyuiは許可する() {
         for (String url : List.of(
                 "http://192.168.1.50:11434/v1",
                 "http://10.0.0.5:11434",
@@ -118,10 +115,15 @@ class ProjectConnectionUrlDenylistTest {
                 "http://gpu-box.lan:11434",
                 "http://gpu:11434/v1",
                 "https://comfy.example:8188",
+                "http://192.168.1.71:11434/v1",
                 "http://ollama:11434/v1",
                 "http://ollama-cpu:11434",
                 "http://lbs-ollama:11434",
                 "http://lbs-ollama-cpu:11434",
+                "http://comfyui:8188",
+                "http://comfyui-cpu:8188",
+                "http://lbs-comfyui:8188",
+                "http://lbs-comfyui-cpu:8188",
                 "http://[2001:db8::1]:11434",
                 "http://8.8.8.8:11434",
                 "http://169.253.1.1/",
@@ -262,16 +264,32 @@ class ProjectConnectionUrlDenylistTest {
     // ---- docker-compose.yml との突き合わせ ----
 
     @Test
-    void docker_composeのOllama以外のサービス名とコンテナ名はすべて拒否される() throws IOException {
+    void 同梱Ollamaと同梱ComfyUIのサービス名はdocker_composeに無く_拒否リストにも無い_issue1745_issue1746() throws IOException {
         Set<String> names = composeNames();
-        assertTrue(names.contains("mysql") && names.contains("lbs-mysql") && names.contains("ollama"),
+        for (String gone : List.of("ollama", "ollama-cpu", "ollama-model-init",
+                "lbs-ollama", "lbs-ollama-cpu", "lbs-ollama-model-init")) {
+            assertFalse(names.contains(gone), "docker-compose.yml に同梱 Ollama の名前が残っている: " + gone);
+        }
+        for (String gone : List.of("comfyui", "comfyui-cpu", "lbs-comfyui", "lbs-comfyui-cpu")) {
+            assertFalse(names.contains(gone), "docker-compose.yml に同梱 ComfyUI の名前が残っている: " + gone);
+            assertAccepted("http://" + gone + ":8188");
+        }
+        for (String gone : List.of("ollama", "ollama-cpu", "lbs-ollama", "lbs-ollama-cpu")) {
+            assertAccepted("http://" + gone + ":11434");
+        }
+        // 廃止したサービス名は拒否リストに残さない(無関係なホスト名を理由なく拒否しない)。
+        assertAccepted("http://ollama-model-init:11434");
+        assertAccepted("http://lbs-ollama-model-init:11434");
+    }
+
+    @Test
+    void docker_composeのサービス名とコンテナ名はすべて拒否される() throws IOException {
+        Set<String> names = composeNames();
+        assertTrue(names.contains("mysql") && names.contains("lbs-mysql"),
                 "docker-compose.yml の名前を読み取れていない: " + names);
 
         Set<String> missing = new TreeSet<>();
         for (String name : names) {
-            if (ALLOWED_STACK_NAMES.contains(name)) {
-                continue;
-            }
             try {
                 service().setConnectionUrls(1L, "http://" + name + ":8080", null);
                 missing.add(name);
@@ -280,16 +298,6 @@ class ProjectConnectionUrlDenylistTest {
             }
         }
         assertEquals(Set.of(), missing, "拒否リストに無い docker-compose.yml の名前(サービス追加時はProjectAiSettingsServiceへ追加する)");
-    }
-
-    @Test
-    void docker_composeのOllama名は許可される() throws IOException {
-        Set<String> names = composeNames();
-        for (String name : ALLOWED_STACK_NAMES) {
-            assertTrue(names.contains(name), "docker-compose.yml に無い許可名: " + name);
-            assertAccepted("http://" + name + ":8080");
-        }
-        assertFalse(names.isEmpty());
     }
 
     private static Set<String> composeNames() throws IOException {

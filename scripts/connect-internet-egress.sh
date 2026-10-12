@@ -12,8 +12,6 @@
 #   - lbs-platform: 外部LLM API(api.anthropic.com / api.openai.com)
 #   - lbs-publishing: 記事プレビューの外部取得、管理対象サイトが外部ホストの場合のWordPress操作
 #   - lbs-wordpress: wordpress.orgからのプラグイン/テーマ取得
-#   - lbs-ollama: モデルpull(`ollama pull`はOllamaコンテナ自身がregistry.ollama.aiへ
-#     取得しにいくため)
 # docker-compose.ymlのservices.*.networksでDockerの既定bridgeネットワークを直接指定すると
 # 「network-scoped aliases are only supported for user-defined networks」エラーになり
 # 宣言的に書けないため、`docker network connect`で後付けする。
@@ -35,7 +33,6 @@ TARGET_CONTAINERS=(
   lbs-platform
   lbs-publishing
   lbs-wordpress
-  lbs-ollama
 )
 
 connected_or_present_count=0

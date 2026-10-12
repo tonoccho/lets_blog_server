@@ -322,9 +322,13 @@ verify_failed=0
 # ゼロ構築の直後に platform-service が起動して書く行は残骸ではないので数えない(#1701)。
 # 表まるごとではなくキーで除外する: 利用者が管理画面で保存した設定の残りは見逃さない。
 # シーダーのキーを変えたら、ここも変えること(test_rebuild_acceptance_env.py が突き合わせる)。
-SEEDED_SETTING_KEYS=(llm_ollama_base_url)
-seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
-seeded_in_list="${seeded_in_list%,}"
+SEEDED_SETTING_KEYS=()
+# 既定値を書く接続先は無い(Ollama は #1745、ComfyUI は #1746 で同梱をやめた)。キーが増えたときだけ除外する。
+seeded_in_list=""
+if [ "${#SEEDED_SETTING_KEYS[@]}" -gt 0 ]; then
+  seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
+  seeded_in_list="${seeded_in_list%,}"
+fi
 for s in "${SERVICE_SCHEMAS[@]}"; do
   tables="$(mysql_q "SELECT table_name FROM information_schema.tables
                      WHERE table_schema='$s'
@@ -333,7 +337,7 @@ for s in "${SERVICE_SCHEMAS[@]}"; do
   for t in $tables; do
     where=""
     if [ "$s" = "lbs_platform" ] && [ "$t" = "system_settings" ]; then
-      where=" WHERE setting_key NOT IN ($seeded_in_list)"
+      [ -n "$seeded_in_list" ] && where=" WHERE setting_key NOT IN ($seeded_in_list)"
     fi
     c="$(mysql_q "SELECT COUNT(*) FROM \`$s\`.\`$t\`${where};" || echo 0)"
     # マイグレーションが入れる件数(MIGRATION_SEEDED_TABLES)を超えた分だけを残骸として数える(#1738)。

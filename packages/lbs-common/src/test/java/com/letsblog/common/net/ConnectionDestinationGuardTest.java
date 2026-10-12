@@ -145,15 +145,13 @@ class ConnectionDestinationGuardTest {
     }
 
     @Test
-    void bundledNamesAreExemptFromDockerRangeOnlyWhenGivenByName() throws Exception {
-        for (String name : List.of("ollama", "lbs-ollama")) {
-            dns.put(name, List.of("172.18.0.20"));
-            assertThat(dockerGuard().check("Ollama", "http://" + name + ":11434/").baseUrl())
-                    .isEqualTo("http://172.18.0.20:11434/");
-        }
-        dns.put("OLLAMA.", List.of("172.18.0.20"));
+    void noNameIsExemptFromDockerRange_issue1745_issue1746() throws Exception {
+        // OllamaもComfyUIも同梱しないので、名前での例外は無い。docker内部のアドレスへ解決される名前は、
+        // 名前に関わらず(大文字・末尾のドットでも、アドレスの直指定でも)拒否する。
+        dns.put("COMFYUI.", List.of("172.18.0.20"));
         dns.put("172.18.0.20", List.of("172.18.0.20"));
-        assertThat(dockerGuard().check("Ollama", "http://OLLAMA.:11434").baseUrl()).isEqualTo("http://172.18.0.20:11434");
+        assertThatThrownBy(() -> dockerGuard().check("ComfyUI", "http://COMFYUI.:8188"))
+                .isInstanceOf(ForbiddenDestinationException.class);
         assertThatThrownBy(() -> dockerGuard().check("Ollama", "http://172.18.0.20:11434"))
                 .isInstanceOf(ForbiddenDestinationException.class);
     }
@@ -180,9 +178,28 @@ class ConnectionDestinationGuardTest {
     }
 
     @Test
+    void ollamaIsNoLongerABundledNameAndInsideDockerRangeIsRejected_issue1745() throws Exception {
+        // 同梱のOllamaは廃止した。docker内部のアドレスへ解決される ollama / lbs-ollama は、もう例外扱いにしない。
+        for (String name : List.of("ollama", "lbs-ollama")) {
+            dns.put(name, List.of("172.18.0.20"));
+            assertThatThrownBy(() -> dockerGuard().check("Ollama", "http://" + name + ":11434/v1"))
+                    .isInstanceOf(ForbiddenDestinationException.class)
+                    .hasMessageContaining("Ollama");
+        }
+    }
+
+    @Test
+    void gpuPcLanUrlIsPinnedToTheSameAddress_issue1745() throws Exception {
+        dns.put("192.168.1.71", List.of("192.168.1.71"));
+        GuardedTarget target = dockerGuard().check("Ollama", "http://192.168.1.71:11434/v1");
+        assertThat(target.baseUrl()).isEqualTo("http://192.168.1.71:11434/v1");
+        assertThat(target.sniHost()).isNull();
+    }
+
+    @Test
     void bundledNameResolvingToDeniedAddressIsStillRejected() throws Exception {
-        dns.put("ollama", List.of("127.0.0.1"));
-        assertThatThrownBy(() -> dockerGuard().check("Ollama", "http://ollama:11434"))
+        dns.put("comfyui", List.of("127.0.0.1"));
+        assertThatThrownBy(() -> dockerGuard().check("ComfyUI", "http://comfyui:8188"))
                 .isInstanceOf(ForbiddenDestinationException.class);
     }
 

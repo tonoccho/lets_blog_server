@@ -484,20 +484,11 @@ docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
 **スタブ化しないもの**: PlantUML / draw.io / Penpot / WordPress。
 いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
 
-### ollama は AT スタックでは起動しない(#1090)
+### Ollama は同梱しないので AT スタックにも無い(#1745)
 
-AT の LLM は `llm-stub` が受けるので、`docker-compose.e2e-stubs.yml` が `ollama` と
-`ollama-model-init` に `profiles: ["ollama"]` を付け、`up -d` の対象から外している
-(約4.7GBのモデル取得もVRAM確保も起きない)。`docker-compose.yml` 単独では従来どおり起動する。
-`deploy.replicas: 0` は採らなかった: コンテナが作られず `docker compose start ollama` が使えないため。
-明示的に起動するには、profile が自動で有効になる `up -d ollama` を使う:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d ollama
-```
-
-作られた後のコンテナは `docker compose start|stop ollama` でも操作できる。
-検証: `scripts/test_ollama_at_disabled.py`。
+AT の LLM は `llm-stub` が受ける。同梱の Ollama(`ollama` / `ollama-model-init`)は #1745 で廃止したので、
+かつて #1090 が `docker-compose.e2e-stubs.yml` に置いていた「`profiles: ["ollama"]` で起動対象から外す」設定と、
+その検証 `scripts/test_ollama_at_disabled.py` も無い。
 
 ### ComfyUI だけは実機とスタブを併用する
 
@@ -944,10 +935,10 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml restart \
 
 ### LLM / ComfyUI の接続先がスタブを向いていることの保証(#1703)
 
-ゼロ構築の直後、`ConnectionDefaultsSeeder` は本番の既定値(`http://ollama:11434/v1` /
-`http://comfyui:8188`)を DB へ書く(この挙動は変えない)。スタブへ向けないと AI 系シナリオは
-起動していない実 ollama を呼んで即座に失敗する(2026-10-09 のリリース検証で `at-provision` の 3 件が落ち、
-後続 989 件がスキップされた)。次の 2 段で防ぐ。
+ゼロ構築の直後、`ConnectionDefaultsSeeder` が DB へ書く既定値は無い(Ollama は #1745、ComfyUI は #1746 で同梱を
+やめ、接続先は管理者が設定するまで未設定のまま)。スタブへ向けないと AI 系シナリオは未設定のエラー(または、
+かつて既定値を書いていた時代には起動していない実サービスへの接続失敗)で即座に失敗する(2026-10-09 のリリース検証で
+`at-provision` の 3 件が落ち、後続 989 件がスキップされた)。次の 2 段で防ぐ。
 
 | 段 | 何をするか |
 | --- | --- |
@@ -1169,7 +1160,7 @@ npm run test:at:setup                 # データ層リセット → at-setup �
 
 | 保全するボリューム | 保全する理由 |
 | --- | --- |
-| `lets_blog_server_ollama_models` | Ollama の**モデル重み**(約4.7GB)。再取得に長時間かかり、受け入れテストの LLM 呼び出しは `llm-stub` が受けるためテスト対象の状態でもない。`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
+| (なし) | 保全するボリュームは無い。Ollama と ComfyUI のモデル重みは GPU PC 側にあり、このスタックのボリュームではない(#1745 / #1746)。既存環境に旧ボリュームが残っていてもスクリプトは触らない(手動削除は `docs/EXTERNAL_OLLAMA.md` / `docs/EXTERNAL_COMFYUI.md` の移行手順) |
 
 `*_test` スキーマ(ホストからの `./gradlew test` 用)は `mysql_data` ごと巻き添えで消えるが、
 構築時に `infra/mysql/init/02-create-test-schemas.sh` が本来の経路で作り直す。
@@ -1319,7 +1310,7 @@ compose プロジェクトに閉じる。
 
 1. 破棄対象のボリュームが**新規に作成されたものである**
    (`docker volume inspect --format '{{.CreatedAt}}'` が実行開始時刻より後)
-2. `ollama_models` の `CreatedAt` が**変わっていない**(保全が成立している)
+2. 保全対象のボリュームの `CreatedAt` が**変わっていない**(保全が成立している。現在、保全対象は無い)
 3. 全サービスが healthy(`scripts/wait-for-stack-healthy.sh` を再利用。重複実装しない)
 4. 9スキーマに Flyway 管理テーブル以外のデータが無い
    (`roles` / `role_permissions` はマイグレーションが投入するマスタデータなので除外)
