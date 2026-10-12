@@ -1,0 +1,40 @@
+# 同じ PC で動く lets_blog_server_extensions のツール(Ollama / ComfyUI / PlantUML)へ、共有ネットワーク
+# 経由で届くようにする任意適用のオーバーライド(issue #1762)。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.extensions.yml up -d
+#
+# docker-compose.shared-host.yml と併用できる。重ねないときの LBS は何も変わらない
+# (docker-compose.yml 本体と受け入れテスト環境はこのファイルを使わない)。
+#
+# extensions 側が先に外部ネットワークを作っている必要がある(extensions の
+# scripts/create-shared-network.sh)。無いホストでは重ねないこと。
+#
+# ai / media / platform だけを参加させる。ネットワーク名は LBX_SHARED_NETWORK で変えられる。
+# `networks` はマージされるが、リスト形式の既存値(lbs-net)を落とさないよう、ここでも列挙する。
+# platform は docker-socket-proxy-net への参加も保つ。
+#
+# PlantUML は extensions の別名 lbx-plantuml に向ける。Ollama / ComfyUI の接続先は環境変数ではなく
+# システム設定(llm_ollama_base_url / comfyui_base_url)で指定する。手順は docs/EXTENSIONS_CONNECTION.md。
+services:
+  ai:
+    networks:
+      - lbs-net
+      - lbx-shared
+  media:
+    networks:
+      - lbs-net
+      - lbx-shared
+    environment:
+      PLANTUML_BASE_URL: http://lbx-plantuml:8080
+  platform:
+    networks:
+      - lbs-net
+      - docker-socket-proxy-net
+      - lbx-shared
+    environment:
+      PLANTUML_BASE_URL: http://lbx-plantuml:8080
+
+networks:
+  lbx-shared:
+    external: true
+    name: ${LBX_SHARED_NETWORK:-lbx-shared}

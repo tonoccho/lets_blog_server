@@ -294,6 +294,17 @@ docker run --rm --network lbs-1587-net curlimages/curl -s -o /dev/null -w '%{htt
 | `POST /containers/<id>/pause` | 403 |
 | `GET /containers/<id>/logs`、`GET /images/json` | 403 |
 
+## 任意のオーバーレイ一覧
+
+`-f` で明示的に重ねるオーバーレイ。いずれも `docker-compose.yml` の既定を変えない。
+
+| ファイル | 目的 |
+| --- | --- |
+| `docker-compose.e2e-stubs.yml` | 受け入れテスト用のスタブ |
+| `docker-compose.shared-host.yml` | ホストの 80/443 を他スタックと共有する(#1038) |
+| `docker-compose.host-tests.yml` | ホスト上のテスト用 |
+| `docker-compose.extensions.yml` | 同じ PC の lets_blog_server_extensions へ共有ネットワークで接続する(#1762)。手順は [EXTENSIONS_CONNECTION.md](EXTENSIONS_CONNECTION.md) |
+
 ## コンテナログのサイズ上限(#1247)
 
 Docker の既定 `json-file` ドライバはサイズ無制限でログを書く。2026-09-10 に `lbs-log-writer`
