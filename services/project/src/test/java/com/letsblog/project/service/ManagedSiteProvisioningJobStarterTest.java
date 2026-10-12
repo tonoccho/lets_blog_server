@@ -1,5 +1,9 @@
 package com.letsblog.project.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
@@ -13,11 +17,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.task.TaskRejectedException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -146,6 +152,31 @@ class ManagedSiteProvisioningJobStarterTest {
         verify(tracker).track(32L);
         verify(tracker).complete(eq(32L), any());
         verify(generationJobClient).updateStatus(eq(32L), eq("failed"), any());
+    }
+
+    @Test
+    @DisplayName("満杯で拒否されたら、ジョブIDと queue_full を含む WARN を1行出す(#1768)")
+    void queueFullLogsWarn() {
+        when(currentActorService.snapshot()).thenReturn(ACTOR);
+        when(generationJobClient.create(any(), any(), any()))
+                .thenReturn(new GenerationJobSummary(41L, "site_provisioning", "running", NOW, NOW));
+        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any());
+
+        Logger logger = (Logger) LoggerFactory.getLogger(ManagedSiteProvisioningJobStarter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            start();
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        java.util.List<ILoggingEvent> warns = appender.list.stream()
+                .filter(e -> e.getLevel() == Level.WARN).toList();
+        assertEquals(1, warns.size());
+        assertTrue(warns.get(0).getFormattedMessage().contains("41"));
+        assertTrue(warns.get(0).getFormattedMessage().contains("queue_full"));
     }
 
     private void start() {

@@ -6,6 +6,8 @@ import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +26,8 @@ public class ManagedSiteProvisioningJobStarter {
 
     /** サイト自動構築ジョブの種別。キューUIの遷移先の判定に使われるので変えないこと。 */
     public static final String JOB_TYPE = "site_provisioning";
+
+    private static final Logger log = LoggerFactory.getLogger(ManagedSiteProvisioningJobStarter.class);
 
     private final GenerationJobClient generationJobClient;
     private final ManagedSiteProvisioningJobRunner runner;
@@ -58,6 +62,7 @@ public class ManagedSiteProvisioningJobStarter {
         } catch (TaskRejectedException e) {
             // 実行枠と待ち行列が満杯。ジョブを作ってしまっているので、runningのまま取り残さず、
             // 理由が読めるfailedにする。応答も実際の状態(failed)を返す。
+            log.warn("サイト自動構築ジョブ {} を実行枠が満杯のため拒否した (errorType=queue_full)", job.id());
             heartbeatTracker.complete(job.id(), () -> generationJobClient.updateStatus(job.id(), "failed", toJson(Map.of(
                     "error", "サイト構築の待ち行列が満杯です。しばらくしてからもう一度要求してください",
                     "errorType", "queue_full"))));

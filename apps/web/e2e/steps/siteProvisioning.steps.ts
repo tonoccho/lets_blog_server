@@ -3,7 +3,8 @@ import path from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Step, Then, When } from './fixtures';
 import { waitForSiteCreationPanel } from '../support/siteCreationPanel';
-import { waitForProvisionedSiteRow } from '../support/provisionedSiteRow';
+import { waitForProvisioningOutcome } from '../support/provisionedSiteRow';
+import { waitForProvisionedSiteRowAsAdmin } from '../support/provisionedSiteJob';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken, loginAsAdmin, createFixtureProject } from '../support';
 
 /**
@@ -100,6 +101,7 @@ async function fillManagedWordPressForm(
   await page.locator('input[name="managedAdminEmail"]').fill(`e2e-${unique}@letsblog.local`);
   await page.locator('input[name="managedAdminPassword"]').fill('E2eProvision#Passw0rd1');
   await page.locator('button:has-text("構築する")').click();
+  await waitForProvisioningOutcome(page);
 
   return { siteKey, siteName };
 }
@@ -108,13 +110,13 @@ async function fillManagedWordPressForm(
  * WordPressの自動構築は完了まで数分かかる場合がある。フォームはジョブとして受理するだけで完了を待たない
  * (issue #1696)ので、そのサイトの行が一覧に現れるまで待つ。
  */
-async function waitForManagedWordPressCompletion(page: Page, siteKey: string): Promise<void> {
-  await waitForProvisionedSiteRow(page, siteKey);
+async function waitForManagedWordPressCompletion(page: Page, request: APIRequestContext, siteKey: string): Promise<void> {
+  await waitForProvisionedSiteRowAsAdmin(page, request, siteKey);
 }
 
 /** 構築完了を、そのサイトの行が一覧に現れることで確かめる(サイトキーごとに一意なので、何度目の構築でも取り違えない)。 */
-async function waitForSiteRow(page: Page, siteKey: string): Promise<void> {
-  await waitForProvisionedSiteRow(page, siteKey);
+async function waitForSiteRow(page: Page, request: APIRequestContext, siteKey: string): Promise<void> {
+  await waitForProvisionedSiteRowAsAdmin(page, request, siteKey);
 }
 
 /** フォーム入力から完了待ち・ID解決までを一括で行う(1シナリオで複数サイトを構築する場合に使う)。 */
@@ -124,7 +126,7 @@ async function provisionManagedWordPress(
   prefix: string
 ): Promise<{ siteKey: string; siteName: string; siteId: number }> {
   const { siteKey, siteName } = await fillManagedWordPressForm(page, prefix);
-  await waitForSiteRow(page, siteKey);
+  await waitForSiteRow(page, request, siteKey);
   const siteId = await resolveSiteId(request, siteKey);
   return { siteKey, siteName, siteId };
 }
@@ -145,8 +147,8 @@ When('WordPressを新規構築する', async ({ ctx, page }) => {
   ctx.provisionedSiteName = siteName;
 });
 
-Then('構築が完了し、そのサイトが一覧に現れる', async ({ ctx, page }) => {
-  await waitForManagedWordPressCompletion(page, ctx.provisionedSiteKey as string);
+Then('構築が完了し、そのサイトが一覧に現れる', async ({ ctx, page, request }) => {
+  await waitForManagedWordPressCompletion(page, request, ctx.provisionedSiteKey as string);
 });
 
 Then('一覧のそのサイト行で疎通確認が成功する', async ({ ctx, page }) => {
