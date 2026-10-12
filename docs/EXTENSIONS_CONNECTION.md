@@ -3,7 +3,7 @@
 `seiji/lets_blog_server_extensions`(以下 extensions)は ComfyUI・Ollama・PlantUML などを compose の
 プロジェクト名 `lbx` で動かし、外部 Docker ネットワーク `lbx-shared` に別名で参加している。
 同じ PC で動かすときは、このネットワークへ LBS の ai / media / platform を参加させて名前で届かせる。
-別ホストの extensions へは公開 URL でつなぐ(#1763)。
+別ホストの extensions へは公開 URL でつなぐ(#1763、末尾の「別ホストの extensions へつなぐ」)。
 
 | 別名(`lbx-shared` 上) | 用途 |
 | --- | --- |
@@ -59,6 +59,60 @@ extensions のコンテナは `ollama` / `comfyui` / `plantuml` という別名�
 - extensions の接続先一覧: LBS のコンテナ内から `GET http://lbx-portal:3100/api/connections`
   (例: `docker compose exec platform curl -s http://lbx-portal:3100/api/connections`)。
 - 管理画面の「連携サービスの状況」で LLM・ComfyUI・PlantUML が正常と表示されること。PlantUML のプレビューが描画されること。
+
+## 別ホストの extensions へつなぐ(自己署名 HTTPS、#1763)
+
+別ホストの extensions に届くのは、リバースプロキシの `https://<tool>.${BASE_DOMAIN}:${HTTPS_PORT}` だけである。
+証明書は extensions の起動時に作られる自己署名(SAN は `BASE_DOMAIN` と `*.BASE_DOMAIN`、期限は825日)で、
+LBS の JVM は既定の信頼ストアしか使わないため、そのままでは TLS の検証で失敗する。
+`docker-compose.extra-ca.yml` で、その証明書を ai / media / platform の信頼ストアへ**追加**する。
+
+### 手順
+
+1. extensions のホストで証明書を取り出す(extensions のリポジトリで):
+
+   ```bash
+   docker compose cp proxy:/etc/nginx/certs/tls.crt ./lbx-ca.crt
+   ```
+
+2. LBS のホストの `certs/lbx-ca.crt` に置く(`certs/` は `.gitignore` 済み)。別の場所に置くなら
+   環境変数 `LBX_CA_CERT_FILE` にパスを入れる。ファイルが無いまま起動すると Docker が同名のディレクトリを作るので、先に置く。
+3. extensions の `BASE_DOMAIN` を、LBS のホストから引ける名前にする。`*.localhost` は LBS のコンテナ内では
+   自分自身を指すので使えない。DNS か LBS のホストの hosts に `ollama.<domain>` `comfyui.<domain>`
+   `plantuml.<domain>` を登録する。コンテナからも引く必要があるので、DNS で解決できないときは
+   compose のオーバーライドで `extra_hosts` を足す。
+4. オーバーレイを重ねて起動する:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.extra-ca.yml up -d
+   ```
+
+   重ねるのは ai / media / platform だけで、`/certificates/lbx-ca.crt` に読み取り専用でマウントし、
+   temurin の `/__cacert_entrypoint.sh`(`USE_SYSTEM_CA_CERTS=1`)で JVM の cacerts へ追加する。
+   公開 CA(api.openai.com など)は従来どおり通り、マウントした証明書以外の自己署名証明書は拒否される。
+5. 管理画面 → システム設定に入力する(`<port>` は extensions の `HTTPS_PORT`):
+   - `llm_ollama_base_url` = `https://ollama.<domain>:<port>/v1`
+   - `comfyui_base_url` = `https://comfyui.<domain>:<port>`
+
+   extensions の `/api/connections` の `openaiBaseUrl` は内部 URL なので使わない。`publicUrl` に `/v1` を付ける。
+6. PlantUML は環境変数 `LBX_PLANTUML_URL=https://plantuml.<domain>:<port>` で media と platform に渡す
+   (未設定なら従来の `http://plantuml:8080`)。
+
+### 取り直しが要るとき
+
+- extensions 側で `BASE_DOMAIN` を変えたとき(SAN が変わる)。
+- 証明書の期限(825日)が切れる前、または切れたとき。
+- いずれも手順1・2で `lbx-ca.crt` を差し替え、オーバーレイ付きで ai / media / platform を再作成する(`up -d --force-recreate`)。
+
+### 確かめ方
+
+```bash
+# 別名は証明書の CN。件数が重ねる前より減っていないことも見る
+docker compose exec ai keytool -list -cacerts -storepass changeit | grep -ci trustedCertEntry
+docker compose exec ai keytool -list -cacerts -storepass changeit | grep -i '<証明書の CN>'
+```
+
+管理画面の「連携サービスの状況」で LLM・ComfyUI・PlantUML が正常と表示されること。
 
 関連: [EXTERNAL_OLLAMA.md](EXTERNAL_OLLAMA.md) / [EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) /
 [DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)

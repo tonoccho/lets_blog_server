@@ -304,6 +304,7 @@ docker run --rm --network lbs-1587-net curlimages/curl -s -o /dev/null -w '%{htt
 | `docker-compose.shared-host.yml` | ホストの 80/443 を他スタックと共有する(#1038) |
 | `docker-compose.host-tests.yml` | ホスト上のテスト用 |
 | `docker-compose.extensions.yml` | 同じ PC の lets_blog_server_extensions へ共有ネットワークで接続する(#1762)。手順は [EXTENSIONS_CONNECTION.md](EXTENSIONS_CONNECTION.md) |
+| `docker-compose.extra-ca.yml` | 別ホストの lets_blog_server_extensions の自己署名証明書を ai / media / platform の JVM に信頼させる(#1763)。手順は [EXTENSIONS_CONNECTION.md](EXTENSIONS_CONNECTION.md) |
 
 ## コンテナログのサイズ上限(#1247)
 

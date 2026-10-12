@@ -1,0 +1,41 @@
+# 別ホストで動く lets_blog_server_extensions の自己署名証明書を、ai / media / platform の JVM に
+# 信頼させる任意適用のオーバーライド(issue #1763)。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.extra-ca.yml up -d
+#
+# 重ねないときの LBS は何も変わらない(docker-compose.yml 本体と受け入れテスト環境はこのファイルを使わない)。
+# 手順は docs/EXTENSIONS_CONNECTION.md。
+#
+# 仕組み: eclipse-temurin イメージの /__cacert_entrypoint.sh は、USE_SYSTEM_CA_CERTS が設定されて
+# いると /certificates/ の証明書を OS のストアと JVM の cacerts へ「追加」してから、渡されたコマンドを
+# exec する。Dockerfile の ENTRYPOINT がこれを上書きして動かないので、ここで entrypoint を
+# 同じコマンドの前にスクリプトを挟んだ形に戻す。javax.net.ssl.trustStore で置き換える方式や
+# 検証を無効にする方式は使わない(公開 CA は従来どおり通り、マウントした証明書以外の自己署名は拒否される)。
+#
+# 証明書は LBX_CA_CERT_FILE(既定 ./certs/lbx-ca.crt。certs/ は .gitignore 済み)を読み取り専用で
+# マウントする。ファイルが無いと Docker が同名のディレクトリを作ってしまうので、先に置くこと。
+#
+# PlantUML は別ホストの公開 URL に向けられる(LBX_PLANTUML_URL、例 https://plantuml.example.test:8443)。
+x-extra-ca: &extra-ca
+  entrypoint: ["/__cacert_entrypoint.sh", "java", "-jar", "/app/app.jar"]
+  volumes:
+    - type: bind
+      source: ${LBX_CA_CERT_FILE:-./certs/lbx-ca.crt}
+      target: /certificates/lbx-ca.crt
+      read_only: true
+
+services:
+  ai:
+    <<: *extra-ca
+    environment:
+      USE_SYSTEM_CA_CERTS: "1"
+  media:
+    <<: *extra-ca
+    environment:
+      USE_SYSTEM_CA_CERTS: "1"
+      PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://plantuml:8080}
+  platform:
+    <<: *extra-ca
+    environment:
+      USE_SYSTEM_CA_CERTS: "1"
+      PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://plantuml:8080}
