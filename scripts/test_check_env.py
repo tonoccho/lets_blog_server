@@ -57,28 +57,29 @@ class EnvExampleHasNoDuplicates(unittest.TestCase):
         dup = duplicates(keys_of(EXAMPLE))
         self.assertEqual([], dup, ".env.example に重複キーがある: %s" % dup)
 
-    def test_penpot_secret_key_keeps_the_generation_comment(self):
-        """残す定義は、要件(512-bit base64)の指示を伴うほうであること。
+    def test_nextauth_secret_keeps_the_generation_comment(self):
+        """残す定義は、生成手順の指示を伴うほうであること(#959)。
 
-        後勝ちで弱いほうが有効になっていたのが本Issueの中身なので、
+        後勝ちで弱いほうが有効になっていたのが #959 の中身なので、
         「1つになった」だけでは足りない。**どちらが残ったか**を固定する。
+        (#959 で対象にした鍵は #1752 で削除したので、同じ性質の NEXTAUTH_SECRET で意味を保つ。)
         """
         with open(EXAMPLE, encoding="utf-8") as f:
             lines = f.read().splitlines()
-        idx = [i for i, l in enumerate(lines) if l.startswith("PENPOT_SECRET_KEY=")]
-        self.assertEqual(1, len(idx), "PENPOT_SECRET_KEY の定義が1つではない")
+        idx = [i for i, l in enumerate(lines) if l.startswith("NEXTAUTH_SECRET=")]
+        self.assertEqual(1, len(idx), "NEXTAUTH_SECRET の定義が1つではない")
         preceding = "\n".join(lines[max(0, idx[0] - 3):idx[0]])
-        self.assertIn("512-bit base64", preceding, "512-bit base64 の生成手順コメントが無い")
+        self.assertIn("openssl rand -hex 32", preceding, "生成手順コメントが無い")
 
-    def test_penpot_keys_are_in_one_block(self):
-        """受入基準の背景: Penpot 関連が散らばっていると重複が再発する。"""
+    def test_keycloak_client_secrets_are_in_one_block(self):
+        """受入基準の背景: 関連キーが散らばっていると重複が再発する。"""
         keys = keys_of(EXAMPLE)
-        positions = [i for i, k in enumerate(keys) if k.startswith("PENPOT_")]
+        positions = [i for i, k in enumerate(keys) if k.startswith("KEYCLOAK_")]
         self.assertTrue(positions)
         span = positions[-1] - positions[0] + 1
         self.assertEqual(
             len(positions), span,
-            "PENPOT_* の間に無関係なキーが挟まっている(1ブロックにまとまっていない)",
+            "KEYCLOAK_* の間に無関係なキーが挟まっている(1ブロックにまとまっていない)",
         )
 
 
@@ -133,15 +134,15 @@ class CheckEnvDetectsDuplicates(unittest.TestCase):
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     def test_duplicate_key_in_env_is_reported(self):
-        target = self.env_from_example(["PENPOT_VERSION=2.16"])
+        target = self.env_from_example(["NEXTAUTH_SECRET=x"])
         r = self.run_check(target)
         self.assertNotEqual(0, r.returncode, "重複キーがあるのに終了コード0")
-        self.assertIn("PENPOT_VERSION", r.stdout + r.stderr, "重複したキー名が報告されていない")
+        self.assertIn("NEXTAUTH_SECRET", r.stdout + r.stderr, "重複したキー名が報告されていない")
 
     def test_reports_every_duplicate_not_just_the_first(self):
-        target = self.env_from_example(["PENPOT_VERSION=2.16", "MCP_LOG_LEVEL=debug"])
+        target = self.env_from_example(["NEXTAUTH_SECRET=x", "MCP_LOG_LEVEL=debug"])
         out = self.run_check(target).stdout
-        self.assertIn("PENPOT_VERSION", out)
+        self.assertIn("NEXTAUTH_SECRET", out)
         self.assertIn("MCP_LOG_LEVEL", out)
 
     def test_duplicate_in_the_example_itself_is_reported(self):
@@ -154,7 +155,7 @@ class CheckEnvDetectsDuplicates(unittest.TestCase):
         os.makedirs(broken)
         shutil.copy(EXAMPLE, os.path.join(broken, ".env.example"))
         with open(os.path.join(broken, ".env.example"), "a", encoding="utf-8") as f:
-            f.write("PENPOT_VERSION=9.99\n")
+            f.write("NEXTAUTH_SECRET=other\n")
         shutil.copy(os.path.join(broken, ".env.example"), os.path.join(broken, ".env"))
         # スクリプトはリポジトリ直下の .env.example を見るため、ここでは
         # `.env` 側に同じ重複が入ることで検出されることを確認する。

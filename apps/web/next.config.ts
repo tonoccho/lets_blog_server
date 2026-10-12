@@ -26,7 +26,7 @@ import type { NextConfig } from "next";
  *   (scripts/generate-certs.sh、README.md参照)。長い max-age を焼き付けると
  *   証明書を作り直した後にブラウザが警告を回避できず開発者が締め出されるため、
  *   意図的に短くしてある(HTTPS強制自体は nginx の 80→443 リダイレクトが担う)。
- * - `Content-Security-Policy` は入れない。管理画面は draw.io / Penpot / PlantUML を
+ * - `Content-Security-Policy` は入れない。管理画面は draw.io / PlantUML を
  *   iframe と画像で埋め込み、開発サーバー(next dev)は eval とインラインを使うため、
  *   実効性のある CSP を今この Issue の範囲で書き切れない。理由は SECURITY.md にも残す。
  */

@@ -42,7 +42,6 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | **認証あり(phpMyAdmin自身のログイン画面)**。`.env` の `MYSQL_USER` / `MYSQL_PASSWORD` を入力してログインする。コンテナへ `PMA_USER` / `PMA_PASSWORD` は渡さない(#978。渡すと `auth_type` が `config` になり無認証で全DBを操作できる) |
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
-| `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
 | `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
@@ -155,7 +154,75 @@ profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの�
 ### 将来の縮退起動
 
 Ollama(#1745)も ComfyUI(#1746)も同梱しないので、このホストの GPU 要件は無い。
-Penpot 一式(6サービス)は #1752 で削除するので profile 化しない。
+Penpot 一式は #1752 で削除したので profile 化しない(既存環境の移行手順は「Penpot を使っていた既存環境の移行(#1752)」)。
+
+## reverse-proxy の経路図
+
+この節は、reverse-proxy(nginx)が受け付ける経路のうち、**どの経路が外部に開いているか**を伝える
+経路図である。`infra/nginx/conf.d/default.conf` の実態と一致させて維持する
+(`scripts/test_docs_reverse_proxy_diagram.py` が、図に載っている経路が nginx に実在することを機械的に検査する。#1010)。
+図は要約であり、内部向けの `location`(`/nginx-health` など)は載せていない。網羅的な一覧は `default.conf` を参照。
+
+```
+https://localhost/
+├─ /             ← Web UI (Next.js, reverse-proxy → web:3000)
+├─ /api          ← Let's Blog API (reverse-proxy → gateway:8080)
+├─ /auth         ← Keycloak (reverse-proxy → keycloak:8080)
+├─ /drawio       ← draw.io (reverse-proxy → drawio:8080)
+├─ /phpmyadmin   ← phpMyAdmin (reverse-proxy → phpmyadmin:80)
+└─ /sites        ← 管理対象 WordPress サイト (reverse-proxy → wordpress:80)
+```
+
+`/api` の中継先は `gateway` である。`api` という名前のサービスは `docker-compose.yml` に存在しない。
+
+**外部に開いていない経路**(過去に図へ載っていたもの):
+
+| 経路 | 現状 |
+| --- | --- |
+| `/ollama` | **存在しない。** Ollama コンテナごと廃止済み |
+| `/comfyui` | **#979 で `location` を削除した。** ブラウザからは到達しない。ComfyUI へはサービス間通信でのみ到達する |
+| `/penpot` | **#1752 で `location` を削除した。** どこにも中継されない(404) |
+
+## Penpot を使っていた既存環境の移行(#1752)
+
+Penpot は #1752 で、`docker-compose.yml` の6サービス(`penpot-frontend` / `penpot-backend` /
+`penpot-mcp` / `penpot-exporter` / `penpot-postgres` / `penpot-valkey`)・2ボリューム(`penpot_postgres` /
+`penpot_assets`)・`PENPOT_*` 環境変数・nginx の `/penpot` ごと削除した。外部の Penpot への接続は
+#1753 で改めて計画する。
+
+**ボリュームは自動では消えない。** `docker compose up -d` も `scripts/rebuild-acceptance-env.sh` も
+`penpot_*` ボリュームを削除しない。残したいデータがあるか確かめ、**利用者が手で**消す。
+
+1. 必要なら、先にバックアップを取る(コンテナは止まっていてよい。ボリューム名の接頭辞は
+   `docker volume ls | grep penpot` で確かめる。既定のプロジェクト名なら `lets_blog_server_`):
+
+   ```bash
+   mkdir -p ~/penpot-backup
+   for volume in lets_blog_server_penpot_postgres lets_blog_server_penpot_assets; do
+     docker run --rm -v "${volume}:/data:ro" -v ~/penpot-backup:/backup alpine \
+       tar czf "/backup/${volume}.tar.gz" -C /data .
+   done
+   ```
+
+2. 新しい `docker-compose.yml` で、孤立した Penpot のコンテナを止めて消す
+   (`.env` の `PENPOT_*` は不要になるので、あわせて消してよい。残っていても害は無い):
+
+   ```bash
+   docker compose down --remove-orphans
+   docker compose up -d
+   ```
+
+3. 不要になったら、ボリュームを消す。**元に戻せない**ので、1. の退避を確かめてから行う:
+
+   ```bash
+   docker volume rm lets_blog_server_penpot_postgres lets_blog_server_penpot_assets
+   ```
+
+4. 取り込み直す場合(別途起動した Penpot へ戻す場合など)は、バックアップを
+   `docker run --rm -v <新しいボリューム>:/data -v ~/penpot-backup:/backup alpine tar xzf /backup/<ファイル> -C /data`
+   で展開する。
+
+メモリの変化(既定の起動、アイドル時、`docker stats --no-stream`)は #1752 のコメントに実測値がある。
 
 ## docker-socket-proxy の権限(#1587)
 
@@ -324,13 +391,12 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
 | `lbs-identity` | 403 | 558 | 1g | 512m |
 | `lbs-media`(#1112 の値を維持) | 439 | 919 | 2g | 1g |
 | `lbs-keycloak` | 534 | 901 | 1536m | - |
-| `lbs-penpot-backend` | 1046 | 1057 | 4g | - |
 | `lbs-wordpress` | 31 | 968 | 1g | - |
 | `lbs-mysql` | 432 | 743 | 1g | - |
 | `lbs-rabbitmq` | 135 | 208 | 768m | - |
 
-残りは `reverse-proxy` / `phpmyadmin` 128m、`docker-socket-proxy` / `penpot-valkey` / `mailcatch` 64m、
-`keycloak-postgres` 256m、`penpot-frontend` / `penpot-mcp` 256m、`penpot-exporter` 768m、`penpot-postgres` 384m、
+残りは `reverse-proxy` / `phpmyadmin` 128m、`docker-socket-proxy` / `mailcatch` 64m、
+`keycloak-postgres` 256m、
 `plantuml` 1g、`drawio` 512m(`docker-compose.yml` を参照)。
 
 根拠:
@@ -357,19 +423,17 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 
 ## リソース実測
 
-全29コンテナを `docker compose up -d` で起動した状態で `docker stats --no-stream` を実測した値
-(2026-09-01、issue #590 で再実測)。
+全22コンテナを `docker compose up -d` で起動した状態で `docker stats --no-stream` を実測した値
+(2026-09-01、issue #590 で再実測。Penpot 一式の6コンテナは #1752 で削除したので、その行は除いて合計を引き直した)。
 
 | コンテナ | メモリ使用量 |
 |---|---|
-| `lbs-penpot-backend` | 3224.6 MiB |
 | `lbs-web` | 1766.4 MiB |
 | `lbs-keycloak` | 828.7 MiB |
 | `lbs-content` | 788.9 MiB |
 | `lbs-media` | 759.2 MiB |
 | `lbs-platform` | 576.9 MiB |
 | `lbs-identity` | 572.7 MiB |
-| `lbs-penpot-frontend` | 567.7 MiB |
 | `lbs-log-writer` | 558.1 MiB |
 | `lbs-project` | 547.6 MiB |
 | `lbs-ai` | 518.5 MiB |
@@ -379,18 +443,14 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 | `lbs-gateway` | 404.2 MiB |
 | `lbs-mysql` | 396.1 MiB |
 | `lbs-drawio` | 295.3 MiB |
-| `lbs-penpot-exporter` | 176.9 MiB |
 | `lbs-rabbitmq` | 148.6 MiB |
-| `lbs-penpot-mcp` | 125.8 MiB |
-| `lbs-penpot-postgres` | 108.2 MiB |
 | `lbs-mailcatch` | 43.3 MiB |
 | `lbs-phpmyadmin` | 42.8 MiB |
 | `lbs-keycloak-postgres` | 31.3 MiB |
 | `lbs-wordpress` | 27.6 MiB |
 | `lbs-reverse-proxy` | 23.2 MiB |
 | `lbs-docker-socket-proxy` | 20.7 MiB |
-| `lbs-penpot-valkey` | 18.0 MiB |
-| **合計** | **約15.0 GiB** |
+| **合計** | **約9.5 GiB** |
 
 **注意点**
 
@@ -398,14 +458,15 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
   本番ビルドより大幅にメモリを消費している。本番相当の構成にすればもっと小さくなる見込み。
 - 上の測定は同梱の ComfyUI(約1.4 GiB)を含む時点のもの。ComfyUI は #1746 で同梱をやめたので、その分は不要になった。
 - ビルド時(`docker compose build` 実行中)やAI機能利用時は瞬間的にこれを上回る。
-  ホストOS自体の消費分も含め、実測値(約15GiB)に対して余裕を見て**24GB以上を推奨**する(README参照)。
+  ホストOS自体の消費分も含め、実測値(Penpot を削除する前は約15GiB)に対して余裕を見て**24GB以上を推奨**する(README参照)。
 
 ### 前回(#556時点)からの変化
 
 | | コンテナ数 | 合計メモリ |
 |---|---:|---:|
 | #556 時点 | 19 | 約10.3 GiB |
-| **現在** | **29** | **約15.0 GiB** |
+| 2026-09-01(#590) | 29 | 約15.0 GiB |
+| **現在**(Penpot 一式の削除後、#1752) | **22** | **約9.5 GiB**(上の表から Penpot の6コンテナを除いた値) |
 
 増分の内訳は、Epic #551 のマイクロサービス分割で追加された9サービス
 (gateway / identity / project / content / media / ai / analytics / publishing / platform、

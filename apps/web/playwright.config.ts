@@ -407,7 +407,7 @@ const atLetsblogSyncExclusive = defineBddProject({
  *
  * 2026-09-23 のリリース検証(develop `d6a48a3a`、run `20260922T221642Z-3414881`)で
  * **5件が落ちた**。実行ログは `Running 355 tests using 4 workers` で、連番
- * `[339] media-service停止` / `[340] log-writer停止` / `[342] Penpot停止` /
+ * `[339] media-service停止` / `[340] log-writer停止` / `[342] 連携サービス停止` /
  * `[343][344] RabbitMQ停止` / `[345] log-writer停止` が同時に走っている。
  *
  * 決定的だったのは `service-degradation.feature:24`。**media-service を止める**シナリオ

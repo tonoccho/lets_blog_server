@@ -67,7 +67,7 @@ docker compose up -d
 (reverse-proxy / web / gateway / keycloak / keycloak-postgres / mysql / rabbitmq /
 identity / media / ai / content / analytics / project / publishing / platform /
 log-writer)を対象に、`healthy`(ヘルスチェックを持たないものは `running`)
-になるまで待つ。penpot / comfyui / drawio 等の任意サービスは待機対象に含めない。
+になるまで待つ。comfyui / drawio 等の任意サービスは待機対象に含めない。
 
 ```bash
 ./scripts/wait-for-stack-healthy.sh --all --timeout 900   # 全コンテナを対象にする

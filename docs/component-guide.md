@@ -1809,7 +1809,7 @@ Footer
 
 ---
 
-## 4. Penpot 実装ガイド
+## 4. デザインツール実装ガイド
 
 ### 4.1 コンポーネント作成手順
 
@@ -1819,11 +1819,11 @@ Footer
    - テキスト：ラベル・説明文
 
 2. **Main Component 定義**
-   - フレーム → Assets パネル → "Make a component"
+   - フレームをコンポーネント化する
    - コンポーネント名：`Button / Primary / Medium`（命名規則）
 
 3. **Variants 作成**
-   - 右クリック → "Create component set"
+   - コンポーネントセット(バリアント)を作る
    - Properties を追加：Size, Variant, State
    - 各状態のデザイン定義
 
@@ -2004,7 +2004,7 @@ const buttonClasses = cn(
 
 各コンポーネント作成時に確認：
 
-- [ ] Penpot コンポーネント作成（Main + Variants）
+- [ ] デザインツールでコンポーネント作成（Main + Variants）
 - [ ] Tailwind CSS 実装例を文書化
 - [ ] React コンポーネント型定義作成
 - [ ] アクセシビリティ要件記載
@@ -2038,7 +2038,6 @@ const buttonClasses = cn(
 ## 10. 参考資料・ツール
 
 ### デザインツール
-- Penpot: https://penpot.app/
 - Tailwind CSS: https://tailwindcss.com/
 - Color Contrast Checker: https://webaim.org/resources/contrastchecker/
 
@@ -2060,7 +2059,6 @@ const buttonClasses = cn(
 - [ ] イアウント/アニメーション ガイドライン
 - [ ] Internationalization（多言語対応）
 - [ ] Design Tokens JSON 自動生成スクリプト
-- [ ] Penpot → Figma マイグレーション
 
 ---
 

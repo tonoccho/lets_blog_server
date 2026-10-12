@@ -157,12 +157,12 @@ This creates:
 docker compose up -d
 ```
 
-This starts all ~19 containers (reverse proxy, web, API, log-writer, MySQL, RabbitMQ,
-PlantUML, drawio, WordPress, phpMyAdmin, and the Penpot design-tooling suite).
+This starts all ~16 containers (reverse proxy, web, API, log-writer, MySQL, RabbitMQ,
+PlantUML, drawio, WordPress, and phpMyAdmin).
 Wait for all services to start — first-time startup (pulling/building images) can take
 several minutes, and subsequent restarts typically take 30 seconds to 2 minutes depending
 on hardware, since services that declare a healthcheck (`api`, `log-writer`, `mysql`,
-`rabbitmq`, `penpot-postgres`, `penpot-valkey`) wait for their dependencies to report
+`rabbitmq`) wait for their dependencies to report
 healthy before starting (see [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)
 for the full port/healthcheck layout):
 
@@ -181,7 +181,7 @@ say "healthy", not just "Up"):
 - `lbs-mysql` (Database)
 - `lbs-rabbitmq` (log message queue)
 - `lbs-plantuml` (Diagram rendering)
-- `lbs-drawio`, `lbs-wordpress`, `lbs-phpmyadmin`, and the `lbs-penpot-*` containers
+- `lbs-drawio`, `lbs-wordpress`, and `lbs-phpmyadmin`
 
 If a container never reaches "healthy", see
 [Multi-service startup failures](COMPREHENSIVE_TROUBLESHOOTING.md#multi-service-startup-failures)

@@ -125,8 +125,6 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
 | Docker Volume | `wordpress_sites` | 必須 | issue本文で名指し。WordPressサイトのファイル一式 |
 | Docker Volume | `bulk_upload_files` | 必須 | 一括アップロード作業ファイル |
 | Docker Volume | `avatar_images` | 必須 | identity-serviceのアバター画像(#1241)。利用者のデータで他から再生成できない |
-| Docker Volume | `penpot_assets` | 推奨 | カスタムタグAIデザイン生成で使うPenpotアセット |
-| Docker Volume | `penpot_postgres` | 推奨 | Penpot自体のDB。Keycloak/認証には非依存だが全停止のタイミングで一緒に取得する |
 | Docker Volume | `rabbitmq_data` | 任意 | キューの永続化データ。復旧後は空でも業務継続に支障はない想定だが安全側で対象に含める |
 | Docker Volume | `mysql_data` / `keycloak_postgres` | 参考(物理コピー) | 上記の論理ダンプ(mysqldump/pg_dump)が正の復旧手段。物理ボリュームコピーは保険として任意 |
 
@@ -169,7 +167,7 @@ docker exec -e PGPASSWORD="$KEYCLOAK_DB_PASSWORD" lbs-keycloak-postgres \
 # --- Docker named volume群(生ファイル。停止済みのサービスが使うボリュームなので
 #     書き込み競合を気にせず tar できる)
 for volume in generated_images wordpress_sites bulk_upload_files \
-              avatar_images penpot_assets penpot_postgres rabbitmq_data \
+              avatar_images rabbitmq_data \
               mysql_data keycloak_postgres; do
   full_volume="$(basename "$(pwd)")_${volume}"
   docker run --rm \
@@ -443,8 +441,7 @@ docker compose stop keycloak-postgres mysql rabbitmq docker-socket-proxy
 
 # カットオーバーに直接関与しない補助サービスも、全停止の一貫性のため合わせて停止する
 docker compose stop wordpress phpmyadmin
-docker compose stop penpot-frontend penpot-backend penpot-exporter penpot-mcp \
-  penpot-postgres penpot-valkey mailcatch
+docker compose stop mailcatch
 docker compose stop comfyui plantuml drawio
 
 docker compose ps   # 全コンテナがExited/Stoppedになっていることを確認
@@ -752,8 +749,7 @@ docker compose up -d reverse-proxy
 
 # 補助サービス
 docker compose up -d wordpress phpmyadmin
-docker compose up -d penpot-postgres penpot-valkey mailcatch
-docker compose up -d penpot-backend penpot-exporter penpot-mcp penpot-frontend
+docker compose up -d mailcatch
 docker compose up -d comfyui plantuml drawio
 
 docker compose ps   # 全サービスがhealthy/runningであることを確認
@@ -838,7 +834,7 @@ Keycloakから取り消す、等)は推奨しない。**
   いずれかのドメインサービスが `unhealthy` のまま15分以上回復しない
 - 想定外のデータ破損・欠損が確認された場合(件数突合の不一致等)
 
-軽微な問題(例: 一部の補助サービス(Penpot等)が起動しない、監査ログの表示が一部欠ける等、
+軽微な問題(例: 一部の補助サービス(drawio等)が起動しない、監査ログの表示が一部欠ける等、
 [認証・ログイン・記事公開・画像生成]の中核機能に影響しないもの)は、ロールバックせず
 別Issueとして起票し、カットオーバー自体は完了扱いとする。
 
@@ -857,8 +853,7 @@ docker compose stop identity
 docker compose stop keycloak
 docker compose stop keycloak-postgres mysql rabbitmq docker-socket-proxy
 docker compose stop wordpress phpmyadmin
-docker compose stop penpot-frontend penpot-backend penpot-exporter penpot-mcp \
-  penpot-postgres penpot-valkey mailcatch
+docker compose stop mailcatch
 docker compose stop comfyui plantuml drawio
 
 # 2. MySQL復元(全データベースを一度作り直してから流し込む)

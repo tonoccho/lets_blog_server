@@ -26,9 +26,10 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 NGINX = os.path.join(REPO_ROOT, "infra/nginx/conf.d/default.conf")
-DOC = os.path.join(REPO_ROOT, "docs/penpot-infrastructure.md")
+# #1752: 経路図は Penpot 専用文書(削除済み)から、Penpot と無関係なこの文書へ移した。
+DOC = os.path.join(REPO_ROOT, "docs/DOCKER_COMPOSE_ARCHITECTURE.md")
 
-# 図の行から経路を拾う。`├─ /penpot  ← ...` のような行。
+# 図の行から経路を拾う。`├─ /drawio  ← ...` のような行。
 DIAGRAM_PATH = re.compile(r"^[│├└─\s]*(/[a-z0-9_{}/-]*)\s")
 
 
@@ -112,18 +113,19 @@ class DiagramMatchesNginx(unittest.TestCase):
 
 
 class DocumentPositioning(unittest.TestCase):
-    def test_the_document_states_whether_it_is_current_or_historical(self):
-        """設計記録か現行構成かが冒頭で分かること。
+    def test_the_diagram_has_a_section_that_says_it_is_kept_in_sync(self):
+        """経路図の節があり、nginx の実態と一致させて維持する旨が分かること(#1010)。
 
-        分からないと、読者は図の食い違いを「古い記録だから」と流すか、
-        「現行のはずなのに違う」と混乱するかのどちらかになる。
+        分からないと、読者は図の食い違いを「古い記録だから」と流してしまう。
         """
         with open(DOC, encoding="utf-8") as f:
-            head = "\n".join(f.read().splitlines()[:30])
-        self.assertTrue(
-            any(w in head for w in ("現行", "設計記録", "当時", "この文書は")),
-            "文書の位置づけ(設計記録か現行構成か)が冒頭で分からない",
-        )
+            text = f.read()
+        self.assertIn("## reverse-proxy の経路図", text)
+        section = text.split("## reverse-proxy の経路図", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("test_docs_reverse_proxy_diagram.py", section)
+
+    def test_the_diagram_does_not_present_penpot(self):
+        self.assertEqual([], [p for p, _ in diagram_paths() if "penpot" in p])
 
 
 class ParserSanity(unittest.TestCase):
@@ -131,7 +133,7 @@ class ParserSanity(unittest.TestCase):
 
     def test_nginx_locations_are_found(self):
         got = nginx_locations()
-        for expected in ("/api", "/penpot", "/drawio", "/phpmyadmin"):
+        for expected in ("/api", "/drawio", "/phpmyadmin"):
             with self.subTest(path=expected):
                 self.assertIn(expected, got)
 

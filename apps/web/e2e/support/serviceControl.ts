@@ -2,7 +2,7 @@
  * シナリオの途中でサービスを停止・復旧させるための共通ヘルパー。
  *
  * 出所は `steps/degradation.steps.ts`(issue #943 / AT-17)。同じ仕組みを
- * `steps/diagram.steps.ts`(issue #937 / AT-11、Penpot 未起動時のふるまい)でも
+ * `steps/diagram.steps.ts`(issue #937 / AT-11、連携サービス未起動時のふるまい)でも
  * 使うため、**片方に閉じた実装を複製せず**ここへ出した。
  *
  * ## 復旧は誰がするのか

@@ -1,4 +1,4 @@
-// media-service (#573): ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリング。
+// media-service (#573): ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Rechartsレンダリング。
 // GPU/外部プロセス依存でレスポンスタイムが他のAPIと桁違いに長いため、最も独立性が高い領域として
 // legacy-apiから抽出した。スキーマ分離(lbs_media)により他サービスから独立する。
 plugins {

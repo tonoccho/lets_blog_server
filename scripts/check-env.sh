@@ -51,8 +51,8 @@ keys_of() {
 # なぜ重複が問題か: `docker compose` の env_file も shell の `source` も**後の定義が勝つ**。
 # したがってキーが2箇所にあると、コメント付きの正しい定義を利用者が書き換えても、
 # コメントの無い後の行に上書きされて無視される。しかも警告は一切出ない。
-# #959 では `.env.example` の PENPOT_SECRET_KEY がまさにこれで、
-# 「512-bit base64 で生成せよ」という指示を持たないほうが有効になっていた。
+# #959 では `.env.example` の秘密鍵の1つがまさにこれで、
+# 「生成手順」の指示を持たないほうが有効になっていた。
 duplicate_keys_of() {
     grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$1" | tr -d '=' | sort | uniq -d
 }

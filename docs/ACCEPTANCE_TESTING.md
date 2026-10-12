@@ -481,7 +481,7 @@ docker compose exec -w /app web sh      # web は npm を /app で動かす
 docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
 ```
 
-**スタブ化しないもの**: PlantUML / draw.io / Penpot / WordPress。
+**スタブ化しないもの**: PlantUML / draw.io / WordPress。
 いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
 
 ### Ollama は同梱しないので AT スタックにも無い(#1745)
@@ -1049,7 +1049,7 @@ Playwright はファイルをまたぐ直列化の手段を持たない(`@mode:s
 
 2026-09-23 のリリース検証(develop `d6a48a3a`)で **5件が落ちた**。実行ログは
 `Running 355 tests using 4 workers` で、連番 `[339] media-service停止` /
-`[340] log-writer停止` / `[342] Penpot停止` / `[343][344] RabbitMQ停止` /
+`[340] log-writer停止` / `[342] 連携サービス停止` / `[343][344] RabbitMQ停止` /
 `[345] log-writer停止` が同時に走っていた。
 
 決め手は `cross-cutting/service-degradation.feature:24`。**media-service を止める**
@@ -1155,8 +1155,6 @@ npm run test:at:setup                 # データ層リセット → at-setup �
 | `lets_blog_server_generated_images` | 生成画像の保存領域 | テストが作った成果物 |
 | `lets_blog_server_bulk_upload_files` | 一括アップロードの一時ファイル | テストが作った成果物 |
 | `lets_blog_server_avatar_images` | identity-service のアバター画像(`AVATAR_STORAGE_PATH: /app/data/avatars`) | テストが作った成果物 |
-| `lets_blog_server_penpot_postgres` | Penpot の DB | 既定は破棄。再構築コストが問題になれば保全へ移す(#965 Open Questions) |
-| `lets_blog_server_penpot_assets` | Penpot のアセット | 同上 |
 
 | 保全するボリューム | 保全する理由 |
 | --- | --- |

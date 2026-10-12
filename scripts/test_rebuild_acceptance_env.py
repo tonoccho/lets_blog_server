@@ -89,8 +89,6 @@ DESTROYED_VOLUMES = [
     "mysql_data",
     "rabbitmq_data",
     "keycloak_postgres",
-    "penpot_postgres",
-    "penpot_assets",
     "wordpress_sites",
     "bulk_upload_files",
     "generated_images",
@@ -100,6 +98,8 @@ PRESERVED_VOLUMES = []
 # #1745 / #1746: 同梱の Ollama と ComfyUI を廃止したので、スクリプトはこれらのボリュームを管理(破棄・保全)しない。
 REMOVED_OLLAMA_VOLUMES = ["ollama_models"]
 REMOVED_COMFYUI_VOLUMES = ["comfyui_models", "comfyui_output"]
+# #1752: Penpot を削除したので、スクリプトはこれらのボリュームを管理(破棄・保全)しない。
+REMOVED_PENPOT_VOLUMES = ["penpot_postgres", "penpot_assets"]
 VOLUME_PREFIX = "lets_blog_server_"
 
 SERVICE_SCHEMAS = [
@@ -904,6 +904,16 @@ class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
         既存ボリュームの手動削除は docs/EXTERNAL_COMFYUI.md の移行手順に書く(自動削除はしない)。
         """
         for v in REMOVED_COMFYUI_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertNotIn(v, self.text)
+
+    def test_does_not_manage_the_removed_penpot_volumes(self):
+        """#1752: Penpot を削除したので、penpot_postgres / penpot_assets を破棄も保全もしない。
+
+        既存ボリュームのバックアップと手動削除は docs/DOCKER_COMPOSE_ARCHITECTURE.md の移行手順に書く
+        (自動削除はしない)。
+        """
+        for v in REMOVED_PENPOT_VOLUMES:
             with self.subTest(volume=v):
                 self.assertNotIn(v, self.text)
 

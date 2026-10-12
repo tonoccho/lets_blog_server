@@ -10,19 +10,18 @@
 なく**リクエストごとに**名前解決するため、宛先が存在しないホスト名でも `nginx -t` は通り、
 コンテナも healthy のまま起動する。
 
-#1012 がまさにそれだった。`location /penpot` の宛先は `penpot:80` だったが、
-`docker-compose.yml` に `penpot` というサービスは無く(実在するのは `penpot-frontend`)、
+#1012 がまさにそれだった。ある `location` の宛先は `docker-compose.yml` に無いホスト名で、
 `aliases:` の定義も1つも無い。誤りが表に出るのは利用者がアクセスした瞬間だけで、
-症状は 502 という「上流が落ちている」ようにしか見えない形で現れる。
+症状は 502 という「上流が落ちている」ようにしか見えない形で現れる。(その経路は #1752 で削除した。)
 
 `default.conf` と `docker-compose.yml` は別々に編集され、**両者が同期している保証は無い**。
 そこで「中継先のホスト名が compose のサービス名かネットワークエイリアスとして実在すること」
 を検査する。
 
-ポートの誤り(`penpot-frontend:80`。実際の listen は 8080)まではここでは見ない。
+ポートの誤り(宛先のサービスが実際に listen する番号との食い違い)まではここでは見ない。
 compose の宣言だけからは、ポートを公開していないサービスが何番で listen しているか
 決められないためである。そちらは受け入れテスト
-(`apps/web/e2e/features/cross-cutting/penpot-routing.feature` の
+(`apps/web/e2e/features/cross-cutting/reverse-proxy-upstreams.feature` の
 「reverse-proxy の全ての中継先へ到達できる」)が稼働中のコンテナへ実際に TCP 接続して見る。
 
 ## SECURITY.md との対応
@@ -55,7 +54,7 @@ COMPOSE_SERVICE = re.compile(r"^  ([a-z][a-z0-9_-]*):\s*$", re.M)
 # ネットワークエイリアス。`aliases:` の直後に続く `- name` の並び。
 COMPOSE_ALIAS_BLOCK = re.compile(r"^(\s*)aliases:\s*$((?:\n\1\s+-\s*\S+)*)", re.M)
 
-# SECURITY.md の表の行。`| `/penpot` | Penpot | ... |`
+# SECURITY.md の表の行。`| `/phpmyadmin` | phpMyAdmin | ... |`
 SECURITY_ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|", re.M)
 
 # `location = <path> { ... return 301 <target>; ... }` — 完全一致ロケーションの301リダイレクト。
@@ -73,7 +72,7 @@ def read(path):
 
 
 def normalize(path):
-    """`/penpot/` と `/penpot` を同じものとして扱う。"""
+    """`/drawio/` と `/drawio` を同じものとして扱う。"""
     return path.rstrip("/") or "/"
 
 
@@ -151,8 +150,8 @@ class ExactRedirectsPreserveQueryString(unittest.TestCase):
     def test_bare_path_redirect_keeps_query_string(self):
         """`location = <path>` の301が、末尾スラッシュ付きへ寄せる際にクエリ文字列を保つこと。
 
-        `return 301 /penpot/;` は元のリクエストの `?...` を一切引き継がない
-        (`https://.../penpot?foo=bar` は `https://.../penpot/` に落ちて `foo=bar` が消える)。
+        `return 301 /<path>/;` は元のリクエストの `?...` を一切引き継がない
+        (`https://.../x?foo=bar` は `https://.../x/` に落ちて `foo=bar` が消える)。
         `$is_args$args` を含む形でなければ、ディープリンクのクエリパラメータが
         リダイレクト1回で失われる。
         """
@@ -212,6 +211,20 @@ class SecurityDocMatchesNginx(unittest.TestCase):
         )
 
 
+class NoPenpotUpstream(unittest.TestCase):
+    """#1752: Penpot を削除したので、nginx に Penpot の中継先も経路も無い。"""
+
+    def test_no_penpot_upstream_host(self):
+        hosts = {host for host, _ in upstream_targets()}
+        self.assertEqual([], sorted(h for h in hosts if "penpot" in h))
+
+    def test_no_penpot_location(self):
+        self.assertEqual([], sorted(p for p in location_upstreams() if "penpot" in p))
+
+    def test_security_doc_has_no_penpot_row(self):
+        self.assertEqual([], sorted(p for p in security_table_paths() if "penpot" in p))
+
+
 class ParserSanity(unittest.TestCase):
     """検査そのものが空振りしていないこと。"""
 
@@ -223,19 +236,18 @@ class ParserSanity(unittest.TestCase):
 
     def test_compose_names_are_found(self):
         names = compose_names()
-        for expected in ("web", "gateway", "penpot-frontend"):
+        for expected in ("web", "gateway", "keycloak"):
             with self.subTest(service=expected):
                 self.assertIn(expected, names)
 
     def test_location_upstreams_are_found(self):
         found = location_upstreams()
-        self.assertIn("/penpot", found)
         self.assertIn("/phpmyadmin", found)
         self.assertEqual({"drawio"}, found.get("/drawio"))
 
     def test_security_table_paths_are_found(self):
         paths = security_table_paths()
-        for expected in ("/penpot", "/phpmyadmin", "/drawio"):
+        for expected in ("/phpmyadmin", "/drawio"):
             with self.subTest(path=expected):
                 self.assertIn(expected, paths)
 

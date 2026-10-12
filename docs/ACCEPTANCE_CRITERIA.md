@@ -552,7 +552,7 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | AC-EXT-019 | `letsBlog.previewDevTools` | 開発者向けのデバッグ機能。利用者から見た受け入れ基準を持たない |
 | AC-USR-012 | `POST /api/users/migrate-to-keycloak` | #566 のKeycloak移行時にのみ使う一度きりの移行操作。恒常的な利用者機能ではない |
 | AC-USR-013 | `POST /api/users/reconcile-keycloak` | 同上(移行後の突き合わせ用の運用操作) |
-| AC-SYS-010 | phpMyAdmin / RabbitMQ 管理UI / Penpot 管理UI | 本システムが提供する機能ではなく、同梱している第三者ツールの画面。それぞれの提供元が品質を担保する |
+| AC-SYS-010 | phpMyAdmin / RabbitMQ 管理UI | 本システムが提供する機能ではなく、同梱している第三者ツールの画面。それぞれの提供元が品質を担保する |
 | AC-INT-001〜018 | `/api/internal/**` | 利用者から直接呼ばれないサービス間契約。契約テストの担当(§3) |
 
 ### 4.1 実装が仕様に届いていないため受け入れ基準を狭めた行

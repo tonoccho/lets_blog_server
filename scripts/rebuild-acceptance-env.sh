@@ -93,8 +93,6 @@ readonly DESTROY_VOLUMES=(
   mysql_data
   rabbitmq_data
   keycloak_postgres
-  penpot_postgres
-  penpot_assets
   wordpress_sites
   bulk_upload_files
   generated_images

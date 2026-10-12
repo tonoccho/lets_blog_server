@@ -779,13 +779,13 @@ export function ThemeToggle() {
 
 ## 7. Design Tokens 更新ワークフロー
 
-### 1. Penpot でデザイン作成
+### 1. デザインツールでデザイン作成
    - Color palette 定義
    - Typography styles 作成
    - Component variants 追加
 
 ### 2. design-tokens.json 更新
-   - Penpot の最新デザインを JSON に反映
+   - デザインツールの最新デザインを JSON に反映
    - WCAG コントラスト値を検証
 
 ### 3. スクリプト実行
@@ -796,7 +796,7 @@ export function ThemeToggle() {
 ### 4. ファイル確認・コミット
    ```bash
    git add src/styles/tokens.css src/constants/design-tokens.ts
-   git commit -m "chore: Design Tokens updated from Penpot"
+   git commit -m "chore: Design Tokens updated from design tool"
    ```
 
 ### 5. React コンポーネント更新
@@ -907,7 +907,7 @@ Error: Invalid color syntax
 ### ❌ してはいけない
 
 - ❌ 生成ファイル（tokens.css, design-tokens.ts）を手編集
-- ❌ Penpot と JSON が不同期な状態を放置
+- ❌ デザインツールと JSON が不同期な状態を放置
 - ❌ ハードコード色 (#0066CC など）を使用
 - ❌ Tailwind config を直接編集（常に generated config を使用）
 
@@ -926,7 +926,7 @@ Error: Invalid color syntax
 
 ### 定期更新
 
-- [ ] Penpot デザイン変更を JSON に反映
+- [ ] デザインツールのデザイン変更を JSON に反映
 - [ ] スクリプト実行
 - [ ] 変更をコミット
 - [ ] PR でレビュー

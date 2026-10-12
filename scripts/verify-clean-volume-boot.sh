@@ -2,7 +2,7 @@
 # issue #668の受入基準検証手順の再現用スクリプト。
 #
 # `lets_blog_server_mysql_data`ボリューム(MySQLの永続データのみ。rabbitmq_data/
-# keycloak_postgres/penpot_*/wordpress_sites等の他ボリュームは対象外)を削除した
+# keycloak_postgres/wordpress_sites等の他ボリュームは対象外)を削除した
 # 完全にクリーンな状態から `docker compose up -d <target>`(既定はgateway。gatewayは
 # api/identity/media/ai/content/analytics/project/log-writer/keycloakへ推移的に依存するため、
 # 実質スタック全体を起動する)を実行し、全サービスがhealthyになることを確認する。

@@ -283,6 +283,19 @@ class ProjectConnectionUrlDenylistTest {
     }
 
     @Test
+    void Penpotのサービス名はdocker_composeに無く_拒否リストにも無い_issue1752() throws IOException {
+        Set<String> names = composeNames();
+        for (String gone : List.of("penpot-frontend", "penpot-backend", "penpot-mcp", "penpot-exporter",
+                "penpot-postgres", "penpot-valkey")) {
+            for (String name : List.of(gone, "lbs-" + gone)) {
+                assertFalse(names.contains(name), "docker-compose.yml に Penpot の名前が残っている: " + name);
+                // 廃止したサービス名は拒否リストに残さない(外部の Penpot へ接続する将来の構成を理由なく塞がない)。
+                assertAccepted("http://" + name + ":8080");
+            }
+        }
+    }
+
+    @Test
     void docker_composeのサービス名とコンテナ名はすべて拒否される() throws IOException {
         Set<String> names = composeNames();
         assertTrue(names.contains("mysql") && names.contains("lbs-mysql"),

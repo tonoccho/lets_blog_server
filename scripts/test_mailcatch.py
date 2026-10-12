@@ -47,10 +47,6 @@ class MailcatchService(unittest.TestCase):
     def test_container_name(self):
         self.assertEqual(compose_config()["mailcatch"]["container_name"], "lbs-mailcatch")
 
-    def test_penpot_smtp_host_follows_the_new_name(self):
-        env = compose_config("--profile", "*")["penpot-backend"]["environment"]
-        self.assertEqual(env["PENPOT_SMTP_HOST"], "mailcatch")
-
 
 class KeycloakRealm(unittest.TestCase):
     def test_smtp_host_is_mailcatch(self):

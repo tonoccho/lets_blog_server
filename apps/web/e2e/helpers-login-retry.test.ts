@@ -1,13 +1,13 @@
 /**
  * @jest-environment node
  *
- * issue #1391: `@destructive` シナリオ(例: `diagram.steps.ts`の`stopService(ctx, 'penpot-frontend')`)
+ * issue #1391: `@destructive` シナリオ(例: `degradation.steps.ts`の`stopService`)
  * がコンテナを再起動した直後、共有Dockerブリッジネットワークの再構成に伴う一過性の接続断が、
  * 直後の最初の操作(`loginViaKeycloak`が`/login`へ遷移してNextAuthの`signIn("keycloak")`が
  * 発行する`/api/auth/csrf`・`/api/auth/providers`へのfetch、またはKeycloakへのトップレベル
  * 遷移そのもの)を1回だけ巻き込むことがある。
  *
- * 実測(実装報告に記録): `docker compose stop/start penpot-frontend`前後で
+ * 実測(実装報告に記録): `docker compose stop/start`(当時の連携コンテナ)前後で
  *   - ホストから`https://localhost/`へのcurl/`requests.Session`(keep-alive)を200ms間隔で
  *     反復しても到達性は一度も失われなかった(#1391の「有力な手がかり」が示すホスト疎通確認は
  *     この断を検知できない)。

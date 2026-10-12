@@ -27,7 +27,7 @@ public class ProjectAiSettingsService {
 
     /**
      * 拒否するホスト名(小文字、末尾のドットなし。issue #1518)。クラウドメタデータと、docker-compose.ymlの
-     * サービス名・container_name。OllamaもComfyUIも同梱しない(issue #1745 / #1746)ので、ollama / comfyui 系の名前は
+     * サービス名・container_name。Ollama・ComfyUIは同梱しない(issue #1745 / #1746)ので、それらの名前は
      * docker-compose.ymlに無く、ここにも含めない(GPU PCなど外部の接続先を妨げない)。
      * docker-compose.ymlとの食い違いはProjectConnectionUrlDenylistTestが検出する。
      */
@@ -36,14 +36,12 @@ public class ProjectAiSettingsService {
             "localhost",
             "reverse-proxy", "web", "media", "ai", "content", "analytics", "platform", "project", "publishing",
             "log-writer", "gateway", "identity", "rabbitmq", "docker-socket-proxy", "mysql", "phpmyadmin",
-            "keycloak-postgres", "keycloak", "penpot-frontend", "penpot-backend", "penpot-mcp",
-            "penpot-exporter", "penpot-postgres", "penpot-valkey", "mailcatch",
+            "keycloak-postgres", "keycloak", "mailcatch",
             "plantuml", "drawio", "wordpress",
             "lbs-reverse-proxy", "lbs-web", "lbs-media", "lbs-ai", "lbs-content", "lbs-analytics",
             "lbs-platform", "lbs-project", "lbs-publishing", "lbs-log-writer", "lbs-gateway", "lbs-identity",
             "lbs-rabbitmq", "lbs-docker-socket-proxy", "lbs-mysql", "lbs-phpmyadmin", "lbs-keycloak-postgres",
-            "lbs-keycloak", "lbs-penpot-frontend", "lbs-penpot-backend", "lbs-penpot-mcp",
-            "lbs-penpot-exporter", "lbs-penpot-postgres", "lbs-penpot-valkey", "lbs-mailcatch",
+            "lbs-keycloak", "lbs-mailcatch",
             "lbs-plantuml", "lbs-drawio", "lbs-wordpress");
 
     /** 10進・16進(0x)・8進(先頭0)のいずれかの数値表記(IPv4の1要素)。 */

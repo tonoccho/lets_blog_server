@@ -13,11 +13,11 @@
 - サービス間連携(gateway → 各ドメインサービス)
 - 複数スキーマに跨るデータ
 - サービス障害時の縮退表示
-- Penpot プラグイン / ComfyUI 等の周辺コンポーネント
+- ComfyUI 等の周辺コンポーネント
 - ダークモード・レスポンシブ・アクセシビリティ
 
 > **更新(issue #588)**: サービス分割・Keycloak 移行に伴い、単一アプリケーション時代の
-> 前提(`http://localhost:8000`、`ollama` / `mcp-penpot` コンテナ等)を全面的に改めています。
+> 前提(`http://localhost:8000`、`ollama` コンテナ等)を全面的に改めています。
 
 ---
 
@@ -42,7 +42,6 @@ df -h                     # ディスク空き容量(最小 20GB。不足する�
 | `https://localhost/api/` | gateway(各ドメインサービスへルーティング) |
 | `https://localhost/sites/{siteKey}/` | ManagedWordPress サイト |
 | `https://localhost/phpmyadmin/` | phpMyAdmin |
-| `https://localhost/penpot` | Penpot |
 | `https://localhost/drawio/` | draw.io(VSCode拡張のダイアグラム編集が読み込む) |
 
 ComfyUI(`/comfyui/`)と PlantUML(`/plantuml/`)は #979 で reverse-proxy の中継を
@@ -277,23 +276,17 @@ docker compose start content
 同じ検証は `apps/web/e2e/features/cross-cutting/service-degradation.feature` で自動化されています
 (`@destructive` なので `npm run test:at` の最終段階で実行されます。issue #943 / AT-17)。
 
-### 4.4 Penpot / ComfyUI 等の周辺コンポーネント
+### 4.4 ComfyUI 等の周辺コンポーネント
 
 ```bash
-# Penpot(penpot-frontend / penpot-backend / penpot-exporter / penpot-postgres / penpot-valkey)
-docker compose up -d penpot-frontend
-# ブラウザ: https://localhost/penpot
-
 # ComfyUI(画像生成。media-service が利用する)
 docker compose up -d comfyui
 # ブラウザからは開けない(#979 で /comfyui/ の中継を削除)。疎通確認は lbs-net の中から:
 #   docker exec lbs-media curl -s -o /dev/null -w '%{http_code}' http://comfyui:8188/
 
 # ダッシュボードの「接続サービス状態」パネル(platform-service)で
-# ComfyUI / PlantUML / WordPress プロビジョニング / Penpot の状態を確認できる
+# ComfyUI / PlantUML / WordPress プロビジョニングの状態を確認できる
 ```
-
-Penpot プラグインの導入・動作確認手順は `docs/penpot-setup.md` を参照してください。
 
 ---
 
@@ -393,7 +386,7 @@ https://www.nvaccess.org/
 
 # テスト方法
 1. NVDA を起動
-2. Penpot / Let's Blog にアクセス
+2. Let's Blog にアクセス
 3. ナビゲーション動作を確認
 ```
 

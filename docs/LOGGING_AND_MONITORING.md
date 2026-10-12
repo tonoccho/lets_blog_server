@@ -303,7 +303,7 @@ external call: target=brave-search host=api.search.brave.com method=GET path=/re
 | `google-analytics` / `google-adsense` | analytics `analytics/GoogleAnalyticsClient`, `adsense/AdSenseClient` |
 | `keycloak-admin` | identity and platform `keycloak/KeycloakAdminClientConfig` (also the token calls made through the same builder) |
 | `keycloak-token` | identity `config/ServiceTokenClientConfig`, `packages/lbs-common` `auth/ServiceTokenClientConfig` |
-| `openai-image` / `comfyui` / `penpot` / `plantuml` | media `ai/ChatGptImageClient`, `ai/ComfyUiClient`, `ai/PenpotClient`, `render/PlantUmlClient` |
+| `openai-image` / `comfyui` / `plantuml` | media `ai/ChatGptImageClient`, `ai/ComfyUiClient`, `render/PlantUmlClient` |
 | `container-status` / `rabbitmq-management` / `gateway-status` / `connected-service-status` | platform `service/ContainerStatusService`, `RabbitMqQueueStatusService`, `LetsBlogServiceStatusService`, `ConnectedServiceStatusService` |
 | `wordpress-agent` / `wordpress-bulk` | project `provisioning/AgentRestClients`, publishing `cms/agent/WordPressAgentOperations`, `provisioning/WordPressBulkManagementClient` |
 | `x-api` / `linkedin-api` / `facebook-api` / `hatena-api` / `threads-api` | project `client/XApiClient`, `LinkedinApiClient`, `FacebookApiClient`, `HatenaApiClient`, `ThreadsApiClient` |
@@ -429,7 +429,7 @@ platform-service の `ConnectedServiceStatusService`。
 
 | 区分 | 対象 |
 |---|---|
-| 外部依存 | データベース、LLM、ComfyUI、PlantUML、WordPress プロビジョニングエージェント、Penpot、Brave Search |
+| 外部依存 | データベース、LLM、ComfyUI、PlantUML、WordPress プロビジョニングエージェント、Brave Search |
 | **Let's Blog 自身の9サービス** | identity / project / content / media / ai / analytics / publishing / platform / log-writer(#589で追加) |
 | **RabbitMQ のキュー滞留・DLQ 滞留** | 全キュー(#589で追加) |
 

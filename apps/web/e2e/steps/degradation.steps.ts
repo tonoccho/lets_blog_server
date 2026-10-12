@@ -26,7 +26,7 @@ import {
  * 待たずに次のシナリオへ進むと、無関係なシナリオが起動途中のサービスで落ちる。
  * 下の後始末は `ctx.stoppedServices` に積まれたものを見るので、**このファイル以外の
  * `@destructive` シナリオが止めたサービス**も同じように復旧する
- * (`support/serviceControl.ts` を参照。issue #937 の Penpot がそれである)。
+ * (`support/serviceControl.ts` を参照。issue #937 の連携サービス停止がそれである)。
  *
  * サービスの停止・起動のヘルパーは `support/serviceControl.ts` にある。
  */

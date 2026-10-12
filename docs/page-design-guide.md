@@ -11,7 +11,7 @@
 - コンポーネント配置
 - ユーザーフロー・インタラクション
 - レスポンシブ対応
-- Penpot フレーム定義
+- デザインツールのフレーム定義
 - React 実装ガイド
 
 ---
@@ -1353,7 +1353,7 @@ Hamburger Menu (Drawer):
 
 ---
 
-## 11. Penpot実装ガイド
+## 11. デザインツール実装ガイド
 
 ### ページフレーム作成手順
 
@@ -1426,7 +1426,6 @@ Hamburger Menu (Drawer):
 - Tailwind UI: https://tailwindui.com/
 
 ### ツール
-- Penpot: https://penpot.app/
 - Figma: https://figma.com/
 - Storybook: https://storybook.js.org/
 

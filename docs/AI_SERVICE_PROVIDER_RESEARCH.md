@@ -7,13 +7,13 @@
 | 機能 | 現在の実装 | 用途 |
 | --- | --- | --- |
 | LLM(テキスト生成) | Ollama (`ollama/ollama`イメージ) | 下書き/校正/要約支援、タグ提案、記事プランニング(壁打ちチャット)、タグデザイン生成 |
-| デザイン/画像編集ハンドオフ | Penpot (self-hosted) | カスタムタグ生成時のデザインファイル作成・コメント連携 |
+| デザイン/画像編集ハンドオフ | セルフホストのデザインツール(#1752 で削除済み) | カスタムタグ生成時のデザインファイル作成・コメント連携 |
 | 画像生成 | ComfyUI (Stable Diffusion系, GPU必須) | アイキャッチ・記事内画像の生成 |
 
 これらはいずれもGPU付きサーバーの運用・モデルの手動pull・ディスク容量管理が必要で、運用コストが高い。本Issueはそれぞれの外部(ホスト型)サービスへの置き換えを検討し、各サービスごとに実装Issueを作成することがゴール。実装Issueは既に以下の3件が作成済み:
 
 - #376 Replace Ollama with external LLM service provider
-- #377 Replace Penpot with external design/image generation service
+- #377 Replace the self-hosted design tool with an external design/image generation service
 - #378 Replace ComfyUI with external image generation service
 
 このドキュメントは3サービス共通の比較・意思決定記録であり、**このタイミングで実装するのは#376のみ**(#377/#378は本ドキュメントの調査結果を踏まえた上で別途着手する)。
@@ -64,15 +64,15 @@
 
 ---
 
-## 2. デザイン/画像編集ハンドオフ(Penpot代替) — 今回は未実装、#377で対応
+## 2. デザイン/画像編集ハンドオフ(セルフホストのデザインツールの代替) — 今回は未実装、#377で対応
 
 現在の用途は「カスタムタグ生成時に、生成に使ったプロンプトとAI応答をコメントとして添付したデザインファイルを作成する」という限定的なもの(`CustomTagGenerationService`からのベストエフォート呼び出しで、失敗してもタグ生成自体は失敗させない)。
 
 | 選択肢 | 概要 | 所感 |
 | --- | --- | --- |
 | Figma REST API / Webhooks | デザインファイル作成・コメント投稿のAPIあり | 実質的な業界標準。API仕様が安定しており移行先として最有力。ただしOAuth認可フローの実装が必要。 |
-| Figma (Plugin経由) | Figma Pluginでの代替も可能(かつて本リポジトリにあった Penpot プラグインは#1749で削除) | Webhook/RESTのほうがサーバーサイドから直接叩けるため優先度は下 |
-| そのまま自前ホストPenpotを維持 | 現状維持 | デザインハンドオフはベストエフォート機能であり、必須要件ではない。優先度を下げて#377で個別に判断してよい |
+| Figma (Plugin経由) | Figma Pluginでの代替も可能(かつて本リポジトリにあったデザインツールのプラグインは#1749で削除) | Webhook/RESTのほうがサーバーサイドから直接叩けるため優先度は下 |
+| そのまま自前ホストのデザインツールを維持 | 現状維持(#1752 で同梱をやめた) | デザインハンドオフはベストエフォート機能であり、必須要件ではない。優先度を下げて#377で個別に判断してよい |
 
 **推奨**: Figma REST API(コメント投稿・ファイル作成)への置き換え。詳細な認可方式(サービスアカウント vs OAuth)は#377で個別調査する。
 
@@ -95,13 +95,13 @@
 | サービス | 対応Issue | 採用方針 | ステータス |
 | --- | --- | --- | --- |
 | Ollama → LLM | #376 | OpenAI互換Chat Completions API、既定プロバイダ OpenAI (`gpt-4o-mini`) | 本セッションで実装 |
-| Penpot → デザインハンドオフ | #377 | Figma REST API(コメント投稿)への置き換えを推奨。認可方式は別途調査要 | 未着手(将来Issue) |
+| セルフホストのデザインツール → デザインハンドオフ | #377 | Figma REST API(コメント投稿)への置き換えを推奨。認可方式は別途調査要 | 未着手(将来Issue) |
 | ComfyUI → 画像生成 | #378 | Stability AI APIを第一候補として評価を推奨 | 未着手(将来Issue) |
 
 ## 5. #375 受け入れ基準との対応
 
 - [x] Research completed for Ollama alternatives — 上記セクション1
-- [x] Research completed for Penpot alternatives — 上記セクション2
+- [x] Research completed for design-tool alternatives — 上記セクション2
 - [x] Research completed for ComfyUI alternatives — 上記セクション3
 - [x] Separate issues created for each service integration — #376/#377/#378(既存)
 - [x] Comparison document or decision matrix created — 本ドキュメント(セクション4)

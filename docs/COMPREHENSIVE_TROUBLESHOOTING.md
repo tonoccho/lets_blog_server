@@ -488,8 +488,7 @@ docker compose restart <services listed above>
 
 **Problem:** A container fails to start with `port is already allocated` / `bind: address already in use`.
 
-**Cause:** With 19 containers, more host ports are in play than just 80/443 — `9001`
-(Penpot frontend), `1080` (mailcatch UI), `3306` (if you've temporarily published
+**Cause:** With 19 containers, more host ports are in play than just 80/443 — `1080` (mailcatch UI), `3306` (if you've temporarily published
 MySQL for local `./gradlew test` runs, per [docs/setup.md](setup.md)), etc.
 
 **Solution:**

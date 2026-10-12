@@ -39,7 +39,7 @@ bash scripts/check-env.sh   # .env が .env.example の全項目を満たして�
 bash scripts/generate-certs.sh
 
 # 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/log-writer/mysql/rabbitmq/
-#    phpmyadmin/plantuml/drawio/wordpress/Penpotスイート。ComfyUI は同梱しない)
+#    phpmyadmin/plantuml/drawio/wordpress。Ollama・ComfyUI は同梱しない)
 docker compose up -d --build
 
 # 4. 全サービスがhealthyになるまで待機
@@ -127,8 +127,8 @@ bash scripts/check-env.sh
 
 `docker compose` の `env_file` も shell の `source` も**後の定義が勝つ**。したがって
 キーが2箇所にあると、コメント付きの正しい定義を書き換えても後の行に上書きされて無視される。
-しかも警告は一切出ない。#959 では `.env.example` の `PENPOT_SECRET_KEY` がこれで、
-「512-bit base64 で生成せよ」という指示を持たないほうが有効になっていた。
+しかも警告は一切出ない。#959 では `.env.example` の秘密鍵の1つがこれで、
+「生成手順」の指示を持たないほうが有効になっていた。
 
 **既存の `.env` を持つ環境では、これまで通っていた検査が急に落ちることがある。**
 `.env.example` を古い時点でコピーした `.env` には、同じ重複がそのまま入っている
@@ -172,15 +172,14 @@ docker compose up -d
 
 起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `log-writer` / `mysql` /
 `rabbitmq` / `phpmyadmin` / `plantuml` / `drawio` / `wordpress` /
-`penpot-*`(デザイン生成スイート、6コンテナ)/ `docker-socket-proxy`。
+`docker-socket-proxy`。
 アーキテクチャ・ポート割当・全サービスの起動時メモリ実測値は
 [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) を参照。
 
 Phase 6 以降、`reverse-proxy` の `80`(HTTP→HTTPSリダイレクト)・`443`(HTTPS)以外はホストにポート公開していない。
 各サービスへは直接ポートではなく、必ず `https://localhost/...` 経由でアクセスする。
 
-サービスによってはヘルスチェックが設定されており(`api` / `log-writer` / `mysql` / `rabbitmq` /
-`penpot-postgres` / `penpot-valkey`)、依存先が healthy になるまで起動を待つため、初回起動や
+サービスによってはヘルスチェックが設定されており(`api` / `log-writer` / `mysql` / `rabbitmq`)、依存先が healthy になるまで起動を待つため、初回起動や
 複数コンテナの一括再作成時は数十秒〜数分かかることがある。`docker compose ps` の `STATUS`
 列が `Up` ではなく `Up (healthy)` になっているかを確認する。
 

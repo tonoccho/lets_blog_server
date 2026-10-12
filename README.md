@@ -46,7 +46,6 @@ flowchart LR
         WP[("WordPress サイト群")]
         ComfyUI["GPU PC の ComfyUI(外部・URL で接続)"]
         PlantUML["PlantUML / drawio"]
-        Penpot["Penpot"]
     end
 
     VSCode -- OIDCトークン --> RP
@@ -67,7 +66,6 @@ flowchart LR
     Events --> LogW
     Publishing -- "SSH + wp-cli" --> WP
     Media --> ComfyUI
-    Media --> Penpot
     Content --> PlantUML
 ```
 

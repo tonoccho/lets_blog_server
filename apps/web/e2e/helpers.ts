@@ -121,7 +121,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
  * ようにするため)。
  *
  * <p><b>issue #1391: `/login`直後の一過性の接続断からの再試行。</b> `@destructive`シナリオが
- * コンテナを再起動した直後(例: `diagram.steps.ts`の`stopService(ctx, 'penpot-frontend')`)、
+ * コンテナを再起動した直後(例: `degradation.steps.ts`の`stopService`)、
  * 共有Dockerブリッジネットワークの再構成に伴う一過性の接続断が、直後の最初の操作——
  * `signIn("keycloak")`が内部で発行する`/api/auth/csrf`・`/api/auth/providers`への
  * クライアント側fetch、またはKeycloakへのトップレベル遷移そのもの——を1回だけ巻き込む
@@ -129,7 +129,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
  * `[next-auth][error][CLIENT_FETCH_ERROR] Failed to fetch`が残っていた)。
  *
  * <p>ホストからの疎通確認(`global-setup.ts`と同じ発想を`startService`の復旧待ちに足す案)は
- * この断を検知できない。実測(`docker compose stop/start penpot-frontend`前後で
+ * この断を検知できない。実測(`docker compose stop/start`(当時の連携コンテナ)前後で
  * `curl`・keep-aliveの`requests.Session`を200ms間隔で反復)では、ホストから
  * `https://localhost/`への到達性は一度も失われなかった——断はキープアライブ接続の再利用に
  * 限って一瞬だけ起きるとみられ、疎通確認のような新規接続のプローブでは観測できない。

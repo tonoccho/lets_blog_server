@@ -43,7 +43,6 @@ cat .env
 
 # 重要: 本番環境ではセキュアな値に変更
 # - POSTGRES_PASSWORD
-# - PENPOT_SECRET_KEY
 # - JWT_SECRET
 ```
 
@@ -63,9 +62,6 @@ docker compose logs -f
 #### 4. アクセス確認
 
 ```bash
-# Penpot（デザインツール）
-https://localhost/penpot
-
 # Let's Blog アプリ
 http://localhost:8000
 ```
@@ -73,12 +69,6 @@ http://localhost:8000
 #### 5. 初期セットアップ
 
 ```bash
-# Penpot ユーザーアカウント作成
-1. https://localhost/penpot にアクセス
-2. "Sign Up" をクリック
-3. メール・パスワード入力
-4. プロジェクト作成
-
 # Let's Blog アカウント作成
 1. http://localhost:8000 にアクセス
 2. "サインアップ" をクリック
@@ -128,48 +118,6 @@ docker compose up -d     # 再起動
 ## ユーザーガイド
 
 記事の執筆・PRレビュー・差し戻しの流れと前提は [記事レビューワークフロー](ARTICLE_REVIEW_WORKFLOW.md) を参照してください。
-
-### Penpot（デザイン）の使用
-
-#### プロジェクト・ファイル作成
-
-```
-1. Penpot にログイン
-2. "+ New Project" をクリック
-3. プロジェクト名入力
-4. "+ New File" をクリック
-5. ファイル名入力
-6. デザイン開始
-```
-
-#### AI デザインアシスタント プラグイン
-
-```
-1. ファイルを開く
-2. Plugins → "AI Design Assistant" をクリック
-3. パネルが右側に表示される
-
-4つの機能タブ:
-
-【Design Suggestion】
-- 説明からコンポーネント自動生成
-- 例: "Primary button, blue, medium"
-- → AI が最適なボタンデザインを提案
-
-【Improve Component】
-- 既存コンポーネントを改善
-- Focus areas: Accessibility / Responsiveness / Dark Mode
-- → 改善提案を確認
-
-【Color Palette】
-- ブランドに合わせたカラーパレット生成
-- WCAG AA 準拠の色を自動選定
-- ダークモード対応
-
-【Typography】
-- 日本語・英語フォント提案
-- 見出し・本文・UI等の最適なサイズ提案
-```
 
 ### Let's Blog（ブログプラットフォーム）の使用
 
@@ -309,13 +257,11 @@ lets-blog-server/
 └── infra/                         # ミドルウェアの設定(#963)
     ├── nginx/                     # Reverse Proxy
     │   └── conf.d/
-    │       ├── penpot.conf
-    │       └── mcp.conf
+    │       └── default.conf
     ├── keycloak/                  # 認証基盤(Keycloak)の設定
     ├── mysql/                     # MySQL の初期化・設定
     ├── wordpress/                 # WordPress の設定
     ├── e2e-stubs/                 # E2E用スタブサービス
-    ├── penpot/                    # Penpot の設定
     └── shared-host/               # 共有ホスト向けの構成
 ```
 
@@ -680,9 +626,6 @@ A: ログを確認して問題を特定：
 ```bash
 # Web app ログ
 docker compose logs -f web
-
-# Penpot ログ
-docker compose logs -f penpot
 
 # Ollama ログ
 docker compose logs -f ollama

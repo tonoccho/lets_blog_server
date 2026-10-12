@@ -15,7 +15,7 @@ import org.springframework.web.client.RestClientException;
  * media-serviceの{@code /api/render/plantuml}を呼び出すクライアント。legacy-apiの
  * {@code com.letsblog.api.render.MediaRenderClient}(issue #573)から、publishing-serviceの
  * 公開パイプライン(PlantUmlEmbedService/PlantUmlTagRenderService)が実際に使うPlantUMLレンダリング
- * 呼び出しのみを移設した(issue #707)。Recharts/Penpotのレンダリング呼び出しはこのパイプラインでは
+ * 呼び出しのみを移設した(issue #707)。Rechartsのレンダリング呼び出しはこのパイプラインでは
  * 使わないため移設していない(legacy-api側に残る、CustomTagGenerationService/RechartsTagRenderService
  * 向け)。
  */

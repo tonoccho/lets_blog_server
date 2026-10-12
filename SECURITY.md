@@ -83,7 +83,6 @@ the full list — everything else under `/` and `/api/` goes through the gate ab
 | `/nginx-health` | nginx itself | Nothing. Returns a static `200`; carries no data |
 | `/auth/` | Keycloak | Keycloak's own login. Public by design — it *is* the login endpoint (#559) |
 | `/phpmyadmin/` | phpMyAdmin | phpMyAdmin's own login screen (`auth_type: cookie`), using MySQL credentials. The container is deliberately given **no** `PMA_USER` / `PMA_PASSWORD`: those switch it to `auth_type: config`, which hands every visitor an already-connected MySQL session (#978) |
-| `/penpot/` | Penpot (`penpot-frontend`) | Penpot's own login. The prefix is stripped before forwarding, and bare `/penpot` redirects to `/penpot/`; Penpot's `index.html` references its assets relatively, so it only assembles under the trailing slash (#1012). This adds no exposure that did not already exist: `penpot-frontend` is also published directly on host port `9001` |
 | `/sites/<slug>/**` | WordPress | Nothing for published pages — they are public blog content by design. `wp-admin` behind them is guarded by WordPress's own login |
 | `/drawio/` | drawio | **Nothing — deliberately (#979).** The VSCode extension loads `/drawio/?embed=1&…` into a webview iframe (`apps/extension/src/diagramEditorPanel.ts`), which runs outside `lbs-net`, so it cannot use container-to-container calls like the other bundled tools. draw.io is a self-contained static editor that touches none of this repository's data; diagrams are saved by the extension through the authenticated `/api/**`. `/comfyui/` and `/plantuml/` used to sit on this row and were **removed** from the reverse proxy in #979: nothing in `web` or the extension opened them, and unauthenticated they allowed arbitrary GPU workflows and arbitrary server-side rendering |
 
@@ -141,20 +140,15 @@ in a webview iframe. Those upstreams keep their own header policy.
 
 Not implemented, and why:
 
-- **Content-Security-Policy** — not sent. The admin screens embed draw.io, Penpot and PlantUML
+- **Content-Security-Policy** — not sent. The admin screens embed draw.io and PlantUML
   through iframes and images, and the development server needs `eval` and inline scripts, so a
   policy that is both correct and useful cannot be written without a dedicated effort. (The
   article preview has its own CSP, applied to the previewed HTML only.)
-- **CORS** — the admin web application itself declares no CORS policy (no `CorsConfiguration`,
+- **CORS** — there is no explicit CORS configuration anywhere: the admin web application declares no CORS policy (no `CorsConfiguration`,
   `addCorsMappings`, `CorsWebFilter`, `@CrossOrigin`). The browser reaches the web app and its
   API through the same origin (the reverse proxy publishes both under one host), so
   cross-origin requests are rejected by the browser's same-origin policy by default and no
-  allow-list is granted. Penpot's embedded editor is the one exception: nginx
-  (`infra/penpot/nginx-overrides/server.d/lbs-cors-api.conf`, issue #1093) adds a hand-written
-  `Access-Control-Allow-Origin` on `/api/` only, echoing back the caller's Origin when it is on
-  an allow-list (`overrides/http.d/lbs-cors.conf`), because Penpot's frontend calls that
-  endpoint with fetch credentials mode `include` from within the VSCode webview and needs a
-  credentialed cross-origin response.
+  allow-list is granted.
 
 HTTPS enforcement and session handling are unchanged: the reverse proxy redirects port 80 to
 443 (`infra/nginx/conf.d/default.conf`), and sessions are handled by NextAuth.js with

@@ -18,7 +18,6 @@ generate_value_for_key() {
   case "$key" in
     APP_ENCRYPTION_KEY) openssl rand -base64 32 ;;
     NEXTAUTH_SECRET) openssl rand -hex 32 ;;
-    PENPOT_SECRET_KEY) openssl rand -base64 64 | tr -d '\n' ;;
     WP_PROVISION_TOKEN) openssl rand -hex 32 ;;
     KEYCLOAK_SERVICES_CLIENT_SECRET|KEYCLOAK_WEB_CLIENT_SECRET) openssl rand -hex 32 ;;
     *) openssl rand -base64 24 ;;

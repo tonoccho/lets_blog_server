@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 定数を変えたときに鎖が黙って壊れるため。
  *
  * <p><b>鎖全体の上限は3600秒</b>にする。これはこのリポジトリのnginxが既に
- * {@code /api/dashboard/}(SSE)と{@code /penpot}に与えている値で、これを超える長さを
+ * {@code /api/dashboard/}(SSE)に与えている値で、これを超える長さを
  * 同期リクエストに与えないという方針の表明でもある。
  */
 @DisplayName("画像生成のタイムアウトの鎖: nginx ≧ gateway ≧ media (issue #1102)")

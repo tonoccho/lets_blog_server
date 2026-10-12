@@ -35,7 +35,7 @@
 
 ### 1.2 スコープ（Phase C で対象）
 
-- ✅ Penpot でのコンポーネント定義
+- ✅ デザインツールでのコンポーネント定義
 - ✅ デザインシステムドキュメント
 - ✅ React コンポーネント実装ガイド
 - ✅ CSS 変数・Tailwind カスタマイズ
@@ -400,7 +400,7 @@ if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
 
 ## 11. デザイン成果物
 
-### 11.1 Penpot アセット
+### 11.1 デザインツールのアセット
 
 - **Pages**: ページデザイン（Dashboard, Sites, Posts 等）
 - **Components**: 再利用可能なコンポーネント
@@ -446,7 +446,7 @@ C-6: Tokens/CSS 同期 (6-8h)
 
 - [ ] Ollama による提案レビュー
 - [ ] WCAG AA コントラストチェック
-- [ ] Penpot コンポーネント実装チェック
+- [ ] デザインツールのコンポーネント実装チェック
 - [ ] React マッピング確認
 - [ ] 実機でのダークモード・レスポンシブ確認
 
@@ -457,7 +457,6 @@ C-6: Tokens/CSS 同期 (6-8h)
 - WCAG 2.1: https://www.w3.org/WAI/WCAG21/quickref/
 - Material Design 3: https://m3.material.io/
 - Tailwind CSS: https://tailwindcss.com/
-- Penpot Docs: https://help.penpot.app/
 - Figma Design System Guide: https://www.designsystems.com/
 
 ---
@@ -466,7 +465,6 @@ C-6: Tokens/CSS 同期 (6-8h)
 
 - [ ] コンポーネント Storybook 統合（React doc）
 - [ ] Design Tokens JSON 自動生成
-- [ ] Penpot → Figma マイグレーション戦略
 - [ ] 多言語対応（日本語・英語・中国語）
 - [ ] アニメーション・トランジション ガイドライン
 - [ ] マイクロインタラクション設計（ローディング等）

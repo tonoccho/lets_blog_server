@@ -37,8 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (ここで式を書き写すと定数を変えたときに黙ってずれるため)。gateway側では
  * <b>鎖全体の上限3600秒</b>と、その中でmediaの最悪ケースを賄える下限だけを見る。
  *
- * <p>3600秒はこのリポジトリのnginxが既に{@code /api/dashboard/}(SSE)と
- * {@code /penpot}に与えている値で、同期リクエストにこれ以上の長さを与えないという
+ * <p>3600秒はこのリポジトリのnginxが既に{@code /api/dashboard/}(SSE)に
+ * 与えている値で、同期リクエストにこれ以上の長さを与えないという
  * 方針の表明でもある。
  *
  * <p>逆に{@code /api/ai/image-options}(モデル一覧の参照)は数秒で終わる参照系で、
@@ -50,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AiImageRouteTimeoutTest {
 
     /**
-     * 鎖全体に許す上限。nginxが既に{@code /api/dashboard/}と{@code /penpot}へ
+     * 鎖全体に許す上限。nginxが既に{@code /api/dashboard/}へ
      * 与えている値に合わせる。
      */
     private static final Duration CHAIN_CAP = Duration.ofSeconds(3600);
