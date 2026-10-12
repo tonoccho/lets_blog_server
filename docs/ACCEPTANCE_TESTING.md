@@ -1342,6 +1342,29 @@ compose プロジェクトに閉じる。
   `https://localhost/` は 502 を返し、そこで落とすと「まだ早いだけ」でゼロ構築が止まるため。
   到達性の判定はリトライを持つ `wait-for-stack-healthy.sh` に委ねる。
 
+### ホストの gradle テスト用に MySQL を 127.0.0.1:3306 へ公開する(#1769)
+
+各サービスの `application-test.yml` は `jdbc:mysql://localhost:3306/...` に固定されている。
+**ゼロ構築(`rebuild-acceptance-env.sh`)は `docker-compose.host-tests.yml` を常に重ねる**(共有ホスト構成でも同じ)ので、
+構築後は `lbs-mysql` が `127.0.0.1:3306` へ公開され、ホストの `./gradlew test` が追加の手作業なしで繋がる。
+初期化(`reset-acceptance-env.sh`)は mysql を作り直さないが、終わりに公開が外れていないことを確かめ、
+外れていれば次の復旧コマンドを出して非 0 で終わる。
+
+    docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql
+
+- ゼロ構築は、`lbs-mysql` 以外のコンテナがホストの 3306 を握っていると、何も撤去せずに名前を出して止まる。
+  他のコンテナを止めるかどうかは利用者が決める(スクリプトは止めない)。
+- `scripts/check-test-db.sh` は、フルモードで 3306 の向こうの `@@hostname` を `lbs-mysql` のコンテナ ID 先頭 12 桁と比べ、
+  古い転送や別のコンテナに繋がっていれば失敗する。`TEST_DB_HOST` / `TEST_DB_PORT` を指定したときは比べない。
+
+#### 手作りの転送コンテナ `tmp-mysql-fwd` を使っていた場合
+
+`nginx:alpine` で `lbs-mysql:3306` へ転送していた手作りのコンテナ(リポジトリ外)は、もう要らない。
+`lbs-mysql` が作り直されると古い IP へ転送し続け、`Communications link failure` になる。次の順で撤去する。
+
+    docker rm -f tmp-mysql-fwd
+    ./scripts/rebuild-acceptance-env.sh --yes     # または上の復旧コマンド(mysql だけ作り直す)
+
 ### 所要時間(2026-09-04 実測)
 
 | 対象 | 実測 | 内訳 |

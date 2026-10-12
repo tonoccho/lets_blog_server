@@ -384,6 +384,15 @@ if [ "$verify_failed" -ne 0 ]; then
   exit 1
 fi
 
+# 7-4. ホストの gradle テスト用に 3306 が公開されていること(#1769)。
+# このスクリプトは mysql を作り直さないので、公開が外れていても他の検証では気づけない。
+if ! docker port "$MYSQL_CONTAINER" 3306 2>/dev/null | grep -Eq '^(127\.0\.0\.1|0\.0\.0\.0):3306$'; then
+  echo "  NG: ${MYSQL_CONTAINER} の 3306 がホストへ公開されていません(ホストの ./gradlew test が繋がりません)。" >&2
+  echo "      復旧: docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql" >&2
+  exit 1
+fi
+log "  OK: ${MYSQL_CONTAINER} の 3306 が公開されています"
+
 ELAPSED=$(( $(date +%s) - START_TS ))
 step "完了"
 log "所要時間: ${ELAPSED} 秒"

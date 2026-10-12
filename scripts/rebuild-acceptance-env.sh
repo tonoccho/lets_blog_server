@@ -218,6 +218,13 @@ other_container_holds_host_port() {
     | grep -Eq ':(80|443)->'
 }
 
+# ホストの 3306 を自スタックの mysql 以外が握っているか(#1769)。名前を返す。
+# 自スタックの mysql は撤去で外れるので除外する。80/443 の検査(上)と同じ docker ps の読み方。
+other_container_holding_3306() {
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | awk -F'\t' -v me="$MYSQL_CONTAINER" '$1 != me && $2 ~ /(127\.0\.0\.1|0\.0\.0\.0):3306->/ {print $1}'
+}
+
 SHARED_HOST=0
 if container_running "$REVERSE_PROXY_CONTAINER"; then
   bindings="$(docker inspect "$REVERSE_PROXY_CONTAINER" --format '{{len .HostConfig.PortBindings}}' 2>/dev/null || echo 0)"
@@ -227,7 +234,9 @@ if [ "$SHARED_HOST" -eq 0 ] && other_container_holds_host_port; then
   SHARED_HOST=1
 fi
 
-COMPOSE_ARGS=(-p "$COMPOSE_PROJECT" -f "$REPO_ROOT/docker-compose.yml" -f "$REPO_ROOT/docker-compose.e2e-stubs.yml")
+# docker-compose.host-tests.yml は mysql を 127.0.0.1:3306 へ公開する。ホストの ./gradlew test が
+# 手作りの転送コンテナ無しで今の mysql に繋がるよう、共有ホスト構成でも常に重ねる(#1769)。
+COMPOSE_ARGS=(-p "$COMPOSE_PROJECT" -f "$REPO_ROOT/docker-compose.yml" -f "$REPO_ROOT/docker-compose.e2e-stubs.yml" -f "$REPO_ROOT/docker-compose.host-tests.yml")
 if [ "$SHARED_HOST" -eq 1 ]; then
   COMPOSE_ARGS+=(-f "$REPO_ROOT/docker-compose.shared-host.yml")
 fi
@@ -292,6 +301,17 @@ if [ "$APPLY" -eq 0 ]; then
   log "実行するには --yes を付けてください。"
   log "  ./scripts/rebuild-acceptance-env.sh --yes"
   exit 0
+fi
+
+# 3306 を他のコンテナが握っていると、構築後に mysql を公開できない(#1769)。
+# 何も撤去する前に止める。他のコンテナを止めるかどうかは利用者が決めるので、ここでは止めない。
+holders="$(other_container_holding_3306 | sort -u)"
+if [ -n "$holders" ]; then
+  echo "エラー: ホストの 3306 を次のコンテナが公開しています(何も撤去していません):" >&2
+  printf '  - %s\n' $holders >&2
+  echo "       止めてから再実行してください(例: docker rm -f <コンテナ名>)。" >&2
+  echo "       構築後は docker-compose.host-tests.yml が lbs-mysql を 127.0.0.1:3306 へ公開します。" >&2
+  exit 1
 fi
 
 # 実行中の lets_blog_server compose プロジェクトが、このスクリプトを実行している

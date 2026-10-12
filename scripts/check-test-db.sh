@@ -65,6 +65,10 @@ remedy() {
     echo "    詳細は docs/TEST_DOCUMENTATION.md の「テスト用MySQLの前提」を参照。"
 }
 
+# TEST_DB_HOST / TEST_DB_PORT を指定したときは別の MySQL を指す正当な使い方なので、同一性は比べない(#1769)。
+COMPARE_IDENTITY=1
+if [ -n "${TEST_DB_HOST:-}" ] || [ -n "${TEST_DB_PORT:-}" ]; then COMPARE_IDENTITY=0; fi
+
 REACHABILITY_ONLY=0
 case "${1:-}" in
     --reachability|--port-only) REACHABILITY_ONLY=1 ;;
@@ -113,6 +117,23 @@ if ! existing="$(mysql -h "$HOST" -P "$PORT" -u "$USER" -p"$PASSWORD" -N -B \
     exit 1
 fi
 echo "✓ ${USER} でログインできます"
+
+# 3. 3306 の向こうが今の lbs-mysql か。古い転送コンテナや別のコンテナは、繋がっても別物である(#1769)。
+# @@hostname は既定でコンテナ ID の先頭 12 桁になる。lbs-mysql が無ければ比べようがない。
+if [ "$COMPARE_IDENTITY" = 1 ] && command -v docker >/dev/null 2>&1; then
+    if expected_id="$(docker inspect --format '{{.Id}}' lbs-mysql 2>/dev/null)" && [ -n "$expected_id" ]; then
+        expected="${expected_id:0:12}"
+        actual="$(mysql -h "$HOST" -P "$PORT" -u "$USER" -p"$PASSWORD" -N -B \
+                    -e 'SELECT @@hostname;' 2>/dev/null | tr -d '[:space:]')"
+        if [ "$actual" != "$expected" ]; then
+            echo "✗ ${HOST}:${PORT} の向こうが今の lbs-mysql ではない(@@hostname=${actual:-取得できず}、lbs-mysql=${expected})。"
+            echo "  古い転送コンテナ(tmp-mysql-fwd 等)やほかのコンテナが 3306 を握っている可能性があります。"
+            remedy
+            exit 1
+        fi
+        echo "✓ 接続先は今の lbs-mysql です"
+    fi
+fi
 
 missing=()
 for schema in "${REQUIRED_SCHEMAS[@]}"; do

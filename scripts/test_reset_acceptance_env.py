@@ -72,6 +72,12 @@ case "$1" in
     esac
     exit 0
     ;;
+  port)
+    # #1769: FAKE_MYSQL_PORT が空なら公開されていない(docker port は何も出さず非 0)。
+    if [ -z "${FAKE_MYSQL_PORT-0.0.0.0:3306}" ]; then exit 1; fi
+    echo "${FAKE_MYSQL_PORT-0.0.0.0:3306}"
+    exit 0
+    ;;
   compose)
     echo "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-<unset>} $*" >> "$FAKE_COMPOSE_LOG"
     exit 0
@@ -117,8 +123,10 @@ class ResetNotRunningContainerTest(unittest.TestCase):
         self.log = os.path.join(self.tmp, "docker.log")
         self.compose_log = os.path.join(self.tmp, "compose.log")
 
-    def run_script(self, not_running):
+    def run_script(self, not_running, mysql_port=None):
         env = dict(os.environ)
+        if mysql_port is not None:
+            env["FAKE_MYSQL_PORT"] = mysql_port
         env["PATH"] = self.bin + os.pathsep + env["PATH"]
         env["FAKE_DOCKER_LOG"] = self.log
         env["FAKE_NOT_RUNNING"] = not_running
@@ -170,6 +178,27 @@ class ResetNotRunningContainerTest(unittest.TestCase):
                 l.startswith("COMPOSE_PROJECT_NAME=lets_blog_server "),
                 "プロジェクト名が固定されていない: " + l,
             )
+
+
+    def test_fails_with_recovery_command_when_3306_is_not_published(self):
+        """#1769: 公開が外れていたら、復旧コマンドを出して非 0 で終わる。"""
+        r = self.run_script("none", mysql_port="")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(
+            "docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql",
+            r.stdout + r.stderr,
+        )
+
+    def test_passes_when_3306_is_published_on_loopback(self):
+        r = self.run_script("none", mysql_port="127.0.0.1:3306")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_does_not_recreate_mysql(self):
+        self.run_script("none", mysql_port="127.0.0.1:3306")
+        with open(self.compose_log, encoding="utf-8") as f:
+            for l in f.read().splitlines():
+                self.assertNotIn(" up ", l)
+                self.assertNotRegex(l, r"restart .*\bmysql\b")
 
 
 if __name__ == "__main__":

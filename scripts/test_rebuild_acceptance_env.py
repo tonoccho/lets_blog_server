@@ -58,6 +58,8 @@ Playwright はスタックが上がっていることを前提に起動するた
     FAKE_SETUP_STATUS     setup-status の応答ボディ
     FAKE_SETUP_CODE       setup-status の HTTP ステータス
     FAKE_SHARED_HOST      1 なら reverse-proxy がポートを公開していない(#1038 の構成)
+    FAKE_PORT_3306_HOLDER 3306 を公開している、このスタックに属さないコンテナ名(#1769)。
+                          自スタックの lbs-mysql は常に 127.0.0.1:3306 を公開している
     FAKE_OTHER_STACK_HOLDS_PORT  1 なら、このスタックに属さない別コンテナ(infra-proxy等)
                           が80/443番を公開している(#1065: 直前のスタックが完全停止
                           していても検知できるべき構成)
@@ -610,7 +612,12 @@ if args[:1] == ["ps"]:
             ports = ""
             if c == "lbs-reverse-proxy" and os.environ.get("FAKE_SHARED_HOST") != "1":
                 ports = "0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"
+            if c == "lbs-mysql":
+                # #1769: host-tests オーバーレイで 3306 を公開している自スタックの mysql。
+                ports = "127.0.0.1:3306->3306/tcp"
             lines_out.append("%s\t%s" % (c, ports))
+        if os.environ.get("FAKE_PORT_3306_HOLDER"):
+            lines_out.append("%s\t127.0.0.1:3306->3306/tcp" % os.environ["FAKE_PORT_3306_HOLDER"])
         if os.environ.get("FAKE_OTHER_STACK_HOLDS_PORT") == "1":
             lines_out.append("infra-proxy\t0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp")
         print("\n".join(lines_out))
@@ -781,6 +788,52 @@ class RebuildScriptHarness(unittest.TestCase):
 
     def out(self, r):
         return r.stdout + r.stderr
+
+
+class HostTestsOverlayAndPortConflict(RebuildScriptHarness):
+    """#1769: ゼロ構築のあとも、ホストの gradle テスト用に MySQL を 127.0.0.1:3306 へ公開する。"""
+
+    def up_calls(self):
+        return [c for c in self.docker_calls() if c.startswith("compose") and "\tup" in c]
+
+    def test_up_includes_the_host_tests_overlay(self):
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        ups = self.up_calls()
+        self.assertTrue(ups, "docker compose up が呼ばれていない")
+        for call in ups:
+            self.assertIn("docker-compose.host-tests.yml", call)
+
+    def test_up_includes_the_overlay_in_a_shared_host_stack_too(self):
+        r = self.run_script("--yes", FAKE_SHARED_HOST="1")
+        self.assertEqual(0, r.returncode, self.out(r))
+        ups = self.up_calls()
+        self.assertTrue(ups)
+        for call in ups:
+            self.assertIn("docker-compose.host-tests.yml", call)
+            self.assertIn("docker-compose.shared-host.yml", call)
+
+    def test_another_container_holding_3306_stops_before_anything_is_removed(self):
+        r = self.run_script("--yes", FAKE_PORT_3306_HOLDER="tmp-mysql-fwd")
+        self.assertNotEqual(0, r.returncode, self.out(r))
+        self.assertIn("tmp-mysql-fwd", self.out(r))
+        self.assertIn("止めて", self.out(r))
+        calls = self.docker_calls()
+        for call in calls:
+            self.assertNotIn("down", call.split("\t"), call)
+            self.assertNotIn("volume\trm", call)
+        self.assertFalse(any(c.startswith("stop") or c.startswith("rm") for c in calls),
+                         "他のコンテナを止めてはならない")
+
+    def test_only_own_lbs_mysql_holding_3306_is_not_a_conflict(self):
+        r = self.run_script("--yes")
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertNotIn("3306", r.stderr)
+
+    def test_loop_engineering_test_db_holding_3306_is_a_conflict(self):
+        r = self.run_script("--yes", FAKE_PORT_3306_HOLDER="lbs-test-db")
+        self.assertNotEqual(0, r.returncode, self.out(r))
+        self.assertIn("lbs-test-db", self.out(r))
 
 
 class Usage(RebuildScriptHarness):
@@ -1756,6 +1809,16 @@ class Documentation(unittest.TestCase):
 
     def setUp(self):
         self.doc = read(DOC)
+
+    def test_documents_host_gradle_mysql_exposure_and_tmp_mysql_fwd_removal(self):
+        """#1769: ゼロ構築・初期化で 3306 が公開されることと、手作り転送コンテナの撤去手順。"""
+        self.assertIn("tmp-mysql-fwd", self.doc)
+        self.assertIn("docker rm -f tmp-mysql-fwd", self.doc)
+        self.assertIn("127.0.0.1:3306", self.doc)
+        self.assertIn(
+            "docker compose -f docker-compose.yml -f docker-compose.host-tests.yml up -d mysql",
+            self.doc,
+        )
 
     def section10(self):
         lines = self.doc.splitlines()
