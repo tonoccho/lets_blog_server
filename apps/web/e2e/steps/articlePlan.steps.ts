@@ -323,9 +323,6 @@ When('壁打ち一覧の先頭のセッションを開く', async ({ page }) => 
   await expect(aiMessages(page).first()).toBeVisible({ timeout: 30_000 });
 });
 
-When(/^Issue一覧の表示条件を「(.+)」に変える$/, async ({ page }, label: string) => {
-  await issueCard(page).locator('select').selectOption({ label });
-});
 
 // --------------------------------------------------------------- 画面の確認
 
@@ -446,8 +443,22 @@ Then('Issueを更新したと表示される', async ({ page }) => {
   await expect(structureCard(page)).toContainText('を更新しました');
 });
 
-Then(/^Issue一覧に「(.+)」というエラーが表示される$/, async ({ page }, message: string) => {
-  await expect(issueCard(page).locator('p.text-red-600')).toContainText(message, { timeout: 30_000 });
+Then(/^「(.+)」という通知が表示される$/, async ({ page }, message: string) => {
+  await expect(page.getByRole('alert').filter({ hasText: message })).toBeVisible({ timeout: 30_000 });
+});
+
+Then('Issue一覧のカードは表示されない', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: '登録済み記事(Issue)一覧' })).toHaveCount(0);
+});
+
+Then(/^Issue一覧のAPIは「(.+)」というエラーを返す$/, async ({ ctx, request }, message: string) => {
+  const token = await adminToken(request);
+  const response = await request.get(
+    `/api/projects/${(ctx.plan as PlanFixture).projectId}/article-plan/issues?state=open`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  expect(response.ok(), 'GitHubの設定が不備なのにIssue一覧が成功してしまった').toBeFalsy();
+  expect(await response.text()).toContain(message);
 });
 
 // --------------------------------------------------------------- GitHubスタブ側の確認

@@ -807,7 +807,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/projects/{id}/ai-connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1499 で追加**。プロジェクトから見たAIプロバイダー4種の接続情報と利用可否を返す。非メンバーは403 |
 
-## AiController (9エンドポイント、ベースパスなし)
+## AiController (10エンドポイント、ベースパスなし)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -816,6 +816,7 @@ legacy-apiはまだ `@PreAuthorize` ベースの宣言的認可へ移行して�
 | POST /api/ai/tags | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
 | POST /api/ai/proofread | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
 | POST /api/ai/image | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
+| POST /api/ai/image/jobs | requireProjectMemberOrAdmin(projectId指定時のみ) | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | `ImageGenerationController.java:68-76`(issue #1405)。同期版 `POST /api/ai/image` の非同期ジョブ版で、認可は同じ。`projectId`未指定なら所属を判定しない |
 | GET /api/ai/image-options | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | projectIdは任意パラメータだが未チェック |
 | POST /api/ai/section | なし | 401 | 該当なし | 認可OK | 要検討(本Issueの対象外) | 同上 |
 | POST /api/projects/{projectId}/ai/generate-image-prompt | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 唯一projectIdを取り、正しくチェックしている |
@@ -863,7 +864,7 @@ requireProjectMemberOrAdmin をコントローラ側で呼ぶ点は同じ。旧�
 | POST .../render | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | content-service所有(#576) |
 | POST .../signed-url | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#1561) |
 
-## ArticleReviewController (1エンドポイント、ベースパス `/api/projects/{projectId}/article-review`)
+## ArticleReviewController (7エンドポイント、ベースパス `/api/projects/{projectId}/article-review`)
 
 publishing-service所有(issue #1337、Epic #1333)。プロジェクトのGitHubリポジトリで開いているPull Requestを返す。
 プロジェクトメンバー判定は `ArticlePreviewController` と同じ `requireProjectMemberOrAdmin` を使う。
@@ -871,6 +872,12 @@ publishing-service所有(issue #1337、Epic #1333)。プロジェクトのGitHub
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
 | GET .../pull-requests | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | publishing-service所有(#1337) |
+| GET .../pull-requests/{prNumber}/article | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ArticleReviewController`。レビュー対象PRの記事本文 |
+| POST .../submissions | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ArticleReviewController`。レビューへの提出。操作者のIDを記録する |
+| POST .../pull-requests/{prNumber}/review | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ArticleReviewController`。レビューの実行 |
+| POST .../pull-requests/{prNumber}/approve | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ArticleReviewApprovalController`。レビューの承認 |
+| POST .../pull-requests/{prNumber}/reject | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ArticleReviewFeedbackController`。レビューの差し戻し |
+| GET .../my-reviews | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ArticleReviewFeedbackController`。自分のレビュー履歴 |
 
 ## AuditLogController (1エンドポイント、ベースパス `/api/audit-logs`)
 
@@ -1001,7 +1008,7 @@ matcher の否定先読み(`(?!api/auth|...)`)ではなく `proxy()` 内で弾�
 `/client-errors-foo` や `/client-errors/nested` のような「`client-errors` で始まる別のルート」
 まで認証ゲートを外れてしまい、そこにページを足した時点で無言でゲートが消える。
 
-## GeneratedImageController (7エンドポイント、ベースパスなし)
+## GeneratedImageController (8エンドポイント、ベースパスなし)
 
 media-service所有。ComfyUIで生成した画像とパラメータの一覧・詳細・バイナリ取得
 (issue #830で`requireProjectMemberOrAdmin`系を追加)。`projectId`を持たないリソースはadmin限定。
@@ -1014,6 +1021,7 @@ media-service所有。ComfyUIで生成した画像とパラメータの一覧・
 | PUT /api/generated-images/{id}/tags | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:116-122,156-160`。同上(存在しない場合は404が先) |
 | GET /api/generated-images/{id}/file | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:124-132,156-160`。同上(存在しない場合は404が先) |
 | DELETE /api/generated-images/{id} | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageController.java:134-140,156-160`。同上(存在しない場合は404が先) |
+| POST /api/generated-images/{id}/edit | requireProjectMemberOrAdminForResource | 401 | 403 | 認可OK | 現状維持 | `GeneratedImageEditController.java`(issue #1655)。回転・反転・切り抜きを新しい画像として保存する。対象を読んでから所属プロジェクトで判定するため、存在しない場合は404が先に返る(上の行と同じ理由) |
 | POST /api/generated-images/bulk-delete | requireProjectMemberOrAdminForResource(idごと) | 401 | 403 | 認可OK | 現状維持 | issue #1492。`bulkDelete`が**全idを`findAuthorized`で読んで認可してから**削除ループに入る。権限の無いidが1つでもあれば403、存在しないidがあれば404で、権限のある画像も含めて1件も削除しない(ファイル削除は取り消せないため)。`projectId==null`の画像はadminのみ |
 | POST /api/generated-images/upload | requireProjectMemberOrAdmin(projectId) | 401 | 403 | 認可OK | 現状維持 | issue #1599。手元のJPEG/PNGを切り抜き・拡縮せず元の解像度のまま(メタ情報除去・向き補正・形式維持、#1654)`provider=UPLOAD`で登録する(multipart、`projectId`はクエリ必須)。ファイル本体を読む前に判定する。形式・サイズ・中身の不正は400、multipart上限(20MB)超過は413。gatewayでは`upload-endpoint`バケットに分類する |
 | PUT /api/generated-images/{id}/folder | requireAdmin | 401 | 403 | 認可OK | 現状維持 | issue #1493。画像をフォルダへ入れる/未分類へ戻す(`folderId`がnull)。フォルダは横断の共通ツリーで画像のプロジェクトに依存しないため、**画像の所属プロジェクトを問わずadminのみ**(利用者の判断 2026-10-01)。認可を先に行うので、権限の無い利用者には画像・フォルダの存在も漏らさない。存在しない画像・フォルダは404 |
@@ -1156,7 +1164,7 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | GET /api/projects/{projectId}/content-settings | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectContentSettingsController.java:43-47` |
 | PUT /api/projects/{id}/css-selector-prefix | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 
-## ProjectController (38エンドポイント、ベースパス `/api/projects`)
+## ProjectController (39エンドポイント、ベースパス `/api/projects`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1170,6 +1178,7 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | PUT /api/projects/{id}/master-environment | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | PUT /api/projects/{id}/github-repository | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/environments/sync | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/projects/{id}/environments/sync/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectController.java:166-172`。同期版 `environments/sync` の非同期ジョブ版で、認可は同じ(admin限定) |
 | POST /api/projects/{id}/bulk-management/apply | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/bulk-management/apply-all | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/bulk-management/upload | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
@@ -1336,6 +1345,16 @@ project-service所有(issue #1580)。プロジェクト設定画面の「Faceboo
 | POST /api/projects/{projectId}/sns/facebook/test | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テスト投稿 |
 | DELETE /api/projects/{projectId}/sns/facebook | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 切断。本番サイトのプラグインから Facebook の設定を消す |
 
+## ProjectSnsTemplateController (3エンドポイント、ベースパス `/api/projects/{projectId}/sns/templates`)
+
+project-service所有。プロジェクト設定画面の「SNS 告知」欄で、公開時と PV 達成時の告知文テンプレートを扱うAPI。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/projects/{projectId}/sns/templates | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | 保存済みのテンプレートと本番サイトへの送信状態 |
+| PUT /api/projects/{projectId}/sns/templates | requireAdmin | 401 | 403 | 認可OK | 現状維持 | テンプレートを保存し、本番サイトへ送る |
+| POST /api/projects/{projectId}/sns/templates/resend | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 送信失敗からの回復。保存済みのテンプレートを送り直す |
+
 ## ProjectUserController (1エンドポイント、ベースパス `/api/project-users`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
@@ -1350,7 +1369,7 @@ identity-service所有(RBAC、issue #653系)。
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/roles | requirePermission(ROLE_MANAGE) | 401 | 403 | 認可OK | 現状維持 | `RoleController.java:25-29` |
 
-## SiteController (11エンドポイント、ベースパス `/api/sites`)
+## SiteController (16エンドポイント、ベースパス `/api/sites`)
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1365,6 +1384,11 @@ identity-service所有(RBAC、issue #653系)。
 | DELETE /api/sites/{id} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/sites/{id}/install-wp-cli | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/sites/{id}/reprovision | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/sites/managed-wordpress/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `SiteController.java:107-113`。マネージドWordPressサイト作成の非同期ジョブ版。admin限定(同期版 `managed-wordpress` も実装は `SiteController.java:88-92` で `requireAdmin`) |
+| GET /api/sites/{id}/letsblog-plugin | requireAdmin | 401 | 403 | 認可OK | 現状維持 | letsblog プラグインの状態 |
+| POST /api/sites/{id}/letsblog-plugin/install | requireAdmin | 401 | 403 | 認可OK | 現状維持 | letsblog プラグインの再導入 |
+| GET /api/sites/{id}/letsblog-sync | requireAdmin | 401 | 403 | 認可OK | 現状維持 | プラグインへの同期状態 |
+| POST /api/sites/{id}/letsblog-sync | requireAdmin | 401 | 403 | 認可OK | 現状維持 | プラグインへの再同期 |
 
 ## SiteStaticContentController (2エンドポイント、ベースパス `/api/sites/{siteId}/static-content`)
 

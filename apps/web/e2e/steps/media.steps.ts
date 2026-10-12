@@ -1187,14 +1187,15 @@ When(
   async ({ ctx, page }, prompt: string) => {
     const checkbox = page.getByLabel(`${prompt}を選択`);
     await expect(checkbox).toBeVisible({ timeout: 30_000 });
-    // ハイドレーション完了前のクリックはネイティブにチェックされるだけで、ハイドレーション後に
-    // 未チェックへ戻される(issue #1284と同種)。チェック状態ではなく、Reactの状態を反映する
-    // 「N件選択中」が累計の期待値になるまで再試行する。
+    // ハイドレーション完了前のクリックはネイティブにチェックされるだけで、React の状態(選択件数)には
+    // 反映されない(issue #1284と同種)。そのまま「チェック済みなら押さない」で再試行すると、
+    // 見た目はチェック済み・件数は0件のまま永久に進まない(issue #1754)。そこでチェック状態ではなく、
+    // Reactの状態を反映する「N件選択中」が累計の期待値になるまで、毎回クリックし直す。
+    // ハイドレーション後のクリックは React が制御するので、再試行で二重にトグルされることはない
+    // (件数が出れば `toPass` を抜ける)。
     const expectedCount = selectedImageIds(ctx).length + 1;
     await expect(async () => {
-      if (!(await checkbox.isChecked())) {
-        await checkbox.click();
-      }
+      await checkbox.click();
       await expect(page.getByText(`${expectedCount}件選択中`, { exact: true })).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
     selectedImageIds(ctx).push(galleryImageIds(ctx)[prompt]);
