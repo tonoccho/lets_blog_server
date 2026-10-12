@@ -32,7 +32,7 @@ The system is built on Docker and includes all necessary services (API server, d
 
 | Component | Requirement | Notes |
 |-----------|-------------|-------|
-| **GPU** | Optional (NVIDIA GPU with 16GB+ VRAM recommended) | Not required. Ollama runs on GPU with `GPU_RUNTIME=nvidia` (default) or on CPU with `GPU_RUNTIME=` (empty); ComfyUI is opt-in via `COMPOSE_PROFILES=gpu` or `cpu`. See [Docker Compose Architecture](DOCKER_COMPOSE_ARCHITECTURE.md) ("Ollama を CPU で動かす") and the comments in `.env.example` |
+| **GPU** | Optional (NVIDIA GPU with 16GB+ VRAM recommended) | Not required. Ollama runs on GPU with `GPU_RUNTIME=nvidia` (default) or on CPU with `GPU_RUNTIME=` (empty). ComfyUI is not bundled: run it on a separate GPU PC and connect by URL ([External ComfyUI](EXTERNAL_COMFYUI.md)). See [Docker Compose Architecture](DOCKER_COMPOSE_ARCHITECTURE.md) ("Ollama を CPU で動かす") and the comments in `.env.example` |
 | **CPU** | Dual-core or better | Recommended 4+ cores |
 | **RAM** | 8GB minimum, 16GB+ recommended | Multiple services run concurrently |
 | **Storage** | 50GB+ available space | For Docker images and AI model files |
@@ -42,7 +42,7 @@ The system is built on Docker and includes all necessary services (API server, d
 
 - **Git** - For cloning the repository
 - **Docker Engine + Docker Compose v2** - Container orchestration
-- **NVIDIA Container Toolkit** - GPU support in Docker (only if running Ollama/ComfyUI on an NVIDIA GPU)
+- **NVIDIA Container Toolkit** - GPU support in Docker (only if running the bundled Ollama on an NVIDIA GPU)
 - **openssl** - For generating TLS certificates (included on Linux/macOS)
 - **Visual Studio Code** - For using the VSCode extension
 
@@ -111,7 +111,6 @@ MAIL_PASSWORD=your_smtp_password_here
 NEXTAUTH_SECRET=your_nextauth_secret_here
 
 # GPU/AI Model configuration (optional customization; see .env.example for GPU_RUNTIME / COMPOSE_PROFILES)
-COMFYUI_IMAGE=yanwk/comfyui-boot:cu130-slim
 LLM_OLLAMA_MODEL=qwen2.5:7b-instruct
 COMFYUI_CHECKPOINT=v1-5-pruned-emaonly.safetensors
 ```
@@ -159,7 +158,7 @@ docker compose up -d
 ```
 
 This starts all ~19 containers (reverse proxy, web, API, log-writer, MySQL, RabbitMQ,
-ComfyUI, PlantUML, drawio, WordPress, phpMyAdmin, and the Penpot design-tooling suite).
+PlantUML, drawio, WordPress, phpMyAdmin, and the Penpot design-tooling suite).
 Wait for all services to start — first-time startup (pulling/building images) can take
 several minutes, and subsequent restarts typically take 30 seconds to 2 minutes depending
 on hardware, since services that declare a healthcheck (`api`, `log-writer`, `mysql`,
@@ -181,7 +180,6 @@ say "healthy", not just "Up"):
 - `lbs-log-writer` (async error/operation/audit log writer)
 - `lbs-mysql` (Database)
 - `lbs-rabbitmq` (log message queue)
-- `lbs-comfyui` (Image generation)
 - `lbs-plantuml` (Diagram rendering)
 - `lbs-drawio`, `lbs-wordpress`, `lbs-phpmyadmin`, and the `lbs-penpot-*` containers
 
@@ -344,7 +342,7 @@ echo 'export NODE_EXTRA_CA_CERTS=~/lets_blog_server/certs/localhost.crt' >> ~/.z
 
 ## Performance Tips
 
-- **First-time setup**: Ollama and ComfyUI models take time to download (~5-15 minutes)
+- **First-time setup**: The Ollama model takes time to download (~5-15 minutes)
 - **Monitor resources**: Check `docker compose logs -f ollama` if AI features feel slow
 - **GPU optimization**: Ensure NVIDIA drivers are updated for best performance
 

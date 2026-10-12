@@ -8,7 +8,7 @@
 # ■ 安全上の制約(重要)
 #
 # 対象はローカル開発用 docker compose の固定コンテナ名(lbs-mysql / lbs-keycloak /
-# lbs-wordpress / lbs-rabbitmq / lbs-media / lbs-comfyui)と固定レルム名(letsblog)だけ。
+# lbs-wordpress / lbs-rabbitmq / lbs-media)と固定レルム名(letsblog)だけ。
 # **任意のホスト・DB・レルムを指定するオプションは意図的に持たせていない**
 # (scripts/provision-e2e-keycloak-users.sh と同じ設計)。共有/本番環境では実行できない。
 #
@@ -24,7 +24,7 @@
 #   MySQL(WP)  : ManagedWordPress のサイト別DB(wp_*)を drop する。
 #   Keycloak   : letsblog レルムの *@letsblog.local ユーザーを削除する。
 #   WordPress  : /var/www/html/sites/* を削除する。
-#   メディア    : 生成画像の保存領域と ComfyUI の output を空にする。
+#   メディア    : 生成画像の保存領域を空にする(同梱の ComfyUI は廃止した、#1746)。
 #   RabbitMQ   : 全キューを purge する(削除ではなく purge。宣言はサービス起動時に行われる)。
 #
 # ■ 使い方
@@ -47,7 +47,6 @@ readonly KEYCLOAK_CONTAINER="lbs-keycloak"
 readonly WORDPRESS_CONTAINER="lbs-wordpress"
 readonly RABBITMQ_CONTAINER="lbs-rabbitmq"
 readonly MEDIA_CONTAINER="lbs-media"
-readonly COMFYUI_CONTAINER="lbs-comfyui"
 readonly KEYCLOAK_REALM="letsblog"
 # compose のプロジェクト名。git worktree(ディレクトリ名が違う)から実行しても
 # 共有スタックのコンテナへ restart が効くよう固定する(#1635)。
@@ -255,9 +254,8 @@ fi
 
 # ---------------------------------------------------------------- 4. メディア
 
-step "5/6 生成画像と ComfyUI の output を空にします"
-# `docker inspect` はコンテナが Created(compose の gpu プロファイルで未起動の
-# lbs-comfyui など)でも成功するため、存在確認では docker exec の可否を決められない。
+step "5/6 生成画像を空にします"
+# `docker inspect` はコンテナが Created(compose の profile で未起動のもの)でも成功するため、存在確認では docker exec の可否を決められない。
 # 実行中(State.Running == true)であることで判定する(#1306)。
 is_running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" = "true" ]; }
 
@@ -266,12 +264,6 @@ if is_running "$MEDIA_CONTAINER"; then
   log "  空にしました: ${MEDIA_CONTAINER}:/app/data/generated-images"
 else
   log "  スキップ: $MEDIA_CONTAINER は未起動のためスキップします"
-fi
-if is_running "$COMFYUI_CONTAINER"; then
-  docker exec "$COMFYUI_CONTAINER" sh -c 'rm -rf /root/ComfyUI/output/* 2>/dev/null || true'
-  log "  空にしました: ${COMFYUI_CONTAINER}:/root/ComfyUI/output"
-else
-  log "  スキップ: $COMFYUI_CONTAINER は未起動のためスキップします"
 fi
 
 # ---------------------------------------------------------------- 5. RabbitMQ
@@ -330,7 +322,7 @@ verify_failed=0
 # ゼロ構築の直後に platform-service が起動して書く行は残骸ではないので数えない(#1701)。
 # 表まるごとではなくキーで除外する: 利用者が管理画面で保存した設定の残りは見逃さない。
 # シーダーのキーを変えたら、ここも変えること(test_rebuild_acceptance_env.py が突き合わせる)。
-SEEDED_SETTING_KEYS=(llm_ollama_base_url comfyui_base_url)
+SEEDED_SETTING_KEYS=(llm_ollama_base_url)
 seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
 seeded_in_list="${seeded_in_list%,}"
 for s in "${SERVICE_SCHEMAS[@]}"; do

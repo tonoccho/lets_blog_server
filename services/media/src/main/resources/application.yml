@@ -97,15 +97,14 @@ spring:
     connection-timeout: 3s
 
 # ComfyUI/PlantUML/Penpotへの接続情報。legacy-apiのapplication.ymlから該当プロパティをそのまま
-# 移設した(#573)。stage1時点ではRenderController(PlantUML/Recharts/Penpot)のみが実際にこれらを
-# 使う。ComfyUI関連プロパティ自体はstage2(ComfyUiModelService移設)まで未使用だが、legacy-api側の
-# 既定値と揃えておく。
+# 移設した(#573)。ComfyUIは同梱せず、GPU PCなど外部のサーバーへURLで接続する(issue #1746)。
+# 接続先はDB(system_settings.comfyui_base_url)とプロジェクト設定で決まる。comfyui-checkpointは
+# チェックポイントを選んでいないプロジェクトの既定の名前で、ファイルの実体はComfyUI側にある。
 app:
   # issue #1135: /api/render/**のJSON本文サイズ上限(バイト、RenderBodySizeLimitFilter)。
   render:
     max-body-bytes: ${RENDER_MAX_BODY_BYTES:10485760}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
-  comfyui-models-path: ${COMFYUI_MODELS_PATH:/app/data/comfyui-models}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
   penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
   penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
@@ -136,7 +135,7 @@ app:
   # CmsBridgeClientの向き先をこちらへ切り替え、パスも/api/internal/cms/**から
   # /api/internal/publishing/**へ変更した(Epic #551 C6-3)。
   publishing-service-uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
-  # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob)の進捗反映先。#573 stage2では
+  # 画像生成・メディアGCのジョブ(GenerationJob)の進捗反映先。#573 stage2では
   # legacy-apiが所有していたためlegacy-api-uriを共用していたが、issue #574でgeneration_jobsの
   # 所有権がai-serviceへ移ったため、GenerationJobClientの向き先をこちらへ切り替えた。
   # 既定値を http://ai:8080 にしている理由(issue #825 / #1484): 撤去済みのlegacy-api(http://api:8080)を

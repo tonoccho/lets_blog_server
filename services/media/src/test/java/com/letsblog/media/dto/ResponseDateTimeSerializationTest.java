@@ -7,10 +7,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.servlet.http.HttpServletRequest;
 import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.common.client.GenerationJobSummary;
-import com.letsblog.media.ai.ComfyUiClient;
 import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.controller.DiagramController;
 import com.letsblog.media.controller.GeneratedImageController;
@@ -22,10 +20,6 @@ import com.letsblog.media.messaging.DomainEventPublisher;
 import com.letsblog.media.repository.DiagramRepository;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.service.AdminAuthorizationService;
-import com.letsblog.media.client.ProjectServiceClient;
-import com.letsblog.media.service.ComfyUiModelService;
-import com.letsblog.media.service.ModelInstallJobRunner;
-import com.letsblog.media.service.ProjectImageSettingsService;
 import com.letsblog.media.service.CurrentActorService;
 import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.GeneratedImageFolderService;
@@ -181,22 +175,5 @@ class ResponseDateTimeSerializationTest {
         assertEquals(CREATED_Z, node.get("createdAt").asString());
         assertTrue(node.get("updatedAt").isNull());
         assertEquals(5, node.get("id").asInt());
-    }
-
-    @Test
-    void checkpointジョブの応答はZ終端のRFC3339で返る() {
-        GenerationJobClient jobs = mock(GenerationJobClient.class);
-        ComfyUiModelService service = new ComfyUiModelService(
-                mock(ComfyUiClient.class), mock(ProjectServiceClient.class), mock(ProjectImageSettingsService.class),
-                jobs, mock(ModelInstallJobRunner.class), new ObjectMapper(), mock(HttpServletRequest.class), "g");
-        when(jobs.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(10L, "comfyui_checkpoint_delete", "running", CREATED, UPDATED));
-
-        for (Object response : List.of(service.startDelete("m.safetensors"),
-                service.startInstall("https://example.com/m.safetensors", "m.safetensors"))) {
-            JsonNode node = json(response);
-            assertEquals(CREATED_Z, node.get("createdAt").asString());
-            assertEquals(UPDATED_Z, node.get("updatedAt").asString());
-        }
     }
 }

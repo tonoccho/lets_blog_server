@@ -91,13 +91,14 @@ DESTROYED_VOLUMES = [
     "keycloak_postgres",
     "penpot_postgres",
     "penpot_assets",
-    "comfyui_output",
     "wordpress_sites",
     "bulk_upload_files",
     "generated_images",
     "avatar_images",
 ]
-PRESERVED_VOLUMES = ["comfyui_models", "ollama_models"]
+PRESERVED_VOLUMES = ["ollama_models"]
+# #1746: 同梱の ComfyUI を廃止したので、スクリプトはこれらのボリュームを管理(破棄・保全)しない。
+REMOVED_COMFYUI_VOLUMES = ["comfyui_models", "comfyui_output"]
 VOLUME_PREFIX = "lets_blog_server_"
 
 SERVICE_SCHEMAS = [
@@ -244,15 +245,16 @@ identity media ai content analytics project publishing platform log-writer""".sp
 
 PROBE_CONTAINERS = ["lbs-mysql", "lbs-keycloak", "lbs-wordpress", "lbs-reverse-proxy"]
 
-# #1293: gpu プロファイル(comfyui)の残存コンテナを模す。
+# #1293: profile 付きサービスの残存コンテナを模す(#1746 で同梱の ComfyUI を廃止したので、
+# 名前は架空の `lbs-profiled-leftover`、塞ぐボリュームは generated_images に置き換えた)。
 #
-# FAKE_LEFTOVER_GPU_CONTAINER=1 のとき、初回起動時に一度だけマーカーファイルを置く。
-# これは「直前の実行が終わったあとも lbs-comfyui が Created/Exited のまま残っている」
+# FAKE_LEFTOVER_PROFILE_CONTAINER=1 のとき、初回起動時に一度だけマーカーファイルを置く。
+# これは「直前の実行が終わったあとも profile 付きのコンテナが Created/Exited のまま残っている」
 # 状態を表す。`compose down` が `--profile` 付きで呼ばれて初めてこのマーカーを消す
 # (= プロファイル込みで撤去されて初めて片付く)。プロファイル無しの `down` では
-# 消えないので、そのまま comfyui_output の `volume rm` を失敗させる。
-GPU_LEFTOVER_CONTAINER_NAME = "lbs-comfyui"
-if os.environ.get("FAKE_LEFTOVER_GPU_CONTAINER") == "1" and not os.path.exists(
+# 消えないので、そのまま generated_images の `volume rm` を失敗させる。
+GPU_LEFTOVER_CONTAINER_NAME = "lbs-profiled-leftover"
+if os.environ.get("FAKE_LEFTOVER_PROFILE_CONTAINER") == "1" and not os.path.exists(
     path("gpu_leftover_initialized")
 ):
     with open(path("gpu_leftover_container"), "w", encoding="utf-8") as _f:
@@ -318,7 +320,7 @@ if args[:1] == ["volume"]:
                     fail("Error response from daemon: remove %s: volume is in use - [%s]" % (n, referencing))
                 fail("Error: volume is in use: %s" % n)
             leftover = gpu_leftover_container()
-            if n.endswith("comfyui_output") and leftover:
+            if n.endswith("generated_images") and leftover:
                 fail("Error response from daemon: remove %s: volume is in use - [%s]" % (n, leftover))
             if volume_exists(n):
                 os.remove(path("volumes", n))
@@ -526,8 +528,8 @@ if args[:1] == ["compose"]:
             break
     if verb == "down":
         write_lines("containers", [])
-        # #1293: `--profile` 付きで撤去されて初めて、gpu プロファイルの残存
-        # コンテナ(lbs-comfyui)も片付く。プロファイル無しの撤去では残ったままにする。
+        # #1293: `--profile` 付きで撤去されて初めて、profile 付きサービスの残存
+        # コンテナも片付く。プロファイル無しの撤去では残ったままにする。
         if "--profile" in rest and os.path.exists(path("gpu_leftover_container")):
             os.remove(path("gpu_leftover_container"))
         sys.exit(0)
@@ -543,23 +545,11 @@ if args[:1] == ["compose"]:
                 if not volume_exists(VOLUME_PREFIX + v):
                     create_volume(VOLUME_PREFIX + v)
             fresh_boot()
-            # GPU が無いホストでは comfyui の起動に失敗する。compose はそこで中断するため、
-            # 依存関係の下流(web / gateway / keycloak ほか)は created のまま残る。
-            if not targets or "comfyui" in targets:
-                sys.stderr.write(
-                    'Error response from daemon: could not select device driver "nvidia" '
-                    "with capabilities: [[gpu]]\n"
-                )
-                started = read_lines("containers")
-                for s in ("mysql", "rabbitmq", "keycloak-postgres", "reverse-proxy"):
-                    started.append("lbs-%s" % s)
-                write_lines("containers", sorted(set(started)))
-                sys.exit(1)
             containers = ["lbs-%s" % s for s in REQUIRED_SERVICES] + PROBE_CONTAINERS
             write_lines("containers", sorted(set(containers)))
         sys.exit(0)
     if "config" in rest and "--services" in rest:
-        print("\n".join(sorted(set(REQUIRED_SERVICES + ["comfyui", "wordpress", "phpmyadmin"]))))
+        print("\n".join(sorted(set(REQUIRED_SERVICES + ["wordpress", "phpmyadmin"]))))
         sys.exit(0)
     if verb == "ps":
         running = read_lines("containers")
@@ -603,7 +593,7 @@ if args[:1] == ["ps"]:
     if filter_value.startswith("volume="):
         vol = filter_value.split("=", 1)[1]
         names = []
-        if vol.endswith("comfyui_output") and gpu_leftover_container():
+        if vol.endswith("generated_images") and gpu_leftover_container():
             names.append(gpu_leftover_container())
         extra = os.environ.get("FAKE_REFERENCING_CONTAINER", "")
         if extra and extra not in names:
@@ -907,12 +897,17 @@ class SafetyDeviceIsHardcodedTargets(unittest.TestCase):
         self.assertNotIn("kcadm delete", outside)
         self.assertNotIn("delete users/", outside)
 
-    def test_preserves_comfyui_models_and_says_why(self):
-        self.assertRegex(self.text, r"readonly\s+PRESERVE_VOLUMES=\(\s*comfyui_models")
-        self.assertIn("モデル", self.text, "comfyui_models を保全する理由がコメントに無い")
+    def test_does_not_manage_the_removed_comfyui_volumes(self):
+        """#1746: 同梱の ComfyUI を廃止したので、comfyui_models / comfyui_output を破棄も保全もしない。
+
+        既存ボリュームの手動削除は docs/EXTERNAL_COMFYUI.md の移行手順に書く(自動削除はしない)。
+        """
+        for v in REMOVED_COMFYUI_VOLUMES:
+            with self.subTest(volume=v):
+                self.assertNotIn(v, self.text)
 
     def test_preserves_ollama_models_and_says_why(self):
-        """#1089: ollama_models も comfyui_models と同じく保全対象で、理由が明文化されている。"""
+        """#1089: ollama_models は保全対象で、理由が明文化されている。"""
         self.assertIn(
             "ollama_models",
             re.search(r"readonly\s+PRESERVE_VOLUMES=\([^)]*\)", self.text, re.S).group(0),
@@ -960,8 +955,9 @@ class DryRunChangesNothing(RebuildScriptHarness):
     def test_lists_the_volumes_it_would_preserve(self):
         out = self.out(self.r)
         self.assertIn("保全するボリューム", out)
-        self.assertIn(VOLUME_PREFIX + "comfyui_models", out)
         self.assertIn(VOLUME_PREFIX + "ollama_models", out, "ollama_models が保全リストに出ていない")
+        for v in REMOVED_COMFYUI_VOLUMES:
+            self.assertNotIn(VOLUME_PREFIX + v, out, "廃止した %s が一覧に出ている(#1746)" % v)
 
     def test_does_not_list_ollama_models_as_a_volume_to_destroy(self):
         out = self.out(self.r)
@@ -1274,23 +1270,17 @@ class VolumesAreDestroyedAndRecreated(RebuildScriptHarness):
             with self.subTest(volume=v):
                 self.assertNotEqual("2020-01-01T00:00:00Z", self.volume_created_at(v))
 
-    def test_comfyui_models_is_never_removed(self):
+    def test_never_removes_the_leftover_comfyui_volumes(self):
+        """#1746: 既存環境に残る comfyui_models / comfyui_output は自動では消さない(移行手順で手動削除)。"""
         self.run_script("--yes")
         for call in self.docker_calls():
             if call.startswith("volume\trm"):
                 with self.subTest(call=call):
-                    self.assertNotIn("comfyui_models", call)
-
-    def test_comfyui_models_created_at_is_unchanged(self):
-        self.run_script("--yes")
-        self.assertEqual(
-            "2020-01-01T00:00:00Z",
-            self.volume_created_at("comfyui_models"),
-            "保全対象の comfyui_models が作り直されている",
-        )
+                    for v in REMOVED_COMFYUI_VOLUMES:
+                        self.assertNotIn(v, call)
 
     def test_ollama_models_is_never_removed(self):
-        """#1089: ollama_models も comfyui_models と同じく volume rm の対象にならない。"""
+        """#1089: ollama_models は volume rm の対象にならない。"""
         self.run_script("--yes")
         for call in self.docker_calls():
             if call.startswith("volume\trm"):
@@ -1354,36 +1344,21 @@ class VolumesAreDestroyedAndRecreated(RebuildScriptHarness):
         calls = "\n".join(self.docker_calls())
         self.assertIn("--no-cache", calls)
 
-    def test_starts_the_required_services_even_though_comfyui_cannot_start(self):
-        """**回帰させてはいけない検査(2026-09-04 の実測で踏んだ)。**
+    def test_starts_all_services_from_compose_without_a_gpu_only_exception(self):
+        """#1746: GPU が無いと起動できない同梱 ComfyUI を廃止したので、任意サービスを分けて起動する手順は持たない。
 
-        この開発機には NVIDIA ランタイムが無く、`comfyui` は起動できない
-        (`could not select device driver "nvidia"`)。`docker compose up -d` を
-        サービス無指定で呼ぶと、compose はそこで**中断**し、依存関係の下流
-        (web / gateway / keycloak / 各ドメインサービス)を `created` のまま残す。
-        健全性待ちはそれを 900 秒待ってからタイムアウトする — 実測で踏んだ壊れ方である。
-
-        必須サービスと任意サービスを分けて起動し、任意サービスの起動失敗は警告に留めること。
+        スクリプトは全サービスを1回の `up -d --build` で起動し、任意サービスの分離を持たない。
         """
         r = self.run_script("--yes")
         out = self.out(r)
-        self.assertEqual(0, r.returncode, "comfyui の起動失敗でゼロ構築ごと落ちている:\n" + out)
+        self.assertEqual(0, r.returncode, out)
+        text = read(SCRIPT)
+        self.assertNotIn("OPTIONAL_SERVICES", text)
+        self.assertNotIn("up -d comfyui", text)
+        self.assertNotIn("up -d \"$o\"", text)
         for service in ("web", "gateway", "keycloak", "identity"):
             with self.subTest(service=service):
-                self.assertIn(
-                    "lbs-%s" % service,
-                    self.read_state("containers"),
-                    "%s が起動していない(compose が comfyui で中断している)" % service,
-                )
-
-    def test_says_which_optional_service_failed_to_start(self):
-        r = self.run_script("--yes")
-        self.assertIn("comfyui", self.out(r), "起動しなかった任意サービスの名前が出ていない")
-
-    def test_still_creates_the_volume_of_the_optional_service(self):
-        """comfyui_output は comfyui だけが使う。作られないと破棄検証が通らない。"""
-        self.run_script("--yes")
-        self.assertIsNotNone(self.volume_created_at("comfyui_output"))
+                self.assertIn("lbs-%s" % service, self.read_state("containers"))
 
     def test_includes_the_e2e_stub_compose_file(self):
         self.run_script("--yes")
@@ -1448,10 +1423,10 @@ class PostBuildVerification(RebuildScriptHarness):
         self.assertNotEqual(0, r.returncode, "余分な行があるのに成功した:\n" + out)
         self.assertIn("lbs_identity", out)
 
-    SEEDED = "llm_ollama_base_url,comfyui_base_url"
+    SEEDED = "llm_ollama_base_url"
 
     def test_accepts_the_rows_connection_defaults_seeder_writes_at_startup(self):
-        """#1701: platform-service が起動時に書く接続先の既定値 2 行は残骸ではない。"""
+        """#1701: platform-service が起動時に書く接続先の既定値(Ollama のみ。ComfyUI は #1746 で書かない)は残骸ではない。"""
         r = self.run_script("--yes", FAKE_PLATFORM_SETTINGS=self.SEEDED)
         self.assertEqual(0, r.returncode, self.out(r))
 
@@ -1471,7 +1446,7 @@ class PostBuildVerification(RebuildScriptHarness):
         constants = re.findall(r"AppSettingService\.(\w+)|\b([A-Z_]+_BASE_URL)\b", seeder)
         names = {a or b for a, b in constants if (a or b).endswith("_BASE_URL") and not (a or b).startswith("DEFAULT_")}
         seeded = {re.search(r'%s\s*=\s*"([^"]+)"' % n, settings).group(1) for n in names}
-        self.assertEqual({"llm_ollama_base_url", "comfyui_base_url"}, seeded)
+        self.assertEqual({"llm_ollama_base_url"}, seeded)  # ComfyUI は既定値を書かない(#1746)
         for script in ("rebuild-acceptance-env.sh", "reset-acceptance-env.sh"):
             with self.subTest(script=script):
                 with open(os.path.join(REPO_ROOT, "scripts", script), encoding="utf-8") as f:
@@ -1815,7 +1790,7 @@ class Documentation(unittest.TestCase):
             with self.subTest(volume=v):
                 self.assertIn(v, s, "ボリューム %s が §10 の表に無い" % v)
 
-    def test_explains_why_comfyui_models_is_preserved(self):
+    def test_explains_why_ollama_models_is_preserved(self):
         self.assertIn("モデル", self.section10())
 
     def test_documents_the_probe_mechanism(self):
@@ -1869,11 +1844,11 @@ class Documentation(unittest.TestCase):
 
 
 class TeardownTargetsAllDeclaredProfiles(RebuildScriptHarness):
-    """#1293: gpu プロファイル(comfyui)のコンテナも撤去の対象に含める。
+    """#1293: profile 付きサービス(diagram / db-tools など)のコンテナも撤去の対象に含める。
 
-    `docker-compose.yml` の comfyui は `profiles: ["gpu"]` を持つため、プロファイル指定
-    無しの `compose down` では対象にならない。プロファイル込みの `lbs-comfyui` が
-    Created/Exited のまま残ると、それが参照する comfyui_output の `volume rm` が失敗し、
+    profile 付きのサービスは、プロファイル指定無しの `compose down` では対象にならない。
+    プロファイル込みのコンテナが Created/Exited のまま残ると、それが参照するボリュームの
+    `volume rm` が失敗し、
     撤去(1/5)が途中で止まる(他のボリュームは既に破棄済みという中途半端な状態が残る)。
     """
 
@@ -1904,37 +1879,38 @@ class TeardownTargetsAllDeclaredProfiles(RebuildScriptHarness):
         self.assertEqual(0, r.returncode, out)
         self.assertIn("--profile", out, "ドライランがプロファイルを含めることを示していない(#1293)")
         self.assertIn(
-            "comfyui", out, "ドライランが gpu プロファイルのサービス名を示していない(#1293)"
+            "diagram", out, "ドライランが profile 付きサービスの名前を示していない(#1293)"
         )
+        self.assertNotIn("comfyui", out, "廃止した同梱 ComfyUI の名前が残っている(#1746)")
 
 
 class LeftoverGpuProfileContainerDoesNotBlockTeardown(RebuildScriptHarness):
-    """受入基準: 残存する gpu プロファイルのコンテナ(lbs-comfyui, Created/Exited)がいても、
-    撤去(1/5)が完走し comfyui_output が破棄される(#1293)。
+    """受入基準: 残存する profile 付きのコンテナ(Created/Exited)がいても、
+    撤去(1/5)が完走し、それが塞いでいたボリューム(generated_images)が破棄される(#1293)。
     """
 
     def setUp(self):
         super().setUp()
-        self.r = self.run_script("--yes", FAKE_LEFTOVER_GPU_CONTAINER="1")
+        self.r = self.run_script("--yes", FAKE_LEFTOVER_PROFILE_CONTAINER="1")
         self.out_text = self.out(self.r)
 
     def test_succeeds(self):
         self.assertEqual(0, self.r.returncode, self.out_text)
 
-    def test_comfyui_output_is_destroyed_and_recreated(self):
+    def test_blocked_volume_is_destroyed_and_recreated(self):
         self.assertNotEqual(
             "2020-01-01T00:00:00Z",
-            self.volume_created_at("comfyui_output"),
-            "残存する gpu プロファイルのコンテナのせいで comfyui_output が"
+            self.volume_created_at("generated_images"),
+            "残存する profile 付きのコンテナのせいで generated_images が"
             "破棄・再作成されていない(#1293):\n" + self.out_text,
         )
 
     def test_protected_volume_is_not_destroyed(self):
-        """受入基準: 保全対象(comfyui_models)は、gpu プロファイルの撤去に巻き込まれない。"""
+        """受入基準: 保全対象(ollama_models)は、profile 付きコンテナの撤去に巻き込まれない。"""
         self.assertEqual(
             "2020-01-01T00:00:00Z",
-            self.volume_created_at("comfyui_models"),
-            "保全対象の comfyui_models まで作り直されている:\n" + self.out_text,
+            self.volume_created_at("ollama_models"),
+            "保全対象の ollama_models まで作り直されている:\n" + self.out_text,
         )
 
 

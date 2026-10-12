@@ -1110,8 +1110,6 @@ media-service所有(issue #573 stage3)。CMSのメディアライブラリへ直
 | PUT .../image/provider/selection | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
 | GET .../comfyui/checkpoints | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
 | PUT .../comfyui/checkpoints/selection | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
-| POST .../comfyui/checkpoints/install | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
-| DELETE .../comfyui/checkpoints/{fileName} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同上 |
 | GET .../llm/review-steps | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。多段レビュー(#1210)の5ステップぶんの選択値・選択可能なprovider/model一覧(`ProjectLlmModelController.java`) |
 | PUT .../llm/review-steps/{stepKey} | requireAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1211 で追加**。同上。provider/modelが空ならそのステップの上書きを解除する(`ProjectLlmModelController.java`) |
 | GET .../connections | requireProjectMemberOrAdmin | 401 | 403 | 認可OK | 現状維持 | **issue #1503 で追加**。プロジェクト単位のOllama / ComfyUI接続先の上書き値と解決結果(`ProjectConnectionController.java`)。他行のrequireAdminと違いプロジェクトメンバー判定 |

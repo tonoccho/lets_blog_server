@@ -165,7 +165,7 @@ ensure_docker() {
 ensure_nvidia_toolkit() {
   if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
     warn "nvidia-smi が使えないため NVIDIA Container Toolkit の導入をスキップします。"
-    warn "  GPUドライバが無い/未導入の環境では、画像生成(ComfyUI)が実用的な速度で動作しません。"
+    warn "  GPUドライバが無い/未導入の環境では、同梱のOllama(ローカルLLM)をGPUで動かせません(ComfyUIは別PCで動かします)。"
     return 0
   fi
   if dpkg -s nvidia-container-toolkit >/dev/null 2>&1; then

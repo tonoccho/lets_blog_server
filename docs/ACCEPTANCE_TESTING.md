@@ -384,10 +384,8 @@ docker compose -f docker-compose.yml -f docker-compose.e2e-stubs.yml up -d
 cd apps/web && npm run test:at
 ```
 
-`comfyui`(実機の画像生成コンテナ)は `profiles: ["gpu"]` を持つため(issue #1066)、
-GPUの無いホストでもこの `up -d` は中断しない。画像生成の受け入れシナリオは
-`comfyui-stub` が受けるので、GPUの無いホストでもE2Eは通る。GPUを持つホストで実機の
-`comfyui` も併せて起動したい場合は `.env` の `COMPOSE_PROFILES=gpu` を有効にする。
+ComfyUI は同梱しない(issue #1746。GPU PC へ URL で接続する構成)。画像生成の受け入れシナリオは
+`comfyui-stub` が受けるので、GPUの無いホストでもE2Eは通る。
 
 ### gateway の `api-global` 枠を受け入れテスト用に引き上げる(issue #1132)
 
@@ -508,7 +506,7 @@ ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 �
 
 | 使うもの | 何を検証するか | シナリオ | タグ | 前提 |
 | --- | --- | --- | --- | --- |
-| 実機 `lbs-comfyui` | (受け入れテストでは検証しない。2026-10-09 に利用者の判断で削除、§20) 実際に画像が生成できること、生成パラメータが記録に残ること、チェックポイントの導入・削除 | なし。UAT の手順は §19.2 | なし | 実機の GPU / CPU の ComfyUI。結果が実機の AI に左右されるため |
+| 実機の ComfyUI(GPU PC) | (受け入れテストでは検証しない。2026-10-09 に利用者の判断で削除、§20) 実際に画像が生成できること、生成パラメータが記録に残ること | なし。UAT の手順は §19.2 | なし | 実機の GPU / CPU の ComfyUI。結果が実機の AI に左右されるため |
 | `comfyui-stub` | batch size の枚数(1〜16)、リピートごとに seed が変わること、seed が生成画像に残ること、`/api/ai/image-options` の一覧 | `features/stubs/comfyui-stub.feature`、および #1101 / #1102 / #1103 / #1105 の枚数・seed のシナリオ | `@stub` | GPU 不要。**GPU 非搭載環境でも通る** |
 
 分ける理由は実行時間と決定性である。実機の生成は1枚あたり数十秒かかるため、
@@ -1166,14 +1164,12 @@ npm run test:at:setup                 # データ層リセット → at-setup �
 | `lets_blog_server_generated_images` | 生成画像の保存領域 | テストが作った成果物 |
 | `lets_blog_server_bulk_upload_files` | 一括アップロードの一時ファイル | テストが作った成果物 |
 | `lets_blog_server_avatar_images` | identity-service のアバター画像(`AVATAR_STORAGE_PATH: /app/data/avatars`) | テストが作った成果物 |
-| `lets_blog_server_comfyui_output` | ComfyUI の output | テストが作った成果物 |
 | `lets_blog_server_penpot_postgres` | Penpot の DB | 既定は破棄。再構築コストが問題になれば保全へ移す(#965 Open Questions) |
 | `lets_blog_server_penpot_assets` | Penpot のアセット | 同上 |
 
 | 保全するボリューム | 保全する理由 |
 | --- | --- |
-| `lets_blog_server_comfyui_models` | 画像生成の**モデル重み**。再取得に長時間かかり、そもそもテスト対象の状態ではない。`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
-| `lets_blog_server_ollama_models` | Ollama の**モデル重み**(約4.7GB)。再取得に長時間かかり、受け入れテストの LLM 呼び出しは `llm-stub` が受けるためテスト対象の状態でもない。`comfyui_models` と同様、`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
+| `lets_blog_server_ollama_models` | Ollama の**モデル重み**(約4.7GB)。再取得に長時間かかり、受け入れテストの LLM 呼び出しは `llm-stub` が受けるためテスト対象の状態でもない。`CreatedAt` が実行をまたいで変わらないことをスクリプトが検証する |
 
 `*_test` スキーマ(ホストからの `./gradlew test` 用)は `mysql_data` ごと巻き添えで消えるが、
 構築時に `infra/mysql/init/02-create-test-schemas.sh` が本来の経路で作り直す。
@@ -1323,7 +1319,7 @@ compose プロジェクトに閉じる。
 
 1. 破棄対象のボリュームが**新規に作成されたものである**
    (`docker volume inspect --format '{{.CreatedAt}}'` が実行開始時刻より後)
-2. `comfyui_models` の `CreatedAt` が**変わっていない**(保全が成立している)
+2. `ollama_models` の `CreatedAt` が**変わっていない**(保全が成立している)
 3. 全サービスが healthy(`scripts/wait-for-stack-healthy.sh` を再利用。重複実装しない)
 4. 9スキーマに Flyway 管理テーブル以外のデータが無い
    (`roles` / `role_permissions` はマイグレーションが投入するマスタデータなので除外)
@@ -1345,16 +1341,10 @@ compose プロジェクトに閉じる。
 ゼロ構築は開発機の実環境を作り直すので、その環境の癖を2つ吸収する。
 
 - **`comfyui` が起動できないホスト。** 以前はサービス無指定の `docker compose up -d` が
-  1つのサービスの起動に失敗した時点で**中断**していた。NVIDIA ランタイムが無いと
-  `comfyui` は `could not select device driver "nvidia"` で落ち、依存関係の下流
-  (web / gateway / keycloak / 各ドメインサービス)が `created` のまま残っていた。issue #1066
-  で `comfyui` に `profiles: ["gpu"]` を付けたため、GPUの無いホストでは `docker compose
-  up -d` がそもそも `comfyui` のコンテナを作らなくなり、この中断は起きなくなった。
-  このスクリプトが必須サービスと任意サービス(`comfyui`)を**分けて**起動し、任意サービスの
-  起動失敗を警告に留める作りは#1066より前からの防御として残している
-  (`docker compose up -d comfyui` は `--profile gpu` を指定しなくても明示的にサービス名を
-  指定すれば起動を試みるため、GPUの無いホストではやはり失敗しうる。起動できなくても
-  ボリュームは作られるので、破棄検証は成立する)。
+  1つのサービスの起動に失敗した時点で**中断**していた。かつては同梱の `comfyui` が NVIDIA ランタイムの無い
+  ホストで `could not select device driver "nvidia"` で落ち、依存関係の下流が `created` のまま残っていた。
+  ComfyUI は同梱をやめた(issue #1746)ので、起動できないことが前提の任意サービスは無くなり、
+  このスクリプトは全サービスを1回の `up -d --build` で起動する。
 - **ホストの 80/443 を他プロセスが握っているホスト(§12)。** `lbs-reverse-proxy` が
   ポートを公開していないことでこの構成を判定し、`docker-compose.shared-host.yml` を重ねて
   起動し、構築後に `scripts/setup-shared-host-proxy.sh` を再適用する
@@ -2120,13 +2110,15 @@ Q1(クロスブラウザ)・Q2(フォーカスの視認性)・Q3(モバイル・
 リリースの前などに、実機の環境で人が確かめる。いずれも本番相当のスタックで、スタブ(`docker-compose.e2e-stubs.yml`)を
 重ねていない構成で行う。
 
-**R1: ComfyUI チェックポイントの導入と削除**(AC-IMG-010)
+**R1: GPU PC の ComfyUI のチェックポイントの一覧と選択**(AC-IMG-010)
 
-1. システム設定で画像生成に ComfyUI(実機 `lbs-comfyui`)を指定する。
-2. プロジェクトの管理画面を開き、「AI・アセット」タブ → 「AIモデル管理」 → 「画像生成」で ComfyUI のチェックポイントの一覧を表示する。
-3. 小さな safetensors の URL とファイル名を指定して導入する。ジョブが「完了しました。」になり、一覧に現れること。
-4. 選択中のチェックポイントの行の「削除」が押せず、理由(「選択中のチェックポイントは削除できません」)が示されること。
-5. 選択していない導入したチェックポイントを削除し、一覧から消えること(ComfyUI のモデル領域から消すこと)。
+チェックポイントの導入・削除は Let's Blog の機能から外した(#1746。GPU PC の `models/checkpoints/` にファイルを置く)。
+
+1. システム設定の「ComfyUI ベースURL」に GPU PC の ComfyUI の URL を入れる(`docs/EXTERNAL_COMFYUI.md`)。
+2. GPU PC の `models/checkpoints/` に小さな safetensors を置き、ComfyUI を再読み込みする。
+3. プロジェクトの管理画面を開き、「AI・アセット」タブ → 「AIモデル管理」 → 「画像生成」でチェックポイントの一覧を表示し、置いたものが現れること。
+4. 一覧に導入・削除の操作(「+ 新規インストール」「削除」)が無いこと。
+5. 置いたチェックポイントを「選択」し、「選択中」の表示に変わること。
 
 **R2: 実機 ComfyUI での画像生成**(AC-IMG-001 / AC-IMG-009)
 
@@ -2134,13 +2126,8 @@ Q1(クロスブラウザ)・Q2(フォーカスの視認性)・Q3(モバイル・
 2. 生成画像が画像ギャラリーの一覧に現れること。
 3. 別のプロンプトとサイズ(例: `a red bicycle in the rain`、512 x 512)で生成し、詳細にプロンプト・サイズ・使ったチェックポイント名が残ること。
 
-**R3: CPU 構成の ComfyUI での画像生成**
-
-1. `docker compose --profile cpu up -d comfyui-cpu` で CPU 構成の ComfyUI(`lbs-comfyui-cpu`)を起動する。
-2. システム設定の `comfyui_base_url` を `http://lbs-comfyui-cpu:8188` にする(確認後は元へ戻す)。
-3. `stabilityai/sd-turbo` の `sd_turbo.safetensors`(約 5.2GB)が無ければ導入する。
-4. 512x512・`steps=1`・`cfgScale=1.0`・`euler` / `simple`・batchSize=1 で画像を 1 枚生成し、media のポーリング予算(120 秒)以内に返り、
-   ギャラリーに現れること。所要時間を記録する。
+**R3: (欠番)** かつての「CPU 構成の ComfyUI(`comfyui-cpu`)での画像生成」は、同梱の ComfyUI を廃止した(#1746)ため無い。
+GPU PC の ComfyUI を CPU で動かすかどうかは、GPU PC 側の起動方法(`--cpu` の有無)で決まる。
 
 **R4: CPU 構成の Ollama でのタグ提案**
 

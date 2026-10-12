@@ -1079,24 +1079,25 @@ ComfyUI error
 
 **Solutions:**
 
-1. **Check ComfyUI service**
-   ```bash
-   docker compose logs -f comfyui | tail -20
-   ```
+ComfyUI is not bundled (issue #1746); it runs on a separate GPU PC. See `docs/EXTERNAL_COMFYUI.md`.
 
-2. **Verify model checkpoint exists**
+1. **Check the ComfyUI URL and reachability**
+   - Confirm the ComfyUI URL (e.g. `http://192.168.1.71:8188`) is set in the system settings
+     or the project settings.
+   - From the Let's Blog host: `curl http://192.168.1.71:8188/system_stats`
+   - ComfyUI on the GPU PC must be started with `--listen 0.0.0.0`.
+
+2. **Verify model checkpoint exists (on the GPU PC)**
    ```bash
-   docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
+   ls <ComfyUI directory>/models/checkpoints/
    ```
    
    Should see your checkpoint file (e.g., `sd-v1-5-fp16.safetensors`)
 
 3. **If missing, download checkpoint**
    - Download model from Hugging Face
-   - Copy to ComfyUI container:
-   ```bash
-   docker cp model.safetensors lbs-comfyui:/root/ComfyUI/models/checkpoints/
-   ```
+   - Put it in `models/checkpoints/` of the ComfyUI directory on the GPU PC (there is no install/delete
+     in the Let's Blog UI or API), then restart ComfyUI
 
 4. **Check `.env` configuration**
    ```bash
@@ -1156,7 +1157,6 @@ Model running on CPU
 5. **Check container GPU access**
    ```bash
    docker exec lbs-ollama nvidia-smi
-   docker exec lbs-comfyui nvidia-smi
    ```
    
    Note: `docker exec lbs-ollama nvidia-smi` only applies with `GPU_RUNTIME=nvidia` (the default);

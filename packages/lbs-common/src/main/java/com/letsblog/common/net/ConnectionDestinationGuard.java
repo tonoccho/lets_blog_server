@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  *
  * <p>dockerネットワーク範囲は、非loopbackインタフェースのアドレスとプレフィックス長から求める
  * (dockerソケットに触れない設計のためDocker APIは使わない)。コンテナ内でなければ(開発時にJVMを直接起動)
- * 空とし、ホストのLANを誤って拒否しない。同梱のOllama / ComfyUIを<b>名前で</b>指定した場合に限り(a)は適用しない。
+ * 空とし、ホストのLANを誤って拒否しない。同梱のOllamaを<b>名前で</b>指定した場合に限り(a)は適用しない。ComfyUIの接続先は外部のGPU PCなので、LANのプライベートアドレスはそのまま通る。
  */
 public class ConnectionDestinationGuard {
 
@@ -40,9 +40,11 @@ public class ConnectionDestinationGuard {
         InetAddress[] resolve(String host) throws UnknownHostException;
     }
 
-    /** issue #1518が拒否リストから意図的に外した同梱サービス名(とそのlbs-付き)。 */
-    private static final Set<String> BUNDLED_NAMES = Set.of(
-            "ollama", "comfyui", "comfyui-cpu", "lbs-ollama", "lbs-comfyui", "lbs-comfyui-cpu");
+    /**
+     * issue #1518が拒否リストから意図的に外した同梱サービス名(とそのlbs-付き)。ComfyUIは同梱をやめた
+     * (GPU PCなど外部へURLで接続する)ので、ここには含めない(issue #1746)。
+     */
+    private static final Set<String> BUNDLED_NAMES = Set.of("ollama", "lbs-ollama");
 
     private static final Pattern NUMERIC_HOST = Pattern.compile("[0-9.]+");
 

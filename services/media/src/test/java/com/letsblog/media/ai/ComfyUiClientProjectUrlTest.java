@@ -114,4 +114,28 @@ class ComfyUiClientProjectUrlTest {
         assertThat(params.projectId()).isNull();
         assertThat(ComfyUiGenerationParams.withDefaults("p").projectId()).isNull();
     }
+
+    /** issue #1746: GPU PCのComfyUI(LANのプライベートアドレス+ポート)へ、一覧取得も画像生成も送られる。 */
+    @Test
+    void LANのGPU_PCのURLへ一覧取得も画像生成も送られる() {
+        String lan = "http://192.168.1.71:8188";
+        baseUrls.put(9L, lan);
+        expectObjectInfo(lan, "CheckpointLoaderSimple", "ckpt_name", "gpu-pc.safetensors");
+        server.expect(requestTo(lan + "/prompt"))
+                .andRespond(withSuccess("{\"prompt_id\":\"p2\"}", MediaType.APPLICATION_JSON));
+        server.expect(manyTimes(), requestTo(lan + "/history/p2"))
+                .andRespond(withSuccess(
+                        "{\"p2\":{\"outputs\":{\"9\":{\"images\":[{\"filename\":\"b.png\",\"subfolder\":\"\","
+                                + "\"type\":\"output\"}]}}}}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(manyTimes(), requestTo(org.hamcrest.Matchers.startsWith(lan + "/view")))
+                .andRespond(withSuccess(new byte[] {1, 2, 3}, MediaType.IMAGE_PNG));
+        ComfyUiGenerationParams params = new ComfyUiGenerationParams(
+                "a cat", "blurry", 20, 7.0, "euler", "normal", 1L, 512, 512, 1,
+                "gpu-pc.safetensors", null, null, 9L);
+
+        assertThat(client.listCheckpoints(9L)).containsExactly("gpu-pc.safetensors");
+        assertThat(client.generateImage(params)).hasSize(1);
+        server.verify();
+    }
 }

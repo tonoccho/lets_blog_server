@@ -121,12 +121,10 @@ Issue: [#591](https://github.com/tonoccho/lets_blog_server/issues/591) [E5] カ�
 | MySQL | `lbs_identity` / `lbs_project` / `lbs_content` / `lbs_media` / `lbs_ai` / `lbs_publishing` / `lbs_analytics` / `lbs_platform` / `lbs_log` | 必須 | ADR-0004。`lbs_publishing`/`lbs_platform`は対応サービス未抽出のため空の想定だが、将来の取りこぼし防止のため対象に含める |
 | MySQL | WordPressサイトごとの動的DB(`wp_*`等。`infra/wordpress/provision-agent/index.php`がサイト作成時に`CREATE DATABASE`する) | 必須 | **固定スキーマ名の列挙だけでは漏れる**。`mysqldump --all-databases`で一括取得することで担保する(下記1.3参照) |
 | PostgreSQL | `keycloak`(Keycloakのrealm/ユーザー/クレデンシャル情報) | 必須 | `lbs-keycloak-postgres`コンテナ |
-| Docker Volume | `generated_images` | 必須 | AI生成画像(issue本文で名指し) |
-| Docker Volume | `comfyui_models` | 必須 | issue本文で名指し。チェックポイント等 |
+| Docker Volume | `generated_images` | 必須 | AI生成画像(issue本文で名指し)。ComfyUI のボリューム(`comfyui_models` / `comfyui_output`)は #1746 で同梱をやめたため対象外(既存環境の移行は docs/EXTERNAL_COMFYUI.md) |
 | Docker Volume | `wordpress_sites` | 必須 | issue本文で名指し。WordPressサイトのファイル一式 |
 | Docker Volume | `bulk_upload_files` | 必須 | 一括アップロード作業ファイル |
 | Docker Volume | `avatar_images` | 必須 | identity-serviceのアバター画像(#1241)。利用者のデータで他から再生成できない |
-| Docker Volume | `comfyui_output` | 推奨 | ComfyUI生成物の一時出力 |
 | Docker Volume | `penpot_assets` | 推奨 | カスタムタグAIデザイン生成で使うPenpotアセット |
 | Docker Volume | `penpot_postgres` | 推奨 | Penpot自体のDB。Keycloak/認証には非依存だが全停止のタイミングで一緒に取得する |
 | Docker Volume | `rabbitmq_data` | 任意 | キューの永続化データ。復旧後は空でも業務継続に支障はない想定だが安全側で対象に含める |
@@ -170,8 +168,8 @@ docker exec -e PGPASSWORD="$KEYCLOAK_DB_PASSWORD" lbs-keycloak-postgres \
 
 # --- Docker named volume群(生ファイル。停止済みのサービスが使うボリュームなので
 #     書き込み競合を気にせず tar できる)
-for volume in generated_images comfyui_models wordpress_sites bulk_upload_files \
-              avatar_images comfyui_output penpot_assets penpot_postgres rabbitmq_data \
+for volume in generated_images wordpress_sites bulk_upload_files \
+              avatar_images penpot_assets penpot_postgres rabbitmq_data \
               mysql_data keycloak_postgres; do
   full_volume="$(basename "$(pwd)")_${volume}"
   docker run --rm \
@@ -877,10 +875,10 @@ docker exec -i -e PGPASSWORD="$KEYCLOAK_DB_PASSWORD" lbs-keycloak-postgres \
   pg_restore -U keycloak -d keycloak --clean --if-exists \
   < "$BACKUP_DIR/keycloak-postgres.dump"
 
-# 4. Docker volume群の復元(必要なもののみ。generated_images/comfyui_models/
+# 4. Docker volume群の復元(必要なもののみ。generated_images/
 #    wordpress_sites/bulk_upload_files/avatar_imagesはカットオーバー中に書き込みが発生しない想定のため
 #    通常は復元不要だが、念のため手順を残す)
-for volume in generated_images comfyui_models wordpress_sites bulk_upload_files avatar_images; do
+for volume in generated_images wordpress_sites bulk_upload_files avatar_images; do
   full_volume="$(basename "$(pwd)")_${volume}"
   docker run --rm -v "${full_volume}:/volume" -v "$(pwd)/$BACKUP_DIR:/backup" \
     alpine sh -c "rm -rf /volume/* /volume/..?* /volume/.[!.]* 2>/dev/null; \

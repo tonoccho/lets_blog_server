@@ -8,7 +8,7 @@
 対象は `docker-compose.yml` の media サービスの `environment:` であり、
 `docker compose config` の出力でしか観測できない運用設定である。Web UI からは
 到達できないため、`CLAUDE.md` → Test-First Implementation が認める
-サービス/スクリプトレベルのテストで表現する(`test_comfyui_gpu_profile.py` と同じ理由)。
+サービス/スクリプトレベルのテストで表現する(`test_compose_no_bundled_comfyui.py` と同じ理由)。
 
 未設定時は application.yml の既定値を効かせる必要がある。compose の `${VAR}` は
 未設定を空文字にして既定値を潰すため、`${VAR-既定値}`(コロン無し: 未設定のときだけ既定値)

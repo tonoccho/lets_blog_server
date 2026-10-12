@@ -6,9 +6,7 @@
  */
 import type {
   ComfyUiCheckpointListResponse,
-  GenerationJobResponse,
   ImageProviderListResponse,
-  InstallComfyUiCheckpointRequest,
   SelectComfyUiCheckpointRequest,
   SelectImageProviderRequest
 } from '../openAPIDefinition.schemas';
@@ -106,52 +104,6 @@ const res = await fetch(getSelectCheckpointUrl(id),
 }
 
 
-export type installCheckpointResponse200 = {
-  data: GenerationJobResponse
-  status: 200
-}
-
-export type installCheckpointResponseSuccess = (installCheckpointResponse200) & {
-  headers: Headers;
-};
-;
-
-export type installCheckpointResponse = (installCheckpointResponseSuccess)
-
-export const getInstallCheckpointUrl = (id: number,) => {
-
-
-
-
-  return `http://localhost:8080/api/projects/${id}/ai-models/comfyui/checkpoints/install`
-}
-
-export const installCheckpoint = async (id: number,
-    installComfyUiCheckpointRequest: InstallComfyUiCheckpointRequest, options?: RequestInit): Promise<installCheckpointResponse> => {
-
-    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Array.isArray(h)) return Object.fromEntries(h);
-    return h;
-  };
-const res = await fetch(getInstallCheckpointUrl(id),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(installComfyUiCheckpointRequest)
-  }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: installCheckpointResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as installCheckpointResponse
-}
-
-
 export type listImageProviderResponse200 = {
   data: ImageProviderListResponse
   status: 200
@@ -227,47 +179,6 @@ export const listCheckpoints = async (id: number, options?: RequestInit): Promis
 
   const data: listCheckpointsResponse['data'] = body ? JSON.parse(body) : {}
   return { data, status: res.status, headers: res.headers } as listCheckpointsResponse
-}
-
-
-export type deleteCheckpointResponse200 = {
-  data: GenerationJobResponse
-  status: 200
-}
-
-export type deleteCheckpointResponseSuccess = (deleteCheckpointResponse200) & {
-  headers: Headers;
-};
-;
-
-export type deleteCheckpointResponse = (deleteCheckpointResponseSuccess)
-
-export const getDeleteCheckpointUrl = (id: number,
-    fileName: string,) => {
-
-
-
-
-  return `http://localhost:8080/api/projects/${id}/ai-models/comfyui/checkpoints/${fileName}`
-}
-
-export const deleteCheckpoint = async (id: number,
-    fileName: string, options?: RequestInit): Promise<deleteCheckpointResponse> => {
-
-  const res = await fetch(getDeleteCheckpointUrl(id,fileName),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteCheckpointResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as deleteCheckpointResponse
 }
 
 

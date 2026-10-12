@@ -96,7 +96,7 @@ Phase 19の各抽出Issueが暫定策として実装していた「呼び出し�
 そもそも存在しない呼び出し(定期バッチ等)を新設する場合は、`clientCredentials`を今から使ってよい。
 
 **例外(issue #1083)**: media(lbs-common版`GenerationJobClient`)の`PATCH /api/generation-jobs/{id}`は、
-`@Async`な非同期ジョブランナー(ModelInstallJobRunner等)が起動から数分〜数十分後に呼ぶため、
+`@Async`な非同期ジョブランナー(ImageGenerationJobRunner等。かつてはModelInstallJobRunnerも。#1746で削除)が起動から数分〜数十分後に呼ぶため、
 起動時点のユーザーBearerトークンは`forwardedBearer`のままでは失効する(Keycloakの
 `accessTokenLifespan`、既定300秒)。ここは「元々ユーザーコンテキストが必要だった」わけではなく
 (ai-serviceの`InternalGenerationJobController`は有効なJWTさえあれば認可し、呼び出し元ユーザーの
@@ -186,7 +186,6 @@ ai-service へ移設済みのエンドポイントを legacy-api に問い合わ
 | content(`MediaRenderClient`) → `PlantUmlTagRenderService`/`RechartsTagRenderService`(組み込みタグ`[plantuml]`/`[recharts]`) | `POST /api/render/plantuml`・`POST /api/render/recharts` | RENDER(30秒) | なし | あり(`media-service`、上記と共有) | 明確なエラー(既存の製品判断: タグの記法・データ誤りを利用者に明示する設計を維持。C12では変更しない) | 済(クライアント基盤は移行、フォールバック方針は既存のまま維持) |
 | content(`MediaRenderClient`) → `CustomTagGenerationService`(Penpotデザインファイル作成) | `POST /api/render/penpot/design-file` | RENDER(30秒) | なし | あり(`media-service`、上記と共有) | 明確なエラー | 済 |
 | legacy-api(`MediaRenderClient`、content版と同一エンドポイントの旧経路) | `POST /api/render/**` | (未移行、既存は20秒) | - | - | (未整理) | 未 |
-| legacy-api(`MediaComfyUiClient`) | `/api/comfyui/checkpoints/install`・`/delete` | (未移行) | - | - | (未整理) | 未 |
 | legacy-api(`MediaGeneratedImageClient`) | `/api/generated-images`・`/api/generated-images/{id}/file` | (未移行) | - | - | (未整理) | 未 |
 
 ### analytics-service向け

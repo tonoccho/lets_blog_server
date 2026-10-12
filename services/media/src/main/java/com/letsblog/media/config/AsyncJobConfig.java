@@ -8,25 +8,14 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 /**
- * ComfyUIチェックポイントダウンロード等、数分かかりうる処理をHTTPリクエストをブロックせずに
- * 実行するための専用スレッドプール。legacy-apiのAsyncJobConfig(#573でmedia-serviceへ移設)と
- * 同一の設定。デフォルトのSimpleAsyncTaskExecutorは無制限にスレッドを生成するため、
- * 同時ダウンロード数の上限を設けるために明示的なBeanを用意する。
+ * メディアガベージコレクション・画像生成・AIタグ付けなど、HTTPリクエストをブロックせずに実行する
+ * 処理の専用スレッドプール。デフォルトのSimpleAsyncTaskExecutorは無制限にスレッドを生成するため、
+ * 同時実行数の上限を設けるために明示的なBeanを用意する。ComfyUIチェックポイントのダウンロード用
+ * プール(modelInstallExecutor)は、チェックポイントの導入機能ごと削除した(issue #1746)。
  */
 @Configuration
 @EnableScheduling
 public class AsyncJobConfig {
-
-    @Bean(name = "modelInstallExecutor")
-    public Executor modelInstallExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(20);
-        executor.setThreadNamePrefix("model-install-");
-        executor.initialize();
-        return executor;
-    }
 
     /**
      * メディアガベージコレクションの一括削除(issue #500)。1サイトへの削除は逐次CMSブリッジ呼び出し

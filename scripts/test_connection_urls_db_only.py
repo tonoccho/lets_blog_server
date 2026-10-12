@@ -26,7 +26,7 @@ import os
 import re
 import unittest
 
-import test_comfyui_gpu_profile as base
+import test_compose_no_bundled_comfyui as base
 
 REPO_ROOT = base.REPO_ROOT
 AT_FILES = (base.COMPOSE, base.STUB_COMPOSE)

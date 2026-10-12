@@ -95,7 +95,6 @@ readonly DESTROY_VOLUMES=(
   keycloak_postgres
   penpot_postgres
   penpot_assets
-  comfyui_output
   wordpress_sites
   bulk_upload_files
   generated_images
@@ -104,17 +103,19 @@ readonly DESTROY_VOLUMES=(
 
 # 保全するボリューム。
 #
-#   comfyui_models — 画像生成のモデル重み。再取得に長時間かかり、テスト対象の状態でもない。
-#                    ここだけは実行をまたいで保持する(CreatedAt が変わらないことを検証する)。
 #   ollama_models  — Ollama のモデル重み(issue #1086)。約4.7GBあり、再取得に長時間かかる。
 #                    受け入れテストの LLM 呼び出しは llm-stub が受けるため(#1086 R7)、
-#                    テスト対象の状態でもない。comfyui_models と同様、実行をまたいで
-#                    保持する(CreatedAt が変わらないことを検証する)。
+#                    テスト対象の状態でもない。実行をまたいで保持する
+#                    (CreatedAt が変わらないことを検証する)。
+#
+# ComfyUI は同梱をやめた(GPU PC へ URL で接続する、#1746)ので、そのボリューム(旧 ComfyUI 用の
+# 2つ)はここで管理しない。既存環境に残っている場合の手動削除は docs/EXTERNAL_COMFYUI.md の
+# 移行手順を参照(自動では消さない)。
 #
 # mysql_data 内の *_test スキーマ(ホストからの ./gradlew test 用)は mysql_data ごと
 # 巻き添えで消えるが、構築時に infra/mysql/init/02-create-test-schemas.sh が本来の経路で
 # 作り直す。作り直されたことは手順4で確認する。
-readonly PRESERVE_VOLUMES=(comfyui_models ollama_models)
+readonly PRESERVE_VOLUMES=(ollama_models)
 
 readonly MYSQL_CONTAINER="lbs-mysql"
 readonly KEYCLOAK_CONTAINER="lbs-keycloak"
@@ -140,10 +141,6 @@ readonly HOST_ARTIFACTS=(
   "apps/web/test-results"
   "apps/web/playwright-report"
 )
-
-# GPU が無いホストでは起動できないサービス。起動失敗を致命傷にしない。
-# 受け入れテストは comfyui に依存しない(画像生成は image-stub が受ける)。
-readonly OPTIONAL_SERVICES=(comfyui)
 
 # 健全性待ちの上限(秒)。空ボリュームからの起動は Keycloak のレルムインポートと
 # 9サービス分の Flyway を含むため、既存スタックの再起動より長くかかる。
@@ -242,7 +239,6 @@ if [ "$SHARED_HOST" -eq 1 ]; then
 fi
 # 受け入れテストが使うオプトイン profile(#1741)。diagram = PlantUML + draw.io、
 # db-tools = phpMyAdmin。docker-compose.yml が既定の起動から外しているので、ここで有効にする。
-# gpu / cpu(comfyui)はここに入れない。comfyui は OPTIONAL_SERVICES として別に起動する。
 readonly AT_PROFILES=(diagram db-tools)
 for p in "${AT_PROFILES[@]}"; do COMPOSE_ARGS+=(--profile "$p"); done
 compose() { docker compose "${COMPOSE_ARGS[@]}" "$@"; }
@@ -283,9 +279,9 @@ fi
 
 step "撤去コマンドの対象範囲(#1293)"
 log "  docker compose --profile '*' down --remove-orphans: docker-compose.yml が宣言する"
-log "  全プロファイル(comfyui の gpu 等)のコンテナも撤去の対象に含めます。"
+log "  全プロファイル(diagram / db-tools 等)のコンテナも撤去の対象に含めます。"
 log "  プロファイルを指定しないと、Created/Exited のまま残ったコンテナが"
-log "  それの乗るボリューム(comfyui_output 等)の破棄をブロックし、途中で止まります。"
+log "  それの乗るボリュームの破棄をブロックし、途中で止まります。"
 
 if [ "$SHARED_HOST" -eq 1 ]; then
   log ""
@@ -458,7 +454,7 @@ done
 
 down_out=""
 # --profile '*' を付けるのは、docker-compose.yml が宣言する全プロファイル
-# (comfyui の gpu 等)のコンテナも撤去の対象に含めるため(#1293)。プロファイル名を
+# (diagram / db-tools 等)のコンテナも撤去の対象に含めるため(#1293)。プロファイル名を
 # 個別に列挙する代わりに '*' を選んだのは、今後プロファイルが増減しても
 # このスクリプトを追随させる必要がないようにするため。
 if ! down_out="$(compose --profile '*' down --remove-orphans --timeout 60 2>&1)"; then
@@ -506,41 +502,16 @@ if [ "$NO_CACHE" -eq 1 ]; then
   log "  docker compose build --no-cache(ビルドキャッシュを使いません)"
   compose build --no-cache
 fi
-# 必須サービスと任意サービスを**分けて**起動する。
-#
-# サービス無指定の `docker compose up -d` は、1つのサービスの起動に失敗した時点で
-# **中断**する。GPU が無いホストでは comfyui が
-# `could not select device driver "nvidia"` で落ちるため、依存関係の下流
-# (web / gateway / keycloak / 各ドメインサービス)が created のまま残り、
-# 健全性待ちが上限まで待ってから落ちる(2026-09-04 実測)。
-#
-# サービス一覧は compose 自身から取る(docker-compose.yml の写しを持たない)。
-mapfile -t ALL_SERVICES < <(compose config --services | sort)
-REQUIRED_TO_START=()
-for s in "${ALL_SERVICES[@]}"; do
-  skip=0
-  for o in "${OPTIONAL_SERVICES[@]}"; do
-    [ "$s" = "$o" ] && skip=1
-  done
-  [ "$skip" -eq 0 ] && REQUIRED_TO_START+=("$s")
-done
-
+# サービス無指定の `docker compose up -d` は、1つのサービスの起動に失敗した時点で**中断**し、
+# 依存関係の下流を created のまま残す。かつては GPU が無いホストで同梱の comfyui が
+# `could not select device driver "nvidia"` で落ち、健全性待ちが上限まで待ってから落ちた
+# (2026-09-04 実測)。ComfyUI は同梱をやめた(#1746)ので、起動できないことが前提の任意サービスは
+# 無く、全サービスを1回で起動する。サービス一覧は compose 自身が持つ(このスクリプトに写しを置かない)。
 UP_FAILED=0
-compose up -d --build "${REQUIRED_TO_START[@]}" || UP_FAILED=1
-
-# 任意サービスは最後に、失敗を許して起動する。起動できなくてもボリュームは作られるので、
-# 破棄検証(CreatedAt)は成立する。
-FAILED_OPTIONAL=()
-for o in "${OPTIONAL_SERVICES[@]}"; do
-  compose up -d "$o" >/dev/null 2>&1 || FAILED_OPTIONAL+=("$o")
-done
+compose up -d --build || UP_FAILED=1
 
 BUILD_ELAPSED=$(( $(date +%s) - BUILD_START ))
 log "  ビルドと起動: ${BUILD_ELAPSED} 秒"
-if [ ${#FAILED_OPTIONAL[@]} -gt 0 ]; then
-  log "  注意: 任意サービスが起動しませんでした: ${FAILED_OPTIONAL[*]}"
-  log "        受け入れテストはこれらに依存しません(画像生成は image-stub が受けます)。"
-fi
 if [ "$UP_FAILED" -eq 1 ]; then
   log "  注意: 必須サービスの起動で compose が非0を返しました。"
   log "        どのサービスが healthy でないかは次の手順が判定します。"
@@ -615,7 +586,7 @@ done
 # ゼロ構築の直後に platform-service が起動して書く行は残骸ではないので数えない(#1701)。
 # 表まるごとではなくキーで除外する: 利用者が管理画面で保存した設定の残りは見逃さない。
 # シーダーのキーを変えたら、ここも変えること(test_rebuild_acceptance_env.py が突き合わせる)。
-SEEDED_SETTING_KEYS=(llm_ollama_base_url comfyui_base_url)
+SEEDED_SETTING_KEYS=(llm_ollama_base_url)
 seeded_in_list="$(printf "'%s'," "${SEEDED_SETTING_KEYS[@]}")"
 seeded_in_list="${seeded_in_list%,}"
 schema_dirty=0
@@ -752,9 +723,10 @@ fi
 
 # ---------------------------------------------------------------- 4+. スタブの接続先(#1703)
 #
-# ゼロ構築後は ConnectionDefaultsSeeder が本番の既定値(ollama / comfyui)を DB へ書く。#1567 以降
-# 接続先は DB だけで決まるので、スタブへ向けないと AI 系シナリオは起動していない実サービスへ出て落ちる。
-# 検証(4/5)が通った後、受け入れテストが始まる前にここで向ける。ConnectionDefaultsSeeder 自体は変えない。
+# ゼロ構築後は ConnectionDefaultsSeeder が Ollama の本番の既定値(ollama)を DB へ書く。ComfyUI は
+# 既定値を書かず未設定になる(#1746)。#1567 以降 接続先は DB だけで決まるので、スタブへ向けないと
+# AI 系シナリオは起動していない実サービス(または未設定)へ出て落ちる。
+# 検証(4/5)が通った後、受け入れテストが始まる前にここで向ける。
 step "4+ スタブの接続先(LLM / ComfyUI)を DB へ投入します(e2e-clear-llm-db-overrides.sh)"
 if ! "$SCRIPT_DIR/e2e-clear-llm-db-overrides.sh" --yes; then
   echo "エラー: LLM / ComfyUI の接続先をスタブへ向けられませんでした。" >&2

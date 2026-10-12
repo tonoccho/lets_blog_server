@@ -22,7 +22,7 @@ profile を自動で有効にして起動でき、いったん作られたコン
 import os
 import unittest
 
-import test_comfyui_gpu_profile as base
+import test_compose_no_bundled_comfyui as base
 
 OLLAMA_SERVICES = ("ollama", "ollama-model-init")
 AT_FILES = (base.COMPOSE, base.STUB_COMPOSE)

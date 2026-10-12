@@ -82,14 +82,22 @@ class PlatformServiceClientConnectionGuardTest {
         assertThat(client.comfyUiTarget(7L).baseUrl()).isEqualTo("http://192.168.1.60:8188");
     }
 
+    /**
+     * issue #1746: ComfyUIは同梱しないので、comfyuiという名前はdockerネットワーク内へ解決されても
+     * もう例外として許可しない(GPU PCのLANアドレスは許可する)。
+     */
     @Test
-    void bundledComfyUiNameIsAllowedByNameButNotByIpLiteral() {
+    void comfyUiNameResolvingIntoTheDockerRangeIsNoLongerAnException() {
         dns.put("comfyui", "172.18.0.20");
-        dns.put("172.18.0.20", "172.18.0.20");
         when(aiConnections.comfyUiBaseUrlOverride(7L)).thenReturn("http://comfyui:8188");
-        assertThat(client.comfyUiTarget(7L).baseUrl()).isEqualTo("http://172.18.0.20:8188");
-        when(aiConnections.comfyUiBaseUrlOverride(7L)).thenReturn("http://172.18.0.20:8188");
         assertThatThrownBy(() -> client.comfyUiTarget(7L)).isInstanceOf(ForbiddenDestinationException.class);
+    }
+
+    @Test
+    void gpuPcLanUrlIsUsedForTheProjectOverride() {
+        dns.put("192.168.1.71", "192.168.1.71");
+        when(aiConnections.comfyUiBaseUrlOverride(7L)).thenReturn("http://192.168.1.71:8188");
+        assertThat(client.comfyUiTarget(7L).baseUrl()).isEqualTo("http://192.168.1.71:8188");
     }
 
     @Test

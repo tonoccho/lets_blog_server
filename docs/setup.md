@@ -39,7 +39,7 @@ bash scripts/check-env.sh   # .env が .env.example の全項目を満たして�
 bash scripts/generate-certs.sh
 
 # 3. Docker Compose で全サービスを起動(reverse-proxy/web/api/log-writer/mysql/rabbitmq/
-#    phpmyadmin/comfyui/plantuml/drawio/wordpress/Penpotスイート。計19コンテナ)
+#    phpmyadmin/plantuml/drawio/wordpress/Penpotスイート。ComfyUI は同梱しない)
 docker compose up -d --build
 
 # 4. 全サービスがhealthyになるまで待機
@@ -58,7 +58,7 @@ bash scripts/wait-for-stack-healthy.sh --all
 ### 停止
 
 停止は `./shutdown.sh` を使う。コンテナを停止・削除するが、**名前付きボリュームは残す**ので、
-DB(mysql_data)・Keycloak(keycloak_postgres)・生成画像(generated_images)・ComfyUI モデルなどのデータは
+DB(mysql_data)・Keycloak(keycloak_postgres)・生成画像(generated_images)などのデータは
 そのままで、`./startup.sh` で起動し直せば元の状態に戻る。起動していなければその旨を表示して正常終了する。
 
 ```bash
@@ -73,7 +73,7 @@ DB(mysql_data)・Keycloak(keycloak_postgres)・生成画像(generated_images)・
 
 - Docker / Docker Compose(Compose v2 系。`docker compose version` で確認)
 - openssl(証明書生成に使用。Linux/macOSは標準搭載)
-- NVIDIA GPU + NVIDIA Container Toolkit(ComfyUIのGPU利用に推奨。CPUのみでも動作するイメージタグに変更すれば起動は可能だが低速)
+- (任意)NVIDIA GPU + NVIDIA Container Toolkit(同梱のOllamaをGPUで動かす場合のみ。ComfyUIは GPU PC で別に動かすので、このホストに GPU は要らない。[docs/EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md))
 - 外部LLMサービス(既定: OpenAI)のAPIキー(下書き/校正/要約支援・タグ提案・記事プランニングに使用)
 - ホストの 80番・443番ポートが空いていること(リバースプロキシが使用)
 
@@ -100,9 +100,8 @@ DB(mysql_data)・Keycloak(keycloak_postgres)・生成画像(generated_images)・
 |---|---|---|
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | MySQLのパスワード | 必須変更 |
 | `APP_ENCRYPTION_KEY` | CMS認証情報暗号化キー(Base64, 32バイト)。生成例: `openssl rand -base64 32` | 必須変更 |
-| `COMFYUI_IMAGE` | ComfyUIイメージ(GPU種別に応じて変更。既定はNVIDIA CUDA13系) | 環境に応じて変更 |
 | `LLM_MODEL` | 使用するモデル名(既定: `gpt-4o-mini`) | 既定値のままでも可 |
-| `COMFYUI_CHECKPOINT` | 画像生成に使うチェックポイントファイル名 | 既定値のままでも可 |
+| `COMFYUI_CHECKPOINT` | 画像生成に使うチェックポイントの既定ファイル名(実体は GPU PC の ComfyUI 側) | 既定値のままでも可 |
 | `APP_MAIL_FROM` / `APP_WEB_BASE_URL` | メール送信元・Web公開URL(メール内リンク生成に使用) | `APP_WEB_BASE_URL` は `https://localhost` を指定 |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` | 外部メールサービス(SendGrid/Resend/AWS SES等)のSMTP接続情報 | 必須変更 |
 | `NEXTAUTH_SECRET` | Web管理画面(Auth.js)のセッション署名鍵。生成例: `openssl rand -hex 32` | 必須変更 |
@@ -172,7 +171,7 @@ docker compose up -d
 ```
 
 起動するサービス: `reverse-proxy`(nginx) / `web`(Next.js) / `api` / `log-writer` / `mysql` /
-`rabbitmq` / `phpmyadmin` / `comfyui` / `plantuml` / `drawio` / `wordpress` /
+`rabbitmq` / `phpmyadmin` / `plantuml` / `drawio` / `wordpress` /
 `penpot-*`(デザイン生成スイート、6コンテナ)/ `docker-socket-proxy`。
 アーキテクチャ・ポート割当・全サービスの起動時メモリ実測値は
 [docs/DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md) を参照。
@@ -255,9 +254,9 @@ mysql / rabbitmq / keycloak / web などは集約の対象外なので、個別�
 | phpMyAdmin | https://localhost/phpmyadmin/ | MySQLデータベース管理 |
 | draw.io | https://localhost/drawio/ | ダイアグラム編集UI(VSCode拡張のwebviewが読み込む。#979) |
 
-ComfyUI と PlantUML はブラウザからは開けない(#979 で reverse-proxy の `/comfyui/` /
-`/plantuml/` 中継を削除した)。いずれも media-service が `lbs-net` 経由で呼ぶ内部専用サービスで、
-稼働状況はダッシュボードの「接続サービス状態」パネルで確認する。
+PlantUML はブラウザからは開けない(#979 で reverse-proxy の `/plantuml/` 中継を削除した)。
+media-service が `lbs-net` 経由で呼ぶ内部専用サービスで、稼働状況はダッシュボードの
+「接続サービス状態」パネルで確認する。ComfyUI は同梱せず、GPU PC の URL へ接続する(次節)。
 
 ### ブラウザの自己署名証明書警告について
 
@@ -265,21 +264,14 @@ ComfyUI と PlantUML はブラウザからは開けない(#979 で reverse-proxy
 「この接続ではプライバシーが保護されません」等の警告が表示される。「詳細設定」→
 「localhost にアクセスする(安全ではありません)」等から例外承認して進める(表記はブラウザにより異なる)。
 
-## 4. ComfyUIチェックポイントの配置
+## 4. ComfyUI(GPU PC)への接続
 
-`comfyui_models` はDocker管理の名前付きボリュームであり、ホストの特定ディレクトリに
-直接バインドされていない。チェックポイントファイルは `docker cp` でコンテナ内にコピーする。
-
-```bash
-docker cp <ダウンロードしたcheckpointファイル> lbs-comfyui:/root/ComfyUI/models/checkpoints/
-```
-
-配置後、`.env` の `COMFYUI_CHECKPOINT` にファイル名を設定し、`docker compose up -d media` で反映する。
-配置確認:
-
-```bash
-docker exec lbs-comfyui ls /root/ComfyUI/models/checkpoints/
-```
+ComfyUI は同梱しない(#1746)。GPU 付きの別 PC で ComfyUI を起動し、管理画面のシステム設定
+(またはプロジェクト設定)に URL(例: `http://192.168.1.71:8188`)を入れる。チェックポイント・LoRA は
+GPU PC の `models/` に置く(Let's Blog の画面・API からの導入・削除は無い)。手順、LAN 内に限った公開、
+同梱 ComfyUI を使っていた環境の移行は [docs/EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) を参照。
+`.env` の `COMFYUI_CHECKPOINT` は、プロジェクトで選んでいないときの既定のファイル名で、
+`docker compose up -d media` で反映する。
 
 ## 5. Web管理画面(Next.js)について
 
@@ -478,8 +470,15 @@ LISTENしているかを確認する(環境変数変更後はプロセス再起�
 `npm run dev` を再起動する(環境変数の変更はプロセス再起動が必要)。
 
 **GPU (NVIDIA) が認識されない**
-ホスト側で `nvidia-smi` が動作するか、NVIDIA Container Toolkitが導入済みか確認する。
-`docker compose logs comfyui` でGPU認識ログを確認できる。
+ホスト側で `nvidia-smi` が動作するか、NVIDIA Container Toolkitが導入済みか確認する
+(同梱のOllamaをGPUで動かす場合のみ。ComfyUI の GPU は GPU PC 側で確認する)。
+`docker compose logs ollama` でGPU認識ログを確認できる。
+
+**画像生成が「ComfyUIの接続先が設定されていません」で失敗する / ComfyUI に到達できない**
+システム設定(またはプロジェクト設定)に GPU PC の ComfyUI の URL が入っているか確認する。
+GPU PC の ComfyUI が `--listen 0.0.0.0` で起動しているか、ファイアウォールが許しているか、
+Let's Blog のホストから `curl http://<GPU PC>:8188/system_stats` が通るかを確認する
+([docs/EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md))。
 
 **下書き/校正/要約・タグ提案・記事プランニングが失敗する(LLM呼び出しエラー)**
 ChatGPT / ClaudeのAPIキーはプロジェクト単位だけで、環境変数・システム設定には持たない(#1568)。

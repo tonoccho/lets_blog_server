@@ -8,7 +8,7 @@
 # テスト開始時刻によって結果が変わる状態になっていた。テスト実行前にこのスクリプトで
 # 全サービスのhealthyを待ってから開始する(apps/web/e2e/global-setup.tsから呼ばれる)。
 #
-# 既定の待機対象はE2Eに必要なサービス群(REQUIRED_SERVICES)のみ。penpot/comfyui/drawio等の
+# 既定の待機対象はE2Eに必要なサービス群(REQUIRED_SERVICES)のみ。penpot/drawio等の
 # 起動していない可能性があるオプションサービスは待たない(起動していれば無視される)。
 # --all を付けるとcomposeプロジェクト内の全コンテナを対象にする
 # (scripts/verify-clean-volume-boot.shはこのモードを使う)。

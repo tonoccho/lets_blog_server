@@ -27,7 +27,7 @@ public class ProjectAiSettingsService {
 
     /**
      * 拒否するホスト名(小文字、末尾のドットなし。issue #1518)。クラウドメタデータと、docker-compose.ymlの
-     * サービス名・container_nameのうちOllama / ComfyUI(ollama / comfyui / comfyui-cpu とその lbs- 付き)以外。
+     * サービス名・container_nameのうちOllama(ollama / ollama-cpu とその lbs- 付き)以外。ComfyUIは同梱しない(issue #1746)ので例外に含めない。
      * docker-compose.ymlとの食い違いはProjectConnectionUrlDenylistTestが検出する。
      */
     private static final Set<String> DENIED_HOSTS = Set.of(

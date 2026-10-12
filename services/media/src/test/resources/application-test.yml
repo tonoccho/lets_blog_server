@@ -31,7 +31,6 @@ spring:
 
 app:
   comfyui-checkpoint: v1-5-pruned-emaonly.safetensors
-  comfyui-models-path: /tmp/comfyui-models
   plantuml-base-url: http://localhost:19999
   penpot-base-url: http://localhost:19999
   penpot-public-url: http://localhost:19999

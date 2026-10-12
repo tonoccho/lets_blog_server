@@ -181,16 +181,6 @@ export interface MediaGarbageCollectionDeleteRequest {
   mediaIds: string[];
 }
 
-export interface InstallComfyUiCheckpointRequest {
-  /** @minLength 1 */
-  downloadUrl: string;
-  /**
-     * @minLength 1
-     * @pattern ^[A-Za-z0-9_.-]+$
-     */
-  fileName: string;
-}
-
 export interface GenerationJobResponse {
   id?: number;
   type?: string;
@@ -257,20 +247,6 @@ export interface CreateDiagramRequest {
   name?: string;
   xml?: string;
   svg?: string;
-}
-
-export interface InstallComfyUiCheckpointCommand {
-  jobId: number;
-  /** @minLength 1 */
-  downloadUrl: string;
-  /** @minLength 1 */
-  fileName: string;
-}
-
-export interface DeleteComfyUiCheckpointCommand {
-  jobId: number;
-  /** @minLength 1 */
-  fileName: string;
 }
 
 export interface AiImageRequest {

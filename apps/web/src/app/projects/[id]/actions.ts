@@ -62,8 +62,6 @@ import {
   selectImageProvider,
   listComfyUiCheckpoints,
   selectComfyUiCheckpoint,
-  installComfyUiCheckpoint,
-  deleteComfyUiCheckpoint,
   listAiConnections,
   getProjectConnections,
   updateProjectConnections,
@@ -1062,35 +1060,6 @@ export async function selectComfyUiCheckpointAction(
   }
   revalidatePath(`/projects/${projectId}`);
   return {};
-}
-
-export async function installComfyUiCheckpointAction(
-  projectId: number,
-  downloadUrl: string,
-  fileName: string
-): Promise<AiModelActionState> {
-  await requireAdminSession();
-
-  try {
-    const job = await installComfyUiCheckpoint(projectId, downloadUrl, fileName);
-    return { jobId: job.id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function deleteComfyUiCheckpointAction(
-  projectId: number,
-  fileName: string
-): Promise<AiModelActionState> {
-  await requireAdminSession();
-
-  try {
-    const job = await deleteComfyUiCheckpoint(projectId, fileName);
-    return { jobId: job.id };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
-  }
 }
 
 /** Ollamaのモデルのpull(インストール)を開始する(issue #1675)。ジョブを作ってすぐ返り、進捗はジョブをポーリングして読む。 */

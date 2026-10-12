@@ -33,8 +33,7 @@ import static org.mockito.Mockito.verify;
 class ProjectConnectionUrlDenylistTest {
 
     private static final Set<String> ALLOWED_STACK_NAMES = Set.of(
-            "ollama", "ollama-cpu", "comfyui", "comfyui-cpu",
-            "lbs-ollama", "lbs-ollama-cpu", "lbs-comfyui", "lbs-comfyui-cpu");
+            "ollama", "ollama-cpu", "lbs-ollama", "lbs-ollama-cpu");
 
     @Mock
     private ProjectAiSettingsRepository repository;
@@ -111,7 +110,7 @@ class ProjectConnectionUrlDenylistTest {
     // ---- AC4: 許可 ----
 
     @Test
-    void LANとOllama_ComfyUIのサービス名は許可する() {
+    void LANとOllamaのサービス名は許可する() {
         for (String url : List.of(
                 "http://192.168.1.50:11434/v1",
                 "http://10.0.0.5:11434",
@@ -120,19 +119,27 @@ class ProjectConnectionUrlDenylistTest {
                 "http://gpu:11434/v1",
                 "https://comfy.example:8188",
                 "http://ollama:11434/v1",
-                "http://comfyui:8188",
-                "http://comfyui-cpu:8188",
                 "http://ollama-cpu:11434",
                 "http://lbs-ollama:11434",
                 "http://lbs-ollama-cpu:11434",
-                "http://lbs-comfyui:8188",
-                "http://lbs-comfyui-cpu:8188",
                 "http://[2001:db8::1]:11434",
                 "http://8.8.8.8:11434",
                 "http://169.253.1.1/",
                 "http://[::2]/")) {
             assertAccepted(url);
         }
+    }
+
+    /** issue #1746: GPU PCのComfyUI(LANのプライベートアドレス)をプロジェクト設定へ保存できる。 */
+    @Test
+    void GPU_PCのLAN_URLをComfyUIの接続先として保存できる() {
+        ProjectAiSettingsService service = service();
+
+        service.setConnectionUrls(1L, null, "http://192.168.1.71:8188");
+
+        org.mockito.ArgumentCaptor<ProjectAiSettings> saved = org.mockito.ArgumentCaptor.forClass(ProjectAiSettings.class);
+        verify(repository, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
+        assertEquals("http://192.168.1.71:8188", saved.getValue().getComfyuiBaseUrl());
     }
 
     // ---- AC5: 別表記 ----
@@ -255,7 +262,7 @@ class ProjectConnectionUrlDenylistTest {
     // ---- docker-compose.yml との突き合わせ ----
 
     @Test
-    void docker_composeのOllama_ComfyUI以外のサービス名とコンテナ名はすべて拒否される() throws IOException {
+    void docker_composeのOllama以外のサービス名とコンテナ名はすべて拒否される() throws IOException {
         Set<String> names = composeNames();
         assertTrue(names.contains("mysql") && names.contains("lbs-mysql") && names.contains("ollama"),
                 "docker-compose.yml の名前を読み取れていない: " + names);
@@ -276,7 +283,7 @@ class ProjectConnectionUrlDenylistTest {
     }
 
     @Test
-    void docker_composeのOllama_ComfyUI名は許可される() throws IOException {
+    void docker_composeのOllama名は許可される() throws IOException {
         Set<String> names = composeNames();
         for (String name : ALLOWED_STACK_NAMES) {
             assertTrue(names.contains(name), "docker-compose.yml に無い許可名: " + name);

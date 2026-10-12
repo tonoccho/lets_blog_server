@@ -179,6 +179,23 @@ class AppSettingServiceTest {
                 () -> service.updateSettings(Map.of("comfyui_base_url", "not-a-url")));
     }
 
+    /** issue #1746: GPU PCのComfyUI(LANのプライベートアドレス)をシステム設定へ保存でき、そのまま解決される。 */
+    @Test
+    void updateSettings_comfyui_base_urlにLANのURLを保存でき解決される() {
+        AppSettingService service = service();
+        lenient().when(repository.findById(any())).thenReturn(Optional.empty());
+
+        service.updateSettings(Map.of("comfyui_base_url", "http://192.168.1.71:8188"));
+
+        org.mockito.ArgumentCaptor<SystemSetting> saved = org.mockito.ArgumentCaptor.forClass(SystemSetting.class);
+        verify(repository).save(saved.capture());
+        assertEquals("comfyui_base_url", saved.getValue().getSettingKey());
+        assertEquals("http://192.168.1.71:8188", credentialCipher.decrypt(saved.getValue().getSettingValueEncrypted()));
+
+        when(repository.findById("comfyui_base_url")).thenReturn(Optional.of(saved.getValue()));
+        assertEquals("http://192.168.1.71:8188", service.getComfyUiBaseUrl());
+    }
+
     @Test
     void updateSettings_不正なllm_providerの値は例外で保存されない() {
         AppSettingService service = service();

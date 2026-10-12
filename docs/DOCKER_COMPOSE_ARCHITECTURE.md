@@ -45,7 +45,6 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `penpot-frontend` | 8080 | `9001:8080`(直接公開。ハンドオフURL生成のため) | |
 | `ollama` | 11434 | 非公開(platform/ai経由) | ローカルLLM(#1086)。GPUは**オプトイン**(下記)。`platform` が DB(`system_settings.llm_ollama_base_url`。無ければ起動時に `http://ollama:11434/v1` を書き込む)で接続先を解決し、ai-service がその設定で呼ぶ(環境変数 `LLM_OLLAMA_BASE_URL` は廃止した、#1567)。reverse-proxy は中継しない |
 | `ollama-model-init` | — | — | 既定モデルを起動時に取得するワンショット(#1086)。`restart: "no"` で終了コード0なら `ContainerStatusService`(#725)が「正常に完了したジョブ」として扱う |
-| `comfyui` | 8188 | 非公開(media経由) | GPU必須。#979でreverse-proxyの`/comfyui/`中継を削除した(ブラウザから開く導線が無く、無認証で任意のワークフローを実行できてしまうため)。media-serviceが DB の接続先(`system_settings.comfyui_base_url`。無ければ起動時に `http://comfyui:8188` を書き込む。環境変数 `COMFYUI_BASE_URL` は廃止した、#1567)でlbs-net経由に呼ぶ |
 | `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
@@ -119,9 +118,10 @@ healthy を待つ。この循環のため、空の MySQL ボリュームから�
 - GPU を使うホストは `.env` に `GPU_RUNTIME=nvidia` を書く。コマンドライン引数は不要で、
   `docker compose up -d` のままGPUが使われる。
 
-`comfyui` が持つ無条件の `deploy.resources.reservations.devices` を写さないのは、それだと
+無条件の `deploy.resources.reservations.devices` を写さないのは、それだと
 NVIDIA ランタイムのないホストで `could not select device driver "nvidia"` になり、サービス
-無指定の `docker compose up -d` がそこで**中断する**ためである(#1066)。#1086 で実測した
+無指定の `docker compose up -d` がそこで**中断する**ためである(#1066 で、かつて同梱していた
+ComfyUI のコンテナで実際に起きた。ComfyUI は #1746 で同梱をやめた)。#1086 で実測した
 代替案の結果:
 
 | 書き方 | 未搭載ホストでの挙動 |
@@ -130,24 +130,8 @@ NVIDIA ランタイムのないホストで `could not select device driver "nvi
 | `gpus: ${X:-}` | **失敗**。`services.ollama.gpus value must be 'all'` で検証に落ちる |
 | `runtime: ${GPU_RUNTIME:-}` | 成功。未指定は「Dockerの既定ランタイム」に倒れる |
 
-**この節はかつて「#1066 は `comfyui` に同じ1行を適用すればよい(新しい仕組みを2つ作らない)」
-と書いていたが、#1066 の実装時にその方針は変更した。** ollama と `comfyui` には決定的な
-違いがある。ollama は GPU が無くてもCPUで正常に動作するのに対し、`comfyui` の既定イメージ
-(`yanwk/comfyui-boot:cu130-slim`)はCUDA前提のビルドで、README.md の「ハードウェア要件」も
-CPU動作には別イメージタグへの変更を要求している(#1066 の Out of Scope は ComfyUI を CPU で
-動かすこと自体を除外している)。`runtime: ${GPU_RUNTIME:-}` を `comfyui` にも適用すると、
-未指定時はDockerの既定ランタイムで起動を**試みてしまい**、GPUの無いホストではCUDA前提の
-イメージがクラッシュし、`restart: unless-stopped` により再起動を繰り返す
-(`state=running` に安定しないため、`wait-for-stack-healthy.sh --all` がタイムアウトする
-おそれが残る)。
-
-そこで `comfyui` は `runtime:` ではなく `profiles: ["gpu"]` を使う。既定の
-`docker compose up -d`(サービス無指定)ではコンテナ自体を作らないため、GPUの無いホストでは
-起動の試行そのものが起きない。GPUを持つホストは `.env` の `COMPOSE_PROFILES=gpu` で
-オプトインする(`docker compose --profile gpu up -d` でも同じ)。コンテナが作られなければ
-`docker compose ps --all` にも現れないため、`wait-for-stack-healthy.sh --all` の待機対象
-からも自動的に外れる(スクリプト側の変更は不要だった)。「新しい仕組みを2つ作らない」の
-判断は、ollamaとcomfyuiのCPU動作可否という前提の違いにより成り立たなかった。
+ComfyUI は同梱しない(#1746)。GPU PC で動かす ComfyUI へ URL で接続する構成で、用意の手順と
+既存環境の移行は [docs/EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) に書いた。
 
 ## Ollama を CPU で動かす(大規模モデル)(#1396)
 
@@ -182,7 +166,7 @@ CPU動作には別イメージタグへの変更を要求している(#1066 の 
 
 ### GPU 前提の既定値の読み替え
 
-`docker-compose.yml` の既定値は「単一 GPU を ComfyUI と共有する」前提で決めてある。CPU では制約が
+`docker-compose.yml` の既定値は「単一 GPU を ComfyUI(GPU PC などで動かすもの)と共有する」前提で決めてある。CPU では制約が
 VRAM ではなくシステム RAM と帯域に変わる。
 
 | 変数 | GPU での意味(既定) | CPU で大規模モデルを動かすとき |
@@ -227,7 +211,7 @@ docker compose up -d
 「モデル「…」がまだ利用できません。…取得の進捗は docker logs -f lbs-ollama-model-init で
 確認できます。」に変換して返す(`LlmClient`)。生の 404 は表示しない。
 
-VRAM は `lbs-comfyui` と共有する(単一GPU前提)。ComfyUI は生成後に VRAM を解放するが
+VRAM は ComfyUI と共有する(単一GPU前提。ComfyUI を別の GPU PC で動かすなら共有しない)。ComfyUI は生成後に VRAM を解放するが
 (`ComfyUiClient#clearMemory`)、Ollama は既定でモデルを常駐させ続けるため、次の3つで抑える。
 
 | 変数 | 既定 | 意味 |
@@ -254,7 +238,7 @@ profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの�
   起動する(`AT_PROFILES`)。受け入れテストは PlantUML・draw.io・phpMyAdmin を使うため。
 - 常時起動するサービスは、これらに `depends_on` しない(`scripts/test_compose_optin_profiles.py` が検査する)。
 - `scripts/wait-for-stack-healthy.sh --all` は `docker compose ps --all` に出るコンテナだけを待つので、
-  作られていないコンテナは待機対象から外れる(ComfyUI の `gpu` / `cpu` と同じ)。
+  作られていないコンテナは待機対象から外れる。
 
 ### 無効なときの各機能の振る舞い
 
@@ -271,8 +255,8 @@ profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの�
 
 ### 将来の縮退起動
 
-GPU 要件は、README 記載のとおり `COMFYUI_IMAGE` を CPU 向けタグにして `cpu` profile を有効にすれば、
-低速になるだけで起動は成立する。Penpot 一式(6サービス)は #1752 で削除するので profile 化しない。
+ComfyUI は同梱しない(#1746)ので、このホストの GPU 要件は無い(同梱の Ollama を GPU で動かす場合を除く)。
+Penpot 一式(6サービス)は #1752 で削除するので profile 化しない。
 
 ## docker-socket-proxy の権限(#1587)
 
@@ -463,15 +447,13 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
 
 ### AI 系コンテナの上限と `.env` での上書き
 
-`ollama` / `ollama-cpu` / `comfyui` / `comfyui-cpu` は、ロードするモデルで必要量が大きく変わる(#1396 は VRAM に載らない
+`ollama` / `ollama-cpu` は、ロードするモデルで必要量が大きく変わる(#1396 は VRAM に載らない
 大規模モデルを意図的にシステム RAM で動かす)ため、`.env` で上書きできる(既定値と説明は `.env.example`)。
 
 | 変数 | 既定 |
 |---|---|
 | `OLLAMA_MEM_LIMIT` | 16g |
 | `OLLAMA_CPU_MEM_LIMIT` | 24g |
-| `COMFYUI_MEM_LIMIT` | 16g |
-| `COMFYUI_CPU_MEM_LIMIT` | 16g |
 
 ホストの空きメモリを超える値は付けないこと。
 
@@ -495,7 +477,6 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 |---|---|
 | `lbs-penpot-backend` | 3224.6 MiB |
 | `lbs-web` | 1766.4 MiB |
-| `lbs-comfyui` | 1422.3 MiB |
 | `lbs-keycloak` | 828.7 MiB |
 | `lbs-content` | 788.9 MiB |
 | `lbs-media` | 759.2 MiB |
@@ -528,8 +509,7 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 
 - `web` はNext.jsの開発モード(Turbopack, ホットリロード用のbind mount)で実行しているため、
   本番ビルドより大幅にメモリを消費している。本番相当の構成にすればもっと小さくなる見込み。
-- `comfyui` は画像生成をしていない状態の値。実際に生成するとGPU VRAM側の使用量が主に増加する
-  (ホストメモリへの影響は本測定の範囲外)。
+- 上の測定は同梱の ComfyUI(約1.4 GiB)を含む時点のもの。ComfyUI は #1746 で同梱をやめたので、その分は不要になった。
 - ビルド時(`docker compose build` 実行中)やAI機能利用時は瞬間的にこれを上回る。
   ホストOS自体の消費分も含め、実測値(約15GiB)に対して余裕を見て**24GB以上を推奨**する(README参照)。
 
@@ -547,21 +527,6 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 
 JVM が9個に増えたぶん、1サービスあたりの実処理量に比べてベースラインの消費が大きい。
 メモリ制約環境向けの周辺ツールのオプトイン起動は、上記「周辺ツールのオプトイン起動と縮退起動」を参照。
-
-## comfyui のCPU実行構成(#1395)
-
-nvidia デバイス予約は変数展開でもマージでも消せない(上記 #1066 の実測、`docker-compose.shared-host.yml` の
-`!override` は追加の `-f` を要する)ため、CPU実行は `comfyui` とは**別サービス `comfyui-cpu`**
-(`profiles: ["cpu"]`)として定義している。切り替えは `.env` の `COMPOSE_PROFILES`(`gpu` / `cpu`)だけで、
-`docker compose up -d` に追加引数は要らない。
-
-- イメージは既存の `COMFYUI_IMAGE`(CPU実行時は `yanwk/comfyui-boot:cpu`)。新しいイメージ変数は無い。
-- 起動引数は環境変数 `CLI_ARGS`(コンテナ内 `/runner-scripts/entrypoint.sh` が展開)。`comfyui` は `COMFYUI_CLI_ARGS`(既定は空)、
-  `comfyui-cpu` は `--cpu --force-fp32` に `COMFYUI_CLI_ARGS` を足す。
-- `comfyui-cpu` はネットワークエイリアス `comfyui` を持つため、既定の接続先(`http://comfyui:8188`)は不変(`COMFYUI_BASE_URL` は廃止した、#1567)。
-  固有名 `comfyui-cpu` でも到達でき、GPU構成を止めずにこちらだけを指名できる(#1401 の前提)。
-- モデル・出力ボリューム(`comfyui_models` / `comfyui_output`)は共有。両者は同時に起動しない前提。
-- 検証: `scripts/test_comfyui_gpu_profile.py`(compose契約テスト)。実機での生成は #1401。
 
 ## 演算デバイス(GPU / CPU)の選択(#1744)
 

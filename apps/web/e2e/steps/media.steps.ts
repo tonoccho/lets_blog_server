@@ -7,6 +7,7 @@ import {
   E2E_TEST_PASSWORD,
   expect,
   fetchAccessToken,
+  loginAsAdmin,
   loginViaKeycloak,
 } from '../support';
 import { STUB_URLS, forceStubStatus, resetStub, stubRequestCount } from '../support/stubs';
@@ -1998,6 +1999,50 @@ When('一覧の先頭のチェックポイントを選択する', async ({ ctx, 
 Then('そのプロジェクトの選択中チェックポイントは選択したものになる', async ({ ctx, request }) => {
   const list = await fetchCheckpoints(request, ctx.mediaProjectId as number);
   expect(list.selected).toBe(ctx.mediaSelectedCheckpoint);
+});
+
+// ---- チェックポイントの導入・削除は無い(issue #1746) ----
+
+When('プロジェクト詳細の「AI・アセット」の画像生成画面を開く', async ({ ctx, page }) => {
+  await loginAsAdmin(page);
+  await page.goto(`/projects/${ctx.mediaProjectId}`, { waitUntil: 'commit' });
+  const aiTab = page.getByRole('button', { name: 'AI・アセット', exact: true });
+  await expect(aiTab).toBeVisible({ timeout: 30_000 });
+  const imageTab = page.getByRole('button', { name: '画像生成', exact: true });
+  const marker = page.getByText('選択中のチェックポイント:');
+  await expect(async () => {
+    await aiTab.click();
+    await imageTab.click({ timeout: 2_000 });
+    await expect(marker).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+});
+
+Then('チェックポイントの一覧と選択の操作が表示される', async ({ page }) => {
+  await expect(page.getByRole('columnheader', { name: 'チェックポイント' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('button', { name: '選択', exact: true }).first()).toBeVisible();
+});
+
+Then('チェックポイントの導入・削除の操作は表示されない', async ({ page }) => {
+  await expect(page.getByRole('button', { name: /新規インストール/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '削除', exact: true })).toHaveCount(0);
+  await expect(page.getByText('ダウンロードURL')).toHaveCount(0);
+});
+
+When('管理者がチェックポイントの導入・削除の4つのAPIを呼ぶ', async ({ ctx, request }) => {
+  const headers = { Authorization: `Bearer ${await adminToken(request)}` };
+  const project = `/api/projects/${ctx.mediaProjectId}/ai-models/comfyui/checkpoints`;
+  const body = { downloadUrl: 'https://example.com/m.safetensors', fileName: 'm.safetensors', jobId: 1 };
+  const responses = [
+    await request.post('/api/comfyui/checkpoints/install', { headers, data: body }),
+    await request.post('/api/comfyui/checkpoints/delete', { headers, data: { jobId: 1, fileName: 'm.safetensors' } }),
+    await request.post(`${project}/install`, { headers, data: body }),
+    await request.delete(`${project}/m.safetensors`, { headers }),
+  ];
+  ctx.mediaRemovedApiStatuses = responses.map((r) => r.status());
+});
+
+Then('4つのAPIはどれも404を返す', async ({ ctx }) => {
+  expect(ctx.mediaRemovedApiStatuses).toEqual([404, 404, 404, 404]);
 });
 
 /**

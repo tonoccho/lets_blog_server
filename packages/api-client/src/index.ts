@@ -28,7 +28,6 @@ export * from './generated/media/generated-image-controller/generated-image-cont
 export * from './generated/media/generated-image-folder-controller/generated-image-folder-controller';
 export * from './generated/media/diagram-controller/diagram-controller';
 export * from './generated/media/render-controller/render-controller';
-export * from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';
 export * from './generated/media/media-controller/media-controller';
 export * from './generated/media/project-media-garbage-collection-controller/project-media-garbage-collection-controller';
 
@@ -313,15 +312,6 @@ export type {
 export type {
   _deleteResponse204,
 } from './generated/identity/users/users';
-export {
-  delete2,
-  getDelete2Url,
-} from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';
-export type {
-  delete2Response,
-  delete2Response200,
-  delete2ResponseSuccess,
-} from './generated/media/comfy-ui-checkpoint-controller/comfy-ui-checkpoint-controller';
 export {
   get,
   getGetUrl,

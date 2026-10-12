@@ -17,8 +17,7 @@ import java.util.Map;
  * legacy-apiから移設(issue #573 stage3)。メディアガベージコレクションの一括削除を
  * バックグラウンドスレッドで実行する(issue #500)。Spring の{@code @Async}は同一クラス内の
  * 自己呼び出しには効かない(プロキシを経由しないため)ため、ジョブを起動する
- * {@link MediaGarbageCollectionService}とは別クラスに分離している({@link ModelInstallJobRunner}と
- * 同じ構成)。
+ * {@link MediaGarbageCollectionService}とは別クラスに分離している。
  *
  * <p>元の実装は{@code Site}/{@code CmsAdapter}/{@code GenerationJobRepository}へ直接アクセスして
  * いたが、これらはこのissueの移設対象ではない(あるいはlegacy-apiが引き続き所有する)ため、

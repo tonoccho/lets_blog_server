@@ -13,12 +13,12 @@ import org.springframework.stereotype.Service;
 /**
  * 画像生成を非同期ジョブとして受理する(issue #1405)。要求を検証して{@code generation_jobs}に
  * ジョブを作り、ジョブIDを返して即座に戻る。生成本体は別クラスの{@link ImageGenerationJobRunner}
- * ({@code @Async})が担う。{@code ComfyUiModelService}が{@link ModelInstallJobRunner}を起動するのと同型。
+ * ({@code @Async})が担う。
  *
  * <p>ジョブの{@code type}は{@link #JOB_TYPE}。プロバイダ(ComfyUI/ChatGPT)ごとに分かれる同期経路の
  * {@code comfyui_image}/{@code chatgpt_image}とは別で、プロバイダに依らず1種類にする
  * (結果画面への遷移先をジョブ種別で決める側が、プロバイダを意識しなくて済むように)。
- * 命名は既存の{@code <対象>_<操作>}(例: {@code comfyui_checkpoint_download})に倣う。
+ * 命名は既存の{@code <対象>_<操作>}(例: {@code media_garbage_collection_delete})に倣う。
  */
 @Service
 public class ImageGenerationJobStarter {

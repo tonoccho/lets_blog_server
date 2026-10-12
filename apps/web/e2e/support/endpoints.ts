@@ -63,8 +63,6 @@ export interface ControllerEndpoint {
  * 公開エンドポイントではないので、到達性も認可表への掲載も要求しない。
  */
 export const NON_GATEWAY_ROUTED_PATHS = [
-  '/api/comfyui/checkpoints/install',
-  '/api/comfyui/checkpoints/delete',
   '/api/render/plantuml',
   '/api/render/recharts',
   '/api/render/penpot/design-file',

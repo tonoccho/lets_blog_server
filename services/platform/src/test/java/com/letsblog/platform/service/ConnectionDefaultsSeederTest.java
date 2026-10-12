@@ -21,8 +21,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 起動時に、Ollama / ComfyUIの接続先がDBに無い場合だけコード内の既定値を書き込む(issue #1567)。
- * 既にある値は上書きしない。値は他のシステム設定と同じくCredentialCipherで暗号化して保存する。
+ * 起動時に、Ollamaの接続先がDBに無い場合だけコード内の既定値を書き込む(issue #1567)。
+ * ComfyUIは同梱しないため書き込まない(issue #1746)。既にある値は上書きしない。値は他のシステム設定と同じくCredentialCipherで暗号化して保存する。
  */
 @ExtendWith(MockitoExtension.class)
 class ConnectionDefaultsSeederTest {
@@ -42,29 +42,39 @@ class ConnectionDefaultsSeederTest {
     }
 
     @Test
-    void DBに2項目とも無ければ既定値を暗号化して書き込む() throws Exception {
+    void DBにOllamaの接続先が無ければ既定値を暗号化して書き込む() throws Exception {
         when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.empty());
-        when(repository.findById("comfyui_base_url")).thenReturn(Optional.empty());
 
         seeder().run(null);
 
         ArgumentCaptor<SystemSetting> saved = ArgumentCaptor.forClass(SystemSetting.class);
-        verify(repository, times(2)).save(saved.capture());
-        List<SystemSetting> rows = saved.getAllValues();
-        assertEquals(List.of("llm_ollama_base_url", "comfyui_base_url"),
-                rows.stream().map(SystemSetting::getSettingKey).toList());
-        assertEquals("http://ollama:11434/v1", cipher.decrypt(rows.get(0).getSettingValueEncrypted()));
-        assertEquals("http://comfyui:8188", cipher.decrypt(rows.get(1).getSettingValueEncrypted()));
-        assertTrue(!new String(rows.get(0).getSettingValueEncrypted()).contains("ollama"),
+        verify(repository).save(saved.capture());
+        SystemSetting row = saved.getValue();
+        assertEquals("llm_ollama_base_url", row.getSettingKey());
+        assertEquals("http://ollama:11434/v1", cipher.decrypt(row.getSettingValueEncrypted()));
+        assertTrue(!new String(row.getSettingValueEncrypted()).contains("ollama"),
                 "平文のまま保存してはいけない");
     }
 
+    /** issue #1746: ComfyUIは同梱しないので、接続先が未設定でも既定値を書き込まない(読みにも行かない)。 */
     @Test
-    void 既に値がある項目は上書きしない() throws Exception {
+    void ComfyUIの接続先には既定値を書き込まない() throws Exception {
+        when(repository.findById("llm_ollama_base_url")).thenReturn(Optional.empty());
+
+        seeder().run(null);
+
+        verify(repository, never()).findById("comfyui_base_url");
+        ArgumentCaptor<SystemSetting> saved = ArgumentCaptor.forClass(SystemSetting.class);
+        verify(repository, times(1)).save(saved.capture());
+        assertEquals(List.of("llm_ollama_base_url"),
+                saved.getAllValues().stream().map(SystemSetting::getSettingKey).toList());
+    }
+
+    /** issue #1746: 既存DBにある http://comfyui:8188 などの値は書き換えない(=ComfyUI行には触れない)。 */
+    @Test
+    void 既存のComfyUI接続先は書き換えない() throws Exception {
         when(repository.findById("llm_ollama_base_url"))
                 .thenReturn(Optional.of(row("llm_ollama_base_url", "http://gpu:11434/v1")));
-        when(repository.findById("comfyui_base_url"))
-                .thenReturn(Optional.of(row("comfyui_base_url", "http://comfyui-stub:8080")));
 
         seeder().run(null);
 
@@ -72,25 +82,9 @@ class ConnectionDefaultsSeederTest {
     }
 
     @Test
-    void 片方だけ無ければ無い方だけ書き込む() throws Exception {
-        when(repository.findById("llm_ollama_base_url"))
-                .thenReturn(Optional.of(row("llm_ollama_base_url", "http://gpu:11434/v1")));
-        when(repository.findById("comfyui_base_url")).thenReturn(Optional.empty());
-
-        seeder().run(null);
-
-        ArgumentCaptor<SystemSetting> saved = ArgumentCaptor.forClass(SystemSetting.class);
-        verify(repository).save(saved.capture());
-        assertEquals("comfyui_base_url", saved.getValue().getSettingKey());
-        assertEquals("http://comfyui:8188", cipher.decrypt(saved.getValue().getSettingValueEncrypted()));
-    }
-
-    @Test
-    void 値が空白の行は値が無いものとして既定値で埋める() throws Exception {
+    void 値が空白のOllama行は値が無いものとして既定値で埋める() throws Exception {
         when(repository.findById("llm_ollama_base_url"))
                 .thenReturn(Optional.of(row("llm_ollama_base_url", "  ")));
-        when(repository.findById("comfyui_base_url"))
-                .thenReturn(Optional.of(row("comfyui_base_url", "http://comfyui-stub:8080")));
 
         seeder().run(null);
 

@@ -13,12 +13,14 @@ test_rebuild_acceptance_env.py と同じ文書化された例外である。
 
 ## どう検証するか
 
-`docker` と `curl` を PATH 上の偽物に差し替える。偽 docker は `lbs-comfyui` を
-`docker-compose.yml` の gpu プロファイルと同じく「存在するが未起動(Created)」として振る舞う。
+`docker` と `curl` を PATH 上の偽物に差し替える。偽 docker は FAKE_NOT_RUNNING に指定した
+コンテナを「存在するが未起動(Created)」として振る舞わせる。
 
-  - `docker inspect lbs-comfyui` は成功する(Created でも成功する本物と同じ)
-  - `docker inspect -f '{{.State.Running}}' lbs-comfyui` は false
-  - `docker exec lbs-comfyui ...` は失敗する("is not running")
+  - `docker inspect <name>` は成功する(Created でも成功する本物と同じ)
+  - `docker inspect -f '{{.State.Running}}' <name>` は false
+  - `docker exec <name> ...` は失敗する("is not running")
+
+同梱の ComfyUI(`lbs-comfyui`)は廃止した(#1746)ので、スクリプトはそれを探さない。
 
 スクリプトは REPO_ROOT を自身の位置から求めるため、一時ディレクトリに scripts/ と
 ダミーの .env を置いて実行し、実スタックにも実 .env にも触れない。
@@ -131,15 +133,14 @@ class ResetNotRunningContainerTest(unittest.TestCase):
         with open(self.log, encoding="utf-8") as f:
             return f.read().splitlines()
 
-    def test_created_comfyui_does_not_stop_the_reset(self):
-        r = self.run_script("lbs-comfyui")
+    def test_does_not_touch_a_bundled_comfyui_container(self):
+        """#1746: 同梱の ComfyUI は無いので、その output を空にする手順は持たない(存在確認も exec もしない)。"""
+        r = self.run_script("none")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("6/6 RabbitMQ", r.stdout)
-        self.assertIn("setup-status → 200", r.stdout)
-        self.assertIn("lbs-comfyui は未起動のためスキップ", r.stdout)
+        self.assertNotIn("lbs-comfyui", r.stdout)
         self.assertFalse(
-            any(c.startswith("exec lbs-comfyui") for c in self.docker_calls()),
-            "未起動のコンテナへ docker exec してはならない",
+            any("lbs-comfyui" in c for c in self.docker_calls()),
+            "存在しない lbs-comfyui へ docker を呼んではならない",
         )
 
     def test_created_media_is_also_skipped(self):
@@ -153,7 +154,6 @@ class ResetNotRunningContainerTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         calls = self.docker_calls()
         self.assertTrue(any(c.startswith("exec lbs-media") for c in calls))
-        self.assertTrue(any(c.startswith("exec lbs-comfyui") for c in calls))
         self.assertNotIn("未起動のためスキップ", r.stdout)
 
     def test_compose_restart_pins_the_shared_stack_project_name(self):

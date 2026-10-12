@@ -146,7 +146,7 @@ class ConnectionDestinationGuardTest {
 
     @Test
     void bundledNamesAreExemptFromDockerRangeOnlyWhenGivenByName() throws Exception {
-        for (String name : List.of("ollama", "comfyui", "comfyui-cpu", "lbs-ollama", "lbs-comfyui", "lbs-comfyui-cpu")) {
+        for (String name : List.of("ollama", "lbs-ollama")) {
             dns.put(name, List.of("172.18.0.20"));
             assertThat(dockerGuard().check("Ollama", "http://" + name + ":11434/").baseUrl())
                     .isEqualTo("http://172.18.0.20:11434/");
@@ -156,6 +156,27 @@ class ConnectionDestinationGuardTest {
         assertThat(dockerGuard().check("Ollama", "http://OLLAMA.:11434").baseUrl()).isEqualTo("http://172.18.0.20:11434");
         assertThatThrownBy(() -> dockerGuard().check("Ollama", "http://172.18.0.20:11434"))
                 .isInstanceOf(ForbiddenDestinationException.class);
+    }
+
+    /** issue #1746: ComfyUIは同梱しないので、comfyui系の名前はもう例外ではない(dockerネットワーク内は拒否)。 */
+    @Test
+    void comfyUiNamesAreNoLongerBundledExceptions() throws Exception {
+        for (String name : List.of("comfyui", "comfyui-cpu", "lbs-comfyui", "lbs-comfyui-cpu")) {
+            dns.put(name, List.of("172.18.0.20"));
+            assertThatThrownBy(() -> dockerGuard().check("ComfyUI", "http://" + name + ":8188/"))
+                    .as(name)
+                    .isInstanceOf(ForbiddenDestinationException.class)
+                    .hasMessageContaining("ComfyUI");
+        }
+    }
+
+    /** issue #1746: GPU PC(LANのプライベートアドレス)のComfyUIは、そのアドレスのまま接続先になる。 */
+    @Test
+    void lanComfyUiUrlIsAcceptedAndPinned() throws Exception {
+        dns.put("192.168.1.71", List.of("192.168.1.71"));
+        GuardedTarget target = dockerGuard().check("ComfyUI", "http://192.168.1.71:8188");
+        assertThat(target.baseUrl()).isEqualTo("http://192.168.1.71:8188");
+        assertThat(target.sniHost()).isNull();
     }
 
     @Test

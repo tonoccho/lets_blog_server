@@ -44,7 +44,7 @@ flowchart LR
 
     subgraph External["外部連携"]
         WP[("WordPress サイト群")]
-        ComfyUI["ComfyUI (GPU)"]
+        ComfyUI["GPU PC の ComfyUI(外部・URL で接続)"]
         PlantUML["PlantUML / drawio"]
         Penpot["Penpot"]
     end
@@ -213,29 +213,22 @@ cd apps/extension && npm audit --audit-level=moderate
 
 | 項目 | 要件 |
 |---|---|
-| GPU | **NVIDIA GPU(VRAM 16GB以上)必須**。ComfyUI(画像生成)がGPUを使用するため |
-| GPUドライバ | NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
-| メモリ | **24GB以上を推奨**(全29コンテナ起動時の実測で約15GiB。ホストOS分の余裕や、ComfyUIでの画像生成時のスパイクを考慮するとこの程度が安全。以前は19コンテナ/約10.3GiBだったが、Epic #551 のマイクロサービス分割でサービス数が増えた。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
-| ディスク | Dockerイメージに加え、ComfyUIのモデルファイルで数GB〜十数GB程度の空き容量が必要 |
+| GPU | このホストには**不要**。画像生成の ComfyUI は GPU 付きの別 PC(GPU PC)で動かし、URL で接続する(下記)。同梱の Ollama(ローカルLLM)を GPU で動かしたい場合だけ NVIDIA GPU を使う |
+| GPUドライバ | 同梱の Ollama を GPU で動かす場合のみ、NVIDIA GPUドライバ + NVIDIA Container Toolkit(Dockerコンテナへのパススルー用) |
+| メモリ | **24GB以上を推奨**(全29コンテナ起動時の実測で約15GiB。ホストOS分の余裕を考慮するとこの程度が安全。以前は19コンテナ/約10.3GiBだったが、Epic #551 のマイクロサービス分割でサービス数が増えた。詳細は[docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md#リソース実測)参照) |
+| ディスク | Dockerイメージに加え、Ollamaのモデルファイルで数GB〜十数GB程度の空き容量が必要(ComfyUIのモデルは GPU PC 側) |
 | ネットワーク | ホストの80番・443番ポートが空いていること(リバースプロキシが使用) |
 
-GPUを持たないホストでも、ComfyUIをCPUで実行できる(issue #1395)。`.env` で
-`COMFYUI_IMAGE=yanwk/comfyui-boot:cpu` とし、`COMPOSE_PROFILES=cpu` を有効にすると、
-`docker compose up -d` のまま別サービス `comfyui-cpu`(`--cpu --force-fp32`、nvidia予約なし)が
-起動する。ComfyUI の接続先は変更不要(DB の設定で決まる。`COMFYUI_BASE_URL` は廃止した)で、`comfyui`(GPU)とは同時に起動しない。
-ただしCPU実行は**実用的な速度に達しない**(画像生成は遅いが完了することが到達点)。
-AI機能を実用速度で使うにはGPU(上記要件)を推奨する。
-
-**`comfyui` はGPUオプトインのcompose profile(`gpu`)を持つ(issue #1066)。** GPUの無い
-ホストで `docker compose up -d`(サービス無指定)を実行しても、`comfyui` はコンテナ自体が
-作られないため起動は中断しない(画像生成機能だけが使えない状態になる)。GPUを持つホストは
-`.env` の `COMPOSE_PROFILES=gpu` の行を有効にする(コメントアウトを外す)ことで、従来どおり
-`docker compose up -d` のまま `comfyui` が起動する。
+**ComfyUI(画像生成)は同梱しない(issue #1746)。** GPU 付きの別 PC で ComfyUI を起動し、管理画面の
+システム設定(またはプロジェクト設定)に URL(例: `http://192.168.1.71:8188`)を入れて接続する。
+このホストに GPU は要らない。ComfyUI の用意、LAN 内に限った公開、チェックポイント・LoRA の置き場、
+既存環境(同梱の ComfyUI を使っていた環境)の移行は [docs/EXTERNAL_COMFYUI.md](docs/EXTERNAL_COMFYUI.md) を参照。
+ComfyUI の接続先が未設定のまま画像生成をすると、設定を促すエラーになる。
 
 **PlantUML・draw.io・phpMyAdmin もオプトイン起動である(issue #1741)。** 既定の
 `docker compose up -d` / `./startup.sh` ではコンテナを作らない(アイドル時のメモリ約0.4〜0.9GB を使わない)。
 `.env` の `COMPOSE_PROFILES` に `diagram`(PlantUML と draw.io)、`db-tools`(phpMyAdmin)を
-カンマ区切りで指定する(例: `COMPOSE_PROFILES=diagram,db-tools`。`gpu` / `cpu` とも併記できる)。
+カンマ区切りで指定する(例: `COMPOSE_PROFILES=diagram,db-tools`)。
 一回だけなら `docker compose --profile diagram up -d`。無効のとき `/drawio/` と `/phpmyadmin/` は
 502 Bad Gateway になり、PlantUML 図のプレビュー・公開はレンダリング失敗のエラーになる。
 詳細は [docs/DOCKER_COMPOSE_ARCHITECTURE.md](docs/DOCKER_COMPOSE_ARCHITECTURE.md) の「周辺ツールのオプトイン起動と縮退起動」。
@@ -246,7 +239,7 @@ AI機能を実用速度で使うにはGPU(上記要件)を推奨する。
 |---|---|
 | Git | リポジトリの取得 |
 | Docker Engine + Docker Compose(v2系) | 全サービスのコンテナ起動 |
-| NVIDIA Container Toolkit | ComfyUIコンテナへのGPUパススルー |
+| NVIDIA Container Toolkit | (任意)同梱のOllamaコンテナへのGPUパススルー |
 | openssl | リバースプロキシ用の自己署名TLS証明書生成(Linux/macOSは標準搭載) |
 | Visual Studio Code | VSCode拡張機能(執筆・投稿)の利用 |
 
@@ -393,7 +386,7 @@ DB・Keycloak・生成画像などのデータは保たれ、`./startup.sh` で�
 `./shutdown.sh --volumes` と `docker compose down -v` は、**DB・Keycloak・生成画像などの全ボリュームを
 削除し、復元できない**。`--volumes` は消えるボリュームを列挙して確認を求める。
 
-環境変数の各項目の詳細、ComfyUIチェックポイントの配置、
+環境変数の各項目の詳細、ComfyUI(GPU PC)への接続、
 トラブルシューティング等は [docs/setup.md](docs/setup.md) を参照。
 
 ## アップデート

@@ -95,15 +95,10 @@ class RouteControllerContractTest {
      * {@code /api/internal/**}の命名規則には従わないが、実際にはgatewayを経由しない
      * (コンテナ間で直接呼び出される)ことがJavadocで明示されているエンドポイント。
      *
-     * <p>ComfyUiCheckpointController(media-service)は、#583以前はlegacy-apiの
-     * ComfyUiModelServiceからdocker network越しに直接呼ばれる設計だった(同クラスのJavadoc
-     * 「gatewayは経由しない」参照)。#583でComfyUiModelServiceがmedia-service自身へ移り、
-     * 同一サービス内の直接呼び出しになったため、この2本は外部から到達する必要がそもそも無い。
-     * gatewayのルート表に載っていないのは引き続き意図通り(バグではない)。
+     * <p>(ComfyUiCheckpointController の導入・削除2本は、チェックポイントの導入・削除機能ごと
+     * 削除した(issue #1746)ので、ここには載せない。)
      */
     private static final List<String> NON_GATEWAY_ROUTED_PATHS = List.of(
-            "/api/comfyui/checkpoints/install",
-            "/api/comfyui/checkpoints/delete",
             // RenderController(media-service)。content-service/publishing-serviceの
             // MediaRenderClientがapp.media-service-uriへコンテナ間で直接呼ぶ経路しか無く、
             // web/extensionからの利用は無い。issue #830でgatewayのルート表から外した。

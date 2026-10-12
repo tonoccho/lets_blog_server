@@ -3334,28 +3334,6 @@ export function selectComfyUiCheckpoint(
   );
 }
 
-export function installComfyUiCheckpoint(
-  projectId: number,
-  downloadUrl: string,
-  fileName: string
-): Promise<GenerationJob> {
-  return apiFetch<GenerationJob>(`/api/projects/${projectId}/ai-models/comfyui/checkpoints/install`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ downloadUrl, fileName }),
-  });
-}
-
-export function deleteComfyUiCheckpoint(
-  projectId: number,
-  fileName: string
-): Promise<GenerationJob> {
-  return apiFetch<GenerationJob>(
-    `/api/projects/${projectId}/ai-models/comfyui/checkpoints/${encodeURIComponent(fileName)}`,
-    { method: 'DELETE' }
-  );
-}
-
 /** ガベージコレクション画面(issue #500)の一覧行。 */
 export interface UnreferencedMediaItem {
   mediaId: string;

@@ -15,7 +15,7 @@
 サイレントに exit 0 しないこと」)は実際の Docker デーモンの有無・実行中のコンテナ構成
 というホスト環境に依存する。E2E環境のPlaywrightからは`docker network connect`という
 インフラ操作そのものへ到達できず、Web UIから観測できる振る舞いでもない。
-`scripts/test_rebuild_acceptance_env.py`(#1038-系)・`scripts/test_comfyui_gpu_profile.py`
+`scripts/test_rebuild_acceptance_env.py`(#1038-系)・`scripts/test_compose_no_bundled_comfyui.py`
 (#1066)と同じ、文書化された例外としてここで表現する。
 
 ## なぜ `docker` をスタブで差し替えるのか

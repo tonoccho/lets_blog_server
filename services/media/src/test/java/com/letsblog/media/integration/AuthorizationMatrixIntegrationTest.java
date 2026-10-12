@@ -64,7 +64,7 @@ class AuthorizationMatrixIntegrationTest {
      * media-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code media}ルート:
      * {@code /api/generated-images/**}・{@code /api/diagrams/**}・{@code /api/render/**}・
      * {@code /api/media/**}、{@code project-media-garbage-collection}ルート、および
-     * fallback経由で到達する{@code /api/comfyui/**})。本サービスは{@code /api/internal/**}配下の
+     * fallback経由で到達する{@code /api/projects/{id}/ai-models/**})。本サービスは{@code /api/internal/**}配下の
      * 内部ブリッジを持たないが、{@code /api/render/**}等はcontent-service/publishing-service/
      * legacy-apiからのサービス間呼び出しでも叩かれる(いずれもBearerトークンを転送するため
      * 認証必須で問題ない。docs/SYNC_SERVICE_CALLS.md参照)。
@@ -74,10 +74,6 @@ class AuthorizationMatrixIntegrationTest {
      */
     static Stream<Endpoint> allProtectedEndpoints() {
         return Stream.of(
-                // -- ComfyUiCheckpointController --
-                new Endpoint("POST", "/api/comfyui/checkpoints/install"),
-                new Endpoint("POST", "/api/comfyui/checkpoints/delete"),
-
                 // -- MediaController --
                 new Endpoint("POST", "/api/media/upload"),
 
@@ -129,8 +125,6 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("PUT", "/api/projects/1/ai-models/image/provider/selection"),
                 new Endpoint("GET", "/api/projects/1/ai-models/comfyui/checkpoints"),
                 new Endpoint("PUT", "/api/projects/1/ai-models/comfyui/checkpoints/selection"),
-                new Endpoint("POST", "/api/projects/1/ai-models/comfyui/checkpoints/install"),
-                new Endpoint("DELETE", "/api/projects/1/ai-models/comfyui/checkpoints/model.safetensors"),
 
                 // -- ProjectImageSettingsController(issue #583でlegacy-apiから移設) --
                 new Endpoint("GET", "/api/projects/1/image-settings"),

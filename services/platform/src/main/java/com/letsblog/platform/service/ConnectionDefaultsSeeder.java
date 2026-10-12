@@ -17,13 +17,16 @@ import java.util.Optional;
  * 受け入れテスト環境が投入したスタブのURL)は上書きしない。値は他のシステム設定と同じく
  * {@link CredentialCipher}で暗号化して保存する(暗号化値はFlywayのSQLでは作れないためJava側で書く)。
  *
+ * <p>書き込むのはOllamaの接続先だけである。ComfyUIは同梱せず、GPU PCなど外部のサーバーへURLで接続する
+ * ため、既定の接続先は無く、管理画面で設定されるまで「未設定」のままにする(issue #1746)。
+ * 既存のDBにある{@code comfyui_base_url}(旧既定値の{@code http://comfyui:8188}を含む)は書き換えない。
+ *
  * <p>利用者が管理画面で値を消す(行の削除)と、その時点から次の起動までは「未設定」になる。
  */
 @Component
 public class ConnectionDefaultsSeeder implements ApplicationRunner {
 
     static final String DEFAULT_OLLAMA_BASE_URL = "http://ollama:11434/v1";
-    static final String DEFAULT_COMFYUI_BASE_URL = "http://comfyui:8188";
 
     private final SystemSettingRepository repository;
     private final CredentialCipher credentialCipher;
@@ -37,7 +40,6 @@ public class ConnectionDefaultsSeeder implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put(AppSettingService.LLM_OLLAMA_BASE_URL, DEFAULT_OLLAMA_BASE_URL);
-        defaults.put(AppSettingService.COMFYUI_BASE_URL, DEFAULT_COMFYUI_BASE_URL);
         defaults.forEach(this::seedIfAbsent);
     }
 

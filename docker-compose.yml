@@ -20,7 +20,7 @@ x-logging: &default-logging
 # 余裕にする。値と根拠(アイドル・負荷時の実測)は docs/DOCKER_COMPOSE_ARCHITECTURE.md「全コンテナのメモリ上限」。
 # deploy.resources.limits ではなく mem_limit を使う(media の既存方式、#1112)。
 # 新しいサービスを足すときも必ず付けること(scripts/test_compose_memory_limits.py が検査する)。
-# AI 系(ollama / ollama-cpu / comfyui / comfyui-cpu)は .env で上書きできる(.env.example 参照)。
+# AI 系(ollama / ollama-cpu)は .env で上書きできる(.env.example 参照)。
 x-common-service: &common-service
   # restartを個別に上書きする場合は、ダッシュボードのコンテナ状態判定
   # (services/platform/.../ContainerStatusService、issue #725)に影響する点に注意。
@@ -166,7 +166,6 @@ services:
       # unauthorized_client で拒否し、画像生成に関わる公開APIが全滅する(#998)。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
-      COMFYUI_MODELS_PATH: /comfyui-models
       PLANTUML_BASE_URL: http://plantuml:8080
       PENPOT_BASE_URL: http://penpot-frontend:8080
       PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
@@ -181,8 +180,7 @@ services:
       # プロジェクトの存在確認(画像設定の読み書き・解決、issue #583)。project_image_settings と
       # 画像生成一式が media-service へ移ったのに伴い、projects の所有者へ問い合わせる。
       PROJECT_SERVICE_URI: http://project:8080
-      # ComfyUIチェックポイントのダウンロード/削除ジョブ(GenerationJob、ai-serviceが所有)の
-      # 進捗反映先。#573 stage2ではlegacy-apiが所有していたため上のLEGACY_API_URIを共用していたが、
+      # 画像生成・メディアGCのジョブ(GenerationJob、ai-serviceが所有)の進捗反映先。
       # issue #574でgeneration_jobsの所有権がai-serviceへ移ったため、GenerationJobClientの向き先を
       # ここへ切り替えた(同じくdepends_onには含めない。理由は上のコメントと同じ)。
       AI_SERVICE_URI: http://ai:8080
@@ -206,7 +204,6 @@ services:
     mem_limit: 2g
     volumes:
       - generated_images:/app/data/generated-images
-      - comfyui_models:/comfyui-models
     depends_on:
       mysql:
         condition: service_healthy
@@ -401,8 +398,9 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-OLLAMA}
       LLM_CLAUDE_MODEL: ${LLM_CLAUDE_MODEL:-claude-3-5-haiku-20241022}
       # OLLAMA専用の既定モデル(issue #1086)。Ollama / ComfyUI の接続先は環境変数では渡さない(issue #1567):
-      # プロジェクト設定かシステム設定(DB)だけで決まり、DBに無ければ起動時に既定値
-      # (http://ollama:11434/v1 / http://comfyui:8188)が書き込まれる。LLM_OLLAMA_BASE_URL / COMFYUI_BASE_URL は廃止した。
+      # プロジェクト設定かシステム設定(DB)だけで決まる。Ollama は DB に無ければ起動時に既定値
+      # (http://ollama:11434/v1)が書き込まれる。ComfyUI は同梱しない(GPU PC などの外部の URL を
+      # 管理画面で設定する。既定値は無い、issue #1746)。LLM_OLLAMA_BASE_URL / COMFYUI_BASE_URL は廃止した。
       LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
       UPLOAD_RATE_LIMIT_REQUESTS: ${UPLOAD_RATE_LIMIT_REQUESTS:-10}
@@ -1083,7 +1081,7 @@ services:
     <<: *common-service
     # GPUはオプトイン(issue #1086 / R2)。
     #
-    # comfyui のような無条件の deploy.resources.reservations.devices は使わない。
+    # 無条件の deploy.resources.reservations.devices は使わない。
     # NVIDIAランタイムを持たないホストでは `could not select device driver "nvidia"` で
     # 起動に失敗し、サービス無指定の `docker compose up -d` がそこで中断してしまう
     # (docs/ACCEPTANCE_TESTING.md「GPUを持たないホスト」)。実測(#1086)では
@@ -1093,17 +1091,17 @@ services:
     #
     # GPUを持つホストは .env に GPU_RUNTIME=nvidia を書く。コマンドライン引数は要らないので
     # `docker compose up -d` のままGPUが使われる。空にすると、VRAMに載らない大規模モデルを
-    # システムRAMで動かす意図的なCPU実行になる(#1396、docs/DOCKER_COMPOSE_ARCHITECTURE.md)。#1066 は同じ1行を comfyui へ適用できる。
+    # システムRAMで動かす意図的なCPU実行になる(#1396、docs/DOCKER_COMPOSE_ARCHITECTURE.md)。
     runtime: ${GPU_RUNTIME:-}
     environment:
       TZ: UTC
       # runtime=nvidia のときにnvidia-container-runtimeが参照する(runc既定では無視される)。
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      # issue #1086 / R6: 単一GPUをlbs-comfyuiと共有する。ComfyUIは生成後にVRAMを解放するが
-      # (ComfyUiClient#clearMemory)、Ollamaは既定でモデルを常駐させ続ける。常駐時間を短くし、
-      # 同時ロードを1モデルに制限してVRAMの取り合いを避ける。ComfyUI側でOOMが出る場合は
-      # OLLAMA_KEEP_ALIVE=30s まで下げる(docs/DOCKER_COMPOSE_ARCHITECTURE.md)。
+      # issue #1086 / R6: 単一GPUをComfyUI(GPU PCなど外部で動かす場合は同じGPUを共有していれば)と
+      # 共有する。ComfyUIは生成後にVRAMを解放するが(ComfyUiClient#clearMemory)、Ollamaは既定で
+      # モデルを常駐させ続ける。常駐時間を短くし、同時ロードを1モデルに制限してVRAMの取り合いを避ける。
+      # ComfyUI側でOOMが出る場合は OLLAMA_KEEP_ALIVE=30s まで下げる(docs/DOCKER_COMPOSE_ARCHITECTURE.md)。
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
       OLLAMA_MAX_LOADED_MODELS: "1"
       # Ollamaの既定コンテキスト長は小さく、超過分は黙って切り捨てられる。下書き/校正の
@@ -1181,79 +1179,6 @@ services:
         echo "モデル ${LLM_OLLAMA_MODEL:-qwen2.5:7b-instruct} を取得します(初回は数分かかります)"
         ollama pull "$${LLM_OLLAMA_MODEL}"
         ollama list
-
-  # GPUはオプトイン(issue #1066)。
-  #
-  # ollama(#1086)は `runtime: ${GPU_RUNTIME:-}` の1行でGPUをオプトイン化したが、
-  # comfyui はその1行だけでは同じようにいかない。ollamaはGPUが無くてもCPUで正常に
-  # 動作するのに対し、comfyui の既定イメージ(cu130-slim)はCUDA前提のビルドで、
-  # README.md の「ハードウェア要件」もCPU動作には別イメージタグへの変更を要求している
-  # (本Issueの Out of Scope はComfyUIをCPUで動かすこと自体を除外している)。
-  # `runtime:` の未指定をDocker既定ランタイムに倒すだけでは、GPUの無いホストで
-  # CUDA前提イメージの起動がクラッシュし、`restart: unless-stopped` により再起動を
-  # 繰り返す(`docker ps -a` には残らないが `state=running` に安定しないため、
-  # `wait-for-stack-healthy.sh --all` がタイムアウトする恐れが残る)。
-  #
-  # そこで `profiles: ["gpu"]` を付け、既定の `docker compose up -d`(サービス無指定)
-  # ではコンテナ自体を作らないようにする。GPUを持つホストは `.env` に
-  # `COMPOSE_PROFILES=gpu` を書く(または `docker compose --profile gpu up -d`)。
-  # コンテナが作られなければ `docker compose ps --all` にも現れないため、
-  # `wait-for-stack-healthy.sh --all`(scripts/verify-clean-volume-boot.shが使う)の
-  # 待機対象からも自動的に外れる(スクリプト側の変更は不要)。
-  comfyui:
-    environment:
-      TZ: UTC
-      # ComfyUIの起動引数(コンテナ内の起動スクリプトが `main.py ... ${CLI_ARGS}` と展開する。#1395)。
-      # 既定は空でGPU構成の挙動を変えない。
-      CLI_ARGS: ${COMFYUI_CLI_ARGS:-}
-    logging: *default-logging
-    image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cu130-slim}
-    container_name: lbs-comfyui
-    mem_limit: "${COMFYUI_MEM_LIMIT:-16g}"
-    profiles: ["gpu"]
-    <<: *common-service
-    volumes:
-      - comfyui_models:/root/ComfyUI/models
-      - comfyui_output:/root/ComfyUI/output
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  # CPU実行構成(issue #1395)。GPUの無いホスト向けに、`comfyui` とは別サービスとして併存させる。
-  #
-  # `deploy.resources.reservations.devices` は変数展開で条件付きにできず(#1066 の実測、
-  # docs/DOCKER_COMPOSE_ARCHITECTURE.md)、マージでも消せない(`!override` を伴う `-f` の追加が
-  # 要り、`docker compose up -d` だけでは切り替わらない)。別サービスにすればnvidia予約を
-  # 一切持たずに済み、切り替えは「どちらのprofileを有効にするか」だけになる。
-  #
-  # `.env` に `COMPOSE_PROFILES=cpu` を書き、`COMFYUI_IMAGE` をCPU向けタグ(yanwk/comfyui-boot:cpu)
-  # にする。`comfyui` と同じネットワークエイリアスを持つので、既定の接続先(http://comfyui:8188)
-  # は変えなくてよい(接続先はDBの設定で決まる。COMFYUI_BASE_URL は廃止した、issue #1567)。`comfyui`(gpu)とは同時に起動しない前提(エイリアスが重複する)。
-  # `comfyui-cpu` という固有名でも到達できるため、GPU構成を止めずにこちらだけを指名できる(#1401)。
-  # モデル・出力ボリュームは `comfyui` と共有する。CPU実行は実用速度に達しない(速度改善は対象外)。
-  comfyui-cpu:
-    environment:
-      TZ: UTC
-      # CPU実行には --cpu に加えて --force-fp32 が要る(CPUではfp16が使えない/不安定)。
-      CLI_ARGS: --cpu --force-fp32 ${COMFYUI_CLI_ARGS:-}
-    logging: *default-logging
-    image: ${COMFYUI_IMAGE:-yanwk/comfyui-boot:cpu}
-    container_name: lbs-comfyui-cpu
-    mem_limit: "${COMFYUI_CPU_MEM_LIMIT:-16g}"
-    profiles: ["cpu"]
-    <<: *common-service
-    networks:
-      lbs-net:
-        aliases:
-          - comfyui
-          - comfyui-cpu
-    volumes:
-      - comfyui_models:/root/ComfyUI/models
-      - comfyui_output:/root/ComfyUI/output
 
   plantuml:
     environment:
@@ -1334,8 +1259,6 @@ volumes:
   keycloak_postgres:
   penpot_postgres:
   penpot_assets:
-  comfyui_models:
-  comfyui_output:
   # Ollamaのモデル置き場(issue #1086)。docker data-rootは/home配下にあり容量に余裕がある。
   ollama_models:
   wordpress_sites:

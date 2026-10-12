@@ -653,47 +653,6 @@
         }
       }
     },
-    "/api/projects/{id}/ai-models/comfyui/checkpoints/install": {
-      "post": {
-        "tags": [
-          "project-image-model-controller"
-        ],
-        "operationId": "installCheckpoint",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstallComfyUiCheckpointRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJobResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/media/upload": {
       "post": {
         "tags": [
@@ -1041,52 +1000,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/api/comfyui/checkpoints/install": {
-      "post": {
-        "tags": [
-          "comfy-ui-checkpoint-controller"
-        ],
-        "operationId": "install",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstallComfyUiCheckpointCommand"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/api/comfyui/checkpoints/delete": {
-      "post": {
-        "tags": [
-          "comfy-ui-checkpoint-controller"
-        ],
-        "operationId": "delete_2",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteComfyUiCheckpointCommand"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
           }
         }
       }
@@ -1464,45 +1377,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ImageGenerationOptionsResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/projects/{id}/ai-models/comfyui/checkpoints/{fileName}": {
-      "delete": {
-        "tags": [
-          "project-image-model-controller"
-        ],
-        "operationId": "deleteCheckpoint",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          },
-          {
-            "name": "fileName",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJobResponse"
                 }
               }
             }
@@ -1950,24 +1824,6 @@
           "mediaIds"
         ]
       },
-      "InstallComfyUiCheckpointRequest": {
-        "type": "object",
-        "properties": {
-          "downloadUrl": {
-            "type": "string",
-            "minLength": 1
-          },
-          "fileName": {
-            "type": "string",
-            "minLength": 1,
-            "pattern": "^[A-Za-z0-9_.-]+$"
-          }
-        },
-        "required": [
-          "downloadUrl",
-          "fileName"
-        ]
-      },
       "GenerationJobResponse": {
         "type": "object",
         "properties": {
@@ -2159,45 +2015,6 @@
             "type": "string"
           }
         }
-      },
-      "InstallComfyUiCheckpointCommand": {
-        "type": "object",
-        "properties": {
-          "jobId": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "downloadUrl": {
-            "type": "string",
-            "minLength": 1
-          },
-          "fileName": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "downloadUrl",
-          "fileName",
-          "jobId"
-        ]
-      },
-      "DeleteComfyUiCheckpointCommand": {
-        "type": "object",
-        "properties": {
-          "jobId": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "fileName": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "fileName",
-          "jobId"
-        ]
       },
       "AiImageRequest": {
         "type": "object",
