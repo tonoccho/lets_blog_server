@@ -7,8 +7,7 @@
 1. [セットアップガイド](#セットアップガイド)
 2. [ユーザーガイド](#ユーザーガイド)
 3. [開発者ガイド](#開発者ガイド)
-4. [MCP 拡張ガイド](#mcp-拡張ガイド)
-5. [FAQ](#faq)
+4. [FAQ](#faq)
 
 ---
 
@@ -69,9 +68,6 @@ https://localhost/penpot
 
 # Let's Blog アプリ
 http://localhost:8000
-
-# MCP Server（AI サポート）
-curl http://localhost:3000/health
 ```
 
 #### 5. 初期セットアップ
@@ -283,25 +279,6 @@ lets-blog-server/
 ├── apps/                          # 利用者が直接触るアプリケーション(#963)
 │   ├── extension/                 # VSCode 拡張
 │   │
-│   ├── mcp-server/                # MCP サーバー（Ollama 連携）
-│   │   ├── src/
-│   │   │   ├── server.js
-│   │   │   ├── clients/
-│   │   │   ├── tools/
-│   │   │   └── utils/
-│   │   ├── package.json
-│   │   ├── Dockerfile
-│   │   └── README.md
-│   │
-│   ├── penpot-plugin/             # Penpot AI プラグイン
-│   │   ├── src/
-│   │   │   ├── plugin.ts
-│   │   │   ├── ui.ts
-│   │   ├── manifest.json
-│   │   ├── ui.html
-│   │   ├── styles.css
-│   │   └── package.json
-│   │
 │   └── web/                       # Next.js Web App
 │       ├── src/
 │       │   ├── app/
@@ -456,30 +433,6 @@ export default function DashboardPage() {
 }
 ```
 
-### API 開発
-
-#### エンドポイント例（Express）
-
-```typescript
-// apps/mcp-server/src/server.js
-
-app.post('/api/design-suggestion', async (req, res) => {
-  try {
-    const { design_brief, brand_style, audience } = req.body;
-    
-    // Ollama へ プロンプト送信
-    const suggestion = await ollamaClient.generateJSON(
-      `以下のデザイン提案をしてください...\n${design_brief}`
-    );
-    
-    res.json(suggestion);
-  } catch (error) {
-    logger.error('Design suggestion error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-```
-
 ### テスト
 
 #### Jest テスト例
@@ -548,125 +501,6 @@ Spring Boot 起動時に Flyway で自動的に適用する。
 
 ---
 
-## MCP 拡張ガイド
-
-### MCP とは
-
-Model Context Protocol（MCP）は、AI モデル（Ollama）と アプリケーション間の 標準的な通信プロトコルです。
-
-Let's Blog では、MCP を使用して Penpot プラグインが Ollama にデザイン提案を依頼します。
-
-```
-Penpot Plugin
-    ↓ (HTTP)
-MCP Server (Node.js)
-    ↓ (HTTP)
-Ollama (LLM)
-    ↑ (JSON)
-MCP Server
-    ↑ (HTTP)
-Penpot Plugin
-```
-
-### 新しい MCP Tool を追加
-
-#### 1. ツール関数を作成
-
-```typescript
-// apps/mcp-server/src/tools/generateLayoutSuggestions.ts
-
-export async function generateLayoutSuggestions(brief: string) {
-  const prompt = `
-    ページレイアウトを提案してください:
-    
-    要件: ${brief}
-    
-    以下の形式で JSON を返してください:
-    {
-      "layout_type": "2-column" | "3-column" | "hero-section" | ...,
-      "sections": [
-        { "name": "header", "height": "64px", "content": "..." },
-        ...
-      ],
-      "css": "..."
-    }
-  `;
-
-  const response = await ollamaClient.generateJSON(prompt);
-  return response;
-}
-```
-
-#### 2. API エンドポイント を作成
-
-```typescript
-// apps/mcp-server/src/server.js
-
-app.post('/api/generate-layout', async (req, res) => {
-  try {
-    const { brief } = req.body;
-    const layout = await generateLayoutSuggestions(brief);
-    res.json(layout);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-```
-
-#### 3. Penpot プラグイン に追加
-
-```typescript
-// apps/penpot-plugin/src/ui.ts
-
-async function getLayoutSuggestion() {
-  const brief = document.getElementById('brief').value;
-  
-  const response = await fetch(`${MCP_API_BASE}/generate-layout`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ brief }),
-  });
-  
-  const layout = await response.json();
-  displayLayoutSuggestion(layout);
-}
-```
-
-### Ollama プロンプト チューニング
-
-モデルからより質の高い提案を得るためのプロンプト設計：
-
-```typescript
-// 効果的なプロンプト例
-
-const prompt = `
-あなたはプロのUX/UIデザイナーです。
-Let's Blog Server のデザインシステムに従ってください。
-
-デザインシステム:
-- Primary Color: #0066CC
-- Secondary Color: #FF6633
-- Neutral: グレースケール
-- Typography: Inter (英語), Noto Sans JP (日本語)
-- Spacing: 8px グリッド
-- Border Radius: 4-12px
-- Shadow: elevation-1 to elevation-4
-
-要件: ${userBrief}
-
-提案内容:
-1. コンポーネント名
-2. サイズ・色・スペーシング
-3. 状態（ホバー・フォーカス・無効等）
-4. ダークモード対応
-5. CSS 実装例
-
-JSON 形式で返してください。
-`;
-```
-
----
-
 ## FAQ
 
 ### インストール・セットアップ
@@ -684,7 +518,6 @@ A: 公式サイトから Docker Desktop をダウンロード・インストー�
 
 A: ポート競合が発生しています。以下で確認・対処してください：
 ```bash
-lsof -i :3000    # MCP Server
 lsof -i :5432    # PostgreSQL
 lsof -i :11434   # Ollama
 ```
@@ -698,31 +531,6 @@ A: 初回ダウンロード時に 5GB 以上必要です。
 - ネットワーク接続を確認
 - ダウンロード完了を待つ（数十分）
 - `docker compose logs ollama` でダウンロード進捗確認
-
----
-
-### Penpot 使用方法
-
-**Q: プラグインがPenpotで読み込まれません**
-
-A: 以下を確認してください：
-1. `apps/penpot-plugin/manifest.json` が存在するか
-2. `npm run build` でビルド済みか
-3. `plugin.js` が dist/ に存在するか
-4. ブラウザキャッシュをクリア（Ctrl+Shift+Delete）
-
----
-
-**Q: AI 提案が表示されません**
-
-A: MCP Server が起動しているか確認：
-```bash
-curl http://localhost:3000/health
-# 期待: {"status":"ok"}
-
-# エラーの場合:
-docker compose logs mcp-penpot
-```
 
 ---
 
@@ -872,9 +680,6 @@ A: ログを確認して問題を特定：
 ```bash
 # Web app ログ
 docker compose logs -f web
-
-# MCP Server ログ
-docker compose logs -f mcp-penpot
 
 # Penpot ログ
 docker compose logs -f penpot

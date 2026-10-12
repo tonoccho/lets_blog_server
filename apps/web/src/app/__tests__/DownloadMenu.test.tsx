@@ -42,32 +42,12 @@ describe('DownloadMenu', () => {
     expect(screen.getByRole('menuitem', { name: /VSCode拡張機能/ })).toBeInTheDocument()
   })
 
-  it('lists the Penpot plugin and MCP server items too (issue #1491)', () => {
+  it('lists only the VSCode extension item (issue #1749)', () => {
     renderMenu()
     fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    expect(screen.getAllByRole('menuitem')).toHaveLength(3)
-    expect(screen.getByRole('menuitem', { name: /Penpotプラグイン/ })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /MCPサーバー/ })).toBeInTheDocument()
-  })
-
-  it('downloads the Penpot plugin zip from /downloads/penpot-plugin', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okResponse())
-    renderMenu()
-    fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Penpotプラグイン/ }))
-    await waitFor(() => expect(clicked).toHaveLength(1))
-    expect(global.fetch).toHaveBeenCalledWith('/downloads/penpot-plugin')
-    expect(clicked[0].download).toBe('letsblog-penpot-plugin.zip')
-  })
-
-  it('downloads the MCP server zip from /downloads/mcp-server', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okResponse())
-    renderMenu()
-    fireEvent.click(screen.getByRole('button', { name: 'ダウンロード' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /MCPサーバー/ }))
-    await waitFor(() => expect(clicked).toHaveLength(1))
-    expect(global.fetch).toHaveBeenCalledWith('/downloads/mcp-server')
-    expect(clicked[0].download).toBe('letsblog-mcp-server.zip')
+    expect(screen.getAllByRole('menuitem')).toHaveLength(1)
+    expect(screen.queryByRole('menuitem', { name: /Penpotプラグイン/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /MCPサーバー/ })).toBeNull()
   })
 
   it('closes on Escape', () => {

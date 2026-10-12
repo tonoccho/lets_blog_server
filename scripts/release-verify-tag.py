@@ -29,13 +29,10 @@
 4. 版数X を`compute_next_version`で決める(#1305 要件2: テスト手順より前)。
    同名タグが既に存在しないかを、ここ(計算時)と push 直前の両方で確認する。
 5. リリースコミットR(Pの子。版数ファイルの変更だけを含む)を、git フックを
-   束縛する前に作る(#1305 要件3。Implementation Notes: `apps/mcp-server/src/server.js`は
-   プロダクション扱いなので、束縛したまま作ると隔離チェックアウトのpre-commitフックに
-   拒否される)。
+   束縛する前に作る(#1305 要件3。この順序は#1749のパッケージ削除後も変えない)。
 6. 事前確認: `origin/main`の先頭にRを`--no-ff`でマージし、結果の木がRの木と
    同一であることを確かめる。不一致ならテスト手順を1つも始めずに失敗する。
-7. 全手順(依存導入・Pythonユニットテスト・web/extension/mcp-server/penpot-plugin/
-   api-clientのテスト・lint・build・受け入れテスト・バックエンドの`./gradlew test lint`)を
+7. 全手順(依存導入・Pythonユニットテスト・web/extension/api-clientのテスト・lint・build・受け入れテスト・バックエンドの`./gradlew test lint`)を
    Rに対して実行する。ゼロ許容(全終了コード0、failed/skipped/did not run/flakyが全て0)。
 8. 成功したら、`origin/main`を再取得してもう一度マージ+木の同一性確認をRに対して行い、
    同名タグの不存在とdevelopがPのままであることを再確認する(#1305 要件2/5/6: 競合対策)。
@@ -98,11 +95,6 @@ VERSION_LOCATIONS = [
     ("apps/web/package-lock.json", "npm_lock"),
     ("apps/extension/package.json", "npm_pkg"),
     ("apps/extension/package-lock.json", "npm_lock"),
-    ("apps/mcp-server/package.json", "npm_pkg"),
-    ("apps/mcp-server/package-lock.json", "npm_lock"),
-    ("apps/mcp-server/src/server.js", "server_js"),
-    ("apps/penpot-plugin/package.json", "npm_pkg"),
-    ("apps/penpot-plugin/package-lock.json", "npm_lock"),
     ("packages/api-client/package.json", "npm_pkg"),
     ("packages/api-client/package-lock.json", "npm_lock"),
     ("build.gradle", "gradle"),
@@ -112,8 +104,6 @@ VERSION_LOCATIONS = [
 VERSION_FIELD_RE = re.compile(r'"version":\s*"[^"]*"')
 #: build.gradle の `subprojects { version = '...' }`。
 GRADLE_VERSION_RE = re.compile(r"(version\s*=\s*)'[^']*'")
-#: apps/mcp-server/src/server.js の health 応答の `version: '...'`。
-SERVER_JS_VERSION_RE = re.compile(r"(version:\s*)'[^']*'")
 
 
 class VersionFieldNotFound(RuntimeError):
@@ -167,14 +157,6 @@ def set_version_everywhere(checkout_dir, version, out):
                 1,
                 rel,
             )
-        elif kind == "server_js":
-            new_text = _replace_first_n(
-                text,
-                SERVER_JS_VERSION_RE,
-                lambda m: "%s'%s'" % (m.group(1), version),
-                1,
-                rel,
-            )
         else:
             raise AssertionError("未知の種別: %s" % kind)
         with open(path, "w", encoding="utf-8") as f:
@@ -192,8 +174,6 @@ def read_version(text, kind):
         m = matches[1] if len(matches) > 1 else None
     elif kind == "gradle":
         m = GRADLE_VERSION_RE.search(text)
-    elif kind == "server_js":
-        m = SERVER_JS_VERSION_RE.search(text)
     else:
         raise AssertionError("未知の種別: %s" % kind)
     if not m:
@@ -401,16 +381,6 @@ DEFAULT_STEPS = [
         "cwd": "",
     },
     {
-        "name": "deps-mcp-server",
-        "argv": ["npm", "ci", "--prefix", "apps/mcp-server"],
-        "cwd": "",
-    },
-    {
-        "name": "deps-penpot-plugin",
-        "argv": ["npm", "ci", "--prefix", "apps/penpot-plugin"],
-        "cwd": "",
-    },
-    {
         "name": "deps-api-client",
         "argv": ["npm", "ci", "--prefix", "packages/api-client"],
         "cwd": "",
@@ -504,21 +474,6 @@ DEFAULT_STEPS = [
     {
         "name": "extension-compile",
         "argv": ["npm", "run", "compile", "--prefix", "apps/extension"],
-        "cwd": "",
-    },
-    {
-        "name": "mcp-server-test",
-        "argv": ["npm", "test", "--prefix", "apps/mcp-server"],
-        "cwd": "",
-    },
-    {
-        "name": "penpot-plugin-build",
-        "argv": ["npm", "run", "build", "--prefix", "apps/penpot-plugin"],
-        "cwd": "",
-    },
-    {
-        "name": "penpot-plugin-build-ui",
-        "argv": ["npm", "run", "build:ui", "--prefix", "apps/penpot-plugin"],
         "cwd": "",
     },
     {
@@ -1220,9 +1175,8 @@ def main(argv=None):
         out.write("==> 版数 X=%s\n" % version)
 
         # #1305 要件3: リリースコミット R を P の子として作る(版数ファイルの変更だけ)。
-        # Implementation Notes: git フックを束縛する前に作ること
-        # (apps/mcp-server/src/server.js はプロダクション扱いなので、束縛したまま
-        #  だと隔離チェックアウトの pre-commit フックがテストファースト規則で拒否する)。
+        # Implementation Notes: git フックを束縛する前に作ること(この順序は #1749 の
+        # パッケージ削除後も変えない)。
         out.write("==> リリースコミット R を作成(P の子、版数ファイルのみ)\n")
         git(["checkout", "--detach", p_sha], cwd=checkout_dir)
         try:

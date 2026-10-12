@@ -3384,16 +3384,6 @@ export async function downloadVscodeExtension(): Promise<{ body: ArrayBuffer; fi
   return downloadSystemFile('/api/system/vscode-extension', 'letsblog-vscode.vsix');
 }
 
-/** Penpotプラグインのソース一式 + setup.sh のZip(issue #1491)。ビルドは利用者の手元で走る。 */
-export function downloadPenpotPlugin(): Promise<{ body: ArrayBuffer; filename: string }> {
-  return downloadSystemFile('/api/system/penpot-plugin', 'letsblog-penpot-plugin.zip');
-}
-
-/** MCPサーバーのソース一式 + setup.sh のZip(issue #1491)。ビルドは利用者の手元で走る。 */
-export function downloadMcpServer(): Promise<{ body: ArrayBuffer; filename: string }> {
-  return downloadSystemFile('/api/system/mcp-server', 'letsblog-mcp-server.zip');
-}
-
 async function downloadSystemFile(
   path: string,
   defaultFilename: string,

@@ -125,7 +125,7 @@ class OriginFixture:
     def _version_fixture_files(self, version="0.1.0"):
         """#1305: `rvt.VERSION_LOCATIONS` の全ファイル・全箇所を、実物と同じ形(npmの
         package.json/lock の `version` と `packages[""].version`、build.gradle の
-        `version = '...'`、server.js の health 応答の `version: '...'`)で fixture に置く。
+        `version = '...'`)で fixture に置く。
         本物のリスト(`rvt.VERSION_LOCATIONS`)を直接使うので、対象が増減しても
         fixture が自動的に追従する。"""
         files = {}
@@ -147,10 +147,6 @@ class OriginFixture:
                 ) + "\n"
             elif kind == "gradle":
                 files[rel] = "subprojects {\n    version = '%s'\n}\n" % version
-            elif kind == "server_js":
-                files[rel] = (
-                    "res.json({ status: 'ok', service: 'x', version: '%s' });\n" % version
-                )
             else:
                 raise AssertionError("未知の kind: %s" % kind)
         return files
@@ -437,7 +433,6 @@ FIXTURE_CONTENT = {
         '      "version": "2.0.0"\n    }\n  }\n}\n'
     ),
     "gradle": "subprojects {\n    version = '0.1.0'\n}\n",
-    "server_js": "res.json({ status: 'ok', service: 'x', version: '0.1.0' });\n",
 }
 
 
@@ -1366,8 +1361,6 @@ class DefaultStepsCoverEveryRequiredCommand(unittest.TestCase):
             '"ci"',
             "apps/web",
             "apps/extension",
-            "apps/mcp-server",
-            "apps/penpot-plugin",
             "packages/api-client",
             "unittest",
             "discover",
@@ -1385,6 +1378,29 @@ class DefaultStepsCoverEveryRequiredCommand(unittest.TestCase):
         for token in required:
             with self.subTest(token=token):
                 self.assertIn(token, self.text, "既定の手順表に %s が無い" % token)
+
+
+class RemovedPackagesAreNotVerified(unittest.TestCase):
+    """#1749: apps/penpot-plugin と apps/mcp-server はパッケージごと削除した。
+    リリース検証の手順・版数の更新対象のどちらにも、両者が残っていない。"""
+
+    REMOVED = ("apps/mcp-server", "apps/penpot-plugin", "mcp-server", "penpot-plugin")
+
+    def test_default_steps_do_not_mention_removed_packages(self):
+        with open(SCRIPT, encoding="utf-8") as f:
+            text = f.read()
+        for token in self.REMOVED:
+            with self.subTest(token=token):
+                self.assertNotIn(token, text)
+
+    def test_version_locations_do_not_include_removed_packages(self):
+        for rel, _kind in rvt.VERSION_LOCATIONS:
+            with self.subTest(path=rel):
+                self.assertFalse(rel.startswith(("apps/mcp-server/", "apps/penpot-plugin/")))
+
+    def test_no_server_js_version_kind_remains(self):
+        self.assertFalse(hasattr(rvt, "SERVER_JS_VERSION_RE"))
+        self.assertNotIn("server_js", [kind for _rel, kind in rvt.VERSION_LOCATIONS])
 
 
 class IsolatedCheckoutBindsGitHooks(Harness):

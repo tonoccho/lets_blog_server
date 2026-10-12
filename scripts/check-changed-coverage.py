@@ -123,11 +123,6 @@ UNMEASURABLE_OVERRIDE_PATTERNS = [
     # `.css`(`apps/web/src/app/globals.css` など)にレポートは原理的に存在しない。
     # #1330 / #1379 と同じく拡張子を1つずつ免除せず、計測できる側を列挙して残りを免除する。
     r"^apps/[^/]+/src/(?!.*\.(?:[cm]?[jt]sx?)$)",
-    # #1722: `apps/mcp-server`(mocha のみ、c8 / nyc 無し)と `apps/penpot-plugin`(ランナー無し)は
-    # jest でも JaCoCo でもないため、`coverage-final.json` が生成されず、1行変えただけで
-    # 「レポートが見つかりません」になる。依存を足さず、webviews と同じく受け入れテストに委ねる
-    # (利用者の決定 2026-10-10)。
-    r"^apps/(?:mcp-server|penpot-plugin)/src/",
 ]
 
 UNMEASURABLE_OVERRIDE_RE = [re.compile(p) for p in UNMEASURABLE_OVERRIDE_PATTERNS]
@@ -451,7 +446,7 @@ def jest_branches(changed_lines):
     重なるものだけを分子・分母に含める(要件2)。
     """
     result = {}
-    for app in ("apps/web", "apps/extension", "apps/mcp-server"):
+    for app in ("apps/web", "apps/extension"):
         report = os.path.join(ROOT, app, "coverage", "coverage-final.json")
         if not os.path.exists(report):
             continue

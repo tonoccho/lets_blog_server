@@ -1768,9 +1768,8 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 3. メイン作業ツリーとは別の**clone**(`git worktree` ではない。§「なぜ push か」参照)で
    検証する。メイン作業ツリーの HEAD・ブランチ・インデックス・ファイルは変更しない。
    まず P を detached で checkout し、**版数ファイルだけを変更するリリースコミット R**
-   (P の子)を、git フックを束縛する**前**に作る(#1305 要件3。`apps/mcp-server/src/server.js`
-   はプロダクション扱いなので、束縛したまま作ると隔離チェックアウトの pre-commit フックが
-   テストファースト規則で拒否する)。以降の事前確認・全手順・本番の木チェックは、すべて
+   (P の子)を、git フックを束縛する**前**に作る(#1305 要件3。この順序は #1749 の
+   パッケージ削除後も変えない)。以降の事前確認・全手順・本番の木チェックは、すべて
    **R に対して**行う(検証するのはタグの付く木そのもの)。gitignore 対象で clone に
    含まれない `.env` と `certs/` は、メイン作業ツリーから隔離チェックアウトへ別途コピーする
    (`.env` が無ければ、手順を1つも始めずに理由を表示して失敗する)。資格情報は
@@ -1786,7 +1785,7 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
    同一であることを確かめる。不一致なら、テスト手順を1つも始めずに失敗する(誰かが main
    へ直接コミットした、などのずれを、1〜2時間かかる検証の前に検出するため)。
 6. 依存導入(`npm ci`)、`scripts/` と `.claude/hooks/` の Python ユニットテスト、
-   `apps/web` / `apps/extension` / `apps/mcp-server` / `apps/penpot-plugin` /
+   `apps/web` / `apps/extension` /
    `packages/api-client` のテスト・lint・build・typecheck、`apps/web` の
    `npm run test:at:clean`(`ACCEPTANCE_RESET=1`、迂回 `AT_WORKTREE_CHECK_BYPASS=1` を明示的に
    使い、ログに残す。迂回の根拠は手順4の `cycle.lock`)、`apps/extension` の

@@ -108,8 +108,6 @@ flowchart LR
 apps/        利用者が直接触るアプリケーション
   web/            Next.js のフロントエンド(BFF を兼ねる)
   extension/      VSCode 拡張
-  mcp-server/     MCP サーバー
-  penpot-plugin/  Penpot プラグイン
 services/    バックエンドの9サービス(Spring Boot)
 packages/    サービス・アプリ間で共有するライブラリ
   lbs-common/     Java 共通ライブラリ(Gradle プロジェクト :packages:lbs-common)

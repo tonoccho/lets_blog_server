@@ -368,12 +368,6 @@ class MeasurabilityClassifier(unittest.TestCase):
         "packages/api-client/src/generated/ai/project-llm-model-controller/"
         "project-llm-model-controller.ts",
         "packages/api-client/src/index.ts",
-        # #1722: テストランナーが jest でも JaCoCo でもない(mcp-server は mocha のみ、
-        # penpot-plugin はランナー無し)ので、レポートは原理的に生成されない。
-        "apps/mcp-server/src/server.js",
-        "apps/mcp-server/src/tools/designSuggestion.js",
-        "apps/penpot-plugin/src/plugin.ts",
-        "apps/penpot-plugin/src/ui.ts",
         # #1272: VSCode拡張ホストに依存する層(docs/COVERAGE_TARGETS.md の表)。
         "apps/extension/src/extension.ts",
         "apps/extension/src/askAiPanel.ts",
@@ -431,6 +425,18 @@ class MeasurabilityClassifier(unittest.TestCase):
         for path in self.MEASURABLE:
             with self.subTest(path=path):
                 self.assertTrue(ccc.is_measurable(path))
+
+    def test_removed_packages_have_no_unmeasurable_override(self):
+        """#1749: apps/mcp-server と apps/penpot-plugin はパッケージごと削除した。
+        測定不能の免除(#1722)にも jest の対象アプリにも、両者は残らない。"""
+        for path in ("apps/mcp-server/src/server.js", "apps/penpot-plugin/src/plugin.ts"):
+            with self.subTest(path=path):
+                self.assertFalse(
+                    any(rx.search(path) for rx in ccc.UNMEASURABLE_OVERRIDE_RE),
+                    "削除したパッケージの免除パターンが残っている",
+                )
+        with open(ccc.__file__, encoding="utf-8") as f:
+            self.assertNotIn("apps/mcp-server", f.read())
 
     def test_unmeasurable_trees(self):
         for path in self.UNMEASURABLE:

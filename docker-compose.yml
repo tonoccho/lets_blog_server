@@ -462,9 +462,6 @@ services:
       # コンテナが持っていた同名の環境変数と同じ。
       VSCODE_EXTENSION_SOURCE_PATH: /app/extension-src
       VSCODE_EXTENSION_BUILD_PATH: /app/extension-build
-      # SourceArchiveService(issue #1491)がPenpotプラグイン / MCPサーバーのソースZipを作る際のソース。
-      PENPOT_PLUGIN_SOURCE_PATH: /app/penpot-plugin-src
-      MCP_SERVER_SOURCE_PATH: /app/mcp-server-src
       <<: *rabbitmq-env
     volumes:
       - generated_images:/app/data/generated-images
@@ -472,10 +469,6 @@ services:
       # コンテナ内の書き込み可能な場所(/app/extension-build)を使うため、ソースは読み取り専用でマウントする
       # (issue #696、C10-4でapiコンテナから移設)。
       - ./apps/extension:/app/extension-src:ro
-      # Penpotプラグイン / MCPサーバーのZip配布用(issue #1491)。サーバー側ではビルドせず
-      # ソースを固めて渡すだけなので、読み取り専用でマウントする(node_modules等は固める際に除外)。
-      - ./apps/penpot-plugin:/app/penpot-plugin-src:ro
-      - ./apps/mcp-server:/app/mcp-server-src:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -1206,25 +1199,6 @@ services:
     # 既定の起動では作らない(#1741)。`COMPOSE_PROFILES=diagram` で PlantUML とともに起動する。
     profiles: ["diagram"]
     <<: *common-service
-
-  # mcp-penpot:
-  #   build:
-  #     context: ./apps/mcp-server
-  #     dockerfile: Dockerfile
-  #   container_name: lbs-mcp-penpot
-  #   restart: unless-stopped
-  #   environment:
-  #     LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
-  #     MCP_PORT: 3000
-  #     MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
-  #   networks:
-  #     - lbs-net
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 10s
 
   wordpress:
     logging: *default-logging

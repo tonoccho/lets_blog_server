@@ -9,7 +9,7 @@
 ディレクトリ構成は別に変更される。**両者が同期している保証は無い**。実際 #963 で
 `apps/extension/` `services/` `packages/` が新設され、`infra/` にも
 `keycloak/` `mysql/` `wordpress/` `e2e-stubs/` などが増えた後も、この図は
-`mcp-server/` `penpot-plugin/` `web/` `nginx/` しか載っていない #963 以前の
+`web/` `nginx/` など当時のディレクトリしか載っていない #963 以前の
 状態のまま陳腐化していた(#974)。
 
 `scripts/test_docs_reverse_proxy_diagram.py` と同じ考え方で、図に実在ディレクトリ名の

@@ -54,7 +54,6 @@ class TestCodeClassification(unittest.TestCase):
         "apps/extension/e2e/acceptance.test.ts",
         "apps/extension/e2e/jest.config.js",
         "apps/web/src/components/ArticleCard.test.tsx",
-        "apps/mcp-server/src/tools/designSuggestion.test.js",
         "apps/web/src/lib/api.spec.ts",
         "apps/web/src/lib/__tests__/format.ts",
         "apps/web/src/lib/__mocks__/fetch.ts",
@@ -115,17 +114,11 @@ class ProductionCodeClassification(unittest.TestCase):
         "infra/wordpress/Dockerfile",
         # #1208: Dockerfile の ENTRYPOINT/CMD から起動される apps/*/ 直下のスクリプト。
         "apps/web/docker-entrypoint.sh",
-        # #1491: Zip で配る導入スクリプト。利用者の手元でビルドを走らせる出荷物そのもの。
-        "apps/penpot-plugin/setup.sh",
-        "apps/mcp-server/setup.sh",
         # 実装判断: 実行時・ビルド出力を決める設定。
         "apps/web/next.config.ts",
         "apps/web/postcss.config.mjs",
-        # 実装判断: 利用者に見える UI 文言とプラグインの出荷 UI。
+        # 実装判断: 利用者に見える UI 文言。
         "apps/web/messages/ja.json",
-        "apps/penpot-plugin/ui.html",
-        "apps/penpot-plugin/styles.css",
-        "apps/penpot-plugin/manifest.json",
     ]
 
     def test_is_production_true(self):
@@ -176,14 +169,11 @@ class NeutralClassification(unittest.TestCase):
         # リポジトリメタとしての dotfile。列挙(paths.py の NEUTRAL_PATTERNS)に
         # 実在するものを一つずつ対応させる。ワイルドカードで一括に中立化しない。
         ".gitignore",
-        "apps/mcp-server/.gitignore",
-        "apps/penpot-plugin/.gitignore",
         "apps/web/.gitignore",
         ".dockerignore",
         "apps/web/.dockerignore",
         "apps/extension/.vscodeignore",
         ".env.example",
-        "apps/mcp-server/.env.example",
         "apps/web/.env.local.example",
         ".node-version",
         "apps/extension/.vscode/extensions.json",

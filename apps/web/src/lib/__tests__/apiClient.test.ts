@@ -62,8 +62,7 @@ import {
   clearProjectOpenAiApiKey,
   setProjectClaudeApiKey,
   clearProjectClaudeApiKey,
-  downloadPenpotPlugin,
-  downloadMcpServer,
+  downloadVscodeExtension,
   getProjectXConnection,
   startProjectXAuthorization,
   completeProjectXAuthorization,
@@ -897,7 +896,7 @@ describe('操作ログ集計API(issue #1471)', () => {
   })
 })
 
-describe('配布物(Zip)のダウンロード(issue #1491)', () => {
+describe('配布物のダウンロード(issue #1491 / #1749)', () => {
   function zipResponse(disposition: string | null): Response {
     return {
       ok: true,
@@ -909,28 +908,25 @@ describe('配布物(Zip)のダウンロード(issue #1491)', () => {
     } as unknown as Response
   }
 
-  it('Penpotプラグインは /api/system/penpot-plugin を呼び、Content-Dispositionのファイル名を返す', async () => {
-    fetchMock.mockResolvedValue(zipResponse('attachment; filename="p.zip"'))
+  it('VSCode拡張は /api/system/vscode-extension を呼び、Content-Dispositionのファイル名を返す', async () => {
+    fetchMock.mockResolvedValue(zipResponse('attachment; filename="v.vsix"'))
 
-    const result = await downloadPenpotPlugin()
+    const result = await downloadVscodeExtension()
 
-    expect(calls()[0][0]).toContain('/api/system/penpot-plugin')
-    expect(result.filename).toBe('p.zip')
+    expect(calls()[0][0]).toContain('/api/system/vscode-extension')
+    expect(result.filename).toBe('v.vsix')
     expect(result.body.byteLength).toBe(6)
   })
 
-  it('MCPサーバーは /api/system/mcp-server を呼び、Content-Dispositionが無ければ既定のファイル名', async () => {
+  it('VSCode拡張はContent-Dispositionが無ければ既定のファイル名', async () => {
     fetchMock.mockResolvedValue(zipResponse(null))
-
-    const result = await downloadMcpServer()
-
-    expect(calls()[0][0]).toContain('/api/system/mcp-server')
-    expect(result.filename).toBe('letsblog-mcp-server.zip')
+    expect((await downloadVscodeExtension()).filename).toBe('letsblog-vscode.vsix')
   })
 
-  it('Penpotプラグインも既定のファイル名を持つ', async () => {
-    fetchMock.mockResolvedValue(zipResponse(null))
-    expect((await downloadPenpotPlugin()).filename).toBe('letsblog-penpot-plugin.zip')
+  it('Penpotプラグインと MCPサーバーの配布関数は無い(issue #1749で削除)', async () => {
+    const api = (await import('../apiClient')) as Record<string, unknown>
+    expect(api.downloadPenpotPlugin).toBeUndefined()
+    expect(api.downloadMcpServer).toBeUndefined()
   })
 })
 
