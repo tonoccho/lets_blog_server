@@ -44,3 +44,4 @@ ADR には以下のセクションを含める。
 | [ADR-0008](0008-auth-gate-in-each-service-security-config.md) | 認証ゲートは各サービス自身の SecurityConfig で担い、gateway では実施しない |
 | [ADR-0009](0009-sdk-api-client-not-consumed-by-web.md) | sdk/api-client は web から利用せず、生成物の維持のみを行う |
 | [ADR-0010](0010-github-to-gitlab-migration.md) | 開発ワークフローを GitHub からセルフホスト GitLab CE へ移行する |
+| [ADR-0011](0011-external-service-plugin-boundary.md) | LLM・画像生成・図のレンダリングは、契約 API(HTTP)で話す外部プラグインにする |
