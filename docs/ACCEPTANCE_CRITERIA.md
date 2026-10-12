@@ -290,7 +290,7 @@ VSCode 拡張だけにあるため、この節の受け入れ基準に対応す�
 | AC-DIAG-003 | SVG取得 | 図が記事に埋め込める | `GET /api/diagrams/{id}/svg` が描画済みSVGを返す | `features/diagram/diagram-storage.feature` › ダイアグラムを作成すると一覧に現れ、SVGを取得できる / ソースを更新すると、取り直したSVGは更新後の内容になる(キャッシュが残らないこと)/ ダイアグラムを削除すると一覧から消え、SVGは404になる | 検証済 |
 | AC-DIAG-004 | PlantUML レンダリング | テキストからUMLを描ける | `POST /api/render/plantuml` が図を返し、不正な記法はエラーになる | `features/diagram/plantuml-rendering.feature` › 妥当なPlantUMLソースを渡すと、ノード名を含む図がPNGとして返る / 不正な構文では、理由の分かるエラーが返り、生の500にはならない / 巨大な入力にはサイズ上限のエラーが返り、待たされ続けない | 検証済(返る画像は SVG ではなく PNG。中身は埋め込みメタデータと寸法で検証している) |
 | AC-DIAG-005 | recharts レンダリング | データからグラフを描ける | `POST /api/render/recharts` が図を返す | `features/diagram/recharts-rendering.feature` › チャート定義を渡すと、元データが反映されたSVGが返る / 系列の指定を欠いた定義ではエラーが返る | 検証済 |
-| AC-DIAG-006 | Penpot デザインファイル連携 | デザインを記事素材にできる | Penpot が起動していないとき、デザインファイルの要求は理由の分かるエラーになる | `features/diagram/penpot-unavailable.feature` › Penpot が起動していないとき、デザインファイルの要求は理由の分かるエラーになる | 検証済(`@destructive`、§4.1 参照。2026-10-08 に `at-destructive` で通過を確認、#1684) |
+| AC-DIAG-006 | ~~Penpot デザインファイル連携~~ | (削除) | #1750 で機能ごと削除した(Penpot をシステムから削除したため、カスタムタグの AI 生成時のデザインファイル作成と `POST /api/render/penpot/design-file` は無い)。旧シナリオ `penpot-unavailable.feature` は機能の削除に伴い削除した(skip ではない)。以後は、API が存在しないこと(404)を `features/diagram/render-design-file-removed.feature` が確かめる | `features/diagram/render-design-file-removed.feature` › デザインファイルの作成を要求しても、そのAPIは存在しない | 対象外(#1750 で機能ごと削除。以後は上記シナリオが API の不在を確かめる) |
 | AC-DIAG-007 | draw.io 編集 | 図をGUIで描ける | 拡張の `addNewDiagram` / `editDiagram` で draw.io が開き、保存内容が `GET /api/diagrams/{id}` に反映される | `features/diagram/diagram-storage.feature` › drawio で描いた図を保存すると、あとから同じ内容を取り出して編集を続けられる(サービス側の契約)、`ext:diagrams/diagrams.feature` › ダイアグラムを作成し編集して一覧から参照できる(拡張のコマンド)、手動: チェックリスト §7 | 検証済(draw.io のエディタ操作は手動) |
 
 ### 2.10 カスタムタグ・テンプレート・コンテンツ設定 — `TAG`
@@ -564,7 +564,6 @@ AT-10 / AT-13 のシナリオが理由の分からない形で落ちるため、
 | --- | --- | --- | --- |
 | AC-AUTH-005 | 期限切れのデバイスコードで `expired_token` が返る | 存在しないデバイスコードが拒否されることを検証 | 真に期限切れにするには Keycloak realm の `oauth2DeviceCodeLifespan`(既定600秒)を縮める必要がある。共有レルムの設定変更になるため見送った。拡張(`deviceAuth.ts`)が見ているのは「待ち続けずに失敗と分かること」なので、検証の目的は満たしている |
 | AC-AUTH-008 | 期限切れアクセストークンで401 | 復号できないセッションで保護ページに入れないことを検証 | 有効な署名を持つ期限切れトークンは、realm のアクセストークン寿命(既定5分)を待つか設定を変えないと作れない。署名が不正なトークンの拒否は AC-AUTH-007 が別途検証している |
-| AC-DIAG-006 | `POST /api/render/penpot/design-file` がデザインを取り込む | Penpot が起動していないとき、デザインファイルの要求が理由の分かるエラーになることを検証 | 成功経路は共有 Penpot に消せないファイルを残すため叩かない。Penpot は任意サービスなので未起動時の振る舞いを基準にした(#1684) |
 
 AC-AUTH-005 / 008 はどちらも Keycloak の realm 設定を一時的に変更すれば検証できる。必要になった時点で、
 設定変更と復元を含む `@slow` シナリオとして足すこと。
@@ -624,16 +623,16 @@ Epic #1333 の子 Issue と機能ID(各 Issue のシナリオは `apps/web/e2e/f
 
 ## 6. 集計
 
-§2 に列挙した機能ID: **234**。うち3件(AC-EXT-019、AC-POST-010・011)は対象外としたので、
-受け入れテストの対象は **231**。
+§2 に列挙した機能ID: **234**。うち4件(AC-EXT-019、AC-POST-010・011、AC-DIAG-006)は対象外としたので、
+受け入れテストの対象は **230**。
 
 | 状態 | 件数 |
 | --- | --- |
-| `検証済` | 198 |
+| `検証済` | 197 |
 | `実装中` | 13 |
 | `既存spec` / `既存spec(部分)` | 3 |
 | `未着手` | 17 |
-| `対象外`(§2 に行を持つもの) | 3 |
+| `対象外`(§2 に行を持つもの) | 4 |
 | **§2 合計** | **234** |
 
 `検証済` のうち3件は §4.1 のとおり受け入れ基準を狭めてある。

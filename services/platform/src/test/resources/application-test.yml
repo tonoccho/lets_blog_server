@@ -45,7 +45,6 @@ app:
   # MockRestServiceServerを介するユニットテスト自体はこれらを使わないが、@SpringBootTestで
   # フルコンテキストを起動するAdminAuthorizationIntegrationTestがBean生成のために必要とする。
   plantuml-base-url: http://localhost:8085
-  penpot-base-url: http://localhost:9001
   wordpress-provision-base-url: http://localhost:9000
   docker-socket-proxy-base-url: http://localhost:2375
   # LetsBlogServiceStatusService / RabbitMqQueueStatusService のテスト用値(issue #589)。

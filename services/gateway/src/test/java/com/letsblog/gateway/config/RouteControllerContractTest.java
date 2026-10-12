@@ -103,8 +103,7 @@ class RouteControllerContractTest {
             // MediaRenderClientがapp.media-service-uriへコンテナ間で直接呼ぶ経路しか無く、
             // web/extensionからの利用は無い。issue #830でgatewayのルート表から外した。
             "/api/render/plantuml",
-            "/api/render/recharts",
-            "/api/render/penpot/design-file");
+            "/api/render/recharts");
 
     /**
      * サービスモジュール名(services/配下のディレクトリ名) -> application.ymlでそのサービスを

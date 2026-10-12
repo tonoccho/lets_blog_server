@@ -171,10 +171,6 @@ services:
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       PLANTUML_BASE_URL: http://plantuml:8080
-      PENPOT_BASE_URL: http://penpot-frontend:8080
-      PENPOT_PUBLIC_URL: ${PENPOT_PUBLIC_URL:-http://localhost:9001}
-      PENPOT_SERVICE_EMAIL: ${PENPOT_SERVICE_EMAIL:-lbs-service@letsblog.local}
-      PENPOT_SERVICE_PASSWORD: ${PENPOT_SERVICE_PASSWORD}
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       # メディアガベージコレクションのCMSブリッジ(CmsMediaBridgeController)の呼び出し先。
       # #573 stage3ではlegacy-apiが所有していたが、issue #709でpublishing-serviceへ移管された
@@ -290,7 +286,7 @@ services:
       # その実装は project-service への素通しだったため、中継を外して直接向けた。
       # project_users のメンバー判定と roles は下の IDENTITY_SERVICE_URI へ向く。
       PROJECT_SERVICE_URI: http://project:8080
-      # 埋め込みタグ(PlantUML/Recharts)展開・カスタムタグAI生成のPenpotデザインファイル作成の
+      # 埋め込みタグ(PlantUML/Recharts)展開の
       # 呼び出し先(issueの注記どおり、実際のダイアグラム描画はmedia-serviceへ委譲する)。
       MEDIA_SERVICE_URI: http://media:8080
       # カスタムタグのAI生成(CustomTagGenerationService)の呼び出し先。
@@ -411,7 +407,6 @@ services:
       # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
       # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ。
       PLANTUML_BASE_URL: http://plantuml:8080
-      PENPOT_BASE_URL: http://penpot-frontend:8080
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       # issue #589: ダッシュボードに Let's Blog 自身の9サービスの状態を出すため、gateway の
       # 集約ヘルスを読む。各サービスを個別に叩かず1箇所(gateway)の判定を展開する。
@@ -649,7 +644,7 @@ services:
       JAVA_TOOL_OPTIONS: -Xmx512m
       TZ: UTC
       LOG_SERVICE_URI: http://log-writer:8080
-      # 画像生成・ダイアグラム・PlantUML/Recharts/Penpotレンダリングのルーティング先(#573)。
+      # 画像生成・ダイアグラム・PlantUML/Rechartsレンダリングのルーティング先(#573)。
       MEDIA_SERVICE_URI: http://media:8080
       # LLM呼び出し・記事プラン(壁打ち)・generation_jobsのルーティング先(#574)。
       AI_SERVICE_URI: http://ai:8080

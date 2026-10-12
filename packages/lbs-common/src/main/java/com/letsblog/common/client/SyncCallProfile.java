@@ -29,7 +29,7 @@ public enum SyncCallProfile {
     STANDARD(Duration.ofSeconds(3), Duration.ofSeconds(10)),
 
     /**
-     * 外部プロセス(PlantUMLサーバー、ヘッドレスChromiumによるRecharts/Penpotレンダリング等)に
+     * 外部プロセス(PlantUMLサーバー、ヘッドレスChromiumによるRechartsレンダリング等)に
      * 依存し数秒〜十数秒かかりうる呼び出し。content/legacy-api → media-serviceのレンダリング系が該当。
      */
     RENDER(Duration.ofSeconds(3), Duration.ofSeconds(30)),

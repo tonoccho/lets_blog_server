@@ -161,18 +161,6 @@ export interface PlantUmlRenderRequest {
   source: string;
 }
 
-export interface PenpotDesignFileRequest {
-  /** @minLength 1 */
-  fileName: string;
-  promptContext?: string;
-}
-
-export interface PenpotDesignFileResponse {
-  fileId?: string;
-  projectId?: string;
-  url?: string;
-}
-
 export interface MediaGarbageCollectionDeleteRequest {
   /**
      * @minItems 1

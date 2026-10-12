@@ -1371,9 +1371,6 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "penpotFileUrl": {
-            "type": "string"
           }
         }
       },
@@ -1679,9 +1676,6 @@
           "projectId": {
             "type": "integer",
             "format": "int64"
-          },
-          "penpotFileUrl": {
-            "type": "string"
           }
         }
       },

@@ -33,6 +33,17 @@ Then(
   }
 );
 
+// ---- Penpot の行が無い(issue #1750) ----
+
+Then('連携サービスの状況に Penpot の行は無く、他のサービスの行は表示される', async ({ page }) => {
+  const panel = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: '接続サービスの稼働状況' }) });
+  // 他のサービスの行が出てから(読み込み中の空表示ではなく)Penpot の不在を確かめる。
+  await expect(panel.locator('ul > li').filter({ hasText: 'ComfyUI' })).toBeVisible({ timeout: 30_000 });
+  await expect(panel.locator('ul > li').filter({ hasText: 'Penpot' })).toHaveCount(0);
+});
+
 // ---- 演算デバイス表示(issue #1397) ----
 
 function serviceRow(page: import('@playwright/test').Page, serviceName: string) {

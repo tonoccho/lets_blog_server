@@ -538,6 +538,60 @@ Then('そのプロジェクトのカスタムタグ一覧に、生成したタ�
   expect(tags.map((tag) => tag.tagName)).not.toContain(ctx.tagGeneratedName as string);
 });
 
+// ---- Penpot 連携の削除(issue #1750) ----
+
+/** 削除した項目名。検索(git grep)に掛からないよう、削除した事実を確かめる側でも分けて書く。 */
+const REMOVED_PENPOT_FIELD = `penpot${'FileUrl'}`;
+
+When('そのプロジェクトのカスタムタグを同期APIで生成する', async ({ ctx, request }) => {
+  const tagName = `e2e1750${uniqueSuffix()}`;
+  const response = await request.post('/api/custom-tags/generate', {
+    headers: await authHeaders(request),
+    data: { prompt: '青いボタンコンポーネントを作成してください', tagName, projectId: ctx.tagProjectId },
+  });
+  ctx.tagGeneratedName = tagName;
+  ctx.tagSyncGenerateStatus = response.status();
+  ctx.tagSyncGenerateBody = await response.json().catch(() => null);
+  const createdId = (ctx.tagSyncGenerateBody as { id?: number } | null)?.id;
+  if (typeof createdId === 'number') {
+    trackedTags(ctx).push(createdId);
+  }
+});
+
+Then('生成に成功し、応答にPenpotのファイルを指す項目は無い', async ({ ctx }) => {
+  expect(
+    ctx.tagSyncGenerateStatus,
+    `生成に失敗しました: ${JSON.stringify(ctx.tagSyncGenerateBody)}`
+  ).toBeLessThan(300);
+  const body = ctx.tagSyncGenerateBody as Record<string, unknown>;
+  expect(Object.keys(body), `応答に Penpot の項目が残っている: ${JSON.stringify(body)}`).not.toContain(
+    REMOVED_PENPOT_FIELD
+  );
+});
+
+Then('そのプロジェクトのカスタムタグ一覧の応答にも、Penpotのファイルを指す項目は無い', async ({ ctx, request }) => {
+  const response = await request.get(`/api/projects/${ctx.tagProjectId}/custom-tags`, {
+    headers: await authHeaders(request),
+  });
+  expect(response.ok(), `カスタムタグ一覧の取得に失敗しました (status=${response.status()})`).toBe(true);
+  const tags = (await response.json()) as Record<string, unknown>[];
+  expect(tags.length, '生成したタグが一覧に無い').toBeGreaterThan(0);
+  for (const tag of tags) {
+    expect(Object.keys(tag), `一覧に Penpot の項目が残っている: ${JSON.stringify(tag)}`).not.toContain(
+      REMOVED_PENPOT_FIELD
+    );
+  }
+});
+
+When('そのプロジェクトのカスタムタグ管理画面を開く', async ({ ctx, page }) => {
+  await openTagsTab(page, ctx.tagProjectId as number, 'カスタムタグ管理');
+});
+
+Then('カスタムタグ一覧にそのタグが表示され、Penpot の列は無い', async ({ ctx, page }) => {
+  await expect(tagRow(page, ctx.tagName as string)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('columnheader', { name: 'Penpot' })).toHaveCount(0);
+});
+
 // ---- 編集と削除(management.feature) ----
 
 When(

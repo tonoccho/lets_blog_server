@@ -87,7 +87,7 @@ class RenderBodySizeLimitFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         FilterChain chain = (req, res) -> req.getInputStream().readAllBytes();
 
-        assertThatThrownBy(() -> filter.doFilter(chunked(post("/api/render/penpot/design-file", 500)), response, chain))
+        assertThatThrownBy(() -> filter.doFilter(chunked(post("/api/render/recharts", 500)), response, chain))
                 .isInstanceOf(RequestBodyTooLargeException.class)
                 .hasMessageContaining("100");
     }

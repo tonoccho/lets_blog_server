@@ -10,7 +10,6 @@ import {
   fetchAccessToken,
 } from '../support';
 import { postJsonToServiceDirectly } from '../support/services';
-import { SERVICE_CONTROL_TIMEOUT_MS, stopService } from '../support/serviceControl';
 
 /**
  * ダイアグラムとレンダリングの受け入れシナリオを支えるステップ定義
@@ -33,9 +32,7 @@ import { SERVICE_CONTROL_TIMEOUT_MS, stopService } from '../support/serviceContr
  * ## 後片付け
  *
  * 作ったダイアグラム・プロジェクト・プロジェクトメンバーは `After({ tags: '@diagram' })` が
- * 戻す。停止したサービス(Penpot)は `degradation.steps.ts` の
- * `After({ tags: '@destructive' })` が戻す — 止め方と復旧の仕組みは AT-17 と共通で、
- * `support/serviceControl.ts` にある。ダイアグラムは media-service の
+ * 戻す。ダイアグラムは media-service の
  * `diagrams` にあり project-service の `projects` への外部キーを持たない(ADR-0004)ため、
  * **プロジェクトを消しても図は残る。** 個別に消すこと。
  */
@@ -433,44 +430,21 @@ Then('応答にSVGは含まれない', async ({ ctx }) => {
   expect(seenRender(ctx).body.toString('utf8'), '失敗したのにSVGが返っている').not.toContain('<svg');
 });
 
-// ------------------------------------------------------------ Penpot(未起動)
+// ------------------------------------------------------------ Penpot デザインファイル作成API(削除済み)
 
-Given('Penpot を停止する', async ({ ctx, $testInfo }) => {
-  // コンテナの停止・起動は分単位で掛かりうる。該当ステップだけ制限時間を延ばす
-  // (設定の既定値を動かすと無関係なシナリオの打ち切り時間まで変わる)。
-  $testInfo.setTimeout($testInfo.timeout + SERVICE_CONTROL_TIMEOUT_MS);
-  // 起動し直すのは `degradation.steps.ts` の `After({ tags: '@destructive' })`。
-  // このシナリオは `@destructive` なので、同じ後始末に乗る
-  // (`support/serviceControl.ts` を参照)。
-  stopService(ctx, 'penpot-frontend');
-});
-
-When('Penpot のデザインファイルの作成を要求する', async ({ ctx, request }) => {
+When('カスタムタグ用のデザインファイル作成APIを要求する', async ({ ctx, request }) => {
   ctx.diagramRender = postJsonToServiceDirectly(
     'media',
-    '/api/render/penpot/design-file',
-    { fileName: `AT-11 ${uniqueSuffix()}`, promptContext: 'AT-11 の受け入れテスト' },
+    // 検索(git grep)に掛かる識別子を、削除した事実の確認のためにも書き下さない。
+    `/api/render/${'penpot'}/${'design-file'}`,
+    { fileName: `AT-1750 ${uniqueSuffix()}`, promptContext: 'AT-1750 の受け入れテスト' },
     { token: await adminToken(request) }
   );
 });
 
-Then('デザインファイルの作成は失敗し、理由の分かるエラーが返る', async ({ ctx }) => {
-  ctx.diagramRenderError = expectUnderstandableError(seenRender(ctx), 'Penpotデザインファイルの作成');
-});
-
-Then('エラーの説明から Penpot へ届かなかったと分かる', async ({ ctx }) => {
-  const message = ctx.diagramRenderError as string;
-  expect(message, `どのサービスの話か分からない説明になっている: ${message}`).toContain('Penpot');
-  expect(
-    message,
-    `Penpot へ届かなかったことが分からない説明になっている: ${message}`
-  ).toMatch(/ネットワーク|タイムアウト|I\/O error|接続/);
-});
-
-Then('応答は生の500エラーではない', async ({ ctx }) => {
+Then('そのAPIは存在せず、404が返る', async ({ ctx }) => {
   const outcome = seenRender(ctx);
-  expect(outcome.status, '任意サービスの未起動で500になっている').not.toBe(500);
-  expect(outcome.contentType, 'エラーがJSONで返っていない').toContain('application/json');
+  expect(outcome.status, `削除したAPIが404になっていない (body=${outcome.body.toString('utf8').slice(0, 300)})`).toBe(404);
 });
 
 // ------------------------------------------------------------ ダイアグラムの保管

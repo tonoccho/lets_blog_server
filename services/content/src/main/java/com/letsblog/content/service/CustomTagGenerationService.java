@@ -6,10 +6,7 @@ import com.letsblog.content.dto.GenerateCustomTagRequest;
 import com.letsblog.content.dto.GenerateCustomTagResponse;
 import com.letsblog.content.dto.ValidationError;
 import com.letsblog.content.dto.ValidationResult;
-import com.letsblog.content.render.MediaRenderClient;
 import com.letsblog.content.repository.CustomTagRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,20 +16,17 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * カスタムタグのAI生成(LLM+Penpotデザインファイル作成)。legacy-apiのCustomTagGenerationServiceと
+ * カスタムタグのAI生成(LLM)。legacy-apiのCustomTagGenerationServiceと
  * 同じ実装(issue #576でcontent-serviceへ移管)。#574時点ではcustom_tagsテーブルへの直接書き込みが
  * 理由でai-serviceへは移設せずlegacy-apiに残されていたが(AiGenerationClientのJavadoc参照)、
  * custom_tagsの所有権自体が本Issueでcontent-serviceへ移ったため、ここへ移設する。
- * AiGenerationClient/MediaRenderClientはlegacy-apiを経由せず、それぞれai-service/media-serviceへ
- * 直接問い合わせる。
+ * AiGenerationClientはlegacy-apiを経由せず、ai-serviceへ直接問い合わせる。
+ * (Penpotのデザインファイル作成は#1750で削除した。)
  */
 @Service
 public class CustomTagGenerationService {
 
-    private static final Logger log = LoggerFactory.getLogger(CustomTagGenerationService.class);
-
     private final AiGenerationClient aiGenerationClient;
-    private final MediaRenderClient mediaRenderClient;
     private final CustomTagRepository customTagRepository;
     private final AdminAuthorizationService adminAuthorizationService;
     private final CustomTagValidationService customTagValidationService;
@@ -42,12 +36,10 @@ public class CustomTagGenerationService {
 
     public CustomTagGenerationService(
             AiGenerationClient aiGenerationClient,
-            MediaRenderClient mediaRenderClient,
             CustomTagRepository customTagRepository,
             AdminAuthorizationService adminAuthorizationService,
             CustomTagValidationService customTagValidationService) {
         this.aiGenerationClient = aiGenerationClient;
-        this.mediaRenderClient = mediaRenderClient;
         this.customTagRepository = customTagRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.customTagValidationService = customTagValidationService;
@@ -108,29 +100,9 @@ public class CustomTagGenerationService {
         tag.setCssContent(cssContent);
         tag.setDescription(request.description());
         tag.setProjectId(projectId);
-        tag.setPenpotFileUrl(tryCreatePenpotDesignFile(request.tagName(), request.prompt(), htmlTemplate, cssContent));
 
         CustomTag savedTag = customTagRepository.save(tag);
         return GenerateCustomTagResponse.from(savedTag);
-    }
-
-    /**
-     * LLMへ送ったプロンプトと生成結果を元に、Penpot上へハンドオフ用のデザインファイルを作成する。
-     * Penpotへの接続失敗はカスタムタグ生成そのものを失敗させないベストエフォート扱いとする
-     * (Penpotが未起動/未設定でもタグ生成というコア機能は継続できるべきため)。
-     */
-    private String tryCreatePenpotDesignFile(String tagName, String prompt, String htmlTemplate, String cssContent) {
-        try {
-            String promptContext = "LLMへのプロンプト:\n" + prompt
-                    + "\n\n生成されたHTML:\n" + htmlTemplate
-                    + "\n\n生成されたCSS:\n" + cssContent;
-            MediaRenderClient.DesignFile designFile =
-                    mediaRenderClient.createPenpotDesignFile("カスタムタグ: " + tagName, promptContext);
-            return designFile.url();
-        } catch (RuntimeException e) {
-            log.warn("Penpotデザインファイルの作成に失敗しました(タグ生成は継続します): {}", e.getMessage());
-            return null;
-        }
     }
 
     private String buildPrompt(String userPrompt) {

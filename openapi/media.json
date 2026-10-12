@@ -574,36 +574,6 @@
         }
       }
     },
-    "/api/render/penpot/design-file": {
-      "post": {
-        "tags": [
-          "render-controller"
-        ],
-        "operationId": "createPenpotDesignFile",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PenpotDesignFileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PenpotDesignFileResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/projects/{id}/media-garbage-collection/delete": {
       "post": {
         "tags": [
@@ -1778,35 +1748,6 @@
         "required": [
           "source"
         ]
-      },
-      "PenpotDesignFileRequest": {
-        "type": "object",
-        "properties": {
-          "fileName": {
-            "type": "string",
-            "minLength": 1
-          },
-          "promptContext": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "fileName"
-        ]
-      },
-      "PenpotDesignFileResponse": {
-        "type": "object",
-        "properties": {
-          "fileId": {
-            "type": "string"
-          },
-          "projectId": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          }
-        }
       },
       "MediaGarbageCollectionDeleteRequest": {
         "type": "object",

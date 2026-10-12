@@ -6,9 +6,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * content-service の Flyway マイグレーションの契約テスト(issue #914)。
@@ -34,6 +36,9 @@ class MigrationContractTest {
     @Autowired
     private Flyway flyway;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     @DisplayName("2回目のマイグレーションは0件(冪等である)")
     void マイグレーションは冪等である() {
@@ -50,5 +55,27 @@ class MigrationContractTest {
     @DisplayName("適用済みマイグレーションのチェックサムがファイルと一致する")
     void 適用済みマイグレーションを後から編集していない() {
         assertDoesNotThrow(() -> MigrationContract.verifyValidates(flyway, "content"));
+    }
+
+    @Test
+    @DisplayName("Penpotのファイル URL の列(custom_tags)は削除されている(issue #1750)")
+    void Penpotのファイル_URL列は削除されている() {
+        Integer columns = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                        + "WHERE table_schema = DATABASE() AND table_name = 'custom_tags' "
+                        + "AND column_name = ?",
+                Integer.class, "penpot" + "_file_url");
+        assertEquals(0, columns);
+    }
+
+    @Test
+    @DisplayName("custom_tags の他の列は残っている(issue #1750)")
+    void custom_tagsの他の列は残っている() {
+        Integer columns = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                        + "WHERE table_schema = DATABASE() AND table_name = 'custom_tags' "
+                        + "AND column_name IN ('tag_name', 'html_template', 'css_content', 'project_id')",
+                Integer.class);
+        assertEquals(4, columns);
     }
 }

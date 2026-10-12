@@ -294,8 +294,8 @@ Review of every bucket in `RateLimitWebFilter` (the other three, for test-time e
 - **Limit**: 10 MiB (10,485,760 bytes) of JSON body, per request. Not a rate limit.
 - **Environment Variable**: `RENDER_MAX_BODY_BYTES` (`app.render.max-body-bytes` in
   `services/media`)
-- **Applies to**: `POST /api/render/plantuml`, `/api/render/recharts`,
-  `/api/render/penpot/design-file` (media-service; reachable only from content-service /
+- **Applies to**: `POST /api/render/plantuml`, `/api/render/recharts`
+  (media-service; reachable only from content-service /
   publishing-service inside `lbs-net`, not routed by the gateway, #830)
 - **Why a limit at all**: Spring's `@RequestBody` JSON read has no cap (the multipart
   `max-file-size`/`max-request-size` of 20MB do not apply), so a huge `source`/`data` would consume

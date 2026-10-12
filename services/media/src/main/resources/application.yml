@@ -96,7 +96,7 @@ spring:
     # と同じ3秒の慣例に合わせる。
     connection-timeout: 3s
 
-# ComfyUI/PlantUML/Penpotへの接続情報。legacy-apiのapplication.ymlから該当プロパティをそのまま
+# ComfyUI/PlantUMLへの接続情報。legacy-apiのapplication.ymlから該当プロパティをそのまま
 # 移設した(#573)。ComfyUIは同梱せず、GPU PCなど外部のサーバーへURLで接続する(issue #1746)。
 # 接続先はDB(system_settings.comfyui_base_url)とプロジェクト設定で決まる。comfyui-checkpointは
 # チェックポイントを選んでいないプロジェクトの既定の名前で、ファイルの実体はComfyUI側にある。
@@ -106,10 +106,6 @@ app:
     max-body-bytes: ${RENDER_MAX_BODY_BYTES:10485760}
   comfyui-checkpoint: ${COMFYUI_CHECKPOINT:v1-5-pruned-emaonly.safetensors}
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
-  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
-  penpot-public-url: ${PENPOT_PUBLIC_URL:http://localhost:9001}
-  penpot-service-email: ${PENPOT_SERVICE_EMAIL:lbs-service@letsblog.local}
-  penpot-service-password: ${PENPOT_SERVICE_PASSWORD:}
   generated-images-storage-path: ${GENERATED_IMAGES_STORAGE_PATH:/app/data/generated-images}
   # 画像生成のアプリ全体の既定値(issue #583でlegacy-apiから移設)。プロジェクト単位の上書きが
   # 無い場合にProjectImageDefaultsResolverが使う。環境変数名は移設前と同じものを引き継いでいる。

@@ -49,7 +49,6 @@ class ExternalCallLoggingWiringContractTest {
                 "keycloak-token");
         add("services/media/src/main/java/com/letsblog/media/ai/ChatGptImageClient.java", "openai-image");
         add("services/media/src/main/java/com/letsblog/media/ai/ComfyUiClient.java", "comfyui");
-        add("services/media/src/main/java/com/letsblog/media/ai/PenpotClient.java", "penpot");
         add("services/media/src/main/java/com/letsblog/media/render/PlantUmlClient.java", "plantuml");
         add("services/platform/src/main/java/com/letsblog/platform/keycloak/KeycloakAdminClientConfig.java",
                 "keycloak-admin");

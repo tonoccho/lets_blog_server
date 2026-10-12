@@ -155,7 +155,6 @@ app:
   # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
   # legacy-apiのapiコンテナが持っていた同名プロパティと同じ。
   plantuml-base-url: ${PLANTUML_BASE_URL:http://localhost:8085}
-  penpot-base-url: ${PENPOT_BASE_URL:http://localhost:9001}
   wordpress-provision-base-url: ${WORDPRESS_PROVISION_BASE_URL:http://localhost:9000}
   # ContainerStatusService(issue #695、C10-3でlegacy-apiから移設)がDocker Engine API(コンテナ一覧)を
   # 読み取り専用で取得するためのdocker-socket-proxyのURL。docker-socket-proxyへのアクセスは

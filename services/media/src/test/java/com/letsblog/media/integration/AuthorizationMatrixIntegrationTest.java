@@ -88,7 +88,6 @@ class AuthorizationMatrixIntegrationTest {
                 // -- RenderController --
                 new Endpoint("POST", "/api/render/plantuml"),
                 new Endpoint("POST", "/api/render/recharts"),
-                new Endpoint("POST", "/api/render/penpot/design-file"),
 
                 // -- GeneratedImageController --
                 new Endpoint("GET", "/api/generated-images"),

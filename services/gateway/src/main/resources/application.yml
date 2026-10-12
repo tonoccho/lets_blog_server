@@ -414,11 +414,10 @@ app:
           # 残り続けていたので、issue #913 で削除した(#707 の /api/publish/** と同じ形の残骸)。
           - /api/generated-images/**
           - /api/diagrams/**
-          # /api/render/** は載せない(issue #830)。PlantUML/Recharts/Penpotのレンダリングは
+          # /api/render/** は載せない(issue #830)。PlantUML/Rechartsのレンダリングは
           # content-service・publishing-serviceのMediaRenderClientがapp.media-service-uriへ
           # コンテナ間で直接呼ぶ経路しか無く、web/extensionからの利用は無い。gatewayに載せると
-          # 「有効なJWTさえあれば誰でも」外部から叩ける状態になり、特に
-          # /api/render/penpot/design-file はサービスアカウントで共有Penpotにファイルを作れてしまう。
+          # 「有効なJWTさえあれば誰でも」外部から叩ける状態になる。
           # 認可はレンダリングを依頼する側(content-serviceのCustomTagController等)が担う。
           # MediaControllerの実際のマッピングは/api/media/**(#573 stage3でmedia-serviceへ移設)。
           - /api/media/**

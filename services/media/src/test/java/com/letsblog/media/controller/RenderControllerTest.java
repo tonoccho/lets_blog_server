@@ -1,8 +1,5 @@
 package com.letsblog.media.controller;
 
-import com.letsblog.media.ai.PenpotClient;
-import com.letsblog.media.dto.PenpotDesignFileRequest;
-import com.letsblog.media.dto.PenpotDesignFileResponse;
 import com.letsblog.media.dto.PlantUmlRenderRequest;
 import com.letsblog.media.dto.RechartsRenderResponse;
 import com.letsblog.media.render.PlantUmlClient;
@@ -21,14 +18,12 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * RenderController(#573)の回帰テスト。PlantUMLは legacy-api から移設した既存エンドポイントの挙動、
- * Recharts/Penpotはlegacy-api側の{@code PlantUmlEmbedService}等が委譲する先として新設した
+ * Rechartsはlegacy-api側の{@code PlantUmlEmbedService}等が委譲する先として新設した
  * エンドポイントの応答形状を検証する。
  */
 @ExtendWith(MockitoExtension.class)
@@ -38,14 +33,12 @@ class RenderControllerTest {
     private PlantUmlClient plantUmlClient;
     @Mock
     private RechartsRenderer rechartsRenderer;
-    @Mock
-    private PenpotClient penpotClient;
 
     private RenderController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new RenderController(plantUmlClient, rechartsRenderer, penpotClient);
+        controller = new RenderController(plantUmlClient, rechartsRenderer);
     }
 
     @Test
@@ -70,19 +63,5 @@ class RenderControllerTest {
 
         assertEquals("<div class=\"recharts-wrapper\"></div>", response.html());
         verify(rechartsRenderer).render(config);
-    }
-
-    @Test
-    void createPenpotDesignFile_PenpotClientのDesignFileをレスポンスDTOへ写す() {
-        PenpotClient.DesignFile designFile = new PenpotClient.DesignFile(
-                "file-id", "project-id", "http://localhost:9001/#/view/file-id?page-id=p&share-id=s");
-        when(penpotClient.createDesignFile(eq("カスタムタグ: my-button"), any())).thenReturn(designFile);
-
-        PenpotDesignFileResponse response = controller.createPenpotDesignFile(
-                new PenpotDesignFileRequest("カスタムタグ: my-button", "プロンプト内容"));
-
-        assertEquals("file-id", response.fileId());
-        assertEquals("project-id", response.projectId());
-        assertEquals("http://localhost:9001/#/view/file-id?page-id=p&share-id=s", response.url());
     }
 }

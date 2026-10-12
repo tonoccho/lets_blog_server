@@ -184,7 +184,6 @@ ai-service へ移設済みのエンドポイントを legacy-api に問い合わ
 |---|---|---|---|---|---|---|
 | content(`MediaRenderClient`) → `PlantUmlEmbedService`(Markdownフェンス埋め込み、プレビュー限定) | `POST /api/render/plantuml` | RENDER(30秒) | なし(POST) | あり(`media-service`) | **プレースホルダ表示**(issue #581の受入基準の例そのもの。副作用の無いプレビュー専用経路のため安全に代替できる) | 済 |
 | content(`MediaRenderClient`) → `PlantUmlTagRenderService`/`RechartsTagRenderService`(組み込みタグ`[plantuml]`/`[recharts]`) | `POST /api/render/plantuml`・`POST /api/render/recharts` | RENDER(30秒) | なし | あり(`media-service`、上記と共有) | 明確なエラー(既存の製品判断: タグの記法・データ誤りを利用者に明示する設計を維持。C12では変更しない) | 済(クライアント基盤は移行、フォールバック方針は既存のまま維持) |
-| content(`MediaRenderClient`) → `CustomTagGenerationService`(Penpotデザインファイル作成) | `POST /api/render/penpot/design-file` | RENDER(30秒) | なし | あり(`media-service`、上記と共有) | 明確なエラー | 済 |
 | legacy-api(`MediaRenderClient`、content版と同一エンドポイントの旧経路) | `POST /api/render/**` | (未移行、既存は20秒) | - | - | (未整理) | 未 |
 | legacy-api(`MediaGeneratedImageClient`) | `/api/generated-images`・`/api/generated-images/{id}/file` | (未移行) | - | - | (未整理) | 未 |
 
@@ -203,7 +202,7 @@ ai-service へ移設済みのエンドポイントを legacy-api に問い合わ
 
 ### 対象外(外部システム連携。C12のスコープ外)
 
-Keycloak Admin API(identity-service)、GitHub API(ai-service)、ComfyUI/PlantUMLサーバー/Penpot
+Keycloak Admin API(identity-service)、GitHub API(ai-service)、ComfyUI/PlantUMLサーバー
 (media-service)、Google Analytics/AdSense API(analytics-service)、WordPress(wp-cli・プロビジョニングエージェント)は、いずれも`lets_blog_server`内の別サービスではなく外部システムとの連携であり、
 本Issueが対象とする「サービス間(lbs-*間)同期呼び出し」には含めない。
 

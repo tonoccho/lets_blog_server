@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
- * media-service(#573)。ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングを
+ * media-service(#573)。ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Rechartsレンダリングを
  * legacy-apiから抽出したもの。lbs_mediaスキーマ(ADR-0004)を所有する。
  */
 @SpringBootApplication

@@ -65,7 +65,6 @@ export interface ControllerEndpoint {
 export const NON_GATEWAY_ROUTED_PATHS = [
   '/api/render/plantuml',
   '/api/render/recharts',
-  '/api/render/penpot/design-file',
 ];
 
 /**

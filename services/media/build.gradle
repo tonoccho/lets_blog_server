@@ -19,7 +19,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     // メディアガベージコレクションの監査ログ発行(#573 stage3、AuditLogService参照)。
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
-    // GeneratedImageController/PenpotClient等がcom.fasterxml.jackson.databind.ObjectMapper/JsonNodeを
+    // GeneratedImageController/ComfyUiClient等がcom.fasterxml.jackson.databind.ObjectMapper/JsonNodeを
     // 直接使うため明示的に追加する(Boot 4の既定JSONコンバータ・既定ObjectMapperはJackson3系
     // (tools.jackson)に変わったため、com.fasterxml.jackson.databind.ObjectMapperのBean定義には
     // 明示的にこのモジュールが必要。legacy-apiのbuild.gradleと同じ構成)。

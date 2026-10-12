@@ -122,14 +122,13 @@ export function ProjectCustomTagManager({
               <th className="px-4 py-2">形式</th>
               <th className="px-4 py-2">説明</th>
               <th className="px-4 py-2">表示サンプル</th>
-              <th className="px-4 py-2">Penpot</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {tags.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center">
+                <td colSpan={5} className="px-4 py-8 text-center">
                   <div className="flex flex-col items-center gap-4">
                     <p className="text-neutral-600 dark:text-neutral-400">登録済みカスタムタグはありません</p>
                     <a
@@ -162,19 +161,6 @@ export function ProjectCustomTagManager({
                 <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">{tag.description}</td>
                 <td className="px-4 py-2">
                   <CustomTagPreviewCell projectId={projectId} tag={tag} />
-                </td>
-                <td className="px-4 py-2 whitespace-nowrap">
-                  {tag.penpotFileUrl && (
-                    <a
-                      href={tag.penpotFileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      開く →
-                    </a>
-                  )}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <button type="button" onClick={() => setEditing(tag)} className="text-sm text-blue-600 hover:underline">

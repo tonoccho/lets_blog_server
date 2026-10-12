@@ -21,7 +21,7 @@ export * from './generated/log-writer/audit-log-controller/audit-log-controller'
 export * from './generated/log-writer/operation-log-controller/operation-log-controller';
 export * from './generated/log-writer/frontend-error-log-controller/frontend-error-log-controller';
 
-// media(ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングの所有権を
+// media(ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Rechartsレンダリングの所有権を
 // media-serviceへ移管、#573 stage1)
 export * from './generated/media/openAPIDefinition.schemas';
 export * from './generated/media/generated-image-controller/generated-image-controller';

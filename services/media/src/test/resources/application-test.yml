@@ -32,10 +32,6 @@ spring:
 app:
   comfyui-checkpoint: v1-5-pruned-emaonly.safetensors
   plantuml-base-url: http://localhost:19999
-  penpot-base-url: http://localhost:19999
-  penpot-public-url: http://localhost:19999
-  penpot-service-email: lbs-service@letsblog.local
-  penpot-service-password: test-password
   generated-images-storage-path: /tmp/generated-images
   publishing-service-uri: http://localhost:19999
   ai-service-uri: http://localhost:19999

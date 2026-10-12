@@ -39,7 +39,6 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
     private static final String DB_COMFYUI_URL = "http://db-comfyui.test:8188";
     private static final String PLANTUML_URL = "http://plantuml.test";
     private static final String WORDPRESS_URL = "http://wordpress-provision.test";
-    private static final String PENPOT_URL = "http://penpot.test";
 
     @Mock
     private DataSource dataSource;
@@ -57,7 +56,6 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
     private MockRestServiceServer comfyUiServer;
     private MockRestServiceServer plantUmlServer;
     private MockRestServiceServer wordpressServer;
-    private MockRestServiceServer penpotServer;
     private ConnectedServiceStatusService service;
     private final List<String> comfyUiFactoryBaseUrls = new ArrayList<>();
 
@@ -76,16 +74,13 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
         RestClient.Builder comfyUiBuilder = RestClient.builder();
         RestClient.Builder plantUmlBuilder = RestClient.builder().baseUrl(PLANTUML_URL);
         RestClient.Builder wordpressBuilder = RestClient.builder().baseUrl(WORDPRESS_URL);
-        RestClient.Builder penpotBuilder = RestClient.builder().baseUrl(PENPOT_URL);
         comfyUiServer = MockRestServiceServer.bindTo(comfyUiBuilder).build();
         plantUmlServer = MockRestServiceServer.bindTo(plantUmlBuilder).build();
         wordpressServer = MockRestServiceServer.bindTo(wordpressBuilder).build();
-        penpotServer = MockRestServiceServer.bindTo(penpotBuilder).build();
         plantUmlServer.expect(requestTo(PLANTUML_URL + "/png/"
                         + PlantUmlEncoder.encode("@startuml\nA->B\n@enduml")))
                 .andRespond(withSuccess(new byte[]{1, 2, 3}, MediaType.IMAGE_PNG));
         wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
-        penpotServer.expect(requestTo(PENPOT_URL + "/readyz")).andRespond(withSuccess());
 
         service = new ConnectedServiceStatusService(
                 dataSource,
@@ -95,7 +90,6 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
                 },
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
-                penpotBuilder, PENPOT_URL,
                 systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService,
                 baseUrl -> RestClient.builder().baseUrl(baseUrl));

@@ -21,7 +21,7 @@ import org.springframework.web.client.RestClientException;
  * Let's Blog 自身のマイクロサービス9つの稼働状況(issue #589)。
  *
  * <p>{@link ConnectedServiceStatusService} が見ているのは<b>外部依存</b>
- * (DB・LLM・ComfyUI・PlantUML・WordPressエージェント・Penpot・Brave Search)だけで、
+ * (DB・LLM・ComfyUI・PlantUML・WordPressエージェント・Brave Search)だけで、
  * サービス自身の状態はダッシュボードに出ていなかった。サービスが11個になった構成では
  * 「どれが落ちているか」が一目で分からないと運用できない、というのが #589 の出発点である。
  *

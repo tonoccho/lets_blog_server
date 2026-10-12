@@ -13,10 +13,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * media-serviceの{@code /api/render/**}(PlantUML/Recharts/Penpot、issue #573)を呼び出すクライアント。
+ * media-serviceの{@code /api/render/**}(PlantUML/Recharts、issue #573)を呼び出すクライアント。
  * legacy-apiのMediaRenderClientと同じ役割だが、content-service側は埋め込みタグの実際の展開
- * (PlantUmlEmbedService/PlantUmlTagRenderService(プレビュー限定)/RechartsTagRenderService/
- * CustomTagGenerationService)を自身で持つため、legacy-apiを経由せず直接media-serviceへ問い合わせる
+ * (PlantUmlEmbedService/PlantUmlTagRenderService(プレビュー限定)/RechartsTagRenderService)を自身で持つため、legacy-apiを経由せず直接media-serviceへ問い合わせる
  * (issue #576)。issue #581(C12)でlbs-commonの{@link SyncServiceClient}へ移行し、C12が採用した
  * 方針(「content → media のレンダリングは30秒/リトライなし/失敗時はプレースホルダ表示」の例)を
  * そのまま適用した。方針の詳細はdocs/SYNC_SERVICE_CALLS.md参照。
@@ -84,28 +83,6 @@ public class MediaRenderClient {
         }
     }
 
-    public DesignFile createPenpotDesignFile(String fileName, String promptContext) {
-        try {
-            PenpotDesignFileResult result = client.post(
-                    "/api/render/penpot/design-file", new Object[0],
-                    Map.of("fileName", fileName, "promptContext", promptContext == null ? "" : promptContext),
-                    PenpotDesignFileResult.class, ServiceAuthHeaders.forwardedBearer(request));
-            if (result == null) {
-                throw new AiServiceException("media-serviceから空の応答を受け取りました", null);
-            }
-            return new DesignFile(result.fileId(), result.projectId(), result.url());
-        } catch (SyncServiceException e) {
-            throw new AiServiceException("media-serviceのPenpotデザインファイル作成呼び出しに失敗しました: " + e.getMessage(), e);
-        }
-    }
-
-    /** media-service側の{@code PenpotClient.DesignFile}相当。CustomTagGenerationServiceが参照する。 */
-    public record DesignFile(String fileId, String projectId, String url) {
-    }
-
     private record RechartsRenderResult(String html) {
-    }
-
-    private record PenpotDesignFileResult(String fileId, String projectId, String url) {
     }
 }

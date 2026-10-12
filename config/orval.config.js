@@ -27,7 +27,7 @@ module.exports = {
     },
   },
 
-  // ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Recharts/Penpotレンダリングをmedia-serviceへ
+  // ComfyUI画像生成・draw.ioダイアグラム・PlantUML/Rechartsレンダリングをmedia-serviceへ
   // 移設(#573)。
   media: {
     input: {

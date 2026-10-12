@@ -51,14 +51,12 @@ public class ConnectedServiceStatusService {
     private final DataSource dataSource;
     private final RestClient plantUmlClient;
     private final RestClient wordpressProvisioningClient;
-    private final RestClient penpotClient;
     private final SystemSettingService systemSettingService;
     private final AppSettingService appSettingService;
     private final LetsBlogServiceStatusService letsBlogServiceStatusService;
     private final RabbitMqQueueStatusService rabbitMqQueueStatusService;
     private final String plantUmlBaseUrl;
     private final String wordpressProvisionBaseUrl;
-    private final String penpotBaseUrl;
     /**
      * OLLAMAのbaseUrlはAppSettingService経由でDB優先に実行時解決される(#1086)ため、他の外部連携と
      * 異なりコンストラクタ時点でRestClientを固定できない。チェックの都度、解決済みbaseUrlから
@@ -77,7 +75,6 @@ public class ConnectedServiceStatusService {
             DataSource dataSource,
             @Value("${app.plantuml-base-url}") String plantUmlBaseUrl,
             @Value("${app.wordpress-provision-base-url}") String wordpressProvisionBaseUrl,
-            @Value("${app.penpot-base-url}") String penpotBaseUrl,
             SystemSettingService systemSettingService,
             AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
@@ -86,7 +83,6 @@ public class ConnectedServiceStatusService {
                 ConnectedServiceStatusService::builderWithTimeout,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
-                builderWithTimeout(penpotBaseUrl), penpotBaseUrl,
                 systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService,
                 ConnectedServiceStatusService::builderWithTimeout);
@@ -98,7 +94,6 @@ public class ConnectedServiceStatusService {
             Function<String, RestClient.Builder> comfyUiClientBuilderFactory,
             RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
             RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
-            RestClient.Builder penpotBuilder, String penpotBaseUrl,
             SystemSettingService systemSettingService,
             AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
@@ -107,7 +102,6 @@ public class ConnectedServiceStatusService {
         this.dataSource = dataSource;
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
-        this.penpotClient = penpotBuilder.build();
         this.systemSettingService = systemSettingService;
         this.appSettingService = appSettingService;
         this.letsBlogServiceStatusService = letsBlogServiceStatusService;
@@ -115,7 +109,6 @@ public class ConnectedServiceStatusService {
         this.comfyUiClientBuilderFactory = comfyUiClientBuilderFactory;
         this.plantUmlBaseUrl = plantUmlBaseUrl;
         this.wordpressProvisionBaseUrl = wordpressProvisionBaseUrl;
-        this.penpotBaseUrl = penpotBaseUrl;
         this.ollamaClientBuilderFactory = ollamaClientBuilderFactory;
     }
 
@@ -145,8 +138,6 @@ public class ConnectedServiceStatusService {
                 checkAsync("plantuml", "PlantUML", this::checkPlantUml);
         CompletableFuture<ConnectedServiceStatusDetailResponse> wordpressProvisioning =
                 checkAsync("wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
-        CompletableFuture<ConnectedServiceStatusDetailResponse> penpot =
-                checkAsync("penpot", "Penpot", this::checkPenpot);
 
         List<ConnectedServiceStatusDetailResponse> result = new ArrayList<>(List.of(
                 runTimed("database", "データベース", this::checkDatabase),
@@ -154,7 +145,6 @@ public class ConnectedServiceStatusService {
                 comfyUi.join(),
                 plantUml.join(),
                 wordpressProvisioning.join(),
-                penpot.join(),
                 runTimed("brave-search", "Brave Search API", this::checkBraveSearch),
                 // RabbitMQのキュー滞留・DLQ滞留(issue #589)。DLQに残っていれば、
                 // 処理されなかったイベントが確実に存在するのでERRORにする。
@@ -315,11 +305,6 @@ public class ConnectedServiceStatusService {
     /** provision-agentの専用ヘルスチェックルート(issue #197で追加)で判定する。 */
     private CheckOutcome checkWordpressProvisioning() {
         return checkHttpService(wordpressProvisioningClient, wordpressProvisionBaseUrl, "/health");
-    }
-
-    /** Penpotフロントエンドが公開しているヘルスチェック用エンドポイントで判定する。 */
-    private CheckOutcome checkPenpot() {
-        return checkHttpService(penpotClient, penpotBaseUrl, "/readyz");
     }
 
     /**

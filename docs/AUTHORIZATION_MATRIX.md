@@ -465,9 +465,9 @@ publishing-service の `MediaRenderClient` で、`app.media-service-uri` へコ�
 持たない(web / extension からの利用は無いことをリポジトリ全体の検索で確認した)。
 そこで **gateway のルート表から `/api/render/**` を外した**。
 
-とくに `POST /api/render/penpot/design-file` は、サービスアカウント
-(`PENPOT_SERVICE_EMAIL`)で共有 Penpot ワークスペースにファイルを作る。ルートに載っていた間は
-認証済みユーザーなら誰でも無制限に作成できた。
+とくに `POST /api/render/penpot/design-file`(サービスアカウントで共有 Penpot ワークスペースに
+ファイルを作る)は、ルートに載っていた間は認証済みユーザーなら誰でも無制限に作成できた。
+このエンドポイントは Penpot の削除に伴い #1750 で削除した(現在の `RenderController` は2件)。
 
 5件とも各メソッドの Javadoc に `認可不要:` マーカーで理由を記録した。
 

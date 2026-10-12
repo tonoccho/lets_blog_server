@@ -6,7 +6,6 @@ import com.letsblog.content.dto.GenerateCustomTagRequest;
 import com.letsblog.content.dto.GenerateCustomTagResponse;
 import com.letsblog.content.dto.ValidationError;
 import com.letsblog.content.dto.ValidationResult;
-import com.letsblog.content.render.MediaRenderClient;
 import com.letsblog.content.repository.CustomTagRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,7 +17,6 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,16 +29,13 @@ import static org.mockito.Mockito.when;
 
 /**
  * issue #656: #641のレビューで、CustomTag*サービス群のうちCustomTagGenerationServiceが未テストの
- * まま残っていたことを受けて追加。LLMレスポンスからのHTML/CSS抽出・バリデーション連携・重複チェック・
- * Penpotデザインファイル作成のベストエフォートフォールバックを検証する。
+ * まま残っていたことを受けて追加。LLMレスポンスからのHTML/CSS抽出・バリデーション連携・重複チェックを検証する(Penpotデザインファイル連携は#1750で削除)。
  */
 @ExtendWith(MockitoExtension.class)
 class CustomTagGenerationServiceTest {
 
     @Mock
     private AiGenerationClient aiGenerationClient;
-    @Mock
-    private MediaRenderClient mediaRenderClient;
     @Mock
     private CustomTagRepository customTagRepository;
     @Mock
@@ -53,7 +48,7 @@ class CustomTagGenerationServiceTest {
     @BeforeEach
     void setUp() {
         service = new CustomTagGenerationService(
-                aiGenerationClient, mediaRenderClient, customTagRepository,
+                aiGenerationClient, customTagRepository,
                 adminAuthorizationService, customTagValidationService);
     }
 
@@ -79,7 +74,6 @@ class CustomTagGenerationServiceTest {
         assertEquals(html, content.htmlTemplate());
         assertEquals(css, content.cssContent());
         verify(customTagRepository, never()).save(any());
-        verify(mediaRenderClient, never()).createPenpotDesignFile(anyString(), anyString());
         verify(adminAuthorizationService, never()).requireAdmin();
     }
 
@@ -123,8 +117,6 @@ class CustomTagGenerationServiceTest {
             saved.setId(1L);
             return saved;
         });
-        when(mediaRenderClient.createPenpotDesignFile(anyString(), anyString()))
-                .thenReturn(new MediaRenderClient.DesignFile("file-1", "proj-1", "https://penpot.example/file-1"));
 
         GenerateCustomTagResponse response = service.generate(buildRequest());
 
@@ -132,29 +124,7 @@ class CustomTagGenerationServiceTest {
         assertEquals("note", response.tagName());
         assertEquals(html, response.htmlTemplate());
         assertEquals(css, response.cssContent());
-        assertEquals("https://penpot.example/file-1", response.penpotFileUrl());
         verify(adminAuthorizationService).requireAdmin();
-    }
-
-    @Test
-    void generate_Penpotデザインファイル作成に失敗してもタグ生成は継続する() {
-        String html = "<div class=\"note\">{{content}}</div>";
-        String css = ".note { color: red; }";
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn(llmResponse(html, css));
-        when(customTagValidationService.validate(html, css)).thenReturn(new ValidationResult(true, List.of(), List.of()));
-        when(customTagRepository.findByTagNameAndProjectIdIsNull("note")).thenReturn(Optional.empty());
-        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
-            CustomTag saved = invocation.getArgument(0);
-            saved.setId(1L);
-            return saved;
-        });
-        when(mediaRenderClient.createPenpotDesignFile(anyString(), anyString()))
-                .thenThrow(new RuntimeException("penpot down"));
-
-        GenerateCustomTagResponse response = service.generate(buildRequest());
-
-        assertEquals(1L, response.id());
-        assertNull(response.penpotFileUrl());
     }
 
     @Test

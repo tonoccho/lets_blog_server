@@ -81,7 +81,6 @@ export interface CustomTagResponse {
   projectId?: number;
   createdAt?: string;
   updatedAt?: string;
-  penpotFileUrl?: string;
 }
 
 export interface CustomTagTemplateRequest {
@@ -196,7 +195,6 @@ export interface GenerateCustomTagResponse {
   cssContent?: string;
   description?: string;
   projectId?: number;
-  penpotFileUrl?: string;
 }
 
 export interface CloneCustomTagTemplateRequest {

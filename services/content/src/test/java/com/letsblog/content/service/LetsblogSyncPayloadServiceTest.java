@@ -63,7 +63,7 @@ class LetsblogSyncPayloadServiceTest {
     }
 
     private CustomTagResponse tag(Long id, String name, Long projectId, String html, String css) {
-        return new CustomTagResponse(id, name, html, "desc", css, CustomTagFormat.BLOCK, projectId, null, null, null);
+        return new CustomTagResponse(id, name, html, "desc", css, CustomTagFormat.BLOCK, projectId, null, null);
     }
 
     private JsonNode payloadJson(LetsblogSyncPayloadResponse response) throws Exception {

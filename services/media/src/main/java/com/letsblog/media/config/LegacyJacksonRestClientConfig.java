@@ -6,11 +6,11 @@ import org.springframework.web.client.RestClient;
 
 /**
  * Boot 4ではRestClientの既定JSONコンバータがJackson3(tools.jackson)になったが、
- * 外部API連携クライアント(Penpot等)は引き続きcom.fasterxml.jackson.databind.JsonNode/ObjectNodeで
+ * 外部API連携クライアント(ComfyUi等)は引き続きcom.fasterxml.jackson.databind.JsonNode/ObjectNodeで
  * レスポンスを組み立てている。Jackson3のコンバータはJsonNode.class(Jackson2)を誤って受理した上で
  * デシリアライズに失敗するため、各クライアントの構築時にJackson3コンバータを外し、Jackson2コンバータへ
  * 差し替える。legacy-apiの{@code com.letsblog.api.config.LegacyJacksonRestClientConfig}と同一の実装
- * (#573でPenpotClientと共にmedia-serviceへ移設)。
+ * (#573でmedia-serviceへ移設)。
  */
 public final class LegacyJacksonRestClientConfig {
 
