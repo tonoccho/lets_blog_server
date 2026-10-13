@@ -32,7 +32,7 @@ async function preparePanel(page: Page, ctx: Record<string, unknown>): Promise<L
   const projectId = ctx.esProjectId as number;
   const panel = await openSyncPanel(page, projectId);
   await fillSyncPanel(panel, 'db');
-  ctx.syncJobBefore = await latestSyncJobId(page.request, projectId);
+  ctx.syncJobBefore = await latestSyncJobId(page.request);
   ctx.syncPanel = panel;
   return panel;
 }

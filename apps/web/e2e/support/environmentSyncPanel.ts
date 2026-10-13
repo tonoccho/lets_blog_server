@@ -66,13 +66,28 @@ function payloadProjectId(requestPayload: string | null): number | null {
   }
 }
 
-async function listSyncJobs(request: APIRequestContext, projectId: number): Promise<JobDetail[]> {
+/** ジョブ一覧(一覧は id と type だけの要約)から、環境間同期のジョブの id を返す。詳細は取らない。 */
+async function listSyncJobIds(request: APIRequestContext): Promise<number[]> {
   const headers = await authHeaders(request);
   const list = await request.get('/api/generation-jobs', { headers });
   expect(list.ok(), `ジョブ一覧の取得に失敗しました (status=${list.status()})`).toBe(true);
+  return ((await list.json()) as { id: number; type: string }[]).filter((j) => j.type === SYNC_JOB_TYPE).map((j) => j.id);
+}
+
+/**
+ * `afterJobId` より新しい、そのプロジェクトの環境間同期ジョブ。詳細(`/api/generation-jobs/{id}`)は
+ * `afterJobId` より新しいものだけ取る。
+ *
+ * #1766: かつては履歴にある環境間同期ジョブを全件、1秒おきに詳細取得していた。ジョブは実行のたびに溜まり
+ * (数百件)、1回の探索で数百リクエストになって gateway の `API_RATE_LIMIT_REQUESTS`(1000回/分)を使い切り、
+ * 同じワーカーのフィクスチャ作成・削除や他ワーカーが 429 で落ちた。詳細を取るのは新しいジョブだけにして、
+ * リクエスト数を履歴の長さに依存させない。
+ */
+async function listSyncJobsAfter(request: APIRequestContext, projectId: number, afterJobId: number): Promise<JobDetail[]> {
+  const headers = await authHeaders(request);
   const jobs: JobDetail[] = [];
-  for (const job of ((await list.json()) as { id: number; type: string }[]).filter((j) => j.type === SYNC_JOB_TYPE)) {
-    const detail = await request.get(`/api/generation-jobs/${job.id}`, { headers });
+  for (const id of (await listSyncJobIds(request)).filter((jobId) => jobId > afterJobId)) {
+    const detail = await request.get(`/api/generation-jobs/${id}`, { headers });
     if (!detail.ok()) continue;
     const body = (await detail.json()) as JobDetail;
     // ジョブの要求内容は JSON 列に保存され、読み出すと `"projectId": 7` のように空白が入る。JSON として読んで比べる。
@@ -81,17 +96,19 @@ async function listSyncJobs(request: APIRequestContext, projectId: number): Prom
   return jobs;
 }
 
-/** そのプロジェクトの環境間同期ジョブのうち最新のid。無ければ 0。操作の前後でどれが新しいかを見分けるのに使う。 */
-export async function latestSyncJobId(request: APIRequestContext, projectId: number): Promise<number> {
-  const jobs = await listSyncJobs(request, projectId);
-  return jobs.reduce((max, job) => Math.max(max, job.id), 0);
+/**
+ * 環境間同期ジョブのうち最新のid(どのプロジェクトのものでもよい)。無ければ 0。操作の前後でどれが新しいかを
+ * 見分けるのに使う。基準が「全プロジェクトの最新」でも、`findSyncJob` は projectId でも絞るので結果は変わらない。
+ */
+export async function latestSyncJobId(request: APIRequestContext): Promise<number> {
+  return (await listSyncJobIds(request)).reduce((max, id) => Math.max(max, id), 0);
 }
 
 /** `afterJobId` より新しい、そのプロジェクトの環境間同期ジョブを探す。受理後に作られるので短く再試行する。 */
 export async function findSyncJob(request: APIRequestContext, projectId: number, afterJobId: number): Promise<JobDetail> {
   const deadline = Date.now() + JOB_LOOKUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const job = (await listSyncJobs(request, projectId)).find((j) => j.id > afterJobId);
+    const job = (await listSyncJobsAfter(request, projectId, afterJobId))[0];
     if (job) return job;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }

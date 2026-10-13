@@ -213,13 +213,41 @@ function roleNames(siteKey: string): string[] {
   );
 }
 
-/** WordPress自身のログイン画面からCookie認証する(`siteAdoption.steps.ts`のloginToWordPressAdminを踏襲)。 */
+/**
+ * WordPress自身のログイン画面からCookie認証する(`siteAdoption.steps.ts`のloginToWordPressAdminを踏襲)。
+ *
+ * #1766: 並列実行・高負荷のホストで、`#wp-submit`を押しても`wp-admin`へ遷移せずログイン画面のまま
+ * 30秒を使い切る失敗が数回に1回あった(エラーメッセージの表示は無い)。30秒待っても進まない以上、
+ * 待ちを延ばしても通らないため、1試行の待ちを20秒に絞ってログイン画面の読み込みからやり直す
+ * (最大3試行)。遷移の完了は`Promise.all`でクリックと同時に待ち、クリック直後の遷移を取り逃さない。
+ * 3回とも進まなければ、各試行のURLとログイン画面のエラー文を添えて失敗させる(原因の手がかりを残す)。
+ */
+const WP_LOGIN_ATTEMPTS = 3;
+const WP_LOGIN_ATTEMPT_TIMEOUT_MS = 20000;
+
 async function loginToWordPressAdmin(page: Page, slug: string, adminUser: string, adminPassword: string): Promise<void> {
-  await page.goto(`/sites/${slug}/wp-login.php`);
-  await page.locator('#user_login').fill(adminUser);
-  await page.locator('#user_pass').fill(adminPassword);
-  await page.locator('#wp-submit').click();
-  await page.waitForURL(`**/sites/${slug}/wp-admin/**`, { timeout: 30000 });
+  const failures: string[] = [];
+  for (let attempt = 1; attempt <= WP_LOGIN_ATTEMPTS; attempt += 1) {
+    try {
+      await page.goto(`/sites/${slug}/wp-login.php`, { waitUntil: 'load' });
+      // 前の試行の遅れたログインが成立していると、ログイン画面はwp-adminへ転送される。
+      if (new URL(page.url()).pathname.startsWith(`/sites/${slug}/wp-admin/`)) {
+        return;
+      }
+      await page.locator('#wp-submit').waitFor({ state: 'visible', timeout: WP_LOGIN_ATTEMPT_TIMEOUT_MS });
+      await page.locator('#user_login').fill(adminUser);
+      await page.locator('#user_pass').fill(adminPassword);
+      await Promise.all([
+        page.waitForURL(`**/sites/${slug}/wp-admin/**`, { timeout: WP_LOGIN_ATTEMPT_TIMEOUT_MS }),
+        page.locator('#wp-submit').click(),
+      ]);
+      return;
+    } catch {
+      const loginError = (await page.locator('#login_error').textContent().catch(() => null))?.trim() ?? '(なし)';
+      failures.push(`試行${attempt}: url=${page.url()} login_error=${loginError}`);
+    }
+  }
+  throw new Error(`wp-adminへログインできませんでした(${WP_LOGIN_ATTEMPTS}試行)\n${failures.join('\n')}`);
 }
 
 // --------------------------------------------------------------- 前提
@@ -297,7 +325,7 @@ async function performSync(
   await fillSyncPanel(panel, target);
   // issue #1697: 同期はジョブとして受理されるだけで、完了は待たない。後続の検証は同期先の実状態を見るので、
   // 受理されたジョブが完了するまで待ってから戻る。
-  const before = await latestSyncJobId(page.request, projectId);
+  const before = await latestSyncJobId(page.request);
   await submitSyncPanel(page, panel);
   await expect(panel.getByText(SYNC_ACCEPTED_NOTICE)).toBeVisible({ timeout: 60000 });
   const job = await findSyncJob(page.request, projectId, before);
