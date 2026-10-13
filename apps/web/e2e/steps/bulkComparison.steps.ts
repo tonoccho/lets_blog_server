@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
+import { acquireSiteLock } from '../site-lock';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
 
 /**
@@ -197,6 +198,10 @@ function requireRow(ctx: Record<string, unknown>): TermComparisonRow {
 Given(
   'testをマスター環境、localを対象環境とする2つのWordPressサイトを持つ比較用プロジェクトがある',
   async ({ ctx, request }) => {
+    // 固定サイト(at7cmpmaster / at7cmptarget)は bulkComparisonResources など別ファイルの
+    // シナリオと共有する。確認から作成までの競合(409)と状態の食い合いを避けるため、同じ名前の
+    // ロックを準備から After の後片付けまで保持する(#1780、#1694)。
+    ctx.cmpSiteLockRelease = await acquireSiteLock('at7cmp');
     const projectId = await ensureProject(request);
     const master = await ensureManagedSite(request, MASTER_SITE_KEY);
     const target = await ensureManagedSite(request, TARGET_SITE_KEY);
@@ -300,11 +305,15 @@ Then('比較結果でそのカテゴリはマスター環境に存在しない',
 
 /** シナリオが作ったカテゴリを消す。サイトそのものは残す(構築に分単位かかるため)。 */
 After({ tags: '@bulk' }, async ({ ctx }) => {
-  for (const term of (ctx.cmpCreated as CreatedTerm[] | undefined) ?? []) {
-    try {
-      wpCli(term.siteSlug, `term delete category ${term.termId}`);
-    } catch {
-      // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
+  try {
+    for (const term of (ctx.cmpCreated as CreatedTerm[] | undefined) ?? []) {
+      try {
+        wpCli(term.siteSlug, `term delete category ${term.termId}`);
+      } catch {
+        // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
+      }
     }
+  } finally {
+    (ctx.cmpSiteLockRelease as (() => void) | undefined)?.();
   }
 });

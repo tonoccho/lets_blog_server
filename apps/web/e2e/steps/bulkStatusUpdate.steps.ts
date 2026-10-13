@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { APIRequestContext } from "@playwright/test";
 import { After, Given, Then, When } from "./fixtures";
+import { acquireSiteLock } from "../site-lock";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -310,6 +311,10 @@ function presentIn(
 Given(
   "testとlocalに2つのWordPressサイトを持つ一括操作用プロジェクトがある",
   async ({ ctx, request }) => {
+    // 固定サイト(at7cmpmaster / at7cmptarget)は bulkComparisonResources など別ファイルの
+    // シナリオと共有する。確認から作成までの競合(409)と状態の食い合いを避けるため、同じ名前の
+    // ロックを準備から After の後片付けまで保持する(#1780、#1694)。
+    ctx.bsuSiteLockRelease = await acquireSiteLock("at7cmp");
     const projectId = await ensureProject(request);
     const master = await ensureManagedSite(request, MASTER_SITE_KEY);
     const target = await ensureManagedSite(request, TARGET_SITE_KEY);
@@ -531,13 +536,17 @@ Then(
 
 /** シナリオが作ったリソースを消す。サイトそのものは残す(構築に分単位かかるため)。 */
 After({ tags: "@bulk" }, async ({ ctx }) => {
-  for (const cleanup of (
-    (ctx.bsuCleanups as Cleanup[] | undefined) ?? []
-  ).reverse()) {
-    try {
-      cleanup();
-    } catch {
-      // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
+  try {
+    for (const cleanup of (
+      (ctx.bsuCleanups as Cleanup[] | undefined) ?? []
+    ).reverse()) {
+      try {
+        cleanup();
+      } catch {
+        // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
+      }
     }
+  } finally {
+    (ctx.bsuSiteLockRelease as (() => void) | undefined)?.();
   }
 });
