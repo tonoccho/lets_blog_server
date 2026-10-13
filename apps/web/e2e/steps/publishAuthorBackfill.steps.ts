@@ -1,9 +1,11 @@
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
 import { createFixtureProject, expect } from '../support';
+import { acquireSiteLock } from '../site-lock';
 import {
   adminHeaders,
   adminToken,
+  AUTHOR_SITE_LOCK,
   ensureManagedSite,
   findWpUserByEmail,
   provisionLoginableKeycloakCredential,
@@ -44,6 +46,8 @@ async function bind(
 }
 
 Given('補填検証用の2つのWordPressサイトがある', async ({ ctx, request }) => {
+  // authors.feature と共有する固定サイトのため、準備から After までロックを保持する(#1779)。
+  ctx.authorSiteLockRelease = await acquireSiteLock(AUTHOR_SITE_LOCK);
   const first = await ensureManagedSite(request, FIRST_SITE_KEY);
   const second = await ensureManagedSite(request, SECOND_SITE_KEY);
   ctx.authorSiteSlug = wpSlug(first.siteKey);
@@ -141,15 +145,19 @@ Then('1つ目のサイトには、そのメンバーのWordPressユーザーが1
 });
 
 After({ tags: '@author-backfill' }, async ({ ctx }) => {
-  const slug = ctx.backfillSecondSiteSlug as string | undefined;
-  const email = ctx.authorMemberEmail as string | undefined;
-  if (slug && email) {
-    try {
-      for (const wpUser of findWpUserByEmail(slug, email)) {
-        wpCli(slug, `user delete ${wpUser.ID} --yes`);
+  try {
+    const slug = ctx.backfillSecondSiteSlug as string | undefined;
+    const email = ctx.authorMemberEmail as string | undefined;
+    if (slug && email) {
+      try {
+        for (const wpUser of findWpUserByEmail(slug, email)) {
+          wpCli(slug, `user delete ${wpUser.ID} --yes`);
+        }
+      } catch {
+        // 後片付けの失敗としては扱わない(publishAuthor.steps.tsと同じ方針)。
       }
-    } catch {
-      // 後片付けの失敗としては扱わない(publishAuthor.steps.tsと同じ方針)。
     }
+  } finally {
+    (ctx.authorSiteLockRelease as (() => void) | undefined)?.();
   }
 });

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 import { kcadm, kcadmLogin, KEYCLOAK_REALM } from '../kcadm';
 import { After, Given, Then, When } from './fixtures';
+import { acquireSiteLock } from '../site-lock';
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -35,6 +36,13 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 /** 著者マッピング検証用のサイト。冪等に用意し、実行をまたいで再利用する。 */
 const AUTHOR_SITE_KEY = 'at66authorprobe';
 const AUTHOR_SITE_ADMIN_USER = 'at66authoradmin';
+
+/**
+ * 固定サイト at66authorprobe を使うシナリオ(authors.feature と author-backfill.feature)を
+ * 直列化するロック名(#1779、#1694)。`@mode:serial` はファイルの中しか直列にしないため、
+ * 別ワーカーが同じサイトを同時に構築して 409 → 構築途中の adopt が 404 になる競合が起きていた。
+ */
+export const AUTHOR_SITE_LOCK = 'at66authorprobe';
 
 /** WordPress自動構築の待ち上限。分単位でかかりうる。 */
 const PROVISION_TIMEOUT_MS = 600_000;
@@ -165,9 +173,14 @@ async function adoptExistingManagedSite(
       adminUser: AUTHOR_SITE_ADMIN_USER,
     },
   });
+  const hint =
+    adopted.status() === 404
+      ? ' [固定サイトのロックを保持した状態での 404 のため、他ワーカーの構築途中ではなく、' +
+        '管理者の無い取り残しのサイトと考えられる。呼び出し元がロックを取っていない場合は構築途中の可能性がある]'
+      : '';
   expect(
     adopted.ok(),
-    `既存WordPressの取り込みに失敗しました (status=${adopted.status()}): ${await adopted.text()}`
+    `既存WordPressの取り込みに失敗しました (status=${adopted.status()}): ${await adopted.text()}${hint}`
   ).toBe(true);
   return (await adopted.json()) as SiteFixture;
 }
@@ -201,6 +214,8 @@ export function provisionLoginableKeycloakCredential(email: string, password: st
 // ------------------------------------------------------- 前提
 
 Given('著者マッピング検証用のWordPressサイトがあり、プロジェクトに紐づいている', async ({ ctx, request }) => {
+  // 準備から After の後片付けまでロックを保持し、author-backfill.feature との同時構築を避ける(#1779)。
+  ctx.authorSiteLockRelease = await acquireSiteLock(AUTHOR_SITE_LOCK);
   const site = await ensureManagedSite(request);
   const token = await adminToken(request);
   const project = await createFixtureProject(request, token, 'at66-author');
@@ -320,37 +335,41 @@ Then('WordPress側にその利用者のメールアドレスに対応する新�
 // ------------------------------------------------------- 後片付け
 
 After({ tags: '@publishing' }, async ({ ctx, request }) => {
-  const projectId = ctx.authorProjectId as number | undefined;
-  if (projectId !== undefined) {
-    const token = await adminToken(request);
-    await deleteFixtureProject(request, token, projectId);
-  }
-
-  const memberId = ctx.authorMemberId as number | undefined;
-  if (memberId !== undefined) {
-    const headers = await adminHeaders(request);
-    await request.delete(`/api/users/${memberId}`, { headers });
-  }
-
-  const slug = ctx.authorSiteSlug as string | undefined;
-  const postId = ctx.authorPublishedPostId as string | undefined;
-  if (slug && postId) {
-    try {
-      wpCli(slug, `post delete ${postId} --force`);
-    } catch {
-      // 既に削除済み等は後片付けの失敗としては扱わない。
+  try {
+    const projectId = ctx.authorProjectId as number | undefined;
+    if (projectId !== undefined) {
+      const token = await adminToken(request);
+      await deleteFixtureProject(request, token, projectId);
     }
-  }
 
-  const email = ctx.authorMemberEmail as string | undefined;
-  if (slug && email) {
-    try {
-      const wpUsers = findWpUserByEmail(slug, email);
-      for (const wpUser of wpUsers) {
-        wpCli(slug, `user delete ${wpUser.ID} --yes`);
+    const memberId = ctx.authorMemberId as number | undefined;
+    if (memberId !== undefined) {
+      const headers = await adminHeaders(request);
+      await request.delete(`/api/users/${memberId}`, { headers });
+    }
+
+    const slug = ctx.authorSiteSlug as string | undefined;
+    const postId = ctx.authorPublishedPostId as string | undefined;
+    if (slug && postId) {
+      try {
+        wpCli(slug, `post delete ${postId} --force`);
+      } catch {
+        // 既に削除済み等は後片付けの失敗としては扱わない。
       }
-    } catch {
-      // 投稿削除前にユーザーへ紐づく投稿が他に残っている等は後片付けの失敗としては扱わない。
     }
+
+    const email = ctx.authorMemberEmail as string | undefined;
+    if (slug && email) {
+      try {
+        const wpUsers = findWpUserByEmail(slug, email);
+        for (const wpUser of wpUsers) {
+          wpCli(slug, `user delete ${wpUser.ID} --yes`);
+        }
+      } catch {
+        // 投稿削除前にユーザーへ紐づく投稿が他に残っている等は後片付けの失敗としては扱わない。
+      }
+    }
+  } finally {
+    (ctx.authorSiteLockRelease as (() => void) | undefined)?.();
   }
 });
