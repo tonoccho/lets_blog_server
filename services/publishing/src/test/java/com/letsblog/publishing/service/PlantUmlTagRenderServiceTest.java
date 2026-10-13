@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -111,12 +112,13 @@ class PlantUmlTagRenderServiceTest {
     }
 
     @Test
-    void render_レンダリング失敗時はInvalidPlantUmlTagExceptionを投げアップロードしない() {
+    void render_media呼び出し失敗時はPlantUmlServerUnavailableExceptionを投げアップロードしない() {
         when(mediaRenderClient.renderPlantUml(anyString()))
                 .thenThrow(new MediaRenderException("PlantUMLサーバーに接続できません", null));
 
-        assertThrows(InvalidPlantUmlTagException.class,
+        PlantUmlServerUnavailableException e = assertThrows(PlantUmlServerUnavailableException.class,
                 () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", Map.of()));
+        assertTrue(e.getMessage().contains("PlantUMLサーバーに接続できません"));
         verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
     }
 

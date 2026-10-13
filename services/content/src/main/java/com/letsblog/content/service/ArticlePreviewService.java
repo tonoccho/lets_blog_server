@@ -69,7 +69,7 @@ public class ArticlePreviewService {
         }
         try {
             rendered = plantUmlTagRenderService.renderForPreview(rendered);
-        } catch (InvalidPlantUmlTagException e) {
+        } catch (InvalidPlantUmlTagException | PlantUmlServerUnavailableException e) {
             return renderPlantUmlError(e.getMessage());
         }
         rendered = plantUmlEmbedService.embedDiagramsForPreview(rendered);

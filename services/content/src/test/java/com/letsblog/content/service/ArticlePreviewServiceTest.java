@@ -178,4 +178,20 @@ class ArticlePreviewServiceTest {
         verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
                 renderedContentWrapperService);
     }
+
+    @Test
+    void renderHtml_PlantUMLサーバーに接続できない場合も同じエラー表示で中止する() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
+        when(plantUmlTagRenderService.renderForPreview("markdown"))
+                .thenThrow(new PlantUmlServerUnavailableException("PlantUMLサーバーに接続できません: x", null));
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertTrue(html.contains("PlantUMLサーバーに接続できません: x"));
+        assertTrue(html.contains("PlantUML図のレンダリングエラー"));
+        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+                renderedContentWrapperService);
+    }
 }

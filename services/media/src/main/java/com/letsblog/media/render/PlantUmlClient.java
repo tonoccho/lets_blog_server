@@ -5,6 +5,7 @@ import com.letsblog.media.ai.AiServiceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 /**
@@ -29,6 +30,9 @@ public class PlantUmlClient {
                     .body(byte[].class);
         } catch (RestClientResponseException e) {
             throw new AiServiceException("PlantUMLのレンダリングに失敗しました: " + e.getStatusCode(), e);
+        } catch (RestClientException e) {
+            // 名前解決失敗・接続拒否・タイムアウト等(HTTP応答なし)。素の500にせず502へ写像させる(issue #1759)。
+            throw new AiServiceException("PlantUMLサーバーに接続できません: " + e.getMessage(), e);
         }
     }
 }

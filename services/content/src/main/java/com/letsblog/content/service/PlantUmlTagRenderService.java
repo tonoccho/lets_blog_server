@@ -34,7 +34,7 @@ public class PlantUmlTagRenderService {
      * プレビュー向け: PNGをdata URIとして直接埋め込む。CMS認証情報を必要とせず、
      * メディアアップロードも行わない(プレビューは副作用のある外部呼び出しを避けるため)。
      *
-     * @throws InvalidPlantUmlTagException レンダリングに失敗した場合
+     * @throws PlantUmlServerUnavailableException media-service経由のレンダリング呼び出しに失敗した場合(502)
      */
     public String renderForPreview(String markdown) {
         if (markdown == null || markdown.isEmpty()) {
@@ -56,7 +56,7 @@ public class PlantUmlTagRenderService {
         try {
             return mediaRenderClient.renderPlantUml(wrappedDiagramSource);
         } catch (AiServiceException e) {
-            throw new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました: " + e.getMessage(), e);
+            throw new PlantUmlServerUnavailableException("PlantUMLサーバーに接続できません: " + e.getMessage(), e);
         }
     }
 

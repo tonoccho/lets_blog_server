@@ -51,7 +51,7 @@ public class PlantUmlTagRenderService {
      * priorUploadsに同一内容(sha256)のダイアグラムが既にあり、CMS側のメディアも実在する場合は
      * 再生成・再アップロードせず既存のURLを再利用する(issue #499。通常画像の再利用判定と同じ方針)。
      *
-     * @throws InvalidPlantUmlTagException レンダリング/アップロードに失敗した場合
+     * @throws PlantUmlServerUnavailableException media-service経由のレンダリング呼び出しに失敗した場合(502)
      */
     public DiagramEmbedResult render(
             CmsCredentials credentials, String markdown, Map<String, UploadedImageInfo> priorUploads) {
@@ -90,7 +90,7 @@ public class PlantUmlTagRenderService {
         try {
             return mediaRenderClient.renderPlantUml(wrappedDiagramSource);
         } catch (MediaRenderException e) {
-            throw new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました: " + e.getMessage(), e);
+            throw new PlantUmlServerUnavailableException("PlantUMLサーバーに接続できません: " + e.getMessage(), e);
         }
     }
 

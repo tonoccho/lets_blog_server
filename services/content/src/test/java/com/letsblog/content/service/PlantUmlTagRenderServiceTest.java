@@ -69,11 +69,11 @@ class PlantUmlTagRenderServiceTest {
     }
 
     @Test
-    void renderForPreview_レンダリング失敗時はInvalidPlantUmlTagExceptionを投げる() {
+    void renderForPreview_media呼び出し失敗時はPlantUmlServerUnavailableExceptionを投げる() {
         when(mediaRenderClient.renderPlantUml(anyString()))
                 .thenThrow(new AiServiceException("PlantUMLサーバーに接続できません", null));
 
-        InvalidPlantUmlTagException e = assertThrows(InvalidPlantUmlTagException.class,
+        PlantUmlServerUnavailableException e = assertThrows(PlantUmlServerUnavailableException.class,
                 () -> service.renderForPreview("[plantuml]\nA->B\n[/plantuml]"));
         assertTrue(e.getMessage().contains("PlantUMLサーバーに接続できません"));
     }

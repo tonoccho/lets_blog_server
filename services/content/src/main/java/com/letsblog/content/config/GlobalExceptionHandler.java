@@ -9,6 +9,7 @@ import com.letsblog.content.service.IdentityServiceUnavailableException;
 import com.letsblog.content.service.InvalidCustomTagContentException;
 import com.letsblog.content.service.InvalidPlantUmlTagException;
 import com.letsblog.content.service.InvalidRechartsTagException;
+import com.letsblog.content.service.PlantUmlServerUnavailableException;
 import com.letsblog.content.service.PostNotFoundException;
 import com.letsblog.content.service.SiteNotFoundException;
 import com.letsblog.common.web.ErrorResponse;
@@ -80,6 +81,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidRechartsTagException.class)
     public ResponseEntity<ErrorResponse> handleInvalidRechartsTag(InvalidRechartsTagException e) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    @ExceptionHandler(PlantUmlServerUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handlePlantUmlServerUnavailable(PlantUmlServerUnavailableException e) {
+        log.warn("PlantUMLサーバーへ接続できません", e);
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidPlantUmlTagException.class)
