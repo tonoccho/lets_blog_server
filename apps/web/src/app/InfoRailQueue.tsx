@@ -27,6 +27,8 @@ import { useViewerTimeZone } from "./operation-logs/useViewerTimeZone";
 const POLL_INTERVAL_MS = 2000;
 /** 進行中のジョブがないときの確認間隔。このページで始めたジョブを、遷移なしで拾うため。 */
 const IDLE_POLL_INTERVAL_MS = 10000;
+/** 1 回の取得がこの時間返らなければ、その取得を見限って取り直す(#1773)。 */
+const REQUEST_TIMEOUT_MS = 10000;
 
 type QueueState =
   | { status: "loading" }
@@ -58,6 +60,8 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
  * 情報表示レールの「処理キュー」タブ。表示中は取得し、進行中(running / pending)のジョブがある間は
  * 2 秒間隔、ないときは 10 秒間隔で取得し直す。ページ遷移のたびに取得し直し、アンマウントで止まる。
  * 取得に失敗したら、エラーを出してポーリングを止める(次のページ遷移で再試行する)。
+ * 取得が返らないまま止まった場合は(失敗ではない)、{@link REQUEST_TIMEOUT_MS} で見張りが
+ * その取得を見限り、エラーを出さずに取り直してポーリングを続ける。遅れて届いた結果は捨てる(#1773)。
  */
 export function InfoRailQueue() {
   const { t } = useI18n();
@@ -68,17 +72,26 @@ export function InfoRailQueue() {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    /** 最新の取得の番号。見限った取得の遅れた結果を、番号の不一致で捨てる。 */
+    let requestId = 0;
 
     function load() {
+      const id = ++requestId;
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(load, REQUEST_TIMEOUT_MS);
       fetchQueueJobsAction().then(
         (result) => {
-          if (cancelled) return;
+          if (cancelled || id !== requestId) return;
+          if (watchdog) clearTimeout(watchdog);
           setState({ status: "ready", ...result });
           const active = result.jobs.some((job) => isActiveJobStatus(job.status));
           timer = setTimeout(load, active ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
         },
         () => {
-          if (!cancelled) setState({ status: "error" });
+          if (cancelled || id !== requestId) return;
+          if (watchdog) clearTimeout(watchdog);
+          setState({ status: "error" });
         },
       );
     }
@@ -87,6 +100,7 @@ export function InfoRailQueue() {
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      if (watchdog) clearTimeout(watchdog);
     };
   }, [pathname]);
 

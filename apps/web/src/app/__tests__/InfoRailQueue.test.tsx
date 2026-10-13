@@ -366,3 +366,109 @@ describe('InfoRailQueue failure reason (#1571)', () => {
     expect(screen.queryByTestId('info-rail-queue-failure-reason')).not.toBeInTheDocument()
   })
 })
+
+describe('InfoRailQueue hung request (#1773)', () => {
+  const running = { jobs: [job({ id: 17, type: 'site_provisioning', status: 'running' })], timeZone: 'UTC' }
+  const done = { jobs: [job({ id: 17, type: 'site_provisioning', status: 'done' })], timeZone: 'UTC' }
+
+  async function advance(ms: number) {
+    await act(async () => {
+      jest.advanceTimersByTime(ms)
+    })
+    await flush()
+  }
+
+  it('abandons a request that never settles, asks again, and shows the row as done without an error', async () => {
+    mockFetch
+      .mockResolvedValueOnce(running)
+      .mockReturnValueOnce(new Promise(() => {})) // サーバーアクションが返らない
+      .mockResolvedValue(done)
+    setup()
+    await flush()
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('実行中')
+
+    await advance(2000) // 2 回目の取得が詰まる
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    await advance(10000) // 監視が時間切れにして取り直す
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('完了')
+    expect(screen.queryByText('処理キューを取得できませんでした')).not.toBeInTheDocument()
+  })
+
+  it('keeps polling after recovering from a hung request', async () => {
+    mockFetch
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValueOnce(running)
+      .mockResolvedValue(done)
+    setup()
+    await advance(10000)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('実行中')
+    await advance(2000)
+    expect(mockFetch).toHaveBeenCalledTimes(3)
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('完了')
+  })
+
+  it('does not fire the watchdog once a response has arrived in time', async () => {
+    mockFetch.mockResolvedValue(done)
+    setup()
+    await flush()
+    await advance(9000) // 完了後は 10 秒間隔。監視の 10 秒が残っていれば先に重複して呼ばれる
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    await advance(1000)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a late result of an abandoned request', async () => {
+    let resolveLate: (v: unknown) => void = () => {}
+    mockFetch
+      .mockReturnValueOnce(new Promise((r) => (resolveLate = r)))
+      .mockResolvedValue(done)
+    setup()
+    await advance(10000)
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('完了')
+    const calls = mockFetch.mock.calls.length
+    resolveLate(running)
+    await flush()
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('完了')
+    await advance(2000)
+    expect(mockFetch).toHaveBeenCalledTimes(calls) // 遅れた結果が余分な取得を予約しない
+  })
+
+  it('ignores a late rejection of an abandoned request', async () => {
+    let rejectLate: (e: unknown) => void = () => {}
+    mockFetch
+      .mockReturnValueOnce(new Promise((_, rej) => (rejectLate = rej)))
+      .mockResolvedValue(done)
+    setup()
+    await advance(10000)
+    rejectLate(new Error('late'))
+    await flush()
+    expect(screen.queryByText('処理キューを取得できませんでした')).not.toBeInTheDocument()
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('完了')
+  })
+
+  it('clears the watchdog on unmount so no further request is made', async () => {
+    mockFetch.mockReturnValue(new Promise(() => {}))
+    const { unmount } = setup()
+    unmount()
+    await advance(30000)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('abandons the pending request on a pathname change and ignores its late result', async () => {
+    let resolveLate: (v: unknown) => void = () => {}
+    mockFetch.mockReturnValueOnce(new Promise((r) => (resolveLate = r))).mockResolvedValue(done)
+    const { rerender } = setup()
+    mockPathname = '/other'
+    rerender(
+      <I18nProvider initialLocale="ja">
+        <InfoRailQueue />
+      </I18nProvider>
+    )
+    await flush()
+    resolveLate(running)
+    await flush()
+    expect(screen.getByTestId('info-rail-queue-item')).toHaveTextContent('完了')
+  })
+})
