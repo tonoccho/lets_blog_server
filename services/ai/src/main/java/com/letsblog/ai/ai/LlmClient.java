@@ -292,7 +292,7 @@ public class LlmClient {
      * 従来どおり応答内容を添えたメッセージのままにする。
      *
      * <p>この判定は<b>呼び出し側でOLLAMAに限定する</b>こと。整形後の文言はOllama固有
-     * (ollama-model-initのログを見るよう案内する)であり、OpenAI互換エンドポイントは
+     * (Ollamaのあるホストでの ollama pull を案内する)であり、OpenAI互換エンドポイントは
      * OpenAI本体に限らず自前のOpenAI互換サーバ等でもよいため、
      * それらの404本文に "not found" が含まれると無関係な案内をしてしまう。
      */
@@ -302,13 +302,12 @@ public class LlmClient {
 
     /**
      * 生の404本文やスタックトレースではなく、「モデルがまだ無い/取得中である」と分かる文言を返す
-     * (issue #1086 / R3)。初回起動直後はollama-model-initがモデルを取得している最中で、
-     * 数分のあいだこの状態になりうる。
+     * (issue #1086 / R3)。Ollamaに対象モデルがまだ取得されていない間
+     * この状態になる。
      */
     private static String modelNotFoundMessage(String modelName) {
         return "モデル「" + modelName + "」がまだ利用できません。"
-                + "ローカルLLM(Ollama)では初回起動時のモデル取得に数分かかります。"
-                + "取得の進捗は docker logs -f lbs-ollama-model-init で確認できます。";
+                + "Ollamaのあるホストで ollama pull " + modelName + " を実行してモデルを取得してください。";
     }
 
     /** apiKeyがnullの場合はAuthorizationヘッダを付けない(認証を持たないOLLAMA向け、issue #1086)。 */

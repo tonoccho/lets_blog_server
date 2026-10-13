@@ -119,6 +119,10 @@ class LlmClientTest {
         assertTrue(e.getMessage().contains("qwen2.5:7b-instruct"), "実際: " + e.getMessage());
         assertTrue(e.getMessage().contains("取得"), "取得中であることが分かる文言にする。実際: " + e.getMessage());
         assertFalse(e.getMessage().contains("api_error"), "生の404本文をそのまま流さない。実際: " + e.getMessage());
+        assertTrue(e.getMessage().contains("ollama pull qwen2.5:7b-instruct"),
+                "Ollamaのあるホストでの ollama pull を案内する。実際: " + e.getMessage());
+        assertFalse(e.getMessage().contains("lbs-ollama-model-init"),
+                "存在しないコンテナを案内しない。実際: " + e.getMessage());
     }
 
     // ---- Ollama接続先が未設定(issue #1567) ----
@@ -184,7 +188,7 @@ class LlmClientTest {
     }
 
     /**
-     * モデル未取得の案内はOllama固有(「docker logs -f lbs-ollama-model-init で確認」)なので、
+     * モデル未取得の案内はOllama固有(「Ollamaのあるホストで ollama pull」)なので、
      * OLLAMA以外のプロバイダに適用してはならない。OpenAI互換エンドポイントは
      * OpenAI本体に限らずGroq/OpenRouter/自前サーバ等でもよく(.env.example の LLM_BASE_URL)、
      * それらが返す404の本文に "not found" が含まれることは十分ありうる。
