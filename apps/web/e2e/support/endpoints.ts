@@ -111,8 +111,11 @@ const ASSET_IMAGE_UPLOAD_PATTERN = new RegExp('^/api/projects/[^/]+/asset-images
  * 各環境へ実際にmultipartアップロードし、一括適用する(`BulkManagementController`)。
  * 画像アップロードではないが実際の重いファイルアップロードであるため、upload-endpointに残す
  * (issue #999の実装判断)。
+ * `POST /api/projects/{id}/bulk-management/upload/jobs`(同じzipの全環境インストールを
+ * ジョブとして受理する口、issue #1702)も、受理時にzip本体がgatewayを通るので同じ枠に入れる。
+ * slugの受理口(`apply-all/jobs`、JSON)は軽量なのでapi-globalに置く。
  */
-const BULK_MANAGEMENT_UPLOAD_PATTERN = new RegExp('^/api/projects/[^/]+/bulk-management/upload$');
+const BULK_MANAGEMENT_UPLOAD_PATTERN = new RegExp('^/api/projects/[^/]+/bulk-management/upload(/jobs)?$');
 
 export function isUploadBucketPath(requestPath: string): boolean {
   return UPLOAD_BUCKET_EXACT_PATHS.includes(requestPath)

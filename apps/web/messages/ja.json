@@ -57,7 +57,9 @@
     "queueTypeStaticContentGeneration": "静的コンテンツ生成",
     "queueTypeTagDesignGeneration": "タグデザイン生成",
     "queueTypeSiteProvisioning": "サイト自動構築",
-    "queueTypeEnvironmentSync": "環境間同期"
+    "queueTypeEnvironmentSync": "環境間同期",
+    "queueTypeBulkSlugInstall": "全環境へのインストール",
+    "queueTypeBulkZipInstall": "zip の全環境インストール"
   },
   "dashboard": {
     "title": "ダッシュボード",

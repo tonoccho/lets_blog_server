@@ -65,13 +65,16 @@ export default async function ProjectDetailPage({
    * 旧タブ id の `bulk-management` / `garbage-collection` は `maintenance` を開く(issue #1669)。
    * `?imageJob=<ジョブID>` を付けると、アセット画像生成パネルがそのジョブの生成結果を開いた状態で
    * 表示する(処理キューの画像生成ジョブの「結果を見る」の遷移先、issue #1408)。
+   * `?bulkJob=<ジョブID>` を付けると、メンテナンスタブの一括管理がその全環境インストールジョブの
+   * 環境ごとの成否を表示する(処理キューの「結果を見る」の遷移先、issue #1702)。
    */
-  searchParams?: Promise<{ tab?: string; imageJob?: string }>;
+  searchParams?: Promise<{ tab?: string; imageJob?: string; bulkJob?: string }>;
 }) {
   const { id } = await params;
-  const { tab: requestedTabId, imageJob } = (await searchParams) ?? {};
+  const { tab: requestedTabId, imageJob, bulkJob } = (await searchParams) ?? {};
   const initialTabId = requestedTabId === undefined ? undefined : (LEGACY_TAB_IDS[requestedTabId] ?? requestedTabId);
   const imageJobId = Number(imageJob);
+  const bulkJobId = Number(bulkJob);
   await requireAdminSession();
   const projectId = Number(id);
 
@@ -306,6 +309,7 @@ export default async function ProjectDetailPage({
             project={project}
             categoryPage={categoryPage}
             timezone={timezone}
+            bulkJobId={Number.isInteger(bulkJobId) && bulkJobId > 0 ? bulkJobId : undefined}
           />
           <GarbageCollectionPanel projectId={project.id} project={project} />
           <div className="border-t border-neutral-200 dark:border-neutral-800 pt-4">

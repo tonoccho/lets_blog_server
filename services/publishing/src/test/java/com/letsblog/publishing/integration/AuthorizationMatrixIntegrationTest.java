@@ -87,7 +87,9 @@ class AuthorizationMatrixIntegrationTest {
                 // -- BulkManagementController --
                 new Endpoint("POST", "/api/projects/1/bulk-management/apply"),
                 new Endpoint("POST", "/api/projects/1/bulk-management/apply-all"),
+                new Endpoint("POST", "/api/projects/1/bulk-management/apply-all/jobs"),
                 new Endpoint("POST", "/api/projects/1/bulk-management/upload"),
+                new Endpoint("POST", "/api/projects/1/bulk-management/upload/jobs"),
                 new Endpoint("POST", "/api/projects/1/asset-images/1/upload"),
                 new Endpoint("GET", "/api/projects/1/bulk-management/categories/comparison"),
                 new Endpoint("GET", "/api/projects/1/bulk-management/tags/comparison"),

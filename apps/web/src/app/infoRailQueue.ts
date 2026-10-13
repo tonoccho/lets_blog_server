@@ -20,6 +20,12 @@ export const SITE_PROVISIONING_JOB_TYPE = "site_provisioning";
 /** 環境間同期ジョブの種別(project の `ProjectEnvironmentSyncJobStarter.JOB_TYPE`、#1697)。 */
 export const ENVIRONMENT_SYNC_JOB_TYPE = "environment_sync";
 
+/** slug での全環境インストールジョブの種別(publishing の `BulkInstallJobStarter.SLUG_JOB_TYPE`、#1702)。 */
+export const BULK_SLUG_INSTALL_JOB_TYPE = "bulk_slug_install";
+
+/** zip での全環境インストールジョブの種別(publishing の `BulkInstallJobStarter.ZIP_JOB_TYPE`、#1702)。 */
+export const BULK_ZIP_INSTALL_JOB_TYPE = "bulk_zip_install";
+
 export interface QueueJob {
   id: number;
   type: string;
@@ -74,6 +80,9 @@ function readProjectId(requestPayload: string | null): number | null {
  * - 環境間同期(#1697): リクエストの projectId から、そのプロジェクトの「設定」タブ(環境同期パネルがある)へ導く。
  *   同期の結果は同期先サイトの状態そのものでジョブに載せる値が無いため、同期を要求した画面へ戻す。
  *   projectId が読めなければリンクなし。
+ * - 全環境インストール(slug / zip、#1702): 環境ごとの成否はジョブの結果にだけあるので、リクエストの projectId から
+ *   プロジェクトの「メンテナンス」タブへ導き、`bulkJob` でそのジョブの結果を指す。`jobId` が無い、
+ *   projectId が読めないときはリンクなし。
  * - 未知の種別: リンクなし。
  */
 export function resolveResultHref(type: string, requestPayload: string | null, jobId: number | null = null): string | null {
@@ -99,6 +108,10 @@ export function resolveResultHref(type: string, requestPayload: string | null, j
   if (type === GARBAGE_COLLECTION_JOB_TYPE) {
     const projectId = readProjectId(requestPayload);
     return projectId === null ? null : `/projects/${projectId}?tab=garbage-collection`;
+  }
+  if (type === BULK_SLUG_INSTALL_JOB_TYPE || type === BULK_ZIP_INSTALL_JOB_TYPE) {
+    const projectId = readProjectId(requestPayload);
+    return projectId === null || jobId === null ? null : `/projects/${projectId}?tab=maintenance&bulkJob=${jobId}`;
   }
   if (type === ENVIRONMENT_SYNC_JOB_TYPE) {
     const projectId = readProjectId(requestPayload);

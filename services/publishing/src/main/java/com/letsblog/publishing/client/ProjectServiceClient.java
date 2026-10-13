@@ -7,13 +7,11 @@ import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.service.ProjectNotFoundException;
 import com.letsblog.publishing.service.SiteNotFoundException;
-import jakarta.servlet.http.HttpServletRequest;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -29,7 +27,8 @@ import org.springframework.stereotype.Component;
  * (SiteCredentialsInternalController等)。
  *
  * <p>認証は、他サービスの同種ブリッジ(project-serviceのIdentityBridgeClient等)と同じ暫定策として、
- * 呼び出し元のBearerトークンをそのまま転送する。
+ * 呼び出し元のBearerトークンをそのまま転送する。ただしHTTPリクエストの無いスレッド(ジョブランナー、
+ * issue #1702)では、このサービス自身のClient Credentialsトークンを使う({@link OutboundAuthHeaders})。
  */
 @Component
 public class ProjectServiceClient {
@@ -39,16 +38,16 @@ public class ProjectServiceClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final RestClient restClient;
-    private final HttpServletRequest request;
+    private final OutboundAuthHeaders outboundAuthHeaders;
 
     public ProjectServiceClient(
             RestClient.Builder builder, @Value("${app.project-service-uri}") String projectServiceUri,
-            HttpServletRequest request) {
+            OutboundAuthHeaders outboundAuthHeaders) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = builder.baseUrl(projectServiceUri).requestFactory(requestFactory).build();
-        this.request = request;
+        this.outboundAuthHeaders = outboundAuthHeaders;
     }
 
     public record SiteBridge(
@@ -247,11 +246,9 @@ public class ProjectServiceClient {
     }
 
     private RestClient.RequestHeadersSpec<?> authorized(RestClient.RequestHeadersSpec<?> spec) {
-        String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (bearerToken != null && !bearerToken.isBlank()) {
-            spec.header(HttpHeaders.AUTHORIZATION, bearerToken);
-        }
-        return spec;
+        // リクエスト中は利用者のBearerを転送し、リクエストの無い@Asyncスレッド(全環境インストールのジョブ、
+        // issue #1702)ではこのサービス自身のClient Credentialsを使う。
+        return spec.headers(outboundAuthHeaders.current());
     }
 
     private String bodyOrMessage(RestClientResponseException e) {

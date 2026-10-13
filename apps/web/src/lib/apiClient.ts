@@ -2789,6 +2789,25 @@ export function applyToAllEnvironments(
   });
 }
 
+/**
+ * slug での全環境インストールを、ジョブとして要求する(`POST /api/projects/{id}/bulk-management/apply-all/jobs`、
+ * issue #1702)。完了を待たずに受理されたジョブ(id・状態)が返る。環境ごとの結果は `GET /api/generation-jobs/{id}` の
+ * `resultPayload.logs` で引く。同期の {@link applyToAllEnvironments} は変えない(VSCode 拡張が使う)。
+ */
+export function startBulkSlugInstallJob(
+  projectId: number,
+  input: {
+    operationType: BulkOperationType;
+    value: string;
+  }
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`/api/projects/${projectId}/bulk-management/apply-all/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 export function syncCategoryToMaster(
   projectId: number,
   slug: string
@@ -3040,6 +3059,24 @@ export function runBulkOperationUpload(
   formData.append('operationType', input.operationType);
   formData.append('file', input.file);
   return apiFetch<BulkOperationLog[]>(`/api/projects/${projectId}/bulk-management/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+/**
+ * zip での全環境インストールを、ジョブとして要求する(`POST /api/projects/{id}/bulk-management/upload/jobs`、
+ * issue #1702)。zip は受理時にサーバー側で保存され、完了を待たずに受理されたジョブが返る。同期の
+ * {@link runBulkOperationUpload} は変えない。
+ */
+export function startBulkZipInstallJob(
+  projectId: number,
+  input: { operationType: ZipInstallOperationType; file: File }
+): Promise<GenerationJob> {
+  const formData = new FormData();
+  formData.append('operationType', input.operationType);
+  formData.append('file', input.file);
+  return apiFetch<GenerationJob>(`/api/projects/${projectId}/bulk-management/upload/jobs`, {
     method: 'POST',
     body: formData,
   });

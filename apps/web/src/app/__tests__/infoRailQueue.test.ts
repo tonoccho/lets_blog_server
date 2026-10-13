@@ -1,5 +1,7 @@
 import {
   CUSTOM_TAG_GENERATION_JOB_TYPE,
+  BULK_SLUG_INSTALL_JOB_TYPE,
+  BULK_ZIP_INSTALL_JOB_TYPE,
   ENVIRONMENT_SYNC_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
@@ -237,5 +239,34 @@ describe('environment sync job result link (#1697)', () => {
     ['no projectId', '{"from":"test"}'],
   ])('gives no link when the request payload is %s', (_label, payload) => {
     expect(resolveResultHref('environment_sync', payload, 5)).toBeNull()
+  })
+})
+
+describe('bulk install job result link (#1702)', () => {
+  it('uses the job types written by the publishing service', () => {
+    expect(BULK_SLUG_INSTALL_JOB_TYPE).toBe('bulk_slug_install')
+    expect(BULK_ZIP_INSTALL_JOB_TYPE).toBe('bulk_zip_install')
+  })
+
+  it.each(['bulk_slug_install', 'bulk_zip_install'])(
+    'sends a done %s job to the maintenance tab of the project, pointing at the job',
+    (type) => {
+      expect(resolveResultHref(type, '{"projectId":7,"operationType":"PLUGIN_INSTALL"}', 5)).toBe(
+        '/projects/7?tab=maintenance&bulkJob=5'
+      )
+    }
+  )
+
+  it.each([
+    ['null', null],
+    ['broken JSON', '{'],
+    ['no projectId', '{"operationType":"PLUGIN_INSTALL"}'],
+  ])('gives no link when the request payload is %s', (_label, payload) => {
+    expect(resolveResultHref('bulk_slug_install', payload, 5)).toBeNull()
+  })
+
+  it('gives no link without the job id, since the result lives in the job', () => {
+    expect(resolveResultHref('bulk_zip_install', '{"projectId":7}')).toBeNull()
+    expect(resolveResultHref('bulk_zip_install', '{"projectId":7}', null)).toBeNull()
   })
 })

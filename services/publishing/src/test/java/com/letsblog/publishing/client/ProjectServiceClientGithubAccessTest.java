@@ -18,6 +18,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import com.letsblog.common.auth.ServiceTokenClient;
 
 /**
  * {@link ProjectServiceClient#resolveGithubAccess}の単体テスト(issue #1337)。project-serviceの既存ブリッジ
@@ -30,6 +33,7 @@ class ProjectServiceClientGithubAccessTest {
 
     @AfterEach
     void tearDown() {
+        RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
         }
@@ -149,8 +153,11 @@ class ProjectServiceClientGithubAccessTest {
         if (authorization != null) {
             servletRequest.addHeader("Authorization", authorization);
         }
+        // 認証は、バインドされたリクエストがあるときだけ利用者のBearerを転送する(issue #1702)。
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
         return new ProjectServiceClient(
-                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), servletRequest);
+                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(),
+                new OutboundAuthHeaders(servletRequest, org.mockito.Mockito.mock(ServiceTokenClient.class)));
     }
 
     private static HttpServer start(HttpHandler handler) throws IOException {

@@ -39,6 +39,15 @@ class GenerationJobSourceClassifierTest {
     }
 
     @Test
+    void 全環境インストールの2種別はSYSTEM_JOBに分類する_issue1702() {
+        for (String type : new String[] {"bulk_slug_install", "bulk_zip_install"}) {
+            assertEquals("SYSTEM_JOB", GenerationJobSourceClassifier.classify(type));
+            assertTrue(GenerationJobSourceClassifier.matches("SYSTEM_JOB", type));
+            assertFalse(GenerationJobSourceClassifier.matches("AI_JOB", type));
+        }
+    }
+
+    @Test
     void 未知の種別は例外にせずAI_JOBに分類する() {
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("something_new"));
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("draft"));

@@ -139,7 +139,10 @@ public class RateLimitWebFilter implements WebFilter {
      *       ファイルを各環境へ実際にmultipartアップロードし一括適用する
      *       ({@code BulkManagementController#runBulkOperationUpload}参照)。画像アップロード
      *       ではないが実際の重いファイルアップロードであるため、#999でも
-     *       upload-endpointに残す判断をした</li>
+     *       upload-endpointに残す判断をした。同じzipの全環境インストールをジョブとして受理する口
+     *       {@code POST /api/projects/{id}/bulk-management/upload/jobs}(issue #1702、
+     *       {@code BulkManagementController#runBulkOperationUploadJob})も、受理時にzip本体がgatewayを通るので
+     *       同じ枠に入れる。slugの受理口({@code .../apply-all/jobs}、JSON)は軽量なのでapi-globalに置く</li>
      * </ul>
      *
      * <p><b>{@code POST /api/users/{id}/avatar}(issue #1241、プロフィール編集画面のアバター
@@ -176,7 +179,7 @@ public class RateLimitWebFilter implements WebFilter {
             Pattern.compile("^/api/projects/[^/]+/asset-images/[^/]+/upload$");
 
     private static final Pattern BULK_MANAGEMENT_UPLOAD_PATH_PATTERN =
-            Pattern.compile("^/api/projects/[^/]+/bulk-management/upload$");
+            Pattern.compile("^/api/projects/[^/]+/bulk-management/upload(/jobs)?$");
 
     private final ConcurrentHashMap<String, RateLimiter> rateLimiters = new ConcurrentHashMap<>();
     private final RateLimitProperties properties;

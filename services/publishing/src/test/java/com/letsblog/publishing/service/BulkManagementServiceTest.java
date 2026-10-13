@@ -1016,4 +1016,82 @@ class BulkManagementServiceTest {
         verify(bulkManagementClient).applyZip(eq("local-site"), eq("plugin_install"), any(byte[].class), eq("p.zip"));
         verify(bulkManagementClient).applyZip(eq("production-site"), eq("plugin_install"), any(byte[].class), eq("p.zip"));
     }
+
+    // ---- issue #1702: ジョブ(非同期)から呼ぶための分離 ----
+
+    @Test
+    void validateSlugInstall_プラグインとテーマのインストールでslugがあれば通る() {
+        BulkManagementService service = service();
+
+        assertDoesNotThrow(() -> service.validateSlugInstall(BulkOperationType.PLUGIN_INSTALL, "akismet"));
+        assertDoesNotThrow(() -> service.validateSlugInstall(BulkOperationType.THEME_INSTALL, "twentytwentyfive"));
+    }
+
+    @Test
+    void validateSlugInstall_インストール以外の操作は例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateSlugInstall(BulkOperationType.PLUGIN_ACTIVATE, "akismet"));
+    }
+
+    @Test
+    void validateSlugInstall_slugが空白またはnullなら例外() {
+        BulkManagementService service = service();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateSlugInstall(BulkOperationType.PLUGIN_INSTALL, " "));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateSlugInstall(BulkOperationType.PLUGIN_INSTALL, null));
+    }
+
+    @Test
+    void validateZipInstall_zipなら通る() {
+        BulkManagementService service = service();
+        MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1});
+
+        assertDoesNotThrow(() -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, file));
+    }
+
+    @Test
+    void validateZipInstall_インストール以外_拡張子違い_空ファイルは例外() {
+        BulkManagementService service = service();
+        MockMultipartFile ok = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1});
+        MockMultipartFile txt = new MockMultipartFile("file", "p.txt", "text/plain", new byte[]{1});
+        MockMultipartFile empty = new MockMultipartFile("file", "p.zip", "application/zip", new byte[0]);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.CATEGORY_CREATE, ok));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, txt));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, empty));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, null));
+    }
+
+    @Test
+    void applyStoredZipToAllEnvironments_保存済みのバイト列を再保存せず各環境へ転送しログに保存先を載せる() throws IOException {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, 20L, null);
+        byte[] content = new byte[]{1, 2, 3};
+        BulkUploadStorageService.StoredZip stored =
+                new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip");
+
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
+        when(bulkManagementClient.applyZip(any(), eq("theme_install"), eq(content), eq("custom-theme.zip")))
+                .thenReturn(BulkApplyResult.success());
+
+        List<BulkOperationLog> results =
+                service.applyStoredZipToAllEnvironments(1L, BulkOperationType.THEME_INSTALL, content, stored, 9L);
+
+        assertEquals(List.of("local", "test"), results.stream().map(BulkOperationLog::getEnvironment).toList());
+        assertEquals("1/abc.zip", results.get(0).getStoragePath());
+        assertEquals("abc", results.get(0).getFileSha256());
+        assertEquals(BulkOperationSourceType.ZIP, results.get(0).getSourceType());
+        assertEquals(9L, results.get(0).getActorId());
+        verify(bulkUploadStorageService, never()).store(any(), any(), any());
+    }
 }

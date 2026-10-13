@@ -28,6 +28,8 @@ import {
   startStaticContentGenerationJob,
   startManagedWordPressSiteJob,
   startProjectEnvironmentSyncJob,
+  startBulkSlugInstallJob,
+  startBulkZipInstallJob,
   startTagDesignGenerationJob,
   saveStaticContent,
   getSiteAdminPath,
@@ -829,6 +831,34 @@ describe('LLM生成の非同期ジョブAPI(issue #1409)', () => {
     expect(url).toMatch(/\/api\/projects\/7\/environments\/sync\/jobs$/)
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual(input)
+  })
+
+  it('startBulkSlugInstallJob は POST /api/projects/{id}/bulk-management/apply-all/jobs へJSONを送り、同期APIは呼ばない (#1702)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 51, type: 'bulk_slug_install', status: 'running' }, 202))
+    const input = { operationType: 'PLUGIN_INSTALL' as const, value: 'akismet' }
+
+    const job = await startBulkSlugInstallJob(7, input)
+
+    expect(job.id).toBe(51)
+    const [url, init] = calls()[0]
+    expect(url).toMatch(/\/api\/projects\/7\/bulk-management\/apply-all\/jobs$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual(input)
+  })
+
+  it('startBulkZipInstallJob は POST /api/projects/{id}/bulk-management/upload/jobs へ multipart を送る (#1702)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 52, type: 'bulk_zip_install', status: 'running' }, 202))
+    const file = new File(['zip'], 'plugin.zip', { type: 'application/zip' })
+
+    const job = await startBulkZipInstallJob(7, { operationType: 'THEME_INSTALL', file })
+
+    expect(job.id).toBe(52)
+    const [url, init] = calls()[0]
+    expect(url).toMatch(/\/api\/projects\/7\/bulk-management\/upload\/jobs$/)
+    expect(init.method).toBe('POST')
+    const body = init.body as FormData
+    expect(body.get('operationType')).toBe('THEME_INSTALL')
+    expect((body.get('file') as File).name).toBe('plugin.zip')
   })
 
   it('startTagDesignGenerationJob はプロジェクト個別とグローバルで別のパスへ送る', async () => {

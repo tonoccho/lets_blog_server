@@ -60,6 +60,9 @@ class RateLimitUploadBucketSyncTest {
             "/api/ai/image",
             "/api/projects/1/asset-images/2/upload",
             "/api/projects/1/bulk-management/upload",
+            // #1702: zip本体が通る受理口はアップロード枠。slugの受理口(JSON)は軽量なのでapi-global。
+            "/api/projects/1/bulk-management/upload/jobs",
+            "/api/projects/1/bulk-management/apply-all/jobs",
             // #1599: 生成画像ギャラリーへの画像アップロード(multipart、最大20MB)
             "/api/generated-images/upload",
             // #1405: 非同期の受理口。受理は軽量でGPU占有は専用Executorが直列化するため、

@@ -123,10 +123,7 @@ public class BulkManagementService {
      */
     public List<BulkOperationLog> applyToAllEnvironments(
             Long projectId, BulkOperationType type, String value, Long actorId) {
-        if (!type.supportsZipUpload()) {
-            throw new IllegalArgumentException("全環境への一括インストールはプラグイン/テーマのインストールのみ対応しています");
-        }
-        requireNonBlank(value, "slugを入力してください");
+        validateSlugInstall(type, value);
         Project project = getProject(projectId);
         // 環境ごとのインストールは独立なので並列に走らせる(issue #1687)。結果はENVIRONMENT_ORDER順
         List<Supplier<BulkOperationLog>> tasks = new ArrayList<>();
@@ -149,19 +146,54 @@ public class BulkManagementService {
         return EnvironmentTasks.runAll(environmentFetchExecutor, tasks);
     }
 
-    public List<BulkOperationLog> executeFromUpload(
-            Long projectId, BulkOperationType type, MultipartFile file, Long actorId) throws IOException {
+    /**
+     * slugでの全環境インストールの入力検証({@link #applyToAllEnvironments}の冒頭の検証)。ジョブとして受理する口
+     * (issue #1702)がリクエストスレッドで同じ検証をして、入力が誤っているときはジョブを作らず同期で400にするため、
+     * 外から呼べる形に切り出した。
+     */
+    public void validateSlugInstall(BulkOperationType type, String value) {
+        if (!type.supportsZipUpload()) {
+            throw new IllegalArgumentException("全環境への一括インストールはプラグイン/テーマのインストールのみ対応しています");
+        }
+        requireNonBlank(value, "slugを入力してください");
+    }
+
+    /**
+     * zipでの全環境インストールの入力検証({@link #executeFromUpload}の冒頭の検証)。slugと同じ理由で切り出した(issue #1702)。
+     */
+    public void validateZipInstall(BulkOperationType type, MultipartFile file) {
         if (!type.supportsZipUpload()) {
             throw new IllegalArgumentException("zipアップロードはプラグイン/テーマのインストールのみ対応しています");
         }
         validateZip(file);
+    }
+
+    public List<BulkOperationLog> executeFromUpload(
+            Long projectId, BulkOperationType type, MultipartFile file, Long actorId) throws IOException {
+        validateZipInstall(type, file);
         Project project = getProject(projectId);
         List<Map.Entry<String, Site>> environments = resolveZipUploadEnvironments(project);
 
         byte[] bytes = file.getBytes();
         BulkUploadStorageService.StoredZip stored =
                 bulkUploadStorageService.store(projectId, bytes, file.getOriginalFilename());
+        return applyZipToEnvironments(projectId, type, environments, bytes, stored, actorId);
+    }
 
+    /**
+     * 受理時に保存済みのzip({@link BulkUploadStorageService#store})を、紐付いている全環境へ転送する(ジョブのランナー用、
+     * issue #1702)。再保存はしない。結果は{@link #executeFromUpload}と同じくENVIRONMENT_ORDER順。
+     */
+    public List<BulkOperationLog> applyStoredZipToAllEnvironments(
+            Long projectId, BulkOperationType type, byte[] bytes, BulkUploadStorageService.StoredZip stored,
+            Long actorId) {
+        Project project = getProject(projectId);
+        return applyZipToEnvironments(projectId, type, resolveZipUploadEnvironments(project), bytes, stored, actorId);
+    }
+
+    private List<BulkOperationLog> applyZipToEnvironments(
+            Long projectId, BulkOperationType type, List<Map.Entry<String, Site>> environments, byte[] bytes,
+            BulkUploadStorageService.StoredZip stored, Long actorId) {
         // 環境ごとの転送は独立なので並列に走らせる(issue #1687)。結果はENVIRONMENT_ORDER順
         List<Supplier<BulkOperationLog>> tasks = new ArrayList<>();
         for (Map.Entry<String, Site> entry : environments) {

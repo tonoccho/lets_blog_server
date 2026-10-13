@@ -57,7 +57,9 @@
     "queueTypeStaticContentGeneration": "Static content generation",
     "queueTypeTagDesignGeneration": "Tag design generation",
     "queueTypeSiteProvisioning": "Site provisioning",
-    "queueTypeEnvironmentSync": "Environment sync"
+    "queueTypeEnvironmentSync": "Environment sync",
+    "queueTypeBulkSlugInstall": "Install to all environments",
+    "queueTypeBulkZipInstall": "Install a zip to all environments"
   },
   "dashboard": {
     "title": "Dashboard",

@@ -582,6 +582,12 @@ services:
       # (BulkUploadStorageService)。一括管理機能一式のpublishing-serviceへの移設(issue #708)に伴い、
       # apiコンテナから移した(bulk_upload_filesボリュームは同じものを引き続き使う)。
       BULK_UPLOAD_STORAGE_PATH: /app/data/bulk-uploads
+      # 全環境インストール(slug / zip)をジョブとして受理する(issue #1702)。ジョブ(generation_jobs)の
+      # 所有者はai-serviceなので、その呼び出し先と、進捗・完了・失敗の反映とリクエストの無いスレッドでの
+      # project-service呼び出しに使うClient Credentials(ServiceTokenClientConfig)を渡す。
+      # project-service・media-serviceと同じ資格情報。ai-serviceへはdepends_onに含めない(実行時の呼び出し先のみ)。
+      AI_SERVICE_URI: http://ai:8080
+      KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
     volumes:
       - bulk_upload_files:/app/data/bulk-uploads
     depends_on:

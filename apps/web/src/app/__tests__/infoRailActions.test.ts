@@ -259,3 +259,27 @@ describe('fetchQueueJobsAction environment sync (#1697)', () => {
     expect(mockGetJob).not.toHaveBeenCalled()
   })
 })
+
+describe('fetchQueueJobsAction bulk install (#1702)', () => {
+  it.each(['bulk_slug_install', 'bulk_zip_install'])('derives the done link of a %s job from the request payload', async (type) => {
+    mockListJobs.mockResolvedValue([job(9, type, 'done')])
+    mockGetJob.mockResolvedValue({ requestPayload: '{"projectId":7,"operationType":"PLUGIN_INSTALL"}' })
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(9)
+    expect(result.jobs[0].resultHref).toBe('/projects/7?tab=maintenance&bulkJob=9')
+  })
+
+  it('gives no link when the detail cannot be read', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'bulk_slug_install', 'done')])
+    mockGetJob.mockRejectedValue(new Error('404'))
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives no link to a running install and fetches no detail for it', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'bulk_zip_install', 'running')])
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+    expect(mockGetJob).not.toHaveBeenCalled()
+  })
+})

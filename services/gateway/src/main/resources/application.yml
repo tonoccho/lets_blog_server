@@ -59,6 +59,16 @@ app:
         uri: ${PROJECT_SERVICE_URI:http://project:8080}
         paths:
           - /api/projects/*/environments/sync/jobs
+      # issue #1702: 全環境インストール(slug / zip)を非同期ジョブとして受理する口
+      # (POST /api/projects/{id}/bulk-management/apply-all/jobs・upload/jobs)。下のproject-bulk-managementは
+      # /bulk-management/** で300秒のresponse-timeoutを持つが、受理はジョブを1件作って即座に返すだけなので、
+      # 長いresponse-timeoutは与えず既定値を使う(project-environment-sync-jobsと同じ)。先勝ちなので
+      # 汎用ルートより前に置く。upload/jobsは受理時にzip本体が通るので、RateLimitWebFilterでアップロード枠に入れる。
+      - id: project-bulk-management-jobs
+        uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
+        paths:
+          - /api/projects/*/bulk-management/apply-all/jobs
+          - /api/projects/*/bulk-management/upload/jobs
       # 一括管理(bulk-management: カテゴリ/タグ/プラグイン/テーマ/投稿の環境間比較・同期)を担う
       # BulkManagementService/TermComparisonService/PluginThemeComparisonService/PostComparisonServiceは
       # publishing-serviceへ移設した(issue #708、Epic #551 C6-2。#577移設時の発見: 元のこのルート

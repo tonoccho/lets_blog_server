@@ -7,6 +7,8 @@ import { formatOperationLogDateTime, TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/
 import { useI18n } from "./I18nProvider";
 import { fetchQueueJobsAction } from "./infoRailActions";
 import {
+  BULK_SLUG_INSTALL_JOB_TYPE,
+  BULK_ZIP_INSTALL_JOB_TYPE,
   CHECKPOINT_DOWNLOAD_JOB_TYPE,
   CUSTOM_TAG_GENERATION_JOB_TYPE,
   ENVIRONMENT_SYNC_JOB_TYPE,
@@ -39,6 +41,8 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   [TAG_DESIGN_GENERATION_JOB_TYPE]: "queueTypeTagDesignGeneration",
   [SITE_PROVISIONING_JOB_TYPE]: "queueTypeSiteProvisioning",
   [ENVIRONMENT_SYNC_JOB_TYPE]: "queueTypeEnvironmentSync",
+  [BULK_SLUG_INSTALL_JOB_TYPE]: "queueTypeBulkSlugInstall",
+  [BULK_ZIP_INSTALL_JOB_TYPE]: "queueTypeBulkZipInstall",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

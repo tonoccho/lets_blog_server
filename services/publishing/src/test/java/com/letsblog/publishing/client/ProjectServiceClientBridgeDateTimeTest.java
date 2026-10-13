@@ -11,6 +11,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import com.letsblog.common.auth.ServiceTokenClient;
 
 /**
  * issue #1541: project-service の内部ブリッジ応答の日時が Z 終端 RFC 3339 になっても、
@@ -22,13 +25,17 @@ class ProjectServiceClientBridgeDateTimeTest {
 
     @AfterEach
     void tearDown() {
+        RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
         }
     }
 
     private ProjectServiceClient client() {
-        return new ProjectServiceClient(RestClient.builder(), baseUrl(), new MockHttpServletRequest());
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
+        return new ProjectServiceClient(RestClient.builder(), baseUrl(),
+                new OutboundAuthHeaders(servletRequest, org.mockito.Mockito.mock(ServiceTokenClient.class)));
     }
 
     @Test

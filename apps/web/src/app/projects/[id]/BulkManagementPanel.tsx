@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import type {
   Project,
@@ -13,12 +13,14 @@ import type {
 } from "@/lib/apiClient";
 import {
   runBulkOperationUploadAction,
+  fetchGenerationJobAction,
   fetchTermComparisonAction,
   fetchStatusComparisonAction,
   fetchPostComparisonAction,
   BulkOperationState,
 } from "./actions";
 import { formatDateTime } from "@/lib/formatDate";
+import { BULK_INSTALL_ACCEPTED_MESSAGE, readBulkJobView, type BulkJobView } from "./bulkJobResult";
 import { TermComparisonTable } from "./TermComparisonTable";
 import { PluginThemeComparisonTable } from "./PluginThemeComparisonTable";
 import { PostComparisonTable } from "./PostComparisonTable";
@@ -82,11 +84,14 @@ export function BulkManagementPanel({
   project,
   categoryPage,
   timezone,
+  bulkJobId,
 }: {
   projectId: number;
   project: Project;
   categoryPage: TermComparisonPage;
   timezone: string | null;
+  /** 処理キューの「結果を見る」(`?bulkJob=`)で指された全環境インストールのジョブ。その結果を表示する(issue #1702)。 */
+  bulkJobId?: number;
 }) {
   const [tab, setTab] = useState<Tab>("CATEGORY");
   // タグ・プラグイン・テーマは、そのタブを初めて開いたときにクライアント側から取得する
@@ -140,6 +145,7 @@ export function BulkManagementPanel({
 
   return (
     <div className="space-y-6">
+      {bulkJobId !== undefined && <BulkJobResult jobId={bulkJobId} timezone={timezone} />}
       <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
         <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">一括管理</h3>
         <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
@@ -179,7 +185,7 @@ export function BulkManagementPanel({
             ) : (
               <TabLoading loading={loadingTab === "PLUGIN"} />
             )}
-            <ZipUploadPanel projectId={projectId} operationType="PLUGIN_INSTALL" timezone={timezone} />
+            <ZipUploadPanel projectId={projectId} operationType="PLUGIN_INSTALL" />
           </div>
         )}
         {tab === "THEME" && (
@@ -194,7 +200,7 @@ export function BulkManagementPanel({
             ) : (
               <TabLoading loading={loadingTab === "THEME"} />
             )}
-            <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" timezone={timezone} />
+            <ZipUploadPanel projectId={projectId} operationType="THEME_INSTALL" />
           </div>
         )}
         {tab === "POST" &&
@@ -216,6 +222,64 @@ export function BulkManagementPanel({
   );
 }
 
+type BulkJobState = { loading: true } | { loading: false; view: BulkJobView } | { loading: false; error: string };
+
+/**
+ * 全環境インストールのジョブ(issue #1702)の環境ごとの成否。処理キューの「結果を見る」から
+ * `?tab=maintenance&bulkJob=<ジョブID>` で開く。結果はジョブの `resultPayload.logs` にだけあるので、
+ * `fetchGenerationJobAction` で引いて既存の {@link ResultList} で表示する。
+ */
+function BulkJobResult({ jobId, timezone }: { jobId: number; timezone: string | null }) {
+  const [state, setState] = useState<BulkJobState>({ loading: true });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGenerationJobAction(jobId)
+      .then((job) => {
+        if (!cancelled) setState({ loading: false, view: readBulkJobView(job) });
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setState({ loading: false, error: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  return (
+    <div
+      data-testid="bulk-job-result"
+      className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 text-sm"
+    >
+      <h3 className="mb-1 font-medium text-neutral-700 dark:text-neutral-300">
+        全環境インストールの結果(ジョブ #{jobId})
+      </h3>
+      {state.loading && <p className="text-neutral-500 dark:text-neutral-400">読み込み中…</p>}
+      {!state.loading && "error" in state && <p className="text-red-600">{state.error}</p>}
+      {!state.loading && "view" in state && (
+        <BulkJobViewBody view={state.view} timezone={timezone} />
+      )}
+    </div>
+  );
+}
+
+function BulkJobViewBody({ view, timezone }: { view: BulkJobView; timezone: string | null }) {
+  switch (view.kind) {
+    case "done":
+      return <ResultList results={view.logs} timezone={timezone} />;
+    case "failed":
+      return <p className="text-red-600">{view.error}</p>;
+    case "invalid":
+      return <p className="text-red-600">結果を読み取れませんでした。</p>;
+    case "running":
+      return (
+        <p className="text-neutral-500 dark:text-neutral-400">
+          まだ実行中です。完了後に、処理キューの「結果を見る」からもう一度開いてください。
+        </p>
+      );
+  }
+}
+
 function TabLoading({ loading }: { loading: boolean }) {
   return (
     <p className="text-sm text-neutral-500 dark:text-neutral-400">
@@ -227,11 +291,9 @@ function TabLoading({ loading }: { loading: boolean }) {
 function ZipUploadPanel({
   projectId,
   operationType,
-  timezone,
 }: {
   projectId: number;
   operationType: "PLUGIN_INSTALL" | "THEME_INSTALL";
-  timezone: string | null;
 }) {
   const uploadAction = (prevState: BulkOperationState, formData: FormData) =>
     runBulkOperationUploadAction(projectId, prevState, formData);
@@ -266,11 +328,11 @@ function ZipUploadPanel({
           disabled={uploadPending}
           className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-200 disabled:text-neutral-600"
         >
-          {uploadPending ? "アップロード・実行中(数分かかる場合があります)…" : "全環境へインストール"}
+          {uploadPending ? "要求中…" : "全環境へインストール"}
         </button>
       </form>
       {uploadState.error && <p className="mt-2 text-sm text-red-600">{uploadState.error}</p>}
-      {uploadState.results && <ResultList results={uploadState.results} timezone={timezone} />}
+      {uploadState.success && <p className="mt-2 text-sm text-green-600">{BULK_INSTALL_ACCEPTED_MESSAGE}</p>}
     </div>
   );
 }

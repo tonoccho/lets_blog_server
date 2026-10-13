@@ -26,7 +26,7 @@ import {
   ProjectUserSyncSiteResult,
   startProjectEnvironmentSyncJob,
   applyToEnvironment,
-  applyToAllEnvironments,
+  startBulkSlugInstallJob,
   saveProjectGoogleAnalyticsClient,
   selectProjectGoogleAnalyticsProperty,
   clearProjectGoogleAnalyticsCredentials,
@@ -51,7 +51,7 @@ import {
   reconcileThemeState,
   deletePluginEverywhere,
   deleteThemeEverywhere,
-  runBulkOperationUpload,
+  startBulkZipInstallJob,
   listLlmModels,
   selectLlmModel,
   listLlmProvider,
@@ -694,7 +694,12 @@ export interface BulkOperationState {
   error?: string;
   success?: boolean;
   results?: BulkOperationLog[];
+  /** 全環境インストールがジョブとして受理された(#1702)。完了ではない(完了は処理キューの「結果を見る」から辿る)。 */
+  jobId?: number;
 }
+
+const BULK_INSTALL_QUEUE_FULL_ERROR =
+  "全環境インストールの待ち行列が満杯です。しばらくしてからもう一度要求してください。";
 
 export async function applyToEnvironmentAction(
   projectId: number,
@@ -757,6 +762,12 @@ export async function applyToEnvironmentAction(
   }
 }
 
+/**
+ * slug での全環境インストールを、ジョブとして要求する(issue #1702)。インストールの完了を待たず、受理
+ * (`POST /api/projects/{id}/bulk-management/apply-all/jobs`)の時点で返る。まだ終わっていないので
+ * プロジェクトのページは再検証しない。同期API(`applyToAllEnvironments`)は VSCode 拡張のために残してあり、
+ * ここからは呼ばない。
+ */
 export async function applyToAllEnvironmentsAction(
   projectId: number,
   _prevState: BulkOperationState,
@@ -775,9 +786,12 @@ export async function applyToAllEnvironmentsAction(
   }
 
   try {
-    const results = await applyToAllEnvironments(projectId, { operationType, value });
-    revalidatePath(`/projects/${projectId}`);
-    return { success: true, results };
+    const job = await startBulkSlugInstallJob(projectId, { operationType, value });
+    if (job.status === "failed") {
+      // 実行枠と待ち行列が満杯のとき、ジョブは作られた上で failed として返る。
+      return { error: BULK_INSTALL_QUEUE_FULL_ERROR };
+    }
+    return { success: true, jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -854,6 +868,11 @@ export async function deleteTermEverywhereAction(
   }
 }
 
+/**
+ * zip での全環境インストールを、ジョブとして要求する(issue #1702)。zip は受理時にサーバー側で保存され、
+ * インストールの完了を待たず、受理(`POST /api/projects/{id}/bulk-management/upload/jobs`)の時点で返る。
+ * 同期API(`runBulkOperationUpload`)は VSCode 拡張のために残してあり、ここからは呼ばない。
+ */
 export async function runBulkOperationUploadAction(
   projectId: number,
   _prevState: BulkOperationState,
@@ -872,9 +891,11 @@ export async function runBulkOperationUploadAction(
   }
 
   try {
-    const results = await runBulkOperationUpload(projectId, { operationType, file });
-    revalidatePath(`/projects/${projectId}`);
-    return { success: true, results };
+    const job = await startBulkZipInstallJob(projectId, { operationType, file });
+    if (job.status === "failed") {
+      return { error: BULK_INSTALL_QUEUE_FULL_ERROR };
+    }
+    return { success: true, jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

@@ -317,6 +317,39 @@ describe("PluginThemeComparisonTable", () => {
     expect(applyMock).not.toHaveBeenCalled();
   });
 
+  it("「全ての環境」への要求が受理されたら、処理キューへ追加された旨を示し、完了を待たずボタンは押せる状態に戻る(#1702)", async () => {
+    applyAllMock.mockResolvedValue({ success: true, jobId: 9 });
+    fetchPageMock.mockResolvedValue(page());
+    const { container } = renderTable();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ 新規インストール" }));
+    fireEvent.change(screen.getByLabelText("対象環境"), { target: { value: "__all__" } });
+    fireEvent.change(screen.getByPlaceholderText("akismet"), { target: { value: "akismet" } });
+    fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(screen.getByText(/全環境へのインストールを要求しました。処理キューに追加されました/)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "インストール" })).toBeEnabled();
+    // インストールはまだ終わっていないので、一覧は取り直さない
+    expect(fetchPageMock).not.toHaveBeenCalled();
+  });
+
+  it("「全ての環境」への要求がエラーなら、受理の表示は出さない(#1702)", async () => {
+    applyAllMock.mockResolvedValue({ error: "全環境インストールの待ち行列が満杯です" });
+    const { container } = renderTable();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ 新規インストール" }));
+    fireEvent.change(screen.getByLabelText("対象環境"), { target: { value: "__all__" } });
+    fireEvent.change(screen.getByPlaceholderText("akismet"), { target: { value: "akismet" } });
+    fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(screen.getByText("全環境インストールの待ち行列が満杯です")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/全環境へのインストールを要求しました/)).toBeNull();
+  });
+
   it("新規インストールに失敗するとエラーを表示したままフォームを開いておく", async () => {
     applyMock.mockResolvedValue({ error: "インストールに失敗しました" });
     const { container } = renderTable();

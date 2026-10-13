@@ -12,6 +12,10 @@ import type { BulkOperationLog, Project, Site, TermComparisonPage } from "@/lib/
  * ハイドレーション不一致はそもそも起こり得ず、本番コードの変更は不要という結論を
  * Readiness Report(2026-09-20、2回目)で確認済み。
  *
+ * (issue #1702: zipの全環境インストールはジョブとして受理されるだけになり、環境ごとの結果は
+ * 処理キューの「結果を見る」(`?bulkJob=`)で開くジョブ結果の表示に載る。失敗ログのコピーボタンは
+ * その表示から使うので、本テストもその経路で失敗ログを表示する。)
+ *
  * ここでは「本番コードを変えない」という判断そのものを固定するため、コピーされる
  * テキストが受け取った`timezone`を素直に`formatDateTime`へ渡していることを確かめる。
  * `timezone`がnullのときに`formatDateTime`自身がブラウザTZへフォールバックする挙動は
@@ -19,6 +23,7 @@ import type { BulkOperationLog, Project, Site, TermComparisonPage } from "@/lib/
  */
 jest.mock("../actions", () => ({
   runBulkOperationUploadAction: jest.fn(),
+  fetchGenerationJobAction: jest.fn(),
   fetchTermComparisonAction: jest.fn(),
   fetchStatusComparisonAction: jest.fn(),
   fetchPostComparisonAction: jest.fn(),
@@ -32,7 +37,7 @@ jest.mock("@/lib/formatDate", () => ({
   formatDateTime: jest.fn((iso: string, tz?: string | null) => `FORMATTED(${iso}|${tz})`),
 }));
 
-import { runBulkOperationUploadAction } from "../actions";
+import { fetchGenerationJobAction } from "../actions";
 
 function buildSite(overrides: Partial<Site> = {}): Site {
   return {
@@ -91,27 +96,27 @@ function buildFailedLog(overrides: Partial<BulkOperationLog> = {}): BulkOperatio
   };
 }
 
-/** アップロードを実行し、失敗ログの「コピー」ボタンが現れるまで待つ。 */
-async function uploadAndFail(timezone: string | null, log: BulkOperationLog) {
-  (runBulkOperationUploadAction as jest.Mock).mockResolvedValue({ success: true, results: [log] });
-  jest.spyOn(window, "confirm").mockReturnValue(true);
+/** 処理キューの「結果を見る」から開いたときと同じく、ジョブの結果を表示し、失敗ログの「コピー」ボタンが現れるまで待つ。 */
+async function openJobResultWithFailure(timezone: string | null, log: BulkOperationLog) {
+  (fetchGenerationJobAction as jest.Mock).mockResolvedValue({
+    id: 9,
+    type: "bulk_zip_install",
+    status: "done",
+    requestPayload: null,
+    resultPayload: JSON.stringify({ phase: "done", projectId: 1, logs: [log] }),
+    createdAt: "",
+    updatedAt: "",
+  });
 
-  const { container } = render(
-    <BulkManagementPanel projectId={1} project={buildProject()} categoryPage={buildCategoryPage()} timezone={timezone} />
+  render(
+    <BulkManagementPanel
+      projectId={1}
+      project={buildProject()}
+      categoryPage={buildCategoryPage()}
+      timezone={timezone}
+      bulkJobId={9}
+    />
   );
-
-  fireEvent.click(screen.getByRole("button", { name: "プラグイン" }));
-  await screen.findByRole("button", { name: "全環境へインストール" });
-
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  const file = new File(["dummy"], "custom.zip", { type: "application/zip" });
-  fireEvent.change(fileInput, { target: { files: [file] } });
-
-  // ボタンのclickではなくformへ直接submitイベントを送る。type="file"のrequired属性による
-  // jsdomのネイティブ制約検証(クリック起点のrequestSubmitでのみ働く)を経由しないため、
-  // フォームアクション(React 19の`action={fn}`)が確実に呼ばれる
-  // (TermComparisonTable.test.tsxと同じ`fireEvent.submit(form)`方式)。
-  fireEvent.submit(container.querySelector("form") as HTMLFormElement);
 
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "コピー" })).toBeInTheDocument();
@@ -126,7 +131,7 @@ describe("BulkManagementPanel 失敗ログのコピー(issue #1363 Requirement 4
 
   it("個人設定TZがあるとき、コピーした内容はそのTZでformatDateTimeを呼ぶ", async () => {
     const log = buildFailedLog();
-    await uploadAndFail("Asia/Tokyo", log);
+    await openJobResultWithFailure("Asia/Tokyo", log);
 
     fireEvent.click(screen.getByRole("button", { name: "コピー" }));
 
@@ -139,7 +144,7 @@ describe("BulkManagementPanel 失敗ログのコピー(issue #1363 Requirement 4
 
   it("個人設定TZが未設定のとき、コピーした内容はTZ引数無しでformatDateTimeを呼ぶ(ブラウザTZへフォールバック)", async () => {
     const log = buildFailedLog();
-    await uploadAndFail(null, log);
+    await openJobResultWithFailure(null, log);
 
     fireEvent.click(screen.getByRole("button", { name: "コピー" }));
 

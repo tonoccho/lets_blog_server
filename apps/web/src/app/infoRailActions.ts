@@ -2,6 +2,8 @@
 
 import { getGeneratedImage, getGenerationJob, listGenerationJobs, listUnifiedOperationLogs, type UnifiedLogEntry } from "@/lib/apiClient";
 import {
+  BULK_SLUG_INSTALL_JOB_TYPE,
+  BULK_ZIP_INSTALL_JOB_TYPE,
   CUSTOM_TAG_GENERATION_JOB_TYPE,
   ENVIRONMENT_SYNC_JOB_TYPE,
   GARBAGE_COLLECTION_JOB_TYPE,
@@ -27,8 +29,9 @@ import { getViewerTimeZone, requireSession } from "@/lib/session";
 const NEEDS_REQUEST_PAYLOAD = new Set([
   GARBAGE_COLLECTION_JOB_TYPE,
   ENVIRONMENT_SYNC_JOB_TYPE,
+  BULK_SLUG_INSTALL_JOB_TYPE,
+  BULK_ZIP_INSTALL_JOB_TYPE,
   CUSTOM_TAG_GENERATION_JOB_TYPE,
-  ENVIRONMENT_SYNC_JOB_TYPE,
   STATIC_CONTENT_GENERATION_JOB_TYPE,
   TAG_DESIGN_GENERATION_JOB_TYPE,
 ]);

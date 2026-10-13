@@ -9,6 +9,7 @@ import com.letsblog.publishing.dto.ApplyToEnvironmentRequest;
 import com.letsblog.publishing.dto.BulkOperationLogResponse;
 import com.letsblog.publishing.dto.DeleteSlugRequest;
 import com.letsblog.publishing.dto.EditTermRequest;
+import com.letsblog.publishing.dto.GenerationJobResponse;
 import com.letsblog.publishing.dto.PostComparisonPage;
 import com.letsblog.publishing.dto.ReconcileStateRequest;
 import com.letsblog.publishing.dto.StatusComparisonPage;
@@ -17,6 +18,7 @@ import com.letsblog.publishing.dto.TermNameRequest;
 import com.letsblog.publishing.dto.UpdatePostStatusRequest;
 import com.letsblog.publishing.service.AdminAuthorizationService;
 import com.letsblog.publishing.service.AssetImageFormat;
+import com.letsblog.publishing.service.BulkInstallJobStarter;
 import com.letsblog.publishing.service.BulkManagementService;
 import com.letsblog.publishing.service.CurrentActorService;
 import com.letsblog.publishing.service.PluginThemeComparisonService;
@@ -25,6 +27,7 @@ import com.letsblog.publishing.service.ProjectService;
 import com.letsblog.publishing.service.TermComparisonService;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -61,6 +64,7 @@ public class BulkManagementController {
     private final AdminAuthorizationService adminAuthorizationService;
     private final CurrentActorService currentActorService;
     private final MediaGeneratedImageClient mediaGeneratedImageClient;
+    private final BulkInstallJobStarter bulkInstallJobStarter;
 
     public BulkManagementController(
             ProjectService projectService,
@@ -70,7 +74,8 @@ public class BulkManagementController {
             PostComparisonService postComparisonService,
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService,
-            MediaGeneratedImageClient mediaGeneratedImageClient) {
+            MediaGeneratedImageClient mediaGeneratedImageClient,
+            BulkInstallJobStarter bulkInstallJobStarter) {
         this.projectService = projectService;
         this.bulkManagementService = bulkManagementService;
         this.termComparisonService = termComparisonService;
@@ -79,6 +84,7 @@ public class BulkManagementController {
         this.adminAuthorizationService = adminAuthorizationService;
         this.currentActorService = currentActorService;
         this.mediaGeneratedImageClient = mediaGeneratedImageClient;
+        this.bulkInstallJobStarter = bulkInstallJobStarter;
     }
 
     @PostMapping("/{id}/bulk-management/apply")
@@ -122,6 +128,34 @@ public class BulkManagementController {
         Long actorId = currentActorService.getCurrentActorId();
         List<BulkOperationLog> logs = bulkManagementService.executeFromUpload(id, operationType, file, actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
+    }
+
+    /**
+     * slugでの全環境インストールを非同期ジョブとして受理する(issue #1702)。完了を待たずにジョブIDを返し、
+     * 状態と結果(環境ごとの成否)は{@code GET /api/generation-jobs/{id}}で引く。同期の
+     * {@link #applyBulkOperationToAllEnvironments}は変えない。認可は同じ(admin限定)。入力が誤っているときは
+     * ジョブを作らず同期で400を返す。
+     */
+    @PostMapping("/{id}/bulk-management/apply-all/jobs")
+    public ResponseEntity<GenerationJobResponse> applyBulkOperationToAllEnvironmentsJob(
+            @PathVariable Long id, @Valid @RequestBody ApplyToAllEnvironmentsRequest request) {
+        adminAuthorizationService.requireAdmin();
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(bulkInstallJobStarter.startSlugInstall(id, request)));
+    }
+
+    /**
+     * zipでの全環境インストールを非同期ジョブとして受理する(issue #1702)。zipは受理時に保存し、ランナーは保存先から読む。
+     * 同期の{@link #runBulkOperationUpload}は変えない。認可・入力の検証はslug版と同じ。
+     */
+    @PostMapping(value = "/{id}/bulk-management/upload/jobs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<GenerationJobResponse> runBulkOperationUploadJob(
+            @PathVariable Long id,
+            @RequestParam BulkOperationType operationType,
+            @RequestPart("file") MultipartFile file) throws IOException {
+        adminAuthorizationService.requireAdmin();
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(bulkInstallJobStarter.startZipInstall(id, operationType, file)));
     }
 
     /**

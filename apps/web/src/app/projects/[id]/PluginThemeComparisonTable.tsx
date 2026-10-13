@@ -9,6 +9,7 @@ import {
   deleteSlugEverywhereAction,
   fetchStatusComparisonAction,
 } from "./actions";
+import { BULK_INSTALL_ACCEPTED_MESSAGE } from "./bulkJobResult";
 import { buildDeleteConfirmation } from "./deleteConfirmation";
 
 const ENVIRONMENT_LABEL: Record<ProjectEnvironment, string> = {
@@ -306,6 +307,7 @@ function NewInstallForm({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState(false);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -313,6 +315,7 @@ function NewInstallForm({
     formData.set("operationType", kind === "plugin" ? "PLUGIN_INSTALL" : "THEME_INSTALL");
     setPending(true);
     setError(null);
+    setAccepted(false);
     const environment = String(formData.get("environment") ?? "");
     const result =
       environment === ALL_ENVIRONMENTS_VALUE
@@ -321,6 +324,10 @@ function NewInstallForm({
     setPending(false);
     if (result.error) {
       setError(result.error);
+    } else if (environment === ALL_ENVIRONMENTS_VALUE) {
+      // 全環境へはジョブとして受理されただけで、インストールはまだ終わっていない(#1702)。一覧は取り直さず、
+      // 受理を示して、完了は処理キューの「結果を見る」へ委ねる。
+      setAccepted(true);
     } else {
       onDone();
     }
@@ -358,6 +365,7 @@ function NewInstallForm({
         {pending ? "インストール中…" : "インストール"}
       </button>
       {error && <p className="w-full text-red-600">{error}</p>}
+      {accepted && <p className="w-full text-green-600">{BULK_INSTALL_ACCEPTED_MESSAGE}</p>}
     </form>
   );
 }

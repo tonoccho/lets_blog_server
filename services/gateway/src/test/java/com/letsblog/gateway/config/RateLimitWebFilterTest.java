@@ -306,6 +306,19 @@ class RateLimitWebFilterTest {
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
     }
 
+    /** zipの全環境インストールの受理口(issue #1702)も、受理時にzip本体が通るのでアップロード枠に入れる。 */
+    @Test
+    @DisplayName("一括管理アップロードのジョブ受理口もupload-endpointバケットを使う(#1702)")
+    void bulkManagementUploadJobsUsesUploadBucket() {
+        consume(exchangeFor("/api/projects/5/bulk-management/upload/jobs"));
+        consume(exchangeFor("/api/projects/5/bulk-management/upload"));
+
+        ServerWebExchange exchange = exchangeFor("/api/projects/5/bulk-management/upload/jobs");
+        StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, exchange.getResponse().getStatusCode());
+    }
+
     @Test
     @DisplayName("operation-logsは専用バケットを使う")
     void operationLogsUseDedicatedBucket() {

@@ -1,5 +1,6 @@
 package com.letsblog.publishing.controller;
 
+import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.publishing.client.MediaGeneratedImageClient;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationSourceType;
@@ -10,6 +11,7 @@ import com.letsblog.publishing.dto.ApplyToAllEnvironmentsRequest;
 import com.letsblog.publishing.dto.ApplyToEnvironmentRequest;
 import com.letsblog.publishing.dto.DeleteSlugRequest;
 import com.letsblog.publishing.dto.EditTermRequest;
+import com.letsblog.publishing.dto.GenerationJobResponse;
 import com.letsblog.publishing.dto.ReconcileStateRequest;
 import com.letsblog.publishing.dto.StatusComparisonPage;
 import com.letsblog.publishing.dto.TermComparisonPage;
@@ -17,6 +19,7 @@ import com.letsblog.publishing.dto.TermNameRequest;
 import com.letsblog.publishing.dto.UpdatePostStatusRequest;
 import com.letsblog.publishing.render.MediaRenderException;
 import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.BulkInstallJobStarter;
 import com.letsblog.publishing.service.BulkManagementService;
 import com.letsblog.publishing.service.CurrentActorService;
 import com.letsblog.publishing.service.ForbiddenException;
@@ -28,6 +31,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.LocalDateTime;
@@ -71,10 +76,14 @@ class BulkManagementControllerTest {
     @Mock
     private MediaGeneratedImageClient mediaGeneratedImageClient;
 
+    @Mock
+    private BulkInstallJobStarter bulkInstallJobStarter;
+
     private BulkManagementController controller() {
         return new BulkManagementController(
                 projectService, bulkManagementService, termComparisonService, pluginThemeComparisonService,
-                postComparisonService, adminAuthorizationService, currentActorService, mediaGeneratedImageClient);
+                postComparisonService, adminAuthorizationService, currentActorService, mediaGeneratedImageClient,
+                bulkInstallJobStarter);
     }
 
     private BulkOperationLog buildLog() {
@@ -473,5 +482,68 @@ class BulkManagementControllerTest {
         doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
 
         assertThrows(ForbiddenException.class, () -> controller.updatePostStatusEverywhere(1L, "post", request));
+    }
+
+    // ---- issue #1702: 全環境インストールをジョブとして受理する口 ----
+
+    private static GenerationJobSummary job(long id, String type, String status) {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 13, 1, 2, 3);
+        return new GenerationJobSummary(id, type, status, now, now);
+    }
+
+    @Test
+    void applyBulkOperationToAllEnvironmentsJob_adminなら202とジョブを返す() {
+        BulkManagementController controller = controller();
+        ApplyToAllEnvironmentsRequest request =
+                new ApplyToAllEnvironmentsRequest(BulkOperationType.PLUGIN_INSTALL, "akismet");
+        when(bulkInstallJobStarter.startSlugInstall(1L, request)).thenReturn(job(21L, "bulk_slug_install", "running"));
+
+        ResponseEntity<GenerationJobResponse> response = controller.applyBulkOperationToAllEnvironmentsJob(1L, request);
+
+        assertEquals(HttpStatus.ACCEPTED, response.getStatusCode());
+        assertEquals(21L, response.getBody().id());
+        assertEquals("bulk_slug_install", response.getBody().type());
+        assertEquals("running", response.getBody().status());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void applyBulkOperationToAllEnvironmentsJob_admin権限がなければジョブを作らない() {
+        BulkManagementController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.applyBulkOperationToAllEnvironmentsJob(
+                1L, new ApplyToAllEnvironmentsRequest(BulkOperationType.PLUGIN_INSTALL, "akismet")));
+
+        verify(bulkInstallJobStarter, org.mockito.Mockito.never()).startSlugInstall(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void runBulkOperationUploadJob_adminなら202とジョブを返す() throws Exception {
+        BulkManagementController controller = controller();
+        MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1});
+        when(bulkInstallJobStarter.startZipInstall(1L, BulkOperationType.PLUGIN_INSTALL, file))
+                .thenReturn(job(22L, "bulk_zip_install", "running"));
+
+        ResponseEntity<GenerationJobResponse> response =
+                controller.runBulkOperationUploadJob(1L, BulkOperationType.PLUGIN_INSTALL, file);
+
+        assertEquals(HttpStatus.ACCEPTED, response.getStatusCode());
+        assertEquals(22L, response.getBody().id());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void runBulkOperationUploadJob_admin権限がなければ保存もジョブ作成もしない() throws Exception {
+        BulkManagementController controller = controller();
+        MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1});
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.runBulkOperationUploadJob(1L, BulkOperationType.PLUGIN_INSTALL, file));
+
+        verify(bulkInstallJobStarter, org.mockito.Mockito.never()).startZipInstall(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 }
