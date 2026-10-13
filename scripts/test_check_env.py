@@ -140,10 +140,10 @@ class CheckEnvDetectsDuplicates(unittest.TestCase):
         self.assertIn("NEXTAUTH_SECRET", r.stdout + r.stderr, "重複したキー名が報告されていない")
 
     def test_reports_every_duplicate_not_just_the_first(self):
-        target = self.env_from_example(["NEXTAUTH_SECRET=x", "MCP_LOG_LEVEL=debug"])
+        target = self.env_from_example(["NEXTAUTH_SECRET=x", "MYSQL_USER=x"])
         out = self.run_check(target).stdout
         self.assertIn("NEXTAUTH_SECRET", out)
-        self.assertIn("MCP_LOG_LEVEL", out)
+        self.assertIn("MYSQL_USER", out)
 
     def test_duplicate_in_the_example_itself_is_reported(self):
         """`.env.example` 側の重複も見ること。
