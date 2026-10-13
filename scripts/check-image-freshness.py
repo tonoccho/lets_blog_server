@@ -105,16 +105,23 @@ def _java_paths(svc):
 
 SERVICE_SOURCE_PATHS = {svc: _java_paths(svc) for svc in _JAVA_SERVICES}
 
-# web: apps/web/Dockerfile は `COPY package.json package-lock.json ./`(L8)、`COPY . .`(L11)、
-# `COPY docker-entrypoint.sh /docker-entrypoint.sh`(L13)。ただし `./apps/web:/app` を
-# bind mount しており(docker-compose.yml の web)、`COPY . .` の中身(apps/web/src/** など)は
-# 実行時に bind mount が覆う。よって鮮度に効くのは、イメージに焼き込まれる依存定義と
-# エントリポイントに限る。
+# web: 既定の web は本番ビルド(#1743)。apps/web/Dockerfile が `COPY . .` のあと `next build` を
+# 実行するので、イメージに焼き込まれるのは依存定義・エントリポイントに加え、src / public /
+# messages / next.config.ts / tsconfig.json / postcss.config.mjs である。Dockerfile の stamp
+# ステージの COPY と同じ集合にする(DockerfileStampStages が照合する)。e2e・jest 設定などビルド
+# 成果物に効かないものは含めない。開発モードのオーバーレイ(docker-compose.dev-web.yml)はソースを
+# bind mount するが、既定の起動ではイメージが唯一の実体なので、src の変更は再ビルドまで反映されない。
 SERVICE_SOURCE_PATHS["web"] = [
     "apps/web/package.json",
     "apps/web/package-lock.json",
     "apps/web/Dockerfile",
     "apps/web/docker-entrypoint.sh",
+    "apps/web/next.config.ts",
+    "apps/web/tsconfig.json",
+    "apps/web/postcss.config.mjs",
+    "apps/web/src",
+    "apps/web/public",
+    "apps/web/messages",
 ]
 
 # wordpress: build context は infra/wordpress。infra/wordpress/Dockerfile の

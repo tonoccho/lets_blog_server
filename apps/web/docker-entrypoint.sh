@@ -1,5 +1,9 @@
 #!/bin/sh
-# docker-compose.ymlのwebサービスは ./apps/web:/app をバインドマウントするため、
+# (#1743)既定の本番モード(LBS_WEB_MODE=production)ではバインドマウントが無く、npm ci も .next の
+# 削除もせずに権限を落として起動するだけである。以下は開発オーバーレイ(docker-compose.dev-web.yml)
+# のときの説明である。
+#
+# 開発モードではwebサービスが ./apps/web:/app をバインドマウントするため、
 # Dockerfileの `RUN npm ci` がイメージ内に作った /app/node_modules はマウントで
 # 覆い隠される。クローン直後などホストに apps/web/node_modules が無い状態では、
 # コンテナ内(node:22-alpine、musl)で改めて npm ci する必要がある(#1050)。
@@ -27,7 +31,16 @@
 # npm ci で node_modules が正しくなった後も next dev が失敗を返し続ける(#1609)。そのため
 # npm ci が成功した起動では exec の前に .next 全体を消す(作り直すのは su-exec 後の next dev
 # なのでホストユーザー所有になる)。npm ci を実行しない起動ではキャッシュをそのまま使う。
+#
+# 本番モード(LBS_WEB_MODE=production、Dockerfile の既定、#1743)では、上の処理はすべて不要
+# である。node_modules と .next はイメージのビルド時に作られ、ソースのバインドマウントも
+# 無い。そのため npm ci も .next の削除もせず、非 root の node へ権限を落として起動する。
+# 開発モードは docker-compose.dev-web.yml が LBS_WEB_MODE=development を渡す。
 set -e
+
+if [ "${LBS_WEB_MODE:-}" = "production" ]; then
+  exec su-exec node "$@"
+fi
 
 # 既定は /app(Dockerfile の WORKDIR/バインドマウント先)。scripts/test_web_docker_entrypoint.py
 # が権限昇格なしに検証できるよう、テストからのみ上書きできるようにしてある(本番の起動では

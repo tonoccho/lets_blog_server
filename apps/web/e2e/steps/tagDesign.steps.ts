@@ -39,20 +39,38 @@ Given('タグデザインの動作を確かめるためのプロジェクトが�
 
 When('その組み込みタグデザイン画面を開く', async ({ ctx, page }) => {
   const projectId = (ctx as ScenarioState).tagDesignProjectId as number;
+  // クライアントバンドル(JS)の配信を、ステップが明示的に解放するまで止めておく(#1743)。
+  // 以前は next dev のオンデマンドコンパイルが遅く、「開いた直後」の検査がハイドレーション前に
+  // 間に合っていた。本番ビルド(next start)ではバンドルが即座に届き、ハイドレーションが検査より
+  // 先に終わって「disabled になっていない」と誤って落ちる。待ち時間に頼らず、ハイドレーション前
+  // という状態そのものを作る。
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  (ctx as ScenarioState).releaseHydration = release;
+  await page.route('**/_next/static/**/*.js', async (route) => {
+    await gate;
+    await route.continue();
+  });
   // 'commit' は応答を受け取った直後(=SSRされたHTMLが届いた直後)で止まり、
   // クライアントバンドルの読み込み・実行(ハイドレーション)の完了を待たない。
   // ここから先のステップが「ハイドレーション完了前」を確かめる土台になる。
   await page.goto(`/projects/${projectId}/tags`, { waitUntil: 'commit' });
 });
 
-Then('ハイドレーション完了前のCSS欄は無効化されていて入力を受け付けない', async ({ page }) => {
+Then('ハイドレーション完了前のCSS欄は無効化されていて入力を受け付けない', async ({ ctx, page }) => {
   const textarea = page.locator('textarea[name="customCss"]');
   // locator.evaluate()はactionability(visible/enabled/stable)を待たず、DOMにあれば
   // 即座に評価する。ここで待ち合わせを挟むとハイドレーションが先に終わってしまい、
   // 「開いた直後」を確かめられなくなる。
-  const disabledRightAfterCommit = await textarea.evaluate(
-    (el) => (el as HTMLTextAreaElement).disabled
-  );
+  // バンドルは止めてある(上のWhen)ので、評価後に解放して以降のステップでハイドレーションを進める。
+  let disabledRightAfterCommit: boolean;
+  try {
+    disabledRightAfterCommit = await textarea.evaluate((el) => (el as HTMLTextAreaElement).disabled);
+  } finally {
+    ((ctx as ScenarioState).releaseHydration as () => void)();
+  }
   expect(
     disabledRightAfterCommit,
     '画面を開いた直後、ハイドレーション完了前のCSS欄がdisabledになっていません。' +
@@ -87,12 +105,15 @@ Then(
 // 「生成」は押さない(押すと処理キューにジョブが積まれ、LLMスタブが要る。#1586の範囲)。
 const AI_PROMPT_PLACEHOLDER = /背景を淡いグレーにして/;
 
-Then('ハイドレーション完了前のAI生成プロンプト欄は無効化されていて入力を受け付けない', async ({ page }) => {
+Then('ハイドレーション完了前のAI生成プロンプト欄は無効化されていて入力を受け付けない', async ({ ctx, page }) => {
   const textarea = page.getByPlaceholder(AI_PROMPT_PLACEHOLDER);
-  // evaluate()はactionabilityを待たない(上のCSS欄のステップと同じ理由)。
-  const disabledRightAfterCommit = await textarea.evaluate(
-    (el) => (el as HTMLTextAreaElement).disabled
-  );
+  // evaluate()はactionabilityを待たない(上のCSS欄のステップと同じ理由)。評価後にバンドルを解放する。
+  let disabledRightAfterCommit: boolean;
+  try {
+    disabledRightAfterCommit = await textarea.evaluate((el) => (el as HTMLTextAreaElement).disabled);
+  } finally {
+    ((ctx as ScenarioState).releaseHydration as () => void)();
+  }
   expect(
     disabledRightAfterCommit,
     '画面を開いた直後、ハイドレーション完了前のAI生成プロンプト欄がdisabledになっていません。' +

@@ -56,6 +56,13 @@ export async function sweepAllPages(
       if (viewport) {
         await page.setViewportSize(viewport);
       }
+      if (role === 'none') {
+        // 未ログインのページ(/login・/setup)はクライアントJSがKeycloakへリダイレクトする。
+        // 以前は next dev のコンパイルが遅く、リダイレクト前に走査が済んでいた(#1743)。本番ビルドでは
+        // JSが即座に動いて走査中にナビゲーションが起き、`Execution context was destroyed` になる。
+        // 走査したいのはリダイレクト前のサーバーレンダリング結果なので、バンドルを配信しない。
+        await page.route('**/_next/static/**/*.js', (route) => route.abort());
+      }
       for (const spec of specs) {
         try {
           // 開発サーバーのHMR等と重なると稀に net::ERR_ABORTED で終わることがある

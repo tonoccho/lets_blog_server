@@ -376,6 +376,46 @@ docker inspect lbs-media --format '{{.State.OOMKilled}}'            # false
 curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # ヒープ上限(-Xmx1g 由来)
 ```
 
+## lbs-web の本番ビルド(#1743)
+
+`web` は既定で**本番ビルドのサーバー(`next start`)**として動く。以前は `next dev` で、`./apps/web:/app` を
+バインドマウントしていた。`next dev` はオンデマンドのコンパイル・Turbopack のキャッシュ・ファイル監視を
+メモリに抱えるうえ、ホストの `.next` を共有するため、ホストで `npm run build` すると稼働中の web と衝突して
+500になることがあった。
+
+- **ビルド**: `apps/web/Dockerfile` が `npm ci` のあと `npm run build` を実行し、`node_modules` と `.next` を
+  イメージに焼き込む(方式は `output: 'standalone'` ではなく `next start`。`next.config.ts` は変えない)。
+  `next build` はビルド時に `NEXT_PUBLIC_*` をバンドルへ焼き込むが、compose の `web` に `NEXT_PUBLIC_*` は無く
+  (`scripts/test_compose_web_production.py` が固定)、実行時設定はすべてサーバー側の環境変数なので、ビルド時に
+  渡すものは無い。`apps/web/Dockerfile` の `ENV NODE_ENV=production` は `next build` の後に置く(先だと devDependencies が入らない)。
+- **起動**: `command: ["sh", "-c", "cd /app && exec npm run start"]`。`working_dir: /` のまま起動時にだけ `/app` へ入る
+  (#1000。ヘルスチェックの cwd がバインドマウント内を指さない制約は、本番モードでは bind mount 自体が無いので満たされ、
+  開発オーバーレイでも `working_dir: /` を保つ)。`docker-entrypoint.sh` は `LBS_WEB_MODE=production`(Dockerfile の既定)
+  のとき `npm ci` も `.next` の削除もせず、非 root の `node` へ `su-exec` で権限を落として起動する。
+- **反映の手順**: `apps/web` を変えたらイメージを作り直す。`./startup.sh --build`、`scripts/rebuild-acceptance-env.sh`
+  (`up -d --build`)のどちらでも成り立つ。作り直さずに受け入れテストへ進むと、`scripts/check-image-freshness.py`(#1686)が
+  古いイメージとして中断する。鮮度確認のソースパス表(`SERVICE_SOURCE_PATHS['web']`)と Dockerfile の `stamp` ステージの
+  `COPY` は、`next build` が焼き込む `src` / `public` / `messages` / `next.config.ts` / `tsconfig.json` /
+  `postcss.config.mjs` を含む同じ集合にしてある(`scripts/test_check_image_freshness.py` → `DockerfileStampStages` が照合)。
+- **開発モード(オプトイン)**: ホットリロードが要るときだけ `docker-compose.dev-web.yml` を重ねる
+  (`docker compose -f docker-compose.yml -f docker-compose.dev-web.yml up -d web`)。`./apps/web:/app` をマウントし、
+  `npm run dev` で起動する。イメージの再ビルドは不要。手順は `README.md` にもある。
+- `ヘルスチェック`(`/api/auth/csrf`)と reverse-proxy のヘルスチェック(web:3000 または gateway:8080 の TCP 到達)は
+  本番・開発の両方で成り立つ。本番モードはコンパイルが走らず、起動後すぐ3000番で応答する。
+
+### 実測(変更前 `next dev` と変更後 `next start`)
+
+`docker stats --no-stream` の `lbs-web`。変更前はこのIssue着手時の `next dev`(コンテナ作成直後、ヘルスチェックによる
+最初のコンパイル後)、変更後は同じホストで `ゼロ構築 → 起動直後` と、受け入れテスト全件(`npm run test:at`)実行中を
+5 秒ごとに採った最大値。
+
+| | アイドル | 受け入れテスト全件実行中のピーク |
+|---|---:|---:|
+| 変更前(`next dev`) | 386 MiB(Issue 起票時の実測は 1.04 GiB) | 2048 MiB(`mem_limit` 2g に張り付き。#1739 の実測) |
+| 変更後(`next start`) | 73 MiB(ゼロ構築直後。AT 開始前は 180 MiB) | 195 MiB(`mem_limit` 2g の約 10%) |
+
+`mem_limit: 2g` は据え置いた(Out of Scope)。変更後のピークが 2g を大きく下回るので、必要なら別 Issue で見直す。
+
 ## 全コンテナのメモリ上限(#1739)
 
 `docker-compose.yml` の全サービス(全 profiles)に `mem_limit` を、Spring Boot 10サービスに
@@ -391,7 +431,7 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
 
 | コンテナ | アイドル | 負荷時ピーク | `mem_limit` | `-Xmx` |
 |---|---:|---:|---|---|
-| `lbs-web`(`next dev`) | 406 | 2048 | 2g | - |
+| `lbs-web`(`next dev`、#1743 前) | 406 | 2048 | 2g | - |
 | `lbs-platform` | 354 | 1059 | 1536m | 768m |
 | `lbs-content` | 414 | 822 | 1536m | 768m |
 | `lbs-ai` | 375 | 543 | 1g | 512m |
@@ -418,7 +458,7 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
   Playwright の Chromium も動かす。
 - `wordpress` は WordPress のプロビジョニング中に 455 MiB で 512m に張り付いたため 1g に上げた(ピーク 968 MiB)。
 - `web` は AT 実行中のピークが 1.5g の上限に達したため 2g に上げた。開発モード(`next dev`)の値で、
-  lbs-web の本番ビルド化(別 Issue)で必要なら見直す。ピークが上限と同じ 2048 なのはページキャッシュを含むためで、
+  #1743 で既定が本番ビルドになったため、変更後の実測は「lbs-web の本番ビルド」節を参照(必要なら見直す)。ピークが上限と同じ 2048 なのはページキャッシュを含むためで、
   この実行では `OOMKilled` にはならなかった。
 - 実測の合計ピーク(lbs-* と e2e スタブ)は約 11.1 GiB(11,412 MiB。変更前の約 30 GB に対して)。
 
@@ -466,8 +506,8 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 
 **注意点**
 
-- `web` はNext.jsの開発モード(Turbopack, ホットリロード用のbind mount)で実行しているため、
-  本番ビルドより大幅にメモリを消費している。本番相当の構成にすればもっと小さくなる見込み。
+- (2026-09-01 の測定時点)`web` はNext.jsの開発モード(Turbopack, ホットリロード用のbind mount)で実行していた。
+  #1743 で既定が本番ビルド(`next start`)になり、メモリは大幅に減った(「lbs-web の本番ビルド」節の実測)。
 - 上の測定は同梱の ComfyUI(約1.4 GiB)を含む時点のもの。ComfyUI は #1746 で同梱をやめたので、その分は不要になった。
 - ビルド時(`docker compose build` 実行中)やAI機能利用時は瞬間的にこれを上回る。
   ホストOS自体の消費分も含め、実測値(Penpot を削除する前は約15GiB)に対して余裕を見て**24GB以上を推奨**する(README参照)。

@@ -288,10 +288,11 @@ class SourcePathTable(unittest.TestCase):
         finally:
             os.unlink(f.name)
 
-    def test_web_excludes_bind_mounted_paths(self):
-        for p in cif.SERVICE_SOURCE_PATHS["web"]:
-            self.assertFalse(p.startswith("apps/web/src"), p)
+    def test_web_includes_baked_in_source_paths(self):
+        # #1743: 既定の web は本番ビルドで、src は next build でイメージに焼き込まれる
+        # (バインドマウントは開発オーバーレイだけ)。src の変更は再ビルドまで反映されない。
         self.assertIn("apps/web/package.json", cif.SERVICE_SOURCE_PATHS["web"])
+        self.assertIn("apps/web/src", cif.SERVICE_SOURCE_PATHS["web"])
 
     def test_java_services_include_services_and_shared_roots(self):
         paths = cif.SERVICE_SOURCE_PATHS["media"]

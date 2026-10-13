@@ -82,8 +82,9 @@ services:
     # 名前解決に失敗して落ちる。web と gateway の**どちらか**が届けばよいことにして、
     # 片方の再起動でreverse-proxyがunhealthyへ倒れる無用な連鎖を避ける。
     #
-    # start_period は上流のTCP待ち受け開始を待てる長さにする(webの`next dev`は
-    # 初回コンパイル前に3000番をlistenするので、ここで待つのはコンパイルではなく起動)。
+    # start_period は上流のTCP待ち受け開始を待てる長さにする(webは既定で本番ビルドの
+    # `next start` で、起動後すぐ3000番をlistenする。開発モードの`next dev`も初回コンパイル前に
+    # 3000番をlistenするので、いずれもここで待つのはコンパイルではなく起動)。
     healthcheck:
       test:
         - CMD-SHELL
@@ -119,32 +120,37 @@ services:
       # Keycloakのletsblog-webクライアント(confidential client)のシークレット(#564)。
       # apps/web/src/lib/auth.tsがトークン交換・リフレッシュ・ログアウトのサーバー間通信で使う。
       KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET}
-    # node_modules/.nextは匿名ボリュームにせず./web配下のbind mountに含める
-    # (匿名ボリュームは/var/lib/docker配下、すなわちルートディスクに置かれるため、
-    # 容量の大きいTurbopackキャッシュがルートディスクを圧迫していた)
-    volumes:
-      - ./apps/web:/app
+    # 既定は本番ビルド(#1743)。`next build` はイメージのビルド時に済んでおり、ここでは
+    # `next start` で配信するだけである。ソースはバインドマウントしない: イメージ内の
+    # node_modules と .next を使うので、ホストで `npm run build` を実行しても稼働中の web と
+    # 衝突しない(以前は ./apps/web:/app を共有しており、500になることがあった)。
+    # `apps/web` を変えたら `./startup.sh --build` でイメージを作り直す。
+    # ホットリロード(next dev + ソースのバインドマウント)が要るときだけ、
+    # docker-compose.dev-web.yml を重ねる(README.md「lbs-web の開発モード」)。
+    #
     # マウント先(/app)を working_dir にしない(#1000)。
     #
-    # イメージのWORKDIRは/appだが、そこは上のバインドマウントの中である。ヘルスチェックは
-    # docker execと同じ経路で走り、cwdはコンテナのWorkingDirになる。runc 1.4.0はexecのcwdが
-    # バインドマウント経由でマウント名前空間のルート外を指す場合、プロセスの起動そのものを
-    # 拒否する(current working directory is outside of container mount namespace root)。
-    # 拒否されるのはプロセスが動き出す前なので、test:の中にcdを書いても回避できない。
-    # e2eスタブ6本が恒常的にunhealthyになったのと同じ構図で、webも同じ組み合わせを持つ。
+    # イメージのWORKDIRは/appである。開発モードのオーバーレイはそこへバインドマウントする。
+    # ヘルスチェックはdocker execと同じ経路で走り、cwdはコンテナのWorkingDirになる。
+    # runc 1.4.0はexecのcwdがバインドマウント経由でマウント名前空間のルート外を指す場合、
+    # プロセスの起動そのものを拒否する(current working directory is outside of container
+    # mount namespace root)。拒否されるのはプロセスが動き出す前なので、test:の中にcdを
+    # 書いても回避できない。e2eスタブ6本が恒常的にunhealthyになったのと同じ構図である。
+    # 本番モードにバインドマウントは無いが、開発オーバーレイと同じ working_dir に揃える。
     #
-    # next devはプロジェクトディレクトリをcwdから決めるため、起動時にだけ/appへ入る。
-    # commandはDockerfileのCMD(npm run dev)と同じものを、cd経由で起動する。
+    # next はプロジェクトディレクトリをcwdから決めるため、起動時にだけ/appへ入る。
     working_dir: /
-    command: ["sh", "-c", "cd /app && exec npm run dev"]
+    command: ["sh", "-c", "cd /app && exec npm run start"]
     # webの呼び先はgatewayに一本化した(issue #584)ため、起動順の依存もgatewayへ付け替える
     # (gateway自身がapi/identity/各ドメインサービスのhealthyを待つ)。
     depends_on:
       - gateway
     # E2E(#588)がテスト開始前に「全サービスhealthy」を待てるようにするためのヘルスチェック。
     # 認証不要でNext.jsのサーバー処理まで到達する/api/auth/csrf(NextAuth)を叩く。
-    # 開発モード(next dev)は初回リクエスト時にコンパイルが走るため、start_period/retriesは
-    # 他サービス(actuator)より緩めに設定する。node:22-alpineにcurlは無いためbusybox wgetを使う。
+    # 本番モード(next start)はビルド済みなのでコンパイルは走らないが、開発モード(next dev、
+    # docker-compose.dev-web.yml)は初回リクエスト時にコンパイルが走る。両方で使うため
+    # start_period/retriesは他サービス(actuator)より緩めに設定する。
+    # node:22-alpineにcurlは無いためbusybox wgetを使う。
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/auth/csrf || exit 1"]
       interval: 10s

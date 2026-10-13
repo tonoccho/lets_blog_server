@@ -33,9 +33,12 @@ echo "--- 2/4: クローン直後を模した node_modules の無い /app を用
 cp -r "$REPO_ROOT/apps/web/." "$TMP_APP_DIR/"
 rm -rf "${TMP_APP_DIR:?}/node_modules"
 
+# 開発モード(#1743: イメージの既定は本番)。バインドマウントの node_modules 初期化を検証する。
 echo "--- 3/4: コンテナを単体起動し、next dev が3000番で応答するまで待機 ---"
 docker run -d --name "$CONTAINER_NAME" \
   -v "$TMP_APP_DIR:/app" \
+  -e LBS_WEB_MODE=development \
+  -e NODE_ENV=development \
   -e NEXTAUTH_SECRET=dummy-secret-for-verification \
   -e NEXTAUTH_URL=http://127.0.0.1:3000 \
   -e LETS_BLOG_GATEWAY_URL=http://127.0.0.1:0 \

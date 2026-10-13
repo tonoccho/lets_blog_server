@@ -300,5 +300,23 @@ class NextCacheClearedOnNpmCi(DockerEntrypointTestCase):
         self.assertTrue(os.path.exists(os.path.join(self.app_dir, ".next", "dev", "cache", "x")))
 
 
+class ProductionMode(DockerEntrypointTestCase):
+    """#1743: LBS_WEB_MODE=production(Dockerfile が設定する既定)では、イメージに焼き込まれた
+    node_modules と .next をそのまま使う。npm ci も .next の削除もせず、非 root の node へ
+    権限を落として起動する。"""
+
+    def test_does_not_npm_ci_or_remove_next_and_drops_to_node(self):
+        os.makedirs(os.path.join(self.app_dir, ".next"))
+        marker = os.path.join(self.app_dir, ".next", "BUILD_ID")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("x")
+        r = self._run(["true"], {"LBS_WEB_MODE": "production"})
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        log = self._fake_log_lines()
+        self.assertEqual(0, self._npm_ci_count(), log)
+        self.assertTrue(os.path.exists(marker))
+        self.assertIn("su-exec node true", log)
+
+
 if __name__ == "__main__":
     unittest.main()

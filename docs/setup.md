@@ -286,8 +286,10 @@ GPU PC の `models/` に置く(Let's Blog の画面・API からの導入・削�
 Web管理画面自身のサーバーサイドAPI呼び出しがコンテナ間の平文HTTP通信になるため、
 Web管理画面側では自己署名証明書の信頼設定(`NODE_EXTRA_CA_CERTS`)は不要。
 
-`docker-compose.yml` の `web` サービスは `./apps/web:/app` をバインドマウントするため、
-イメージビルド時に作られた `/app/node_modules` はマウントで覆い隠される。クローン直後など
+`docker-compose.yml` の `web` サービスは既定で本番ビルド(`next start`)として動き、ソースを
+バインドマウントしない(#1743)。以下は、開発オーバーレイ(`docker-compose.dev-web.yml`、
+`./apps/web:/app` をバインドマウントして `next dev` を動かす)を重ねたときの説明である。
+バインドマウントのため、イメージビルド時に作られた `/app/node_modules` はマウントで覆い隠される。クローン直後など
 ホストに `apps/web/node_modules` が無い場合、`apps/web/docker-entrypoint.sh` が起動時に
 それを検知してコンテナ内(`node:22-alpine`、musl)で `npm ci` を実行し、生成された
 `node_modules` の所有者をバインドマウント元(ホストの実行ユーザー)へ揃える。ホストの

@@ -340,8 +340,9 @@ class CheckerSanity(unittest.TestCase):
         found = {
             (f, n) for f, n, _ in healthchecked_services_with_binds()
         }
+        # web は #1743 で既定が本番ビルド(バインドマウント無し)になったため含めない。
+        # 開発オーバーレイでの working_dir は test_compose_web_production.py が検査する。
         for expected in [
-            ("docker-compose.yml", "web"),
             (STUB_COMPOSE, "llm-stub"),
             (STUB_COMPOSE, "brave-stub"),
             (STUB_COMPOSE, "ga-stub"),

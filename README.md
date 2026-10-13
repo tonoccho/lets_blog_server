@@ -374,6 +374,29 @@ bash scripts/wait-for-stack-healthy.sh --all
 
 healthy にならないサービスがあれば、そのサービス名を表示して終了コード非0で終わる。
 
+### lbs-web の本番ビルドと開発モード(#1743)
+
+既定の `lbs-web` は、イメージのビルド時に `next build` を済ませた本番サーバー(`next start`)で動く。
+ソースはバインドマウントしないので、ホストで `npm run build` を実行しても稼働中の web と衝突しない。
+その代わり、`apps/web` を変更したら **イメージを作り直さないと反映されない**:
+
+```bash
+./startup.sh --build        # 再ビルドして起動(web の src の変更もこれで反映される)
+```
+
+`scripts/rebuild-acceptance-env.sh` も `up -d --build` でビルドし直すので、受け入れテストは常に今のソースを見る。
+古いイメージのまま受け入れテストを回すと、`scripts/check-image-freshness.py` が検出して中断する(#1686)。
+
+`apps/web/src` を編集して即座に画面へ反映したい(ホットリロード)ときだけ、開発モードのオーバーレイを重ねる。
+他の `-f`(`docker-compose.e2e-stubs.yml` / `docker-compose.shared-host.yml`)も同じ並びに含めること。
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev-web.yml up -d web   # 開発モード(next dev)
+docker compose -f docker-compose.yml up -d web                                 # 既定(本番)へ戻す
+```
+
+開発モードは常駐メモリが大きい(`docs/DOCKER_COMPOSE_ARCHITECTURE.md` →「lbs-web の本番ビルド」)。
+
 ### 停止
 
 停止は `./shutdown.sh` を使う。コンテナを停止・削除するが、名前付きボリュームは残るので、

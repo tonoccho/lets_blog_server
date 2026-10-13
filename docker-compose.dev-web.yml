@@ -1,0 +1,23 @@
+# lbs-web の開発モード(next dev + ホットリロード)のオプトイン用オーバーレイ(#1743)。
+#
+# 既定の `docker-compose.yml` の web は、イメージのビルド時に `next build` を済ませた本番
+# サーバー(`next start`)で動く。`apps/web/src` を編集して即座に画面へ反映したいときだけ、
+# このファイルを重ねる:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev-web.yml up -d web
+#
+# 重ねる場合は他のオーバーレイ(docker-compose.e2e-stubs.yml 等)も同じ -f の並びに
+# 含めること。web を作り直すのは `up -d web`(イメージの再ビルドは不要)。
+# 既定へ戻すには、このファイル無しで `docker compose up -d web` を実行する。
+#
+# 開発モードは ./apps/web を /app へバインドマウントし、docker-entrypoint.sh が
+# node_modules の初期化(npm ci)とホストの実行ユーザーへの権限の切り替えをする(#1042 / #1050)。
+# working_dir は既定のまま `/` に保つ(#1000: バインドマウント内を cwd にしない)。
+services:
+  web:
+    environment:
+      LBS_WEB_MODE: development
+      NODE_ENV: development
+    volumes:
+      - ./apps/web:/app
+    command: ["sh", "-c", "cd /app && exec npm run dev"]
