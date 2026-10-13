@@ -1,5 +1,6 @@
 package com.letsblog.media.config;
 
+import com.letsblog.common.async.MdcPropagatingTaskDecorator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -29,6 +30,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("media-gc-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }
@@ -45,6 +48,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(1);
         executor.setQueueCapacity(10);
         executor.setThreadNamePrefix("image-generation-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }
@@ -61,6 +66,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("image-tagging-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }

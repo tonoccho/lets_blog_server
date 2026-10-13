@@ -1,5 +1,6 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.letsblog.common.scheduling.MdcPropagation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -93,16 +94,21 @@ public class OllamaPullJobRunner {
      */
     @Async("ollamaPullExecutor")
     public void run(Long jobId, String baseUrl, boolean projectOverride, String model) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "ollama_pull", jobId);
         try {
             pull(jobId, rootUrl(baseUrl), projectOverride, model);
             update(jobId, "done", objectMapper.createObjectNode().put("success", "true"));
+            timer.success();
         } catch (IOException e) {
+            timer.failure(e);
             log.warn("Ollama model pull job {} could not reach Ollama", jobId, e);
             fail(jobId, "Ollamaへ接続できませんでした(外部への通信(egress)が無い場合も含みます): " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            timer.failure(e);
             fail(jobId, "インストールが中断されました");
         } catch (RuntimeException e) {
+            timer.failure(e);
             log.warn("Ollama model pull job {} failed", jobId, e);
             fail(jobId, String.valueOf(e.getMessage()));
         }

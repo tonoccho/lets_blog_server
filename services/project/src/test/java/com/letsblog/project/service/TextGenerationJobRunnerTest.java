@@ -1,5 +1,13 @@
 package com.letsblog.project.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
@@ -165,5 +173,45 @@ class TextGenerationJobRunnerTest {
         runner.runTagDesign(12L, 3L, EmbedTagType.TOC, "p");
 
         assertEquals("invalid_content", terminalPayload(12L, "failed").get("errorType").asText());
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(TextGenerationJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+        when(staticContentGenerationService.generateBody(any(), any())).thenReturn("本文");
+        List<ILoggingEvent> lines = completionLines(() -> { runner.runStaticContent(11L, 5L, StaticContentType.PRIVACY_POLICY, "Bearer abc"); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=text_generation job_id=11 duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        when(staticContentGenerationService.generateBody(any(), any())).thenThrow(new SiteNotFoundException("無い"));
+        List<ILoggingEvent> lines = completionLines(() -> { runner.runStaticContent(11L, 5L, StaticContentType.PRIVACY_POLICY, "Bearer abc"); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=text_generation job_id=11 duration_ms=\\d+ outcome=SiteNotFoundException"),
+                lines.get(0).getFormattedMessage());
     }
 }

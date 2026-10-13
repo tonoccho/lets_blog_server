@@ -1,5 +1,6 @@
 package com.letsblog.media.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.client.CmsBridgeClient;
 import com.letsblog.common.client.GenerationJobClient;
@@ -55,6 +56,7 @@ public class MediaGarbageCollectionJobRunner {
         long[] lastReportedAt = {0L};
         List<String> deleted = new ArrayList<>();
         Map<String, String> failures = new LinkedHashMap<>();
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "media_garbage_collection", jobId);
         try {
             for (int i = 0; i < mediaIds.size(); i++) {
                 String mediaId = mediaIds.get(i);
@@ -83,7 +85,14 @@ public class MediaGarbageCollectionJobRunner {
                     "failedCount", failures.size(),
                     "deletedMediaIds", deleted,
                     "failures", failures)));
+            if ("failed".equals(status)) {
+                // 例外ではなく、全件の削除に失敗してジョブをfailedにしたケース。
+                timer.failure("all_items_failed");
+            } else {
+                timer.success();
+            }
         } catch (RuntimeException e) {
+            timer.failure(e);
             log.warn("メディアガベージコレクションジョブが失敗しました(jobId={})", jobId, e);
             generationJobClient.updateStatus(
                     jobId, "failed", toJson(Map.of("error", String.valueOf(e.getMessage()))));

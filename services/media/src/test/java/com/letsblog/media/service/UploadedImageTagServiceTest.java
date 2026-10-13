@@ -1,5 +1,13 @@
 package com.letsblog.media.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.client.AiGenerationClient;
@@ -159,5 +167,46 @@ class UploadedImageTagServiceTest {
         when(repository.save(any())).thenThrow(new IllegalStateException("db down"));
 
         service.tagAsync(1L, 7L, "image/png", DATA);
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(UploadedImageTagService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+        when(aiGenerationClient.generateWithImage(any(), anyString(), any(), any())).thenReturn(null);
+        List<ILoggingEvent> lines = completionLines(() -> { service.tagAsync(1L, 7L, "image/png", DATA); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=image_tagging duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        when(aiGenerationClient.generateWithImage(any(), anyString(), any(), any()))
+                .thenThrow(new AiServiceException("timeout", null));
+        List<ILoggingEvent> lines = completionLines(() -> { service.tagAsync(1L, 7L, "image/png", DATA); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=image_tagging duration_ms=\\d+ outcome=AiServiceException"),
+                lines.get(0).getFormattedMessage());
     }
 }

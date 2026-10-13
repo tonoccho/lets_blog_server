@@ -1,5 +1,6 @@
 package com.letsblog.project.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.project.client.AiServiceException;
@@ -41,6 +42,9 @@ public class TextGenerationJobRunner {
     static final String ERROR_INVALID_CONTENT = "invalid_content";
     static final String ERROR_UNEXPECTED = "unexpected_error";
 
+    /** 完了行({@link JobCompletionLog})の種別(issue #1731)。 */
+    private static final String JOB_KIND = "text_generation";
+
     private static final Logger log = LoggerFactory.getLogger(TextGenerationJobRunner.class);
 
     private final StaticContentGenerationService staticContentGenerationService;
@@ -65,6 +69,7 @@ public class TextGenerationJobRunner {
     /** @param bearer 受理側が取り置いた呼び出し元のBearer。サービス間ブリッジ(プラグイン取得)が使う。 */
     @Async("textGenerationExecutor")
     public void runStaticContent(Long jobId, Long siteId, StaticContentType contentType, String bearer) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, JOB_KIND, jobId);
         try {
             String body = BearerScope.call(bearer, () -> staticContentGenerationService.generateBody(siteId, contentType));
             Map<String, Object> result = new LinkedHashMap<>();
@@ -72,13 +77,16 @@ public class TextGenerationJobRunner {
             result.put("contentType", contentType.name());
             result.put("body", body);
             generationJobClient.updateStatus(jobId, "done", toJson(result));
+            timer.success();
         } catch (RuntimeException e) {
+            timer.failure(e);
             fail(jobId, "Static content generation", e);
         }
     }
 
     @Async("textGenerationExecutor")
     public void runTagDesign(Long jobId, Long projectId, EmbedTagType tagType, String prompt) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, JOB_KIND, jobId);
         try {
             String currentHtmlTemplate = tagDesignSettingService.resolveHtmlTemplate(projectId, tagType);
             GenerateTagDesignResponse generated =
@@ -89,7 +97,9 @@ public class TextGenerationJobRunner {
             result.put("htmlTemplate", generated.htmlTemplate());
             result.put("cssContent", generated.cssContent());
             generationJobClient.updateStatus(jobId, "done", toJson(result));
+            timer.success();
         } catch (RuntimeException e) {
+            timer.failure(e);
             fail(jobId, "Tag design generation", e);
         }
     }

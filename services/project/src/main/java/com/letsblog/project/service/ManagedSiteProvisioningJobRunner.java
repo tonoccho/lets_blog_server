@@ -1,5 +1,6 @@
 package com.letsblog.project.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
@@ -59,13 +60,16 @@ public class ManagedSiteProvisioningJobRunner {
     /** @param actor 受理側がリクエストスレッドで解決した操作者。監査ログとサイト登録の著者解決に使う。 */
     @Async("siteProvisioningExecutor")
     public void run(Long jobId, CreateManagedWordPressSiteRequest request, ActorSnapshot actor) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "site_provisioning", jobId);
         try {
             // 取り置いた利用者のBearerは5分で切れるので持ち込まない。サービス間ブリッジは、リクエストの無い
             // このスレッドではサービス自身のClient Credentialsを呼び出しの都度使う(#1723)。
             SiteResponse site = currentActorService.runAs(actor.withoutAuthorization(), () ->
                     provisioningService.createManagedSiteForJob(request, phase -> reportPhase(jobId, phase)));
             heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "done", toJson(donePayload(site))));
+            timer.success();
         } catch (RuntimeException e) {
+            timer.failure(e);
             log.warn("Site provisioning job {} failed", jobId, e);
             heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e))));
         }

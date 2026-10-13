@@ -1,5 +1,12 @@
 package com.letsblog.media.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.AiServiceException;
@@ -258,5 +265,47 @@ class ImageGenerationJobRunnerTest {
         // 開始(0%)・リピート完了(25%)・ハートビートの3回。ハートビートは直近の25%を使う。
         verify(generationJobClient, times(3)).updateStatus(eq(7L), eq("running"), payload.capture());
         assertEquals(25, objectMapper.readTree(payload.getAllValues().get(2)).get("percent").asInt());
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ImageGenerationJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+        when(imageGenerationService.generateBatch(eq(REQUEST), eq(false), any()))
+                .thenReturn(new BatchOutcome(List.of(image(11)), 1, 0, 1, false));
+        List<ILoggingEvent> lines = completionLines(() -> { runner.run(7L, REQUEST); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=image_generation job_id=7 duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        when(imageGenerationService.generateBatch(any(), eq(false), any()))
+                .thenThrow(new IllegalStateException("boom"));
+        List<ILoggingEvent> lines = completionLines(() -> { runner.run(7L, REQUEST); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=image_generation job_id=7 duration_ms=\\d+ outcome=IllegalStateException"),
+                lines.get(0).getFormattedMessage());
     }
 }

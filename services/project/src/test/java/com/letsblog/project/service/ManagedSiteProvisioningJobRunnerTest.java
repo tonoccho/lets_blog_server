@@ -1,5 +1,13 @@
 package com.letsblog.project.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
@@ -247,5 +255,46 @@ class ManagedSiteProvisioningJobRunnerTest {
 
         assertEquals("null/null/a@example.com", seen.get());
         org.junit.jupiter.api.Assertions.assertNull(com.letsblog.project.client.BearerScope.current());
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ManagedSiteProvisioningJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+        when(provisioningService.createManagedSiteForJob(eq(REQUEST), any())).thenReturn(site());
+        List<ILoggingEvent> lines = completionLines(() -> { runner.run(11L, REQUEST, ACTOR); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=site_provisioning job_id=11 duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        when(provisioningService.createManagedSiteForJob(any(), any()))
+                .thenThrow(new ProvisioningException("構築失敗", null));
+        List<ILoggingEvent> lines = completionLines(() -> { runner.run(11L, REQUEST, ACTOR); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=site_provisioning job_id=11 duration_ms=\\d+ outcome=ProvisioningException"),
+                lines.get(0).getFormattedMessage());
     }
 }

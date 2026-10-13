@@ -1,5 +1,6 @@
 package com.letsblog.project.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.project.dto.SyncEnvironmentRequest;
@@ -51,6 +52,7 @@ public class ProjectEnvironmentSyncJobRunner {
     /** @param actor 受理側がリクエストスレッドで解決した操作者。監査ログに使う(Bearerは持ち込まない。#1723)。 */
     @Async("environmentSyncExecutor")
     public void run(Long jobId, Long projectId, SyncEnvironmentRequest request, ActorSnapshot actor) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "environment_sync", jobId);
         try {
             heartbeatTracker.updatePhase(jobId, "syncing");
             generationJobClient.updateStatus(jobId, "running", toJson(JobProgressPayload.phase("syncing")));
@@ -61,7 +63,9 @@ public class ProjectEnvironmentSyncJobRunner {
                 return null;
             });
             heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "done", toJson(donePayload(projectId, request))));
+            timer.success();
         } catch (RuntimeException e) {
+            timer.failure(e);
             log.warn("Environment sync job {} failed", jobId, e);
             heartbeatTracker.complete(jobId, () -> generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e))));
         }

@@ -1,5 +1,12 @@
 package com.letsblog.project.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
@@ -230,5 +237,46 @@ class ProjectEnvironmentSyncJobRunnerTest {
                 .getMethod("run", Long.class, Long.class, SyncEnvironmentRequest.class, ActorSnapshot.class)
                 .getAnnotation(org.springframework.scheduling.annotation.Async.class).value();
         assertEquals("environmentSyncExecutor", qualifier);
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ProjectEnvironmentSyncJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+
+        List<ILoggingEvent> lines = completionLines(() -> { runner.run(21L, 3L, REQUEST, ACTOR); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=environment_sync job_id=21 duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        doThrow(new ProvisioningException("同期失敗", null))
+                .when(syncService).sync(any(), any(), any(), any());
+        List<ILoggingEvent> lines = completionLines(() -> { runner.run(21L, 3L, REQUEST, ACTOR); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=environment_sync job_id=21 duration_ms=\\d+ outcome=ProvisioningException"),
+                lines.get(0).getFormattedMessage());
     }
 }

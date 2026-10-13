@@ -1,5 +1,6 @@
 package com.letsblog.publishing.config;
 
+import com.letsblog.common.async.MdcPropagatingTaskDecorator;
 import java.util.concurrent.Executor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,6 +29,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(5);
         executor.setThreadNamePrefix("bulk-install-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }

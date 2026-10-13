@@ -1,5 +1,6 @@
 package com.letsblog.project.config;
 
+import com.letsblog.common.async.MdcPropagatingTaskDecorator;
 import java.util.concurrent.Executor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,6 +28,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(5);
         executor.setThreadNamePrefix("site-provisioning-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }
@@ -44,6 +47,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(4);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("text-generation-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }
@@ -60,6 +65,8 @@ public class AsyncJobConfig {
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(5);
         executor.setThreadNamePrefix("environment-sync-");
+        // 起動したリクエストの処理ID(MDC)をジョブの実行スレッドへ引き継ぐ(issue #1731)。
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
         executor.initialize();
         return executor;
     }

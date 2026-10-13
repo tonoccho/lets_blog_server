@@ -1,5 +1,6 @@
 package com.letsblog.media.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.ai.ComfyUiUnreachableException;
@@ -56,6 +57,7 @@ public class ImageGenerationJobRunner {
 
     @Async("imageGenerationExecutor")
     public void run(Long jobId, AiImageRequest request) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "image_generation", jobId);
         try {
             reportProgress(jobId, 0);
             ImageGenerationService.BatchOutcome outcome = imageGenerationService.generateBatch(
@@ -63,7 +65,9 @@ public class ImageGenerationJobRunner {
             // 終端通知はトラッカーの排他の中で書く。ハートビートが後からrunningで上書きしないため。
             tracker.complete(jobId, () ->
                     generationJobClient.updateStatus(jobId, "done", toJson(donePayload(outcome))));
+            timer.success();
         } catch (RuntimeException e) {
+            timer.failure(e);
             log.warn("Image generation job {} failed", jobId, e);
             tracker.complete(jobId, () ->
                     generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e))));

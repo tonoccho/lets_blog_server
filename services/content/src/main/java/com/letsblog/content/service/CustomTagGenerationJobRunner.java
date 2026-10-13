@@ -1,5 +1,6 @@
 package com.letsblog.content.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.content.client.AiServiceException;
@@ -49,10 +50,13 @@ public class CustomTagGenerationJobRunner {
 
     @Async("customTagGenerationExecutor")
     public void run(Long jobId, GenerateCustomTagRequest request) {
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "custom_tag_generation", jobId);
         try {
             CustomTagGenerationService.GeneratedContent content = generationService.generateContent(request.prompt());
             generationJobClient.updateStatus(jobId, "done", toJson(donePayload(request, content)));
+            timer.success();
         } catch (RuntimeException e) {
+            timer.failure(e);
             log.warn("Custom tag generation job {} failed", jobId, e);
             generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e)));
         }

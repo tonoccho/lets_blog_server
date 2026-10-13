@@ -1,5 +1,12 @@
 package com.letsblog.media.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.client.CmsBridgeClient;
 import com.letsblog.common.client.GenerationJobClient;
@@ -110,5 +117,60 @@ class MediaGarbageCollectionJobRunnerTest {
         runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "keycloak-sub-1");
 
         verify(generationJobClient).updateStatus(eq(123L), eq("failed"), anyString());
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(MediaGarbageCollectionJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+
+        List<ILoggingEvent> lines = completionLines(() -> { runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "sub"); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=media_garbage_collection job_id=123 duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        doThrow(new IllegalStateException("予期しない失敗")).when(auditLogService)
+                .log(any(), any(), any(), any(), any(), any(), any(), any());
+        List<ILoggingEvent> lines = completionLines(() -> { runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "sub"); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=media_garbage_collection job_id=123 duration_ms=\\d+ outcome=IllegalStateException"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_全件削除に失敗したジョブはWARNでoutcomeにall_items_failedを出す() {
+        doThrow(new RuntimeException("削除不可")).when(cmsBridgeClient).deleteMedia(any(), any(), any());
+
+        List<ILoggingEvent> lines = completionLines(
+                () -> runner().runDelete(123L, 1L, "local", List.of("10"), 9L, "sub"));
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=media_garbage_collection job_id=123 duration_ms=\\d+ outcome=all_items_failed"),
+                lines.get(0).getFormattedMessage());
     }
 }

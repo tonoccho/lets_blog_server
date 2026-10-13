@@ -1,5 +1,6 @@
 package com.letsblog.media.service;
 
+import com.letsblog.common.job.JobCompletionLog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.media.client.AiGenerationClient;
@@ -55,25 +56,33 @@ public class UploadedImageTagService {
      */
     @Async("imageTaggingExecutor")
     public void tagAsync(Long imageId, Long projectId, String mimeType, byte[] imageData) {
+        // generation_jobsの行を持たない補助処理なのでjob_idは出さない。早期return(タグ無し等)は成功。
+        JobCompletionLog.Timer timer = JobCompletionLog.start(log, "image_tagging", null);
         try {
-            String raw = aiGenerationClient.generateWithImage(projectId, PROMPT, mimeType, imageData);
-            if (raw == null) {
-                return;
-            }
-            List<String> tags = parseTags(raw);
-            if (tags.isEmpty()) {
-                return;
-            }
-            GeneratedImage image = generatedImageRepository.findById(imageId).orElse(null);
-            // 応答を待つ間に画像が消えた、または利用者が先にタグを付けた場合は何もしない。
-            if (image == null || (image.getTagsJson() != null && !image.getTagsJson().isBlank())) {
-                return;
-            }
-            image.setTagsJson(objectMapper.writeValueAsString(tags));
-            generatedImageRepository.save(image);
+            tag(imageId, projectId, mimeType, imageData);
+            timer.success();
         } catch (Exception e) {
+            timer.failure(e);
             log.warn("アップロード画像のAIタグ付けに失敗しました(タグなしで登録済みのまま続行します): {}", e.getMessage());
         }
+    }
+
+    private void tag(Long imageId, Long projectId, String mimeType, byte[] imageData) throws Exception {
+        String raw = aiGenerationClient.generateWithImage(projectId, PROMPT, mimeType, imageData);
+        if (raw == null) {
+            return;
+        }
+        List<String> tags = parseTags(raw);
+        if (tags.isEmpty()) {
+            return;
+        }
+        GeneratedImage image = generatedImageRepository.findById(imageId).orElse(null);
+        // 応答を待つ間に画像が消えた、または利用者が先にタグを付けた場合は何もしない。
+        if (image == null || (image.getTagsJson() != null && !image.getTagsJson().isBlank())) {
+            return;
+        }
+        image.setTagsJson(objectMapper.writeValueAsString(tags));
+        generatedImageRepository.save(image);
     }
 
     private List<String> parseTags(String raw) throws Exception {

@@ -1603,3 +1603,50 @@ Then(
     expect(found, `project の内部連携(sites)のログに操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
   }
 );
+
+// ---------------------------------- 非同期ジョブへの処理ID引き継ぎ(issue #1731)
+
+// カスタムタグの生成要求(POST /api/custom-tags/generate/jobs)は、content-service の @Async ジョブ
+// (CustomTagGenerationJobRunner)を起動し、ジョブが ai-service を同期で呼ぶ。BFF が付けた操作IDが
+// ジョブの実行スレッドへ引き継がれていれば、ジョブの完了行と ai-service の呼び出し行が同じ処理IDを持つ。
+Then('カスタムタグ生成の要求の操作IDが分かるまで待つ', async ({ ctx, request, $testInfo }) => {
+  $testInfo.setTimeout($testInfo.timeout + LOG_POLL_TIMEOUT_MS);
+  const token = await adminToken(request);
+  const known = ctx.at15KnownOperationIds as Set<string>;
+  const entry = await pollFor('カスタムタグ生成の要求の操作ログ', async () => {
+    const logs = await listOperationLogs(request, token);
+    return (
+      logs.content.find(
+        (candidate) =>
+          !known.has(candidate.operationId)
+          && candidate.method === 'POST'
+          && candidate.path.endsWith('/custom-tags/generate/jobs')
+      ) ?? null
+    );
+  });
+  ctx.at15OperationId = entry.operationId;
+});
+
+Then('content-serviceのログにその操作IDを処理IDとするカスタムタグ生成ジョブの完了行がある', async ({ ctx }) => {
+  const operationId = ctx.at15OperationId as string;
+  const found = await pollFor('ジョブの完了行の処理ID', async () =>
+    containerLogLines('lbs-content').some(
+      (line) =>
+        line.includes('job completed:')
+        && line.includes('kind=custom_tag_generation')
+        && line.includes('outcome=')
+        && line.includes(`"correlationId":"${operationId}"`)
+    ) || null
+  );
+  expect(found, `content のジョブ完了行に操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
+});
+
+Then('ai-serviceの「service request:」行にその操作IDを処理IDとする行がある', async ({ ctx }) => {
+  const operationId = ctx.at15OperationId as string;
+  const found = await pollFor('ジョブから呼ばれた ai-service のログの処理ID', async () =>
+    containerLogLines('lbs-ai').some(
+      (line) => line.includes('service request:') && line.includes(`correlation_id=${operationId}`)
+    ) || null
+  );
+  expect(found, `ai-service のログに操作ID(${operationId})を処理IDとする行が無い`).toBe(true);
+});

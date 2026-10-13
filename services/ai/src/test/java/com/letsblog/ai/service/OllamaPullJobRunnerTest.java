@@ -1,5 +1,12 @@
 package com.letsblog.ai.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import java.util.stream.Collectors;
+
 import org.slf4j.MDC;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.domain.GenerationJob;
@@ -316,6 +323,46 @@ class OllamaPullJobRunnerTest {
         new OllamaPullJobRunner(repository, new ObjectMapper(), guard, clock::get).run(11L, root, false, "llama3");
 
         verify(repository, never()).save(any());
+    }
+
+    /** ジョブ1件の完了行(issue #1731)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(OllamaPullJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+        respond(200, "{\"status\":\"success\"}");
+        List<ILoggingEvent> lines = completionLines(() -> { runner().run(11L, root, false, "llama3"); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=ollama_pull job_id=11 duration_ms=\\d+ outcome=success"),
+                lines.get(0).getFormattedMessage());
+    }
+
+    @org.junit.jupiter.api.Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
+        respond(200, "{\"error\":\"no such model\"}");
+        List<ILoggingEvent> lines = completionLines(() -> { runner().run(11L, root, false, "llama3"); });
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=ollama_pull job_id=11 duration_ms=\\d+ outcome=IllegalStateException"),
+                lines.get(0).getFormattedMessage());
     }
 
     // ---- issue #1732: 無通信を見張るwatchdogのログも、取り込みを始めたリクエストの処理IDを持つ ----
