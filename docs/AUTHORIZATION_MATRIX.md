@@ -1181,8 +1181,11 @@ content-service所有(issue #576、#913)。実装は`GET /content-settings`と`P
 | POST /api/projects/{id}/environments/sync/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | `ProjectController.java:166-172`。同期版 `environments/sync` の非同期ジョブ版で、認可は同じ(admin限定) |
 | POST /api/projects/{id}/bulk-management/apply | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/bulk-management/apply-all | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/projects/{id}/bulk-management/apply-all/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同期版 `bulk-management/apply-all` の非同期ジョブ版で、認可は同じ(admin限定)。#1702 |
 | POST /api/projects/{id}/bulk-management/upload | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/projects/{id}/bulk-management/upload/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同期版 `bulk-management/upload` の非同期ジョブ版で、認可は同じ(admin限定)。#1702 |
 | POST /api/projects/{id}/asset-images/{generatedImageId}/upload | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
+| POST /api/projects/{id}/asset-images/{generatedImageId}/upload/jobs | requireAdmin | 401 | 403 | 認可OK | 現状維持 | 同期版 `asset-images/{generatedImageId}/upload` の非同期ジョブ版で、認可は同じ(admin限定)。#1764 |
 | GET /api/projects/{id}/bulk-management/categories/comparison | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | GET /api/projects/{id}/bulk-management/tags/comparison | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
 | POST /api/projects/{id}/bulk-management/categories/sync | requireAdmin | 401 | 403 | 認可OK | 現状維持 | |
