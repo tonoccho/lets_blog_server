@@ -1,5 +1,9 @@
 package com.letsblog.publishing.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
@@ -15,10 +19,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -201,5 +207,65 @@ class BulkInstallJobRunnerTest {
         runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
 
         assertTrue(terminalPayload("done").get("logs").get(0).get("createdAt").isNull());
+    }
+
+    /** ジョブ1件の完了行(issue #1775)だけを集める。 */
+    private static List<ILoggingEvent> completionLines(Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(BulkInstallJobRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(e -> e.getFormattedMessage().startsWith("job completed:"))
+                .collect(Collectors.toList());
+    }
+
+    @Test
+    @DisplayName("完了行: 成功(done)は INFO で kind / job_id / duration_ms / outcome を持つ1行")
+    void completionLineOnSuccess() {
+        when(bulkManagementService.applyToAllEnvironments(3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L))
+                .thenReturn(List.of());
+
+        List<ILoggingEvent> lines = completionLines(
+                () -> runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L));
+
+        assertEquals(1, lines.size());
+        assertEquals(Level.INFO, lines.get(0).getLevel());
+        assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=bulk_install job_id=21 duration_ms=\\d+ outcome=success"));
+    }
+
+    @Test
+    @DisplayName("完了行: 例外でジョブが failed になる場合は WARN で outcome に例外クラス名")
+    void completionLineOnFailure() {
+        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("boom"));
+
+        List<ILoggingEvent> lines = completionLines(
+                () -> runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L));
+
+        assertEquals(1, lines.size());
+        assertEquals(Level.WARN, lines.get(0).getLevel());
+        assertTrue(lines.get(0).getFormattedMessage()
+                .matches("job completed: kind=bulk_install job_id=21 duration_ms=\\d+ outcome=IllegalStateException"));
+    }
+
+    @Test
+    @DisplayName("完了行: done の通知自体が例外でも完了行は1行だけ(最初の結果が勝つ)")
+    void completionLineIsSingleWhenDoneNotificationFails() {
+        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().doThrow(new IllegalStateException("notify")).when(generationJobClient)
+                .updateStatus(any(), eq("done"), any());
+
+        List<ILoggingEvent> lines = completionLines(
+                () -> runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L));
+
+        assertEquals(1, lines.size());
+        assertEquals(Level.WARN, lines.get(0).getLevel());
     }
 }

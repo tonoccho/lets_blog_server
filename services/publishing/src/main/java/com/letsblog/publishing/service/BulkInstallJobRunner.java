@@ -2,6 +2,7 @@ package com.letsblog.publishing.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.common.job.JobCompletionLog;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
 import com.letsblog.publishing.dto.BulkOperationLogResponse;
@@ -34,6 +35,8 @@ public class BulkInstallJobRunner {
     static final String ERROR_INVALID_REQUEST = "invalid_request";
     static final String ERROR_UNEXPECTED = "unexpected_error";
     static final String ERROR_QUEUE_FULL = "queue_full";
+
+    private static final String JOB_KIND = "bulk_install";
 
     private static final Logger log = LoggerFactory.getLogger(BulkInstallJobRunner.class);
 
@@ -70,11 +73,14 @@ public class BulkInstallJobRunner {
     }
 
     private void run(Long jobId, Long projectId, InstallTask task) {
+        var timer = JobCompletionLog.start(log, JOB_KIND, jobId);
         try {
             generationJobClient.updateStatus(jobId, "running", toJson(Map.of("phase", "installing")));
             List<BulkOperationLog> logs = task.run();
             generationJobClient.updateStatus(jobId, "done", toJson(donePayload(projectId, logs)));
+            timer.success();
         } catch (Exception e) {
+            timer.failure(e);
             log.warn("Bulk install job {} failed", jobId, e);
             generationJobClient.updateStatus(jobId, "failed", toJson(failurePayload(e)));
         }
