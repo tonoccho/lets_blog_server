@@ -3,6 +3,8 @@ package com.letsblog.platform.service;
 import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.aop.AuditLog;
 import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.common.net.ConnectionDestinationGuard;
+import com.letsblog.common.net.ForbiddenDestinationException;
 import com.letsblog.platform.domain.AuditLogAction;
 import com.letsblog.platform.domain.SystemSetting;
 import com.letsblog.platform.repository.SystemSettingRepository;
@@ -45,6 +47,7 @@ public class AppSettingService {
     static final String LLM_OLLAMA_AVAILABLE_MODELS = "llm_ollama_available_models";
     static final String LLM_CLAUDE_AVAILABLE_MODELS = "llm_claude_available_models";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
+    static final String PENPOT_BASE_URL = "penpot_base_url";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
     static final String MAIL_USERNAME = "mail_username";
@@ -89,6 +92,7 @@ public class AppSettingService {
             new Definition(LLM_CLAUDE_AVAILABLE_MODELS,
                     "Claude 選択可能モデル(カンマ区切り、CLAUDE用。未設定なら既定モデルのみ)", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
+            new Definition(PENPOT_BASE_URL, "Penpot ベースURL", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
@@ -102,6 +106,8 @@ public class AppSettingService {
     private final CredentialCipher credentialCipher;
     private final AdminAuthorizationService adminAuthorizationService;
     private final Map<String, String> envDefaults;
+    /** 外部Penpotの接続先を保存時に検査する(issue #1774)。接続時の検査は連携サービスの状況側で行う。 */
+    private ConnectionDestinationGuard destinationGuard = ConnectionDestinationGuard.system();
 
     public AppSettingService(
             SystemSettingRepository repository,
@@ -144,6 +150,11 @@ public class AppSettingService {
         defaults.put(UPLOAD_RATE_LIMIT_REQUESTS, uploadRateLimitRequestsEnvDefault);
         defaults.put(SITE_ADMIN_PATH, siteAdminPathEnvDefault);
         this.envDefaults = defaults;
+    }
+
+    /** テスト専用: 保存時の接続先検査に使うガードを差し替える。 */
+    void useDestinationGuard(ConnectionDestinationGuard guard) {
+        this.destinationGuard = guard;
     }
 
     // ---- Web管理画面向け ----
@@ -242,6 +253,7 @@ public class AppSettingService {
             case LLM_PROVIDER -> requireValidProvider(key, value);
             case LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL ->
                     requireUrl(key, value);
+            case PENPOT_BASE_URL -> requireAllowedDestination(key, value);
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
             case APP_MAIL_FROM -> requireEmailLike(key, value);
@@ -264,6 +276,16 @@ public class AppSettingService {
     private void requireUrl(String key, String value) {
         if (!value.startsWith("http://") && !value.startsWith("https://")) {
             throw new IllegalArgumentException(key + " はhttp://またはhttps://から始まるURLを指定してください");
+        }
+    }
+
+    /** URL形式に加え、{@link ConnectionDestinationGuard}が拒否する接続先(禁止アドレス・解決不能)は保存させない。 */
+    private void requireAllowedDestination(String key, String value) {
+        requireUrl(key, value);
+        try {
+            destinationGuard.check("Penpot", value);
+        } catch (ForbiddenDestinationException e) {
+            throw new IllegalArgumentException(key + " に指定できない接続先です。" + e.getMessage(), e);
         }
     }
 
@@ -387,6 +409,12 @@ public class AppSettingService {
     @Transactional(readOnly = true)
     public String getComfyUiBaseUrl() {
         return resolve(COMFYUI_BASE_URL);
+    }
+
+    /** 外部Penpotの接続先。DBだけで決まり、環境変数既定は無い。未設定は空文字(issue #1774)。 */
+    @Transactional(readOnly = true)
+    public String getPenpotBaseUrl() {
+        return resolve(PENPOT_BASE_URL);
     }
 
     @Transactional(readOnly = true)

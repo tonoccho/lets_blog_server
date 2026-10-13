@@ -125,8 +125,11 @@ export function ConnectedServiceStatusPanel({
 
   // 演算デバイスは管理者向け詳細診断(initialDetail)にしか載らない。非adminではnullで何も表示しない。
   const computeDevices = new Map<string, string>();
+  // 未設定・到達不能などの理由(issue #1774)も同じく管理者向け詳細にだけ載る。NORMALの行には出さない。
+  const reasons = new Map<string, string>();
   for (const d of initialDetail ?? []) {
     if (d.computeDevice) computeDevices.set(d.id, d.computeDevice);
+    if (d.status !== "NORMAL" && d.errorMessage) reasons.set(d.id, d.errorMessage);
   }
 
   return (
@@ -160,6 +163,9 @@ export function ConnectedServiceStatusPanel({
           >
             <span className="flex flex-col text-sm text-neutral-700 dark:text-neutral-300">
               <span>{service.name}</span>
+              {service.status !== "NORMAL" && reasons.has(service.id) && (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">{reasons.get(service.id)}</span>
+              )}
               {computeDevices.has(service.id) && (
                 <span className="text-xs text-neutral-500 dark:text-neutral-400">
                   演算デバイス: {computeDeviceLabel(computeDevices.get(service.id)!)}

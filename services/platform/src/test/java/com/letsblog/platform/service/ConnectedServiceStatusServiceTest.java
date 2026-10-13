@@ -150,7 +150,8 @@ class ConnectedServiceStatusServiceTest {
         assertEquals(Status.NORMAL, byId.get("comfyui"));
         assertEquals(Status.NORMAL, byId.get("plantuml"));
         assertEquals(Status.NORMAL, byId.get("wordpress-provisioning"));
-        assertFalse(byId.containsKey("penpot"), "連携サービスの状況にPenpotの行は無い(issue #1750)");
+        // Penpotの行は外部Penpotの到達性として復活した(issue #1774)。この構成ではPenpotの接続先が未設定なので警告になる。
+        assertEquals(Status.WARNING, byId.get("penpot"));
         assertEquals(Status.NORMAL, byId.get("brave-search"));
     }
 

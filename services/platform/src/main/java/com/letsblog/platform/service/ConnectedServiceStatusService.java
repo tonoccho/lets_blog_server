@@ -69,6 +69,8 @@ public class ConnectedServiceStatusService {
      * チェックの都度、解決済みbaseUrlからRestClient.Builderを組み立てる。
      */
     private final Function<String, RestClient.Builder> comfyUiClientBuilderFactory;
+    /** 外部Penpotの到達性(issue #1774)。接続先はシステム設定(DB)で実行時に解決する。 */
+    private final PenpotReachabilityChecker penpotReachabilityChecker;
 
     @Autowired
     public ConnectedServiceStatusService(
@@ -78,14 +80,33 @@ public class ConnectedServiceStatusService {
             SystemSettingService systemSettingService,
             AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
-            RabbitMqQueueStatusService rabbitMqQueueStatusService) {
+            RabbitMqQueueStatusService rabbitMqQueueStatusService,
+            PenpotReachabilityChecker penpotReachabilityChecker) {
         this(dataSource,
                 ConnectedServiceStatusService::builderWithTimeout,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
                 builderWithTimeout(wordpressProvisionBaseUrl), wordpressProvisionBaseUrl,
                 systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService,
-                ConnectedServiceStatusService::builderWithTimeout);
+                ConnectedServiceStatusService::builderWithTimeout,
+                penpotReachabilityChecker);
+    }
+
+    /** テスト専用: Penpotの到達性チェッカーを既定のものにする。 */
+    ConnectedServiceStatusService(
+            DataSource dataSource,
+            Function<String, RestClient.Builder> comfyUiClientBuilderFactory,
+            RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
+            RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
+            SystemSettingService systemSettingService,
+            AppSettingService appSettingService,
+            LetsBlogServiceStatusService letsBlogServiceStatusService,
+            RabbitMqQueueStatusService rabbitMqQueueStatusService,
+            Function<String, RestClient.Builder> ollamaClientBuilderFactory) {
+        this(dataSource, comfyUiClientBuilderFactory, plantUmlBuilder, plantUmlBaseUrl,
+                wordpressBuilder, wordpressProvisionBaseUrl, systemSettingService, appSettingService,
+                letsBlogServiceStatusService, rabbitMqQueueStatusService, ollamaClientBuilderFactory,
+                new PenpotReachabilityChecker());
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -98,8 +119,10 @@ public class ConnectedServiceStatusService {
             AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
             RabbitMqQueueStatusService rabbitMqQueueStatusService,
-            Function<String, RestClient.Builder> ollamaClientBuilderFactory) {
+            Function<String, RestClient.Builder> ollamaClientBuilderFactory,
+            PenpotReachabilityChecker penpotReachabilityChecker) {
         this.dataSource = dataSource;
+        this.penpotReachabilityChecker = penpotReachabilityChecker;
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.systemSettingService = systemSettingService;
@@ -138,6 +161,8 @@ public class ConnectedServiceStatusService {
                 checkAsync("plantuml", "PlantUML", this::checkPlantUml);
         CompletableFuture<ConnectedServiceStatusDetailResponse> wordpressProvisioning =
                 checkAsync("wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
+        CompletableFuture<ConnectedServiceStatusDetailResponse> penpot =
+                checkAsync("penpot", "Penpot", this::checkPenpot);
 
         List<ConnectedServiceStatusDetailResponse> result = new ArrayList<>(List.of(
                 runTimed("database", "データベース", this::checkDatabase),
@@ -145,6 +170,7 @@ public class ConnectedServiceStatusService {
                 comfyUi.join(),
                 plantUml.join(),
                 wordpressProvisioning.join(),
+                penpot.join(),
                 runTimed("brave-search", "Brave Search API", this::checkBraveSearch),
                 // RabbitMQのキュー滞留・DLQ滞留(issue #589)。DLQに残っていれば、
                 // 処理されなかったイベントが確実に存在するのでERRORにする。
@@ -300,6 +326,19 @@ public class ConnectedServiceStatusService {
         }
         return checkHttpService(comfyUiClientBuilderFactory.apply(baseUrl).build(), baseUrl, "/system_stats",
                 ConnectedServiceStatusService::comfyUiComputeDeviceOf);
+    }
+
+    /**
+     * 別途起動した外部Penpotの到達性(issue #1774)。接続先が未設定のときは黙って省かず、設定を促す警告にする。
+     * 接続先の検査・固定・3秒タイムアウト・再試行なしの判定は{@link PenpotReachabilityChecker}が行う。
+     */
+    private CheckOutcome checkPenpot() {
+        String baseUrl = appSettingService.getPenpotBaseUrl();
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return new CheckOutcome(Status.WARNING, null, "未設定(システム設定で設定してください)", null);
+        }
+        PenpotReachabilityChecker.Result result = penpotReachabilityChecker.check(baseUrl);
+        return new CheckOutcome(result.status(), result.httpStatus(), result.errorMessage(), result.targetUrl());
     }
 
     /** provision-agentの専用ヘルスチェックルート(issue #197で追加)で判定する。 */

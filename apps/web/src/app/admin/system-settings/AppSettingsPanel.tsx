@@ -37,6 +37,15 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
     keys: ["comfyui_base_url"],
   },
   {
+    title: "外部Penpot連携",
+    description:
+      "別途起動した外部PenpotのベースURLです(LAN内のURL。インターネット上のPenpotは対象外)。" +
+      "認証情報は持たず、連携サービスの状況に到達性(到達できるか)だけを表示します。" +
+      "禁止された接続先(loopback・リンクローカル・クラウドのメタデータ等)は保存できません。" +
+      "空欄で保存すると未設定に戻ります。",
+    keys: ["penpot_base_url"],
+  },
+  {
     title: "メール送信",
     description: "パスワード再設定メール等の送信に使用するSMTPサーバーの接続設定です。",
     keys: ["mail_host", "mail_port", "mail_username", "mail_password", "app_mail_from"],

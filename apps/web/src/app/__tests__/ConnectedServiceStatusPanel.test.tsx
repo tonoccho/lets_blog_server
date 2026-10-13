@@ -174,4 +174,54 @@ describe("ConnectedServiceStatusPanel", () => {
       expect(screen.queryByText(/演算デバイス/)).not.toBeInTheDocument();
     });
   });
+
+  it("管理者向け詳細診断に理由があるとき、NORMALでない行にその理由を表示する(issue #1774)", () => {
+    const penpot = detail({
+      id: "penpot",
+      name: "Penpot",
+      status: "WARNING",
+      httpStatus: null,
+      errorMessage: "未設定(システム設定で設定してください)",
+      targetUrl: null,
+    });
+    render(
+      <ConnectedServiceStatusPanel
+        initialStatuses={[{ id: "penpot", name: "Penpot", status: "WARNING" }]}
+        initialDetail={[penpot]}
+        personalTimeZone={null}
+      />
+    );
+
+    const row = screen.getAllByText("Penpot")[0].closest("li")!;
+    expect(row).toHaveTextContent("未設定(システム設定で設定してください)");
+    expect(row).toHaveTextContent("警告");
+  });
+
+  it("NORMALの行は理由を持っていても行内に表示しない(issue #1774)", () => {
+    const ok = detail({ id: "penpot", name: "Penpot", status: "NORMAL", errorMessage: "参考情報" });
+    render(
+      <ConnectedServiceStatusPanel
+        initialStatuses={[{ id: "penpot", name: "Penpot", status: "NORMAL" }]}
+        initialDetail={[ok]}
+        personalTimeZone={null}
+      />
+    );
+
+    const row = screen.getAllByText("Penpot")[0].closest("li")!;
+    expect(row).not.toHaveTextContent("参考情報");
+  });
+
+  it("詳細診断に対応する行が無い(非管理者)ときは理由を表示しない(issue #1774)", () => {
+    render(
+      <ConnectedServiceStatusPanel
+        initialStatuses={[{ id: "penpot", name: "Penpot", status: "ERROR" }]}
+        initialDetail={null}
+        personalTimeZone={null}
+      />
+    );
+
+    const row = screen.getByText("Penpot").closest("li")!;
+    expect(row).toHaveTextContent("エラー");
+    expect(row.querySelectorAll("span span").length).toBe(1);
+  });
 });

@@ -46,6 +46,7 @@ function allSettings(): AppSetting[] {
     setting({ key: 'llm_claude_available_models', label: 'Claude 選択可能モデル', value: 'claude-3-5-haiku-20241022' }),
     setting({ key: 'llm_claude_model', label: 'Claude 既定モデル', value: 'claude-3-5-haiku-20241022' }),
     setting({ key: 'comfyui_base_url', label: 'ComfyUI ベースURL', value: 'http://comfyui:8188' }),
+    setting({ key: 'penpot_base_url', label: 'Penpot ベースURL', value: 'http://penpot.lan:9001', source: 'DATABASE' }),
     setting({ key: 'image_llm_base_url', label: '画像生成 ベースURL', value: 'https://api.openai.com/v1' }),
     setting({ key: 'mail_host', label: 'メール送信ホスト', value: 'smtp.example.com' }),
     setting({ key: 'mail_port', label: 'メール送信ポート', value: '587' }),
@@ -96,6 +97,29 @@ describe('AppSettingsPanel', () => {
     expect(field('comfyui_base_url')).not.toBeNull()
     const description = field('llm_provider')!.closest('section')!.querySelector('p')!.textContent ?? ''
     expect(description).not.toContain('llm_base_url')
+  })
+
+  it('外部PenpotのベースURLを専用グループに描画し、説明文で用途と認証なしであることを案内する(issue #1774)', () => {
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    const input = field('penpot_base_url') as HTMLInputElement
+    expect(input).not.toBeNull()
+    expect(input.value).toBe('http://penpot.lan:9001')
+    const section = input.closest('section')!
+    expect(section.querySelector('h2')!.textContent).toBe('外部Penpot連携')
+    const description = section.querySelector('p')!.textContent ?? ''
+    expect(description).toContain('到達性')
+    expect(description).toContain('認証')
+  })
+
+  it('PenpotのベースURLが未設定でも入力欄を描画する(issue #1774)', () => {
+    render(
+      <AppSettingsPanel
+        settings={[setting({ key: 'penpot_base_url', value: null, configured: false, source: 'NONE' })]}
+      />
+    )
+
+    expect((field('penpot_base_url') as HTMLInputElement).value).toBe('')
   })
 
   it('OLLAMA専用の接続設定キーを外部LLMサービス連携グループに描画する', () => {
