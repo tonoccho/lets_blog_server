@@ -1398,6 +1398,69 @@ $ npm run test:at         # 資格情報を渡さずに実行した場合
 
 後続は「6 failed」ではなく **`6 did not run`** になる。原因が1行で読める。
 
+### `at-provision` のサイト構築シナリオが 280 秒待ちで入れ替わりに落ちる(#1751)
+
+**症状**: ゼロ構築後の `npm run test:at` で、`at-provision` のサイト構築を画面から要求するシナリオ
+(`site-provisioning` / `site-letsblog-plugin` / `site-edit-admin-path` など)が、実行ごとに違う 3〜8 件、
+`tr:has-text("<siteKey>")` の行が 280 秒出ないまま落ちる。単独実行(`--no-deps`)では通る。
+
+**原因**(2026-10-12 の実測。サーバー側ではなくテスト側の競合):
+
+- 落ちたシナリオのサイトキーは、`generation_jobs`(ai-service)にも gateway の
+  `POST /api/sites/managed-wordpress/jobs` のログにも**存在しない**。つまり構築ジョブがそもそも作られていない。
+  同じ実行で、ジョブが作られた 9 件は全て 45 秒以内に `done` で終わっている(provision-agent の `POST /provision` は
+  1 件 15〜30 秒)。サイトの構築が遅い・詰まるのではなく、要求が届いていない。
+- 構築フォームのステップは「構築する」を押した直後に `waitForProvisionedSiteRow`(`page.goto('/sites')`)へ進んでいた。
+  このナビゲーションが、まだ gateway へ届いていないサーバーアクション(web → gateway)を中断する。
+  ワーカー 4 本の並列で web が忙しいほど中断されやすく、どのシナリオが中断されるかは実行ごとに変わる。
+  再現: 同じフォーム送信を 4 並列で 8 回、押した直後に移動すると 7 件しかジョブが作られない(1 件欠落)。
+  受理の表示(「構築を要求しました。処理キューに追加されました」)を待ってから移動すると 8/8 で作られる。
+- 手掛かりにされがちだった次の痕跡は、この不安定さとは無関係:
+  - `lbs-project` の `DuplicateSiteKeyException`: `site-provisioning-job.feature` が「同じ siteKey でもう一度要求すると断られる」
+    ことを確かめるために**意図して**起こしている(`duplicate_site_key` で失敗するジョブが 1 件できる)。
+  - `lbs-wordpress` の `PHP Fatal error: Class "WpOrg\Requests\Response" not found` / `SimplePie\HTTP\ClientException` などの
+    `wp-includes` ファイルの欠落: `client 172.18.0.1:0`(ブラウザ起点ではない WordPress 自身のリクエスト)が、消去中(`rm -rf`)の
+    サイトのファイルを読んで出ると**見られる**(ログの対象サイトが消去済みか構築途中かまでは未確認)。サイトキーは全て
+    一意なので別シナリオのサイトを巻き込んではおらず、ジョブが作られない問題とは別の事象。
+  - サイト構築ジョブは `siteProvisioningExecutor`(core 1 / 待ち行列 5)で直列に処理される設計で、ワーカー 4 本が
+    同時に要求しても待ちは 4 件分(約 2 分)に収まり、280 秒を超えない。
+
+**対処**: `apps/web/e2e/support/provisionedSiteRow.ts` の `waitForProvisioningOutcome` が、「構築する」を押した後に
+受理のメッセージかエラー表示が出るまで待ってから戻る。構築フォームを操作する 3 つのステップ定義
+(`siteProvisioning` / `siteLetsblogPlugin` / `siteEditAdminPath`)はこれを使い、その後で行の出現を待つ
+(`waitForProvisionedSiteRowAsAdmin`、ジョブが failed なら時間切れを待たず失敗する)。受理されなかったとき
+(待ち行列満杯・入力不備)は、画面のエラー表示つきで 30 秒以内に失敗する(280 秒待たない)。
+単体テストは `apps/web/e2e/provisionedSiteRow.test.ts`。
+構築フォームを新しく操作するステップを書くときは、「構築する」を押した後にこの関数を使うこと。
+
+**同じ実行で見つかった、別原因の不安定さ**(同じ #1751 で直した。どれも並列実行の混み具合で顕在化する):
+
+- `site-provisioning-job.feature` の進行段階の検証が `provisioning` / `registering` だけを許していた。並列に走る他シナリオの
+  構築が先に並んでいると、ジョブは順番待ちの `queued`(#1724 のハートビート)で観測される。許す段階に `queued` を足した。
+- `site-edit-admin-path.feature` の「保存しました。」を 10 秒しか待たなかった。サイト編集画面は複数のサーバーアクションを
+  出し、Next.js はそれらを 1 本ずつ順に実行する。保存はその行列の後ろに並んで、10 秒を超えてから始まることがあった
+  (トレース: 画面の表示 5 秒 + 先行するアクション 7 本の後)。待ちを 60 秒に広げた(保存自体は数十 ms)。
+- `environment-sync.feature` の同期先サイトの wp-admin ログインが 30 秒待ちで落ちる件は、原因未特定で #1766 に切り出した。
+- `static-content-generation.feature` の「生成」を押した後の「処理キューに追加されました」の表示を 30 秒しか待たなかった。
+  上の保存と同じく、画面のサーバーアクションは 1 本ずつ順に実行されるため、並列実行では先行するアクションの後ろに並んで
+  30 秒を超えることがある。待ちを 90 秒に広げた(`llmGenerationJob.steps.ts` の `ACTION_REFLECTED_TIMEOUT_MS`)。
+  なお、PV ルールの追加・削除・再送の反映待ち(`projectPvRules.steps.ts`)も同じ理由で 120 秒に広げた(実測: 削除 31.7 秒、再送 58.8 秒)。
+
+**実測**(2026-10-13、修正後の `npx playwright test --project=at-provision --no-deps` を 5 回): 26/26 通過が 4 回、
+25/26 が 1 回(4 回目、`static-content-generation` の「生成を要求する」ステップ。上の待ちを広げる前)。広げた後は
+単独で 6 回連続通過したが、全体の並列実行で再現させた確認は取れていない(失敗した回のトレースは次の実行で消えた)。
+#1766(環境同期の wp-admin ログイン)は 5 回とも通り、この 5 回では再現しなかったため、原因未特定のまま #1766 で扱う。
+
+**調べ方**(同じ症状が再発したとき): 落ちたシナリオのサイトキーを `generation_jobs` で引く。
+
+```bash
+docker exec lbs-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" lbs_ai -e \
+  "select id,status,created_at from generation_jobs where type=\"site_provisioning\" and request_payload like \"%<siteKey>%\""'
+```
+
+行が無ければジョブが作られていない(フォーム送信の欠落)。`failed` なら `result_payload` の `errorType` を読む。
+`done` なのに一覧に出ないなら、そのとき初めて一覧側(`/sites` の表示・取得)を疑う。
+
 ### Keycloak の合成アカウントは profile を埋めないと認証できない
 
 このレルムでは required action の `VERIFY_PROFILE` が有効になっている。

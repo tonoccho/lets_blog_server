@@ -197,12 +197,23 @@ Then('本番サイトの wp letsblog pv status が設定済みで接続済みを
   expect(status.property_id).toBe(GA_PROPERTY_ID);
 });
 
+/**
+ * 追加・削除の結果が一覧に反映されるまでの上限(#1751)。削除のサーバーアクション自体は 5 秒前後だが、
+ * Next.js は 1 つの画面のサーバーアクションを 1 本ずつ順に実行するため、画面が定期的に出す他のアクション
+ * (処理キューの更新など)の後ろに並ぶ。at-provision のワーカー4本の並列では、その待ちを含めた POST が
+ * 31.7 秒かかり(アクション本体 5.6 秒、web ログ)、30 秒では足りないことがあった。再送の POST は
+ * ゼロ構築の実行で 58.8 秒かかったことがある(トレース)。
+ */
+const ACTION_REFLECTED_TIMEOUT_MS = 120_000;
+
 Then('SNS 告知設定画面の PV ルール一覧に{string}が表示される', async ({ page }, label: string) => {
-  await expect(page.getByTestId('pv-rule-item').filter({ hasText: label })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByTestId('pv-rule-item').filter({ hasText: label })).toBeVisible({ timeout: ACTION_REFLECTED_TIMEOUT_MS });
 });
 
 Then('SNS 告知設定画面の PV ルール一覧に{string}は表示されない', async ({ page }, label: string) => {
-  await expect(page.getByTestId('pv-rule-item').filter({ hasText: label })).toHaveCount(0, { timeout: 30000 });
+  await expect(page.getByTestId('pv-rule-item').filter({ hasText: label })).toHaveCount(0, {
+    timeout: ACTION_REFLECTED_TIMEOUT_MS,
+  });
 });
 
 Then(
@@ -221,7 +232,7 @@ Then('本番サイトのプラグインにルールは無い', async ({ ctx }) =
 });
 
 Then('SNS 告知設定画面の PV ルールの送信状態は{string}と表示される', async ({ page }, text: string) => {
-  await expect(page.getByTestId('pv-send-status')).toContainText(text, { timeout: 60000 });
+  await expect(page.getByTestId('pv-send-status')).toContainText(text, { timeout: ACTION_REFLECTED_TIMEOUT_MS });
 });
 
 Then('SNS 告知設定画面に告知が GA の集計遅れで遅れることがある旨が表示される', async ({ page }) => {

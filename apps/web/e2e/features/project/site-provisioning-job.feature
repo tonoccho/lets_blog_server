@@ -5,7 +5,7 @@
   サイト自動構築は完了まで最大240秒かかる同期API(`POST /api/sites/managed-wordpress`)のほかに、
   要求をジョブとして受理して即座にジョブIDを返す口(`POST /api/sites/managed-wordpress/jobs`)を
   持つ(issue #1479、親 #1478 の第1段。画像生成の #1405 と同じ形)。構築は背景で進み、
-  `GET /api/generation-jobs/{id}` で進行段階(`provisioning` → `registering`)と、完了後の
+  `GET /api/generation-jobs/{id}` で進行段階(順番待ちの `queued` → `provisioning` → `registering`)と、完了後の
   結果(作成されたサイトのID)を取得する。同期APIは変えない(`site-provisioning.feature` の
   既存シナリオが無改変で通ることが、その保証である)。UIは本Issueの対象外で、
   画面側の切り替えは #1696(`site-provisioning-web-job.feature`)で行った。

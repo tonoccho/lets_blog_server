@@ -19,6 +19,14 @@ function uniqueSuffix(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * 保存の結果表示を待つ上限(#1751)。サイト編集画面は、プラグイン導入状態の取得や処理キューの更新などの
+ * サーバーアクションを何本も出し、Next.js はそれらを1本ずつ順に実行する。at-provision のワーカー4本の並列で
+ * web / agent が忙しいと1本が 0.3〜3 秒かかり、保存はその行列の後ろに並んで 10 秒を超えて始まることがあった
+ * (2026-10-12 のトレース: 画面表示 5 秒 + 先行するアクション 7 本の後に保存が始まった)。保存自体は数十 ms。
+ */
+const SAVE_RESULT_TIMEOUT_MS = 60_000;
+
 async function fetchAdminPath(request: APIRequestContext, id: number): Promise<string | null> {
   const response = await request.get(`/api/sites/${id}`, { headers: await adminHeaders(request) });
   expect(response.ok(), `サイト詳細の取得に失敗しました (status=${response.status()})`).toBe(true);
@@ -99,11 +107,11 @@ When('サイト編集画面で管理画面パスを空欄にして保存する',
   await page.goto(`/sites/${ctx.adminPathSiteId}/edit`);
   await pathInput(page).fill('');
   await page.locator('button[type="submit"]').click();
-  await expect(page.getByText('保存しました。')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('保存しました。')).toBeVisible({ timeout: SAVE_RESULT_TIMEOUT_MS });
 });
 
 Then('サイト編集画面を開き直すと管理画面パスの欄に{string}が入っている', async ({ ctx, page }, value: string) => {
-  await expect(page.getByText('保存しました。')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('保存しました。')).toBeVisible({ timeout: SAVE_RESULT_TIMEOUT_MS });
   await page.goto(`/sites/${ctx.adminPathSiteId}/edit`);
   await expect(pathInput(page)).toHaveValue(value);
 });
@@ -127,7 +135,7 @@ Then('サイト編集画面に認証情報の入力欄は表示されない', as
 });
 
 Then('管理画面パスのエラーが表示される', async ({ page }) => {
-  await expect(page.getByText('相対パス')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('相対パス')).toBeVisible({ timeout: SAVE_RESULT_TIMEOUT_MS });
   await expect(page.getByText('保存しました。')).toHaveCount(0);
 });
 

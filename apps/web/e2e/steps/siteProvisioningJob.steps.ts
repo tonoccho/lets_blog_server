@@ -176,8 +176,10 @@ Then(
     expect(typeof result.siteId, `結果にサイトIDがありません: ${final?.resultPayload}`).toBe('number');
     expect(result.phase).toBe('done');
     // 実行中に観測できた段階は、定義した順序の部分集合に限る(完了が速ければ観測できないこともある)。
+    // `queued` は実行枠に空きが無く順番待ちの間の段階(JobHeartbeatTracker、#1724)。並列に走る他のシナリオの
+    // 構築が先に並んでいるとき、最初のポーリングで必ず見える(#1751)。
     for (const phase of (ctx.siteJobPhases as string[] | undefined) ?? []) {
-      expect(['provisioning', 'registering']).toContain(phase);
+      expect(['queued', 'provisioning', 'registering']).toContain(phase);
     }
     ctx.siteJobSiteId = result.siteId;
   }

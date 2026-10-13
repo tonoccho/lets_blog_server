@@ -30,6 +30,12 @@ interface JobDetail {
 
 const JOB_TIMEOUT_MS = 180_000;
 const UI_TIMEOUT_MS = 30_000;
+/**
+ * サーバーアクションの結果が画面に出るまでの上限(#1751)。Next.js は 1 つの画面のサーバーアクションを 1 本ずつ
+ * 順に実行するため、「生成」はその画面が出す他のアクションの後ろに並ぶ。at-provision のワーカー4本の並列では
+ * 30 秒を超えて「処理キューに追加されました」の表示が遅れることがある。
+ */
+const ACTION_REFLECTED_TIMEOUT_MS = 90_000;
 
 function uniqueSuffix(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -150,7 +156,7 @@ When(/^サイト編集画面で「([^」]+)」の生成を要求する$/, async 
   await expect(generate).toBeVisible({ timeout: UI_TIMEOUT_MS });
   await waitForHydrated(generate);
   await generate.click();
-  await expect(item.getByTestId('static-content-queued')).toBeVisible({ timeout: UI_TIMEOUT_MS });
+  await expect(item.getByTestId('static-content-queued')).toBeVisible({ timeout: ACTION_REFLECTED_TIMEOUT_MS });
   ctx.staticContentLabel = label;
   ctx.llmMarkers = [`"siteId":${siteId}`, `"contentType":"${staticContentType(label)}"`];
   ctx.llmReturnUrl = `/sites/${siteId}/edit`;
