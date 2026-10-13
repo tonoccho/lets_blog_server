@@ -86,6 +86,14 @@ app:
         uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
         paths:
           - /api/projects/*/users/**
+      # issue #1764: アセット画像の全環境アップロードを非同期ジョブとして受理する口
+      # (POST /api/projects/{id}/asset-images/{generatedImageId}/upload/jobs)。受理はジョブを1件作って即座に返すだけで、
+      # 画像本体はgatewayを通らない(media-serviceからpublishingが直接取得する)ので、長いresponse-timeoutは与えず
+      # 既定値を使い、アップロード枠にも入れない。先勝ちなので汎用のproject-asset-imagesより前に置く。
+      - id: project-asset-image-upload-jobs
+        uri: ${PUBLISHING_SERVICE_URI:http://publishing:8080}
+        paths:
+          - /api/projects/*/asset-images/*/upload/jobs
       # ComfyUI生成画像のアセットアップロード(BulkManagementService#uploadImageToAllEnvironments)は、
       # 一括管理機能一式のpublishing-serviceへの移設(issue #708)に伴い、呼び出し元の
       # BulkManagementControllerもpublishing-serviceへ移った。

@@ -19,6 +19,7 @@ import com.letsblog.publishing.dto.TermNameRequest;
 import com.letsblog.publishing.dto.UpdatePostStatusRequest;
 import com.letsblog.publishing.render.MediaRenderException;
 import com.letsblog.publishing.service.AdminAuthorizationService;
+import com.letsblog.publishing.service.AssetImageUploadJobStarter;
 import com.letsblog.publishing.service.BulkInstallJobStarter;
 import com.letsblog.publishing.service.BulkManagementService;
 import com.letsblog.publishing.service.CurrentActorService;
@@ -79,11 +80,14 @@ class BulkManagementControllerTest {
     @Mock
     private BulkInstallJobStarter bulkInstallJobStarter;
 
+    @Mock
+    private AssetImageUploadJobStarter assetImageUploadJobStarter;
+
     private BulkManagementController controller() {
         return new BulkManagementController(
                 projectService, bulkManagementService, termComparisonService, pluginThemeComparisonService,
                 postComparisonService, adminAuthorizationService, currentActorService, mediaGeneratedImageClient,
-                bulkInstallJobStarter);
+                bulkInstallJobStarter, assetImageUploadJobStarter);
     }
 
     private BulkOperationLog buildLog() {
@@ -545,5 +549,30 @@ class BulkManagementControllerTest {
 
         verify(bulkInstallJobStarter, org.mockito.Mockito.never()).startZipInstall(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void uploadAssetImageJob_adminなら202とジョブを返す() {
+        BulkManagementController controller = controller();
+        when(assetImageUploadJobStarter.start(1L, 5L)).thenReturn(job(31L, "asset_image_upload", "running"));
+
+        ResponseEntity<GenerationJobResponse> response = controller.uploadAssetImageJob(1L, 5L);
+
+        assertEquals(HttpStatus.ACCEPTED, response.getStatusCode());
+        assertEquals(31L, response.getBody().id());
+        assertEquals("asset_image_upload", response.getBody().type());
+        assertEquals("running", response.getBody().status());
+        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void uploadAssetImageJob_admin権限がなければ画像取得もジョブ作成もしない() {
+        BulkManagementController controller = controller();
+        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+
+        assertThrows(ForbiddenException.class, () -> controller.uploadAssetImageJob(1L, 5L));
+
+        verify(assetImageUploadJobStarter, org.mockito.Mockito.never()).start(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 }

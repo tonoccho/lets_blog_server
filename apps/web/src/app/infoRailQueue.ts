@@ -26,6 +26,9 @@ export const BULK_SLUG_INSTALL_JOB_TYPE = "bulk_slug_install";
 /** zip での全環境インストールジョブの種別(publishing の `BulkInstallJobStarter.ZIP_JOB_TYPE`、#1702)。 */
 export const BULK_ZIP_INSTALL_JOB_TYPE = "bulk_zip_install";
 
+/** アセット画像の全環境アップロードジョブの種別(publishing の `AssetImageUploadJobStarter.JOB_TYPE`、#1764)。 */
+export const ASSET_IMAGE_UPLOAD_JOB_TYPE = "asset_image_upload";
+
 export interface QueueJob {
   id: number;
   type: string;
@@ -83,6 +86,9 @@ function readProjectId(requestPayload: string | null): number | null {
  * - 全環境インストール(slug / zip、#1702): 環境ごとの成否はジョブの結果にだけあるので、リクエストの projectId から
  *   プロジェクトの「メンテナンス」タブへ導き、`bulkJob` でそのジョブの結果を指す。`jobId` が無い、
  *   projectId が読めないときはリンクなし。
+ * - アセット画像の全環境アップロード(#1764): 環境ごとの成否はジョブの結果にだけあるので、リクエストの projectId から
+ *   プロジェクトの「AI・アセット」タブへ導き、`assetUploadJob` でそのジョブの結果を指す。`jobId` が無い、
+ *   projectId が読めないときはリンクなし。
  * - 未知の種別: リンクなし。
  */
 export function resolveResultHref(type: string, requestPayload: string | null, jobId: number | null = null): string | null {
@@ -112,6 +118,10 @@ export function resolveResultHref(type: string, requestPayload: string | null, j
   if (type === BULK_SLUG_INSTALL_JOB_TYPE || type === BULK_ZIP_INSTALL_JOB_TYPE) {
     const projectId = readProjectId(requestPayload);
     return projectId === null || jobId === null ? null : `/projects/${projectId}?tab=maintenance&bulkJob=${jobId}`;
+  }
+  if (type === ASSET_IMAGE_UPLOAD_JOB_TYPE) {
+    const projectId = readProjectId(requestPayload);
+    return projectId === null || jobId === null ? null : `/projects/${projectId}?tab=ai-models&assetUploadJob=${jobId}`;
   }
   if (type === ENVIRONMENT_SYNC_JOB_TYPE) {
     const projectId = readProjectId(requestPayload);

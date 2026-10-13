@@ -40,8 +40,7 @@ public final class GenerationJobSourceClassifier {
      *   <li>{@code bulk_slug_install} / {@code bulk_zip_install}: 一括管理の全環境インストール(slug / zip、#1702)。
      *       AIではない。</li>
      *   <li>{@code site_provisioning}: サイト自動構築(#1479)。AIではない。</li>
-     *   <li>{@code bulk_slug_install} / {@code bulk_zip_install}: 一括管理の全環境インストール(slug / zip、#1702)。
-     *       AIではない。</li>
+     *   <li>{@code asset_image_upload}: アセット画像の全環境アップロード(#1764)。AIではない。</li>
      * </ul>
      */
     private static final Map<String, String> CLASSIFICATION = Map.of(
@@ -51,7 +50,8 @@ public final class GenerationJobSourceClassifier {
             "environment_sync", SYSTEM_JOB,
             "site_provisioning", SYSTEM_JOB,
             "bulk_slug_install", SYSTEM_JOB,
-            "bulk_zip_install", SYSTEM_JOB);
+            "bulk_zip_install", SYSTEM_JOB,
+            "asset_image_upload", SYSTEM_JOB);
 
     /**
      * 未知・null の種別の既定。{@code generation_jobs}は元々AI処理のためのテーブルで、

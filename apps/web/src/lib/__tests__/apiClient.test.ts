@@ -30,6 +30,7 @@ import {
   startProjectEnvironmentSyncJob,
   startBulkSlugInstallJob,
   startBulkZipInstallJob,
+  startProjectAssetImageUploadJob,
   startTagDesignGenerationJob,
   saveStaticContent,
   getSiteAdminPath,
@@ -859,6 +860,17 @@ describe('LLM生成の非同期ジョブAPI(issue #1409)', () => {
     const body = init.body as FormData
     expect(body.get('operationType')).toBe('THEME_INSTALL')
     expect((body.get('file') as File).name).toBe('plugin.zip')
+  })
+
+  it('startProjectAssetImageUploadJob は POST /api/projects/{id}/asset-images/{imageId}/upload/jobs へ送り、同期APIは呼ばない (#1764)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 61, type: 'asset_image_upload', status: 'running' }, 202))
+
+    const job = await startProjectAssetImageUploadJob(7, 11)
+
+    expect(job.id).toBe(61)
+    const [url, init] = calls()[0]
+    expect(url).toMatch(/\/api\/projects\/7\/asset-images\/11\/upload\/jobs$/)
+    expect(init.method).toBe('POST')
   })
 
   it('startTagDesignGenerationJob はプロジェクト個別とグローバルで別のパスへ送る', async () => {

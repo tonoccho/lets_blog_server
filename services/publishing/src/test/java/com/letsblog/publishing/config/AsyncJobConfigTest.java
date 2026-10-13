@@ -47,4 +47,30 @@ class AsyncJobConfigTest {
         assertEquals(beanName, slug);
         assertEquals(beanName, zip);
     }
+
+    @Test
+    @DisplayName("assetImageUploadExecutor は一括インストールと別の小さな専用Executor(core 1 / max 2 / 待ち行列 5。issue #1764)")
+    void assetImageUploadExecutorIsSeparateAndSmall() {
+        AsyncJobConfig config = new AsyncJobConfig();
+        ThreadPoolTaskExecutor pool = (ThreadPoolTaskExecutor) config.assetImageUploadExecutor();
+
+        assertEquals(1, pool.getCorePoolSize());
+        assertEquals(2, pool.getMaxPoolSize());
+        assertEquals(5, pool.getThreadPoolExecutor().getQueue().remainingCapacity());
+        assertTrue(pool.getThreadNamePrefix().startsWith("asset-image-upload"));
+        assertNotNull(pool.getThreadPoolExecutor());
+        pool.shutdown();
+    }
+
+    @Test
+    @DisplayName("Bean 名は AssetImageUploadJobRunner#run の @Async が指す名前と一致し、一括インストールの名前とは別")
+    void assetImageUploadBeanNameMatchesAsyncQualifier() throws Exception {
+        String beanName = AsyncJobConfig.class.getMethod("assetImageUploadExecutor")
+                .getAnnotation(org.springframework.context.annotation.Bean.class).name()[0];
+        String qualifier = com.letsblog.publishing.service.AssetImageUploadJobRunner.class
+                .getMethod("run", Long.class, Long.class, byte[].class, String.class, String.class, int.class, Long.class)
+                .getAnnotation(org.springframework.scheduling.annotation.Async.class).value();
+        assertEquals(beanName, qualifier);
+        assertTrue(!"bulkInstallExecutor".equals(beanName));
+    }
 }

@@ -316,6 +316,7 @@ describe('InfoRailQueue (#1407)', () => {
     ['environment_sync', '環境間同期', 'Environment sync'],
     ['bulk_slug_install', '全環境へのインストール', 'Install to all environments'],
     ['bulk_zip_install', 'zip の全環境インストール', 'Install a zip to all environments'],
+    ['asset_image_upload', 'アセット画像のアップロード', 'Asset image upload'],
   ])('labels a %s job in Japanese and English instead of showing the raw type (#1409)', async (type, ja, en) => {
     mockFetch.mockResolvedValue({ jobs: [job({ id: 1, type, status: 'running' })], timeZone: 'UTC' })
     const { unmount } = setup('ja')

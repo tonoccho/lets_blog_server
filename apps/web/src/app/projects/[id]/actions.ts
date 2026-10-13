@@ -27,6 +27,7 @@ import {
   startProjectEnvironmentSyncJob,
   applyToEnvironment,
   startBulkSlugInstallJob,
+  startProjectAssetImageUploadJob,
   saveProjectGoogleAnalyticsClient,
   selectProjectGoogleAnalyticsProperty,
   clearProjectGoogleAnalyticsCredentials,
@@ -72,7 +73,6 @@ import {
   getImageGenerationOptions,
   startProjectImageJob,
   generateImagePromptFromChat,
-  uploadProjectAssetImage,
   uploadGeneratedImage,
   listGeneratedImages,
   listPostComparison,
@@ -104,6 +104,7 @@ import {
   MediaGarbageCollectionScanResponse,
 } from "@/lib/apiClient";
 import { requireAdminSession } from "@/lib/session";
+import { ASSET_UPLOAD_QUEUE_FULL_ERROR } from "./assetUploadJobResult";
 import { readImageIds } from "@/app/infoRailQueue";
 
 export interface EnvironmentActionState {
@@ -1301,13 +1302,17 @@ export async function uploadGeneratedImageAction(
 export async function uploadProjectAssetImageAction(
   projectId: number,
   generatedImageId: number
-): Promise<{ logs?: BulkOperationLog[]; error?: string }> {
+): Promise<{ jobId?: number; error?: string }> {
   await requireAdminSession();
 
   try {
-    const logs = await uploadProjectAssetImage(projectId, generatedImageId);
-    revalidatePath(`/projects/${projectId}`);
-    return { logs };
+    // 完了を待たずジョブとして受理する(#1764)。環境ごとの結果は処理キューの「結果を見る」から辿る。
+    const job = await startProjectAssetImageUploadJob(projectId, generatedImageId);
+    if (job.status === "failed") {
+      // 実行枠と待ち行列が満杯のとき、ジョブは作られた上で failed として返る。
+      return { error: ASSET_UPLOAD_QUEUE_FULL_ERROR };
+    }
+    return { jobId: job.id };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

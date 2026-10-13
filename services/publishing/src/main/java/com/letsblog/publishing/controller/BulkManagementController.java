@@ -18,6 +18,7 @@ import com.letsblog.publishing.dto.TermNameRequest;
 import com.letsblog.publishing.dto.UpdatePostStatusRequest;
 import com.letsblog.publishing.service.AdminAuthorizationService;
 import com.letsblog.publishing.service.AssetImageFormat;
+import com.letsblog.publishing.service.AssetImageUploadJobStarter;
 import com.letsblog.publishing.service.BulkInstallJobStarter;
 import com.letsblog.publishing.service.BulkManagementService;
 import com.letsblog.publishing.service.CurrentActorService;
@@ -65,6 +66,7 @@ public class BulkManagementController {
     private final CurrentActorService currentActorService;
     private final MediaGeneratedImageClient mediaGeneratedImageClient;
     private final BulkInstallJobStarter bulkInstallJobStarter;
+    private final AssetImageUploadJobStarter assetImageUploadJobStarter;
 
     public BulkManagementController(
             ProjectService projectService,
@@ -75,7 +77,8 @@ public class BulkManagementController {
             AdminAuthorizationService adminAuthorizationService,
             CurrentActorService currentActorService,
             MediaGeneratedImageClient mediaGeneratedImageClient,
-            BulkInstallJobStarter bulkInstallJobStarter) {
+            BulkInstallJobStarter bulkInstallJobStarter,
+            AssetImageUploadJobStarter assetImageUploadJobStarter) {
         this.projectService = projectService;
         this.bulkManagementService = bulkManagementService;
         this.termComparisonService = termComparisonService;
@@ -85,6 +88,7 @@ public class BulkManagementController {
         this.currentActorService = currentActorService;
         this.mediaGeneratedImageClient = mediaGeneratedImageClient;
         this.bulkInstallJobStarter = bulkInstallJobStarter;
+        this.assetImageUploadJobStarter = assetImageUploadJobStarter;
     }
 
     @PostMapping("/{id}/bulk-management/apply")
@@ -176,6 +180,19 @@ public class BulkManagementController {
         List<BulkOperationLog> logs = bulkManagementService.uploadImageToAllEnvironments(
                 id, data, filename, format.mimeType(), actorId);
         return logs.stream().map(BulkOperationLogResponse::from).toList();
+    }
+
+    /**
+     * アセット画像の全環境アップロードを非同期ジョブとして受理する(issue #1764)。画像とメディア設定は受理スレッドで
+     * 取得し(利用者のBearerを転送するため)、リサイズと環境ごとのアップロードはランナーが行う。
+     * 状態と結果(環境ごとの成否)は{@code GET /api/generation-jobs/{id}}で引く。同期の{@link #uploadAssetImage}は変えない。
+     */
+    @PostMapping("/{id}/asset-images/{generatedImageId}/upload/jobs")
+    public ResponseEntity<GenerationJobResponse> uploadAssetImageJob(
+            @PathVariable Long id, @PathVariable Long generatedImageId) {
+        adminAuthorizationService.requireAdmin();
+        return ResponseEntity.accepted()
+                .body(GenerationJobResponse.from(assetImageUploadJobStarter.start(id, generatedImageId)));
     }
 
     @GetMapping("/{id}/bulk-management/categories/comparison")

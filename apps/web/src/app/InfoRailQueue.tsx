@@ -9,6 +9,7 @@ import { fetchQueueJobsAction } from "./infoRailActions";
 import {
   BULK_SLUG_INSTALL_JOB_TYPE,
   BULK_ZIP_INSTALL_JOB_TYPE,
+  ASSET_IMAGE_UPLOAD_JOB_TYPE,
   CHECKPOINT_DOWNLOAD_JOB_TYPE,
   CUSTOM_TAG_GENERATION_JOB_TYPE,
   ENVIRONMENT_SYNC_JOB_TYPE,
@@ -43,6 +44,7 @@ const TYPE_LABEL_KEYS: Record<string, string> = {
   [ENVIRONMENT_SYNC_JOB_TYPE]: "queueTypeEnvironmentSync",
   [BULK_SLUG_INSTALL_JOB_TYPE]: "queueTypeBulkSlugInstall",
   [BULK_ZIP_INSTALL_JOB_TYPE]: "queueTypeBulkZipInstall",
+  [ASSET_IMAGE_UPLOAD_JOB_TYPE]: "queueTypeAssetImageUpload",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {

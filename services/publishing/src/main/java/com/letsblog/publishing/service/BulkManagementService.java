@@ -257,8 +257,17 @@ public class BulkManagementService {
      */
     public List<BulkOperationLog> uploadImageToAllEnvironments(
             Long projectId, byte[] data, String filename, String contentType, Long actorId) {
-        Project project = getProject(projectId);
         int longEdgePx = mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(projectId);
+        return uploadImageToAllEnvironments(projectId, data, filename, contentType, longEdgePx, actorId);
+    }
+
+    /**
+     * 長辺pxを解決済みの形(issue #1764)。非同期ジョブのランナーは、利用者のBearerを転送する
+     * {@code MediaSettingsBridgeClient}を使えないので、受理スレッドで解決した値を受け取る。
+     */
+    public List<BulkOperationLog> uploadImageToAllEnvironments(
+            Long projectId, byte[] data, String filename, String contentType, int longEdgePx, Long actorId) {
+        Project project = getProject(projectId);
         // 画素数が上限を超える画像は、どの環境へもアップロードせず環境ごとの失敗として返す(issue #1717)。
         ImageResizeService.ResizeResult resized = null;
         String rejection = null;

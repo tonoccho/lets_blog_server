@@ -12,6 +12,7 @@ import {
 } from '../support';
 import { STUB_URLS, forceStubStatus, resetStub, stubRequestCount } from '../support/stubs';
 import { magnifierOf, selectedCountText } from '../support/galleryCard';
+import { ASSET_UPLOAD_ACCEPTED_NOTICE } from '../support/assetUploadJobs';
 
 /**
  * 画像ギャラリーのseed表示のステップ定義(issue #1101)。
@@ -676,9 +677,8 @@ Then(/^生成結果に画像が「(\d+)」枚並ぶ$/, async ({ page }, expected
 Then('生成結果の1枚を選んでアセットとして追加できる', async ({ page }) => {
   await page.getByTestId('generated-image-grid').locator('img').first().click();
   await page.getByRole('button', { name: 'アセットとして追加(全環境へアップロード)' }).click();
-  await expect(page.getByText(/環境へアップロードしました。|環境でアップロードに失敗しました。/)).toBeVisible({
-    timeout: 120_000,
-  });
+  // アセットとしての追加はジョブとして受理される(#1764)。完了は待たず、受理の案内が出ることを確かめる。
+  await expect(page.getByText(ASSET_UPLOAD_ACCEPTED_NOTICE)).toBeVisible({ timeout: 30_000 });
 });
 
 Then('生成ボタンは押せる状態のままで、サーバーからの応答が表示される', async ({ page }) => {

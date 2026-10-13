@@ -91,6 +91,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("POST", "/api/projects/1/bulk-management/upload"),
                 new Endpoint("POST", "/api/projects/1/bulk-management/upload/jobs"),
                 new Endpoint("POST", "/api/projects/1/asset-images/1/upload"),
+                new Endpoint("POST", "/api/projects/1/asset-images/1/upload/jobs"),
                 new Endpoint("GET", "/api/projects/1/bulk-management/categories/comparison"),
                 new Endpoint("GET", "/api/projects/1/bulk-management/tags/comparison"),
                 new Endpoint("POST", "/api/projects/1/bulk-management/categories/sync"),

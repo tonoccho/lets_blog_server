@@ -67,14 +67,17 @@ export default async function ProjectDetailPage({
    * 表示する(処理キューの画像生成ジョブの「結果を見る」の遷移先、issue #1408)。
    * `?bulkJob=<ジョブID>` を付けると、メンテナンスタブの一括管理がその全環境インストールジョブの
    * 環境ごとの成否を表示する(処理キューの「結果を見る」の遷移先、issue #1702)。
+   * `?assetUploadJob=<ジョブID>` を付けると、アセット画像生成パネルがそのアセット追加ジョブの
+   * 環境ごとの成否を表示する(処理キューの「結果を見る」の遷移先、issue #1764)。
    */
-  searchParams?: Promise<{ tab?: string; imageJob?: string; bulkJob?: string }>;
+  searchParams?: Promise<{ tab?: string; imageJob?: string; bulkJob?: string; assetUploadJob?: string }>;
 }) {
   const { id } = await params;
-  const { tab: requestedTabId, imageJob, bulkJob } = (await searchParams) ?? {};
+  const { tab: requestedTabId, imageJob, bulkJob, assetUploadJob } = (await searchParams) ?? {};
   const initialTabId = requestedTabId === undefined ? undefined : (LEGACY_TAB_IDS[requestedTabId] ?? requestedTabId);
   const imageJobId = Number(imageJob);
   const bulkJobId = Number(bulkJob);
+  const assetUploadJobId = Number(assetUploadJob);
   await requireAdminSession();
   const projectId = Number(id);
 
@@ -259,6 +262,7 @@ export default async function ProjectDetailPage({
           <ProjectAssetGenerationPanel
             projectId={project.id}
             imageJobId={Number.isInteger(imageJobId) && imageJobId > 0 ? imageJobId : undefined}
+            assetUploadJobId={Number.isInteger(assetUploadJobId) && assetUploadJobId > 0 ? assetUploadJobId : undefined}
           />
           <ProjectImageGenerationPromptDefaultsForm
             projectId={project.id}

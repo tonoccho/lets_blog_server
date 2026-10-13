@@ -818,6 +818,20 @@ export function uploadProjectAssetImage(
   });
 }
 
+/**
+ * アセット画像の全環境アップロードを、ジョブとして要求する(`POST /api/projects/{id}/asset-images/{imageId}/upload/jobs`、
+ * issue #1764)。完了を待たずに受理されたジョブ(id・状態)が返る。環境ごとの結果は `GET /api/generation-jobs/{id}` の
+ * `resultPayload.logs` で引く。同期の {@link uploadProjectAssetImage} は変えない。
+ */
+export function startProjectAssetImageUploadJob(
+  projectId: number,
+  generatedImageId: number
+): Promise<GenerationJob> {
+  return apiFetch<GenerationJob>(`/api/projects/${projectId}/asset-images/${generatedImageId}/upload/jobs`, {
+    method: 'POST',
+  });
+}
+
 export function listUsers(): Promise<AppUser[]> {
   return apiFetch<AppUser[]>('/api/users');
 }

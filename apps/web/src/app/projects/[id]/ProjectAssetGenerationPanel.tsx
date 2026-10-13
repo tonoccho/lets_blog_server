@@ -9,6 +9,7 @@ import type {
 } from "@/lib/apiClient";
 import {
   fetchGeneratedImagesAction,
+  fetchGenerationJobAction,
   fetchImageGenerationOptionsAction,
   fetchImageJobResultAction,
   generateImagePromptAction,
@@ -16,6 +17,7 @@ import {
   uploadGeneratedImageAction,
   uploadProjectAssetImageAction,
 } from "./actions";
+import { ASSET_UPLOAD_ACCEPTED_MESSAGE, describeAssetUploadJob } from "./assetUploadJobResult";
 
 /** 画像アップロードで選べる形式(issue #1599)。サーバーも中身で同じ判定をする。 */
 const UPLOAD_ACCEPTED_TYPES = ["image/jpeg", "image/png"];
@@ -74,15 +76,21 @@ function toNumberOrEmpty(value: string): number | "" {
  * `?imageJob=<ジョブID>` 付きでこのパネルへ導き(`imageJobId`)、そのジョブが生成した画像だけを
  * 表示する。画像の選択とアセットとしてのアップロードは従来どおり。ページを離れても、生成結果の
  * 表示先はジョブ(サーバー側)に残る。
+ *
+ * アセットとしての追加(全環境へアップロード)も非同期のジョブとして要求し(issue #1764)、受理を示して完了を
+ * 待たない。完了後は、処理キューの「結果を見る」が `?assetUploadJob=<ジョブID>` 付きでこのパネルへ導き
+ * (`assetUploadJobId`)、環境ごとの成否を従来と同じ文言で示す。
  */
 export function ProjectAssetGenerationPanel({
   projectId,
   imageJobId,
+  assetUploadJobId,
 }: {
   projectId: number;
   imageJobId?: number;
+  assetUploadJobId?: number;
 }) {
-  const [open, setOpen] = useState(imageJobId !== undefined);
+  const [open, setOpen] = useState(imageJobId !== undefined || assetUploadJobId !== undefined);
   const [options, setOptions] = useState<ImageGenerationOptionsResponse | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
 
@@ -106,7 +114,7 @@ export function ProjectAssetGenerationPanel({
   const [images, setImages] = useState<{ id: number }[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: "error" | "success" | "info"; text: string } | null>(null);
 
   const [chatOpen, setChatOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState<PlanChatMessage[]>([]);
@@ -175,6 +183,26 @@ export function ProjectAssetGenerationPanel({
     // handleOpen は毎回作り直される関数。ジョブが変わったときだけ取得し直す。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageJobId]);
+
+  // 処理キューの「結果を見る」(`?assetUploadJob=`)から来たとき、パネルを開き、そのジョブの結果を示す(issue #1764)。
+  useEffect(() => {
+    if (assetUploadJobId === undefined) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void handleOpen();
+    fetchGenerationJobAction(assetUploadJobId)
+      .then((job) => {
+        if (!cancelled) setMessage(describeAssetUploadJob(job));
+      })
+      .catch((err) => {
+        if (!cancelled) setMessage({ type: "error", text: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // handleOpen は毎回作り直される関数。ジョブが変わったときだけ取得し直す。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetUploadJobId]);
 
   // 参照画像にできるのは、このプロジェクトのギャラリー画像だけ(別プロジェクトの画像はサーバーが拒否する)。
   const referenceCandidates = galleryImages?.filter((img) => img.projectId === projectId) ?? null;
@@ -306,16 +334,8 @@ export function ProjectAssetGenerationPanel({
       setMessage({ type: "error", text: result.error });
       return;
     }
-    const logs = result.logs ?? [];
-    const failed = logs.filter((l) => l.status !== "SUCCESS");
-    if (failed.length === 0) {
-      setMessage({ type: "success", text: `全${logs.length}環境へアップロードしました。` });
-    } else {
-      setMessage({
-        type: "error",
-        text: `${failed.map((l) => l.environment).join(", ")}環境でアップロードに失敗しました。`,
-      });
-    }
+    // 受理しただけで、完了は待たない。環境ごとの結果は処理キューの「結果を見る」から辿る(issue #1764)。
+    setMessage({ type: "success", text: ASSET_UPLOAD_ACCEPTED_MESSAGE });
   }
 
   async function handleUpload() {
@@ -929,7 +949,13 @@ export function ProjectAssetGenerationPanel({
       )}
 
       {message && (
-        <p className={`text-sm ${message.type === "error" ? "text-red-600" : "text-green-600"}`}>{message.text}</p>
+        <p
+          className={`text-sm ${
+            message.type === "error" ? "text-red-600" : message.type === "info" ? "text-gray-600" : "text-green-600"
+          }`}
+        >
+          {message.text}
+        </p>
       )}
     </section>
   );

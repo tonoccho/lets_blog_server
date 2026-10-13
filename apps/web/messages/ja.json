@@ -59,7 +59,8 @@
     "queueTypeSiteProvisioning": "サイト自動構築",
     "queueTypeEnvironmentSync": "環境間同期",
     "queueTypeBulkSlugInstall": "全環境へのインストール",
-    "queueTypeBulkZipInstall": "zip の全環境インストール"
+    "queueTypeBulkZipInstall": "zip の全環境インストール",
+    "queueTypeAssetImageUpload": "アセット画像のアップロード"
   },
   "dashboard": {
     "title": "ダッシュボード",

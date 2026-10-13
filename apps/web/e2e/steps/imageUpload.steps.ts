@@ -1,6 +1,7 @@
 import zlib from 'node:zlib';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { Given, Then, When } from './fixtures';
+import { latestAssetUploadJobId } from '../support/assetUploadJobs';
 import { galleryCardOf, magnifierOf } from '../support/galleryCard';
 import {
   E2E_ADMIN_EMAIL,
@@ -281,18 +282,14 @@ Then('このプロジェクトのギャラリーにアップロード画像は�
 
 // ---------------------------------------------------------------- アセットとして追加
 
-When('パネルのギャラリーからそのアップロード画像を選んでアセットとして追加する', async ({ page, ctx }) => {
+When('パネルのギャラリーからそのアップロード画像を選んでアセットとして追加する', async ({ page, ctx, request }) => {
   const id = ctx.uploadedImageId as number;
+  // 受理で作られるジョブを、あとから「これより新しいもの」として見分けるために、操作の前の最新のジョブIDを控える(#1764)。
+  ctx.auJobBefore = await latestAssetUploadJobId(request, ctx.mediaProjectId as number);
   const section = page
     .getByRole('heading', { name: '画像ギャラリーから選択してアップロード' })
     .locator('xpath=ancestor::div[contains(@class,"space-y-3")][1]');
   await section.getByRole('button', { name: '開く' }).click();
   await section.locator(`button:has(img[src="/image-gallery/${id}/file"])`).click();
   await section.getByRole('button', { name: '選択した画像をアセットとして追加(全環境へアップロード)' }).click();
-});
-
-Then('アセットとしての追加が完了した旨が表示される', async ({ page }) => {
-  await expect(page.getByText(/環境へアップロードしました。|環境でアップロードに失敗しました。/)).toBeVisible({
-    timeout: 120_000,
-  });
 });

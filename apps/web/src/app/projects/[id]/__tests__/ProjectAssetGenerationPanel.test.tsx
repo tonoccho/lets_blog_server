@@ -166,9 +166,7 @@ describe('ProjectAssetGenerationPanel 画像ギャラリーから選択してア
   })
 
   it('画像を選択してアップロードするとuploadProjectAssetImageActionをprojectIdと選択IDで呼び出す', async () => {
-    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({
-      logs: [{ environment: 'local', status: 'SUCCESS' }, { environment: 'test', status: 'SUCCESS' }],
-    })
+    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({ jobId: 51 })
     await openPanel()
     openGallerySection()
 
@@ -178,13 +176,16 @@ describe('ProjectAssetGenerationPanel 画像ギャラリーから選択してア
 
     await waitFor(() => {
       expect(actions.uploadProjectAssetImageAction).toHaveBeenCalledWith(1, 11)
-      expect(screen.getByText('全2環境へアップロードしました。')).toBeInTheDocument()
+      expect(screen.getByText('アセットとしての追加を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から各環境の成否を確認できます。')).toBeInTheDocument()
     })
+    // 完了を待たないので、環境ごとの結果はまだ出ない。ボタンは押せる状態のまま。
+    expect(screen.queryByText(/環境へアップロードしました/)).not.toBeInTheDocument()
+    expect(screen.getByText('選択した画像をアセットとして追加(全環境へアップロード)')).toBeEnabled()
   })
 
-  it('アップロード失敗時に失敗した環境名を含むエラーメッセージを表示する', async () => {
+  it('待ち行列が満杯などで受理されなかったときは、そのエラーメッセージを表示する', async () => {
     ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({
-      logs: [{ environment: 'production', status: 'FAILED' }],
+      error: 'アセット画像のアップロードの待ち行列が満杯です。',
     })
     await openPanel()
     openGallerySection()
@@ -194,7 +195,7 @@ describe('ProjectAssetGenerationPanel 画像ギャラリーから選択してア
     fireEvent.click(screen.getByText('選択した画像をアセットとして追加(全環境へアップロード)'))
 
     await waitFor(() => {
-      expect(screen.getByText('production環境でアップロードに失敗しました。')).toBeInTheDocument()
+      expect(screen.getByText('アセット画像のアップロードの待ち行列が満杯です。')).toBeInTheDocument()
     })
   })
 })
@@ -457,9 +458,7 @@ describe('ProjectAssetGenerationPanel ジョブの生成結果の確認 (issue #
 
   it('表示された6枚から1枚を選んでアセットとして追加できる', async () => {
     ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: IMAGES })
-    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({
-      logs: [{ environment: 'local', status: 'SUCCESS' }],
-    })
+    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({ jobId: 52 })
     await openWithJob()
 
     const target = screen.getByAltText('生成画像 4').closest('button') as HTMLElement
@@ -470,7 +469,7 @@ describe('ProjectAssetGenerationPanel ジョブの生成結果の確認 (issue #
 
     await waitFor(() => {
       expect(actions.uploadProjectAssetImageAction).toHaveBeenCalledWith(1, 4)
-      expect(screen.getByText('全1環境へアップロードしました。')).toBeInTheDocument()
+      expect(screen.getByText('アセットとしての追加を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から各環境の成否を確認できます。')).toBeInTheDocument()
     })
   })
 
@@ -861,9 +860,9 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
     })
   })
 
-  it('アップロードの結果にログが無ければ全0環境として扱う', async () => {
+  it('受理されたあと、アップロードの要求中の表示は終わり、ボタンは再び押せる(完了は待たない)', async () => {
     ;(actions.fetchImageJobResultAction as jest.Mock).mockResolvedValue({ images: [{ id: 8 }] })
-    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({})
+    ;(actions.uploadProjectAssetImageAction as jest.Mock).mockResolvedValue({ jobId: 53 })
     render(<ProjectAssetGenerationPanel projectId={1} imageJobId={9} />)
 
     await waitFor(() => expect(screen.getByAltText('生成画像 8')).toBeInTheDocument())
@@ -871,8 +870,9 @@ describe('ProjectAssetGenerationPanel 生成とアップロードの失敗系', 
     fireEvent.click(screen.getByText('アセットとして追加(全環境へアップロード)'))
 
     await waitFor(() => {
-      expect(screen.getByText('全0環境へアップロードしました。')).toBeInTheDocument()
+      expect(screen.getByText('アセットとしての追加を要求しました。処理キューに追加されました。完了後、処理キューの「結果を見る」から各環境の成否を確認できます。')).toBeInTheDocument()
     })
+    expect(screen.getByText('アセットとして追加(全環境へアップロード)')).toBeEnabled()
   })
 })
 

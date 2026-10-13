@@ -59,7 +59,8 @@
     "queueTypeSiteProvisioning": "Site provisioning",
     "queueTypeEnvironmentSync": "Environment sync",
     "queueTypeBulkSlugInstall": "Install to all environments",
-    "queueTypeBulkZipInstall": "Install a zip to all environments"
+    "queueTypeBulkZipInstall": "Install a zip to all environments",
+    "queueTypeAssetImageUpload": "Asset image upload"
   },
   "dashboard": {
     "title": "Dashboard",

@@ -34,4 +34,21 @@ public class AsyncJobConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * アセット画像の全環境アップロードジョブ(issue #1764)。リサイズで画像をメモリに展開するので、
+     * 一括インストールとはExecutorを分ける。core 1 / max 2 / 待ち行列5。溢れた要求は受理側が
+     * {@code queue_full}のfailedにして返す。同期APIはこのExecutorを使わない。
+     */
+    @Bean(name = "assetImageUploadExecutor")
+    public Executor assetImageUploadExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(5);
+        executor.setThreadNamePrefix("asset-image-upload-");
+        executor.setTaskDecorator(new MdcPropagatingTaskDecorator());
+        executor.initialize();
+        return executor;
+    }
 }

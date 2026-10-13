@@ -2,6 +2,7 @@ import {
   CUSTOM_TAG_GENERATION_JOB_TYPE,
   BULK_SLUG_INSTALL_JOB_TYPE,
   BULK_ZIP_INSTALL_JOB_TYPE,
+  ASSET_IMAGE_UPLOAD_JOB_TYPE,
   ENVIRONMENT_SYNC_JOB_TYPE,
   IMAGE_GENERATION_JOB_TYPE,
   QUEUE_JOB_LIMIT,
@@ -268,5 +269,30 @@ describe('bulk install job result link (#1702)', () => {
   it('gives no link without the job id, since the result lives in the job', () => {
     expect(resolveResultHref('bulk_zip_install', '{"projectId":7}')).toBeNull()
     expect(resolveResultHref('bulk_zip_install', '{"projectId":7}', null)).toBeNull()
+  })
+})
+
+describe('asset image upload job result link (#1764)', () => {
+  it('uses the job type written by the publishing service', () => {
+    expect(ASSET_IMAGE_UPLOAD_JOB_TYPE).toBe('asset_image_upload')
+  })
+
+  it('sends a done job to the AI/asset tab of the project, pointing at the job', () => {
+    expect(resolveResultHref('asset_image_upload', '{"projectId":7,"generatedImageId":11}', 5)).toBe(
+      '/projects/7?tab=ai-models&assetUploadJob=5'
+    )
+  })
+
+  it.each([
+    ['null', null],
+    ['broken JSON', '{'],
+    ['no projectId', '{"generatedImageId":11}'],
+  ])('gives no link when the request payload is %s', (_label, payload) => {
+    expect(resolveResultHref('asset_image_upload', payload, 5)).toBeNull()
+  })
+
+  it('gives no link without the job id, since the result lives in the job', () => {
+    expect(resolveResultHref('asset_image_upload', '{"projectId":7}')).toBeNull()
+    expect(resolveResultHref('asset_image_upload', '{"projectId":7}', null)).toBeNull()
   })
 })

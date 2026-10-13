@@ -571,6 +571,32 @@ class BulkManagementServiceTest {
     }
 
     @Test
+    void uploadImageToAllEnvironments_解決済みの長辺pxを渡す形ではメディア設定を引かずにその値でリサイズする() {
+        BulkManagementService service = service();
+        Project project = buildProject(10L, null, null);
+        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
+        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds =
+                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
+        when(siteService.getCredentials("local-site")).thenReturn(creds);
+        byte[] originalData = new byte[]{1, 2, 3};
+        byte[] resizedData = new byte[]{9, 9, 9};
+        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 800, true))
+                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/png"));
+        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
+        when(adapter.uploadMedia(eq(creds), eq("cat.png"), eq("image/png"), eq(resizedData)))
+                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", "https://local.test/cat.png"));
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, originalData, "cat.png", "image/png", 800, 9L);
+
+        assertEquals(1, results.size());
+        assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
+        verify(mediaSettingsBridgeClient, never()).resolveArticleImageLongEdgePx(any());
+    }
+
+    @Test
     void uploadImageToAllEnvironments_画素数が上限を超える画像はどの環境へもアップロードせず失敗として返す() {
         BulkManagementService service = new BulkManagementService(
                 bulkManagementClient,

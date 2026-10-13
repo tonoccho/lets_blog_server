@@ -48,6 +48,13 @@ class GenerationJobSourceClassifierTest {
     }
 
     @Test
+    void asset_image_uploadはSYSTEM_JOBに分類する_issue1764() {
+        assertEquals("SYSTEM_JOB", GenerationJobSourceClassifier.classify("asset_image_upload"));
+        assertTrue(GenerationJobSourceClassifier.matches("SYSTEM_JOB", "asset_image_upload"));
+        assertFalse(GenerationJobSourceClassifier.matches("AI_JOB", "asset_image_upload"));
+    }
+
+    @Test
     void 未知の種別は例外にせずAI_JOBに分類する() {
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("something_new"));
         assertEquals("AI_JOB", GenerationJobSourceClassifier.classify("draft"));

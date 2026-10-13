@@ -283,3 +283,27 @@ describe('fetchQueueJobsAction bulk install (#1702)', () => {
     expect(mockGetJob).not.toHaveBeenCalled()
   })
 })
+
+describe('fetchQueueJobsAction asset image upload (#1764)', () => {
+  it('derives the done link of an asset_image_upload job from the request payload', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'asset_image_upload', 'done')])
+    mockGetJob.mockResolvedValue({ requestPayload: '{"projectId":7,"generatedImageId":11}' })
+    const result = await fetchQueueJobsAction()
+    expect(mockGetJob).toHaveBeenCalledWith(9)
+    expect(result.jobs[0].resultHref).toBe('/projects/7?tab=ai-models&assetUploadJob=9')
+  })
+
+  it('gives no link when the detail cannot be read', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'asset_image_upload', 'done')])
+    mockGetJob.mockRejectedValue(new Error('404'))
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+  })
+
+  it('gives no link to a running upload and fetches no detail for it', async () => {
+    mockListJobs.mockResolvedValue([job(9, 'asset_image_upload', 'running')])
+    const result = await fetchQueueJobsAction()
+    expect(result.jobs[0].resultHref).toBeNull()
+    expect(mockGetJob).not.toHaveBeenCalled()
+  })
+})

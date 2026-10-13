@@ -57,8 +57,8 @@ jest.mock('../AiConnectionSection', () => ({
 jest.mock('../ChatGptConnectionSection', () => ({ ChatGptConnectionSection: () => <div data-testid="connection-CHATGPT" /> }))
 jest.mock('../ClaudeConnectionSection', () => ({ ClaudeConnectionSection: () => <div data-testid="connection-CLAUDE" /> }))
 jest.mock('../ProjectAssetGenerationPanel', () => ({
-  ProjectAssetGenerationPanel: ({ imageJobId }: { imageJobId?: number }) => (
-    <div data-testid="asset-panel" data-image-job-id={imageJobId ?? ''} />
+  ProjectAssetGenerationPanel: ({ imageJobId, assetUploadJobId }: { imageJobId?: number; assetUploadJobId?: number }) => (
+    <div data-testid="asset-panel" data-image-job-id={imageJobId ?? ''} data-asset-upload-job-id={assetUploadJobId ?? ''} />
   ),
 }))
 jest.mock('../ProjectImageGenerationPromptDefaultsForm', () => ({ ProjectImageGenerationPromptDefaultsForm: () => null }))
@@ -322,6 +322,34 @@ describe('プロジェクト詳細画面 page.tsx(issue #1475: (detail) ルー�
       getProject.mockResolvedValue(project)
       const { container } = render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
       expect(container.querySelector('[data-testid="bulk-panel"]')).toHaveAttribute('data-bulk-job-id', '')
+    })
+  })
+
+  describe('?assetUploadJob (issue #1764)', () => {
+    const project = { id: 7, name: 'サンプル案件', slug: 'sample', localSite: null, testSite: null, productionSite: null }
+
+    it.each([
+      ['42', '42'],
+      ['0', ''],
+      ['-3', ''],
+      ['abc', ''],
+      ['4.5', ''],
+      ['', ''],
+    ])('assetUploadJob=%s のとき、アセット画像パネルへ渡すジョブIDは「%s」', async (value, expected) => {
+      getProject.mockResolvedValue(project)
+      const { container } = render(
+        await ProjectDetailPage({
+          params: Promise.resolve({ id: '7' }),
+          searchParams: Promise.resolve({ tab: 'ai-models', assetUploadJob: value }),
+        }),
+      )
+      expect(container.querySelector('[data-testid="asset-panel"]')).toHaveAttribute('data-asset-upload-job-id', expected)
+    })
+
+    it('assetUploadJob の指定がなければジョブIDを渡さない', async () => {
+      getProject.mockResolvedValue(project)
+      const { container } = render(await ProjectDetailPage({ params: Promise.resolve({ id: '7' }) }))
+      expect(container.querySelector('[data-testid="asset-panel"]')).toHaveAttribute('data-asset-upload-job-id', '')
     })
   })
 })

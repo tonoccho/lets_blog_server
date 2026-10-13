@@ -90,7 +90,9 @@ class RateLimitUploadBucketSyncTest {
             "/api/media/upload/extra",
             "/api/generated-images/upload/extra",
             "/api/generated-images/uploads",
-            "/api/projects/1/asset-images/2/uploaded");
+            "/api/projects/1/asset-images/2/uploaded",
+            // #1764: アセット画像アップロードの受理口は、画像本体がgatewayを通らないのでアップロード枠に入れない
+            "/api/projects/1/asset-images/2/upload/jobs");
 
     @TestFactory
     Stream<DynamicTest> classificationMatchesEndpointsTs() throws IOException {
