@@ -95,6 +95,10 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/system-settings/app-settings"),
                 new Endpoint("PUT", "/api/system-settings/app-settings"),
 
+                // -- ExtensionsImportController (2、issue #1783) --
+                new Endpoint("POST", "/api/system-settings/app-settings/extensions-import/fetch"),
+                new Endpoint("POST", "/api/system-settings/app-settings/extensions-import/apply"),
+
                 // -- DashboardController (5、issue #695) --
                 new Endpoint("GET", "/api/dashboard/service-status"),
                 new Endpoint("GET", "/api/dashboard/service-status/stream"),

@@ -26,6 +26,7 @@ jest.mock("@/lib/apiClient", () => ({
   listAppSettings: (...a: unknown[]) => api.listAppSettings(...a),
 }));
 jest.mock("../AppSettingsPanel", () => ({ AppSettingsPanel: () => "PANEL" }));
+jest.mock("../ExtensionsImportPanel", () => ({ ExtensionsImportPanel: ({ portalUrl }: { portalUrl: string }) => `IMPORT[${portalUrl}]` }));
 import Page from "../page";
 
 describe("システム設定の取得失敗表示(issue #1235)", () => {
@@ -52,6 +53,19 @@ describe("システム設定の取得失敗表示(issue #1235)", () => {
     const html = renderToStaticMarkup(await Page());
     expect(html).not.toContain('role="alert"');
     expect(html).toContain("PANEL");
+  });
+
+  it("保存済みのポータルのURLを取り込み欄へ渡す(issue #1783)。無ければ空、取得失敗時は描画しない", async () => {
+    api.listAppSettings.mockResolvedValue([
+      { key: "extensions_portal_url", label: "x", secret: false, configured: true, source: "DATABASE", value: "http://lbx-portal:3100" },
+    ]);
+    expect(renderToStaticMarkup(await Page())).toContain("IMPORT[http://lbx-portal:3100]");
+
+    api.listAppSettings.mockResolvedValue([]);
+    expect(renderToStaticMarkup(await Page())).toContain("IMPORT[]");
+
+    api.listAppSettings.mockRejectedValue(DOWN);
+    expect(renderToStaticMarkup(await Page())).not.toContain("IMPORT[");
   });
 
   it("セッション切れは /login へ", async () => {

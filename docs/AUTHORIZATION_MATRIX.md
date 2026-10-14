@@ -318,7 +318,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | `CmsMediaBridgeController` / `TaxonomyController` | publishing |
 | `ArticlePreviewController` | content と publishing の両方に同名クラスがある |
 | `GenerationJobController` | ai |
-| `AppSettingController` / `SystemSettingController` / `DashboardController` / `BackupController` / `VscodeExtensionController` | platform |
+| `AppSettingController` / `ExtensionsImportController` / `SystemSettingController` / `DashboardController` / `BackupController` / `VscodeExtensionController` | platform |
 | `AuditLogController` | log-writer |
 
 各行の「未認証で401になるか」は、移設先サービスの `SecurityConfig` が担う。
@@ -830,6 +830,15 @@ platform-service所有(issue #693)。未認証401はplatform-serviceの`Security
 | --- | --- | --- | --- | --- | --- | --- |
 | GET /api/system-settings/app-settings | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `AppSettingService.getAllSettings()`内でrequireAdmin() |
 | PUT /api/system-settings/app-settings | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `AppSettingService.updateSettings()`内でrequireAdmin() |
+
+## ExtensionsImportController (2エンドポイント、ベースパス `/api/system-settings/app-settings/extensions-import`)
+
+platform-service所有(issue #1783)。extensions のポータルから接続先をシステム設定へ取り込む管理者向けAPI。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| POST /api/system-settings/app-settings/extensions-import/fetch | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `ExtensionsConnectionImportService.fetch()`内でrequireAdmin()。システム設定は書き換えない。ポータルのURLは`ExtensionsPortalUrlPolicy`で検査(ループバック・リンクローカルは拒否) |
+| POST /api/system-settings/app-settings/extensions-import/apply | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `ExtensionsConnectionImportService.apply()`内でrequireAdmin()。保存は`AppSettingService.updateSettings()`の検証を1項目ずつ通す |
 
 ## ArticlePlanController (15エンドポイント、ベースパス `/api/projects/{projectId}/article-plan`)
 

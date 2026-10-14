@@ -2453,6 +2453,49 @@ export function updateAppSettings(settings: Record<string, string>): Promise<voi
   });
 }
 
+export type ExtensionsImportRoute = 'SAME_PC' | 'OTHER_HOST';
+
+export interface ExtensionsImportCandidate {
+  key: string;
+  label: string;
+  currentValue: string | null;
+  candidateValue: string;
+}
+
+export interface ExtensionsImportFetchResult {
+  candidates: ExtensionsImportCandidate[];
+  ignoredIds: string[];
+}
+
+export interface ExtensionsImportApplyResult {
+  saved: string[];
+  rejected: { key: string; reason: string }[];
+}
+
+/** extensions のポータルから接続先の候補を取得する(issue #1783)。システム設定は書き換えない。 */
+export function fetchExtensionsConnections(
+  portalUrl: string,
+  route: ExtensionsImportRoute,
+): Promise<ExtensionsImportFetchResult> {
+  return apiFetch<ExtensionsImportFetchResult>('/api/system-settings/app-settings/extensions-import/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ portalUrl, route }),
+  });
+}
+
+/** 確認済みの候補をシステム設定へ保存する(issue #1783)。拒否された項目はキーと理由で返る。 */
+export function applyExtensionsConnections(
+  portalUrl: string,
+  values: Record<string, string>,
+): Promise<ExtensionsImportApplyResult> {
+  return apiFetch<ExtensionsImportApplyResult>('/api/system-settings/app-settings/extensions-import/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ portalUrl, values }),
+  });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;

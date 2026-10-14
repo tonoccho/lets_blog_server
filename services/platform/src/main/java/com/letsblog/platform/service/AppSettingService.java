@@ -48,6 +48,7 @@ public class AppSettingService {
     static final String LLM_CLAUDE_AVAILABLE_MODELS = "llm_claude_available_models";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
     static final String PENPOT_BASE_URL = "penpot_base_url";
+    static final String EXTENSIONS_PORTAL_URL = "extensions_portal_url";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
     static final String MAIL_USERNAME = "mail_username";
@@ -93,6 +94,7 @@ public class AppSettingService {
                     "Claude 選択可能モデル(カンマ区切り、CLAUDE用。未設定なら既定モデルのみ)", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
             new Definition(PENPOT_BASE_URL, "Penpot ベースURL", false),
+            new Definition(EXTENSIONS_PORTAL_URL, "extensions ポータルのURL(接続先の取り込み元。http:// または https://)", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
             new Definition(MAIL_USERNAME, "メール送信ユーザー名", false),
@@ -108,6 +110,9 @@ public class AppSettingService {
     private final Map<String, String> envDefaults;
     /** 外部Penpotの接続先を保存時に検査する(issue #1774)。接続時の検査は連携サービスの状況側で行う。 */
     private ConnectionDestinationGuard destinationGuard = ConnectionDestinationGuard.system();
+
+    /** extensions ポータルのURLを保存時に検査する(issue #1783)。 */
+    private ExtensionsPortalUrlPolicy portalUrlPolicy = ExtensionsPortalUrlPolicy.system();
 
     public AppSettingService(
             SystemSettingRepository repository,
@@ -155,6 +160,11 @@ public class AppSettingService {
     /** テスト専用: 保存時の接続先検査に使うガードを差し替える。 */
     void useDestinationGuard(ConnectionDestinationGuard guard) {
         this.destinationGuard = guard;
+    }
+
+    /** テスト専用: ポータルのURLの検査に使うポリシーを差し替える。 */
+    void usePortalUrlPolicy(ExtensionsPortalUrlPolicy policy) {
+        this.portalUrlPolicy = policy;
     }
 
     // ---- Web管理画面向け ----
@@ -254,6 +264,7 @@ public class AppSettingService {
             case LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL ->
                     requireUrl(key, value);
             case PENPOT_BASE_URL -> requireAllowedDestination(key, value);
+            case EXTENSIONS_PORTAL_URL -> requireAllowedPortalUrl(key, value);
             case LLM_REQUEST_TIMEOUT_SECONDS -> requirePositiveInt(key, value);
             case MAIL_PORT -> requirePort(key, value);
             case APP_MAIL_FROM -> requireEmailLike(key, value);
@@ -285,6 +296,15 @@ public class AppSettingService {
         try {
             destinationGuard.check("Penpot", value);
         } catch (ForbiddenDestinationException e) {
+            throw new IllegalArgumentException(key + " に指定できない接続先です。" + e.getMessage(), e);
+        }
+    }
+
+    private void requireAllowedPortalUrl(String key, String value) {
+        requireUrl(key, value);
+        try {
+            portalUrlPolicy.check(value);
+        } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(key + " に指定できない接続先です。" + e.getMessage(), e);
         }
     }

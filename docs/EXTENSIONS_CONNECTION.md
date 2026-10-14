@@ -37,7 +37,13 @@ docker compose -f docker-compose.yml -f docker-compose.shared-host.yml -f docker
 
 ## 3. システム設定に接続先を入れる
 
-管理画面 → システム設定:
+管理画面 → システム設定の「extensions から取り込む」欄で、ポータルの URL に `http://lbx-portal:3100`、経路に「同じ PC(共有ネットワーク)」を
+選んで「取得」を押す。Ollama / ComfyUI / Penpot の候補が「現在の値」と「取り込む値」で並ぶので、確認して「反映」を押すと保存される
+(ポータルの URL も保存され、次回は入力済みになる)。検証で拒否された項目は保存されず、キーと理由が表示される(他の項目は保存される)。
+同じ PC の Penpot は `publicUrl`(`https://penpot.<BASE_DOMAIN>:<port>`)を使うので、`BASE_DOMAIN` が `*.localhost` のままだとコンテナ内では
+ループバックに解決され、Penpot だけが拒否される。
+
+手で入力する場合の代替(システム設定の次の項目へ直接入れる):
 
 - `llm_ollama_base_url` = `http://lbx-ollama:11434/v1`
 - `comfyui_base_url` = `http://lbx-comfyui:8188`
@@ -90,7 +96,9 @@ LBS の JVM は既定の信頼ストアしか使わないため、そのまま�
    重ねるのは ai / media / platform だけで、`/certificates/lbx-ca.crt` に読み取り専用でマウントし、
    temurin の `/__cacert_entrypoint.sh`(`USE_SYSTEM_CA_CERTS=1`)で JVM の cacerts へ追加する。
    公開 CA(api.openai.com など)は従来どおり通り、マウントした証明書以外の自己署名証明書は拒否される。
-5. 管理画面 → システム設定に入力する(`<port>` は extensions の `HTTPS_PORT`):
+5. 管理画面 → システム設定の「extensions から取り込む」欄で、ポータルの URL に `https://<domain>:<port>`、経路に「別ホスト(公開 URL)」を選んで
+   「取得」→「反映」を押す(`<port>` は extensions の `HTTPS_PORT`。ポータルの TLS は手順 1〜2 で信頼させた証明書で検証される)。
+   手で入力する場合の代替は次のとおり:
    - `llm_ollama_base_url` = `https://ollama.<domain>:<port>/v1`
    - `comfyui_base_url` = `https://comfyui.<domain>:<port>`
 

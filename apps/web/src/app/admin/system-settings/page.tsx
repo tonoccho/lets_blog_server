@@ -3,6 +3,7 @@ import { listAppSettings } from "@/lib/apiClient";
 import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { AppSettingsPanel } from "./AppSettingsPanel";
+import { ExtensionsImportPanel } from "./ExtensionsImportPanel";
 
 export default async function AdminSystemSettingsPage() {
   await requireAdminSession();
@@ -21,6 +22,11 @@ export default async function AdminSystemSettingsPage() {
       </div>
       <FetchErrorNotice labels={failedLabels(settings)} />
       {/* 取得失敗時に空の設定を表示すると、そのまま保存して既存値を消しかねないため描画しない */}
+      {!settings.failed && (
+        <ExtensionsImportPanel
+          portalUrl={settings.data.find((s) => s.key === "extensions_portal_url")?.value ?? ""}
+        />
+      )}
       {!settings.failed && <AppSettingsPanel settings={settings.data} />}
     </div>
   );

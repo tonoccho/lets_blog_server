@@ -210,6 +210,11 @@ media の `project_image_settings`、platform の `system_settings`)の移行は
 発見元の候補: `lets_blog_server_extensions` の `GET /api/connections`(ADR-0011 §決定 5。2026-10-12)。項目は `id` / `name` / `publicUrl` / `internalUrl` /
 `internalServiceUrl`(Ollama のみ `openaiBaseUrl` も)、認証なし。契約ではなく、登録先を見つける元の候補。対応づけと経路は #1762(同じ PC)・#1763(別ホスト)。
 
+#1783 は、登録の土台(子 1)を待たずに、この発見元を**現行のシステム設定**(`llm_ollama_base_url` / `comfyui_base_url` / `penpot_base_url`)へ
+取り込む形で先に実装した(管理画面の「extensions から取り込む」。管理者が「取得」で候補を見て「反映」で保存する。ポータルの URL は
+`extensions_portal_url` に保存)。取り込み先を登録へ移すのは子 1(またはその後続)の範囲で、#1783 の対応づけ(`ollama` → LLM、`comfyui` → 画像生成、
+`penpot` → Penpot)はそのまま登録の種類への対応づけに使える。
+
 ### 4.3 接続先の検査
 
 `packages/lbs-common/src/main/java/com/letsblog/common/net/ConnectionDestinationGuard.java`。接続のたびにホストを名前解決し、全アドレスが
@@ -381,7 +386,7 @@ SNS 告知を WordPress プラグインのまま残すので変更しない。Ra
 2. **LLM の契約化**: §1 と §5.3 の LLM 分、§6.1。依存 #1745(済)・1。
 3. **画像生成の契約化**: §2 と §5.3 の画像分、§6.2(ComfyUI 固有の画面・API を宣言ベースへ)。依存 #1746(済)・#1747・1。
 4. **図のレンダリングの契約化と公開の停止**: §3・§5.1・§5.2・§6.3(レンダリングを CMS 書き込みの前へ寄せる)。依存 1。
-5. **接続先の自動設定**(`/api/connections`): ADR-0011 §決定 5。依存 1。経路は #1762・#1763。
+5. **接続先の自動設定**(`/api/connections`): ADR-0011 §決定 5。依存 1。経路は #1762・#1763。**#1783 で現行のシステム設定へ取り込む形で先に実装済み**(§4.2 末尾)。登録の土台ができたら、取り込み先を登録へ移す作業が子 1(またはその後続)の範囲。
 6. **外部 Penpot**: #1753 の結論をこの登録に乗せる。依存 1。
 7. **参照プラグイン: ComfyUI アダプター**: §2 のサーバー側。依存 3。
 8. **参照プラグイン: Claude アダプター**: §1 のサーバー側(Anthropic Messages API へ翻訳)。依存 2。
