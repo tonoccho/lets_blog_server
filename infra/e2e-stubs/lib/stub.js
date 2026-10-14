@@ -31,6 +31,8 @@
  *   GET  /__control/state                                     現在の仕込みと受信件数
  *   GET  /health                                              死活(compose の healthcheck 用)
  *
+ * スタブ固有の制御は `control` オプションで足せる(ポータルの `POST /__control/response`、#1782)。
+ *
  * `count` を省略すると解除するまで継続する。`/health` と `/__control/**` 自身は
  * 注入の対象外なので、仕込んだまま健全性を確認できる。
  *
@@ -95,8 +97,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  *        `forced` と `requests` だけでは表せないものを受け入れテストへ見せるために使う
  *        (comfyui スタブが投入ごとの seed と batch size を返す、issue #1106)。
  *        **応答本文には出さないこと。** 決定性を壊すため、外へ見せるのはこの制御経路だけにする。
+ * @param {(ctx) => Promise<boolean>} [options.control]
+ *        スタブ固有の制御エンドポイント(`/__control/<名前>`)。処理したら true、未対応なら false。
+ *        ctx = { req, res, method, pathname, readBody, sendJson }。受信件数にも注入にも数えない。
+ *        応答本文を差し替えるポータルのスタブ(#1782)が使う。
  */
-function createStub({ name, port, handle, errorBody, onReset, extraState }) {
+function createStub({ name, port, handle, errorBody, onReset, extraState, control }) {
   const state = {
     /** 注入中のエラー。{ status?, delayMs?, remaining } */
     forced: null,
@@ -126,7 +132,7 @@ function createStub({ name, port, handle, errorBody, onReset, extraState }) {
     }
 
     if (pathname.startsWith(CONTROL_PREFIX)) {
-      await handleControl(req, res, pathname, state, name, onReset, extraState);
+      await handleControl(req, res, pathname, state, name, onReset, extraState, control);
       return;
     }
 
@@ -197,7 +203,7 @@ function createStub({ name, port, handle, errorBody, onReset, extraState }) {
   return server;
 }
 
-async function handleControl(req, res, pathname, state, name, onReset, extraState) {
+async function handleControl(req, res, pathname, state, name, onReset, extraState, control) {
   if (req.method === 'GET' && pathname === `${CONTROL_PREFIX}/state`) {
     sendJson(res, 200, {
       name,
@@ -238,6 +244,7 @@ async function handleControl(req, res, pathname, state, name, onReset, extraStat
     sendJson(res, 200, { name, forced: state.forced });
     return;
   }
+  if (control && (await control({ req, res, method: req.method, pathname, readBody, sendJson }))) return;
   sendJson(res, 404, { error: { message: `[${name}] unknown control: ${req.method} ${pathname}` } });
 }
 

@@ -207,6 +207,30 @@ services:
     ports:
       - "127.0.0.1:18087:8080"
 
+  # extensions のポータル(GET /api/connections。issue #1782)。接続先の取り込み(#1783)を、実物の
+  # extensions なしで検証するための置き換え。応答の本文は POST /__control/response で差し替えられる。
+  # 同じ PC の extensions と同じ名前 lbx-portal(ポート 3100)で lbs-net 上から届く
+  # (docs/EXTENSIONS_CONNECTION.md)。スタブの土台は PORT=8080 なので、ポートと healthcheck を合わせる。
+  # 本番構成(docker-compose.yml 単体)には置かない。
+  portal-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-portal-stub
+    command: ["node", "/app/portal/server.js"]
+    environment:
+      TZ: UTC
+      PORT: "3100"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3100/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      lbs-net:
+        aliases:
+          - lbx-portal
+    ports:
+      - "127.0.0.1:18094:3100"
+
   # ---- 各サービスの向き先をスタブへ ----
 
   # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service

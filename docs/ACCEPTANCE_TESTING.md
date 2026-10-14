@@ -446,6 +446,50 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
 
+### extensions のポータルのスタブ(`portal-stub`、issue #1782)
+
+lets_blog_server_extensions のポータルが返す `GET /api/connections` を模す。接続先を `/api/connections` から取り込む機能(#1783)を、
+実物の extensions を動かさずに検証するための置き換えで、各ツール(Ollama / ComfyUI / PlantUML / Penpot / GitLab)のスタブは増やさない
+(Ollama は `llm-stub`、ComfyUI は `comfyui-stub`、PlantUML は実物の plantuml-server が受ける)。
+
+| 項目 | 値 |
+| --- | --- |
+| compose サービス | `portal-stub`(`docker-compose.e2e-stubs.yml`。本番構成には置かない) |
+| lbs-net 上の名前 | `lbx-portal:3100`(同じ PC の extensions と同じ名前。`GET http://lbx-portal:3100/api/connections`) |
+| ホスト公開 | `127.0.0.1:18094`(コンテナ内は 3100) |
+| 実装 | `infra/e2e-stubs/portal/server.js` |
+| 受け入れシナリオ | `features/stubs/portal-stub.feature`(`@mode:serial`。応答本文と注入の状態を共有するため) |
+
+`ALL_STUBS` / 上の表には**入れていない**(`support/stubs.ts` の `PORTAL_STUB_URL` を使う)。本文を差し替えるシナリオが、
+他レーンの決定性確認(`external-stubs.feature`)と並列に走って、差し替え中の本文を読ませないため。
+
+**既定の応答の出典**: `seiji/lets_blog_server_extensions` の `b864179`。
+
+- `apps/portal/src/app/api/connections/route.ts` — 認証なしで `Response.json(buildConnections(process.env))`
+- `apps/portal/src/lib/connections.ts` — 各要素 `id` / `name` / `publicUrl` / `internalUrl` / `internalServiceUrl`、Ollama だけ `openaiBaseUrl`(`<internalUrl>/v1`)
+- `apps/portal/src/lib/config.ts` の `SERVICE_DEFS` — 順序は `plantuml`, `comfyui`, `ollama`, `penpot`, `gitlab`。
+  `BASE_DOMAIN=lbx.localhost` / `HTTPS_PORT=8443` の既定値で `publicUrl` は `https://<id>.lbx.localhost:8443`
+
+**未確認の値**: 実装時に extensions のソースを読めなかったため、`internalServiceUrl`(plantuml 以外は `lbx-` を除いた推定)と各 `name` の表記は
+`config.ts` で確かめていない。extensions を読める環境で `portal/server.js` と突き合わせること。
+
+`/api/connections` は契約ではない(ADR-0011 §決定 5)ので、extensions 側の変更で既定の応答は古くなりうる。食い違いは手で追う
+(自動検出は設けていない)。
+
+**制御**(`lib/stub.js` の共通機能に加え、ポータル固有の 1 本):
+
+```bash
+# 応答本文を差し替える(body が文字列ならそのまま、それ以外は JSON として返す。contentType の既定は application/json)
+curl -X POST http://127.0.0.1:18094/__control/response -d '{"body": [{"id":"ollama","internalUrl":"http://llm-stub:8080"}]}'
+curl -X POST http://127.0.0.1:18094/__control/response -d '{"body": "<html>not json</html>", "contentType": "text/plain"}'
+
+curl -X POST http://127.0.0.1:18094/__control/force -d '{"status": 500, "count": 1}'   # 次の1回を500に(delayMs で遅延)
+curl -X POST http://127.0.0.1:18094/__control/reset                                   # 既定の5要素へ戻す(注入・件数も解除)
+curl http://127.0.0.1:18094/__control/state       # requests / requestsByPath["GET /api/connections"] / overridden
+```
+
+遅延(`delayMs`)は他のスタブと同じく、指定時間待ってから接続を切る(呼び元のタイムアウトとして見える)。
+
 ### `working_dir` はマウント先(`/app`)にしない
 
 スタブは `./infra/e2e-stubs` を `/app` へ読み取り専用でマウントするが、`working_dir` は

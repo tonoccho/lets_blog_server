@@ -214,3 +214,31 @@ export function comfyUiWorkflow(options: {
     '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'letsblog', images: ['8', 0] } },
   };
 }
+
+/**
+ * extensions のポータル(`GET /api/connections`)のスタブ(issue #1782)。
+ *
+ * lbs-net 上では `lbx-portal:3100`、ホストからは 127.0.0.1:18094 で見える
+ * (docker-compose.e2e-stubs.yml の `portal-stub`)。
+ *
+ * `StubName` / `ALL_STUBS` には**入れない**。応答の本文と注入の状態を差し替えるシナリオ
+ * (`stubs/portal-stub.feature`)が、`external-stubs.feature` など他のレーンの決定性確認と
+ * 並列に走ると、差し替え中の本文を読ませてしまうため。
+ */
+export const PORTAL_STUB_URL = 'http://127.0.0.1:18094';
+
+/** ポータルスタブが起動していなければ、スキップではなくエラーで落とす(#843)。 */
+export async function requirePortalStub(): Promise<void> {
+  let up = false;
+  try {
+    const res = await fetch(`${PORTAL_STUB_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    up = res.ok;
+  } catch {
+    up = false;
+  }
+  if (!up) {
+    throw new Error(
+      `ポータルスタブが起動していません: ${PORTAL_STUB_URL}/health\n\n${START_HINT}`
+    );
+  }
+}
