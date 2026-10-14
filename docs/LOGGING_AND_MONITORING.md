@@ -304,7 +304,7 @@ external call: target=brave-search host=api.search.brave.com method=GET path=/re
 | `keycloak-admin` | identity and platform `keycloak/KeycloakAdminClientConfig` (also the token calls made through the same builder) |
 | `keycloak-token` | identity `config/ServiceTokenClientConfig`, `packages/lbs-common` `auth/ServiceTokenClientConfig` |
 | `openai-image` / `comfyui` / `plantuml` | media `ai/ChatGptImageClient`, `ai/ComfyUiClient`, `render/PlantUmlClient` |
-| `container-status` / `rabbitmq-management` / `gateway-status` / `connected-service-status` | platform `service/ContainerStatusService`, `RabbitMqQueueStatusService`, `LetsBlogServiceStatusService`, `ConnectedServiceStatusService` |
+| `container-status` / `rabbitmq-management` / `gateway-status` / `connected-service-status` | platform `service/ContainerStatusService`, `RabbitMqQueueStatusService`, `LetsBlogServiceStatusService`, `ConnectedServiceStatusService`, `PenpotReachabilityChecker` |
 | `wordpress-agent` / `wordpress-bulk` | project `provisioning/AgentRestClients`, publishing `cms/agent/WordPressAgentOperations`, `provisioning/WordPressBulkManagementClient` |
 | `x-api` / `linkedin-api` / `facebook-api` / `hatena-api` / `threads-api` | project `client/XApiClient`, `LinkedinApiClient`, `FacebookApiClient`, `HatenaApiClient`, `ThreadsApiClient` |
 

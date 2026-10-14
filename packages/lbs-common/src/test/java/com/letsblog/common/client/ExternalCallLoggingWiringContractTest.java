@@ -60,6 +60,8 @@ class ExternalCallLoggingWiringContractTest {
                 "gateway-status");
         add("services/platform/src/main/java/com/letsblog/platform/service/ConnectedServiceStatusService.java",
                 "connected-service-status");
+        add("services/platform/src/main/java/com/letsblog/platform/service/PenpotReachabilityChecker.java",
+                "connected-service-status");
         add("services/project/src/main/java/com/letsblog/project/provisioning/AgentRestClients.java",
                 "wordpress-agent");
         add("services/project/src/main/java/com/letsblog/project/client/XApiClient.java", "x-api");
