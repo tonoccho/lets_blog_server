@@ -8,12 +8,13 @@ import {
   getArticlePlanIssueDescription,
 } from "@/lib/apiClient";
 import { requireAdminSession, getViewerTimeZone } from "@/lib/session";
-import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
+import { loadOrReport, failedLabels, type LoadResult } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ProjectSectionNav } from "../ProjectSectionNav";
 import { ArticlePlanWorkspace } from "./ArticlePlanWorkspace";
 import { ArticlePlanIssueList } from "./ArticlePlanIssueList";
+import { ArticlePlanIssueListError } from "./ArticlePlanIssueListError";
 
 export default async function ArticlePlanPage({
   params,
@@ -46,7 +47,8 @@ export default async function ArticlePlanPage({
   }
 
   // 条件付きの取得(Issue番号・GitHub連携なし)は「取得しない」ので失敗ではない。
-  const skipped = <T,>(label: string, data: T) => Promise.resolve({ data, failed: false, label });
+  const skipped = <T,>(label: string, data: T): Promise<LoadResult<T>> =>
+    Promise.resolve({ data, failed: false, label });
   const [sessions, issues, issueSession, allIssues, issueDescription, timezone] = await Promise.all([
     loadOrReport(scope, "記事計画セッション一覧", listArticlePlanSessions(projectId), []),
     project.githubRepository
@@ -84,7 +86,17 @@ export default async function ArticlePlanPage({
 
       <ProjectSectionNav projectId={projectId} active="plan" />
 
-      <FetchErrorNotice labels={failedLabels(sessions, issues, issueSession, allIssues, issueDescription)} />
+      {/* Issue一覧の失敗は、原因が分かるときだけこの画面専用の通知で示す(issue #1771)。 */}
+      {issues.reason && <ArticlePlanIssueListError reason={issues.reason} />}
+      <FetchErrorNotice
+        labels={failedLabels(
+          sessions,
+          ...(issues.reason ? [] : [issues]),
+          issueSession,
+          allIssues,
+          issueDescription,
+        )}
+      />
 
       {!project.githubRepository && (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">

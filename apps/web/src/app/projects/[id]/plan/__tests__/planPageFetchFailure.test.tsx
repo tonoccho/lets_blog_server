@@ -82,6 +82,64 @@ describe("記事計画ページの取得失敗表示(issue #1235)", () => {
     expect(html).not.toContain("ISSUE_LIST");
   });
 
+  describe("Issue一覧の取得失敗の原因(issue #1771)", () => {
+    const apiError = (status: number, body: string) => new Error(`APIエラー (${status}): ${body}`);
+
+    it("トークン未設定は原因の通知を出し、汎用文言は出さない", async () => {
+      api.listArticlePlanIssues.mockRejectedValue(
+        apiError(409, '{"error":"{\\"error\\":\\"x\\"}","details":{"reason":"GITHUB_TOKEN_NOT_CONFIGURED"}}'),
+      );
+      const html = await render();
+      expect(html).toContain('role="alert"');
+      expect(html).toContain("記事計画Issue一覧を取得できませんでした。GitHub トークンが設定されていません。");
+      expect(html).not.toContain("時間をおいて再読み込みしてください");
+      expect(html).not.toContain("ISSUE_LIST");
+      expect(errorSpy).toHaveBeenCalled();
+    });
+
+    it("認証失敗は原因の通知を出し、GitHubの本文は出さない", async () => {
+      api.listArticlePlanIssues.mockRejectedValue(
+        apiError(502, '{"error":"Bad credentials","details":{"reason":"GITHUB_AUTH_FAILED"}}'),
+      );
+      const html = await render();
+      expect(html).toContain("記事計画Issue一覧を取得できませんでした。GitHub の認証に失敗しました。");
+      expect(html).not.toContain("時間をおいて再読み込みしてください");
+      expect(html).not.toContain("Bad credentials");
+    });
+
+    it("原因が無い失敗は汎用文言だけを出す", async () => {
+      api.listArticlePlanIssues.mockRejectedValue(
+        apiError(502, '{"error":"API rate limit exceeded"}'),
+      );
+      const html = await render();
+      expect(html).toContain("記事計画Issue一覧を取得できませんでした。時間をおいて再読み込みしてください。");
+      expect(html).not.toContain("GitHub トークンが設定されていません");
+      expect(html).not.toContain("GitHub の認証に失敗しました");
+      expect(html).not.toContain("API rate limit exceeded");
+    });
+
+    it("原因の通知と、ほかの項目の汎用通知を並べて出せる", async () => {
+      api.listArticlePlanIssues.mockRejectedValue(
+        apiError(409, '{"error":"x","details":{"reason":"GITHUB_TOKEN_NOT_CONFIGURED"}}'),
+      );
+      api.listArticlePlanSessions.mockRejectedValue(DOWN);
+      const html = await render();
+      expect(html).toContain("GitHub トークンが設定されていません");
+      expect(html).toContain("記事計画セッション一覧を取得できませんでした。時間をおいて再読み込みしてください。");
+    });
+
+    it("全件一覧(?issue=)の失敗は原因があっても汎用通知のまま", async () => {
+      api.listArticlePlanIssues.mockImplementation((_id: number, state: string) =>
+        state === "all"
+          ? Promise.reject(apiError(409, '{"error":"x","details":{"reason":"GITHUB_TOKEN_NOT_CONFIGURED"}}'))
+          : Promise.resolve([]),
+      );
+      const html = await render("3");
+      expect(html).toContain("記事計画Issue一覧(全件)を取得できませんでした。時間をおいて再読み込みしてください。");
+      expect(html).not.toContain("GitHub トークンが設定されていません");
+    });
+  });
+
   it("Issue指定時の詳細/セッションの取得失敗も通知する", async () => {
     api.getArticlePlanSessionByIssue.mockRejectedValue(DOWN);
     api.getArticlePlanIssueDescription.mockRejectedValue(DOWN);

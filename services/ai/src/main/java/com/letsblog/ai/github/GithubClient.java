@@ -89,7 +89,11 @@ public class GithubClient {
             }
             return issues;
         } catch (RestClientResponseException e) {
-            throw new GithubApiException(errorMessage(owner, repo, e, "issue一覧の取得"), e);
+            String message = errorMessage(owner, repo, e, "issue一覧の取得");
+            if (e.getStatusCode().value() == 401) {
+                throw new GithubAuthFailedException(message, e);
+            }
+            throw new GithubApiException(message, e);
         } catch (Exception e) {
             throw new GithubApiException("GitHub API呼び出しに失敗しました: " + e.getMessage(), e);
         }

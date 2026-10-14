@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { getApiErrorReason, type ApiErrorReason } from "./apiErrorReason";
 import { isApiStatusError, isSessionExpiredError } from "./sessionExpired";
 
 /**
@@ -13,7 +14,13 @@ import { isApiStatusError, isSessionExpiredError } from "./sessionExpired";
  * `notFoundIsEmpty`を指定すると404は「存在しない」という正当な結果として、ログも失敗扱いもせず
  * フォールバックを返す(単一リソース取得で`notFound()`へ流す用途)。
  */
-export type LoadResult<T> = { data: T; failed: boolean; label: string };
+export type LoadResult<T> = {
+  data: T;
+  failed: boolean;
+  label: string;
+  /** 失敗の応答が機械が読める原因(`details.reason`)を載せていたときだけ付く(issue #1771)。 */
+  reason?: ApiErrorReason;
+};
 
 export async function loadOrReport<T>(
   scope: string,
@@ -32,7 +39,8 @@ export async function loadOrReport<T>(
       return { data: fallback, failed: false, label };
     }
     console.error(`[${scope}] ${label}の取得に失敗しました:`, err);
-    return { data: fallback, failed: true, label };
+    const reason = getApiErrorReason(err);
+    return reason ? { data: fallback, failed: true, label, reason } : { data: fallback, failed: true, label };
   }
 }
 

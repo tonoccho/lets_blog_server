@@ -1,7 +1,9 @@
 package com.letsblog.ai.config;
 
 import com.letsblog.ai.ai.AiServiceException;
+import com.letsblog.ai.client.GithubTokenNotConfiguredException;
 import com.letsblog.ai.github.GithubApiException;
+import com.letsblog.ai.github.GithubAuthFailedException;
 import com.letsblog.ai.service.ArticlePlanSessionNotFoundException;
 import com.letsblog.ai.service.ForbiddenException;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
@@ -73,6 +75,23 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * GitHubトークン未設定(issue #1771)。ステータス(409)と {@code error}(project-serviceの本文)は
+     * {@link IllegalStateException} と同じで、画面が文言を照合せずに原因を判定できるよう {@code details.reason} を載せる。
+     */
+    @ExceptionHandler(GithubTokenNotConfiguredException.class)
+    public ResponseEntity<ErrorResponse> handleGithubTokenNotConfigured(GithubTokenNotConfiguredException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(e.getMessage(), Map.of("reason", GithubTokenNotConfiguredException.REASON)));
+    }
+
+    /** GitHubの401(issue #1771)。502のまま、{@code details.reason} だけを足す。 */
+    @ExceptionHandler(GithubAuthFailedException.class)
+    public ResponseEntity<ErrorResponse> handleGithubAuthFailed(GithubAuthFailedException e) {
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(ErrorResponse.of(e.getMessage(), Map.of("reason", GithubAuthFailedException.REASON)));
     }
 
     @ExceptionHandler(ArticlePlanSessionNotFoundException.class)

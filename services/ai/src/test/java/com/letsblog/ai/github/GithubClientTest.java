@@ -240,6 +240,35 @@ class GithubClientTest {
     }
 
     @Test
+    void listIssues_401の場合は認証失敗の専用例外になり原因が機械可読になる() {
+        server.expect(requestTo(containsString("/repos/owner/repo/issues")))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"message\":\"Bad credentials\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubAuthFailedException.class,
+                () -> client.listIssues("invalid-token", "owner", "repo", "open"));
+
+        assertEquals("GITHUB_AUTH_FAILED", GithubAuthFailedException.REASON);
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("認証に失敗しました"));
+        server.verify();
+    }
+
+    @Test
+    void listIssues_403の場合は認証失敗の専用例外にならない() {
+        server.expect(requestTo(containsString("/repos/owner/repo/issues")))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN)
+                        .body("{\"message\":\"API rate limit exceeded\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        GithubApiException exception = assertThrows(GithubApiException.class,
+                () -> client.listIssues("limited-token", "owner", "repo", "open"));
+
+        assertEquals(GithubApiException.class, exception.getClass());
+        server.verify();
+    }
+
+    @Test
     void listIssues_assigneesのloginを抽出する() {
         server.expect(requestTo(containsString("https://api.github.com/repos/owner/repo/issues")))
                 .andRespond(withSuccess(

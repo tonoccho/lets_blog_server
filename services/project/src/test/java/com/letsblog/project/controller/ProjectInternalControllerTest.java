@@ -9,6 +9,7 @@ import com.letsblog.project.dto.ProjectBridgeResponse;
 import com.letsblog.project.dto.SiteBridgeResponse;
 import com.letsblog.project.repository.SiteRepository;
 import com.letsblog.project.service.CurrentActorService;
+import com.letsblog.project.service.GithubTokenNotConfiguredException;
 import com.letsblog.project.service.ProjectService;
 import java.util.List;
 import java.util.Optional;
@@ -150,5 +151,19 @@ class ProjectInternalControllerTest {
         List<SiteBridgeResponse> response = controller().sites();
 
         assertEquals(2, response.size());
+    }
+
+    @Test
+    void githubAccess_トークンが未設定なら専用例外で原因を示す() {
+        when(projectService.getProjectEntity(1L)).thenReturn(buildProject(1L));
+        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer x");
+        when(identityBridgeClient.userGithubToken(5L, "Bearer x"))
+                .thenReturn(new IdentityBridgeClient.UserGithubToken(false, null));
+
+        GithubTokenNotConfiguredException e = org.junit.jupiter.api.Assertions.assertThrows(
+                GithubTokenNotConfiguredException.class, () -> controller().githubAccess(1L, 5L));
+
+        assertEquals("ユーザーの GitHub トークンが設定されていません", e.getMessage());
+        assertEquals("GITHUB_TOKEN_NOT_CONFIGURED", GithubTokenNotConfiguredException.REASON);
     }
 }

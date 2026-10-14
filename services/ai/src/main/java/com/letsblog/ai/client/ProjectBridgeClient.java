@@ -1,5 +1,8 @@
 package com.letsblog.ai.client;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.service.IdentityServiceUnavailableException;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -29,6 +32,8 @@ public class ProjectBridgeClient {
 
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final RestClient restClient;
 
@@ -61,7 +66,11 @@ public class ProjectBridgeClient {
             }
             return access;
         } catch (RestClientResponseException e) {
-            throw new IllegalStateException(bodyOrMessage(e), e);
+            String message = bodyOrMessage(e);
+            if (isTokenNotConfigured(e)) {
+                throw new GithubTokenNotConfiguredException(message, e);
+            }
+            throw new IllegalStateException(message, e);
         } catch (RestClientException e) {
             throw new IdentityServiceUnavailableException(
                     "project-serviceのgithub-access呼び出しに失敗しました: " + e.getMessage(), e);
@@ -71,6 +80,19 @@ public class ProjectBridgeClient {
     private void setAuthorization(HttpHeaders headers, String bearerToken) {
         if (bearerToken != null && !bearerToken.isBlank()) {
             headers.set(HttpHeaders.AUTHORIZATION, bearerToken);
+        }
+    }
+
+    /**
+     * project-serviceの409の本文に載る {@code details.reason} だけでトークン未設定と判定する(issue #1771)。
+     * 日本語の文言は照合しない。本文がJSONでない場合などは未設定と見なさない。
+     */
+    private boolean isTokenNotConfigured(RestClientResponseException e) {
+        try {
+            JsonNode reason = OBJECT_MAPPER.readTree(e.getResponseBodyAsString()).path("details").path("reason");
+            return GithubTokenNotConfiguredException.REASON.equals(reason.asText(null));
+        } catch (JsonProcessingException | RuntimeException ex) {
+            return false;
         }
     }
 

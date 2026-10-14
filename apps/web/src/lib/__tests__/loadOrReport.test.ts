@@ -27,6 +27,18 @@ describe('loadOrReport', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it('失敗の原因(details.reason)が分かるときは、結果に reason を載せる(issue #1771)', async () => {
+    const err = new Error('APIエラー (502): {"error":"x","details":{"reason":"GITHUB_AUTH_FAILED"}}');
+    const result = await loadOrReport('sites', 'サイト一覧', Promise.reject(err), [] as number[]);
+    expect(result).toEqual({ data: [], failed: true, label: 'サイト一覧', reason: 'GITHUB_AUTH_FAILED' });
+    expect(errorSpy).toHaveBeenCalledWith('[sites] サイト一覧の取得に失敗しました:', err);
+  });
+
+  it('原因が分からない失敗では reason キーを付けない(既存の呼び出し側の戻り値を変えない)', async () => {
+    const result = await loadOrReport('sites', 'サイト一覧', Promise.reject(new Error('boom')), [] as number[]);
+    expect(Object.keys(result).sort()).toEqual(['data', 'failed', 'label']);
+  });
+
   it('失敗したときはフォールバックと failed=true を返し、scope・ラベル・原因をログに残す', async () => {
     const err = new Error('APIエラー (503): down');
     const result = await loadOrReport('sites', 'サイト一覧', Promise.reject(err), [] as number[]);

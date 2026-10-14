@@ -9,6 +9,7 @@ import com.letsblog.project.dto.SetGithubTokenBridgeRequest;
 import com.letsblog.project.dto.SiteBridgeResponse;
 import com.letsblog.project.repository.SiteRepository;
 import com.letsblog.project.service.CurrentActorService;
+import com.letsblog.project.service.GithubTokenNotConfiguredException;
 import com.letsblog.project.service.ProjectService;
 import java.util.List;
 import java.util.Set;
@@ -169,7 +170,7 @@ public class ProjectInternalController {
             IdentityBridgeClient.UserGithubToken userToken =
                     identityBridgeClient.userGithubToken(actorUserId, currentActorService.getAuthorizationHeader());
             if (!userToken.configured()) {
-                throw new IllegalStateException("ユーザーの GitHub トークンが設定されていません");
+                throw new GithubTokenNotConfiguredException("ユーザーの GitHub トークンが設定されていません");
             }
             token = credentialCipher.decrypt(userToken.encryptedToken());
         }

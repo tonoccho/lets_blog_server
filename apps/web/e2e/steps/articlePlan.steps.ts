@@ -38,6 +38,8 @@ const STUB_REPOSITORY = 'e2e-stub/acceptance';
 const STUB_VALID_TOKEN = 'e2e-stub-token';
 /** スタブが 401 を返すトークン。 */
 const STUB_INVALID_TOKEN = 'e2e-stub-invalid-token';
+/** スタブが 403(レート制限)を返すトークン。 */
+const STUB_RATELIMITED_TOKEN = 'e2e-stub-ratelimited-token';
 
 /** 公開先に作る既存分類。親子関係とタグの検証に使う。 */
 const FIXTURE_PARENT_CATEGORY = 'AT9親カテゴリ';
@@ -247,6 +249,14 @@ Given('無効なGitHubトークンが設定されたプロジェクトが用意�
   ctx.plan = { projectId } satisfies PlanFixture;
 });
 
+Given('レート制限されたGitHubトークンが設定されたプロジェクトが用意されている', async ({ ctx, request }) => {
+  const token = await adminToken(request);
+  const projectId = await createPlanProject(request, token);
+  await setGithubRepository(request, token, projectId);
+  await setGithubToken(request, token, projectId, STUB_RATELIMITED_TOKEN);
+  ctx.plan = { projectId } satisfies PlanFixture;
+});
+
 Given('公開先に既存の分類があるプロジェクトが用意されている', async ({ ctx, request }) => {
   const token = await adminToken(request);
   const projectId = await createPlanProject(request, token);
@@ -451,15 +461,38 @@ Then('Issue一覧のカードは表示されない', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '登録済み記事(Issue)一覧' })).toHaveCount(0);
 });
 
-Then(/^Issue一覧のAPIは「(.+)」というエラーを返す$/, async ({ ctx, request }, message: string) => {
+Then(/^通知に「(.+)」が含まれる$/, async ({ page }, message: string) => {
+  await expect(
+    page.getByRole('alert').filter({ hasText: '記事計画Issue一覧を取得できませんでした' }).filter({ hasText: message })
+  ).toBeVisible({ timeout: 30_000 });
+});
+
+Then(/^画面に「(.+)」は表示されない$/, async ({ page }, message: string) => {
+  await expect(page.getByText(message)).toHaveCount(0);
+});
+
+async function expectIssueListFailure(
+  ctx: { plan?: unknown }, request: APIRequestContext, status: string, reason: string | undefined
+): Promise<void> {
   const token = await adminToken(request);
   const response = await request.get(
     `/api/projects/${(ctx.plan as PlanFixture).projectId}/article-plan/issues?state=open`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  expect(response.ok(), 'GitHubの設定が不備なのにIssue一覧が成功してしまった').toBeFalsy();
-  expect(await response.text()).toContain(message);
-});
+  expect(response.status(), 'Issue一覧のAPIのステータスが想定と違います').toBe(Number(status));
+  const body = (await response.json()) as { details?: { reason?: string } };
+  expect(body.details?.reason, 'details.reason が想定と違います').toBe(reason);
+}
+
+Then(/^Issue一覧のAPIはステータス (\d+) と原因「(.+)」を返す$/,
+  async ({ ctx, request }, status: string, reason: string) => {
+    await expectIssueListFailure(ctx, request, status, reason);
+  });
+
+Then(/^Issue一覧のAPIはステータス (\d+) と原因なしを返す$/,
+  async ({ ctx, request }, status: string) => {
+    await expectIssueListFailure(ctx, request, status, undefined);
+  });
 
 // --------------------------------------------------------------- GitHubスタブ側の確認
 

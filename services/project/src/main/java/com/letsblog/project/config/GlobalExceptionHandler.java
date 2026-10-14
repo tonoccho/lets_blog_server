@@ -3,6 +3,7 @@ package com.letsblog.project.config;
 import com.letsblog.project.client.AiServiceException;
 import com.letsblog.project.service.AiServiceGenerationException;
 import com.letsblog.project.service.ForbiddenException;
+import com.letsblog.project.service.GithubTokenNotConfiguredException;
 import com.letsblog.project.service.IdentityServiceUnavailableException;
 import com.letsblog.project.service.InvalidCustomTagContentException;
 import com.letsblog.project.service.InvalidSiteAdminPathException;
@@ -54,6 +55,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /**
+     * GitHubトークン未設定(issue #1771)。ステータスと {@code error} は {@link IllegalStateException} と同じ(409)で、
+     * 呼び出し側が文言を照合せずに原因を判定できるよう {@code details.reason} を載せる。
+     */
+    @ExceptionHandler(GithubTokenNotConfiguredException.class)
+    public ResponseEntity<ErrorResponse> handleGithubTokenNotConfigured(GithubTokenNotConfiguredException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(e.getMessage(), Map.of("reason", GithubTokenNotConfiguredException.REASON)));
     }
 
     @ExceptionHandler(SshKeyPairNotFoundException.class)
