@@ -48,11 +48,14 @@ describe("画像ギャラリーの取得失敗表示(issue #1235)", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
-  it("成功して0件のときは従来の空表示で通知なし", async () => {
+  it("成功して0件のときは案内を出しつつ、フォルダのグリッドも描画する(issue #1787)", async () => {
     api.listGeneratedImages.mockResolvedValue([]);
+    api.listGeneratedImageFolders.mockResolvedValue([{ id: 7, name: "風景", parentId: null }]);
     const html = renderToStaticMarkup(await ImageGalleryPage());
     expect(html).not.toContain('role="alert"');
     expect(html).toContain("生成画像がありません");
+    expect(html).toContain("GRID");
+    expect(html).toContain("風景");
   });
 
   it("初回は1ページぶん(limit=24, offset=0)だけを取得する(issue #1472)", async () => {
@@ -87,9 +90,9 @@ describe("画像ギャラリーの取得失敗表示(issue #1235)", () => {
     expect(html).not.toContain("生成画像を取得できませんでした");
   });
 
-  it("フォルダ取得を足しても、画像が0件のときは従来の空表示のまま(issue #1493)", async () => {
-    api.listGeneratedImages.mockResolvedValue([]);
+  it("画像の取得に失敗したときは、0件でもグリッドを描画しない(issue #1787)", async () => {
+    api.listGeneratedImages.mockRejectedValue(DOWN);
     const html = renderToStaticMarkup(await ImageGalleryPage());
-    expect(html).toContain("生成画像がありません");
+    expect(html).not.toContain("GRID");
   });
 });

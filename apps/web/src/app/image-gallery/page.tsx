@@ -24,10 +24,14 @@ export default async function ImageGalleryPage() {
 
       <FetchErrorNotice labels={failedLabels(imagesResult, foldersResult)} />
 
-      {imagesResult.failed ? null : images.length === 0 ? (
-        <p className="text-neutral-500 dark:text-neutral-400">生成画像がありません(VSCode拡張で画像を生成すると表示されます)</p>
-      ) : (
-        <ImageGalleryGrid images={images} folders={foldersResult.data} timezone={timezone} />
+      {imagesResult.failed ? null : (
+        <>
+          {images.length === 0 && (
+            <p className="text-neutral-500 dark:text-neutral-400">生成画像がありません(VSCode拡張で画像を生成すると表示されます)</p>
+          )}
+          {/* 0件でもフォルダのツリーと作成フォームは使えるよう、グリッドは常に描画する(issue #1787)。 */}
+          <ImageGalleryGrid images={images} folders={foldersResult.data} timezone={timezone} />
+        </>
       )}
     </div>
   );
