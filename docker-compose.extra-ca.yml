@@ -33,9 +33,9 @@ services:
     <<: *extra-ca
     environment:
       USE_SYSTEM_CA_CERTS: "1"
-      PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://plantuml:8080}
+      PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://lbx-plantuml:8080}
   platform:
     <<: *extra-ca
     environment:
       USE_SYSTEM_CA_CERTS: "1"
-      PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://plantuml:8080}
+      PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://lbx-plantuml:8080}

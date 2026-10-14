@@ -31,7 +31,7 @@ docker compose -f docker-compose.yml -f docker-compose.shared-host.yml -f docker
 
 - 参加するのは ai / media / platform だけ。既存の `lbs-net`(platform は `docker-socket-proxy-net` も)は保つ。
 - ネットワーク名を変えるときは環境変数 `LBX_SHARED_NETWORK`(既定 `lbx-shared`)を設定する。
-- media と platform の `PLANTUML_BASE_URL` は `http://lbx-plantuml:8080` になる。
+- media と platform の `PLANTUML_BASE_URL` は `http://lbx-plantuml:8080` になる(`docker-compose.yml` 単体の既定値も同じ。#1784)。
 - `lbx-shared` が無いホストでは重ねないこと(重ねなければ今までどおり起動する)。
   受け入れテスト環境のスクリプトはこのオーバーレイを使わない。
 
@@ -52,7 +52,7 @@ PlantUML はオーバーレイが環境変数で設定するので入力は要�
 
 ## 4. 別名のない名前を使わない理由
 
-extensions のコンテナは `ollama` / `comfyui` / `plantuml` という別名を持たない。LBS 自身も同梱をやめたので、
+extensions のコンテナは `ollama` / `comfyui` / `plantuml` という別名を持たない。LBS 自身も同梱をやめた(PlantUML は #1784 が最後)ので、
 これらの名前は解決できない。必ず `lbx-` 付きの別名を使う。
 
 ## 5. プロジェクト単位の上書きでは指定できない
@@ -104,7 +104,9 @@ LBS の JVM は既定の信頼ストアしか使わないため、そのまま�
 
    extensions の `/api/connections` の `openaiBaseUrl` は内部 URL なので使わない。`publicUrl` に `/v1` を付ける。
 6. PlantUML は環境変数 `LBX_PLANTUML_URL=https://plantuml.<domain>:<port>` で media と platform に渡す
-   (未設定なら従来の `http://plantuml:8080`)。
+   (未設定なら `http://lbx-plantuml:8080`。LBS は PlantUML を同梱しないので #1784 でこの既定値に変えた。
+   同じ PC の extensions ならそのまま届き、`docker-compose.extensions.yml` を重ねても同じ値になる。
+   extensions も別途起動した PlantUML サーバーも無い環境では、図の描画はできない)。
 
 ### 取り直しが要るとき
 

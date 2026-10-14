@@ -231,6 +231,28 @@ services:
     ports:
       - "127.0.0.1:18094:3100"
 
+  # 実物の PlantUML サーバー(#1784)。同梱の plantuml サービスは削除したので、受け入れテストの
+  # 図の描画(diagram/plantuml-rendering.feature)はここで起動する実物で行う。スタブには置き換えない
+  # (図を描けたことを確かめるシナリオが空洞化するため)。同じ PC の extensions と同じ別名
+  # lbx-plantuml(ポート 8080)で lbs-net 上から届く。本番構成(docker-compose.yml 単体)には置かない。
+  e2e-plantuml:
+    image: plantuml/plantuml-server:jetty
+    container_name: lbs-e2e-plantuml
+    restart: unless-stopped
+    mem_limit: 1g
+    # 他のサービスと同じログ上限(#1247)。
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    environment:
+      TZ: UTC
+    networks:
+      lbs-net:
+        aliases:
+          - lbx-plantuml
+
   # ---- 各サービスの向き先をスタブへ ----
 
   # LLM を実際に呼ぶのは ai-service、その接続設定の既定値を持つのは platform-service
@@ -264,6 +286,7 @@ services:
       # OPENAI を使うシナリオは、プロジェクトにスタブ用のキーを設定してそのプロジェクトで選ぶ。
       # 同スクリプトが DB 上書きを消すため、ここで固定しないと環境変数既定がそのまま効く。
       LLM_PROVIDER: OLLAMA
+      PLANTUML_BASE_URL: http://lbx-plantuml:8080
       LLM_OLLAMA_MODEL: e2e-stub-model
       # media-service は画像生成の接続設定を platform の
       # /api/internal/platform/image-generation-config から取る(PlatformServiceClient)。
@@ -289,7 +312,10 @@ services:
     environment:
       # ChatGPT 画像生成の向き先を image-stub にする(#1569)。上のコメント(ai)を参照。
       SPRING_PROFILES_ACTIVE: e2e-stubs
+      PLANTUML_BASE_URL: http://lbx-plantuml:8080
     depends_on:
+      e2e-plantuml:
+        condition: service_started
       comfyui-stub:
         condition: service_healthy
 

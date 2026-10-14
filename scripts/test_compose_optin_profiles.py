@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PlantUML・draw.io・phpMyAdmin が compose profiles のオプトイン起動であることの検証(#1741)。
+"""draw.io・phpMyAdmin が compose profiles のオプトイン起動であることの検証(#1741)。
 
     python3 -m unittest scripts.test_compose_optin_profiles
 
@@ -7,7 +7,7 @@ compose の設定は Web UI から到達できないため、Gherkin ではな�
 (CLAUDE.md → Test-First Implementation)。`docker compose config` は静的で、
 コンテナもイメージの pull も要らない。
 
-- profile を指定しない(`COMPOSE_PROFILES` 未設定)`config --services` に対象3サービスが無い
+- profile を指定しない(`COMPOSE_PROFILES` 未設定)`config --services` に対象2サービスが無い
 - 該当 profile(`diagram` / `db-tools`)を有効にすると含まれる
 - 常時起動するサービスから対象サービスへの `depends_on` が無い
 """
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 COMPOSE = os.path.join(REPO_ROOT, "docker-compose.yml")
 
-PROFILE_OF = {"plantuml": "diagram", "drawio": "diagram", "phpmyadmin": "db-tools"}
+PROFILE_OF = {"drawio": "diagram", "phpmyadmin": "db-tools"}
 OPT_IN = set(PROFILE_OF)
 
 
@@ -57,7 +57,6 @@ class OptInProfilesTest(unittest.TestCase):
 
     def test_profile_does_not_enable_other_group(self):
         self.assertNotIn("phpmyadmin", config_services("diagram"))
-        self.assertNotIn("plantuml", config_services("db-tools"))
         self.assertNotIn("drawio", config_services("db-tools"))
 
     def test_always_on_services_do_not_depend_on_opt_in(self):

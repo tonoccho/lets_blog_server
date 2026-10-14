@@ -60,8 +60,13 @@ const DRAWIO_MARKERS = ['geEditor', 'js/main.js'];
 /** PNG のファイル署名。バイト列の先頭に必ず現れる。 */
 const PNG_SIGNATURE = '\x89PNG';
 
-/** 内部ネットワーク上のホスト名(docker-compose のサービス名)。 */
-const INTERNAL_PLANTUML_ORIGIN = 'http://plantuml:8080';
+/**
+ * 内部ネットワーク上のホスト名。PlantUML は同梱をやめた(#1784)ので、extensions と同じ別名
+ * `lbx-plantuml` で届く。受け入れテスト環境では docker-compose.e2e-stubs.yml の実物の
+ * plantuml-server がこの別名を持つ。
+ */
+const INTERNAL_PLANTUML_ORIGIN = 'http://lbx-plantuml:8080';
+/** ComfyUI は同梱のサービス名。 */
 const INTERNAL_COMFYUI_ORIGIN = 'http://comfyui:8188';
 
 /**

@@ -47,7 +47,7 @@ df -h                     # ディスク空き容量(最小 20GB。不足する�
 ComfyUI(`/comfyui/`)と PlantUML(`/plantuml/`)は #979 で reverse-proxy の中継を
 削除したため、ブラウザからは到達しない。状態確認はダッシュボードの
 「接続サービス状態」パネル、直接の疎通確認は `lbs-net` の中から行う
-(例: `docker exec lbs-media curl -s -o /dev/null -w '%{http_code}' http://plantuml:8080/`)。
+(例: `docker exec lbs-media curl -s -o /dev/null -w '%{http_code}' http://lbx-plantuml:8080/`。AT 環境では `e2e-plantuml` が受ける)。
 
 ```bash
 # ポート競合確認(80/443 のみ外部公開)

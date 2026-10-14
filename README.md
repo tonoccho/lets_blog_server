@@ -226,9 +226,9 @@ cd apps/extension && npm audit --audit-level=moderate
 既存環境(同梱の ComfyUI を使っていた環境)の移行は [docs/EXTERNAL_COMFYUI.md](docs/EXTERNAL_COMFYUI.md) を参照。
 ComfyUI の接続先が未設定のまま画像生成をすると、設定を促すエラーになる。
 
-**PlantUML・draw.io・phpMyAdmin もオプトイン起動である(issue #1741)。** 既定の
+**draw.io・phpMyAdmin もオプトイン起動である(issue #1741)。PlantUML は同梱しない(#1784)。extensions(または別途起動した PlantUML サーバー)を `PLANTUML_BASE_URL`(既定 `http://lbx-plantuml:8080`)で指す。** 既定の
 `docker compose up -d` / `./startup.sh` ではコンテナを作らない(アイドル時のメモリ約0.4〜0.9GB を使わない)。
-`.env` の `COMPOSE_PROFILES` に `diagram`(PlantUML と draw.io)、`db-tools`(phpMyAdmin)を
+`.env` の `COMPOSE_PROFILES` に `diagram`(draw.io)、`db-tools`(phpMyAdmin)を
 カンマ区切りで指定する(例: `COMPOSE_PROFILES=diagram,db-tools`)。
 一回だけなら `docker compose --profile diagram up -d`。無効のとき `/drawio/` と `/phpmyadmin/` は
 502 Bad Gateway になり、PlantUML 図のプレビュー・公開はレンダリング失敗のエラーになる。

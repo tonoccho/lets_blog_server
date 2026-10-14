@@ -158,7 +158,7 @@ docker compose up -d
 ```
 
 This starts all ~16 containers (reverse proxy, web, API, log-writer, MySQL, RabbitMQ,
-PlantUML, drawio, WordPress, and phpMyAdmin).
+drawio, WordPress, and phpMyAdmin).
 Wait for all services to start — first-time startup (pulling/building images) can take
 several minutes, and subsequent restarts typically take 30 seconds to 2 minutes depending
 on hardware, since services that declare a healthcheck (`api`, `log-writer`, `mysql`,
@@ -180,7 +180,6 @@ say "healthy", not just "Up"):
 - `lbs-log-writer` (async error/operation/audit log writer)
 - `lbs-mysql` (Database)
 - `lbs-rabbitmq` (log message queue)
-- `lbs-plantuml` (Diagram rendering)
 - `lbs-drawio`, `lbs-wordpress`, and `lbs-phpmyadmin`
 
 If a container never reaches "healthy", see

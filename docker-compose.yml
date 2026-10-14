@@ -176,7 +176,7 @@ services:
       # unauthorized_client で拒否し、画像生成に関わる公開APIが全滅する(#998)。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
-      PLANTUML_BASE_URL: http://plantuml:8080
+      PLANTUML_BASE_URL: http://lbx-plantuml:8080
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
       # メディアガベージコレクションのCMSブリッジ(CmsMediaBridgeController)の呼び出し先。
       # #573 stage3ではlegacy-apiが所有していたが、issue #709でpublishing-serviceへ移管された
@@ -412,7 +412,7 @@ services:
       UPLOAD_RATE_LIMIT_REQUESTS: ${UPLOAD_RATE_LIMIT_REQUESTS:-10}
       # ConnectedServiceStatusService(issue #695、C10-3でlegacy-apiから移設)が疎通確認する外部連携先。
       # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ。
-      PLANTUML_BASE_URL: http://plantuml:8080
+      PLANTUML_BASE_URL: http://lbx-plantuml:8080
       WORDPRESS_PROVISION_BASE_URL: http://wordpress:9000
       # issue #589: ダッシュボードに Let's Blog 自身の9サービスの状態を出すため、gateway の
       # 集約ヘルスを読む。各サービスを個別に叩かず1箇所(gateway)の判定を展開する。
@@ -945,17 +945,6 @@ services:
     ports:
       - "1080:1080"
 
-  plantuml:
-    environment:
-      TZ: UTC
-    logging: *default-logging
-    image: plantuml/plantuml-server:jetty
-    container_name: lbs-plantuml
-    mem_limit: 1g
-    # 既定の起動では作らない(#1741)。`COMPOSE_PROFILES=diagram` で draw.io とともに起動する。
-    profiles: ["diagram"]
-    <<: *common-service
-
   drawio:
     environment:
       TZ: UTC
@@ -963,7 +952,7 @@ services:
     image: ${DRAWIO_IMAGE:-jgraph/drawio:latest}
     container_name: lbs-drawio
     mem_limit: 512m
-    # 既定の起動では作らない(#1741)。`COMPOSE_PROFILES=diagram` で PlantUML とともに起動する。
+    # 既定の起動では作らない(#1741)。`COMPOSE_PROFILES=diagram` で起動する。PlantUML は同梱しない(#1784)。
     profiles: ["diagram"]
     <<: *common-service
 

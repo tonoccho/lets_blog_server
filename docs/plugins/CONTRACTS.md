@@ -370,7 +370,7 @@ API の応答(決定): 未接続・能力不足の呼び出しは HTTP 409 と `
 | `services/media/.../controller/DiagramController.java`(`/api/diagrams`)とその保存(draw.io の保存済み SVG) | 保存した図の資産 | **中核に残る**(変更なし。公開の停止の対象外) |
 | `apps/extension/src/diagramEditorPanel.ts`(`${getServerUrl()}/drawio/` の iframe) | draw.io の編集画面 | **残る**(開く URL を登録の `drawioUrl` にし、未接続の表示を足す) |
 | `apps/extension/src/diagramGalleryPanel.ts` | 保存した図の一覧 | **中核に残る**(変更なし) |
-| `docker-compose.yml` の `plantuml` / `drawio` サービス(`profiles: ["diagram"]`、#1741)と `PLANTUML_BASE_URL`(media・platform)、`infra/nginx/conf.d/default.conf` の `location /drawio/` | 同梱コンテナと中継 | **削除**(アダプターと `drawioUrl` の登録が使えるようになってから) |
+| `docker-compose.yml` の `plantuml` / `drawio` サービス(`profiles: ["diagram"]`、#1741)と `PLANTUML_BASE_URL`(media・platform)、`infra/nginx/conf.d/default.conf` の `location /drawio/` | 同梱コンテナと中継 | PlantUML は #1784 で先に削除(`plantuml` サービスと既定の `PLANTUML_BASE_URL` を `http://lbx-plantuml:8080` へ)、残りは draw.io。**削除**(draw.io はアダプターと `drawioUrl` の登録が使えるようになってから) |
 | `services/platform/.../service/ConnectedServiceStatusService.java` の `checkPlantUml` | PlantUML の疎通確認 | **置き換え**(§4.5) |
 
 ### 6.4 公開イベント(参考)
@@ -392,7 +392,7 @@ SNS 告知を WordPress プラグインのまま残すので変更しない。Ra
 8. **参照プラグイン: Claude アダプター**: §1 のサーバー側(Anthropic Messages API へ翻訳)。依存 2。
 9. **参照プラグイン: PlantUML のレンダラー**: §3.1 のサーバー側。依存 4。
 10. **参照プラグイン: Recharts のレンダラー**: §3.2 のサーバー側(media から Chromium を移す)。依存 4。
-11. **同梱の `plantuml` / `drawio` の撤去**: §6.3 の最後の行。依存 4・9・10。
+11. **同梱の `drawio` の撤去**: §6.3 の最後の行。PlantUML は #1784 で先に削除、残りは draw.io。依存 4・9・10。
 
 LLM・画像生成・図の「プラグインが無いときの画面」(Epic の計画中 5)は、2〜4 の各 Issue に含める(各 Issue がそれぞれの画面を持つため。独立させない)。
 アダプターの置き場所の分類(`.claude/hooks/paths.py`)とテスト・カバレッジの扱いは、7〜10 の各 Issue の範囲(Q2)。

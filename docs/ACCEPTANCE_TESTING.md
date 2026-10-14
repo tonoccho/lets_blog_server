@@ -527,6 +527,9 @@ docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
 
 **スタブ化しないもの**: PlantUML / draw.io / WordPress。
 いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
+PlantUML は `docker-compose.yml` に同梱しない(#1784)ので、`docker-compose.e2e-stubs.yml` の `e2e-plantuml`
+(実物の plantuml-server。別名 `lbx-plantuml`)が起動し、media / platform の `PLANTUML_BASE_URL` はそこを指す。
+draw.io は `rebuild-acceptance-env.sh` の `AT_PROFILES` の `diagram` で起動する。
 
 ### Ollama は同梱しないので AT スタックにも無い(#1745)
 

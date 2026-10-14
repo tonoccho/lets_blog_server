@@ -42,7 +42,7 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | **認証あり(phpMyAdmin自身のログイン画面)**。`.env` の `MYSQL_USER` / `MYSQL_PASSWORD` を入力してログインする。コンテナへ `PMA_USER` / `PMA_PASSWORD` は渡さない(#978。渡すと `auth_type` が `config` になり無認証で全DBを操作できる) |
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
-| `plantuml` | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除した(ブラウザからの参照が無く、無認証で任意のソースをサーバー側で描画させられるため)。media-serviceが`PLANTUML_BASE_URL=http://plantuml:8080`でlbs-net経由に呼ぶ |
+| (PlantUMLは同梱しない) | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除し、#1784で同梱の`plantuml`サービスも削除した。media-serviceは`PLANTUML_BASE_URL`(既定`http://lbx-plantuml:8080`。extensionsの別名)でlbs-net経由に呼ぶ。受け入れテストでは`docker-compose.e2e-stubs.yml`の`e2e-plantuml`(実物のplantuml-server。別名`lbx-plantuml`)が受ける |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
 
@@ -120,20 +120,20 @@ ComfyUI も同様に、コンテナ・モデル・出力用のボリュームを
 
 ## 周辺ツールのオプトイン起動と縮退起動(#1741)
 
-**結論: PlantUML・draw.io・phpMyAdmin は compose profile のオプトイン起動にし、既定の起動
+**結論: draw.io・phpMyAdmin は compose profile のオプトイン起動にし、既定の起動
 (`docker compose up -d` / `./startup.sh`、`COMPOSE_PROFILES` 未設定)では作らない。**
 以前は「`docker compose up -d` だけで全機能が使える」という開発者の前提を理由に
 profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの前提を変えた。
 
 | profile | サービス | 用途 | アイドル時のメモリ(参考) |
 |---|---|---|---|
-| `diagram` | `plantuml`、`drawio` | PlantUML 図のプレビュー・公開、draw.io エディタ | 約0.35〜0.9 GB |
+| `diagram` | `drawio` | draw.io エディタ(PlantUML は #1784 で同梱をやめた) | 約0.35 GB |
 | `db-tools` | `phpmyadmin` | `/phpmyadmin/` での DB 確認 | 約0.01〜0.04 GB |
 
 - 有効にする: `.env` の `COMPOSE_PROFILES=diagram,db-tools`(`gpu` / `cpu` とはカンマで併記)、
   または `docker compose --profile diagram up -d`。`.env.example` に例がある。
 - 受け入れテスト環境(`scripts/rebuild-acceptance-env.sh`)は `diagram` と `db-tools` を有効にして
-  起動する(`AT_PROFILES`)。受け入れテストは PlantUML・draw.io・phpMyAdmin を使うため。
+  起動する(`AT_PROFILES`)。受け入れテストは draw.io・phpMyAdmin を使うため。PlantUML は e2e オーバーレイの `e2e-plantuml` が起動する(#1784)。
 - 常時起動するサービスは、これらに `depends_on` しない(`scripts/test_compose_optin_profiles.py` が検査する)。
 - `scripts/wait-for-stack-healthy.sh --all` は `docker compose ps --all` に出るコンテナだけを待つので、
   作られていないコンテナは待機対象から外れる。
@@ -144,7 +144,7 @@ profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの�
 |---|---|
 | `/phpmyadmin/`(`db-tools`) | nginx は変数の upstream(`set $upstream_phpmyadmin`)と `resolver 127.0.0.11` で中継するので、起動自体は失敗しない。要求すると名前解決に失敗し、nginx 既定の **502 Bad Gateway** ページを返す(使い捨ての nginx で再現して確認)。スタックトレースは出ない。 |
 | `/drawio/`(`diagram`) | 同上。502 Bad Gateway。VS Code 拡張の図エディタ(iframe)は 502 のページを表示する。 |
-| PlantUML 図のプレビュー・公開(`diagram`) | content / publishing は media の `/api/render/plantuml` を呼ぶ。media の `PlantUmlClient` は HTTP 応答のある失敗だけを 502 に変換し、接続不能(`ResourceAccessException`)は変換しないので media は 500 を返す。content / publishing はこれを `InvalidPlantUmlTagException`(HTTP 400、「PlantUML図のレンダリングに失敗しました: …」)にする。画面は応答するがメッセージは 400 で、依存先の不通と分かりにくい。コードの読解による(plantuml を止めた実機では未確認)。#1759 に起票。 |
+| PlantUML 図のプレビュー・公開(同梱なし。extensions または別途起動した PlantUML サーバーが要る。#1784) | content / publishing は media の `/api/render/plantuml` を呼ぶ。media の `PlantUmlClient` は HTTP 応答のある失敗だけを 502 に変換し、接続不能(`ResourceAccessException`)は変換しないので media は 500 を返す。content / publishing はこれを `InvalidPlantUmlTagException`(HTTP 400、「PlantUML図のレンダリングに失敗しました: …」)にする。画面は応答するがメッセージは 400 で、依存先の不通と分かりにくい。コードの読解による(plantuml を止めた実機では未確認)。#1759 に起票。 |
 | 管理画面「連携サービスの状況」の PlantUML 行 | 接続不能のため恒常的に「エラー」になる(コードの読解による)。意図した無効化と障害を区別できない。#1760 に起票。 |
 | ダッシュボードのコンテナ一覧 | 存在するコンテナだけを列挙するので、作られていないコンテナは出ない。 |
 | `ProjectAiSettingsService` の `DENIED_HOSTS` | compose のサービス名の一覧で、profile の有無に関係なく全サービス名を持つ。profile 化で食い違わない(`ProjectConnectionUrlDenylistTest` は `docker-compose.yml` の全サービスと照合する)。 |
@@ -449,7 +449,7 @@ curl -s http://lbs-media:8080/actuator/metrics/jvm.memory.max?tag=area:heap   # 
 
 残りは `reverse-proxy` / `phpmyadmin` 128m、`docker-socket-proxy` / `mailcatch` 64m、
 `keycloak-postgres` 256m、
-`plantuml` 1g、`drawio` 512m(`docker-compose.yml` を参照)。
+`drawio` 512m(`docker-compose.yml` を参照)。
 
 根拠:
 
@@ -491,7 +491,7 @@ for c in $(docker ps -aq); do docker inspect --format '{{.Name}} {{.State.OOMKil
 | `lbs-ai` | 518.5 MiB |
 | `lbs-analytics` | 508.2 MiB |
 | `lbs-publishing` | 464.3 MiB |
-| `lbs-plantuml` | 414.6 MiB |
+| `lbs-plantuml`(#1784で削除。実測当時の値) | 414.6 MiB |
 | `lbs-gateway` | 404.2 MiB |
 | `lbs-mysql` | 396.1 MiB |
 | `lbs-drawio` | 295.3 MiB |
