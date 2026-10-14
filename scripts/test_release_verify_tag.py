@@ -1297,6 +1297,156 @@ class EvidenceIsRetainedBeforeCheckoutIsDeleted(Harness):
         self.assertFalse(os.path.exists(os.path.join(log_dir, "docker-compose-logs.txt")))
 
 
+class HostNetworkEventsAreAttachedToTheEvidence(Harness):
+    """#1791: 受け入れテストの手順の間にホストのリンクが切れたかを、証跡に残す。
+    検証の合否(終了コード、main、タグ)は変えない。"""
+
+    LOST = "Oct 14 14:44:02 host systemd-networkd[1]: enp58s0f1: Lost carrier"
+    GAINED = "Oct 14 14:44:05 host systemd-networkd[1]: enp58s0f1: Gained carrier"
+    LOST2 = "Oct 14 14:44:08 host systemd-networkd[1]: enp58s0f1: Lost carrier"
+    NOISE = "Oct 14 14:44:06 host dockerd[2]: unrelated line"
+
+    def write_journal_command(self, lines=(), rc=0, stderr=""):
+        p = os.path.join(self.tmp, "journal-command.json")
+        code = (
+            "import sys\n"
+            "open(%r, 'a').write(' '.join(sys.argv[1:]) + chr(10))\n"
+            "for l in %r:\n"
+            "    print(l)\n"
+            "sys.stderr.write(%r)\n"
+            "sys.exit(%d)\n"
+        ) % (os.path.join(self.tmp, "journal-args.log"), list(lines), stderr, rc)
+        cmd = {
+            "argv": [sys.executable, "-c", code, "%SINCE%", "%UNTIL%"],
+            "cwd": "",
+        }
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cmd, f)
+        return p
+
+    def run_with(self, journal_cmd, at_rc):
+        steps = [
+            self.fake_step("unit-tests"),
+            self.fake_step("web-test-at-clean", rc=at_rc, touches_stack=True),
+        ]
+        before_main = self.origin.main_sha()
+        before_tags = self.origin.tags()
+        r = self.run_script(
+            self.origin.d,
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": self.write_step_table(steps),
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+                "RELEASE_VERIFY_JOURNAL_COMMAND": journal_cmd,
+            },
+        )
+        entries = [os.path.join(self.log_dir_parent, e) for e in os.listdir(self.log_dir_parent)]
+        self.assertEqual(1, len(entries))
+        return r, entries[0], before_main, before_tags
+
+    def read_events(self, log_dir):
+        path = os.path.join(log_dir, "host-network-events.txt")
+        self.assertTrue(os.path.exists(path), "host-network-events.txt が無い")
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_link_loss_lines_are_written_and_summarised(self):
+        cmd = self.write_journal_command([self.LOST, self.GAINED, self.NOISE, self.LOST2])
+        r, log_dir, _, _ = self.run_with(cmd, at_rc=1)
+        out = self.out(r)
+        self.assertNotEqual(0, r.returncode, out)
+        text = self.read_events(log_dir)
+        self.assertIn(self.LOST, text)
+        self.assertIn(self.GAINED, text)
+        self.assertIn(self.LOST2, text)
+        self.assertNotIn("unrelated line", text)
+        self.assertIn("ホストの有線リンク切れ: 2回", out)
+        self.assertIn("14:44:02", out)
+        self.assertIn("14:44:08", out)
+
+    def test_container_virtual_interfaces_are_not_counted(self):
+        """QA(#1791): docker の veth / bridge は常に Lost carrier を出す。数えない。"""
+        veth = "2026-10-14T14:44:03+13:00 host systemd-networkd[1]: veth1a2b3c: Lost carrier"
+        br = "2026-10-14T14:44:04+13:00 host systemd-networkd[1]: br-0123456789ab: Lost carrier"
+        dk = "2026-10-14T14:44:04+13:00 host systemd-networkd[1]: docker0: Lost carrier"
+        cmd = self.write_journal_command([veth, br, dk, self.LOST])
+        r, log_dir, _, _ = self.run_with(cmd, at_rc=1)
+        text = self.read_events(log_dir)
+        self.assertNotIn("veth1a2b3c", text)
+        self.assertNotIn("br-0123456789ab", text)
+        self.assertNotIn("docker0", text)
+        self.assertIn("ホストの有線リンク切れ: 1回", self.out(r))
+
+    def test_lines_that_merely_mention_the_words_are_not_counted(self):
+        """QA(#1791): 他プロセスのログが文中で Lost carrier に触れても、リンク切れではない。"""
+        talk = "2026-10-14T21:34:24+13:00 host pipeline.sh[9]: #1791 リリース検証(journal の Lost carrier)を添える"
+        kern = "2026-10-14T14:44:02+13:00 host kernel: r8169 0000:3a:00.1 enp58s0f1: Link is Down"
+        cmd = self.write_journal_command([talk, kern])
+        r, log_dir, _, _ = self.run_with(cmd, at_rc=1)
+        text = self.read_events(log_dir)
+        self.assertNotIn("pipeline.sh", text)
+        self.assertIn("Link is Down", text)
+        self.assertIn("ホストの有線リンク切れ: 1回", self.out(r))
+
+    def test_range_passed_to_journalctl_is_the_at_step_window(self):
+        cmd = self.write_journal_command([self.LOST])
+        self.run_with(cmd, at_rc=1)
+        with open(os.path.join(self.tmp, "journal-args.log"), encoding="utf-8") as f:
+            args = f.read().strip().split(" ")
+        # "YYYY-MM-DD HH:MM:SS" が2つ(--since と --until)
+        self.assertEqual(4, len(args), args)
+        self.assertLessEqual(" ".join(args[:2]), " ".join(args[2:]))
+
+    def test_no_matching_lines_says_not_applicable(self):
+        cmd = self.write_journal_command([self.NOISE])
+        r, log_dir, _, _ = self.run_with(cmd, at_rc=1)
+        self.assertIn("該当なし", self.read_events(log_dir))
+        self.assertNotIn("ホストの有線リンク切れ:", self.out(r))
+        self.assertNotEqual(0, r.returncode, self.out(r))
+
+    def test_unreadable_journal_records_the_error_and_keeps_the_exit_code(self):
+        cmd = self.write_journal_command([], rc=1, stderr="Hint: You are currently not seeing")
+        r, log_dir, _, _ = self.run_with(cmd, at_rc=1)
+        text = self.read_events(log_dir)
+        self.assertIn("読めません", text)
+        self.assertIn("You are currently not seeing", text)
+        self.assertNotEqual(0, r.returncode, self.out(r))
+
+    def test_missing_journalctl_does_not_stop_the_verification(self):
+        p = os.path.join(self.tmp, "journal-missing.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"argv": ["/nonexistent/journalctl"], "cwd": ""}, f)
+        r, log_dir, _, _ = self.run_with(p, at_rc=0)
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertIn("読めません", self.read_events(log_dir))
+
+    def test_link_loss_does_not_change_failure_outcome(self):
+        cmd = self.write_journal_command([self.LOST])
+        r, _, before_main, before_tags = self.run_with(cmd, at_rc=1)
+        self.assertNotEqual(0, r.returncode, self.out(r))
+        self.assertEqual(before_main, self.origin.main_sha())
+        self.assertEqual(before_tags, self.origin.tags())
+
+    def test_link_loss_does_not_change_success_outcome(self):
+        with_loss = self.write_journal_command([self.LOST])
+        r, _, _, _ = self.run_with(with_loss, at_rc=0)
+        self.assertEqual(0, r.returncode, self.out(r))
+        self.assertTrue(self.origin.tags())
+
+    def test_no_file_when_no_acceptance_step_ran(self):
+        cmd = self.write_journal_command([self.LOST])
+        steps = [self.fake_step("unit-tests", rc=1)]
+        self.run_script(
+            self.origin.d,
+            extra_env={
+                "RELEASE_VERIFY_STEP_TABLE": self.write_step_table(steps),
+                "RELEASE_VERIFY_HANDOFF_COMMAND": self.write_handoff(),
+                "RELEASE_VERIFY_JOURNAL_COMMAND": cmd,
+            },
+        )
+        log_dir = os.path.join(self.log_dir_parent, os.listdir(self.log_dir_parent)[0])
+        self.assertFalse(os.path.exists(os.path.join(log_dir, "host-network-events.txt")))
+
+
 class TouchesStackStepsReceiveTheSharedComposeProjectName(Harness):
     """#1297: 隔離チェックアウトは `tempfile.mkdtemp(prefix="checkout-")` に作られ、
     `.env` にも `docker-compose.yml` にも compose プロジェクト名が無いので、

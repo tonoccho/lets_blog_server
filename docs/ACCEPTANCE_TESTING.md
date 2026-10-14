@@ -1947,6 +1947,9 @@ python3 scripts/release-verify-tag.py [commit] [--bump patch|minor|major]
 ローカルにも残らず、失敗した手順の名前と理由・ログの場所が表示されて非0で終了する。
 ログ・`docker compose logs`・Playwright のレポートはリポジトリの外
 (`~/.local/state/release-verify-tag/`)に保存し、コミットしない。
+受け入れテストの手順(`web-test-at*`)の間にホストの有線リンクが切れたかは、ログのディレクトリの
+`host-network-events.txt`(journal の `Lost carrier` / `Gained carrier` / `Link is Down` / `Link is Up`。
+無ければ「該当なし」、journal が読めなければそのエラー)に残り、失敗の要約に切れた回数と最初・最後の時刻が出る(#1791)。合否は変わらない。
 
 ### semver の上げ方
 

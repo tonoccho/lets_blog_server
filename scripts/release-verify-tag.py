@@ -887,8 +887,11 @@ COUNTS_PARSERS = {
 
 
 class StepResult:
-    def __init__(self, name, returncode, counts, duration, command, log_path):
+    def __init__(self, name, returncode, counts, duration, command, log_path,
+                 started_at=None, ended_at=None):
         self.name = name
+        self.started_at = started_at  # 壁時計(epoch秒)。#1791: journal の範囲指定に使う
+        self.ended_at = ended_at
         self.returncode = returncode
         self.counts = counts
         self.duration = duration
@@ -937,9 +940,11 @@ def run_step(step, checkout_dir, log_dir, credential_env=None):
     env.update(step_env)
     log_path = os.path.join(log_dir, "%s.log" % step["name"])
     os.makedirs(log_dir, exist_ok=True)
+    started_at = time.time()
     start = time.monotonic()
     r = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
     duration = time.monotonic() - start
+    ended_at = time.time()
     with open(log_path, "w", encoding="utf-8") as f:
         f.write("$ %s\n(cwd=%s)\n\n" % (" ".join(argv), cwd))
         f.write(r.stdout)
@@ -973,7 +978,10 @@ def run_step(step, checkout_dir, log_dir, credential_env=None):
         else:
             counts = {"passed": 0, "failed": 1, "skipped": 0, "did_not_run": 0}
 
-    return StepResult(step["name"], r.returncode, counts, duration, " ".join(argv), log_path)
+    return StepResult(
+        step["name"], r.returncode, counts, duration, " ".join(argv), log_path,
+        started_at=started_at, ended_at=ended_at,
+    )
 
 
 def run_handoff(handoff, main_worktree, log_dir):
@@ -1022,6 +1030,79 @@ def capture_evidence(checkout_dir, main_worktree, log_dir, docker_logs_cmd, out)
             f.write(r.stderr)
     except Exception as e:  # noqa: BLE001 - 証跡保全の失敗で本体の後始末を止めない
         out.write("docker compose logs の保全に失敗しました: %s\n" % e)
+
+
+# --------------------------------------------------------------------- host network events (#1791)
+#: 受け入れテストの手順(名前がこの接頭辞で始まるもの)の間に、ホストのリンクが切れたかを
+#: 証跡へ残す。`Lost carrier` は systemd-networkd の行でカーネルログ(`-k`)には出ないため、
+#: `-k` は付けない。`%SINCE%` / `%UNTIL%` はローカル時刻の `YYYY-MM-DD HH:MM:SS`。
+AT_STEP_PREFIX = "web-test-at"
+DEFAULT_JOURNAL_COMMAND = {
+    "argv": [
+        "journalctl", "--no-pager", "-o", "short-iso",
+        "--since", "%SINCE%", "--until", "%UNTIL%",
+    ],
+    "cwd": "",
+}
+#: 他プロセスのログが文中で触れた行(このループ自身のログ等)を拾わないよう、
+#: `<インターフェース名>: <イベント>` の形に限る。carrier は行末で終わる。
+LINK_EVENT_RE = re.compile(
+    r"[\w.-]+: (?:(?:Lost|Gained) carrier\s*$|Link is (?:Down|Up)\b)"
+)
+#: docker の veth / bridge は、コンテナの起動・停止のたびに Lost carrier を出す。
+#: 数えるのはホストの実インターフェースだけにする。
+VIRTUAL_IFACE_RE = re.compile(r"\b(?:veth|br-|docker|vnet|virbr|cni|flannel)[0-9A-Za-z]*:")
+LINK_LOSS_RE = re.compile(r"Lost carrier")
+LINK_DOWN_RE = re.compile(r"Link is Down")
+EVENT_TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\S+|\w{3} +\d+ \d{2}:\d{2}:\d{2})")
+
+
+def at_step_window(step_results):
+    """受け入れテストの手順の最初の開始から最後の終了まで(epoch秒)。無ければ None。"""
+    at = [r for r in step_results if r.name.startswith(AT_STEP_PREFIX) and r.started_at]
+    if not at:
+        return None
+    return min(r.started_at for r in at), max(r.ended_at for r in at)
+
+
+def collect_host_network_events(journal_cmd, main_worktree, window, log_dir):
+    """範囲内のリンク切れ関連の行を `host-network-events.txt` へ書き、要約の1行を返す
+    (リンク切れが無い・journal が読めないときは None)。例外は呼び出し側へ出さない。"""
+    since, until = (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) for t in window)
+    path = os.path.join(log_dir, "host-network-events.txt")
+    header = "# 受け入れテストの範囲(ローカル時刻): %s 〜 %s\n" % (since, until)
+    try:
+        argv = [a.replace("%SINCE%", since).replace("%UNTIL%", until) for a in journal_cmd["argv"]]
+        cwd = os.path.join(main_worktree, journal_cmd.get("cwd", "") or "")
+        r = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            body = "journal を読めません(rc=%s): %s\n" % (r.returncode, (r.stderr or r.stdout).strip())
+            lines = None
+        else:
+            lines = [l for l in r.stdout.splitlines() if LINK_EVENT_RE.search(l) and not VIRTUAL_IFACE_RE.search(l)]
+            body = "\n".join(lines) + "\n" if lines else "該当なし\n"
+    except Exception as e:  # noqa: BLE001 - 証跡の収集失敗で検証そのものを止めない
+        body, lines = "journal を読めません: %s\n" % e, None
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(header + body)
+    except OSError:
+        return None
+    if not lines:
+        return None
+    losses = [l for l in lines if LINK_LOSS_RE.search(l)] or [
+        l for l in lines if LINK_DOWN_RE.search(l)
+    ]
+    if not losses:
+        return None
+
+    def when(line):
+        m = EVENT_TIME_RE.match(line)
+        return m.group(1) if m else line[:32]
+
+    return "ホストの有線リンク切れ: %d回(最初 %s、最後 %s)。詳細: %s" % (
+        len(losses), when(losses[0]), when(losses[-1]), path,
+    )
 
 
 # --------------------------------------------------------------------- merge / tree check
@@ -1134,6 +1215,7 @@ def main(argv=None):
     docker_logs_cmd = load_json_table(
         "RELEASE_VERIFY_DOCKER_LOGS_COMMAND", DEFAULT_DOCKER_LOGS_COMMAND
     )
+    journal_cmd = load_json_table("RELEASE_VERIFY_JOURNAL_COMMAND", DEFAULT_JOURNAL_COMMAND)
 
     cred_env_path = os.environ.get(
         "RELEASE_VERIFY_CRED_ENV_FILE", os.path.expanduser("~/.config/lets-blog-e2e.env")
@@ -1246,12 +1328,16 @@ def main(argv=None):
             # 手順の外(事前確認・本番のマージ、push)では束縛しない(上記コメント参照)。
             git(["config", "--unset", "core.hooksPath"], cwd=checkout_dir, check=False)
 
+        link_summary = None
+        window = at_step_window(step_results)
+        if window:
+            link_summary = collect_host_network_events(journal_cmd, main_worktree, window, log_dir)
+
         if not overall_ok:
-            fail(
-                out,
-                "手順が失敗しました: %s" % failing.name,
-                "ログ: %s\n%s" % (failing.log_path, failing.summary()),
-            )
+            detail = "ログ: %s\n%s" % (failing.log_path, failing.summary())
+            if link_summary:
+                detail += "\n" + link_summary
+            fail(out, "手順が失敗しました: %s" % failing.name, detail)
             return 1
 
         out.write("==> 本番: origin/main を再取得してマージ+木の同一性を再確認(R に対して)\n")
