@@ -437,6 +437,22 @@ Given('操作ログに記録される操作を1件実行しておく', async ({ 
   ctx.at18TimezoneEntryIso = (entry as { createdAt: string }).createdAt;
 });
 
+/**
+ * 並走する他レーンが同じ時刻に大量のログを出す状況(issue #1778)を、テスト自身が作る。
+ * 操作ログ画面は1ページ50件・新しい順なので、マーカーより後に監査ログを55件足せば、
+ * マーカーは1ページ目から押し出される。
+ */
+Given('同じ時刻に他の操作ログが1ページ分を超えて記録されている', async ({ request }) => {
+  const token = await adminToken(request);
+  for (let batch = 0; batch < 5; batch += 1) {
+    await Promise.all(
+      Array.from({ length: 11 }, (_, i) =>
+        createFixtureProject(request, token, `at1778-noise-${batch}-${i}`)
+      )
+    );
+  }
+});
+
 When('個人設定のタイムゾーンをAmerica\\/New_Yorkに変更する', async ({ ctx, request }) => {
   const token = await adminToken(request);
   const me = await getJson<{ locale: string | null; timezone: string | null }>(
@@ -487,6 +503,10 @@ Then('表示される日時がAmerica\\/New_Yorkでの換算値と一致する',
     second: '2-digit',
     hour12: false,
   });
+  // 並走する他レーンのログで1ページ目から押し出されないよう、マーカーで絞り込む(#1778)。
+  await page.locator('input[name="q"]').fill(marker);
+  await page.getByRole('button', { name: '絞り込み' }).click();
+  await page.waitForLoadState('networkidle');
   const titleCell = page.getByText(marker, { exact: true });
   await expect(titleCell).toBeVisible({ timeout: 15000 });
   const row = titleCell.locator('xpath=..');

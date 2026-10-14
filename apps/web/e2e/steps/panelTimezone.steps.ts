@@ -893,6 +893,10 @@ Then(
       second: '2-digit',
       hour12: false,
     });
+    // 並走する他レーンのログで1ページ目から押し出されないよう、マーカーで絞り込む(#1778)。
+    await tzPage.locator('input[name="q"]').fill(marker);
+    await tzPage.getByRole('button', { name: '絞り込み' }).click();
+    await tzPage.waitForLoadState('networkidle');
     const titleCell = tzPage.getByText(marker, { exact: true });
     await expect(titleCell).toBeVisible({ timeout: 15_000 });
     await expect(titleCell.locator('xpath=..')).toContainText(expected);
@@ -930,6 +934,9 @@ When(
     };
     await tzPage.locator('input[name="startDate"]').fill(wall(created - 60_000));
     await tzPage.locator('input[name="endDate"]').fill(wall(created + 60_000));
+    // 窓の中には並走する他レーンのログも入る(1ページ50件を超えうる)ので、マーカーでも絞って
+    // ページング位置に左右されないようにする。窓の解釈そのものは日時の指定で検証される(#1778)。
+    await tzPage.locator('input[name="q"]').fill(ctx.at18TimezoneMarker as string);
     await tzPage.getByRole('button', { name: '絞り込み' }).click();
     await tzPage.waitForLoadState('networkidle');
   }
