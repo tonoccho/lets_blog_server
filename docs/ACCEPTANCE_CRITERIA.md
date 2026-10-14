@@ -761,8 +761,8 @@ Epic #1333 の子 Issue と機能ID(各 Issue のシナリオは `apps/web/e2e/f
 
 | 操作 | 分類 | 根拠 |
 | --- | --- | --- |
-| サイト自動構築 | 非同期ハンドオフ待ち(#1478) | Web画面から起こす長時間の書き込み。gateway 60秒で現に応答が失われる |
-| 環境間同期 | 非同期ハンドオフ待ち(#1478) | 同上 |
+| サイト自動構築 | 予算対象 | 非同期化済み(#1479 でジョブ受理のエンドポイントを追加、#1696 で Web 画面を切り替え)。予算は受付応答まで(§10.5 の `createManagedWordPressSiteAction`) |
+| 環境間同期 | 予算対象 | 非同期化済み(#1697 でジョブとして受け付け、Web 画面からキュー経由で結果へ到達)。予算は受付応答まで(§10.5 の `syncEnvironmentAction`) |
 | 一括管理の環境間比較 | 予算対象 | 読み取りで、ページの初回描画を止めている形。#1474(並列化)+ #1475(`loading.tsx`)で3秒を狙う。**達成できなかった場合に非同期化を再判断する** |
 | 記事プレビュー | 予算対象外 | VSCode拡張専用の経路(web からの呼び出し0件)で、対象範囲の外。高速化は #1473 / #1369 が担う |
 | 実WordPressへの記事公開 | 予算対象外 | 同じくVSCode拡張専用。拡張側の進捗表示で対応する |
@@ -818,7 +818,7 @@ Server Action の往復としては数えられない。
 | `/users` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 | `/users/[id]/edit` の初回表示 | ① 2回目の `page.goto` 完了まで | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。既存の AC-PERF-003(タグ画面)と同じ値 | 予算対象 |
 
-### 10.5 Server Action(全149件)
+### 10.5 Server Action(全146件)
 
 計測点: **Server Action の POST の往復**(§10.2 の②)。`retryClick` 系を通る操作かどうかに関わらず同じ計測点を使う。
 
@@ -855,7 +855,6 @@ Server Action の往復としては数えられない。
 | `app/projects/[id]/actions.ts`<br>`uploadProjectAssetImageAction` | ② Server Action POST の往復(受付応答まで) | 3,000ms(受付応答に対して) | アセット画像の全環境アップロード(「アセットとして追加」)を非同期ジョブ(`asset_image_upload`、#1764)として**受け付けるまで**の操作。リサイズと環境ごとのアップロードは待たず、環境ごとの成否は処理キューの「結果を見る」から辿る(「AI・アセット」タブの `?assetUploadJob=`)。同期の実装は、並列化(#1688)の後も、1920x1080 の実画像で 17,777ms / 10,913ms(3回目は無応答)と3秒を超えたため、ハンドオフに回した。受付だけの操作は §10.1 の定義どおり予算対象(`applyToAllEnvironmentsAction` と同じ形) | 予算対象 |
 | `app/projects/[id]/actions.ts`<br>`fetchAiConnectionsAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。**既定どおり予算対象**(#1544)。ただし ai-service の疎通確認を呼び、`AiConnectionService` はプロバイダーごとに最大3秒のタイムアウトを持つため、到達できないプロバイダーがあると**構造的に3秒を超えうる**。受け入れ環境で超過が観測され分類の変更(予算対象外 / 非同期ハンドオフ待ち)が要るときは、利用者の判断を仰ぐ(分類の例外は利用者が決める) | 予算対象 |
 | `app/projects/[id]/actions.ts`<br>`pullOllamaModelAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。Ollamaのモデルのpull(#1675)は非同期のGenerationJobで、このActionはジョブを作ってすぐ返す(pull自体は待たない)。**既定どおり予算対象** | 予算対象 |
-| `app/projects/[id]/actions.ts`<br>`installComfyUiCheckpointAction`(ComfyUI チェックポイントの導入) | ② Server Action POST の往復(ハンドオフ後は受付応答まで) | 3,000ms(ハンドオフ後の受付応答に対して) | Web画面から起こす長時間の書き込み。数GBのモデルを外部から取得するため時間が読めない(受け入れシナリオは #1714 で削除し、UAT の docs/ACCEPTANCE_TESTING.md §19.2 R1 で確かめる)。サイト自動構築と同じ形で、利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した。#1478 が非同期ハンドオフを実装するまで予算を課さない | 非同期ハンドオフ待ち(#1478) |
 | `app/projects/[id]/actions.ts`<br>`generateImagePromptAction` | — | — | 外部LLM / 画像生成の応答時間に依存する。AC-PERF-002 と同じく、受け入れテストがスタブへ向く構成では**スタブの往復時間**しか測れず、受け入れ可否の判定に使えない。生成の成立は `ai/`・`custom-tag/generation.feature` 等が確かめる。長時間の生成は #1404 のキューが担う。**この分類は利用者の判断表(6操作)には無かったが、利用者が承認(2026-10-01)した** | 予算対象外 |
 | `app/projects/[id]/actions.ts`<br>`requestProjectImageJobAction`<br>`fetchImageJobResultAction` | ② Server Action POST の往復 | 3,000ms | 利用者要望「すべてのクリックに対する応答を3秒以内」。画像生成を非同期ジョブとして**受け付けるまで**の操作と、完了したジョブの結果の画像IDを読む操作(#1408)。生成そのものは #1404 のキューが担い、これらは受付と読み取りだけ(利用者が予算対象と決定、2026-10-06、#1623) | 予算対象 |
 | `app/projects/[id]/actions.ts`<br>`uploadGeneratedImageAction` | — | — | 生成画像のアップロード。ファイルの大きさに応じて時間が延びるため、3秒の予算では測れない。**利用者が予算対象外と決定した(2026-10-06、#1623)** | 予算対象外 |
