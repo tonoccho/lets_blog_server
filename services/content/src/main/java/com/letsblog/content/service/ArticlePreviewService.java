@@ -1,6 +1,7 @@
 package com.letsblog.content.service;
 
 import com.letsblog.content.markdown.MarkdownRenderer;
+import com.letsblog.content.render.PlantUmlRenderRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.HtmlUtils;
 
@@ -69,7 +70,7 @@ public class ArticlePreviewService {
         }
         try {
             rendered = plantUmlTagRenderService.renderForPreview(rendered);
-        } catch (InvalidPlantUmlTagException | PlantUmlServerUnavailableException e) {
+        } catch (InvalidPlantUmlTagException | PlantUmlServerUnavailableException | PlantUmlRenderRejectedException e) {
             return renderPlantUmlError(e.getMessage());
         }
         rendered = plantUmlEmbedService.embedDiagramsForPreview(rendered);

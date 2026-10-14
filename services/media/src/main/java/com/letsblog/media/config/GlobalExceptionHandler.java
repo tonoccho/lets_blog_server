@@ -2,6 +2,7 @@ package com.letsblog.media.config;
 
 import com.letsblog.common.web.ErrorResponse;
 import com.letsblog.media.ai.AiServiceException;
+import com.letsblog.media.render.PlantUmlRenderRejectedException;
 import com.letsblog.media.render.RechartsRenderException;
 import com.letsblog.media.service.CmsBridgeException;
 import com.letsblog.media.service.DiagramNotFoundException;
@@ -159,6 +160,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAiServiceException(AiServiceException e) {
         log.warn("外部レンダリングサービスの呼び出しに失敗しました", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1776: PlantUMLが図を拒否した。直せるのは利用者の入力なので400(接続不能の502とは区別する)。 */
+    @ExceptionHandler(PlantUmlRenderRejectedException.class)
+    public ResponseEntity<ErrorResponse> handlePlantUmlRenderRejected(PlantUmlRenderRejectedException e) {
+        log.info("PlantUMLが図を拒否しました: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(RechartsRenderException.class)

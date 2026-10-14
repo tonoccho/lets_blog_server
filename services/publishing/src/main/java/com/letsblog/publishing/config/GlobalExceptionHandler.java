@@ -16,6 +16,7 @@ import com.letsblog.publishing.service.IdentityServiceUnavailableException;
 import com.letsblog.publishing.service.InvalidImageUploadException;
 import com.letsblog.publishing.service.InvalidPlantUmlTagException;
 import com.letsblog.publishing.service.InvalidRechartsTagException;
+import com.letsblog.publishing.render.PlantUmlRenderRejectedException;
 import com.letsblog.publishing.service.PlantUmlServerUnavailableException;
 import com.letsblog.publishing.service.ProjectNotFoundException;
 import com.letsblog.publishing.service.ProvisioningException;
@@ -177,6 +178,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handlePlantUmlServerUnavailable(PlantUmlServerUnavailableException e) {
         log.warn("PlantUMLサーバーへ接続できません", e);
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** issue #1776: PlantUMLが図を拒否した。直せるのは利用者の入力なので400(接続不能の502とは区別する)。 */
+    @ExceptionHandler(PlantUmlRenderRejectedException.class)
+    public ResponseEntity<ErrorResponse> handlePlantUmlRenderRejected(PlantUmlRenderRejectedException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(InvalidPlantUmlTagException.class)

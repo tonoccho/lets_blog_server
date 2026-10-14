@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -191,6 +192,24 @@ class ArticlePreviewServiceTest {
 
         assertTrue(html.contains("PlantUMLサーバーに接続できません: x"));
         assertTrue(html.contains("PlantUML図のレンダリングエラー"));
+        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
+                renderedContentWrapperService);
+    }
+
+    @Test
+    void renderHtml_PlantUMLが図を拒否した場合もその文言で中止し接続できない旨は出さない() {
+        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
+        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
+        when(plantUmlTagRenderService.renderForPreview("markdown"))
+                .thenThrow(new com.letsblog.content.render.PlantUmlRenderRejectedException(
+                        "PlantUML が図を描けませんでした: Syntax Error?"));
+
+        String html = service.renderHtml(1L, "markdown");
+
+        assertTrue(html.contains("PlantUML が図を描けませんでした: Syntax Error?"));
+        assertTrue(html.contains("PlantUML図のレンダリングエラー"));
+        assertFalse(html.contains("接続できません"));
         verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
                 renderedContentWrapperService);
     }

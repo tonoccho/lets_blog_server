@@ -3,8 +3,11 @@ package com.letsblog.content.render;
 import com.letsblog.common.client.ServiceAuthHeaders;
 import com.letsblog.common.client.SyncCallProfile;
 import com.letsblog.common.client.SyncServiceClient;
+import com.letsblog.common.client.SyncServiceClientErrorException;
 import com.letsblog.common.client.SyncServiceException;
 import com.letsblog.content.client.AiServiceException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,22 @@ import org.springframework.web.client.RestClient;
 @Component
 public class MediaRenderClient {
 
+    private static final String REJECTED_PREFIX = "PlantUML が図を描けませんでした";
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    /** media-serviceの400本文({"error": ...})から拒否の文言を作る。読めない・別の文言なら定型文にする。 */
+    static String rejectionMessage(String responseBody) {
+        try {
+            JsonNode error = JSON.readTree(responseBody).get("error");
+            if (error != null && error.isTextual() && error.asText().startsWith(REJECTED_PREFIX)) {
+                return error.asText();
+            }
+        } catch (Exception e) {
+            // 本文が読めない場合は定型文にする。
+        }
+        return REJECTED_PREFIX + ": media-service が 400 を返しました";
+    }
+
     private final SyncServiceClient client;
     private final HttpServletRequest request;
 
@@ -48,6 +67,11 @@ public class MediaRenderClient {
             return client.post(
                     "/api/render/plantuml", new Object[0], Map.of("source", source), byte[].class,
                     ServiceAuthHeaders.forwardedBearer(request));
+        } catch (SyncServiceClientErrorException e) {
+            if (e.statusCode() == 400) {
+                throw new PlantUmlRenderRejectedException(rejectionMessage(e.responseBody()));
+            }
+            throw new AiServiceException("media-serviceのPlantUMLレンダリング呼び出しに失敗しました: " + e.getMessage(), e);
         } catch (SyncServiceException e) {
             throw new AiServiceException("media-serviceのPlantUMLレンダリング呼び出しに失敗しました: " + e.getMessage(), e);
         }

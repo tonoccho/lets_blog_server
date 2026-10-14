@@ -336,6 +336,45 @@ Then('エラーの説明からサイズ上限に達したと分かる', async ({
   ).toMatch(/414|URI_TOO_LONG|大きすぎ|サイズ/);
 });
 
+Then(/^PlantUML が図を拒否した入力の誤りとして、ステータス「(\d+)」で返る$/, async ({ ctx }, status: string) => {
+  expect(seenRender(ctx).status, 'PlantUMLの拒否が入力の誤りとして返っていない').toBe(Number(status));
+});
+
+Then(
+  /^エラーの説明は「([^」]*)」で始まり、「([^」]*)」を含まない$/,
+  async ({ ctx }, prefix: string, forbidden: string) => {
+    const message = ctx.diagramRenderError as string;
+    expect(message.startsWith(prefix), `エラーの説明が「${prefix}」で始まっていない: ${message}`).toBe(true);
+    expect(message, `拒否なのに「${forbidden}」と案内している`).not.toContain(forbidden);
+  }
+);
+
+// ---- content のプレビュー(issue #1776) ----
+
+Given('PlantUMLのプレビューを確かめるプロジェクトがある', async ({ ctx, request }) => {
+  ctx.diagramProjectId = await createProject(request, ctx);
+});
+
+When('構文の誤った PlantUML タグを含む本文のプレビューを要求する', async ({ ctx, request }) => {
+  const response = await request.post(`/api/projects/${ctx.diagramProjectId}/preview/render`, {
+    headers: await adminHeaders(request),
+    data: { markdown: '[plantuml]\nこれはPlantUMLではありません\n???\n[/plantuml]' },
+  });
+  expect(
+    response.ok(),
+    `プレビューの描画に失敗しました (status=${response.status()}): ${await response.text()}`
+  ).toBe(true);
+  ctx.diagramPreviewHtml = ((await response.json()) as { html: string }).html;
+});
+
+Then(/^プレビューのHTMLに「([^」]*)」が含まれる$/, async ({ ctx }, text: string) => {
+  expect(ctx.diagramPreviewHtml as string).toContain(text);
+});
+
+Then(/^プレビューのHTMLに「([^」]*)」は含まれない$/, async ({ ctx }, text: string) => {
+  expect(ctx.diagramPreviewHtml as string).not.toContain(text);
+});
+
 Then('応答は画像ではない', async ({ ctx }) => {
   const outcome = seenRender(ctx);
   expect(outcome.contentType, '失敗したのに画像が返っている').not.toContain('image/');

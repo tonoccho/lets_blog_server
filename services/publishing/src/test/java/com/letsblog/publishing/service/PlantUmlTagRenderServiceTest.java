@@ -7,6 +7,7 @@ import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.cms.MediaUploadResult;
 import com.letsblog.publishing.render.MediaRenderClient;
+import com.letsblog.publishing.render.PlantUmlRenderRejectedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -119,6 +120,19 @@ class PlantUmlTagRenderServiceTest {
         PlantUmlServerUnavailableException e = assertThrows(PlantUmlServerUnavailableException.class,
                 () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", Map.of()));
         assertTrue(e.getMessage().contains("PlantUMLサーバーに接続できません"));
+        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+    }
+
+    @Test
+    void render_PlantUMLの拒否は接続不能に変えずそのまま伝えアップロードしない() {
+        PlantUmlRenderRejectedException rejected =
+                new PlantUmlRenderRejectedException("PlantUML が図を描けませんでした: Syntax Error?");
+        when(mediaRenderClient.renderPlantUml(anyString())).thenThrow(rejected);
+
+        PlantUmlRenderRejectedException e = assertThrows(PlantUmlRenderRejectedException.class,
+                () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", Map.of()));
+
+        assertEquals(rejected, e);
         verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
     }
 

@@ -3,6 +3,7 @@ package com.letsblog.content.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.letsblog.common.web.ErrorResponse;
+import com.letsblog.content.render.PlantUmlRenderRejectedException;
 import com.letsblog.content.service.InvalidPlantUmlTagException;
 import com.letsblog.content.service.PlantUmlServerUnavailableException;
 import org.junit.jupiter.api.DisplayName;
@@ -33,5 +34,17 @@ class GlobalExceptionHandlerPlantUmlUnavailableTest {
                 handler.handleInvalidPlantUmlTag(new InvalidPlantUmlTagException("記法が不正"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @DisplayName("PlantUMLが図を拒否したときは400で同じ文言を返し、接続できない旨は含まない(issue #1776)")
+    void rejectedIs400() {
+        ResponseEntity<ErrorResponse> response = handler.handlePlantUmlRenderRejected(
+                new PlantUmlRenderRejectedException("PlantUML が図を描けませんでした: Syntax Error?"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error()).isEqualTo("PlantUML が図を描けませんでした: Syntax Error?");
+        assertThat(response.getBody().error()).doesNotContain("接続できません");
     }
 }

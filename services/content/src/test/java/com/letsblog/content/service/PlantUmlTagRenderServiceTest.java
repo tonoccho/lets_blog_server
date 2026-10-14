@@ -2,6 +2,7 @@ package com.letsblog.content.service;
 
 import com.letsblog.content.client.AiServiceException;
 import com.letsblog.content.render.MediaRenderClient;
+import com.letsblog.content.render.PlantUmlRenderRejectedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -76,5 +77,17 @@ class PlantUmlTagRenderServiceTest {
         PlantUmlServerUnavailableException e = assertThrows(PlantUmlServerUnavailableException.class,
                 () -> service.renderForPreview("[plantuml]\nA->B\n[/plantuml]"));
         assertTrue(e.getMessage().contains("PlantUMLサーバーに接続できません"));
+    }
+
+    @Test
+    void renderForPreview_PlantUMLの拒否は接続不能に変えずそのまま伝える() {
+        PlantUmlRenderRejectedException rejected =
+                new PlantUmlRenderRejectedException("PlantUML が図を描けませんでした: Syntax Error?");
+        when(mediaRenderClient.renderPlantUml(anyString())).thenThrow(rejected);
+
+        PlantUmlRenderRejectedException e = assertThrows(PlantUmlRenderRejectedException.class,
+                () -> service.renderForPreview("[plantuml]\nA->B\n[/plantuml]"));
+
+        assertEquals(rejected, e);
     }
 }
