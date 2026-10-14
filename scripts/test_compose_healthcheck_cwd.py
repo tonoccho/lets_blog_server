@@ -297,6 +297,8 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 # ComfyUI スタブ(#1106)。GPU を持たないホストでも画像生成の経路を
                 # 検証できるようにするため、7本目として追加した。
                 "comfyui-stub",
+                # extensions ポータルのスタブ(#1782)。
+                "portal-stub",
             },
             names,
         )
