@@ -148,6 +148,29 @@ export async function stubRequestCount(name: StubName): Promise<number> {
 }
 
 /**
+ * スタブが受け取った、指定メソッド・パスのリクエスト件数(issue #1781)。
+ *
+ * `stubRequestCount` はパスを区別せず、生成と無関係な呼び出し(連携サービスの状況確認が出す
+ * `GET /models` / `GET /api/ps` など)も数える。「生成の依頼が届いたか」を並列実行でも安定して
+ * 判定するときは、こちらで `POST /chat/completions` のように絞って数える。
+ */
+export async function stubRequestCountFor(
+  name: StubName,
+  method: string,
+  pathname: string
+): Promise<number> {
+  const res = await fetch(`${STUB_URLS[name]}/__control/state`);
+  const state = (await res.json()) as { requestsByPath?: Record<string, number> };
+  expect(state.requestsByPath, `${name} スタブがパス別の受信件数(requestsByPath)を返さない`).toBeDefined();
+  return state.requestsByPath![`${method.toUpperCase()} ${pathname}`] ?? 0;
+}
+
+/** LLM スタブへ届いた生成の依頼(`POST /chat/completions`)の件数。 */
+export async function llmGenerationRequestCount(): Promise<number> {
+  return await stubRequestCountFor('llm', 'POST', '/chat/completions');
+}
+
+/**
  * ComfyUI のワークフロー(issue #1106)。
  *
  * media-service の `ComfyUiClient.buildWorkflow` が組み立てる形をそのまま写している。

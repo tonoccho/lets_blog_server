@@ -39,6 +39,7 @@
  * feature を分散させないこと(docs/ACCEPTANCE_TESTING.md に明記した)。
  *
  * 受信件数(`requests`)はシナリオが「サービスが実際に外部を呼んだか」を確かめるために使う。
+ * `requestsByPath` は同じ件数を `METHOD /path` ごとに分けたもの(#1781)。
  * 応答には含めない(決定性を壊すため)。`/__control/state` からのみ読める。
  */
 const http = require('node:http');
@@ -101,6 +102,8 @@ function createStub({ name, port, handle, errorBody, onReset, extraState }) {
     forced: null,
     /** 制御・死活を除いた受信件数。 */
     requests: 0,
+    /** `METHOD /path` ごとの受信件数。生成の依頼だけを数えたいテストが使う(#1781)。 */
+    requestsByPath: {},
   };
 
   const defaultErrorBody = (status) => ({
@@ -128,6 +131,8 @@ function createStub({ name, port, handle, errorBody, onReset, extraState }) {
     }
 
     state.requests += 1;
+    const pathKey = `${req.method} ${pathname}`;
+    state.requestsByPath[pathKey] = (state.requestsByPath[pathKey] ?? 0) + 1;
 
     // 経路1: ヘッダによる単発注入。状態を変えないので並列実行に干渉しない。
     const headerStatus = req.headers['x-e2e-stub-force-status'];
@@ -198,6 +203,7 @@ async function handleControl(req, res, pathname, state, name, onReset, extraStat
       name,
       forced: state.forced,
       requests: state.requests,
+      requestsByPath: state.requestsByPath,
       ...(extraState ? extraState() : {}),
     });
     return;
@@ -205,8 +211,9 @@ async function handleControl(req, res, pathname, state, name, onReset, extraStat
   if (req.method === 'POST' && pathname === `${CONTROL_PREFIX}/reset`) {
     state.forced = null;
     state.requests = 0;
+    state.requestsByPath = {};
     if (onReset) onReset();
-    sendJson(res, 200, { name, forced: null, requests: 0, ...(extraState ? extraState() : {}) });
+    sendJson(res, 200, { name, forced: null, requests: 0, requestsByPath: {}, ...(extraState ? extraState() : {}) });
     return;
   }
   if (req.method === 'POST' && pathname === `${CONTROL_PREFIX}/force`) {

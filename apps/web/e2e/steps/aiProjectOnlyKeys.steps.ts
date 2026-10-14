@@ -7,7 +7,7 @@ import {
   expect,
   fetchAccessToken,
 } from '../support';
-import { stubRequestCount } from '../support/stubs';
+import { llmGenerationRequestCount } from '../support/stubs';
 
 /**
  * ChatGPT / ClaudeのAPIキーはプロジェクト単位だけ(issue #1568)の受け入れシナリオのステップ定義。
@@ -41,7 +41,7 @@ Given(/^プロジェクトのChatGPT APIキーを「(.+)」で設定する$/, as
 });
 
 Given('LLMスタブの受信件数を控える', async ({ ctx }) => {
-  ctx.llmStubCountBefore1568 = await stubRequestCount('llm');
+  ctx.llmStubCountBefore1568 = await llmGenerationRequestCount();
 });
 
 When(
@@ -69,12 +69,12 @@ Then('下書き生成はこのプロジェクトでAPIキーを設定するよ�
 });
 
 Then('LLMスタブの受信件数は増えていない', async ({ ctx }) => {
-  const after = await stubRequestCount('llm');
+  const after = await llmGenerationRequestCount();
   expect(after, 'キーが無いのにLLMスタブが呼ばれた').toBe(ctx.llmStubCountBefore1568 as number);
 });
 
 Then('LLMスタブの受信件数が増えている', async ({ ctx }) => {
-  const after = await stubRequestCount('llm');
+  const after = await llmGenerationRequestCount();
   expect(after, 'プロジェクトのキーがあるのにLLMスタブが呼ばれていない').toBeGreaterThan(
     ctx.llmStubCountBefore1568 as number
   );

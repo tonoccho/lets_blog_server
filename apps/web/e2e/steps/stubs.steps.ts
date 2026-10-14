@@ -8,6 +8,7 @@ import {
   STUB_URLS,
   type StubName,
   comfyUiWorkflow,
+  llmGenerationRequestCount,
   forceStatusHeader,
   requireStubs,
 } from '../support/stubs';
@@ -206,6 +207,42 @@ Then('タイムアウトを注入すると呼び出しは応答を得られな�
   await expect(
     callProbe('llm', { 'X-E2E-Stub-Force-Delay': '300' })
   ).rejects.toThrow();
+});
+
+/* ------------------------------------------------------------------ *
+ * LLM スタブの生成依頼の件数(issue #1781)
+ *
+ * 連携サービスの状況確認(platform-service が出す `GET /models` / `GET /api/ps`)は、別レーンの
+ * ブラウザ操作でも起きる。件数の前後比較にそれが混ざらないことを、スタブ自体で確かめる。
+ * ------------------------------------------------------------------ */
+
+let llmGenerationCountBefore1781 = 0;
+
+Given('LLMスタブの生成依頼の受信件数を控える', async () => {
+  llmGenerationCountBefore1781 = await llmGenerationRequestCount();
+});
+
+When('LLMスタブへ連携サービスの状況確認のリクエストを送る', async () => {
+  for (const path of ['/models', '/api/ps', '/models', '/api/ps']) {
+    await fetch(`${STUB_URLS.llm}${path}`);
+  }
+});
+
+When('LLMスタブへ生成を依頼する', async () => {
+  const res = await fetch(`${STUB_URLS.llm}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'e2e', messages: [{ role: 'user', content: 'ping' }] }),
+  });
+  expect(res.ok).toBe(true);
+});
+
+Then('LLMスタブの生成依頼の受信件数は増えていない', async () => {
+  expect(await llmGenerationRequestCount()).toBe(llmGenerationCountBefore1781);
+});
+
+Then('LLMスタブの生成依頼の受信件数が1件増えている', async () => {
+  expect(await llmGenerationRequestCount()).toBe(llmGenerationCountBefore1781 + 1);
 });
 
 /* ------------------------------------------------------------------ *
