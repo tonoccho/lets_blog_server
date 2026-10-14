@@ -1252,7 +1252,12 @@ Then(/^ギャラリーの選択件数に「([^」]+)」が表示される$/, asy
 });
 
 When('ギャラリーで全選択する', async ({ page }) => {
-  await page.getByRole('button', { name: '全選択', exact: true }).click();
+  // 表示中の画像が全て選択済みだと、同じボタンの表記が「全選択解除」になる(単独実行で、選んだ画像だけが表示されるとき)。
+  // その場合は既に全選択の状態なので押さない。押すと解除してしまう。
+  const selectAll = page.getByRole('button', { name: '全選択', exact: true });
+  const deselectAll = page.getByRole('button', { name: '全選択解除', exact: true });
+  await expect(selectAll.or(deselectAll)).toBeVisible({ timeout: 30_000 });
+  if (await selectAll.isVisible()) await selectAll.click();
 });
 
 When('ギャラリーで全選択を解除する', async ({ page }) => {
