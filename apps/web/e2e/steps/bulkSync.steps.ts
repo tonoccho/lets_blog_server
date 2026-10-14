@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Then, When } from './fixtures';
+import { acquireSiteLock } from '../site-lock';
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD, expect, fetchAccessToken } from '../support';
 
 /**
@@ -255,6 +256,11 @@ function logsOf(s: SyncState, slugs: string[]): SyncLog[] {
 Given(
   'testをマスター環境、localを対象環境とする2つのWordPressサイトを持つ同期用プロジェクトがある',
   async ({ ctx, request }) => {
+    // 固定サイト(at7syncmaster / at7synctarget)は environment-sync.feature と
+    // tag-environment-sync.feature で共有する。@mode:serial は同一ファイル内しか直列化しないため、
+    // 別 worker で同時に確認から作成まで走ると 409 になる。準備から After の後片付けまで
+    // 同じ名前のロックを保持する(#1785、#1780、#1694)。
+    ctx.syncSiteLockRelease = await acquireSiteLock('at7sync');
     const projectId = await ensureProject(request);
     const master = await ensureManagedSite(request, MASTER_SITE_KEY);
     const target = await ensureManagedSite(request, TARGET_SITE_KEY);
@@ -429,30 +435,34 @@ Then('同期の結果に親カテゴリと単独のカテゴリの成功が示�
 
 /** シナリオが作った(同期で作られたものも含む)カテゴリを両サイトから消す。サイトそのものは残す。 */
 After({ tags: '@bulk' }, async ({ ctx }) => {
-  const s = ctx.syncState as SyncState | undefined;
-  if (!s) {
-    return;
-  }
-  // 子を先に消す(親を先に消すと子が付け替わる)。用意した順の逆に消せば足りる。
-  for (const site of [s.masterSite, s.targetSite]) {
-    for (const slug of [...s.slugs].reverse()) {
-      try {
-        const id = wpCli(site, `term list category --slug='${slug}' --field=term_id`);
-        if (id !== '') {
-          wpCli(site, `term delete category ${id}`);
+  try {
+    const s = ctx.syncState as SyncState | undefined;
+    if (!s) {
+      return;
+    }
+    // 子を先に消す(親を先に消すと子が付け替わる)。用意した順の逆に消せば足りる。
+    for (const site of [s.masterSite, s.targetSite]) {
+      for (const slug of [...s.slugs].reverse()) {
+        try {
+          const id = wpCli(site, `term list category --slug='${slug}' --field=term_id`);
+          if (id !== '') {
+            wpCli(site, `term delete category ${id}`);
+          }
+        } catch {
+          // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
         }
-      } catch {
-        // 既に無いものを消そうとした場合は、後片付けの目的(残さない)を満たしている。
-      }
-      try {
-        const id = wpCli(site, `term list post_tag --slug='${slug}' --field=term_id`);
-        if (id !== '') {
-          wpCli(site, `term delete post_tag ${id}`);
+        try {
+          const id = wpCli(site, `term list post_tag --slug='${slug}' --field=term_id`);
+          if (id !== '') {
+            wpCli(site, `term delete post_tag ${id}`);
+          }
+        } catch {
+          // 同上。
         }
-      } catch {
-        // 同上。
       }
     }
+  } finally {
+    (ctx.syncSiteLockRelease as (() => void) | undefined)?.();
   }
 });
 
