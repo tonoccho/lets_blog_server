@@ -384,7 +384,12 @@ Step('1画面分の複数のAPI呼び出しが1つのoperationIdにまとまる�
     }
     for (const [id, entries] of grouped) {
       // 「一連のログ」なので2件以上あること。1件だけの操作は束ねられていることの証拠にならない。
-      if (entries.length >= 2) return id;
+      // 操作ログは管理者に全ユーザー分が見えるので、並列ワーカーの別の画面操作を拾わないよう、
+      // ダッシュボードが呼ぶ GET /api/posts(apps/web/src/app/page.tsx)を含む操作に限る(#1793)。
+      const fromDashboard = entries.some(
+        (entry) => entry.method === 'GET' && entry.path === '/api/posts'
+      );
+      if (entries.length >= 2 && fromDashboard) return id;
     }
     return null;
   });
