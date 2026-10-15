@@ -1,13 +1,17 @@
 import { requireAdminSession } from "@/lib/session";
-import { listAppSettings } from "@/lib/apiClient";
+import { listAppSettings, listPluginRegistrations } from "@/lib/apiClient";
 import { loadOrReport, failedLabels } from "@/lib/loadOrReport";
 import { FetchErrorNotice } from "@/components/FetchErrorNotice";
 import { AppSettingsPanel } from "./AppSettingsPanel";
 import { ExtensionsImportPanel } from "./ExtensionsImportPanel";
+import { PluginRegistrationsPanel } from "./PluginRegistrationsPanel";
 
 export default async function AdminSystemSettingsPage() {
   await requireAdminSession();
-  const settings = await loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []);
+  const [settings, registrations] = await Promise.all([
+    loadOrReport("admin/system-settings", "システム設定", listAppSettings(), []),
+    loadOrReport("admin/system-settings", "プラグインの登録", listPluginRegistrations(), []),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -20,13 +24,14 @@ export default async function AdminSystemSettingsPage() {
           この保存操作での変更が全てロールバックされます。
         </p>
       </div>
-      <FetchErrorNotice labels={failedLabels(settings)} />
+      <FetchErrorNotice labels={failedLabels(settings, registrations)} />
       {/* 取得失敗時に空の設定を表示すると、そのまま保存して既存値を消しかねないため描画しない */}
       {!settings.failed && (
         <ExtensionsImportPanel
           portalUrl={settings.data.find((s) => s.key === "extensions_portal_url")?.value ?? ""}
         />
       )}
+      {!registrations.failed && <PluginRegistrationsPanel registrations={registrations.data} />}
       {!settings.failed && <AppSettingsPanel settings={settings.data} />}
     </div>
   );

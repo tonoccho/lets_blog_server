@@ -46,3 +46,4 @@ ADR には以下のセクションを含める。
 | [ADR-0010](0010-github-to-gitlab-migration.md) | 開発ワークフローを GitHub からセルフホスト GitLab CE へ移行する |
 | [ADR-0011](0011-external-service-plugin-boundary.md) | LLM・画像生成・図のレンダリングは、契約 API(HTTP)で話す外部プラグインにする |
 | [ADR-0012](0012-extensions-tools-keycloak-auth.md) | extensions のツール(Ollama・ComfyUI・PlantUML)を lets_blog の Keycloak で認証する |
+| [ADR-0013](0013-system-registration-destination-check.md) | システム全体のプラグインの登録の接続先は、禁止アドレスだけを拒否し、docker ネットワーク内のアドレスは通す |

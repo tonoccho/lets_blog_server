@@ -318,7 +318,7 @@ grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' \
 | `CmsMediaBridgeController` / `TaxonomyController` | publishing |
 | `ArticlePreviewController` | content と publishing の両方に同名クラスがある |
 | `GenerationJobController` | ai |
-| `AppSettingController` / `ExtensionsImportController` / `SystemSettingController` / `DashboardController` / `BackupController` / `VscodeExtensionController` | platform |
+| `AppSettingController` / `ExtensionsImportController` / `PluginRegistrationController` / `InternalPluginRegistrationController` / `SystemSettingController` / `DashboardController` / `BackupController` / `VscodeExtensionController` | platform |
 | `AuditLogController` | log-writer |
 
 各行の「未認証で401になるか」は、移設先サービスの `SecurityConfig` が担う。
@@ -839,6 +839,26 @@ platform-service所有(issue #1783)。extensions のポータルから接続先�
 | --- | --- | --- | --- | --- | --- | --- |
 | POST /api/system-settings/app-settings/extensions-import/fetch | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `ExtensionsConnectionImportService.fetch()`内でrequireAdmin()。システム設定は書き換えない。ポータルのURLは`ExtensionsPortalUrlPolicy`で検査(ループバック・リンクローカルは拒否) |
 | POST /api/system-settings/app-settings/extensions-import/apply | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `ExtensionsConnectionImportService.apply()`内でrequireAdmin()。保存は`AppSettingService.updateSettings()`の検証を1項目ずつ通す |
+
+## PluginRegistrationController (5エンドポイント、ベースパス `/api/system-settings/plugin-registrations`)
+
+platform-service所有(issue #1807)。システム全体のプラグインの登録(LLM・画像生成・図のレンダリング・Penpot)の管理者向けAPI。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/system-settings/plugin-registrations | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.list()`内でrequireAdmin() |
+| POST /api/system-settings/plugin-registrations | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.create()`内でrequireAdmin()。接続先は`SystemDestinationPolicy`で検査(禁止アドレスだけ拒否。ADR-0013) |
+| PUT /api/system-settings/plugin-registrations/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.update()`内でrequireAdmin() |
+| DELETE /api/system-settings/plugin-registrations/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.delete()`内でrequireAdmin() |
+| PUT /api/system-settings/plugin-registrations/{id}/in-use | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.activate()`内でrequireAdmin() |
+
+## InternalPluginRegistrationController (1エンドポイント、ベースパス `/api/internal/platform/plugin-registrations`)
+
+platform-service所有(issue #1807)。`InternalPlatformSettingsController`と同じ内部ブリッジ(gatewayには載らない。JWT必須・ロール判定なし)。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET /api/internal/platform/plugin-registrations/resolve | なし(内部ブリッジ) | 401 | 該当なし | 認可OK | 現状維持 | 種類を指定して使用中の登録(無ければ`connected=false`)を返す。環境変数へはフォールバックしない |
 
 ## ArticlePlanController (15エンドポイント、ベースパス `/api/projects/{projectId}/article-plan`)
 

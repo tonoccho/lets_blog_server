@@ -7,6 +7,7 @@ ADR は「なぜ」を、この文書は「何を話すか」を持つ(ADR の�
 - 「現行」は 2026-10-13 時点の `develop` を読んで確認した事実。契約の「使う部分集合」は現行コードが実際に送受信するものに合わせた。
 - 契約の値のうち「決定」と書いたものは本文書で決めたもの。子 Issue で変える場合は新しい ADR を作る。
 - 認証(§0 の「認証」と §4.2 の認証情報の単位)は [ADR-0012](../adr/0012-extensions-tools-keycloak-auth.md)(2026-10-15)で改訂した。
+- システム全体の登録の接続先の検査(§4.3)は [ADR-0013](../adr/0013-system-registration-destination-check.md)(2026-10-16)で改訂した。
 
 ## 0. 全契約に共通すること
 
@@ -190,7 +191,7 @@ draw.io の**編集画面**はサーバー間の契約ではなく、VS Code 拡
 | --- | --- |
 | 種類 | §4.1 |
 | 名前 | 画面に出す表示名(例「社内の Ollama」)。同じ種類の複数登録を見分ける |
-| 接続先 URL | `http://` / `https://`。保存時に `ConnectionDestinationGuard` で検査(§4.3) |
+| 接続先 URL | `http://` / `https://`。保存時に検査(§4.3。システム全体とプロジェクト単位で規則が異なる) |
 | 認証情報 | 任意。`CredentialCipher` で暗号化して保存し、取得 API では値を返さず「設定済み」だけ返す |
 | 使用中 | LLM・画像生成のみ。種類ごとに 1 件 |
 | `drawioUrl` | 図のレンダリングのみ。任意(§3.4) |
@@ -220,10 +221,16 @@ media の `project_image_settings`、platform の `system_settings`)の移行は
 
 ### 4.3 接続先の検査
 
-`packages/lbs-common/src/main/java/com/letsblog/common/net/ConnectionDestinationGuard.java`。接続のたびにホストを名前解決し、全アドレスが
-(a) 自プロセスが参加する docker ネットワークの範囲、(b) 禁止アドレス、のどちらにも入らないことを確かめ、検査したアドレスへ固定して接続する
-(DNS rebinding の防止、#1547)。保存時にも検査する(#1518)。システム全体の登録も同じ検査を通す(決定。例外を作らない)。
-LAN のプライベートアドレスは通る(接続先は外部の GPU PC など)。同梱コンテナが無いので、docker ネットワークへの例外にする名前は無い。
+規則はシステム全体の登録とプロジェクト単位の上書きで異なる([ADR-0013](../adr/0013-system-registration-destination-check.md)、2026-10-16。
+このため、元の「システム全体の登録も同じ検査を通す(例外を作らない)」は改訂した)。どちらも、接続のたびにホストを名前解決し、全アドレスを検査し、
+検査したアドレスへ固定して接続する(DNS rebinding の防止、#1547)。保存時にも検査する(#1518)。
+
+- **システム全体の登録**(管理者): 禁止アドレス(ループバック・未指定・リンクローカル等。`DestinationAddressRules.isDeniedAddress`)だけを拒否する。
+  docker ネットワーク内のアドレスは拒否しない(同じ PC の `lbx-*` を登録できる)。実装は platform-service の `SystemDestinationPolicy`。
+  `drawioUrl`(§3.4)はサーバーが接続しないので URL 形式だけを検査する。
+- **プロジェクト単位の上書き**(プロジェクトの管理者): `packages/lbs-common/src/main/java/com/letsblog/common/net/ConnectionDestinationGuard.java`。
+  (a) 自プロセスが参加する docker ネットワークの範囲、(b) 禁止アドレス、のどちらにも入らないことを確かめる。
+  LAN のプライベートアドレスは通る(接続先は外部の GPU PC など)。同梱コンテナが無いので、docker ネットワークへの例外にする名前は無い。
 
 ### 4.4 能力の取得
 

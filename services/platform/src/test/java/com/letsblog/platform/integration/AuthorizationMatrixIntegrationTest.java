@@ -77,6 +77,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/internal/platform/llm-config"),
                 new Endpoint("GET", "/api/internal/platform/image-generation-config"),
                 new Endpoint("GET", "/api/internal/platform/ai-connections-config"),
+                new Endpoint("GET", "/api/internal/platform/plugin-registrations/resolve"),
 
                 // -- VscodeExtensionController (1、issue #696) --
                 new Endpoint("GET", "/api/system/vscode-extension"),
@@ -98,6 +99,13 @@ class AuthorizationMatrixIntegrationTest {
                 // -- ExtensionsImportController (2、issue #1783) --
                 new Endpoint("POST", "/api/system-settings/app-settings/extensions-import/fetch"),
                 new Endpoint("POST", "/api/system-settings/app-settings/extensions-import/apply"),
+
+                // -- PluginRegistrationController (5、issue #1807) --
+                new Endpoint("GET", "/api/system-settings/plugin-registrations"),
+                new Endpoint("POST", "/api/system-settings/plugin-registrations"),
+                new Endpoint("PUT", "/api/system-settings/plugin-registrations/1"),
+                new Endpoint("DELETE", "/api/system-settings/plugin-registrations/1"),
+                new Endpoint("PUT", "/api/system-settings/plugin-registrations/1/in-use"),
 
                 // -- DashboardController (5、issue #695) --
                 new Endpoint("GET", "/api/dashboard/service-status"),
@@ -151,7 +159,8 @@ class AuthorizationMatrixIntegrationTest {
             "/api/internal/platform/system-settings/brave-search-api-key",
             "/api/internal/platform/llm-config",
             "/api/internal/platform/image-generation-config",
-            "/api/internal/platform/ai-connections-config"
+            "/api/internal/platform/ai-connections-config",
+            "/api/internal/platform/plugin-registrations/resolve"
     })
     @DisplayName("内部ブリッジ /api/internal/platform/** は未認証なら401(issue #742)")
     void 内部ブリッジは未認証で401(String path) throws Exception {

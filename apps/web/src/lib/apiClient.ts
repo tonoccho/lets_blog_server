@@ -2496,6 +2496,65 @@ export function applyExtensionsConnections(
   });
 }
 
+export type PluginKind = 'LLM' | 'IMAGE_GENERATION' | 'DIAGRAM_RENDERER' | 'PENPOT';
+
+/** システム全体のプラグインの登録(issue #1807)。システム全体の登録は認証情報を持たない。 */
+export interface PluginRegistration {
+  id: number;
+  kind: PluginKind;
+  name: string;
+  url: string;
+  inUse: boolean;
+  drawioUrl: string | null;
+}
+
+export interface PluginRegistrationCreateInput {
+  kind: string;
+  name: string;
+  url: string;
+  drawioUrl: string | null;
+}
+
+export interface PluginRegistrationUpdateInput {
+  name: string;
+  url: string;
+  drawioUrl: string | null;
+}
+
+const PLUGIN_REGISTRATIONS_PATH = '/api/system-settings/plugin-registrations';
+
+export function listPluginRegistrations(): Promise<PluginRegistration[]> {
+  return apiFetch<PluginRegistration[]>(PLUGIN_REGISTRATIONS_PATH);
+}
+
+export function createPluginRegistration(input: PluginRegistrationCreateInput): Promise<PluginRegistration> {
+  return apiFetch<PluginRegistration>(PLUGIN_REGISTRATIONS_PATH, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updatePluginRegistration(
+  id: number,
+  input: PluginRegistrationUpdateInput,
+): Promise<PluginRegistration> {
+  return apiFetch<PluginRegistration>(`${PLUGIN_REGISTRATIONS_PATH}/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function deletePluginRegistration(id: number): Promise<void> {
+  return apiFetch<void>(`${PLUGIN_REGISTRATIONS_PATH}/${id}`, { method: 'DELETE' });
+}
+
+/** 同じ種類の他の登録の使用中を外し、この登録を使用中にする(LLM・画像生成のみ)。 */
+export function activatePluginRegistration(id: number): Promise<PluginRegistration> {
+  return apiFetch<PluginRegistration>(`${PLUGIN_REGISTRATIONS_PATH}/${id}/in-use`, { method: 'PUT' });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;

@@ -21,9 +21,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 const SESSION_EXPIRED = "セッションの有効期限が切れました。お手数ですが再度ログインしてください。";
 const DOWN = new Error("APIエラー (503): Service Unavailable");
 
-const api = { listAppSettings: jest.fn() };
+const api = { listAppSettings: jest.fn(), listPluginRegistrations: jest.fn() };
 jest.mock("@/lib/apiClient", () => ({
   listAppSettings: (...a: unknown[]) => api.listAppSettings(...a),
+  listPluginRegistrations: (...a: unknown[]) => api.listPluginRegistrations(...a),
+}));
+jest.mock("../PluginRegistrationsPanel", () => ({
+  PluginRegistrationsPanel: ({ registrations }: { registrations: unknown[] }) => `REGS[${registrations.length}]`,
 }));
 jest.mock("../AppSettingsPanel", () => ({ AppSettingsPanel: () => "PANEL" }));
 jest.mock("../ExtensionsImportPanel", () => ({ ExtensionsImportPanel: ({ portalUrl }: { portalUrl: string }) => `IMPORT[${portalUrl}]` }));
@@ -35,7 +39,7 @@ describe("システム設定の取得失敗表示(issue #1235)", () => {
     jest.clearAllMocks();
     errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     getServerSession.mockResolvedValue({ user: { role: "admin" } });
-
+    api.listPluginRegistrations.mockResolvedValue([]);
   });
   afterEach(() => errorSpy.mockRestore());
 
@@ -66,6 +70,17 @@ describe("システム設定の取得失敗表示(issue #1235)", () => {
 
     api.listAppSettings.mockRejectedValue(DOWN);
     expect(renderToStaticMarkup(await Page())).not.toContain("IMPORT[");
+  });
+
+  it("プラグインの登録の欄へ登録の一覧を渡す(issue #1807)。取得に失敗したら欄を描画せず通知する", async () => {
+    api.listAppSettings.mockResolvedValue([]);
+    api.listPluginRegistrations.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+    expect(renderToStaticMarkup(await Page())).toContain("REGS[2]");
+
+    api.listPluginRegistrations.mockRejectedValue(DOWN);
+    const html = renderToStaticMarkup(await Page());
+    expect(html).not.toContain("REGS[");
+    expect(html).toContain("プラグインの登録を取得できませんでした");
   });
 
   it("セッション切れは /login へ", async () => {
