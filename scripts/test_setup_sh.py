@@ -413,7 +413,14 @@ class EnvGeneration(SetupShTestCase):
         self.assertIn("BRAVE_SEARCH_API_KEY", r.stdout)
         self.assertIn("MAIL_PASSWORD", r.stdout)
 
-    KEYCLOAK_SECRET_KEYS = ("KEYCLOAK_SERVICES_CLIENT_SECRET", "KEYCLOAK_WEB_CLIENT_SECRET")
+    # #1805: extensions(GitLab・Penpot・proxy)用の3つも同じく初回構築でランダム値になる。
+    KEYCLOAK_SECRET_KEYS = (
+        "KEYCLOAK_SERVICES_CLIENT_SECRET",
+        "KEYCLOAK_WEB_CLIENT_SECRET",
+        "KEYCLOAK_GITLAB_CLIENT_SECRET",
+        "KEYCLOAK_PENPOT_CLIENT_SECRET",
+        "KEYCLOAK_PROXY_CLIENT_SECRET",
+    )
 
     def _read_env(self, path):
         with open(path, encoding="utf-8") as f:
@@ -438,7 +445,7 @@ class EnvGeneration(SetupShTestCase):
             self.assertNotIn("dev-only", after[key], key)
             self.assertRegex(after[key], r"^[0-9a-f]{64}$", key)
             values.append(after[key])
-        self.assertNotEqual(values[0], values[1], "2つのシークレットが同じ値")
+        self.assertEqual(len(values), len(set(values)), "シークレットに同じ値がある")
 
     def test_two_fresh_generations_yield_different_keycloak_secrets(self):
         r = self._run_source("ensure_env_file")

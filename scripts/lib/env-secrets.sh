@@ -10,7 +10,8 @@
 # 例外: APP_ENCRYPTION_KEY は "changeme_" ではなく、CredentialCipher(packages/lbs-common)が
 # strict Base64として要求するダミーの有効値を既定にしている(check-env.shの特別扱いと同じ理由)。
 # 例外: KEYCLOAK_SERVICES_CLIENT_SECRET / KEYCLOAK_WEB_CLIENT_SECRET は "dev-only-" で始まる
-# 公開済みの既定値を持つ。ランダム値へ置き換える(#1551)。
+# 公開済みの既定値を持つ。ランダム値へ置き換える(#1551)。#1805 で extensions 用の
+# KEYCLOAK_<ツール名>_CLIENT_SECRET(.env.example 参照)も同じ扱いにした。
 APP_ENCRYPTION_KEY_PLACEHOLDER="UkVQTEFDRV9XSVRIX09QRU5TU0xfUkFORF9CNjRfMzI="
 
 generate_value_for_key() {
@@ -19,7 +20,7 @@ generate_value_for_key() {
     APP_ENCRYPTION_KEY) openssl rand -base64 32 ;;
     NEXTAUTH_SECRET) openssl rand -hex 32 ;;
     WP_PROVISION_TOKEN) openssl rand -hex 32 ;;
-    KEYCLOAK_SERVICES_CLIENT_SECRET|KEYCLOAK_WEB_CLIENT_SECRET) openssl rand -hex 32 ;;
+    KEYCLOAK_SERVICES_CLIENT_SECRET|KEYCLOAK_WEB_CLIENT_SECRET|KEYCLOAK_GITLAB_CLIENT_SECRET|KEYCLOAK_PENPOT_CLIENT_SECRET|KEYCLOAK_PROXY_CLIENT_SECRET) openssl rand -hex 32 ;;
     *) openssl rand -base64 24 ;;
   esac
 }
@@ -31,7 +32,7 @@ is_auto_generatable_secret() {
     return 0
   elif [ "$key" = "APP_ENCRYPTION_KEY" ] && [ "$value" = "$APP_ENCRYPTION_KEY_PLACEHOLDER" ]; then
     return 0
-  elif [[ "$key" =~ ^KEYCLOAK_(SERVICES|WEB)_CLIENT_SECRET$ ]] && [[ "$value" == dev-only-* ]]; then
+  elif [[ "$key" =~ ^KEYCLOAK_[A-Z]+_CLIENT_SECRET$ ]] && [[ "$value" == dev-only-* ]]; then
     return 0
   fi
   return 1

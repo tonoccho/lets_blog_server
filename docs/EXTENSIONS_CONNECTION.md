@@ -161,5 +161,83 @@ GitLab が返す clone URL は、`external_url` に基づく公開 URL(`https://
 | 2xx 以外(3xx・4xx・5xx) | エラー | 「GitLab が 2xx 以外を返しました(HTTP ステータス)」 |
 | 接続できない・タイムアウト | エラー | 「GitLab に到達できません: 原因」 |
 
+## extensions から lets_blog の Keycloak を OIDC の発行者として使う(#1805)
+
+同じ PC の extensions(GitLab・Penpot・proxy)が、lets_blog の Keycloak(realm `letsblog`)でログインできるようにする。
+ブラウザの SSO は同じ PC だけが対象で、別ホストのブラウザ SSO(`KC_HOSTNAME` の変更)は後続の Issue。
+この節の手順は**利用者が実行する**。実装は稼働中の Keycloak に何もしない。
+
+`docker-compose.extensions.yml` を重ねると、keycloak が `lbs-net` に加えて `lbx-shared` にも別名 `lbs-keycloak` で参加する
+(重ねないときの構成は変わらない)。issuer は `KC_HOSTNAME` で固定のまま、`https://localhost/auth/realms/letsblog` で変わらない。
+
+### 内部の JWKS と token の URL
+
+extensions のコンテナから見ると、issuer の `https://localhost/auth/...` は自分自身を指す。そのため GitLab と Penpot は
+discovery(`.well-known`)を使えず、エンドポイントを個別に指定する。
+
+| 用途 | URL |
+| --- | --- |
+| authorization(ブラウザ向けの公開 URL) | `https://localhost/auth/realms/letsblog/protocol/openid-connect/auth` |
+| token(`lbx-shared` の内部 URL) | `http://lbs-keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token` |
+| JWKS(`lbx-shared` の内部 URL) | `http://lbs-keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs` |
+
+別ホストの extensions が API(client credentials)で使うときは、token と JWKS を lets_blog の公開 URL
+(`https://<lets_blog のホスト>/auth/realms/letsblog/protocol/openid-connect/{token,certs}`)から取る。
+
+### extensions の `.env` に渡す値
+
+| クライアント | clientId | secret(lets_blog の `.env`) | リダイレクト URI | ログインできる人 |
+| --- | --- | --- | --- | --- |
+| GitLab | `lbx-gitlab` | `KEYCLOAK_GITLAB_CLIENT_SECRET` | `https://gitlab.<BASE_DOMAIN>:<HTTPS_PORT>/users/auth/openid_connect/callback` | lets_blog のアカウント全員 |
+| Penpot | `lbx-penpot` | `KEYCLOAK_PENPOT_CLIENT_SECRET` | `https://penpot.<BASE_DOMAIN>:<HTTPS_PORT>/api/auth/oidc/callback` | lets_blog のアカウント全員 |
+| proxy(ポータル・ComfyUI) | `lbx-proxy` | `KEYCLOAK_PROXY_CLIENT_SECRET` | `https://portal.<BASE_DOMAIN>:<HTTPS_PORT>/oauth2/callback` と `https://comfyui.<BASE_DOMAIN>:<HTTPS_PORT>/oauth2/callback` | `admin` ロールだけ |
+
+- 各 secret は lets_blog の `.env` と同じ値を extensions の `.env` に写す。`setup.sh` の新規構築はランダム値を生成する。
+- `<BASE_DOMAIN>` / `<HTTPS_PORT>` は extensions の `BASE_DOMAIN` / `HTTPS_PORT`。lets_blog の `.env` には
+  `LBX_BASE_DOMAIN` / `LBX_HTTPS_PORT` として同じ値を置く(未設定なら `localhost` / `443`)。
+  この 2 つと 3 つの secret は、`docker-compose.extensions.yml` を重ねたときだけ keycloak コンテナへ渡り、realm の import が受け取る。
+- `admin` だけに絞るのは proxy のクライアントだけ。realm ロールをトークンの `roles` クレーム(配列)に載せるので、
+  proxy 側で `roles` に `admin` が含まれることを確かめる。GitLab と Penpot はロールで制限しない。
+- リダイレクト URI は、ポート付き(`:<HTTPS_PORT>`)とポート無しの両方を登録する。既定の 443 ではブラウザが `:443` を付けないため。
+  kcadm で足すときも `redirectUris` に両方を入れる。
+- 上のリダイレクト URI のパスは各ソフトの標準のコールバックを仮定している。extensions 側が別のパスを使うなら、
+  Keycloak 側のクライアントの Valid redirect URIs を合わせる。
+
+### 新しく構築する環境
+
+`.env` に上の値があり、`-f docker-compose.yml -f docker-compose.extensions.yml` で起動すれば、初回の realm import で 3 つの
+クライアントが作られる。
+
+### 既存の Keycloak にクライアントを足す(kcadm、利用者が実行)
+
+`--import-realm` は既存の realm を上書きしないので、稼働中の Keycloak には手で足す。`<…>` は自分の値に置き換える。
+
+```bash
+# 0. オーバーレイ付きで keycloak を作り直し、lbx-shared に参加させる(realm のデータは消えない)
+docker compose -f docker-compose.yml -f docker-compose.extensions.yml up -d keycloak
+
+# 1. 管理者でログインする
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://localhost:8080/auth --realm master --user "$KEYCLOAK_ADMIN_USERNAME" --password "$KEYCLOAK_ADMIN_PASSWORD"
+
+# 2. クライアントを作る(gitlab・penpot・proxy で繰り返す。redirectUris は上の表のとおり)
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh create clients -r letsblog \
+  -s clientId=lbx-gitlab -s enabled=true -s publicClient=false -s standardFlowEnabled=true \
+  -s directAccessGrantsEnabled=false -s serviceAccountsEnabled=false \
+  -s secret="<KEYCLOAK_GITLAB_CLIENT_SECRET>" \
+  -s 'redirectUris=["https://gitlab.<BASE_DOMAIN>:<HTTPS_PORT>/users/auth/openid_connect/callback","https://gitlab.<BASE_DOMAIN>/users/auth/openid_connect/callback"]' \
+  -s 'attributes."pkce.code.challenge.method"=S256'
+
+# 3. proxy だけ、realm ロールを roles クレームに載せるマッパーを足す
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh get clients -r letsblog -q clientId=lbx-proxy --fields id
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh create clients/<上で出た id>/protocol-mappers/models -r letsblog \
+  -s name='realm roles (roles claim)' -s protocol=openid-connect -s protocolMapper=oidc-usermodel-realm-role-mapper \
+  -s 'config."claim.name"=roles' -s 'config.multivalued=true' -s 'config."jsonType.label"=String' \
+  -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=true' \
+  -s 'config."userinfo.token.claim"=true' -s 'config."introspection.token.claim"=true'
+```
+
+secret を後から変えるときは `docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md` と同じく、Keycloak 側と `.env` の両方を揃える。
+
 関連: [EXTERNAL_OLLAMA.md](EXTERNAL_OLLAMA.md) / [EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) /
 [DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)

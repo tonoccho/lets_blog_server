@@ -103,11 +103,17 @@ class NoPenpotInEnvExample(unittest.TestCase):
         ]
         self.assertEqual([], offenders)
 
+    # #1805: extensions の Penpot を Keycloak の OIDC クライアントとして登録するための secret だけは例外。
+    # 同梱 Penpot の秘密値ではない(同梱の Penpot は #1753 で撤去済みのまま)。
+    OIDC_CLIENT_SECRET = "KEYCLOAK_PENPOT_CLIENT_SECRET"
+
     def test_no_penpot_secret_is_generated(self):
-        self.assertNotIn("PENPOT", read("scripts/lib/env-secrets.sh"))
+        text = read("scripts/lib/env-secrets.sh").replace(self.OIDC_CLIENT_SECRET, "")
+        self.assertNotIn("PENPOT", text)
 
     def test_check_env_does_not_mention_penpot(self):
-        self.assertNotIn("PENPOT", read("scripts/check-env.sh").upper())
+        text = read("scripts/check-env.sh").upper().replace(self.OIDC_CLIENT_SECRET, "")
+        self.assertNotIn("PENPOT", text)
 
 
 class NoPenpotInNginx(unittest.TestCase):

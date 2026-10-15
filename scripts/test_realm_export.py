@@ -116,6 +116,98 @@ class RealmExportClientSecretsComeFromEnvironmentTest(unittest.TestCase):
                 self.assertIn("%s: ${%s}" % (var, var), block)
 
 
+class RealmExportExtensionsClientsTest(unittest.TestCase):
+    """#1805: extensions(GitLab・Penpot・proxy)の OIDC クライアント。
+
+    リダイレクト URI は extensions の BASE_DOMAIN / HTTPS_PORT に当たる環境変数から import 時に作り、
+    secret は `${VAR:既定値}`。Web UI から到達できない realm 設定なのでここで表現する。
+    """
+
+    CLIENTS = {
+        "lbx-gitlab": ("KEYCLOAK_GITLAB_CLIENT_SECRET", ["gitlab"]),
+        "lbx-penpot": ("KEYCLOAK_PENPOT_CLIENT_SECRET", ["penpot"]),
+        "lbx-proxy": ("KEYCLOAK_PROXY_CLIENT_SECRET", ["portal", "comfyui"]),
+    }
+
+    def setUp(self):
+        with open(REALM_EXPORT, encoding="utf-8") as f:
+            self.realm = json.load(f)
+        self.by_id = {c["clientId"]: c for c in self.realm["clients"]}
+        self.example = {}
+        with open(os.path.join(REPO_ROOT, ".env.example"), encoding="utf-8") as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.rstrip("\n").split("=", 1)
+                    self.example[k] = v
+
+    def test_three_confidential_standard_flow_clients_exist(self):
+        for client_id in self.CLIENTS:
+            with self.subTest(client=client_id):
+                c = self.by_id[client_id]
+                self.assertIs(c["publicClient"], False)
+                self.assertIs(c["standardFlowEnabled"], True)
+                self.assertIs(c["serviceAccountsEnabled"], False)
+
+    def test_secrets_are_env_placeholders_defaulting_to_the_example_values(self):
+        for client_id, (var, _hosts) in self.CLIENTS.items():
+            with self.subTest(client=client_id):
+                self.assertEqual("${%s:%s}" % (var, self.example[var]), self.by_id[client_id]["secret"])
+
+    def test_redirect_uris_come_in_with_port_and_without_port_forms(self):
+        """既定ポート(443)ではブラウザが `:443` を付けないため、両形式を登録する。"""
+        for client_id, (_var, hosts) in self.CLIENTS.items():
+            with self.subTest(client=client_id):
+                uris = self.by_id[client_id]["redirectUris"]
+                self.assertEqual(2 * len(hosts), len(uris))
+                self.assertEqual(len(uris), len(set(uris)))
+                for host in hosts:
+                    base = r"https://%s\.\$\{LBX_BASE_DOMAIN:[^}]+\}" % host
+                    with_port = [u for u in uris if re.match(base + r":\$\{LBX_HTTPS_PORT:[^}]+\}/", u)]
+                    without_port = [u for u in uris if re.match(base + r"/", u)]
+                    self.assertEqual(1, len(with_port), uris)
+                    self.assertEqual(1, len(without_port), uris)
+                    # 同じパスであること
+                    self.assertEqual(
+                        with_port[0].split("}/", 1)[1], without_port[0].split("}/", 1)[1]
+                    )
+
+    def test_env_example_documents_the_redirect_uri_variables(self):
+        with open(os.path.join(REPO_ROOT, ".env.example"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertRegex(text, r"(?m)^# LBX_BASE_DOMAIN=localhost$")
+        self.assertRegex(text, r"(?m)^# LBX_HTTPS_PORT=443$")
+
+    def test_readme_states_the_first_import_without_overlay_uses_public_secrets(self):
+        with open(os.path.join(REPO_ROOT, "infra", "keycloak", "README.md"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("重ねない構成で初回 import", text)
+        self.assertIn("dev-only", text)
+
+    def test_proxy_client_puts_realm_roles_in_a_roles_claim_for_the_admin_check(self):
+        mappers = self.by_id["lbx-proxy"].get("protocolMappers") or []
+        role_mappers = [m for m in mappers if m["protocolMapper"] == "oidc-usermodel-realm-role-mapper"]
+        self.assertEqual(1, len(role_mappers))
+        cfg = role_mappers[0]["config"]
+        self.assertEqual("roles", cfg["claim.name"])
+        self.assertEqual("true", cfg["multivalued"])
+        self.assertEqual("true", cfg["access.token.claim"])
+        self.assertEqual("true", cfg["id.token.claim"])
+        self.assertIn("admin", [r["name"] for r in self.realm["roles"]["realm"]])
+
+    def test_gitlab_and_penpot_are_not_role_restricted(self):
+        for client_id in ("lbx-gitlab", "lbx-penpot"):
+            with self.subTest(client=client_id):
+                mappers = self.by_id[client_id].get("protocolMappers") or []
+                self.assertEqual([], [m for m in mappers if "role" in m["protocolMapper"]])
+
+    def test_existing_clients_are_untouched(self):
+        for client_id in ("letsblog-web", "letsblog-services"):
+            self.assertIn(client_id, self.by_id)
+        self.assertEqual(
+            ["https://localhost/api/auth/callback/keycloak"], self.by_id["letsblog-web"]["redirectUris"]
+        )
+
+
 class RealmExportOfflineSessionPolicyTest(unittest.TestCase):
     """offline session の寿命方針(#1100)。Web UI から到達できない realm 設定のため、
     Gherkin ではなくここで表現する(上記 docstring の文書化された例外)。

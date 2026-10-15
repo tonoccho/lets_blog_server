@@ -1037,6 +1037,173 @@
         "organization",
         "microprofile-jwt"
       ]
+    },
+    {
+      "id": "1ab7d62a-0fa3-518a-9c21-109b2ffd0d88",
+      "clientId": "lbx-gitlab",
+      "name": "Extensions GitLab",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_GITLAB_CLIENT_SECRET:dev-only-gitlab-secret-change-me}",
+      "redirectUris": [
+        "https://gitlab.${LBX_BASE_DOMAIN:localhost}:${LBX_HTTPS_PORT:443}/users/auth/openid_connect/callback",
+        "https://gitlab.${LBX_BASE_DOMAIN:localhost}/users/auth/openid_connect/callback"
+      ],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "backchannel.logout.session.required": "true",
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "organization",
+        "microprofile-jwt"
+      ]
+    },
+    {
+      "id": "5c57b594-d21d-51e6-a495-2bb84fd2cf53",
+      "clientId": "lbx-penpot",
+      "name": "Extensions Penpot",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_PENPOT_CLIENT_SECRET:dev-only-penpot-secret-change-me}",
+      "redirectUris": [
+        "https://penpot.${LBX_BASE_DOMAIN:localhost}:${LBX_HTTPS_PORT:443}/api/auth/oidc/callback",
+        "https://penpot.${LBX_BASE_DOMAIN:localhost}/api/auth/oidc/callback"
+      ],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "backchannel.logout.session.required": "true",
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "organization",
+        "microprofile-jwt"
+      ]
+    },
+    {
+      "id": "c154a0cc-cb62-5d3b-9a80-4856db4402f3",
+      "clientId": "lbx-proxy",
+      "name": "Extensions Portal / ComfyUI (admin only)",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_PROXY_CLIENT_SECRET:dev-only-proxy-secret-change-me}",
+      "redirectUris": [
+        "https://portal.${LBX_BASE_DOMAIN:localhost}:${LBX_HTTPS_PORT:443}/oauth2/callback",
+        "https://portal.${LBX_BASE_DOMAIN:localhost}/oauth2/callback",
+        "https://comfyui.${LBX_BASE_DOMAIN:localhost}:${LBX_HTTPS_PORT:443}/oauth2/callback",
+        "https://comfyui.${LBX_BASE_DOMAIN:localhost}/oauth2/callback"
+      ],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "backchannel.logout.session.required": "true",
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "protocolMappers": [
+        {
+          "id": "553fce7c-5e0a-5f8e-b3d4-2fc4bbccf23f",
+          "name": "realm roles (roles claim)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "organization",
+        "microprofile-jwt"
+      ]
     }
   ],
   "users": [

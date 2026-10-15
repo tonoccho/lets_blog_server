@@ -201,7 +201,7 @@ install_prerequisites() {
 #
 # 例外: APP_ENCRYPTION_KEY は "changeme_" ではなく、CredentialCipher(packages/lbs-common)が
 # strict Base64として要求するダミーの有効値を既定にしている(check-env.shの特別扱いと同じ理由)。
-# 例外: KEYCLOAK_SERVICES_CLIENT_SECRET / KEYCLOAK_WEB_CLIENT_SECRET は "changeme_" ではなく
+# 例外: KEYCLOAK_{SERVICES,WEB,GITLAB,PENPOT,PROXY}_CLIENT_SECRET は "changeme_" ではなく
 # "dev-only-" で始まる既定値を持つ。この既定値は公開リポジトリに載っているため、初回構築では
 # ここで個別にランダム値へ置き換える(#1551)。realm 側には docker-compose.yml が同じ環境変数を
 # keycloak コンテナへ渡し、infra/keycloak/realm-export.json の `${VAR:既定値}` が import 時に

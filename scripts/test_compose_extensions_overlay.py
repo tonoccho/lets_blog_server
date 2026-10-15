@@ -16,7 +16,7 @@ import unittest
 from test_compose_no_bundled_comfyui import COMPOSE, REPO_ROOT, ComposeConfigHarness
 
 EXTENSIONS_COMPOSE = os.path.join(REPO_ROOT, "docker-compose.extensions.yml")
-JOINED = ("ai", "media", "platform", "publishing")
+JOINED = ("ai", "media", "platform", "publishing", "keycloak")
 SHARED = "lbx-shared"
 
 
@@ -25,7 +25,7 @@ def service_networks(config, name):
 
 
 class ExtensionsOverlayNetworks(ComposeConfigHarness):
-    """AC1: ai / media / platform / publishing だけが外部ネットワークへ参加し、元のネットワークも保つ。"""
+    """AC1: ai / media / platform / publishing / keycloak(#1805)だけが外部ネットワークへ参加し、元のネットワークも保つ。"""
 
     def test_overlay_joins_only_four_services_and_keeps_existing_networks(self):
         base = self.full_config()
@@ -46,6 +46,46 @@ class ExtensionsOverlayNetworks(ComposeConfigHarness):
             self.assertFalse((net or {}).get("external"))
         for name in base["services"]:
             self.assertNotIn(SHARED, service_networks(base, name))
+
+
+class ExtensionsOverlayKeycloak(ComposeConfigHarness):
+    """#1805 AC1: keycloak は重ねると lbs-net と lbx-shared に別名つきで参加し、重ねないと lbs-net だけ。"""
+
+    def test_overlay_joins_keycloak_to_both_networks_with_an_alias(self):
+        over = self.full_config(compose_files=(COMPOSE, EXTENSIONS_COMPOSE))
+        self.assertEqual({"lbs-net", SHARED}, service_networks(over, "keycloak"))
+        aliases = over["services"]["keycloak"]["networks"][SHARED].get("aliases") or []
+        self.assertTrue(aliases, "lbx-shared での別名が無い")
+        self.assertIn("lbs-keycloak", aliases)
+
+    def test_base_keeps_keycloak_on_lbs_net_only(self):
+        base = self.full_config()
+        self.assertEqual({"lbs-net"}, service_networks(base, "keycloak"))
+
+    def test_overlay_passes_redirect_uri_and_client_secret_vars_to_keycloak(self):
+        over = self.full_config(
+            extra_env={"LBX_BASE_DOMAIN": "x.example", "LBX_HTTPS_PORT": "9443"},
+            compose_files=(COMPOSE, EXTENSIONS_COMPOSE),
+        )
+        env = over["services"]["keycloak"]["environment"]
+        self.assertEqual("x.example", env["LBX_BASE_DOMAIN"])
+        self.assertEqual("9443", env["LBX_HTTPS_PORT"])
+        for var in (
+            "KEYCLOAK_GITLAB_CLIENT_SECRET",
+            "KEYCLOAK_PENPOT_CLIENT_SECRET",
+            "KEYCLOAK_PROXY_CLIENT_SECRET",
+        ):
+            self.assertIn(var, env)
+
+    def test_base_does_not_pass_the_extensions_vars_to_keycloak(self):
+        env = self.full_config()["services"]["keycloak"]["environment"]
+        for var in env:
+            self.assertFalse(var.startswith("LBX_"), var)
+            self.assertNotIn(var, (
+                "KEYCLOAK_GITLAB_CLIENT_SECRET",
+                "KEYCLOAK_PENPOT_CLIENT_SECRET",
+                "KEYCLOAK_PROXY_CLIENT_SECRET",
+            ))
 
 
 class ExtensionsOverlayEnv(ComposeConfigHarness):

@@ -98,6 +98,22 @@ docker network rm kc-temp-net
    「開発用クライアントシークレットについて」に記載した固定プレースホルダ値に
    戻す(実際に生成されたランダムなシークレットのままコミットしない)。
 
+## extensions の OIDC クライアント(#1805)
+
+`realm-export.json` には extensions 用の confidential クライアントが 3 つある(`lbx-gitlab` / `lbx-penpot` / `lbx-proxy`)。
+リダイレクト URI は `${LBX_BASE_DOMAIN:localhost}` と `${LBX_HTTPS_PORT:443}`(ポート付きと、既定ポートでブラウザが省くポート無しの両方)、secret は
+`${KEYCLOAK_{GITLAB,PENPOT,PROXY}_CLIENT_SECRET:既定値}` から import 時に作る。この環境変数は `docker-compose.extensions.yml` を
+重ねたときだけ keycloak へ渡る(重ねないときは既定値になる)。`lbx-proxy` は realm ロールを `roles` クレームに載せ、
+proxy 側が `admin` を確かめる。
+
+既存の Keycloak にクライアントを足す kcadm の手順と、extensions の `.env` に渡す値は
+[docs/EXTENSIONS_CONNECTION.md](../../docs/EXTENSIONS_CONNECTION.md) の「extensions から lets_blog の Keycloak を OIDC の発行者として使う」。
+手順は利用者が実行する。
+
+**既知の挙動**: 重ねない構成で初回 import すると、3 クライアントは `dev-only-*-change-me` の公開 secret で登録される
+(重ねれば `.env` の値になる)。既存の realm には後から効かないので、公開 secret のまま使わないなら、
+初回から `docker-compose.extensions.yml` を重ねるか、上の docs の kcadm 手順で secret を設定し直す。
+
 ## 動作確認
 
 ```bash

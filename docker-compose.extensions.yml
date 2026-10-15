@@ -9,13 +9,31 @@
 # extensions 側が先に外部ネットワークを作っている必要がある(extensions の
 # scripts/create-shared-network.sh)。無いホストでは重ねないこと。
 #
-# ai / media / platform / publishing だけを参加させる。ネットワーク名は LBX_SHARED_NETWORK で変えられる。
+# ai / media / platform / publishing / keycloak だけを参加させる。ネットワーク名は LBX_SHARED_NETWORK で変えられる。
 # `networks` はマージされるが、リスト形式の既存値(lbs-net)を落とさないよう、ここでも列挙する。
 # platform は docker-socket-proxy-net への参加も保つ。
 #
 # PlantUML は extensions の別名 lbx-plantuml に向ける。Ollama / ComfyUI の接続先は環境変数ではなく
 # システム設定(llm_ollama_base_url / comfyui_base_url)で指定する。手順は docs/EXTENSIONS_CONNECTION.md。
+#
+# keycloak も参加させ、extensions のコンテナが lets_blog の Keycloak を OIDC の発行者として使えるようにする(#1805)。
+# 別名 lbs-keycloak で token / JWKS を引く(http://lbs-keycloak:8080/auth/realms/letsblog/protocol/openid-connect/{token,certs})。
+# issuer は KC_HOSTNAME で固定のまま(https://localhost/auth/realms/letsblog)で、変わらない。
+# extensions 用クライアント(realm-export.json の lbx-*)のリダイレクト URI と secret は、import 時に
+# このオーバーレイが渡す環境変数から作る。既存の realm には効かない(手順は docs/EXTENSIONS_CONNECTION.md)。
 services:
+  keycloak:
+    networks:
+      lbs-net: {}
+      lbx-shared:
+        aliases:
+          - lbs-keycloak
+    environment:
+      LBX_BASE_DOMAIN: ${LBX_BASE_DOMAIN:-localhost}
+      LBX_HTTPS_PORT: ${LBX_HTTPS_PORT:-443}
+      KEYCLOAK_GITLAB_CLIENT_SECRET: ${KEYCLOAK_GITLAB_CLIENT_SECRET:-dev-only-gitlab-secret-change-me}
+      KEYCLOAK_PENPOT_CLIENT_SECRET: ${KEYCLOAK_PENPOT_CLIENT_SECRET:-dev-only-penpot-secret-change-me}
+      KEYCLOAK_PROXY_CLIENT_SECRET: ${KEYCLOAK_PROXY_CLIENT_SECRET:-dev-only-proxy-secret-change-me}
   ai:
     networks:
       - lbs-net

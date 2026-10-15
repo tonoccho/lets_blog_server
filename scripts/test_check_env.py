@@ -304,6 +304,61 @@ class CheckEnvWarnsOnRepositoryDefaultClientSecrets(unittest.TestCase):
         self.assertIn("KEYCLOAK_SERVICES_CLIENT_SECRET", out)
 
 
+class CheckEnvHandlesExtensionsClientSecrets(unittest.TestCase):
+    """#1805 AC3: extensions 用の3つのクライアントシークレットが欠けると検出し、既定値のままなら警告する。"""
+
+    KEYS = (
+        "KEYCLOAK_GITLAB_CLIENT_SECRET",
+        "KEYCLOAK_PENPOT_CLIENT_SECRET",
+        "KEYCLOAK_PROXY_CLIENT_SECRET",
+    )
+    VALID_ENCRYPTION_KEY = CheckEnvDetectsAppEncryptionKeyProblems.VALID_ENCRYPTION_KEY
+    setUp = CheckEnvDetectsAppEncryptionKeyProblems.setUp
+    tearDown = CheckEnvDetectsAppEncryptionKeyProblems.tearDown
+    env_from_example = CheckEnvDetectsAppEncryptionKeyProblems.env_from_example
+    run_check = CheckEnvDetectsAppEncryptionKeyProblems.run_check
+
+    def test_example_defines_the_three_keys_with_dev_only_defaults(self):
+        keys = keys_of(EXAMPLE)
+        with open(EXAMPLE, encoding="utf-8") as f:
+            text = f.read()
+        for key in self.KEYS:
+            self.assertEqual(1, keys.count(key), key)
+            self.assertRegex(text, r"(?m)^%s=dev-only-.*-change-me$" % key)
+
+    def test_missing_secret_is_detected_by_name(self):
+        for key in self.KEYS:
+            with self.subTest(missing=key):
+                target = self.env_from_example(overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY})
+                with open(target, encoding="utf-8") as f:
+                    kept = [l for l in f.read().splitlines() if not l.startswith(key + "=")]
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write("\n".join(kept) + "\n")
+                r = self.run_check(target)
+                self.assertNotEqual(0, r.returncode, r.stdout)
+                self.assertIn(key, r.stdout + r.stderr)
+
+    def test_default_values_warn_naming_the_three_keys(self):
+        target = self.env_from_example(overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY})
+        r = self.run_check(target)
+        for key in self.KEYS:
+            self.assertIn(key, r.stdout + r.stderr)
+        self.assertEqual(0, r.returncode, r.stdout)
+
+    def test_unique_values_do_not_warn(self):
+        overrides = {k: "c" * 64 for k in self.KEYS}
+        overrides.update(
+            APP_ENCRYPTION_KEY=self.VALID_ENCRYPTION_KEY,
+            KEYCLOAK_SERVICES_CLIENT_SECRET="a" * 64,
+            KEYCLOAK_WEB_CLIENT_SECRET="b" * 64,
+        )
+        r = self.run_check(self.env_from_example(overrides=overrides))
+        out = r.stdout + r.stderr
+        for key in self.KEYS:
+            self.assertNotIn(key, out)
+        self.assertEqual(0, r.returncode, out)
+
+
 class CheckEnvIsLocaleIndependent(unittest.TestCase):
     """#1591: sort と comm の照合順がロケールで食い違わないこと。
 
