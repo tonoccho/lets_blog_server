@@ -6,13 +6,14 @@ ADR は「なぜ」を、この文書は「何を話すか」を持つ(ADR の�
 - 対象は **LLM・画像生成・図のレンダリング** の3つの契約と、**プラグインの登録**(Penpot を含む)。SNS 告知(WordPress プラグイン)は対象外。
 - 「現行」は 2026-10-13 時点の `develop` を読んで確認した事実。契約の「使う部分集合」は現行コードが実際に送受信するものに合わせた。
 - 契約の値のうち「決定」と書いたものは本文書で決めたもの。子 Issue で変える場合は新しい ADR を作る。
+- 認証(§0 の「認証」と §4.2 の認証情報の単位)は [ADR-0012](../adr/0012-extensions-tools-keycloak-auth.md)(2026-10-15)で改訂した。
 
 ## 0. 全契約に共通すること
 
 | 項目 | 内容 |
 | --- | --- |
 | 接続先 | 登録した URL(§4)。エンドポイントはその URL からの相対パス。末尾の `/` は付けても付けなくてもよい |
-| 認証 | 認証情報が登録されていれば `Authorization: Bearer <認証情報>` を付ける。無ければヘッダーを付けない(認証を持たないプラグインに空のヘッダーを送らない。現行の Ollama と同じ) |
+| 認証 | 認証情報が登録されていれば `Authorization: Bearer <認証情報>` を付ける。無ければヘッダーを付けない(認証を持たないプラグインに空のヘッダーを送らない。現行の Ollama と同じ)。**例外**([ADR-0012](../adr/0012-extensions-tools-keycloak-auth.md)): 宛先がシステム設定(と `PLANTUML_BASE_URL`)の Ollama・ComfyUI・PlantUML で、`KEYCLOAK_TOOLS_CLIENT_SECRET` が設定されているときは、Keycloak(realm `letsblog`、クライアント `letsblog-tools-client`、client credentials)のトークンを Bearer で付ける。取れなければ理由の分かるエラーにし、認証なしへ落とさない。プロジェクト単位の上書き先へは送らない。既定は無効 |
 | エラー応答 | HTTP の 4xx / 5xx と、OpenAI 互換のエラー本文 `{"error":{"message":"…","type":"…","code":"…"}}`。中核は `message` を利用者へ見せ、本文が無い・形が違うときは HTTP ステータスだけを見せる |
 | 到達できないとき | 接続できない・タイムアウトは、中核が「プラグインに届かない」(理由と接続先つき)として扱う。現行の `ComfyUiUnreachableException`(理由と接続先つきの 502、#1126)と同じ扱いに揃える |
 | 接続先の検査 | 接続のたびに `ConnectionDestinationGuard`(§4)を通し、検査したアドレスへ固定して接続する(`PinnedHttpClients`) |
@@ -199,8 +200,10 @@ draw.io の**編集画面**はサーバー間の契約ではなく、VS Code 拡
 プロジェクトで上書きしたら、その種類の登録は上書き側のものだけを見る(項目ごとの混ぜ合わせはしない)。
 
 **認証情報はプロジェクト単位の登録にだけ置ける**(決定。現行の ChatGPT / Claude の API キーはプロジェクト単位だけで、システム設定へフォールバックしない
-(#1568 / #1521)という規則を維持する)。システム全体の登録は認証情報を持たない(現行の Ollama / ComfyUI / PlantUML と同じ、LAN 内で届く前提)。
-この規則を緩める場合は子 Issue(登録の土台)で利用者に確かめる。
+(#1568 / #1521)という規則を維持する)。システム全体の登録は、登録の項目としての認証情報を持たない。
+ただし [ADR-0012](../adr/0012-extensions-tools-keycloak-auth.md) により、システム設定の宛先(Ollama・ComfyUI・PlantUML)へは、登録の項目ではなく
+lets_blog の Keycloak のトークン(client credentials。§0)を付けられる(任意、既定は無効)。LAN 内で届く前提は、この任意の認証が無効のときの扱い。
+プロジェクト単位の上書き先には、このトークンを送らない。この規則を緩める場合は子 Issue(登録の土台)で利用者に確かめる。
 
 登録の管理(保存・解決・暗号化・検査・状況の問い合わせ)は platform-service に一本化し(決定)、`ai` / `media` / `content` / `publishing` は
 内部 API で解決結果を読む(現行の `RemoteLlmConfigProvider` が platform のシステム設定を読むのと同じ形)。理由: 図のレンダリングは3サービス

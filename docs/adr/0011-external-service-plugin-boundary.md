@@ -3,6 +3,7 @@
 - **日付**: 2026-10-13
 - **関連**: #1755(Epic)、#1756、#1745 / #1746(同梱コンテナの削除)、#1753(外部 Penpot)、#1572(SNS 告知)、
   #1762 / #1763(接続先の自動設定の経路)
+- **改訂**: 認証の決定(CONTRACTS.md §0・§4.2)は [ADR-0012](0012-extensions-tools-keycloak-auth.md) が改訂した(2026-10-15)
 - **契約の中身**: [docs/plugins/CONTRACTS.md](../plugins/CONTRACTS.md)(本 ADR にはエンドポイントやペイロードを書かない)
 
 ## 状態 (Status)

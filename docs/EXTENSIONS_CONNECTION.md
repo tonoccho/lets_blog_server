@@ -239,5 +239,23 @@ docker compose exec keycloak /opt/keycloak/bin/kcadm.sh create clients/<上で�
 
 secret を後から変えるときは `docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md` と同じく、Keycloak 側と `.env` の両方を揃える。
 
+## 認証(#1803、[ADR-0012](adr/0012-extensions-tools-keycloak-auth.md))
+
+lets_blog から extensions の Ollama・ComfyUI・PlantUML への API 呼び出しは、lets_blog の Keycloak(realm `letsblog`)のトークン
+(client credentials)で認証できる。**任意で、既定は無効**。
+
+| 項目 | 内容 |
+| --- | --- |
+| クライアント | `letsblog-tools-client`(専用。`letsblog-services` は `realm-management` のロールを持つので流用しない) |
+| `aud` / `azp` / `iss` | `lbx-tools` / `letsblog-tools-client` / lets_blog の公開 URL + `/auth/realms/letsblog` |
+| lets_blog の有効化 | `.env` の `KEYCLOAK_TOOLS_CLIENT_SECRET` を設定する。設定したのにトークンが取れなければ、理由つきのエラーになる |
+| extensions の有効化 | extensions の `.env` で有効にしたときだけ検証する。別ホストの extensions は、lets_blog の公開 URL から JWKS を取る |
+| 送り先 | システム設定(と `PLANTUML_BASE_URL`)の宛先だけ。プロジェクト単位の上書き先には送らない |
+
+- **GitLab API は、アクセストークンのまま**(上の「extensions の GitLab へつなぐ」)。Keycloak のトークンにはしない。
+- GitLab と Penpot は、それぞれ自分の OIDC ログインで守る(上の「extensions から lets_blog の Keycloak を OIDC の発行者として使う」の節)。proxy では守らない。
+- ポータルと ComfyUI の画面は `admin` だけ。GitLab と Penpot は、ログインできる lets_blog のアカウント全員。
+- ブラウザの SSO は同じ PC だけが対象。API は別ホストも対象。
+
 関連: [EXTERNAL_OLLAMA.md](EXTERNAL_OLLAMA.md) / [EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) /
 [DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)

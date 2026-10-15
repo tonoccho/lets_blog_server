@@ -424,17 +424,22 @@ class MigrationAdr(unittest.TestCase):
         """既存 ADR を書き換えていないこと。
 
         当時 GitHub を使っていた事実は事実として正しい。
+        新しい ADR への参照(行の追加)と索引(README)への追記は書き換えではない(#1803)。
+        行を削除・変更したものだけを書き換えとみなす。
         """
-        untouched = subprocess.run(
-            ["git", "diff", "--name-only", "origin/develop...HEAD", "--", ADR_DIR],
+        numstat = subprocess.run(
+            ["git", "diff", "--numstat", "origin/develop...HEAD", "--", ADR_DIR],
             cwd=REPO_ROOT, capture_output=True, text=True,
-        ).stdout.split()
-        modified = [
-            p for p in untouched
-            if subprocess.run(["git", "cat-file", "-e", "origin/develop:" + p],
-                              cwd=REPO_ROOT, capture_output=True).returncode == 0
-        ]
-        self.assertEqual([], modified, "既存の ADR が変更されている: %s" % modified)
+        ).stdout.splitlines()
+        rewritten = []
+        for line in numstat:
+            _added, deleted, path = line.split("\t", 2)
+            if deleted == "0" or path.endswith("README.md"):
+                continue
+            if subprocess.run(["git", "cat-file", "-e", "origin/develop:" + path],
+                              cwd=REPO_ROOT, capture_output=True).returncode == 0:
+                rewritten.append(path)
+        self.assertEqual([], rewritten, "既存の ADR が変更されている: %s" % rewritten)
 
 
 class SkillNames(unittest.TestCase):
