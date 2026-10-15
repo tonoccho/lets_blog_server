@@ -73,6 +73,7 @@ ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 MEASURABLE_PATTERNS = [
     r"^services/[^/]+/src/",
     r"^packages/[^/]+/src/",
+    r"^plugins/[^/]+/src/",
     r"^apps/[^/]+/src/",
 ]
 
@@ -390,6 +391,10 @@ def jacoco_branches(changed_lines):
     packages_dir = os.path.join(ROOT, "packages")
     if os.path.isdir(packages_dir):
         roots += [os.path.join("packages", d) for d in os.listdir(packages_dir)]
+    # #1812: 参照プラグイン(plugins/<name>/)も JaCoCo が走査する Gradle サブプロジェクト。
+    plugins_dir = os.path.join(ROOT, "plugins")
+    if os.path.isdir(plugins_dir):
+        roots += [os.path.join("plugins", d) for d in os.listdir(plugins_dir)]
 
     for module in roots:
         xml = os.path.join(ROOT, module, "build", "reports", "jacoco", "test", "jacocoTestReport.xml")

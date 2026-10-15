@@ -57,6 +57,11 @@ DOC_PATTERNS = [
 #
 #   apps|services|packages/*/src/
 #       実装ソースツリー。従来からのプロダクション判定。
+#   plugins/*/src/
+#       【採用】参照プラグイン(Claude アダプターなど。#1812)の実装ソースツリー。
+#       services/・packages/ と同じ Gradle サブプロジェクトで、src/test/ は TEST_PATTERNS 側で
+#       テストコードになる。plugins/*/Dockerfile は下の Dockerfile 規則でプロダクション、
+#       plugins/*/build.gradle は build.gradle 規則で中立。
 #   apps/*/webviews/
 #       【採用】VSCode 拡張の Webview 実装(diagramGallery.js ほか)。
 #       利用者が操作する UI そのもので、プロダクションでない根拠が無い(#983 利用者決定)。
@@ -91,6 +96,7 @@ PRODUCTION_PATTERNS = [
     r"^apps/[^/]+/src/",
     r"^services/[^/]+/src/",
     r"^packages/[^/]+/src/",
+    r"^plugins/[^/]+/src/",
     r"^apps/[^/]+/webviews/",
     r"^apps/[^/]+/messages/",
     r"^apps/[^/]+/(next|postcss|tailwind)\.config\.[cm]?[jt]s$",

@@ -352,6 +352,8 @@ class MeasurabilityClassifier(unittest.TestCase):
         "services/identity/src/main/java/com/example/identity/UserService.java",
         "services/content/src/main/kotlin/com/example/content/Post.kt",
         "packages/lbs-common/src/main/java/com/example/common/Json.java",
+        # #1812: plugins/<name>/ は JaCoCo が走査する Gradle サブプロジェクト。
+        "plugins/claude-adapter/src/main/java/com/letsblog/plugins/claude/ClaudeAdapter.java",
         "apps/web/src/app/page.tsx",
         "apps/extension/src/config.ts",
         # #1272: `.tsx` の Panel は拡張ホスト層の免除の対象外(apps/web に実測対象が多数ある)。
@@ -938,6 +940,23 @@ class LineScopedJacocoBranches(unittest.TestCase):
         with mock.patch.object(ccc, "ROOT", self.tmp):
             result = ccc.jacoco_branches({self.rel: {50}})
         self.assertEqual(result[self.rel], (4, 0))
+
+    def test_plugins_subproject_report_is_read(self):
+        """#1812: plugins/<name>/ の JaCoCo レポートも services/ packages/ と同じに読む。"""
+        rel = "plugins/claude-adapter/src/main/java/com/letsblog/plugins/claude/ClaudeAdapter.java"
+        xml_dir = os.path.join(self.tmp, "plugins", "claude-adapter", "build", "reports", "jacoco", "test")
+        os.makedirs(xml_dir)
+        with open(os.path.join(xml_dir, "jacocoTestReport.xml"), "w", encoding="utf-8") as f:
+            f.write(
+                '<?xml version="1.0"?>\n<report>\n'
+                '  <package name="com/letsblog/plugins/claude">\n'
+                '    <sourcefile name="ClaudeAdapter.java">\n'
+                '      <line nr="10" mi="0" ci="2" mb="1" cb="3"/>\n'
+                "    </sourcefile>\n  </package>\n</report>\n"
+            )
+        with mock.patch.object(ccc, "ROOT", self.tmp):
+            result = ccc.jacoco_branches({rel: {10}})
+        self.assertEqual(result[rel], (1, 3))
 
     def test_file_with_no_changed_line_reports_zero_branches(self):
         """変更行が分岐を持たない場合は (0, 0) になり、上位で除外できること。"""

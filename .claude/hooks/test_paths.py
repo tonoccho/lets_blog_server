@@ -86,6 +86,9 @@ class ProductionCodeClassification(unittest.TestCase):
         "apps/extension/src/config.ts",
         "services/identity/src/main/java/com/example/identity/UserService.java",
         "packages/lbs-common/src/main/java/com/example/common/Json.java",
+        # #1812: plugins/<name>/ は参照プラグイン(Gradle サブプロジェクト)の置き場。
+        "plugins/claude-adapter/src/main/java/com/letsblog/plugins/claude/ClaudeAdapter.java",
+        "plugins/claude-adapter/Dockerfile",
         # #983 の決定: 拡張の Webview 実装。
         "apps/extension/webviews/diagramGallery.js",
         "apps/extension/webviews/plan.html",
