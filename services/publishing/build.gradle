@@ -57,6 +57,10 @@ dependencies {
     // issue #1123: WordPressBulkManagementClientHikariPoolTestがHikariCPのプール枯渇を
     // 検証するために使う、実DB不要のインメモリJDBCドライバ。
     testImplementation 'com.h2database:h2'
+    // issue #1814: SshjCommandExecutor(sshjでSSH/SFTPを実際に話す実装)を、外部のSSHサーバーの代わりに
+    // 同一JVM内で起動するApache MINA SSHDのサーバー(SSH・SFTPの境界のサーバー側フェイク)に対して通す。
+    testImplementation 'org.apache.sshd:sshd-core:2.15.0'
+    testImplementation 'org.apache.sshd:sshd-sftp:2.15.0'
 }
 
 tasks.named('test') {

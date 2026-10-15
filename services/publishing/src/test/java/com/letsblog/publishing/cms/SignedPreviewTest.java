@@ -28,4 +28,14 @@ class SignedPreviewTest {
         assertThrows(IllegalArgumentException.class, () -> SignedPreview.fromPreviewOutput("{\"url\":\"https://x\"}"));
         assertThrows(IllegalArgumentException.class, () -> SignedPreview.fromPreviewOutput("{\"url\":\"https://x\",\"expires_at\":\"soon\"}"));
     }
+
+    @Test
+    void 解釈できない出力が長いときは200文字で切って例外メッセージに含める() {
+        String longOutput = "x".repeat(300);
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> SignedPreview.fromPreviewOutput(longOutput));
+
+        assertEquals("wp letsblog previewの出力を解釈できません: " + "x".repeat(200) + "…", e.getMessage());
+    }
 }
