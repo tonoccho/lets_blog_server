@@ -270,3 +270,30 @@ export async function requireGitLabStub(): Promise<void> {
     );
   }
 }
+
+/**
+ * PlantUML のスタブ(issue #1802。`GET /png/<encoded>` に固定の PNG を返し、受け取ったソースを記録する)。
+ *
+ * lbs-net 上では `lbx-plantuml:8080`(同じ PC の extensions の PlantUML と同じ名前)、ホストからは
+ * 127.0.0.1:18096 で見える(docker-compose.e2e-stubs.yml の `plantuml-stub`)。
+ *
+ * `StubName` / `ALL_STUBS` には**入れない**。エラー注入と reset をするシナリオ(`stubs/plantuml-stub.feature`、
+ * @destructive)が、`resetAllStubs` や他の図のシナリオと並列に走ると、記録したソースを消してしまうため。
+ */
+export const PLANTUML_STUB_URL = 'http://127.0.0.1:18096';
+
+/** PlantUML スタブが起動していなければ、スキップではなくエラーで落とす(#843)。 */
+export async function requirePlantUmlStub(): Promise<void> {
+  let up = false;
+  try {
+    const res = await fetch(`${PLANTUML_STUB_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    up = res.ok;
+  } catch {
+    up = false;
+  }
+  if (!up) {
+    throw new Error(
+      `PlantUML スタブが起動していません: ${PLANTUML_STUB_URL}/health\n\n${START_HINT}`
+    );
+  }
+}

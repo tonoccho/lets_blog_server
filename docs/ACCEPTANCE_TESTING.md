@@ -443,6 +443,26 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 | `linkedin-stub` | LinkedIn API(認可画面・トークン交換(refresh token は返さない)・userinfo の sub と名前・ugcPosts への投稿(ARTICLE + originalUrl)。接続したメンバー本人のプロフィールだけ。#1581) | WordPress の wp-config 定数 `LETSBLOG_LINKEDIN_API_BASE_URL`(letsblog プラグイン)、`LINKEDIN_API_BASE_URL` / `LINKEDIN_TOKEN_URL` / `LINKEDIN_AUTHORIZE_URL`(project) | 18092 |
 | `hatena-stub` | はてなブックマーク(OAuth 1.0a のリクエストトークン・認可画面・アクセストークン・自分の情報・`POST /rest/1/my/bookmark` へのブックマーク追加。HMAC-SHA1 の署名を実際に検証し、コメントは100文字まで。#1582) | WordPress の wp-config 定数 `LETSBLOG_HATENA_API_BASE_URL`(letsblog プラグイン)、`HATENA_REQUEST_TOKEN_URL` / `HATENA_ACCESS_TOKEN_URL` / `HATENA_AUTHORIZE_URL` / `HATENA_PROFILE_URL`(project) | 18093 |
 
+| `plantuml-stub` | PlantUML サーバー(`GET /png/<encoded>` に固定の PNG を返す。受け取ったソースを復号して記録し、`@startuml` が無ければ 400 + `X-PlantUML-Diagram-Error`、8192 バイトを超える URI なら 414。#1802) | media の `PLANTUML_BASE_URL`(`http://lbx-plantuml:8080`。スタブが別名 `lbx-plantuml` を持つ) | 18096 |
+
+### 規則: 受け入れテストは extensions のツールをすべてモックで受ける(#1802、2026-10-15 利用者の決定)
+
+受け入れテストは、extensions のツール(Ollama・ComfyUI・PlantUML・ポータル・GitLab・Penpot)を**すべてモックで受ける**。
+GPU の有無や、extensions の実物に関係なく通すためである。**実物は UAT で確かめる**(§19)。
+AT のスタックは、extensions のツールの実物(イメージ)を 1 つも起動しない。
+`scripts/test_compose_no_bundled_plantuml.py` の `E2eStubsUseNoExtensionsToolImage` が、e2e のオーバーレイのどのサービスも
+`plantuml/plantuml-server`・`ollama/ollama`・ComfyUI・`penpotapp/*`・`gitlab/gitlab-ce` のイメージを使わないことを確かめる
+(`scripts/test_compose_healthcheck_cwd.py` の `test_all_stubs_are_covered` が、スタブの一覧を固定する)。
+
+| ツール | AT のスタブ | lbs-net 上の名前 | 受け入れテスト | 備考 |
+| --- | --- | --- | --- | --- |
+| Ollama | `llm-stub` | DB の `llm_ollama_base_url` が指す(`http://llm-stub:8080`) | `features/stubs/external-stubs.feature` ほか | 同梱の Ollama は #1745 で廃止 |
+| ComfyUI | `comfyui-stub` | DB の `comfyui_base_url` が指す(`http://comfyui-stub:8080`) | `features/stubs/comfyui-stub.feature` ほか | 枚数と seed の検証だけ。実機は UAT(§19.2) |
+| PlantUML | `plantuml-stub` | `lbx-plantuml:8080` | `features/stubs/plantuml-stub.feature`、`diagram/plantuml-rendering.feature` | 画像は固定。描かれた内容は UAT(§19.2 R6) |
+| ポータル | `portal-stub` | `lbx-portal:3100` | `features/stubs/portal-stub.feature` | #1782 |
+| GitLab | `gitlab-stub` | `lbx-gitlab:80` | `platform/gitlab-reachability.feature` | `GET /users/sign_in` だけ。#1796 |
+| Penpot | (起動しない。外部 Penpot の到達性は URL の検査で受ける) | — | `platform/` の連携サービスの状況 | #1774 |
+
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
 
@@ -450,7 +470,7 @@ Playwright プロセスなので、分割してもスイート全体が「1ク�
 
 lets_blog_server_extensions のポータルが返す `GET /api/connections` を模す。接続先を `/api/connections` から取り込む機能(#1783)を、
 実物の extensions を動かさずに検証するための置き換えで、各ツール(Ollama / ComfyUI / PlantUML / Penpot / GitLab)のスタブは増やさない
-(Ollama は `llm-stub`、ComfyUI は `comfyui-stub`、PlantUML は実物の plantuml-server が受ける)。
+(Ollama は `llm-stub`、ComfyUI は `comfyui-stub`、PlantUML は `plantuml-stub` が受ける。上の規則の対応表を参照)。
 
 | 項目 | 値 |
 | --- | --- |
@@ -525,10 +545,10 @@ docker compose exec -w /app web sh      # web は npm を /app で動かす
 docker exec -w /app lbs-e2e-llm-stub sh # スタブのソースは /app:ro
 ```
 
-**スタブ化しないもの**: PlantUML / draw.io / WordPress。
-いずれもローカルコンテナとして実物が動くため、実物に対して検証する。
-PlantUML は `docker-compose.yml` に同梱しない(#1784)ので、`docker-compose.e2e-stubs.yml` の `e2e-plantuml`
-(実物の plantuml-server。別名 `lbx-plantuml`)が起動し、media / platform の `PLANTUML_BASE_URL` はそこを指す。
+**スタブ化しないもの**: draw.io / WordPress。
+いずれもローカルコンテナとして実物が動くため、実物に対して検証する(extensions のツールではない)。
+PlantUML は `docker-compose.yml` に同梱せず(#1784)、実物の plantuml-server も AT では起動しない(#1802)。
+`docker-compose.e2e-stubs.yml` の `plantuml-stub`(別名 `lbx-plantuml`)が受け、media / platform の `PLANTUML_BASE_URL` はそこを指す。
 draw.io は `rebuild-acceptance-env.sh` の `AT_PROFILES` の `diagram` で起動する。
 
 ### Ollama は同梱しないので AT スタックにも無い(#1745)
@@ -537,10 +557,10 @@ AT の LLM は `llm-stub` が受ける。同梱の Ollama(`ollama` / `ollama-mod
 かつて #1090 が `docker-compose.e2e-stubs.yml` に置いていた「`profiles: ["ollama"]` で起動対象から外す」設定と、
 その検証 `scripts/test_ollama_at_disabled.py` も無い。
 
-### ComfyUI だけは実機とスタブを併用する
+### ComfyUI は実機を AT で使わず、スタブだけで受ける
 
-ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 の方針決定)。
-どちらか一方への置き換えではないので、シナリオを書くときは下の切り分けに従うこと。
+ComfyUI は**スタブ(`comfyui-stub`)だけで受ける**。かつては実機とスタブを併用した(#1106 / #936、2026-09-07 の方針決定)が、
+実機のシナリオは 2026-10-09 に利用者の判断で削除した(#1714、§19)。実機で確かめることは UAT の手順にある(§19.2)。
 
 | 使うもの | 何を検証するか | シナリオ | タグ | 前提 |
 | --- | --- | --- | --- | --- |
@@ -551,9 +571,7 @@ ComfyUI は**実機とスタブの両方を使う**(#1106 / #936、2026-09-07 �
 batch size 16 の枚数検証や batch count のリピート検証を実生成で行うと現実的な時間に
 収まらない。逆に、実際に絵が出ることはスタブでは分からない。
 
-**スタブは実機のシナリオを置き換えない。** `@slow` のシナリオが ComfyUI の接続先(DB の `comfyui_base_url`)を
-スタブへ向けたまま通ってしまうと、「実機で生成できること」が誰も検証しない状態になる。
-スタブを使う構成(`docker-compose.e2e-stubs.yml`)で `@slow` を回さないこと。
+実機のシナリオは削除済みなので、実機で生成できることは AT では検証されない。UAT の手順(§19.2 R2)で人が確かめる。
 
 スタブが再現しないもの: 画像の見た目、モデル固有の挙動、生成時間、VRAM の実際の解放。
 `/view` が返すのは 1×1 の PNG 固定である(`openai-image` スタブと同じバイト列)。
@@ -2259,6 +2277,18 @@ GPU PC の ComfyUI を CPU で動かすかどうかは、GPU PC 側の起動方�
 1. CPU 構成の Ollama(`ollama-cpu`、コンテナ `lbs-ollama-cpu`)を起動し、`docker exec lbs-ollama-cpu ollama pull qwen2.5:0.5b-instruct` で小さなモデルを用意する。
 2. システム設定の `llm_provider` / `llm_ollama_base_url`(`http://lbs-ollama-cpu:11434/v1`)/ `llm_ollama_model`(`qwen2.5:0.5b-instruct`)を切り替える(確認後は元へ戻す)。
 3. 短い本文でタグ提案(`POST /api/ai/tags`)を 1 回呼び、`LLM_REQUEST_TIMEOUT_SECONDS`(120 秒)以内に応答が返ること。
+
+**R6: PlantUML の図が要素の数に応じて大きく描かれる**(AC-DIAG-004。#1802 で AT から移した)
+
+PlantUML のスタブは固定の PNG を返すので、描かれた内容は AT では確かめられない(受け取ったソースは確かめている)。
+実物の PlantUML サーバー(extensions の `lbx-plantuml`、または `plantuml/plantuml-server` を別途起動)に対して、本番相当のスタックで確かめる。
+
+1. ログインして管理者のトークンを得て、lbs-net の中(`docker exec lbs-media ...`)から `POST http://media:8080/api/render/plantuml` に
+   `{"source": "@startuml\nAlice -> Bob: Hello\n@enduml"}` を送る。
+2. 返った PNG が画像として開け、幅も高さも 1px 以上であること。
+3. 続けて `{"source": "@startuml\nAlice -> Bob: Hello\nBob -> Carol: Relay\nCarol -> Dave: Forward\n@enduml"}` を送る。
+4. 2 回目の PNG の幅と高さが、1 回目より大きいこと(登場人物を増やした分だけ図が大きくなる = ソースが実際に描画へ効いている)。
+5. 1 回目の PNG に埋め込まれたソース(`iTXt` チャンク、キーワード `plantuml`)に「Alice」「Bob」が、2 回目に「Carol」「Dave」が含まれること。
 
 ### 19.3 R5 の代わりのテスト
 

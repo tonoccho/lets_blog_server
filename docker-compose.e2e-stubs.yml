@@ -6,6 +6,7 @@
 # AdSense / Brave Search / OpenAI画像生成 / GitHub)を、決定的に応答するスタブへ置き換える。
 # ComfyUI は外部SaaSではないが、GPU が要り実生成が遅いので、枚数と seed の決定的な検証の
 # ためだけにスタブを併置する(#1106。実生成の検証は #936 が実機で行う)。
+# PlantUML も同じ(#1802): 受け入れテストは extensions のツールをすべてモックで受け、実物のイメージを起動しない。
 # 詳細と使い方は docs/ACCEPTANCE_TESTING.md の「外部依存スタブ」節を参照。
 #
 # #843 で導入した docker-compose.e2e-llm-stub.yml は本ファイルへ統合し、削除した。
@@ -254,27 +255,22 @@ services:
     ports:
       - "127.0.0.1:18095:80"
 
-  # 実物の PlantUML サーバー(#1784)。同梱の plantuml サービスは削除したので、受け入れテストの
-  # 図の描画(diagram/plantuml-rendering.feature)はここで起動する実物で行う。スタブには置き換えない
-  # (図を描けたことを確かめるシナリオが空洞化するため)。同じ PC の extensions と同じ別名
-  # lbx-plantuml(ポート 8080)で lbs-net 上から届く。本番構成(docker-compose.yml 単体)には置かない。
-  e2e-plantuml:
-    image: plantuml/plantuml-server:jetty
-    container_name: lbs-e2e-plantuml
-    restart: unless-stopped
-    mem_limit: 1g
-    # 他のサービスと同じログ上限(#1247)。
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "5"
-    environment:
-      TZ: UTC
+  # PlantUML(GET /png/<encoded> に固定の PNG を返し、受け取ったソースを記録する。issue #1802)。
+  # 受け入れテストは extensions のツールをすべてモックで受ける(docs/ACCEPTANCE_TESTING.md §9)ので、
+  # #1784 で入れた実物の plantuml-server(e2e-plantuml)はやめた。media-service の PlantUmlClient が
+  # 叩く経路(diagram/plantuml-rendering.feature)の向き先で、同じ PC の extensions と同じ別名
+  # lbx-plantuml(ポート 8080。スタブの土台の既定ポートと同じ)で lbs-net 上から届く。
+  # 本番構成(docker-compose.yml 単体)には置かない。
+  plantuml-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-plantuml-stub
+    command: ["node", "/app/plantuml/server.js"]
     networks:
       lbs-net:
         aliases:
           - lbx-plantuml
+    ports:
+      - "127.0.0.1:18096:8080"
 
   # ---- 各サービスの向き先をスタブへ ----
 
@@ -337,8 +333,8 @@ services:
       SPRING_PROFILES_ACTIVE: e2e-stubs
       PLANTUML_BASE_URL: http://lbx-plantuml:8080
     depends_on:
-      e2e-plantuml:
-        condition: service_started
+      plantuml-stub:
+        condition: service_healthy
       comfyui-stub:
         condition: service_healthy
 

@@ -301,6 +301,8 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 "portal-stub",
                 # GitLab のスタブ(#1796)。GET /users/sign_in だけを模す。
                 "gitlab-stub",
+                # PlantUML のスタブ(#1802)。lbx-plantuml を受け、固定の PNG を返す。
+                "plantuml-stub",
             },
             names,
         )

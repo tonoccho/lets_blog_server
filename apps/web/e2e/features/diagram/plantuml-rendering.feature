@@ -22,22 +22,27 @@
   なお media-service は `/api/render/**` にも認証を要求する(SecurityConfig、issue #772)ため、
   呼び出しには管理者のトークンを添える。
 
-  ## 200 を返したことだけで合格としない
+  ## PlantUML は固定画像のスタブで受ける(2026-10-15 利用者の決定、#1802)
 
-  #937 の受け入れ基準は「返却された画像の中身を検証していること」を要求している。
-  PlantUML サーバーが返す PNG は、描画に使ったソースを `iTXt` チャンク(キー `plantuml`)へ
-  zlib 圧縮で埋め込む。そこで **PNG のシグネチャ・IHDR の寸法・埋め込みソース**の3つを見る。
-  加えて、要素を増やした図の方が**大きく描かれる**ことを確かめる。埋め込みソースだけでは
-  「送った文字列が返ってきた」ことしか言えず、実際に描かれたかどうかは分からないため。
+  受け入れテストは extensions のツールをすべてモックで受ける(docs/ACCEPTANCE_TESTING.md §9)。
+  PlantUML は #1784 で本物の plantuml-server を `lbx-plantuml` として起動していたが、
+  `infra/e2e-stubs/plantuml/` のスタブへ置き換えた。スタブは固定の PNG を返すので、
+  かつて見ていた次の2つは AT では確かめられない。
+
+  - PNG に埋め込まれたソースの確認 → 「**スタブが受け取ったソースに Alice / Bob が含まれる**」へ置き換えた。
+    media-service が正しいソースをスタブへ送ったこと(符号化を含む)を、スタブが復号した値で見る。
+  - 「要素を増やすと図が大きくなる」シナリオ → AT から外し、docs/ACCEPTANCE_TESTING.md §19 の UAT へ移した
+    (本物の PlantUML で描かせないと確かめようがないため。#1714 の前例)。
+
+  400 / 414 は、スタブの決定的な規則で保つ(`@startuml` が無ければ 400 と `X-PlantUML-Diagram-Error`、
+  一定の長さを超える URI は 414)。#937 の「200 を返しただけで合格としない」意図は、
+  PNG のシグネチャ・寸法に加え、スタブが受け取ったソースで満たす。
 
   シナリオ: 妥当なPlantUMLソースを渡すと、ノード名を含む図がPNGとして返る
     もし PlantUMLソース「@startuml\nAlice -> Bob: Hello\n@enduml」の描画を要求する
     ならば PNG画像が返る
-    かつ 返ったPNGに埋め込まれたソースに「Alice」「Bob」が含まれる
+    かつ PlantUMLスタブが受け取ったソースに「Alice」「Bob」が含まれる
     かつ 返ったPNGは幅も高さも1px以上ある
-    もし PlantUMLソース「@startuml\nAlice -> Bob: Hello\nBob -> Carol: Relay\nCarol -> Dave: Forward\n@enduml」の描画を要求する
-    ならば 返ったPNGに埋め込まれたソースに「Carol」「Dave」が含まれる
-    かつ 今回のPNGは前回より幅も高さも大きい
 
   # PlantUML サーバーが図を拒否したときは、入力の誤りとして 400 を返す(issue #1776)。
   # 「接続できません」(502)とは区別され、利用者は自分の図を直せばよいと分かる。

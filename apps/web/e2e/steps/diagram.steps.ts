@@ -1,4 +1,3 @@
-import { inflateSync } from 'node:zlib';
 import type { APIRequestContext } from '@playwright/test';
 import { After, Given, Step, Then, When } from './fixtures';
 import {
@@ -10,6 +9,7 @@ import {
   fetchAccessToken,
 } from '../support';
 import { postJsonToServiceDirectly } from '../support/services';
+import { PLANTUML_STUB_URL, requirePlantUmlStub } from '../support/stubs';
 
 /**
  * ダイアグラムとレンダリングの受け入れシナリオを支えるステップ定義
@@ -219,34 +219,6 @@ function pngDimensions(png: Buffer): { width: number; height: number } {
   return { width: header.data.readUInt32BE(0), height: header.data.readUInt32BE(4) };
 }
 
-/**
- * PNG に埋め込まれた PlantUML ソースを取り出す。
- *
- * PlantUML サーバーは描画に使ったソースを `iTXt` チャンク(キーワード `plantuml`)へ
- * zlib 圧縮で書き込む。これを読めば「返ってきた画像が、渡したソースを描いたものか」を
- * 画像の中身から確かめられる(#937 の受け入れ基準。200を返したことだけで合格としない)。
- *
- * iTXt の並びは keyword\0 / 圧縮フラグ / 圧縮方式 / 言語タグ\0 / 翻訳キーワード\0 / 本文。
- */
-function pngEmbeddedPlantUmlSource(png: Buffer): string {
-  for (const chunk of pngChunks(png)) {
-    if (chunk.type !== 'iTXt') {
-      continue;
-    }
-    const keywordEnd = chunk.data.indexOf(0);
-    if (chunk.data.subarray(0, keywordEnd).toString('latin1') !== 'plantuml') {
-      continue;
-    }
-    const compressed = chunk.data[keywordEnd + 1] === 1;
-    let cursor = keywordEnd + 3;
-    cursor = chunk.data.indexOf(0, cursor) + 1; // 言語タグ
-    cursor = chunk.data.indexOf(0, cursor) + 1; // 翻訳キーワード
-    const text = chunk.data.subarray(cursor);
-    return (compressed ? inflateSync(text) : text).toString('utf8');
-  }
-  throw new Error('PNGにPlantUMLソースのメタデータ(iTXt/plantuml)がありません');
-}
-
 // ------------------------------------------------------ PlantUML レンダリング
 
 /** `.feature` に書いた `\n` は文字どおりの2文字なので、改行へ戻してから送る。 */
@@ -259,8 +231,6 @@ async function requestPlantUmlRender(
   ctx: ScenarioState,
   source: string
 ): Promise<void> {
-  const previous = ctx.diagramRender as RenderOutcome | undefined;
-  ctx.diagramRenderPrevious = previous;
   ctx.diagramRender = postJsonToServiceDirectly(
     'media',
     '/api/render/plantuml',
@@ -294,13 +264,21 @@ Then('PNG画像が返る', async ({ ctx }) => {
   ).toBe(true);
 });
 
+/**
+ * PlantUML スタブ(`infra/e2e-stubs/plantuml/`、#1802)が受け取ったソース。
+ *
+ * 受け入れテストの PlantUML は固定の画像を返すスタブなので、PNG の中身からは描いたソースが分からない。
+ * 代わりに、media-service がスタブへ送ったソース(符号化をスタブが復号したもの)を状態から読む。
+ * 他のシナリオも同じスタブを呼ぶので、直近1件ではなく記録(最新100件)のどれかが両方を含むことを見る。
+ */
 Then(
-  /^返ったPNGに埋め込まれたソースに「([^」]*)」「([^」]*)」が含まれる$/,
-  async ({ ctx }, first: string, second: string) => {
-    const embedded = pngEmbeddedPlantUmlSource(seenRender(ctx).body);
-    for (const needle of [first, second]) {
-      expect(embedded, `描画された図のソースに「${needle}」が無い`).toContain(needle);
-    }
+  /^PlantUMLスタブが受け取ったソースに「([^」]*)」「([^」]*)」が含まれる$/,
+  async ({}, first: string, second: string) => {
+    await requirePlantUmlStub();
+    const state = (await (await fetch(`${PLANTUML_STUB_URL}/__control/state`)).json()) as { sources: string[] };
+    const found = state.sources.some((source) => source.includes(first) && source.includes(second));
+    expect(found, `PlantUMLスタブが受け取ったソースに「${first}」「${second}」を含むものが無い (記録=${state.sources.length}件)`)
+      .toBe(true);
   }
 );
 
@@ -308,20 +286,6 @@ Then('返ったPNGは幅も高さも1px以上ある', async ({ ctx }) => {
   const { width, height } = pngDimensions(seenRender(ctx).body);
   expect(width, '図の幅が0である').toBeGreaterThan(0);
   expect(height, '図の高さが0である').toBeGreaterThan(0);
-});
-
-Then('今回のPNGは前回より幅も高さも大きい', async ({ ctx }) => {
-  const previous = ctx.diagramRenderPrevious as RenderOutcome | undefined;
-  if (!previous) {
-    throw new Error('比較する前回の描画結果がありません');
-  }
-  const before = pngDimensions(previous.body);
-  const after = pngDimensions(seenRender(ctx).body);
-  // 登場人物を増やした分だけ図が大きくなる = ソースの中身が実際に描画へ効いている。
-  expect(after.width, `図の幅が変わっていない (前=${before.width} 後=${after.width})`)
-    .toBeGreaterThan(before.width);
-  expect(after.height, `図の高さが変わっていない (前=${before.height} 後=${after.height})`)
-    .toBeGreaterThan(before.height);
 });
 
 Then('描画は失敗し、理由の分かるエラーが返る', async ({ ctx }) => {

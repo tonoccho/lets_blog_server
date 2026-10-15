@@ -75,40 +75,64 @@ class PlantumlBaseUrl(ComposeConfigHarness):
             self.assertEqual(DEFAULT_URL, self.url(config, name), name)
 
 
-class E2eStubsRunRealPlantuml(ComposeConfigHarness):
-    """要件3: 受け入れテスト用のオーバーレイだけが実物の plantuml-server を起動する。"""
+FORBIDDEN_TOOL_IMAGES = (
+    "plantuml/plantuml-server",
+    "ollama/ollama",
+    "comfyui",
+    "penpotapp/",
+    "gitlab/gitlab-ce",
+)
+
+
+class E2eStubsUseNoExtensionsToolImage(ComposeConfigHarness):
+    """受け入れテストのスタックは extensions のツールの実物(イメージ)を起動しない(#1802)。
+
+    規則: 受け入れテストは extensions のツール(Ollama・ComfyUI・PlantUML・ポータル・GitLab・Penpot)を
+    すべてモックで受ける。実物は UAT で確かめる。`lbx-plantuml` は PlantUML のスタブが受ける。
+    """
 
     FILES = (COMPOSE, STUB_COMPOSE)
 
-    def plantuml_service(self, config):
-        found = [
+    def test_no_service_in_the_e2e_stack_uses_an_extensions_tool_image(self):
+        config = self.full_config(compose_files=self.FILES)
+        offenders = []
+        for name, svc in config["services"].items():
+            image = str(svc.get("image", "")).lower()
+            if any(tool in image for tool in FORBIDDEN_TOOL_IMAGES):
+                offenders.append("%s: %s" % (name, image))
+        self.assertEqual([], offenders)
+
+    def test_the_overlay_file_itself_declares_no_extensions_tool_image(self):
+        with open(STUB_COMPOSE, encoding="utf-8") as f:
+            text = f.read().lower()
+        for tool in FORBIDDEN_TOOL_IMAGES:
+            self.assertNotIn("image: " + tool, text)
+
+    def test_lbx_plantuml_alias_belongs_to_a_node_stub(self):
+        config = self.full_config(compose_files=self.FILES)
+        holders = [
             (n, s) for n, s in config["services"].items()
-            if "plantuml/plantuml-server" in str(s.get("image", ""))
+            if "lbx-plantuml" in ((s.get("networks") or {}).get("lbs-net") or {}).get("aliases", [])
         ]
-        self.assertEqual(1, len(found), "e2e オーバーレイに plantuml-server が1つ必要")
-        return found[0]
+        self.assertEqual(["plantuml-stub"], [n for n, _ in holders])
+        svc = holders[0][1]
+        self.assertIn("node", str(svc["image"]))
+        self.assertEqual(["node", "/app/plantuml/server.js"], svc["command"])
 
-    def test_overlay_starts_the_real_plantuml_server_with_the_lbx_alias(self):
-        config = self.full_config(compose_files=self.FILES)
-        _, svc = self.plantuml_service(config)
-        self.assertIn("lbx-plantuml", svc["networks"]["lbs-net"]["aliases"])
-
-    def test_overlay_service_is_not_a_stub(self):
-        config = self.full_config(compose_files=self.FILES)
-        name, svc = self.plantuml_service(config)
-        self.assertNotIn("node", str(svc["image"]))
-        self.assertNotEqual("plantuml", name)
-
-    def test_overlay_service_starts_without_extra_profiles(self):
+    def test_the_stub_starts_without_extra_profiles(self):
         services = self.config_services(compose_files=self.FILES)
-        config = self.full_config(compose_files=self.FILES)
-        name, _ = self.plantuml_service(config)
-        self.assertIn(name, services)
+        self.assertIn("plantuml-stub", services)
 
-    def test_media_and_platform_point_at_it(self):
+    def test_media_and_platform_point_at_the_alias(self):
         config = self.full_config(compose_files=self.FILES)
         for name in CONSUMERS:
             self.assertEqual(DEFAULT_URL, config["services"][name]["environment"]["PLANTUML_BASE_URL"], name)
+
+    def test_media_waits_for_the_stub_to_be_healthy(self):
+        config = self.full_config(compose_files=self.FILES)
+        depends = config["services"]["media"]["depends_on"]
+        self.assertNotIn("e2e-plantuml", depends)
+        self.assertEqual("service_healthy", depends["plantuml-stub"]["condition"])
 
     def test_production_compose_alone_has_no_plantuml_server_image(self):
         config = self.full_config(profiles=("*",))

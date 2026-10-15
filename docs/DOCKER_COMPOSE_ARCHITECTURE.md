@@ -42,7 +42,7 @@ Keycloak / 各ドメインサービス)を見据えた構成に整えた(#556)�
 | `phpmyadmin` | 80 | reverse-proxy経由のみ(`/phpmyadmin/`) | **認証あり(phpMyAdmin自身のログイン画面)**。`.env` の `MYSQL_USER` / `MYSQL_PASSWORD` を入力してログインする。コンテナへ `PMA_USER` / `PMA_PASSWORD` は渡さない(#978。渡すと `auth_type` が `config` になり無認証で全DBを操作できる) |
 | `keycloak` | 8080(管理/ヘルスチェックは9000) | reverse-proxy経由のみ(`/auth/`) | `KC_HTTP_RELATIVE_PATH=/auth`。#559 |
 | `keycloak-postgres` | 5432 | 非公開 | Keycloak専用PostgreSQL。#559 |
-| (PlantUMLは同梱しない) | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除し、#1784で同梱の`plantuml`サービスも削除した。media-serviceは`PLANTUML_BASE_URL`(既定`http://lbx-plantuml:8080`。extensionsの別名)でlbs-net経由に呼ぶ。受け入れテストでは`docker-compose.e2e-stubs.yml`の`e2e-plantuml`(実物のplantuml-server。別名`lbx-plantuml`)が受ける |
+| (PlantUMLは同梱しない) | 8080 | 非公開(content/media経由) | #979でreverse-proxyの`/plantuml/`中継を削除し、#1784で同梱の`plantuml`サービスも削除した。media-serviceは`PLANTUML_BASE_URL`(既定`http://lbx-plantuml:8080`。extensionsの別名)でlbs-net経由に呼ぶ。受け入れテストでは`docker-compose.e2e-stubs.yml`の`plantuml-stub`(固定のPNGを返すスタブ。別名`lbx-plantuml`。#1802)が受ける |
 | `drawio` | 8080 | reverse-proxy経由(`/drawio/`) | **無認証で公開する意図的な判断(#979)**。VSCode拡張の`diagramEditorPanel.ts`がwebviewのiframeへ`/drawio/?embed=1&...`を読み込む。webviewはlbs-netの外のブラウザ文脈のためコンテナ間通信に寄せられない。webからは参照しない |
 | `wordpress` | 9000 | 非公開(publishing経由でプロビジョニング) | |
 
@@ -133,7 +133,7 @@ profile 化を見送ったが、利用者の依頼(#1741、2026-10-11)でこの�
 - 有効にする: `.env` の `COMPOSE_PROFILES=diagram,db-tools`(`gpu` / `cpu` とはカンマで併記)、
   または `docker compose --profile diagram up -d`。`.env.example` に例がある。
 - 受け入れテスト環境(`scripts/rebuild-acceptance-env.sh`)は `diagram` と `db-tools` を有効にして
-  起動する(`AT_PROFILES`)。受け入れテストは draw.io・phpMyAdmin を使うため。PlantUML は e2e オーバーレイの `e2e-plantuml` が起動する(#1784)。
+  起動する(`AT_PROFILES`)。受け入れテストは draw.io・phpMyAdmin を使うため。PlantUML は e2e オーバーレイの `plantuml-stub`(スタブ。#1802)が `lbx-plantuml` として受ける。実物の plantuml-server は起動しない。
 - 常時起動するサービスは、これらに `depends_on` しない(`scripts/test_compose_optin_profiles.py` が検査する)。
 - `scripts/wait-for-stack-healthy.sh --all` は `docker compose ps --all` に出るコンテナだけを待つので、
   作られていないコンテナは待機対象から外れる。

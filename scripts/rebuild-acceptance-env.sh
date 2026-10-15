@@ -241,7 +241,7 @@ if [ "$SHARED_HOST" -eq 1 ]; then
   COMPOSE_ARGS+=(-f "$REPO_ROOT/docker-compose.shared-host.yml")
 fi
 # 受け入れテストが使うオプトイン profile(#1741)。diagram = draw.io(PlantUML は同梱をやめ、
-# docker-compose.e2e-stubs.yml の e2e-plantuml が起動する。#1784)、
+# docker-compose.e2e-stubs.yml の plantuml-stub が lbx-plantuml として受ける。#1784、#1802)、
 # db-tools = phpMyAdmin。docker-compose.yml が既定の起動から外しているので、ここで有効にする。
 readonly AT_PROFILES=(diagram db-tools)
 for p in "${AT_PROFILES[@]}"; do COMPOSE_ARGS+=(--profile "$p"); done

@@ -8,6 +8,7 @@
   ブラウザから到達する必要があるのは draw.io だけ(VSCode拡張の
   apps/extension/src/diagramEditorPanel.ts が webview の iframe に読み込む)であり、
   ComfyUI と PlantUML はサービス間で lbs-net 経由でしか使われない。
+  受け入れテストの PlantUML(`lbx-plantuml`)と ComfyUI はスタブで受ける(#1802、docs/ACCEPTANCE_TESTING.md §9)。
 
   シナリオ: ComfyUI の UI は外部から開けない
     もし 未認証で ComfyUI のパスを開く

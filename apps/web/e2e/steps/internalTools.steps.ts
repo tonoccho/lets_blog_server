@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { Then, When } from './fixtures';
 import { expect } from '../support';
+import { encodePlantUml } from '../support/plantuml';
 
 /**
  * 同梱ツール(ComfyUI / PlantUML / draw.io)の公開面のステップ定義(issue #979)。
@@ -19,11 +20,17 @@ const COMFYUI_PATH = '/comfyui/';
 const PLANTUML_TOP = '/plantuml/';
 
 /**
+ * 描画させるソース。`@startuml` を含める(PlantUML スタブは含まないソースを 400 で拒否する。#1802)。
+ * かつての固定の符号化 `SyfFKj2rKt3CoKnELR1Io4ZDoSa70000` は復号すると `Bob -> Alice : hello` で、含まなかった。
+ */
+const PLANTUML_SOURCE = '@startuml\nAlice -> Bob: Hello\n@enduml';
+
+/**
  * PlantUML の描画エンドポイント。パス中の文字列は PlantUML 独自方式で符号化した
  * `@startuml Alice -> Bob @enduml` 相当。「無認証で任意のソースを描画させられる」という
  * 露出そのものを、実際に描画を要求して確かめる。
  */
-const PLANTUML_RENDER_PATH = '/plantuml/png/SyfFKj2rKt3CoKnELR1Io4ZDoSa70000';
+const PLANTUML_RENDER_PATH = `/plantuml/png/${encodePlantUml(PLANTUML_SOURCE)}`;
 
 /** VSCode拡張が webview の iframe に読み込む URL(diagramEditorPanel.ts と同じクエリ)。 */
 const DRAWIO_EMBED_PATH = '/drawio/?embed=1&ui=min&spin=1&proto=json&configure=1&noSaveBtn=1&noExitBtn=1';
@@ -62,8 +69,9 @@ const PNG_SIGNATURE = '\x89PNG';
 
 /**
  * 内部ネットワーク上のホスト名。PlantUML は同梱をやめた(#1784)ので、extensions と同じ別名
- * `lbx-plantuml` で届く。受け入れテスト環境では docker-compose.e2e-stubs.yml の実物の
- * plantuml-server がこの別名を持つ。
+ * `lbx-plantuml` で届く。受け入れテスト環境では docker-compose.e2e-stubs.yml の PlantUML の
+ * スタブ(`plantuml-stub`、固定の PNG を返す。#1802)がこの別名を持つ。実物の plantuml-server は
+ * 受け入れテストでは起動しない(extensions のツールはすべてモックで受ける。docs/ACCEPTANCE_TESTING.md §9)。
  */
 const INTERNAL_PLANTUML_ORIGIN = 'http://lbx-plantuml:8080';
 /** ComfyUI は同梱のサービス名。 */
@@ -249,7 +257,7 @@ When('media-service から PlantUML サーバーへ図を描画する', async ({
   const output = execInContainer('lbs-media', [
     'curl', '--silent', '--output', '/dev/null', '--max-time', '30',
     '--write-out', '%{http_code}:%{content_type}',
-    `${INTERNAL_PLANTUML_ORIGIN}/png/SyfFKj2rKt3CoKnELR1Io4ZDoSa70000`,
+    `${INTERNAL_PLANTUML_ORIGIN}/png/${encodePlantUml(PLANTUML_SOURCE)}`,
   ]);
   ctx.internalRender = output.trim();
 });
