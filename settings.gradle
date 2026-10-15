@@ -11,4 +11,14 @@ include 'services:analytics'
 include 'services:project'
 include 'services:platform'
 include 'services:publishing'
-include 'plugins:claude-adapter'
+
+// plugins/ 配下は build.gradle を持つディレクトリだけを include する。
+// サービスの Dockerfile は plugins/ をコピーしないので、無条件に include すると
+// ビルドステージで ':plugins' の構成エラーになる(#1857)。
+def pluginsDir = new File(settingsDir, 'plugins')
+if (pluginsDir.isDirectory()) {
+    pluginsDir.listFiles()
+        .findAll { it.isDirectory() && new File(it, 'build.gradle').exists() }
+        .sort { it.name }
+        .each { include "plugins:${it.name}" }
+}
