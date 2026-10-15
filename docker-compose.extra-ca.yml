@@ -1,4 +1,4 @@
-# 別ホストで動く lets_blog_server_extensions の自己署名証明書を、ai / media / platform の JVM に
+# 別ホストで動く lets_blog_server_extensions の自己署名証明書を、ai / media / platform / publishing の JVM に
 # 信頼させる任意適用のオーバーライド(issue #1763)。
 #
 #   docker compose -f docker-compose.yml -f docker-compose.extra-ca.yml up -d
@@ -39,3 +39,7 @@ services:
     environment:
       USE_SYSTEM_CA_CERTS: "1"
       PLANTUML_BASE_URL: ${LBX_PLANTUML_URL:-http://lbx-plantuml:8080}
+  publishing:
+    <<: *extra-ca
+    environment:
+      USE_SYSTEM_CA_CERTS: "1"

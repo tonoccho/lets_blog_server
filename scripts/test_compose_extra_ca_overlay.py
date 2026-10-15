@@ -17,7 +17,7 @@ import unittest
 from test_compose_no_bundled_comfyui import COMPOSE, REPO_ROOT, ComposeConfigHarness
 
 EXTRA_CA_COMPOSE = os.path.join(REPO_ROOT, "docker-compose.extra-ca.yml")
-TRUSTED = ("ai", "media", "platform")
+TRUSTED = ("ai", "media", "platform", "publishing")
 ENTRYPOINT = ["/__cacert_entrypoint.sh", "java", "-jar", "/app/app.jar"]
 
 
@@ -34,9 +34,9 @@ def ca_mounts(config, name):
 
 
 class ExtraCaOverlayTrust(ComposeConfigHarness):
-    """AC1: ai / media / platform だけに証明書のマウントと信頼ストアへ追加する設定がある。"""
+    """AC1: ai / media / platform / publishing だけに証明書のマウントと信頼ストアへ追加する設定がある。"""
 
-    def test_only_three_services_get_the_mount_and_settings(self):
+    def test_only_four_services_get_the_mount_and_settings(self):
         base = self.full_config()
         over = overlay(self)
         for name, svc in over["services"].items():
@@ -102,9 +102,10 @@ class ExtraCaOverlayPlantuml(ComposeConfigHarness):
                 name,
             )
 
-    def test_ai_has_no_plantuml_setting_added(self):
+    def test_ai_and_publishing_have_no_plantuml_setting_added(self):
         over = overlay(self)
-        self.assertNotIn("PLANTUML_BASE_URL", over["services"]["ai"].get("environment") or {})
+        for name in ("ai", "publishing"):
+            self.assertNotIn("PLANTUML_BASE_URL", over["services"][name].get("environment") or {}, name)
 
 
 class ExtraCaDocs(unittest.TestCase):
@@ -132,6 +133,16 @@ class ExtraCaDocs(unittest.TestCase):
             "期限",
         ):
             self.assertIn(needle, doc, needle)
+
+    def test_doc_covers_gitlab(self):
+        doc = self.read("docs/EXTENSIONS_CONNECTION.md")
+        for needle in ("http://lbx-gitlab", "https://gitlab.<domain>:<port>", "Access Token", "api", "公開 URL"):
+            self.assertIn(needle, doc, needle)
+
+    def test_adr_0010_decision_6_records_revision(self):
+        adr = self.read("docs/adr/0010-github-to-gitlab-migration.md")
+        self.assertIn("2026-10-15", adr)
+        self.assertIn("改訂", adr)
 
 
 if __name__ == "__main__":

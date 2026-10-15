@@ -9,7 +9,7 @@
 # extensions 側が先に外部ネットワークを作っている必要がある(extensions の
 # scripts/create-shared-network.sh)。無いホストでは重ねないこと。
 #
-# ai / media / platform だけを参加させる。ネットワーク名は LBX_SHARED_NETWORK で変えられる。
+# ai / media / platform / publishing だけを参加させる。ネットワーク名は LBX_SHARED_NETWORK で変えられる。
 # `networks` はマージされるが、リスト形式の既存値(lbs-net)を落とさないよう、ここでも列挙する。
 # platform は docker-socket-proxy-net への参加も保つ。
 #
@@ -26,6 +26,10 @@ services:
       - lbx-shared
     environment:
       PLANTUML_BASE_URL: http://lbx-plantuml:8080
+  publishing:
+    networks:
+      - lbs-net
+      - lbx-shared
   platform:
     networks:
       - lbs-net

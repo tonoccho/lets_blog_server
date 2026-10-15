@@ -29,7 +29,7 @@ docker compose -f docker-compose.yml -f docker-compose.extensions.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.shared-host.yml -f docker-compose.extensions.yml up -d
 ```
 
-- 参加するのは ai / media / platform だけ。既存の `lbs-net`(platform は `docker-socket-proxy-net` も)は保つ。
+- 参加するのは ai / media / platform / publishing だけ。既存の `lbs-net`(platform は `docker-socket-proxy-net` も)は保つ。
 - ネットワーク名を変えるときは環境変数 `LBX_SHARED_NETWORK`(既定 `lbx-shared`)を設定する。
 - media と platform の `PLANTUML_BASE_URL` は `http://lbx-plantuml:8080` になる(`docker-compose.yml` 単体の既定値も同じ。#1784)。
 - `lbx-shared` が無いホストでは重ねないこと(重ねなければ今までどおり起動する)。
@@ -71,7 +71,7 @@ extensions のコンテナは `ollama` / `comfyui` / `plantuml` という別名�
 別ホストの extensions に届くのは、リバースプロキシの `https://<tool>.${BASE_DOMAIN}:${HTTPS_PORT}` だけである。
 証明書は extensions の起動時に作られる自己署名(SAN は `BASE_DOMAIN` と `*.BASE_DOMAIN`、期限は825日)で、
 LBS の JVM は既定の信頼ストアしか使わないため、そのままでは TLS の検証で失敗する。
-`docker-compose.extra-ca.yml` で、その証明書を ai / media / platform の信頼ストアへ**追加**する。
+`docker-compose.extra-ca.yml` で、その証明書を ai / media / platform / publishing の信頼ストアへ**追加**する。
 
 ### 手順
 
@@ -93,7 +93,7 @@ LBS の JVM は既定の信頼ストアしか使わないため、そのまま�
    docker compose -f docker-compose.yml -f docker-compose.extra-ca.yml up -d
    ```
 
-   重ねるのは ai / media / platform だけで、`/certificates/lbx-ca.crt` に読み取り専用でマウントし、
+   重ねるのは ai / media / platform / publishing だけで、`/certificates/lbx-ca.crt` に読み取り専用でマウントし、
    temurin の `/__cacert_entrypoint.sh`(`USE_SYSTEM_CA_CERTS=1`)で JVM の cacerts へ追加する。
    公開 CA(api.openai.com など)は従来どおり通り、マウントした証明書以外の自己署名証明書は拒否される。
 5. 管理画面 → システム設定の「extensions から取り込む」欄で、ポータルの URL に `https://<domain>:<port>`、経路に「別ホスト(公開 URL)」を選んで
@@ -123,6 +123,26 @@ docker compose exec ai keytool -list -cacerts -storepass changeit | grep -i '<�
 ```
 
 管理画面の「連携サービスの状況」で LLM・ComfyUI・PlantUML が正常と表示されること。
+
+## extensions の GitLab へつなぐ(ai / publishing、#1795)
+
+ai と publishing は、`docker-compose.extensions.yml`(同じ PC)または `docker-compose.extra-ca.yml`(別ホスト)を重ねると
+extensions の GitLab に届く。
+
+| 場所 | 接続先 |
+| --- | --- |
+| 同じ PC | `http://lbx-gitlab`(`lbx-shared` 上の別名、HTTP 80) |
+| 別ホスト | `https://gitlab.<domain>:<port>`(自己署名。上の手順で `lbx-ca.crt` を信頼させる) |
+
+### Access Token の作り方
+
+GitLab で対象ユーザーの「Preferences → Access Tokens」を開き、scope `api` の Personal Access Token を作って、
+製品のプロジェクト設定のトークン欄へ入れる(トークンは作成時にしか表示されない)。
+
+### clone URL
+
+GitLab が返す clone URL は、`external_url` に基づく公開 URL(`https://gitlab.<domain>:<port>/...`)になる。
+同じ PC でも `http://lbx-gitlab` にはならないので、clone する側はその公開 URL を引けて信頼できる必要がある。
 
 関連: [EXTERNAL_OLLAMA.md](EXTERNAL_OLLAMA.md) / [EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) /
 [DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)

@@ -16,7 +16,7 @@ import unittest
 from test_compose_no_bundled_comfyui import COMPOSE, REPO_ROOT, ComposeConfigHarness
 
 EXTENSIONS_COMPOSE = os.path.join(REPO_ROOT, "docker-compose.extensions.yml")
-JOINED = ("ai", "media", "platform")
+JOINED = ("ai", "media", "platform", "publishing")
 SHARED = "lbx-shared"
 
 
@@ -25,9 +25,9 @@ def service_networks(config, name):
 
 
 class ExtensionsOverlayNetworks(ComposeConfigHarness):
-    """AC1: ai / media / platform だけが外部ネットワークへ参加し、元のネットワークも保つ。"""
+    """AC1: ai / media / platform / publishing だけが外部ネットワークへ参加し、元のネットワークも保つ。"""
 
-    def test_overlay_joins_only_three_services_and_keeps_existing_networks(self):
+    def test_overlay_joins_only_four_services_and_keeps_existing_networks(self):
         base = self.full_config()
         over = self.full_config(compose_files=(COMPOSE, EXTENSIONS_COMPOSE))
         self.assertTrue(over["networks"][SHARED]["external"])
@@ -38,6 +38,7 @@ class ExtensionsOverlayNetworks(ComposeConfigHarness):
                 self.assertTrue(service_networks(base, name) <= service_networks(over, name), name)
         self.assertIn("docker-socket-proxy-net", service_networks(over, "platform"))
         self.assertIn("lbs-net", service_networks(over, "platform"))
+        self.assertEqual({"lbs-net", SHARED}, service_networks(over, "publishing"))
 
     def test_base_has_no_external_network(self):
         base = self.full_config()
