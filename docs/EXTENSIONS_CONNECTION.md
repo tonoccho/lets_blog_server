@@ -144,5 +144,22 @@ GitLab で対象ユーザーの「Preferences → Access Tokens」を開き、sc
 GitLab が返す clone URL は、`external_url` に基づく公開 URL(`https://gitlab.<domain>:<port>/...`)になる。
 同じ PC でも `http://lbx-gitlab` にはならないので、clone する側はその公開 URL を引けて信頼できる必要がある。
 
+### GitLab の到達性を連携サービスの状況に出す(#1796)
+
+システム設定画面(管理者)の「GitLab連携」にある **GitLab ベースURL**(`system_settings` のキー `gitlab_base_url`、
+例: `http://lbx-gitlab`)を設定すると、連携サービスの状況に GitLab の行が出る。システム全体に1つで、認証は持たず、
+環境変数の既定値は無い。空欄で保存すると未設定に戻る。`lbx-*` のホスト名はそのまま指定できる
+(システム設定の値は `ConnectionDestinationGuard` の検査を通さない)。
+
+到達性は `GET <URL>/users/sign_in` を1回(再試行しない・タイムアウト 3 秒・リダイレクトは追従しない)で判定する。
+`/-/readiness` は localhost 以外からの要求に 404 を返すので使わない。
+
+| 状態 | 表示 | 理由の表示(管理者) |
+| --- | --- | --- |
+| URL が未設定(行は省かない) | 警告 | 「未設定(システム設定で設定してください)」 |
+| 応答が 2xx | 正常 | なし |
+| 2xx 以外(3xx・4xx・5xx) | エラー | 「GitLab が 2xx 以外を返しました(HTTP ステータス)」 |
+| 接続できない・タイムアウト | エラー | 「GitLab に到達できません: 原因」 |
+
 関連: [EXTERNAL_OLLAMA.md](EXTERNAL_OLLAMA.md) / [EXTERNAL_COMFYUI.md](EXTERNAL_COMFYUI.md) /
 [DOCKER_COMPOSE_ARCHITECTURE.md](DOCKER_COMPOSE_ARCHITECTURE.md)

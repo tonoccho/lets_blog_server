@@ -48,6 +48,7 @@ public class AppSettingService {
     static final String LLM_CLAUDE_AVAILABLE_MODELS = "llm_claude_available_models";
     static final String COMFYUI_BASE_URL = "comfyui_base_url";
     static final String PENPOT_BASE_URL = "penpot_base_url";
+    static final String GITLAB_BASE_URL = "gitlab_base_url";
     static final String EXTENSIONS_PORTAL_URL = "extensions_portal_url";
     static final String MAIL_HOST = "mail_host";
     static final String MAIL_PORT = "mail_port";
@@ -94,6 +95,7 @@ public class AppSettingService {
                     "Claude 選択可能モデル(カンマ区切り、CLAUDE用。未設定なら既定モデルのみ)", false),
             new Definition(COMFYUI_BASE_URL, "ComfyUI ベースURL", false),
             new Definition(PENPOT_BASE_URL, "Penpot ベースURL", false),
+            new Definition(GITLAB_BASE_URL, "GitLab ベースURL", false),
             new Definition(EXTENSIONS_PORTAL_URL, "extensions ポータルのURL(接続先の取り込み元。http:// または https://)", false),
             new Definition(MAIL_HOST, "メール送信ホスト", false),
             new Definition(MAIL_PORT, "メール送信ポート", false),
@@ -261,7 +263,7 @@ public class AppSettingService {
         }
         switch (key) {
             case LLM_PROVIDER -> requireValidProvider(key, value);
-            case LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL ->
+            case LLM_OLLAMA_BASE_URL, APP_WEB_BASE_URL, COMFYUI_BASE_URL, GITLAB_BASE_URL ->
                     requireUrl(key, value);
             case PENPOT_BASE_URL -> requireAllowedDestination(key, value);
             case EXTENSIONS_PORTAL_URL -> requireAllowedPortalUrl(key, value);
@@ -435,6 +437,12 @@ public class AppSettingService {
     @Transactional(readOnly = true)
     public String getPenpotBaseUrl() {
         return resolve(PENPOT_BASE_URL);
+    }
+
+    /** GitLabの接続先。DBだけで決まり、環境変数既定は無い。未設定は空文字(issue #1796)。 */
+    @Transactional(readOnly = true)
+    public String getGitLabBaseUrl() {
+        return resolve(GITLAB_BASE_URL);
     }
 
     @Transactional(readOnly = true)

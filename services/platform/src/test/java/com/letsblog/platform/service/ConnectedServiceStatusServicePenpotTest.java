@@ -49,6 +49,8 @@ class ConnectedServiceStatusServicePenpotTest {
     private RabbitMqQueueStatusService rabbitMqQueueStatusService;
     @Mock
     private PenpotReachabilityChecker penpotChecker;
+    @Mock
+    private GitLabReachabilityChecker gitlabChecker;
 
     private ConnectedServiceStatusService service;
 
@@ -73,7 +75,7 @@ class ConnectedServiceStatusServicePenpotTest {
                 systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService,
                 baseUrl -> RestClient.builder().baseUrl(baseUrl),
-                penpotChecker);
+                penpotChecker, gitlabChecker);
     }
 
     private ConnectedServiceStatusDetailResponse penpotRow() {
@@ -139,7 +141,7 @@ class ConnectedServiceStatusServicePenpotTest {
         String others = rows.stream().filter(r -> !r.id().equals("penpot"))
                 .map(r -> r.id() + "=" + r.status()).collect(Collectors.joining(","));
         assertEquals("database=NORMAL,llm=NORMAL,comfyui=WARNING,plantuml=ERROR,"
-                + "wordpress-provisioning=ERROR,brave-search=NORMAL,rabbitmq-queues=NORMAL", others);
+                + "wordpress-provisioning=ERROR,gitlab=WARNING,brave-search=NORMAL,rabbitmq-queues=NORMAL", others);
         assertFalse(others.contains("penpot"));
     }
 }

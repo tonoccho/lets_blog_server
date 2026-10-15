@@ -46,6 +46,14 @@ const GROUPS: { title: string; description: string; keys: string[] }[] = [
     keys: ["penpot_base_url"],
   },
   {
+    title: "GitLab連携",
+    description:
+      "別途起動したGitLabのベースURLです(例: http://lbx-gitlab。lbx-* のホスト名も指定できます)。" +
+      "認証情報は持たず、連携サービスの状況に到達性(到達できるか)だけを表示します。" +
+      "空欄で保存すると未設定に戻ります。",
+    keys: ["gitlab_base_url"],
+  },
+  {
     title: "メール送信",
     description: "パスワード再設定メール等の送信に使用するSMTPサーバーの接続設定です。",
     keys: ["mail_host", "mail_port", "mail_username", "mail_password", "app_mail_from"],

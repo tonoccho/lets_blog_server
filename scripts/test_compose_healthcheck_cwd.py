@@ -299,6 +299,8 @@ class StubCommandsResolveThroughTheMount(unittest.TestCase):
                 "comfyui-stub",
                 # extensions ポータルのスタブ(#1782)。
                 "portal-stub",
+                # GitLab のスタブ(#1796)。GET /users/sign_in だけを模す。
+                "gitlab-stub",
             },
             names,
         )

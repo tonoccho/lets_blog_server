@@ -231,6 +231,29 @@ services:
     ports:
       - "127.0.0.1:18094:3100"
 
+  # GitLab(GET /users/sign_in だけを模す骨組み。issue #1796)。連携サービスの状況の GitLab の到達性を、
+  # 実物の GitLab なしで検証するための置き換え。同じ PC の extensions の GitLab と同じ名前 lbx-gitlab
+  # (ポート 80)で lbs-net 上から届く。スタブの土台は PORT=8080 なので、ポートと healthcheck を合わせる。
+  # 本番構成(docker-compose.yml 単体)には置かない。
+  gitlab-stub:
+    <<: *stub-base
+    container_name: lbs-e2e-gitlab-stub
+    command: ["node", "/app/gitlab/server.js"]
+    environment:
+      TZ: UTC
+      PORT: "80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      lbs-net:
+        aliases:
+          - lbx-gitlab
+    ports:
+      - "127.0.0.1:18095:80"
+
   # 実物の PlantUML サーバー(#1784)。同梱の plantuml サービスは削除したので、受け入れテストの
   # 図の描画(diagram/plantuml-rendering.feature)はここで起動する実物で行う。スタブには置き換えない
   # (図を描けたことを確かめるシナリオが空洞化するため)。同じ PC の extensions と同じ別名

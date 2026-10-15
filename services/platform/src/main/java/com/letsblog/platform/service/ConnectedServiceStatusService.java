@@ -71,6 +71,8 @@ public class ConnectedServiceStatusService {
     private final Function<String, RestClient.Builder> comfyUiClientBuilderFactory;
     /** 外部Penpotの到達性(issue #1774)。接続先はシステム設定(DB)で実行時に解決する。 */
     private final PenpotReachabilityChecker penpotReachabilityChecker;
+    /** GitLabの到達性(issue #1796)。接続先はシステム設定(DB)で実行時に解決する。 */
+    private final GitLabReachabilityChecker gitLabReachabilityChecker;
 
     @Autowired
     public ConnectedServiceStatusService(
@@ -81,7 +83,8 @@ public class ConnectedServiceStatusService {
             AppSettingService appSettingService,
             LetsBlogServiceStatusService letsBlogServiceStatusService,
             RabbitMqQueueStatusService rabbitMqQueueStatusService,
-            PenpotReachabilityChecker penpotReachabilityChecker) {
+            PenpotReachabilityChecker penpotReachabilityChecker,
+            GitLabReachabilityChecker gitLabReachabilityChecker) {
         this(dataSource,
                 ConnectedServiceStatusService::builderWithTimeout,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
@@ -89,7 +92,8 @@ public class ConnectedServiceStatusService {
                 systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService,
                 ConnectedServiceStatusService::builderWithTimeout,
-                penpotReachabilityChecker);
+                penpotReachabilityChecker,
+                gitLabReachabilityChecker);
     }
 
     /** テスト専用: Penpotの到達性チェッカーを既定のものにする。 */
@@ -106,7 +110,7 @@ public class ConnectedServiceStatusService {
         this(dataSource, comfyUiClientBuilderFactory, plantUmlBuilder, plantUmlBaseUrl,
                 wordpressBuilder, wordpressProvisionBaseUrl, systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService, ollamaClientBuilderFactory,
-                new PenpotReachabilityChecker());
+                new PenpotReachabilityChecker(), new GitLabReachabilityChecker());
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -120,9 +124,11 @@ public class ConnectedServiceStatusService {
             LetsBlogServiceStatusService letsBlogServiceStatusService,
             RabbitMqQueueStatusService rabbitMqQueueStatusService,
             Function<String, RestClient.Builder> ollamaClientBuilderFactory,
-            PenpotReachabilityChecker penpotReachabilityChecker) {
+            PenpotReachabilityChecker penpotReachabilityChecker,
+            GitLabReachabilityChecker gitLabReachabilityChecker) {
         this.dataSource = dataSource;
         this.penpotReachabilityChecker = penpotReachabilityChecker;
+        this.gitLabReachabilityChecker = gitLabReachabilityChecker;
         this.plantUmlClient = plantUmlBuilder.build();
         this.wordpressProvisioningClient = wordpressBuilder.build();
         this.systemSettingService = systemSettingService;
@@ -163,6 +169,8 @@ public class ConnectedServiceStatusService {
                 checkAsync("wordpress-provisioning", "WordPress Provisioning Agent", this::checkWordpressProvisioning);
         CompletableFuture<ConnectedServiceStatusDetailResponse> penpot =
                 checkAsync("penpot", "Penpot", this::checkPenpot);
+        CompletableFuture<ConnectedServiceStatusDetailResponse> gitlab =
+                checkAsync("gitlab", "GitLab", this::checkGitLab);
 
         List<ConnectedServiceStatusDetailResponse> result = new ArrayList<>(List.of(
                 runTimed("database", "データベース", this::checkDatabase),
@@ -171,6 +179,7 @@ public class ConnectedServiceStatusService {
                 plantUml.join(),
                 wordpressProvisioning.join(),
                 penpot.join(),
+                gitlab.join(),
                 runTimed("brave-search", "Brave Search API", this::checkBraveSearch),
                 // RabbitMQのキュー滞留・DLQ滞留(issue #589)。DLQに残っていれば、
                 // 処理されなかったイベントが確実に存在するのでERRORにする。
@@ -338,6 +347,19 @@ public class ConnectedServiceStatusService {
             return new CheckOutcome(Status.WARNING, null, "未設定(システム設定で設定してください)", null);
         }
         PenpotReachabilityChecker.Result result = penpotReachabilityChecker.check(baseUrl);
+        return new CheckOutcome(result.status(), result.httpStatus(), result.errorMessage(), result.targetUrl());
+    }
+
+    /**
+     * 別途起動したGitLabの到達性(issue #1796)。接続先が未設定のときは黙って省かず、設定を促す警告にする。
+     * {@code GET <接続先>/users/sign_in}の2xx判定・3秒タイムアウト・再試行なしは{@link GitLabReachabilityChecker}が行う。
+     */
+    private CheckOutcome checkGitLab() {
+        String baseUrl = appSettingService.getGitLabBaseUrl();
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return new CheckOutcome(Status.WARNING, null, "未設定(システム設定で設定してください)", null);
+        }
+        GitLabReachabilityChecker.Result result = gitLabReachabilityChecker.check(baseUrl);
         return new CheckOutcome(result.status(), result.httpStatus(), result.errorMessage(), result.targetUrl());
     }
 
