@@ -114,6 +114,10 @@ public final class ClaudeAdapter implements AutoCloseable {
             }
         } catch (AdapterException e) {
             respond(exchange, e.status(), errorBody(e));
+        } catch (RuntimeException e) {
+            // 想定外の例外(不正な Bearer 文字・不正な ANTHROPIC_BASE_URL など)。キーを含む詳細は返さない。
+            respond(exchange, 500, errorBody(
+                    new AdapterException(500, "api_error", "internal_error", "アダプターの内部エラーです")));
         }
     }
 

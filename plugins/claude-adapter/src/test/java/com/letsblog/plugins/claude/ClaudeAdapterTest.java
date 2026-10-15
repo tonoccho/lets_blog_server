@@ -261,6 +261,34 @@ class ClaudeAdapterTest {
     }
 
     @Test
+    void bearerWithIllegalCharacterGivesOpenAiErrorBodyWithoutLeakingTheKey() throws Exception {
+        try (java.net.Socket socket = new java.net.Socket("127.0.0.1", adapter.port())) {
+            String body = chatBody("\"hi\"");
+            socket.getOutputStream().write(("POST /chat/completions HTTP/1.1\r\nHost: x\r\n"
+                    + "Authorization: Bearer secret\u0001key\r\nContent-Type: application/json\r\n"
+                    + "Connection: close\r\nContent-Length: " + body.length() + "\r\n\r\n" + body)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String raw = new String(socket.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+
+            assertThat(raw).startsWith("HTTP/1.1 500");
+            assertThat(raw).contains("\"error\"").contains("\"type\":\"api_error\"").doesNotContain("secret");
+        }
+    }
+
+    @Test
+    void invalidAnthropicBaseUrlGivesOpenAiErrorBody() throws Exception {
+        try (ClaudeAdapter broken = startAdapter("http://bad host", Duration.ofSeconds(2))) {
+            HttpRequest request = HttpRequest.newBuilder(
+                            URI.create("http://127.0.0.1:" + broken.port() + "/chat/completions"))
+                    .header("Authorization", "Bearer k")
+                    .POST(HttpRequest.BodyPublishers.ofString(chatBody("\"hi\"")))
+                    .build();
+
+            assertOpenAiError(http.send(request, HttpResponse.BodyHandlers.ofString()), 500, "api_error");
+        }
+    }
+
+    @Test
     void slowAnthropicTimesOutAs502WithoutRetry() throws Exception {
         anthropic.respond(200, OK_MESSAGE);
         anthropic.delay(1500);
