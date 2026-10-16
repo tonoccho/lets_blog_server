@@ -1,22 +1,30 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
 import type { GeneratedImageSummary } from '@/lib/apiClient'
 
 /**
  * issue #1492: ギャラリーでの複数選択と一括削除。
  * 選択は現在表示中の画像が対象。確認ダイアログに件数を出し、結果(成功/失敗件数)を表示する。
  */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
-  bulkDeleteGeneratedImagesAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const bulkDelete = actions.bulkDeleteGeneratedImagesAction as jest.Mock
-const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
+const bulkDelete = backend.bulkDelete
+const fetchPage = backend.listImages
 
 function image(id: number, tags: string[] = []): GeneratedImageSummary {
   return {
@@ -45,7 +53,7 @@ describe('ImageGalleryGrid 複数選択と一括削除 (issue #1492)', () => {
   let confirmSpy: jest.SpyInstance
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    installGallery()
     confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -203,8 +211,8 @@ describe('ImageGalleryGrid 複数選択と一括削除 (issue #1492)', () => {
   })
 
   it('選択済みの画像を詳細モーダルから単体削除すると、選択からも外れる', async () => {
-    ;(actions.deleteGeneratedImageAction as jest.Mock).mockResolvedValue(undefined)
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue({
+    ;backend.deleteImage.mockResolvedValue(undefined)
+    ;backend.getImage.mockResolvedValue({
       ...image(1),
       negativePrompt: null,
     })

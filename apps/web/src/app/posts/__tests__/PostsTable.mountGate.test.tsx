@@ -1,29 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import type { PostSummary } from "@/lib/apiClient";
 
 /**
  * issue #1363(親issue #1261 分割B): 「マウント前は固定プレースホルダーを表示する」
- * (#1362 と同じ mounted フラグ方式)をこのファイル単独で検証する。理由は
- * SshKeyPairsPanel.mountGate.test.tsx の先頭コメントと同じ(`"use client"`を持つ
- * コンポーネントでは`jest.spyOn(React, "useEffect")`が効かず、`jest.mock("react", ...)`
- * によるモジュール差し替えが必要。他のテストを巻き添えにしないためファイルを分離する)。
+ * (#1362 と同じ mounted フラグ方式)を検証する。
  *
- * `PostsTable`は最終投稿日時(:87)と公開予定日時(:90)の2箇所で`formatDateTime`を
- * 呼ぶため、両方のプレースホルダー表示をここで確かめる。
+ * マウント前の状態は、`react` の `useEffect` や `@/lib/formatDate` を差し替えて作らず、
+ * サーバー描画(`renderToString`。effect は走らない)で作る。実際にサーバーが返す HTML と同じ状態を見る(#1834)。
+ *
+ * `PostsTable`は最終投稿日時と公開予定日時の2箇所で日時を整形するため、両方のプレースホルダー表示を確かめる。
  */
-jest.mock("react", () => ({
-  __esModule: true,
-  ...jest.requireActual("react"),
-  useEffect: jest.fn(),
-}));
-
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn(() => "FORMATTED_DATETIME"),
-  TIMEZONE_PENDING_PLACEHOLDER: "読み込み中…",
-}));
-
 import { PostsTable } from "../PostsTable";
-import { formatDateTime } from "@/lib/formatDate";
 
 function post(overrides: Partial<PostSummary> = {}): PostSummary {
   return {
@@ -42,10 +29,9 @@ function post(overrides: Partial<PostSummary> = {}): PostSummary {
 
 describe("PostsTable(マウント前)", () => {
   it("個人設定TZが未設定のとき、マウント前は最終投稿日時・公開予定日時の両方に固定プレースホルダーを表示する(#1362と同じmountedフラグ方式、issue #1363)", () => {
-    render(<PostsTable posts={[post()]} timezone={null} />);
+    const html = renderToString(<PostsTable posts={[post()]} timezone={null} />);
 
-    expect(formatDateTime).not.toHaveBeenCalled();
-    expect(screen.queryByText("FORMATTED_DATETIME")).not.toBeInTheDocument();
-    expect(screen.getAllByText("読み込み中…")).toHaveLength(2);
+    expect(html).not.toContain("2026/9/");
+    expect(html.match(/読み込み中…/g)).toHaveLength(2);
   });
 });

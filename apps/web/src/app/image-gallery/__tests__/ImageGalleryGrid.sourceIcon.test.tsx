@@ -1,21 +1,27 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
 import type { GeneratedImageSummary } from '@/lib/apiClient'
 
 /** issue #1646: カードのタイトル横に、アップロード / AI生成を示す種別アイコンを表示する。 */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
-  bulkDeleteGeneratedImagesAction: jest.fn(),
-  createGeneratedImageFolderAction: jest.fn(),
-  setGeneratedImageFolderAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
-const getDetail = actions.getGeneratedImageAction as jest.Mock
+const fetchPage = backend.listImages
+const getDetail = backend.getImage
 
 function image(id: number, provider: string, prompt: string | null = `prompt-${id}`, tags: string[] = []): GeneratedImageSummary {
   return {
@@ -41,7 +47,7 @@ function iconOf(title: string) {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  installGallery()
   fetchPage.mockReset()
   ;(global as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
     observe() {}
@@ -98,18 +104,18 @@ describe('種別アイコンを足しても既存の操作は変わらない', (
     expect(checkbox).not.toBeChecked()
   })
 
-  it('虫眼鏡ボタンで詳細を開く', () => {
+  it('虫眼鏡ボタンで詳細を開く', async () => {
     getDetail.mockResolvedValue(null)
     renderGrid([image(7, 'COMFYUI')])
     fireEvent.click(screen.getByRole('button', { name: 'prompt-7の詳細を表示' }))
-    expect(getDetail).toHaveBeenCalledWith(7)
+    await waitFor(() => expect(getDetail).toHaveBeenCalledWith(7))
   })
 
-  it('タグボタンはカード選択を変えずに絞り込みを実行する', () => {
+  it('タグボタンはカード選択を変えずに絞り込みを実行する', async () => {
     fetchPage.mockResolvedValue([])
     renderGrid([image(8, 'COMFYUI', 'prompt-8', ['猫'])])
     fireEvent.click(screen.getByRole('button', { name: 'タグ「猫」で絞り込む' }))
     expect(screen.getByRole('checkbox', { name: 'prompt-8を選択' })).not.toBeChecked()
-    expect(fetchPage).toHaveBeenCalled()
+    await waitFor(() => expect(fetchPage).toHaveBeenCalled())
   })
 })

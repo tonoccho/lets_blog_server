@@ -1,6 +1,6 @@
 import { act, configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
 import { GALLERY_PAGE_SIZE } from '../pageSize'
 import type { GeneratedImageDetail, GeneratedImageSummary } from '@/lib/apiClient'
 
@@ -8,14 +8,23 @@ import type { GeneratedImageDetail, GeneratedImageSummary } from '@/lib/apiClien
  * issue #1472: ギャラリーの無限スクロール(IntersectionObserver)、id による重複除去、
  * サーバ側タグ絞り込み、失敗時に読み込み済みの一覧を消さないこと。
  */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
+const fetchPage = backend.listImages
 
 // issue #1658: 1 ページ分(GALLERY_PAGE_SIZE 枚)の描画待ちが、他の jest・gradle・AT と同時に走る
 // 高負荷時に、waitFor の既定(1 秒)とテストの既定(5 秒)に収まらず失敗した。待ちを広げるだけで、
@@ -75,7 +84,7 @@ function thumbnails() {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  installGallery()
   // clearAllMocks は mockResolvedValueOnce の未消費分を消さず、次のテストへ漏れる。
   fetchPage.mockReset()
   FakeObserver.instances = []
@@ -296,8 +305,8 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
   const DETAIL = { ...image(5, ['猫']), negativePrompt: '', steps: 1, cfgScale: 1, samplerName: 'e', scheduler: 'n', seed: 1, width: 1, height: 1, batchSize: 1, batchIndex: 0, loraName: null, loraWeight: null } as unknown as GeneratedImageDetail
 
   it('画像を削除すると一覧から取り除く', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
-    ;(actions.deleteGeneratedImageAction as jest.Mock).mockResolvedValue(undefined)
+    ;backend.getImage.mockResolvedValue(DETAIL)
+    ;backend.deleteImage.mockResolvedValue(undefined)
     jest.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ImageGalleryGrid images={[image(5, ['猫']), image(4)]} timezone={null} />)
 
@@ -309,8 +318,8 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
   })
 
   it('削除した分だけ次のoffsetが戻る', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue({ ...DETAIL, id: 200 })
-    ;(actions.deleteGeneratedImageAction as jest.Mock).mockResolvedValue(undefined)
+    ;backend.getImage.mockResolvedValue({ ...DETAIL, id: 200 })
+    ;backend.deleteImage.mockResolvedValue(undefined)
     jest.spyOn(window, 'confirm').mockReturnValue(true)
     fetchPage.mockResolvedValue([])
     render(<ImageGalleryGrid images={page(200, GALLERY_PAGE_SIZE)} timezone={null} />)
@@ -324,8 +333,8 @@ describe('ImageGalleryGrid ローカルの一覧の更新(issue #1472)', () => {
   })
 
   it('タグを保存すると一覧の画像のタグとチップに反映する', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
-    ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['猫', '新'] })
+    ;backend.getImage.mockResolvedValue(DETAIL)
+    ;backend.updateTags.mockResolvedValue({ ...DETAIL, tags: ['猫', '新'] })
     render(<ImageGalleryGrid images={[image(5, ['猫']), image(4)]} timezone={null} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'prompt-5の詳細を表示' }))

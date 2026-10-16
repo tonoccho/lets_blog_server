@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
+import { DEFAULT_SESSION, getServerSessionMock } from '@/lib/__tests__/testUtils/serverRuntime'
 import { GALLERY_PAGE_SIZE } from '../pageSize'
 import type { GeneratedImageDetail, GeneratedImageFolder, GeneratedImageSummary } from '@/lib/apiClient'
 
@@ -8,26 +9,29 @@ import type { GeneratedImageDetail, GeneratedImageFolder, GeneratedImageSummary 
  * issue #1493: 生成画像ギャラリーの入れ子フォルダ。ツリー表示・フォルダでの絞り込み(タグ・ページングと併用)・
  * フォルダの作成・詳細モーダルからの所属変更。
  */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
-  bulkDeleteGeneratedImagesAction: jest.fn(),
-  createGeneratedImageFolderAction: jest.fn(),
-  setGeneratedImageFolderAction: jest.fn(),
-  renameGeneratedImageFolderAction: jest.fn(),
-  getGeneratedImageFolderDeleteImpactAction: jest.fn(),
-  deleteGeneratedImageFolderAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
-const getDetail = actions.getGeneratedImageAction as jest.Mock
-const createFolder = actions.createGeneratedImageFolderAction as jest.Mock
-const setFolder = actions.setGeneratedImageFolderAction as jest.Mock
-const renameFolder = actions.renameGeneratedImageFolderAction as jest.Mock
-const deleteImpact = actions.getGeneratedImageFolderDeleteImpactAction as jest.Mock
-const deleteFolder = actions.deleteGeneratedImageFolderAction as jest.Mock
+const fetchPage = backend.listImages
+const getDetail = backend.getImage
+const createFolder = backend.createFolder
+const setFolder = backend.setFolder
+const renameFolder = backend.renameFolder
+const deleteImpact = backend.folderDeleteImpact
+const deleteFolder = backend.deleteFolder
 
 function image(id: number, folderId: number | null = null, tags: string[] = []): GeneratedImageSummary {
   return {
@@ -104,7 +108,7 @@ function chooseFolder(name: string) {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  installGallery()
   fetchPage.mockReset()
   FakeObserver.instances = []
   ;(global as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeObserver
@@ -198,12 +202,12 @@ describe('フォルダでの絞り込み', () => {
   })
 
   it('絞り込みの取得に失敗したら、読み込み済みの一覧と選択を残して通知する', async () => {
-    fetchPage.mockRejectedValueOnce(new Error('落ちた'))
+    fetchPage.mockRejectedValueOnce(new Error('APIエラー (500): 落ちた'))
     renderGrid([image(1)])
 
     chooseFolder('風景')
 
-    expect(await screen.findByText(/絞り込みを読み込めませんでした: 落ちた/)).toBeInTheDocument()
+    expect(await screen.findByText(/絞り込みを読み込めませんでした: APIエラー \(500\): 落ちた/)).toBeInTheDocument()
     expect(screen.getByAltText('prompt-1')).toBeInTheDocument()
     expect(treeItem('すべて')).toHaveAttribute('aria-selected', 'true')
   })
@@ -252,17 +256,17 @@ describe('フォルダの作成', () => {
   })
 
   it('作成に失敗したら理由を表示し、入力は残す', async () => {
-    createFolder.mockRejectedValue(new Error('この操作にはadmin権限が必要です'))
+    createFolder.mockRejectedValue(new Error('APIエラー (403): この操作にはadmin権限が必要です'))
     renderGrid()
 
     fillAndSubmit('海')
 
-    expect(await screen.findByText('この操作にはadmin権限が必要です')).toBeInTheDocument()
+    expect(await screen.findByText('APIエラー (403): この操作にはadmin権限が必要です')).toBeInTheDocument()
     expect(screen.getByLabelText('新しいフォルダの名前')).toHaveValue('海')
   })
 
   it('Error以外の失敗も文字列にして表示する', async () => {
-    createFolder.mockRejectedValue('だめ')
+    getServerSessionMock.mockRejectedValue('だめ') // Server Action が Error 以外を投げる
     renderGrid()
 
     fillAndSubmit('海')
@@ -332,11 +336,11 @@ describe('詳細モーダルからの所属変更', () => {
 
   it('保存に失敗したら理由を表示し、選択は元に戻る', async () => {
     const select = await openDetail(image(1, null))
-    setFolder.mockRejectedValue(new Error('この操作にはadmin権限が必要です'))
+    setFolder.mockRejectedValue(new Error('APIエラー (403): この操作にはadmin権限が必要です'))
 
     fireEvent.change(select, { target: { value: '3' } })
 
-    expect(await screen.findByText('この操作にはadmin権限が必要です')).toBeInTheDocument()
+    expect(await screen.findByText('APIエラー (403): この操作にはadmin権限が必要です')).toBeInTheDocument()
     expect(screen.getByLabelText('所属フォルダ')).toHaveValue('')
   })
 
@@ -390,20 +394,20 @@ describe('フォルダの改名(issue #1494)', () => {
   })
 
   it('改名に失敗したら理由を表示し、入力と元の名前を残す', async () => {
-    renameFolder.mockRejectedValue(new Error('この操作にはadmin権限が必要です'))
+    renameFolder.mockRejectedValue(new Error('APIエラー (403): この操作にはadmin権限が必要です'))
     renderGrid()
 
     startRename('人物')
     fireEvent.change(screen.getByLabelText('「人物」の新しい名前'), { target: { value: '動物' } })
     fireEvent.click(screen.getByRole('button', { name: '改名を保存' }))
 
-    expect(await screen.findByText('この操作にはadmin権限が必要です')).toBeInTheDocument()
+    expect(await screen.findByText('APIエラー (403): この操作にはadmin権限が必要です')).toBeInTheDocument()
     expect(screen.getByLabelText('「人物」の新しい名前')).toHaveValue('動物')
     expect(treeItem('人物')).toBeInTheDocument()
   })
 
   it('Error以外の失敗も文字列にして表示する', async () => {
-    renameFolder.mockRejectedValue('だめ')
+    getServerSessionMock.mockRejectedValue('だめ') // Server Action が Error 以外を投げる
     renderGrid()
 
     startRename('人物')
@@ -508,19 +512,20 @@ describe('フォルダの削除(issue #1494)', () => {
   })
 
   it('影響範囲を取得できなければ確認を出さず、理由を表示する', async () => {
-    deleteImpact.mockRejectedValue(new Error('この操作にはadmin権限が必要です'))
+    deleteImpact.mockRejectedValue(new Error('APIエラー (403): この操作にはadmin権限が必要です'))
     renderGrid()
 
     clickDelete('人物')
 
-    expect(await screen.findByText('この操作にはadmin権限が必要です')).toBeInTheDocument()
+    expect(await screen.findByText('APIエラー (403): この操作にはadmin権限が必要です')).toBeInTheDocument()
     expect(confirmSpy).not.toHaveBeenCalled()
     expect(deleteFolder).not.toHaveBeenCalled()
   })
 
   it('削除に失敗したら理由を表示し、ツリーは変えない', async () => {
     deleteImpact.mockResolvedValue({ descendantFolderCount: 0, imageCount: 0 })
-    deleteFolder.mockRejectedValue('だめ')
+    // 1 回目(影響範囲の取得)は通し、2 回目(削除)で Server Action が Error 以外を投げる。
+    getServerSessionMock.mockResolvedValueOnce(DEFAULT_SESSION).mockRejectedValue('だめ')
     confirmSpy.mockReturnValue(true)
     renderGrid()
 

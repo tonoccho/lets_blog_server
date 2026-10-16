@@ -2,12 +2,22 @@
  * @jest-environment node
  */
 jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
-const requireAdminSession = jest.fn();
-jest.mock("@/lib/session", () => ({ requireAdminSession: () => requireAdminSession() }));
-const updateSite = jest.fn();
-jest.mock("@/lib/apiClient", () => ({ updateSite: (...a: unknown[]) => updateSite(...a) }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
 import { updateSiteAction } from "../actions";
+
+/** バックエンド(gateway の向こう)の代役。受け取った本文は `calls` から読む。 */
+const updateSite = jest.fn();
 
 function form(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -17,7 +27,18 @@ function form(entries: Record<string, string>): FormData {
 
 describe("updateSiteAction の管理画面パス(issue #1532)", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    updateSite.mockReset();
+    resetServerRuntime(ADMIN_SESSION);
+    installFetch({
+      "PUT /api/sites/:id": async (_url, init, [id]) => {
+        try {
+          return jsonResponse(await updateSite(Number(id), JSON.parse(String(init.body))));
+        } catch (err) {
+          if (typeof err === "string") throw err;
+          return textResponse(err instanceof Error ? err.message : String(err), 400);
+        }
+      },
+    });
     updateSite.mockResolvedValue({ connectionCheckStatus: null });
   });
 
@@ -47,7 +68,7 @@ describe("updateSiteAction の管理画面パス(issue #1532)", () => {
   });
 
   it("バックエンドの 400 メッセージを error として返す", async () => {
-    updateSite.mockRejectedValue(new Error("APIエラー (400): 相対パスを指定してください"));
+    updateSite.mockRejectedValue(new Error("相対パスを指定してください"));
     const result = await updateSiteAction(1, {}, form({ name: "N", adminPath: "//evil" }));
     expect(result).toEqual({ error: "APIエラー (400): 相対パスを指定してください" });
   });
@@ -63,5 +84,12 @@ describe("updateSiteAction の管理画面パス(issue #1532)", () => {
       success: true,
       connectionCheckStatus: "SUCCESS",
     });
+  });
+
+  it("表示名が空・無いときは名前を送らない(変更しない)", async () => {
+    await updateSiteAction(1, {}, form({ name: "  ", adminPath: "x" }));
+    expect(updateSite.mock.calls[0][1]).not.toHaveProperty("name");
+    await updateSiteAction(1, {}, form({ adminPath: "x" }));
+    expect(updateSite.mock.calls[1][1]).not.toHaveProperty("name");
   });
 });

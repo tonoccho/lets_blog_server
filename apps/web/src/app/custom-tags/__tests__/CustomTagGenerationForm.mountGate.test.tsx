@@ -1,27 +1,25 @@
-import { render, screen } from '@testing-library/react'
+import { renderToString } from 'react-dom/server'
 import { useSession } from 'next-auth/react'
 
 /**
  * issue #1414(#1413の横展開): ハイドレーション完了前は「生成」ボタンを押せないようにする。
- * 理由と単独ファイルにする事情は SshKeyPairsPanel.mountGate.test.tsx を参照
- * (useEffect を no-op にして「マウント前」を再現するため、他のテストと分離する)。
+ * マウント前の状態は、`react` の `useEffect` を差し替えて作らず、サーバー描画(`renderToString`。
+ * effect は走らない)で作る。実際にサーバーが返す HTML と同じ状態を見る(#1834)。
+ *
+ * 自前の useCustomTagGeneration は差し替えない。`next-auth/react` はブラウザのセッション取得で、実行基盤の代替。
  */
-jest.mock('react', () => ({
-  __esModule: true,
-  ...jest.requireActual('react'),
-  useEffect: jest.fn(),
-}))
-
+jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }));
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
 jest.mock('next-auth/react')
-jest.mock('@/lib/useCustomTagGeneration', () => ({
-  useCustomTagGeneration: () => ({
-    isLoading: false,
-    error: null,
-    queuedJobId: null,
-    generate: jest.fn(),
-    reset: jest.fn(),
-  }),
-}))
 
 import { CustomTagGenerationForm } from '../CustomTagGenerationForm'
 
@@ -33,8 +31,8 @@ describe('CustomTagGenerationForm(マウント前)', () => {
       update: jest.fn(),
     })
 
-    render(<CustomTagGenerationForm projects={[]} currentProjectId={null} />)
+    const html = renderToString(<CustomTagGenerationForm projects={[]} currentProjectId={null} />)
 
-    expect(screen.getByRole('button', { name: '生成' })).toBeDisabled()
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>生成<\/button>/)
   })
 })

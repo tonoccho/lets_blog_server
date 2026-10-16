@@ -1,27 +1,45 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import { ReactNode } from 'react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { SiteListTable } from '../SiteListTable'
 import type { Site, Project } from '@/lib/apiClient'
 
-jest.mock('@/components/ViewerDateTime', () => ({
-  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
-    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
-  ),
+/**
+ * 自前の ViewerDateTime・DeleteSiteButton・CheckConnectionButton・Server Action・formatDate は差し替えない。
+ * 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-jest.mock('../DeleteSiteButton', () => ({
-  DeleteSiteButton: () => <div>Delete Button</div>,
-}))
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime'
+import { installFetch, jsonResponse, resetServerRuntime } from '@/lib/__tests__/testUtils/serverRuntime'
 
-jest.mock('../CheckConnectionButton', () => ({
-  CheckConnectionButton: () => <button>Check Connection</button>,
-}))
+/** 削除 API(gateway の向こう)に届いた、削除対象のサイトID。 */
+const deleted: number[] = []
 
-jest.mock('next/link', () => {
-  const Link = ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>
-  Link.displayName = 'MockLink'
-  return Link
+beforeEach(() => {
+  deleted.length = 0
+  resetServerRuntime(ADMIN_SESSION)
+  installFetch({
+    'DELETE /api/sites/:id': (_url, _init, [id]) => {
+      deleted.push(Number(id))
+      return { ...jsonResponse(null, 204), text: async () => '' } as unknown as Response
+    },
+  })
 })
+
+/** 登録日の列(0 始まりで 5 番目)の表示を、行ごとに取り出す。 */
+const createdCells = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll('tbody tr')).map((row) => (row.querySelectorAll('td')[5]?.textContent ?? '').trim())
+const siteKeys = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll('tbody tr')).map((row) => (row.querySelector('td')?.textContent ?? '').trim())
 
 const mockSites: Site[] = [
   {
@@ -66,21 +84,20 @@ const mockProjects: Project[] = [
 ]
 
 describe('SiteListTable', () => {
-  it('renders each site createdAt through ViewerDateTime with the timezone as personalTimeZone (issue #1367)', () => {
-    render(
+  it('renders each site createdAt formatted in the personal timezone (issue #1367)', () => {
+    const { container } = render(
       <SiteListTable sites={mockSites} projects={mockProjects} isAdmin={false} timezone="Asia/Tokyo" adminPath="wp-admin" />
     )
 
-    const cells = screen.getAllByTestId('viewer-datetime').map((el) => el.textContent)
-    expect(cells).toEqual([`VDT(${mockSites[0].createdAt}|Asia/Tokyo)`, `VDT(${mockSites[1].createdAt}|Asia/Tokyo)`])
+    expect(createdCells(container)).toEqual(['2024/1/1 19:00:00', '2024/1/2 19:00:00'])
   })
 
-  it('passes null timezone through as personalTimeZone (issue #1367)', () => {
-    render(
+  it('falls back to the browser timezone (UTC in tests) when the personal timezone is null (issue #1367)', () => {
+    const { container } = render(
       <SiteListTable sites={[mockSites[0]]} projects={mockProjects} isAdmin={false} timezone={null} adminPath="wp-admin" />
     )
 
-    expect(screen.getByTestId('viewer-datetime')).toHaveTextContent(`VDT(${mockSites[0].createdAt}|null)`)
+    expect(createdCells(container)).toEqual(['2024/1/1 10:00:00'])
   })
 
   it('renders sites table', () => {
@@ -204,10 +221,14 @@ describe('SiteListTable', () => {
     )
     const nameHeader = screen.getByText('表示名').closest('th') as HTMLElement
     fireEvent.click(nameHeader)
+    expect(nameHeader).toHaveTextContent('表示名 ↑')
     fireEvent.click(nameHeader)
+    expect(nameHeader).toHaveTextContent('表示名 ↓')
 
     const createdHeader = screen.getByText('登録日').closest('th') as HTMLElement
     fireEvent.click(createdHeader)
+    expect(createdHeader).toHaveTextContent('登録日 ↑')
+    expect(nameHeader).not.toHaveTextContent('↓')
 
     expect(screen.getByText('Test Site 1')).toBeInTheDocument()
   })
@@ -300,6 +321,116 @@ describe('SiteListTable', () => {
       fireEvent.change(screen.getByPlaceholderText('サイトキー・表示名・URLで検索'), { target: { value: 'test1' } })
       expect(screen.getByText('Test Site 1')).toBeInTheDocument()
       expect(screen.queryByText('Test Site 2')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('並び替え', () => {
+    const rows = (sites: Site[]) => {
+      const { container } = render(
+        <SiteListTable sites={sites} projects={[]} isAdmin={false} timezone="UTC" adminPath="wp-admin" />
+      )
+      return container
+    }
+    const a = { ...mockSites[0], siteKey: 'a', name: 'B名', createdAt: '2024-03-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' }
+    const b = { ...mockSites[1], siteKey: 'b', name: 'A名', createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-05-01T00:00:00Z' }
+
+    it('表示名の昇順・降順で並べ替える', () => {
+      const container = rows([a, b])
+      expect(siteKeys(container)).toEqual(['a', 'b'])
+      fireEvent.click(screen.getByText('表示名').closest('th') as HTMLElement)
+      expect(siteKeys(container)).toEqual(['b', 'a'])
+      fireEvent.click(screen.getByText(/表示名/).closest('th') as HTMLElement)
+      expect(siteKeys(container)).toEqual(['a', 'b'])
+    })
+
+    it('登録日の昇順・降順で並べ替える', () => {
+      const container = rows([a, b])
+      fireEvent.click(screen.getByText('登録日').closest('th') as HTMLElement)
+      expect(siteKeys(container)).toEqual(['b', 'a'])
+      fireEvent.click(screen.getByText(/登録日/).closest('th') as HTMLElement)
+      expect(siteKeys(container)).toEqual(['a', 'b'])
+      fireEvent.click(screen.getByText(/登録日/).closest('th') as HTMLElement)
+      expect(siteKeys(container)).toEqual(['b', 'a'])
+    })
+  })
+
+  describe('自動構築・環境の表示', () => {
+    it('自動構築されたサイトに「自動構築」を表示する', () => {
+      render(
+        <SiteListTable
+          sites={[{ ...mockSites[0], managedWordpress: true }]}
+          projects={[]}
+          isAdmin={false}
+          timezone="UTC"
+          adminPath="wp-admin"
+        />
+      )
+      expect(screen.getByText('自動構築')).toBeInTheDocument()
+    })
+
+    it('ローカル環境に紐付いたサイトにはローカルと本番のバッジを区別して出す', () => {
+      const projects: Project[] = [{ ...mockProjects[0], localSite: mockSites[0], productionSite: mockSites[1] }]
+      render(<SiteListTable sites={mockSites} projects={projects} isAdmin={false} timezone="UTC" adminPath="wp-admin" />)
+      expect(screen.getByText('ローカル')).toBeInTheDocument()
+      expect(screen.getByText('本番')).toBeInTheDocument()
+    })
+
+    it('CMS種別で絞り込むと、別のCMS種別のサイトは除外される(WORDPRESS 以外の種別は灰緑のバッジ)', () => {
+      const other = { ...mockSites[1], cmsType: 'OTHER' } as unknown as Site
+      render(<SiteListTable sites={[mockSites[0], other]} projects={[]} isAdmin={false} timezone="UTC" adminPath="wp-admin" />)
+      expect(screen.getByText('OTHER')).toHaveClass('bg-green-100')
+      fireEvent.change(screen.getByLabelText('CMS種別で絞り込む'), { target: { value: 'WORDPRESS' } })
+      expect(screen.queryByText('Test Site 2')).not.toBeInTheDocument()
+      expect(screen.getByText('Test Site 1')).toBeInTheDocument()
+    })
+
+    it('絞り込みに一致するサイトが無いとき「条件に一致するサイトはありません」を表示する', () => {
+      render(<SiteListTable sites={mockSites} projects={[]} isAdmin={false} timezone="UTC" adminPath="wp-admin" />)
+      fireEvent.change(screen.getByPlaceholderText(/サイトキー・表示名・URLで検索/), { target: { value: '該当なし' } })
+      expect(screen.getByText('条件に一致するサイトはありません')).toBeInTheDocument()
+    })
+  })
+
+  describe('操作列', () => {
+    it('管理者でなければ管理リンクと削除ボタンを出さない', () => {
+      render(<SiteListTable sites={mockSites} projects={[]} isAdmin={false} timezone="UTC" adminPath="wp-admin" />)
+      expect(screen.queryByText('管理')).toBeNull()
+      expect(screen.queryByRole('button', { name: '削除' })).toBeNull()
+      expect(screen.getAllByRole('button', { name: '疎通確認' })).toHaveLength(2)
+    })
+
+    it('管理者には編集画面への管理リンクを出す', () => {
+      render(<SiteListTable sites={mockSites} projects={[]} isAdmin={true} timezone="UTC" adminPath="wp-admin" />)
+      expect(screen.getAllByText('管理')[0]).toHaveAttribute('href', '/sites/1/edit')
+    })
+
+    it('削除を確認したらそのサイトを削除する', async () => {
+      const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true)
+      const { container } = render(
+        <SiteListTable sites={mockSites} projects={[]} isAdmin={true} timezone="UTC" adminPath="wp-admin" />
+      )
+      const row = container.querySelectorAll('tbody tr')[1] as HTMLElement
+      fireEvent.click(within(row).getByRole('button', { name: '削除' }))
+      await waitFor(() => expect(deleted).toEqual([2]))
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('登録情報のみ削除され'))
+      confirm.mockRestore()
+    })
+
+    it('自動構築されたサイトの削除では、構築物も削除される旨を確認し、取り消したら削除しない', () => {
+      const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false)
+      render(
+        <SiteListTable
+          sites={[{ ...mockSites[0], managedWordpress: true }]}
+          projects={[]}
+          isAdmin={true}
+          timezone="UTC"
+          adminPath="wp-admin"
+        />
+      )
+      fireEvent.click(screen.getByRole('button', { name: '削除' }))
+      expect(confirm).toHaveBeenCalledWith(expect.stringContaining('自動構築されたWordPressインスタンス'))
+      expect(deleted).toEqual([])
+      confirm.mockRestore()
     })
   })
 })

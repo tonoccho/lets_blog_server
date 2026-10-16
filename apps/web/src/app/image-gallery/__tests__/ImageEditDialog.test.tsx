@@ -1,13 +1,26 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ImageEditDialog } from '../ImageEditDialog'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
+import { getServerSessionMock } from '@/lib/__tests__/testUtils/serverRuntime'
 import type { GeneratedImageDetail } from '@/lib/apiClient'
 
-jest.mock('../actions', () => ({
-  editGeneratedImageAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const edit = actions.editGeneratedImageAction as jest.Mock
+const edit = backend.editImage
 
 const SAVED = { id: 99, width: 100, height: 50 } as unknown as GeneratedImageDetail
 
@@ -33,7 +46,7 @@ function drag(box: HTMLElement, from: [number, number], to: [number, number]) {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  installGallery()
 })
 
 describe('ImageEditDialog 回転・反転(issue #1655)', () => {
@@ -195,25 +208,26 @@ describe('ImageEditDialog 保存とキャンセル(issue #1655)', () => {
   })
 
   it('保存に失敗したら理由を表示し、閉じずに残す', async () => {
-    edit.mockRejectedValue(new Error('画像の画素数が大きすぎます'))
+    edit.mockRejectedValue(new Error('APIエラー (422): 画像の画素数が大きすぎます'))
     const { onSaved } = renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '上下反転' }))
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('画像の画素数が大きすぎます')
+    expect(await screen.findByRole('alert')).toHaveTextContent('APIエラー (422): 画像の画素数が大きすぎます')
     expect(onSaved).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
   })
 
   it('失敗が Error でなくても文字列にして表示する', async () => {
-    edit.mockRejectedValue('boom')
+    // Server Action が Error 以外(文字列)を投げる状態(セッション確認の段階で)。
+    getServerSessionMock.mockRejectedValue('boom')
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: '上下反転' }))
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('boom')
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^boom$/)
   })
 
   it('キャンセルは何も保存せずに閉じる', () => {

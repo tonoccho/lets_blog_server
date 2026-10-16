@@ -15,6 +15,10 @@
  * バックエンド側の認可欠落は #830 で追跡している。
  */
 jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
 
 const redirect = jest.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
@@ -23,36 +27,26 @@ jest.mock('next/navigation', () => ({ redirect: (p: string) => redirect(p) }));
 const revalidatePath = jest.fn();
 jest.mock('next/cache', () => ({ revalidatePath: (...a: unknown[]) => revalidatePath(...a) }));
 
-const getServerSession = jest.fn();
-jest.mock('next-auth', () => ({
-  getServerSession: (...args: unknown[]) => getServerSession(...args),
-}));
-jest.mock('@/lib/auth', () => ({ authOptions: {} }));
+/**
+ * 自前の @/lib/apiClient・@/lib/session・@/lib/auth は差し替えない(#1834)。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch)だけで、バックエンド(media-service)の代役は ./galleryBackend の `backend`。
+ */
+import { backend, installGallery } from './galleryBackend';
+import { getServerSessionMock } from '@/lib/__tests__/testUtils/serverRuntime';
 
-const getGeneratedImage = jest.fn();
-const deleteGeneratedImage = jest.fn();
-const updateGeneratedImageTags = jest.fn();
-const listGeneratedImages = jest.fn();
-const bulkDeleteGeneratedImages = jest.fn();
-const createGeneratedImageFolder = jest.fn();
-const setGeneratedImageFolder = jest.fn();
-const renameGeneratedImageFolder = jest.fn();
-const getGeneratedImageFolderDeleteImpact = jest.fn();
-const deleteGeneratedImageFolder = jest.fn();
-const editGeneratedImage = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  getGeneratedImage: (...a: unknown[]) => getGeneratedImage(...a),
-  deleteGeneratedImage: (...a: unknown[]) => deleteGeneratedImage(...a),
-  updateGeneratedImageTags: (...a: unknown[]) => updateGeneratedImageTags(...a),
-  listGeneratedImages: (...a: unknown[]) => listGeneratedImages(...a),
-  bulkDeleteGeneratedImages: (...a: unknown[]) => bulkDeleteGeneratedImages(...a),
-  createGeneratedImageFolder: (...a: unknown[]) => createGeneratedImageFolder(...a),
-  setGeneratedImageFolder: (...a: unknown[]) => setGeneratedImageFolder(...a),
-  renameGeneratedImageFolder: (...a: unknown[]) => renameGeneratedImageFolder(...a),
-  getGeneratedImageFolderDeleteImpact: (...a: unknown[]) => getGeneratedImageFolderDeleteImpact(...a),
-  deleteGeneratedImageFolder: (...a: unknown[]) => deleteGeneratedImageFolder(...a),
-  editGeneratedImage: (...a: unknown[]) => editGeneratedImage(...a),
-}));
+const getGeneratedImage = backend.getImage;
+const deleteGeneratedImage = backend.deleteImage;
+const updateGeneratedImageTags = backend.updateTags;
+const listGeneratedImages = backend.listImages;
+const bulkDeleteGeneratedImages = backend.bulkDelete;
+const createGeneratedImageFolder = backend.createFolder;
+const setGeneratedImageFolder = backend.setFolder;
+const renameGeneratedImageFolder = backend.renameFolder;
+const getGeneratedImageFolderDeleteImpact = backend.folderDeleteImpact;
+const deleteGeneratedImageFolder = backend.deleteFolder;
+const editGeneratedImage = backend.editImage;
+/** セッションの状態を差し替える(未ログインは null)。 */
+const getServerSession = getServerSessionMock;
 
 import {
   bulkDeleteGeneratedImagesAction,
@@ -70,7 +64,9 @@ import {
 
 describe('image-gallery の Server Action の認可(issue #824)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
   });
 
   describe('未ログイン', () => {
@@ -127,7 +123,9 @@ describe('image-gallery の Server Action の認可(issue #824)', () => {
  */
 describe('fetchGalleryImagesPageAction(issue #1472)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
   });
 
   it('未ログインは /login へ送り、取得しない', async () => {
@@ -144,7 +142,7 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
     const result = await fetchGalleryImagesPageAction(48, null, null, null);
 
     expect(result).toEqual([{ id: 1 }]);
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 48, tag: undefined, folderId: undefined, unfiled: undefined, source: undefined });
+    expect(backend.listQuery).toHaveBeenCalledWith({ limit: '24', offset: '48' });
   });
 
   it('tag があればそのまま渡す', async () => {
@@ -153,14 +151,16 @@ describe('fetchGalleryImagesPageAction(issue #1472)', () => {
 
     await fetchGalleryImagesPageAction(0, '猫', null, null);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, { limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: undefined, source: undefined });
+    expect(backend.listQuery).toHaveBeenCalledWith({ limit: '24', offset: '0', tag: '猫' });
   });
 });
 
 /** issue #1647: 種別(UPLOAD / AI)は一覧APIの source として渡す。null は絞り込みなし(source を付けない)。 */
 describe('fetchGalleryImagesPageAction の種別絞り込み(issue #1647)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     listGeneratedImages.mockResolvedValue([]);
   });
@@ -168,24 +168,22 @@ describe('fetchGalleryImagesPageAction の種別絞り込み(issue #1647)', () =
   it.each(['UPLOAD', 'AI'] as const)('%s は tag・フォルダと併せて source として渡す', async (source) => {
     await fetchGalleryImagesPageAction(24, '猫', 5, source);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
-      limit: 24, offset: 24, tag: '猫', folderId: 5, unfiled: undefined, source,
-    });
+    expect(backend.listQuery).toHaveBeenCalledWith({ limit: '24', offset: '24', tag: '猫', folderId: '5', source });
   });
 
   it('null は source を付けない', async () => {
     await fetchGalleryImagesPageAction(0, null, null, null);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
-      limit: 24, offset: 0, tag: undefined, folderId: undefined, unfiled: undefined, source: undefined,
-    });
+    expect(backend.listQuery).toHaveBeenCalledWith({ limit: '24', offset: '0' });
   });
 });
 
 /** issue #1492: 一括削除の Server Action もログイン必須(#824 の方針)。認可の本体は media-service が id ごとに行う。 */
 describe('bulkDeleteGeneratedImagesAction(issue #1492)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
   });
 
   it('未ログインは /login へ送り、削除しない', async () => {
@@ -210,7 +208,9 @@ describe('bulkDeleteGeneratedImagesAction(issue #1492)', () => {
 /** issue #1493: フォルダでの絞り込みは一覧APIの条件(folderId / unfiled)として渡す。 */
 describe('fetchGalleryImagesPageAction のフォルダ絞り込み(issue #1493)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
     getServerSession.mockResolvedValue({ user: { role: 'user' } });
     listGeneratedImages.mockResolvedValue([]);
   });
@@ -218,24 +218,22 @@ describe('fetchGalleryImagesPageAction のフォルダ絞り込み(issue #1493)'
   it('フォルダidは folderId として渡す', async () => {
     await fetchGalleryImagesPageAction(0, null, 5, null);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
-      limit: 24, offset: 0, tag: undefined, folderId: 5, unfiled: undefined, source: undefined,
-    });
+    expect(backend.listQuery).toHaveBeenCalledWith({ limit: '24', offset: '0', folderId: '5' });
   });
 
   it('"unfiled" は unfiled=true として渡し、folderId は付けない', async () => {
     await fetchGalleryImagesPageAction(0, '猫', 'unfiled', null);
 
-    expect(listGeneratedImages).toHaveBeenCalledWith(undefined, {
-      limit: 24, offset: 0, tag: '猫', folderId: undefined, unfiled: true, source: undefined,
-    });
+    expect(backend.listQuery).toHaveBeenCalledWith({ limit: '24', offset: '0', tag: '猫', unfiled: 'true' });
   });
 });
 
 /** issue #1493: フォルダの作成・所属変更の Server Action はログイン必須。admin 判定は media-service が行い、403 はそのまま伝わる。 */
 describe('フォルダの Server Action(issue #1493)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
   });
 
   it('未ログインは /login へ送り、作成も所属変更もしない', async () => {
@@ -279,7 +277,9 @@ describe('フォルダの Server Action(issue #1493)', () => {
 /** issue #1494: フォルダの改名・削除影響範囲・削除の Server Action はログイン必須。admin 判定は media-service が行い、403 はそのまま伝わる。 */
 describe('フォルダの改名・削除の Server Action(issue #1494)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
   });
 
   it('未ログインは /login へ送り、何も呼ばない', async () => {
@@ -325,7 +325,9 @@ describe('フォルダの改名・削除の Server Action(issue #1494)', () => {
 /** issue #1655: 画像の編集(新しい画像として保存)の Server Action もログイン必須。権限は media-service が判定する。 */
 describe('editGeneratedImageAction(issue #1655)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    installGallery();
+    redirect.mockClear();
+    revalidatePath.mockClear();
   });
 
   it('未ログインは /login へ送り、編集しない', async () => {

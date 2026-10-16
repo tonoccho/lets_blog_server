@@ -15,6 +15,10 @@
  * ここでも throw するモックにして「その先へ進まない」ことを検証できる形にする。
  */
 jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
 
 const redirect = jest.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
@@ -22,26 +26,22 @@ const redirect = jest.fn((path: string) => {
 jest.mock('next/navigation', () => ({ redirect: (p: string) => redirect(p) }));
 jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }));
 
-const getServerSession = jest.fn();
-jest.mock('next-auth', () => ({
-  getServerSession: (...args: unknown[]) => getServerSession(...args),
-}));
-jest.mock('@/lib/auth', () => ({ authOptions: {} }));
+import { installFetch, jsonResponse, resetServerRuntime } from '@/lib/__tests__/testUtils/serverRuntime';
 
+/** バックエンド(gateway の向こう)の代役。自前モジュールではなく HTTP の先を表す。 */
 const registerSite = jest.fn();
 const startManagedWordPressSiteJob = jest.fn();
 const checkSiteConnection = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  registerSite: (...a: unknown[]) => registerSite(...a),
-  startManagedWordPressSiteJob: (...a: unknown[]) => startManagedWordPressSiteJob(...a),
-  checkSiteConnection: (...a: unknown[]) => checkSiteConnection(...a),
-  deleteSite: jest.fn(),
-  updateSite: jest.fn(),
-  installWpCli: jest.fn(),
-  generateStaticContent: jest.fn(),
-  generateSshKeyPair: jest.fn(),
-  listStaticContent: jest.fn(),
-}));
+
+function setup(session: unknown) {
+  jest.clearAllMocks();
+  resetServerRuntime(session);
+  installFetch({
+    'POST /api/sites': async () => jsonResponse(await registerSite()),
+    'POST /api/sites/managed-wordpress/jobs': async () => jsonResponse(await startManagedWordPressSiteJob()),
+    'POST /api/sites/:id/test-connection': async (_u, _i, [id]) => jsonResponse(await checkSiteConnection(Number(id))),
+  });
+}
 
 import {
   checkSiteConnectionAction,
@@ -74,12 +74,8 @@ function managedForm(): FormData {
 }
 
 describe('sites の Server Action の認可(issue #824)', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
   describe('未ログイン', () => {
-    beforeEach(() => getServerSession.mockResolvedValue(null));
+    beforeEach(() => setup(null));
 
     it('registerSiteAction は /login へ送り、サイトを作成しない', async () => {
       await expect(registerSiteAction({}, siteForm())).rejects.toThrow('NEXT_REDIRECT:/login');
@@ -99,7 +95,7 @@ describe('sites の Server Action の認可(issue #824)', () => {
   });
 
   describe('ログイン済みだが非admin', () => {
-    beforeEach(() => getServerSession.mockResolvedValue({ user: { role: 'user' } }));
+    beforeEach(() => setup({ user: { role: 'user' } }));
 
     it('registerSiteAction は / へ送り、サイトを作成しない', async () => {
       await expect(registerSiteAction({}, siteForm())).rejects.toThrow('NEXT_REDIRECT:/');
@@ -122,7 +118,7 @@ describe('sites の Server Action の認可(issue #824)', () => {
   });
 
   describe('admin', () => {
-    beforeEach(() => getServerSession.mockResolvedValue({ user: { role: 'admin' } }));
+    beforeEach(() => setup({ user: { role: 'admin' } }));
 
     /**
      * 認可で止まらないことだけを見る。この先はフォームのバリデーション

@@ -1,6 +1,17 @@
 import { render, screen } from "@testing-library/react";
 
-jest.mock("../actions", () => ({ registerSiteAction: jest.fn(), generateSshKeyPairAction: jest.fn() }));
+// 自前の Server Action(../actions)は差し替えない。差し替えるのは Next.js の実行基盤だけ(#1834)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
 import { SiteForm } from "../SiteForm";
 
 const input = () => screen.getByLabelText(/管理画面パス/) as HTMLInputElement;

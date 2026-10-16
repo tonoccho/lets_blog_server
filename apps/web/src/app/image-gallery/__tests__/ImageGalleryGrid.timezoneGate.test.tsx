@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClient";
 
 /**
@@ -9,19 +9,20 @@ import type { GeneratedImageDetail, GeneratedImageSummary } from "@/lib/apiClien
  * 既にカバーされているため、ここでは追加しない(#1362の
  * ConnectedServiceStatusPanel.test.tsxと同じ役割分担)。
  */
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn((iso: string, tz?: string | null) => `FORMATTED(${iso}|${tz})`),
-}));
-
-jest.mock("../actions", () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
 import { ImageGalleryGrid } from "../ImageGalleryGrid";
-import { formatDateTime } from "@/lib/formatDate";
-import * as actions from "../actions";
+import { backend, installGallery } from "./galleryBackend";
 
 const SUMMARY: GeneratedImageSummary = {
   id: 1,
@@ -52,15 +53,15 @@ const DETAIL: GeneratedImageDetail = {
 
 describe("ImageGalleryGrid 個人設定TZあり(issue #1363)", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    (actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL);
+    installGallery();
+    backend.getImage.mockResolvedValue(DETAIL);
   });
 
   it("一覧のキャプションはformatDateTimeに個人設定TZを渡す", () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone="Asia/Tokyo" />);
 
-    expect(formatDateTime).toHaveBeenCalledWith(SUMMARY.createdAt, "Asia/Tokyo");
-    expect(screen.getByText(`FORMATTED(${SUMMARY.createdAt}|Asia/Tokyo)`)).toBeInTheDocument();
+    // 2026-09-08T20:03:35(オフセット無しは UTC)は Asia/Tokyo では翌日 5:03:35。
+    expect(screen.getByText("2026/9/9 5:03:35")).toBeInTheDocument();
   });
 
   it("詳細ダイアログの作成日時もformatDateTimeに個人設定TZを渡す", async () => {
@@ -68,10 +69,7 @@ describe("ImageGalleryGrid 個人設定TZあり(issue #1363)", () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }));
 
-    await waitFor(() => {
-      expect(screen.getByText("作成日時")).toBeInTheDocument();
-    });
-
-    expect(formatDateTime).toHaveBeenCalledWith(DETAIL.createdAt, "Asia/Tokyo");
+    const createdAtLabel = await screen.findByText("作成日時");
+    expect(createdAtLabel.nextElementSibling?.textContent).toBe("2026/9/9 5:03:35");
   });
 });

@@ -1,19 +1,26 @@
 /**
  * @jest-environment node
  */
+// 自前の @/lib/session・@/lib/apiClient・@/lib/llmJobResults・各パネル・next/link は差し替えない。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1834)。
 jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 jest.mock("next/navigation", () => ({
-  redirect: jest.fn(),
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
   },
 }));
-jest.mock("next/link", () => ({ __esModule: true, default: ({ children }: { children: unknown }) => children }));
-const getServerSession = jest.fn();
-jest.mock("next-auth", () => ({ getServerSession: (...a: unknown[]) => getServerSession(...a) }));
-jest.mock("@/lib/auth", () => ({ authOptions: {} }));
 import { renderToStaticMarkup } from "react-dom/server";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import Page from "../page";
 
+/** gateway の向こう側(各サービス)の代役。 */
 const api = {
   getSiteDetail: jest.fn(),
   listSshKeyPairs: jest.fn(),
@@ -21,21 +28,13 @@ const api = {
   getSiteAdminPath: jest.fn(),
   getGenerationJob: jest.fn(),
 };
-jest.mock("@/lib/apiClient", () => ({
-  getSiteDetail: (...a: unknown[]) => api.getSiteDetail(...a),
-  listSshKeyPairs: (...a: unknown[]) => api.listSshKeyPairs(...a),
-  listStaticContent: (...a: unknown[]) => api.listStaticContent(...a),
-  getSiteAdminPath: (...a: unknown[]) => api.getSiteAdminPath(...a),
-  getGenerationJob: (...a: unknown[]) => api.getGenerationJob(...a),
-}));
-jest.mock("../SiteEditForm", () => ({ SiteEditForm: () => "FORM" }));
-jest.mock("../LetsblogPluginPanel", () => ({ LetsblogPluginPanel: () => "PLUGIN" }));
-jest.mock("../LetsblogSyncPanel", () => ({ LetsblogSyncPanel: () => "SYNC" }));
-jest.mock("../StaticContentPanel", () => ({
-  StaticContentPanel: ({ generatedResult }: { generatedResult?: { jobId: number; contentType: string } | null }) =>
-    `STATIC[${generatedResult ? `${generatedResult.jobId}:${generatedResult.contentType}` : "none"}]`,
-}));
-import Page from "../page";
+const respond = (backend: jest.Mock) => async (_u: string, _i: RequestInit, params: string[]) => {
+  try {
+    return jsonResponse(await backend(...params.map(Number)));
+  } catch (err) {
+    return textResponse(err instanceof Error ? err.message : String(err), 404);
+  }
+};
 
 const render = async (searchParams?: Record<string, string>) =>
   renderToStaticMarkup(
@@ -44,6 +43,9 @@ const render = async (searchParams?: Record<string, string>) =>
       searchParams: searchParams ? Promise.resolve(searchParams) : undefined,
     })
   );
+
+// 生成結果が渡されたときだけ、StaticContentPanel は未保存の結果を示す。
+const GENERATED = 'data-testid="static-content-generated"';
 
 const staticJob = (siteId = 5) => ({
   id: 43,
@@ -55,16 +57,26 @@ const staticJob = (siteId = 5) => ({
 /** issue #1409: 処理キューの「結果を見る」の遷移先。ジョブIDから生成結果を引いて、静的コンテンツのパネルへ渡す。 */
 describe("サイト編集ページ: 静的コンテンツ生成ジョブの結果(issue #1409)", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    getServerSession.mockResolvedValue({ user: { role: "admin" } });
-    api.getSiteDetail.mockResolvedValue({ id: 5, name: "S" });
+    Object.values(api).forEach((m) => m.mockReset());
+    resetServerRuntime({ user: { role: "admin" } });
+    installFetch({
+      "GET /api/sites/:id": respond(api.getSiteDetail),
+      "GET /api/ssh-key-pairs": respond(api.listSshKeyPairs),
+      "GET /api/sites/:id/static-content": respond(api.listStaticContent),
+      "GET /api/system-settings/site-admin-path": respond(api.getSiteAdminPath),
+      "GET /api/generation-jobs/:id": respond(api.getGenerationJob),
+    });
+    api.getSiteDetail.mockResolvedValue({
+      id: 5, name: "S", siteKey: "s-key", cmsType: "WORDPRESS", baseUrl: "https://s.example.com",
+      credentials: {}, configuredSecretFields: [], adminPath: null,
+    });
     api.listSshKeyPairs.mockResolvedValue([]);
     api.listStaticContent.mockResolvedValue([]);
     api.getSiteAdminPath.mockResolvedValue({ path: "wp-admin" });
   });
 
   it("ジョブの指定が無ければジョブを取りに行かず、結果なしで描画する", async () => {
-    expect(await render()).toContain("STATIC[none]");
+    expect(await render()).not.toContain(GENERATED);
     expect(api.getGenerationJob).not.toHaveBeenCalled();
   });
 
@@ -72,16 +84,18 @@ describe("サイト編集ページ: 静的コンテンツ生成ジョブの結�
     api.getGenerationJob.mockResolvedValue(staticJob());
     const html = await render({ staticContentJob: "43" });
     expect(api.getGenerationJob).toHaveBeenCalledWith(43);
-    expect(html).toContain("STATIC[43:OPERATOR_INFO]");
+    expect(html).toContain(GENERATED);
+    expect(html).toContain('data-job-id="43"');
+    expect(html).toContain("本文");
   });
 
   it("別のサイトのジョブの結果は、このサイトの画面には出さない", async () => {
     api.getGenerationJob.mockResolvedValue(staticJob(6));
-    expect(await render({ staticContentJob: "43" })).toContain("STATIC[none]");
+    expect(await render({ staticContentJob: "43" })).not.toContain(GENERATED);
   });
 
   it("ジョブを読めなければ結果なしで描画する", async () => {
     api.getGenerationJob.mockRejectedValue(new Error("APIエラー (404)"));
-    expect(await render({ staticContentJob: "43" })).toContain("STATIC[none]");
+    expect(await render({ staticContentJob: "43" })).not.toContain(GENERATED);
   });
 });

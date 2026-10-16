@@ -2,15 +2,22 @@
  * @jest-environment node
  */
 jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
-const requireAdminSession = jest.fn();
-jest.mock("@/lib/session", () => ({
-  requireAdminSession: () => requireAdminSession(),
-  requireSession: jest.fn(),
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
-const registerSite = jest.fn();
-jest.mock("@/lib/apiClient", () => ({ registerSite: (...a: unknown[]) => registerSite(...a) }));
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
 import { registerSiteAction } from "../actions";
+
+/** バックエンド(gateway の向こう)の代役。受け取った本文は `calls` から読む。 */
+const registerSite = jest.fn();
 
 function form(extra: Record<string, string> = {}): FormData {
   const fd = new FormData();
@@ -31,7 +38,17 @@ function form(extra: Record<string, string> = {}): FormData {
 
 describe("registerSiteAction の管理画面パス(issue #1533)", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    registerSite.mockReset();
+    resetServerRuntime(ADMIN_SESSION);
+    installFetch({
+      "POST /api/sites": async (_url, init) => {
+        try {
+          return jsonResponse(await registerSite(JSON.parse(String(init.body))));
+        } catch (err) {
+          return textResponse(err instanceof Error ? err.message : String(err), 400);
+        }
+      },
+    });
     registerSite.mockResolvedValue({ connectionCheckStatus: "SUCCESS" });
   });
 
@@ -52,7 +69,7 @@ describe("registerSiteAction の管理画面パス(issue #1533)", () => {
   });
 
   it("バックエンドの 400 メッセージを error として返し、成功にしない", async () => {
-    registerSite.mockRejectedValue(new Error("APIエラー (400): adminPath には相対パスを指定してください"));
+    registerSite.mockRejectedValue(new Error("adminPath には相対パスを指定してください"));
     const result = await registerSiteAction({}, form({ adminPath: "//evil.example.com" }));
     expect(result.error).toContain("相対パス");
     expect(result.success).toBeUndefined();

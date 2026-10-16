@@ -1,20 +1,28 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
 import type { GeneratedImageDetail, GeneratedImageSummary } from '@/lib/apiClient'
 
 /**
  * issue #1614: 詳細は各カード右上の虫眼鏡ボタンから開き、カード本体のクリックは選択の切り替えにする。
  */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
-  bulkDeleteGeneratedImagesAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const getDetail = actions.getGeneratedImageAction as jest.Mock
+const getDetail = backend.getImage
 
 function image(id: number, prompt: string | null = `prompt-${id}`): GeneratedImageSummary {
   return {
@@ -53,7 +61,7 @@ function renderGrid(images = [image(2), image(1)]) {
 
 describe('ImageGalleryGrid 虫眼鏡ボタンとカード選択 (issue #1614)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    installGallery()
     getDetail.mockImplementation(async (id: number) => detail(id, `prompt-${id}`))
   })
 

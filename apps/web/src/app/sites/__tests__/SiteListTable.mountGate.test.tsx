@@ -1,45 +1,28 @@
-import { render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 import type { Site } from "@/lib/apiClient";
 
 /**
  * issue #1363(親issue #1261 分割B): 「マウント前は固定プレースホルダーを表示する」
- * (#1362 と同じ mounted フラグ方式)をこのファイル単独で検証する。理由は
- * SshKeyPairsPanel.mountGate.test.tsx の先頭コメントと同じ(`"use client"`を持つ
- * コンポーネントでは`jest.spyOn(React, "useEffect")`が効かず、`jest.mock("react", ...)`
- * によるモジュール差し替えが必要。他のテストを巻き添えにしないためファイルを分離する)。
+ * (#1362 と同じ mounted フラグ方式)をこのファイル単独で検証する。
+ *
+ * マウント前の状態は、`react` の `useEffect` や `@/lib/formatDate` を差し替えて作らず、
+ * サーバー描画(`renderToString`。effect は走らない)で作る。実際にサーバーが返す HTML と同じ状態を見る(#1834)。
+ * 自前の DeleteSiteButton・CheckConnectionButton・Server Action は差し替えない。差し替えるのは
+ * Next.js の実行基盤だけ。
  */
-jest.mock("react", () => ({
-  __esModule: true,
-  ...jest.requireActual("react"),
-  useEffect: jest.fn(),
-}));
-
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn(() => "FORMATTED_CREATED_AT"),
-  TIMEZONE_PENDING_PLACEHOLDER: "読み込み中…",
-}));
-
-jest.mock("../DeleteSiteButton", () => ({
-  DeleteSiteButton: () => <div>Delete Button</div>,
-}));
-
-jest.mock("../CheckConnectionButton", () => ({
-  CheckConnectionButton: () => <button>Check Connection</button>,
-}));
-
-// `SiteListTable.tsx`はadmin向け操作列で`next/link`を使う。`next/link`は内部で
-// `React.createContext`(router context)に依存しており、上の`jest.mock("react", ...)`が
-// スプレッドで作る簡易モジュールではそれが欠落し、importするだけで例外になる
-// (SiteListTable.test.tsxと同じ理由でモックに差し替える)。
-jest.mock("next/link", () => {
-  const Link = ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>;
-  Link.displayName = "MockLink";
-  return Link;
-});
+jest.mock("server-only", () => ({}))
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule)
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule)
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule)
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule)
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
+}))
 
 import { SiteListTable } from "../SiteListTable";
-import { formatDateTime } from "@/lib/formatDate";
 
 function site(overrides: Partial<Site> = {}): Site {
   return {
@@ -59,10 +42,11 @@ function site(overrides: Partial<Site> = {}): Site {
 
 describe("SiteListTable(マウント前)", () => {
   it("個人設定TZが未設定のとき、マウント前は登録日に固定プレースホルダーを表示する(#1362と同じmountedフラグ方式、issue #1363)", () => {
-    render(<SiteListTable sites={[site()]} projects={[]} isAdmin={false} timezone={null} adminPath="wp-admin" />);
+    const html = renderToString(
+      <SiteListTable sites={[site()]} projects={[]} isAdmin={false} timezone={null} adminPath="wp-admin" />,
+    );
 
-    expect(formatDateTime).not.toHaveBeenCalled();
-    expect(screen.queryByText("FORMATTED_CREATED_AT")).not.toBeInTheDocument();
-    expect(screen.getByText("読み込み中…")).toBeInTheDocument();
+    expect(html).not.toContain("2026/9/");
+    expect(html).toContain("読み込み中…");
   });
 });

@@ -1,20 +1,56 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+// 自前の Server Action(../../../actions)・@/lib/session・@/lib/apiClient は差し替えない。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1834)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+
+/**
+ * バックエンド(gateway の向こう)の代役 `jest.fn()` を HTTP の応答にする。解決値は 200 の JSON、
+ * Error の拒否は 502 の応答、Error 以外の拒否は通信そのものの失敗(fetch が値を投げる)になる。
+ */
+function route(backend: jest.Mock) {
+  return async (_url: string, _init: RequestInit, params: string[]) => {
+    try {
+      return jsonResponse(await backend(...params.map(Number)));
+    } catch (err) {
+      if (err instanceof Error) return textResponse(err.message, 502);
+      throw err;
+    }
+  };
+}
+import { LetsblogPluginPanel } from "../LetsblogPluginPanel";
+
+/** バックエンドの代役。 */
 const getStatus = jest.fn();
 const install = jest.fn();
-jest.mock("../../../actions", () => ({
-  getLetsblogPluginStatusAction: (...a: unknown[]) => getStatus(...a),
-  installLetsblogPluginAction: (...a: unknown[]) => install(...a),
-}));
-import { LetsblogPluginPanel } from "../LetsblogPluginPanel";
 
 const installed = { state: "INSTALLED", version: "1.0.0", protocolVersion: 1 };
 const notInstalled = { state: "NOT_INSTALLED", version: null, protocolVersion: null };
 const needsUpdate = { state: "NEEDS_UPDATE", version: "0.9.0", protocolVersion: 0 };
 
 describe("LetsblogPluginPanel(issue #1557)", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    getStatus.mockReset();
+    install.mockReset();
+    resetServerRuntime(ADMIN_SESSION);
+    installFetch({
+      "GET /api/sites/:id/letsblog-plugin": route(getStatus),
+      "POST /api/sites/:id/letsblog-plugin/install": route(install),
+    });
+  });
 
   it("導入済みならバージョンつきで表示し、再導入ボタンは出さない", async () => {
     getStatus.mockResolvedValue(installed);
@@ -22,6 +58,12 @@ describe("LetsblogPluginPanel(issue #1557)", () => {
     expect(await screen.findByText("導入済み(v1.0.0)")).toBeInTheDocument();
     expect(getStatus).toHaveBeenCalledWith(3);
     expect(screen.queryByRole("button", { name: "プラグインを再導入" })).toBeNull();
+  });
+
+  it("導入済みでもバージョンが分からなければ「不明」と表示する", async () => {
+    getStatus.mockResolvedValue({ state: "INSTALLED", version: null, protocolVersion: null });
+    render(<LetsblogPluginPanel siteId={3} />);
+    expect(await screen.findByText("導入済み(v不明)")).toBeInTheDocument();
   });
 
   it("取得中はその旨を表示する", () => {
@@ -52,7 +94,7 @@ describe("LetsblogPluginPanel(issue #1557)", () => {
   });
 
   it("状態を取得できなかったときはエラーを表示する", async () => {
-    getStatus.mockRejectedValue(new Error("APIエラー (502): bad gateway"));
+    getStatus.mockRejectedValue(new Error("bad gateway"));
     render(<LetsblogPluginPanel siteId={3} />);
     expect(await screen.findByText(/導入状態を取得できませんでした/)).toBeInTheDocument();
     expect(screen.getByText(/bad gateway/)).toBeInTheDocument();

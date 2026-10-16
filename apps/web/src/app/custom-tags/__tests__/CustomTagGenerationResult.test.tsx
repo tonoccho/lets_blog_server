@@ -1,19 +1,33 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { CustomTagGenerationResult } from '../CustomTagGenerationResult'
 
-const mockValidate = jest.fn()
-const useValidationMock = jest.fn()
-jest.mock('@/lib/useCustomTagValidation', () => ({
-  useCustomTagValidation: () => useValidationMock(),
-}))
-jest.mock('../ValidationPanel', () => ({
-  ValidationPanel: () => <div>ValidationPanel</div>,
-}))
+/**
+ * 自前の useCustomTagValidation・ValidationPanel・Server Action(@/app/custom-tags/actions、
+ * @/app/projects/[id]/custom-tags/actions)・@/lib/session・@/lib/apiClient は差し替えない。差し替えるのは
+ * Next.js の実行基盤と外部との通信(fetch)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }));
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
 
-const mockSave = jest.fn()
-jest.mock('@/app/projects/[id]/custom-tags/actions', () => ({
-  upsertProjectCustomTagAction: (...args: unknown[]) => mockSave(...args),
-}))
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime'
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime'
+
+const VALIDATE = 'POST /api/custom-tags/validate'
+const SAVE = 'POST /api/custom-tags'
+let fetchMock: jest.Mock
+const bodies = (path: string) =>
+  fetchMock.mock.calls
+    .filter(([url, init]) => String(url).endsWith(path) && init?.method === 'POST')
+    .map(([, init]) => JSON.parse(String(init.body)))
 
 const RESULT = {
   jobId: 21,
@@ -30,14 +44,10 @@ const RESULT = {
  */
 describe('CustomTagGenerationResult (#1409)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    mockValidate.mockResolvedValue(undefined)
-    useValidationMock.mockReturnValue({
-      isLoading: false,
-      error: null,
-      result: null,
-      validate: mockValidate,
-      reset: jest.fn(),
+    resetServerRuntime(ADMIN_SESSION)
+    fetchMock = installFetch({
+      [VALIDATE]: () => jsonResponse({ isValid: true, errors: [], warnings: [] }),
+      [SAVE]: () => jsonResponse({ id: 1 }, 201),
     })
   })
 
@@ -54,27 +64,31 @@ describe('CustomTagGenerationResult (#1409)', () => {
     expect(screen.queryByText(/保存済みです/)).not.toBeInTheDocument()
   })
 
-  it('validates the generated content once on display', async () => {
+  it('validates the generated content once on display and shows the validation outcome', async () => {
     render(<CustomTagGenerationResult projectId={7} result={RESULT} />)
 
-    await waitFor(() => expect(mockValidate).toHaveBeenCalledWith('<button>{{content}}</button>', '.blue-button { color: blue; }'))
-    expect(screen.getByText('ValidationPanel')).toBeInTheDocument()
+    expect(await screen.findByText('✓ 検証成功')).toBeInTheDocument()
+    expect(bodies('/api/custom-tags/validate')).toEqual([
+      { htmlTemplate: '<button>{{content}}</button>', cssContent: '.blue-button { color: blue; }' },
+    ])
   })
 
-  it('does not crash when the validation request itself fails', async () => {
-    mockValidate.mockRejectedValue(new Error('down'))
+  it('does not crash when the validation request itself fails, and shows the reason', async () => {
+    fetchMock = installFetch({ [VALIDATE]: () => textResponse('down', 503) })
     render(<CustomTagGenerationResult projectId={7} result={RESULT} />)
 
-    await waitFor(() => expect(mockValidate).toHaveBeenCalled())
+    expect(await screen.findByText('APIエラー (503): down')).toBeInTheDocument()
     expect(screen.getByTestId('custom-tag-generation-result')).toBeInTheDocument()
   })
 
-  it('shows "(なし)" for a missing description and hides the CSS section for an empty CSS', () => {
+  it('shows "(なし)" for a missing description and hides the CSS section for an empty CSS', async () => {
     render(<CustomTagGenerationResult projectId={7} result={{ ...RESULT, description: null, cssContent: '' }} />)
 
     expect(screen.getByText('(なし)')).toBeInTheDocument()
     expect(screen.queryByText('CSS:')).not.toBeInTheDocument()
-    expect(mockValidate).toHaveBeenCalledWith('<button>{{content}}</button>', '')
+    await waitFor(() =>
+      expect(bodies('/api/custom-tags/validate')).toEqual([{ htmlTemplate: '<button>{{content}}</button>', cssContent: '' }])
+    )
   })
 
   it('explains the selector prefix that the bundled CSS will get, using the first selector', () => {
@@ -91,57 +105,64 @@ describe('CustomTagGenerationResult (#1409)', () => {
   })
 
   it('"保存" registers the tag through the existing tag save action for the project, then says it is saved', async () => {
-    mockSave.mockResolvedValue({ success: true })
     render(<CustomTagGenerationResult projectId={7} result={RESULT} />)
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(screen.getByText('保存しました。')).toBeInTheDocument())
-    const [, formData] = mockSave.mock.calls[0] as [unknown, FormData]
-    expect(Object.fromEntries(formData.entries())).toEqual({
-      projectId: '7',
-      tagName: 'blue-button',
-      description: '青いボタン',
-      htmlTemplate: '<button>{{content}}</button>',
-      cssContent: '.blue-button { color: blue; }',
-    })
-    expect(formData.has('id')).toBe(false)
+    expect(bodies('/api/custom-tags')).toEqual([
+      {
+        tagName: 'blue-button',
+        description: '青いボタン',
+        htmlTemplate: '<button>{{content}}</button>',
+        cssContent: '.blue-button { color: blue; }',
+        tagFormat: 'BLOCK',
+        projectId: 7,
+      },
+    ])
     // 二重に保存させない
     expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
   })
 
   it('saves without a description and a CSS when the generation had none', async () => {
-    mockSave.mockResolvedValue({ success: true })
     render(<CustomTagGenerationResult projectId={7} result={{ ...RESULT, description: null, cssContent: '' }} />)
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(mockSave).toHaveBeenCalled())
-    const [, formData] = mockSave.mock.calls[0] as [unknown, FormData]
-    expect(formData.get('description')).toBe('')
-    expect(formData.get('cssContent')).toBe('')
+    await waitFor(() => expect(bodies('/api/custom-tags')).toHaveLength(1))
+    const [body] = bodies('/api/custom-tags')
+    expect(body).not.toHaveProperty('description')
+    expect(body).not.toHaveProperty('cssContent')
   })
 
   it('shows the reason when the save is refused (e.g. a tag with the same name exists) and keeps the button', async () => {
-    mockSave.mockResolvedValue({ error: 'タグ名 blue-button は既に登録されています' })
+    fetchMock = installFetch({
+      [VALIDATE]: () => jsonResponse({ isValid: true, errors: [], warnings: [] }),
+      [SAVE]: () => textResponse('タグ名 blue-button は既に登録されています', 409),
+    })
     render(<CustomTagGenerationResult projectId={7} result={RESULT} />)
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    await waitFor(() => expect(screen.getByText('タグ名 blue-button は既に登録されています')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByText('APIエラー (409): タグ名 blue-button は既に登録されています')).toBeInTheDocument()
+    )
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
     expect(screen.queryByText('保存しました。')).not.toBeInTheDocument()
   })
 
   it('disables the button while saving', async () => {
-    let resolve: (v: unknown) => void = () => {}
-    mockSave.mockReturnValue(new Promise((r) => (resolve = r)))
+    let finish: (r: Response) => void = () => {}
+    fetchMock = installFetch({
+      [VALIDATE]: () => jsonResponse({ isValid: true, errors: [], warnings: [] }),
+      [SAVE]: () => new Promise<Response>((r) => (finish = r)),
+    })
     render(<CustomTagGenerationResult projectId={7} result={RESULT} />)
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByRole('button', { name: '保存中…' })).toBeDisabled()
-    resolve({ success: true })
+    finish(jsonResponse({ id: 1 }, 201))
     await waitFor(() => expect(screen.getByText('保存しました。')).toBeInTheDocument())
   })
 })

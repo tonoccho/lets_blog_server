@@ -1,19 +1,23 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
+import { getServerSessionMock } from '@/lib/__tests__/testUtils/serverRuntime'
 import type { GeneratedImageDetail, GeneratedImageSummary } from '@/lib/apiClient'
 
-jest.mock('@/components/ViewerDateTime', () => ({
-  ViewerDateTime: ({ iso, personalTimeZone }: { iso: string; personalTimeZone: string | null }) => (
-    <span data-testid="viewer-datetime">{`VDT(${iso}|${personalTimeZone})`}</span>
-  ),
-}))
-
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
 const SUMMARY: GeneratedImageSummary = {
@@ -46,36 +50,31 @@ const DETAIL: GeneratedImageDetail = {
 
 describe('ImageGalleryGrid 日時表示 (issue #1367)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
+    installGallery()
+    ;backend.getImage.mockResolvedValue(DETAIL)
   })
 
-  it('一覧の作成日時と詳細の作成日時をViewerDateTimeへtimezoneをpersonalTimeZoneとして渡して描画する', async () => {
+  it('一覧の作成日時と詳細の作成日時を、個人設定のタイムゾーン(Asia/Tokyo)で整形して描画する', async () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone="Asia/Tokyo" />)
-    expect(screen.getAllByTestId('viewer-datetime').map((el) => el.textContent)).toEqual([
-      `VDT(${SUMMARY.createdAt}|Asia/Tokyo)`,
-    ])
+    // 2026-08-01T00:00:00Z は Asia/Tokyo では 9:00:00。
+    expect(screen.getAllByText('2026/8/1 9:00:00')).toHaveLength(1)
 
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => {
-      expect(screen.getAllByTestId('viewer-datetime')).toHaveLength(2)
+      expect(screen.getAllByText('2026/8/1 9:00:00')).toHaveLength(2)
     })
-    expect(screen.getAllByTestId('viewer-datetime').map((el) => el.textContent)).toEqual([
-      `VDT(${SUMMARY.createdAt}|Asia/Tokyo)`,
-      `VDT(${DETAIL.createdAt}|Asia/Tokyo)`,
-    ])
   })
 
-  it('timezoneがnullならnullをpersonalTimeZoneとして渡す', () => {
+  it('timezoneがnullなら、マウント後はブラウザのタイムゾーン(テストはUTC)で整形する', () => {
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
-    expect(screen.getByTestId('viewer-datetime')).toHaveTextContent(`VDT(${SUMMARY.createdAt}|null)`)
+    expect(screen.getByText('2026/8/1 0:00:00')).toBeInTheDocument()
   })
 })
 
 describe('ImageGalleryGrid この画像の設定をコピー (issue #437)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
+    installGallery()
+    ;backend.getImage.mockResolvedValue(DETAIL)
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
   })
 
@@ -134,12 +133,12 @@ describe('ImageGalleryGrid この画像の設定をコピー (issue #437)', () =
  */
 describe('ImageGalleryGrid seedとバッチ内位置の表示 (issue #1101)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    installGallery()
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
   })
 
   async function openWith(detail: GeneratedImageDetail, summary: GeneratedImageSummary = SUMMARY) {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(detail)
+    ;backend.getImage.mockResolvedValue(detail)
     render(<ImageGalleryGrid images={[summary]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: `${summary.prompt as string}の詳細を表示` }))
     await waitFor(() => {
@@ -194,8 +193,8 @@ describe('ImageGalleryGrid seedとバッチ内位置の表示 (issue #1101)', ()
 
 describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の回帰)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
+    installGallery()
+    ;backend.getImage.mockResolvedValue(DETAIL)
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
   })
 
@@ -214,7 +213,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
   it('タグで絞り込むとサーバ側の結果に置き換わり、すべてで取り直して戻る(issue #1472: クライアント側の絞り込みはしない)', async () => {
     const tagged = { ...SUMMARY, id: 1, tags: ['猫'] }
     const other = { ...SUMMARY, id: 2, prompt: 'a dog', tags: ['犬'] }
-    const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
+    const fetchPage = backend.listImages
     fetchPage.mockResolvedValueOnce([tagged])
     fetchPage.mockResolvedValueOnce([tagged, other])
     render(<ImageGalleryGrid images={[tagged, other]} timezone={null} />)
@@ -230,18 +229,18 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
   })
 
   it('詳細の取得に失敗したらエラーを表示する', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockRejectedValue(new Error('取得できません'))
+    ;backend.getImage.mockRejectedValue(new Error('取得できません'))
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
 
     await waitFor(() => {
-      expect(screen.getByText('取得できません')).toBeInTheDocument()
+      expect(screen.getByText('APIエラー (500): 取得できません')).toBeInTheDocument()
     })
   })
 
   it('未知のプロバイダはコード値をそのまま表示し、negative promptとLoRAが無ければ - を出す', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue({
+    ;backend.getImage.mockResolvedValue({
       ...DETAIL,
       provider: 'UNKNOWN_AI',
       negativePrompt: '',
@@ -275,7 +274,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
   })
 
   it('タグを追加すると保存し、重複タグは追加しない', async () => {
-    ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['猫'] })
+    ;backend.updateTags.mockResolvedValue({ ...DETAIL, tags: ['猫'] })
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
@@ -285,13 +284,13 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => {
-      expect(actions.updateGeneratedImageTagsAction).toHaveBeenCalledWith(1, ['猫'])
+      expect(backend.updateTags).toHaveBeenCalledWith(1, ['猫'])
     })
 
     fireEvent.change(input, { target: { value: '猫' } })
     fireEvent.click(screen.getByText('追加'))
     await waitFor(() => {
-      expect(actions.updateGeneratedImageTagsAction).toHaveBeenCalledTimes(1)
+      expect(backend.updateTags).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -305,12 +304,12 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     fireEvent.keyDown(input, { key: 'Enter' })
     fireEvent.keyDown(input, { key: 'a' })
 
-    expect(actions.updateGeneratedImageTagsAction).not.toHaveBeenCalled()
+    expect(backend.updateTags).not.toHaveBeenCalled()
   })
 
   it('タグを削除すると残りのタグで保存する', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['猫', '動物'] })
-    ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockResolvedValue({ ...DETAIL, tags: ['動物'] })
+    ;backend.getImage.mockResolvedValue({ ...DETAIL, tags: ['猫', '動物'] })
+    ;backend.updateTags.mockResolvedValue({ ...DETAIL, tags: ['動物'] })
     render(<ImageGalleryGrid images={[{ ...SUMMARY, tags: ['猫', '動物'] }]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByLabelText('タグ「猫」を削除')).toBeInTheDocument())
@@ -318,12 +317,12 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     fireEvent.click(screen.getByLabelText('タグ「猫」を削除'))
 
     await waitFor(() => {
-      expect(actions.updateGeneratedImageTagsAction).toHaveBeenCalledWith(1, ['動物'])
+      expect(backend.updateTags).toHaveBeenCalledWith(1, ['動物'])
     })
   })
 
   it('タグ保存に失敗したらエラーを表示する', async () => {
-    ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockRejectedValue(new Error('保存できません'))
+    ;backend.updateTags.mockRejectedValue(new Error('保存できません'))
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
@@ -332,19 +331,19 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     fireEvent.click(screen.getByText('追加'))
 
     await waitFor(() => {
-      expect(screen.getByText('保存できません')).toBeInTheDocument()
+      expect(screen.getByText('APIエラー (500): 保存できません')).toBeInTheDocument()
     })
   })
 
   it('削除を確認すると詳細を閉じ、キャンセルすると何もしない', async () => {
-    ;(actions.deleteGeneratedImageAction as jest.Mock).mockResolvedValue(undefined)
+    ;backend.deleteImage.mockResolvedValue(undefined)
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('削除')).toBeInTheDocument())
 
     fireEvent.click(screen.getByText('削除'))
-    expect(actions.deleteGeneratedImageAction).not.toHaveBeenCalled()
+    expect(backend.deleteImage).not.toHaveBeenCalled()
 
     confirmSpy.mockReturnValue(true)
     fireEvent.click(screen.getByText('削除'))
@@ -355,7 +354,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
   })
 
   it('削除に失敗したらエラーを表示する', async () => {
-    ;(actions.deleteGeneratedImageAction as jest.Mock).mockRejectedValue(new Error('削除できません'))
+    ;backend.deleteImage.mockRejectedValue(new Error('削除できません'))
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
@@ -364,7 +363,7 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
     fireEvent.click(screen.getByText('削除'))
 
     await waitFor(() => {
-      expect(screen.getByText('削除できません')).toBeInTheDocument()
+      expect(screen.getByText('APIエラー (500): 削除できません')).toBeInTheDocument()
     })
     confirmSpy.mockRestore()
   })
@@ -388,13 +387,13 @@ describe('ImageGalleryGrid 一覧と詳細の既存挙動 (issue #281 / #437 の
  */
 describe('ImageGalleryGrid Error以外の例外の扱い', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(DETAIL)
+    installGallery()
+    ;backend.getImage.mockResolvedValue(DETAIL)
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
   })
 
   it('詳細取得がError以外で落ちてもメッセージを表示する', async () => {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockRejectedValue('詳細を取得できません')
+    ;getServerSessionMock.mockRejectedValue('詳細を取得できません')
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
@@ -405,11 +404,12 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
   })
 
   it('削除がError以外で落ちてもメッセージを表示する', async () => {
-    ;(actions.deleteGeneratedImageAction as jest.Mock).mockRejectedValue('削除できません')
     const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByText('削除')).toBeInTheDocument())
+    // 詳細を開いた後、Server Action が Error 以外(文字列)を投げる状態にする。
+    getServerSessionMock.mockRejectedValue('削除できません')
 
     fireEvent.click(screen.getByText('削除'))
 
@@ -420,10 +420,10 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
   })
 
   it('タグ保存がError以外で落ちてもメッセージを表示する', async () => {
-    ;(actions.updateGeneratedImageTagsAction as jest.Mock).mockRejectedValue('保存できません')
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => expect(screen.getByPlaceholderText('タグを追加')).toBeInTheDocument())
+    getServerSessionMock.mockRejectedValue('保存できません')
 
     fireEvent.change(screen.getByPlaceholderText('タグを追加'), { target: { value: '新タグ' } })
     fireEvent.click(screen.getByText('追加'))
@@ -453,12 +453,12 @@ describe('ImageGalleryGrid Error以外の例外の扱い', () => {
  */
 describe('ImageGalleryGrid 参照元の画像の表示 (issue #1601)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    installGallery()
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } })
   })
 
   async function openWith(detail: GeneratedImageDetail) {
-    ;(actions.getGeneratedImageAction as jest.Mock).mockResolvedValue(detail)
+    ;backend.getImage.mockResolvedValue(detail)
     render(<ImageGalleryGrid images={[SUMMARY]} timezone={null} />)
     fireEvent.click(screen.getByRole('button', { name: 'a cute catの詳細を表示' }))
     await waitFor(() => {

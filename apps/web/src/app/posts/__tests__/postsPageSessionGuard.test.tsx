@@ -5,45 +5,48 @@
 /**
  * issue #1234: `/posts` がセッション更新不能時にログイン画面へリダイレクトすることを固定する。
  * 手法は `dashboardPageSessionGuard.test.tsx` と同じ。
+ *
+ * 自前の @/lib/session・@/lib/apiClient・PostsTable・ViewerDateTime は差し替えない。差し替えるのは
+ * Next.js の実行基盤と外部との通信(fetch)だけ(#1834)。
  */
-jest.mock('server-only', () => ({}));
-
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 const redirect = jest.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
 });
-jest.mock('next/navigation', () => ({ redirect: (p: string) => redirect(p) }));
+jest.mock("next/navigation", () => ({ redirect: (p: string) => redirect(p) }));
 
-const getServerSession = jest.fn();
-jest.mock('next-auth', () => ({
-  getServerSession: (...args: unknown[]) => getServerSession(...args),
-}));
-jest.mock('@/lib/auth', () => ({ authOptions: {} }));
+import { installFetch, jsonResponse, resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import PostsPage from "../page";
 
+/** project-service(投稿履歴)と identity-service の代役(gateway の向こう側)。 */
 const listPosts = jest.fn();
 const getMyProfile = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  listPosts: (...a: unknown[]) => listPosts(...a),
-  getMyProfile: (...a: unknown[]) => getMyProfile(...a),
-}));
 
-jest.mock('../PostsTable', () => ({ PostsTable: () => null }));
+function setup(session: unknown) {
+  listPosts.mockReset();
+  getMyProfile.mockReset();
+  redirect.mockClear();
+  resetServerRuntime(session);
+  installFetch({
+    "GET /api/posts": async () => jsonResponse(await listPosts()),
+    "GET /api/identity/me": async () => jsonResponse(await getMyProfile()),
+  });
+  listPosts.mockResolvedValue([]);
+  getMyProfile.mockResolvedValue(null);
+}
 
 /**
  * issue #1364(親issue #1261 分割C): `/posts` の最終投稿日時セルをクライアント部品
  * `ViewerDateTime` へ切り出した。`lastPublishedAt`が無い投稿は従来通り「-」を表示し、
- * `ViewerDateTime`を描画しないことも合わせて検査する(`posts/page.tsx:49`のガードは
- * この切り出しでも変えていない)。
+ * `ViewerDateTime`を描画しないことも合わせて検査する。
  *
- * ページを直接呼ぶだけ(実際にはレンダリングしない)なので、`ViewerDateTime`本体を
- * importしたりモックしたりする必要は無い。返るJSXツリー上の要素は`React.createElement`が
- * 作るプレーンなオブジェクトであり、`type`関数の`.name`で狙った要素を判定できる。これにより、
- * テストファースト(RED)の時点で`@/components/ViewerDateTime`がまだ存在しなくても、
- * このファイルが元々持っていたセッション判定のテストを巻き添えにせず、意味のある失敗の
- * まま書ける(モジュール未解決によるスイートクラッシュを避ける)。
+ * ページを直接呼んで返るJSXツリー上の要素は`React.createElement`が作るプレーンなオブジェクトであり、
+ * `type`関数の`.name`で狙った要素を判定できる。
  */
-
-import PostsPage from '../page';
-
 interface ReactElementLike {
   type: unknown;
   props: Record<string, unknown>;
@@ -71,17 +74,8 @@ function collectElementsByTypeName(node: unknown, name: string, results: ReactEl
 }
 
 describe('/posts のセッション判定(issue #1234)', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    listPosts.mockResolvedValue([]);
-    getMyProfile.mockResolvedValue(null);
-  });
-
   it('session.error が RefreshAccessTokenError のとき /login へ送り、投稿を取得しない(「全0件を表示」を出さない)', async () => {
-    getServerSession.mockResolvedValue({
-      user: { role: 'user' },
-      error: 'RefreshAccessTokenError',
-    });
+    setup({ user: { role: 'user' }, error: 'RefreshAccessTokenError' });
 
     await expect(PostsPage()).rejects.toThrow('NEXT_REDIRECT:/login');
 
@@ -89,14 +83,14 @@ describe('/posts のセッション判定(issue #1234)', () => {
   });
 
   it('未ログインのときも /login へ送る', async () => {
-    getServerSession.mockResolvedValue(null);
+    setup(null);
 
     await expect(PostsPage()).rejects.toThrow('NEXT_REDIRECT:/login');
     expect(listPosts).not.toHaveBeenCalled();
   });
 
   it('セッションが有効なときはリダイレクトせず、実データを取得する(退行なし)', async () => {
-    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    setup({ user: { role: 'user' } });
     listPosts.mockResolvedValue([{ id: 1 }, { id: 2 }]);
     getMyProfile.mockResolvedValue({ id: 1, timezone: 'Asia/Tokyo' });
 
@@ -107,7 +101,7 @@ describe('/posts のセッション判定(issue #1234)', () => {
   });
 
   it('セッションが有効で投稿が0件のときもリダイレクトしない(空状態表示。退行なし)', async () => {
-    getServerSession.mockResolvedValue({ user: { role: 'user' } });
+    setup({ user: { role: 'user' } });
     listPosts.mockResolvedValue([]);
 
     await expect(PostsPage()).resolves.toBeTruthy();
@@ -117,10 +111,7 @@ describe('/posts のセッション判定(issue #1234)', () => {
 });
 
 describe('/posts の最終投稿日時セルとTZ受け渡し(issue #1364)', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    getServerSession.mockResolvedValue({ user: { role: 'user' } });
-  });
+  beforeEach(() => setup({ user: { role: 'user' } }));
 
   it('lastPublishedAtがある投稿は、そのisoと個人設定TZをそのままViewerDateTimeへ渡す', async () => {
     const lastPublishedAt = '2026-09-08T20:03:35';

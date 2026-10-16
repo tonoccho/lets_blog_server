@@ -1,21 +1,27 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
 import type { GeneratedImageFolder, GeneratedImageSummary } from '@/lib/apiClient'
 
 /** issue #1616: カード上のタグを押すと、上部チップと同じサーバ側絞り込みになる。 */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
-  bulkDeleteGeneratedImagesAction: jest.fn(),
-  createGeneratedImageFolderAction: jest.fn(),
-  setGeneratedImageFolderAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
-const getDetail = actions.getGeneratedImageAction as jest.Mock
+const fetchPage = backend.listImages
+const getDetail = backend.getImage
 
 function image(id: number, tags: string[] = [], folderId: number | null = null): GeneratedImageSummary {
   return {
@@ -41,7 +47,7 @@ function cardTag(tag: string) {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  installGallery()
   fetchPage.mockReset()
   ;(global as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
     observe() {}

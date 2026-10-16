@@ -1,18 +1,20 @@
 import { render, screen, within } from '@testing-library/react'
-import { ReactNode } from 'react'
 import { SiteListTable } from '../SiteListTable'
 import type { Site } from '@/lib/apiClient'
 
-jest.mock('@/lib/formatDate', () => ({
-  formatDateTime: () => '2024-01-01 10:00',
+// 自前の formatDate・DeleteSiteButton・CheckConnectionButton・Server Action は差し替えない。
+// 差し替えるのは Next.js の実行基盤だけ(#1834)。
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
-jest.mock('../DeleteSiteButton', () => ({ DeleteSiteButton: () => <div>Delete Button</div> }))
-jest.mock('../CheckConnectionButton', () => ({ CheckConnectionButton: () => <button>Check Connection</button> }))
-jest.mock('next/link', () => {
-  const Link = ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>
-  Link.displayName = 'MockLink'
-  return Link
-})
 
 function site(id: number, letsblogSync: Site['letsblogSync']): Site {
   return {

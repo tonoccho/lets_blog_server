@@ -1,22 +1,30 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ImageGalleryGrid } from '../ImageGalleryGrid'
-import * as actions from '../actions'
+import { backend, installGallery } from './galleryBackend'
 import type { GeneratedImageSummary } from '@/lib/apiClient'
 
 /**
  * issue #1615: Shift+クリックで、起点から表示順に範囲選択する。
  * 受け入れ基準は共有ギャラリー上では並列シナリオの画像が混ざり連続範囲が決まらないため、サービス単体のテストで表す。
  */
-jest.mock('../actions', () => ({
-  getGeneratedImageAction: jest.fn(),
-  deleteGeneratedImageAction: jest.fn(),
-  updateGeneratedImageTagsAction: jest.fn(),
-  fetchGalleryImagesPageAction: jest.fn(),
-  bulkDeleteGeneratedImagesAction: jest.fn(),
+/**
+ * 自前の Server Action(../actions)・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch。media-service の代役は ./galleryBackend の backend)だけ(#1834)。
+ */
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
-const fetchPage = actions.fetchGalleryImagesPageAction as jest.Mock
-const bulkDelete = actions.bulkDeleteGeneratedImagesAction as jest.Mock
+const fetchPage = backend.listImages
+const bulkDelete = backend.bulkDelete
 
 function image(id: number, tags: string[] = []): GeneratedImageSummary {
   return {
@@ -44,7 +52,7 @@ const checkedIds = () => [1, 2, 3, 4, 5, 6].filter((id) => (box(id) as HTMLInput
 
 describe('ImageGalleryGrid Shift+クリックの範囲選択 (issue #1615)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    installGallery()
     jest.spyOn(window, 'confirm').mockReturnValue(true)
   })
   afterEach(() => jest.restoreAllMocks())
