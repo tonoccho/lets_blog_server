@@ -7,7 +7,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 種類を指定して、システム全体の使用中の登録を返す内部API(issue #1807、docs/plugins/CONTRACTS.md §4.2)。
+ * 種類を指定して、使用中の登録を返す内部API(issue #1807、docs/plugins/CONTRACTS.md §4.2)。{@code projectId}を任意で受け、
+ * プロジェクト → システム全体 → 未接続の順に解決する(issue #1808)。応答の{@code scope}は登録の単位(PROJECT / SYSTEM)で、
+ * 復号した認証情報はプロジェクトの登録の分だけ含む。
  * {@link InternalPlatformSettingsController}と同じく{@code /api/internal/platform/**}で、gatewayには載らず、
  * JWT必須・ロール判定なし(認証済みのサービスが呼ぶ)。登録が無ければ{@code connected=false}の未接続を返す。
  */
@@ -21,7 +23,7 @@ public class InternalPluginRegistrationController {
     }
 
     @GetMapping("/api/internal/platform/plugin-registrations/resolve")
-    public ResolvedRegistration resolve(@RequestParam String kind) {
-        return service.resolve(kind);
+    public ResolvedRegistration resolve(@RequestParam String kind, @RequestParam(required = false) Long projectId) {
+        return service.resolve(kind, projectId);
     }
 }

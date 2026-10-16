@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ProjectAiModelsPanel } from "../ProjectAiModelsPanel";
 import {
   fetchLlmModelsAction,
@@ -39,6 +39,14 @@ jest.mock("../actions", () => ({
   fetchAiConnectionsAction: jest.fn(),
   fetchProjectConnectionsAction: jest.fn(),
   updateProjectConnectionAction: jest.fn(),
+}));
+
+jest.mock("../projectPluginRegistrationActions", () => ({
+  fetchProjectPluginRegistrationsAction: jest.fn().mockResolvedValue({ data: [] }),
+  saveProjectPluginRegistrationAction: jest.fn(),
+  deleteProjectPluginRegistrationAction: jest.fn(),
+  activateProjectPluginRegistrationAction: jest.fn(),
+  clearProjectPluginRegistrationCredentialAction: jest.fn(),
 }));
 
 const fetchLlmModelsMock = fetchLlmModelsAction as jest.MockedFunction<typeof fetchLlmModelsAction>;
@@ -427,5 +435,13 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
 
     expect(await screen.findByText(/再取得の失敗/)).toBeInTheDocument();
     expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini");
+  });
+
+  it("「接続先の上書き」タブ(issue #1808)を開くと、プロジェクト単位の上書きの欄が出る", async () => {
+    render(<ProjectAiModelsPanel projectId={1} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "接続先の上書き" }));
+
+    expect(await screen.findByRole("region", { name: "LLM の上書き" })).toBeInTheDocument();
   });
 });

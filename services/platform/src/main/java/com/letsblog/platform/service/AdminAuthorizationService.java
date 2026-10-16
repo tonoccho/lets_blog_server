@@ -1,5 +1,6 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.platform.client.IdentityBridgeClient;
 import org.springframework.stereotype.Service;
 
 /**
@@ -21,14 +22,33 @@ import org.springframework.stereotype.Service;
 public class AdminAuthorizationService {
 
     private final CurrentActorService currentActorService;
+    private final IdentityBridgeClient identityBridgeClient;
 
-    public AdminAuthorizationService(CurrentActorService currentActorService) {
+    public AdminAuthorizationService(CurrentActorService currentActorService, IdentityBridgeClient identityBridgeClient) {
         this.currentActorService = currentActorService;
+        this.identityBridgeClient = identityBridgeClient;
     }
 
     public void requireAdmin() {
         if (!currentActorService.isAdmin()) {
             throw new ForbiddenException("この操作にはadmin権限が必要です");
+        }
+    }
+
+    /**
+     * プロジェクトのメンバーまたはadminのみを許可する(issue #1808。ai-serviceの同名メソッドと同じ方針)。
+     * メンバー判定はproject_usersを持つidentity-serviceへ、呼び出し元のBearerトークンを転送して問い合わせる。
+     */
+    public void requireProjectMemberOrAdmin(Long projectId) {
+        if (currentActorService.isAdmin()) {
+            return;
+        }
+        Long actorId = currentActorService.getCurrentActorId();
+        if (actorId == null) {
+            throw new ForbiddenException("この操作にはログインが必要です");
+        }
+        if (!identityBridgeClient.isProjectMember(projectId, actorId, currentActorService.getAuthorizationHeader())) {
+            throw new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です");
         }
     }
 

@@ -1,10 +1,13 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.platform.aop.AuditLog;
 import com.letsblog.platform.domain.AuditLogAction;
 import com.letsblog.platform.domain.PluginKind;
 import com.letsblog.platform.domain.PluginRegistration;
+import com.letsblog.platform.domain.ProjectPluginRegistration;
 import com.letsblog.platform.repository.PluginRegistrationRepository;
+import com.letsblog.platform.repository.ProjectPluginRegistrationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +22,7 @@ import java.util.List;
 public class PluginRegistrationService {
 
     static final String SCOPE_SYSTEM = "SYSTEM";
+    static final String SCOPE_PROJECT = "PROJECT";
     private static final int MAX_NAME_LENGTH = 100;
     private static final String URL_LABEL = "接続先";
     private static final String DRAWIO_LABEL = "draw.io";
@@ -27,25 +31,41 @@ public class PluginRegistrationService {
     public record RegistrationView(Long id, String kind, String name, String url, boolean inUse, String drawioUrl) {
     }
 
-    /** 内部の解決API向け。{@code connected=false}は未接続(ほかの項目はnull)。 */
+    /**
+     * 内部の解決API向け。{@code connected=false}は未接続(ほかの項目はnull)。{@code scope}は登録の単位(PROJECT / SYSTEM)。
+     * {@code credential}は復号した認証情報で、プロジェクトの登録の分だけ(システム全体の登録は認証情報を持たない)。
+     */
     public record ResolvedRegistration(
-            boolean connected, Long id, String name, String url, String scope, String drawioUrl) {
+            boolean connected, Long id, String name, String url, String scope, String drawioUrl, String credential) {
+
+        /** 認証情報をログに出さない。 */
+        @Override
+        public String toString() {
+            return "ResolvedRegistration[connected=" + connected + ", id=" + id + ", name=" + name + ", url=" + url
+                    + ", scope=" + scope + ", drawioUrl=" + drawioUrl + ", credential=" + (credential == null ? null : "****") + "]";
+        }
     }
 
     private static final ResolvedRegistration NOT_CONNECTED =
-            new ResolvedRegistration(false, null, null, null, null, null);
+            new ResolvedRegistration(false, null, null, null, null, null, null);
 
     private final PluginRegistrationRepository repository;
+    private final ProjectPluginRegistrationRepository projectRepository;
     private final AdminAuthorizationService adminAuthorizationService;
     private final SystemDestinationPolicy destinationPolicy;
+    private final CredentialCipher credentialCipher;
 
     public PluginRegistrationService(
             PluginRegistrationRepository repository,
+            ProjectPluginRegistrationRepository projectRepository,
             AdminAuthorizationService adminAuthorizationService,
-            SystemDestinationPolicy destinationPolicy) {
+            SystemDestinationPolicy destinationPolicy,
+            CredentialCipher credentialCipher) {
         this.repository = repository;
+        this.projectRepository = projectRepository;
         this.adminAuthorizationService = adminAuthorizationService;
         this.destinationPolicy = destinationPolicy;
+        this.credentialCipher = credentialCipher;
     }
 
     @Transactional(readOnly = true)
@@ -104,12 +124,20 @@ public class PluginRegistrationService {
     }
 
     /**
-     * 種類を指定して使用中の登録を返す(内部API。管理者ではなく認証済みのサービスが呼ぶ)。
-     * LLM・画像生成は使用中の1件、図のレンダリング・Penpotは唯一の登録。無ければ未接続(環境変数の値は返さない)。
+     * 種類を指定して使用中の登録を返す(内部API。管理者ではなく認証済みのサービスが呼ぶ)。解決順は プロジェクト → システム全体 → 未接続
+     * (§4.2。環境変数へはフォールバックしない)。{@code projectId}を指定し、その種類にプロジェクトの上書きがあれば、上書き側の
+     * 使用中だけを返す(システム全体とは混ぜない。使用中が無ければ未接続)。Penpotは上書きの対象外でシステム全体だけを見る。
+     * LLM・画像生成は使用中の1件、図のレンダリング・Penpotは唯一の登録。
      */
     @Transactional(readOnly = true)
-    public ResolvedRegistration resolve(String kindValue) {
+    public ResolvedRegistration resolve(String kindValue, Long projectId) {
         PluginKind kind = PluginKind.parse(kindValue);
+        if (projectId != null && kind != PluginKind.PENPOT) {
+            List<ProjectPluginRegistration> overrides = projectRepository.findByProjectIdAndKindOrderByIdAsc(projectId, kind);
+            if (!overrides.isEmpty()) {
+                return resolveOverride(kind, overrides);
+            }
+        }
         PluginRegistration found = kind.multiple()
                 ? repository.findFirstByKindAndInUseTrue(kind).orElse(null)
                 : repository.findByKindOrderByIdAsc(kind).stream().findFirst().orElse(null);
@@ -117,7 +145,19 @@ public class PluginRegistrationService {
             return NOT_CONNECTED;
         }
         return new ResolvedRegistration(
-                true, found.getId(), found.getName(), found.getBaseUrl(), SCOPE_SYSTEM, found.getDrawioUrl());
+                true, found.getId(), found.getName(), found.getBaseUrl(), SCOPE_SYSTEM, found.getDrawioUrl(), null);
+    }
+
+    private ResolvedRegistration resolveOverride(PluginKind kind, List<ProjectPluginRegistration> overrides) {
+        ProjectPluginRegistration used = kind.multiple()
+                ? overrides.stream().filter(ProjectPluginRegistration::isInUse).findFirst().orElse(null)
+                : overrides.get(0);
+        if (used == null) {
+            return NOT_CONNECTED;
+        }
+        String credential = used.getCredentialEncrypted() == null ? null : credentialCipher.decrypt(used.getCredentialEncrypted());
+        return new ResolvedRegistration(
+                true, used.getId(), used.getName(), used.getBaseUrl(), SCOPE_PROJECT, used.getDrawioUrl(), credential);
     }
 
     private PluginRegistration find(Long id) {

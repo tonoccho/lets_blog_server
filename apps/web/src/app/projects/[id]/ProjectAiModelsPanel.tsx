@@ -21,12 +21,14 @@ import { LlmProviderPanel } from "./LlmProviderPanel";
 import { ReviewStepSettingsPanel } from "./ReviewStepSettingsPanel";
 import { ImageProviderPanel } from "./ImageProviderPanel";
 import { ComfyUiCheckpointTable } from "./ComfyUiCheckpointTable";
+import { ProjectPluginOverridesPanel } from "./ProjectPluginOverridesPanel";
 
-type Tab = "LLM" | "COMFYUI";
+type Tab = "LLM" | "COMFYUI" | "OVERRIDES";
 
 const TAB_LABEL: Record<Tab, string> = {
   LLM: "LLM",
   COMFYUI: "画像生成",
+  OVERRIDES: "接続先の上書き",
 };
 
 export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
@@ -172,6 +174,7 @@ export function ProjectAiModelsPanel({ projectId }: { projectId: number }) {
           )}
         </div>
       )}
+      {tab === "OVERRIDES" && <ProjectPluginOverridesPanel projectId={projectId} />}
     </div>
   );
 }

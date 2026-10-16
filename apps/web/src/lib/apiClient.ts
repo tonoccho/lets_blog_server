@@ -2555,6 +2555,84 @@ export function activatePluginRegistration(id: number): Promise<PluginRegistrati
   return apiFetch<PluginRegistration>(`${PLUGIN_REGISTRATIONS_PATH}/${id}/in-use`, { method: 'PUT' });
 }
 
+/** プロジェクト単位のプラグインの登録の上書き(issue #1808)。認証情報の値は返らず、設定済みかどうかだけが返る。 */
+export interface ProjectPluginRegistration {
+  id: number;
+  kind: PluginKind;
+  name: string;
+  url: string;
+  inUse: boolean;
+  drawioUrl: string | null;
+  credentialConfigured: boolean;
+}
+
+export interface ProjectPluginRegistrationCreateInput {
+  kind: string;
+  name: string;
+  url: string;
+  drawioUrl: string | null;
+  /** 任意。空は未設定。 */
+  credential: string | null;
+}
+
+export interface ProjectPluginRegistrationUpdateInput {
+  name: string;
+  url: string;
+  drawioUrl: string | null;
+  /** null なら保存済みの認証情報を変えない(消去は clearProjectPluginRegistrationCredential)。 */
+  credential: string | null;
+}
+
+const projectPluginRegistrationsPath = (projectId: number) => `/api/projects/${projectId}/plugin-registrations`;
+
+export function listProjectPluginRegistrations(projectId: number): Promise<ProjectPluginRegistration[]> {
+  return apiFetch<ProjectPluginRegistration[]>(projectPluginRegistrationsPath(projectId));
+}
+
+export function createProjectPluginRegistration(
+  projectId: number,
+  input: ProjectPluginRegistrationCreateInput,
+): Promise<ProjectPluginRegistration> {
+  return apiFetch<ProjectPluginRegistration>(projectPluginRegistrationsPath(projectId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateProjectPluginRegistration(
+  projectId: number,
+  id: number,
+  input: ProjectPluginRegistrationUpdateInput,
+): Promise<ProjectPluginRegistration> {
+  return apiFetch<ProjectPluginRegistration>(`${projectPluginRegistrationsPath(projectId)}/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteProjectPluginRegistration(projectId: number, id: number): Promise<void> {
+  return apiFetch<void>(`${projectPluginRegistrationsPath(projectId)}/${id}`, { method: 'DELETE' });
+}
+
+/** 同じ種類の他の上書きの使用中を外し、この上書きを使用中にする(LLM・画像生成のみ)。 */
+export function activateProjectPluginRegistration(projectId: number, id: number): Promise<ProjectPluginRegistration> {
+  return apiFetch<ProjectPluginRegistration>(`${projectPluginRegistrationsPath(projectId)}/${id}/in-use`, {
+    method: 'PUT',
+  });
+}
+
+/** 保存済みの認証情報を消去する。 */
+export function clearProjectPluginRegistrationCredential(
+  projectId: number,
+  id: number,
+): Promise<ProjectPluginRegistration> {
+  return apiFetch<ProjectPluginRegistration>(`${projectPluginRegistrationsPath(projectId)}/${id}/credential`, {
+    method: 'DELETE',
+  });
+}
+
 export interface PlanChatMessage {
   role: "user" | "assistant";
   content: string;

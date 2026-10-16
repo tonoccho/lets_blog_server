@@ -1,6 +1,9 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.platform.domain.PluginKind;
+import com.letsblog.platform.domain.ProjectPluginRegistration;
+import com.letsblog.platform.repository.ProjectPluginRegistrationRepository;
 import com.letsblog.platform.domain.PluginRegistration;
 import com.letsblog.platform.repository.PluginRegistrationRepository;
 import com.letsblog.platform.service.PluginRegistrationService.RegistrationView;
@@ -14,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,8 +41,11 @@ class PluginRegistrationServiceTest {
     @Mock
     private PluginRegistrationRepository repository;
     @Mock
+    private ProjectPluginRegistrationRepository projectRepository;
+    @Mock
     private AdminAuthorizationService adminAuthorizationService;
 
+    private final CredentialCipher cipher = new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32]));
     private PluginRegistrationService service;
     private long nextId;
 
@@ -54,7 +61,7 @@ class PluginRegistrationServiceTest {
                     throw new UnknownHostException(host);
             }
         });
-        service = new PluginRegistrationService(repository, adminAuthorizationService, policy);
+        service = new PluginRegistrationService(repository, projectRepository, adminAuthorizationService, policy, cipher);
         nextId = 1;
         lenient().when(repository.save(any(PluginRegistration.class))).thenAnswer(inv -> {
             PluginRegistration r = inv.getArgument(0);
@@ -237,9 +244,9 @@ class PluginRegistrationServiceTest {
         PluginRegistration r = existing(7, PluginKind.LLM, "社内", "http://lbx-ollama:11434/v1", true);
         when(repository.findFirstByKindAndInUseTrue(PluginKind.LLM)).thenReturn(Optional.of(r));
 
-        ResolvedRegistration resolved = service.resolve("LLM");
+        ResolvedRegistration resolved = service.resolve("LLM", null);
 
-        assertEquals(new ResolvedRegistration(true, 7L, "社内", "http://lbx-ollama:11434/v1", "SYSTEM", null), resolved);
+        assertEquals(new ResolvedRegistration(true, 7L, "社内", "http://lbx-ollama:11434/v1", "SYSTEM", null, null), resolved);
         verifyNoInteractions(adminAuthorizationService);
     }
 
@@ -248,10 +255,10 @@ class PluginRegistrationServiceTest {
         when(repository.findFirstByKindAndInUseTrue(PluginKind.IMAGE_GENERATION)).thenReturn(Optional.empty());
         when(repository.findByKindOrderByIdAsc(PluginKind.PENPOT)).thenReturn(List.of());
 
-        ResolvedRegistration image = service.resolve("IMAGE_GENERATION");
-        ResolvedRegistration penpot = service.resolve("PENPOT");
+        ResolvedRegistration image = service.resolve("IMAGE_GENERATION", null);
+        ResolvedRegistration penpot = service.resolve("PENPOT", null);
 
-        assertEquals(new ResolvedRegistration(false, null, null, null, null, null), image);
+        assertEquals(new ResolvedRegistration(false, null, null, null, null, null, null), image);
         assertEquals(image, penpot);
     }
 
@@ -261,7 +268,7 @@ class PluginRegistrationServiceTest {
         d.setDrawioUrl("https://drawio.example/");
         when(repository.findByKindOrderByIdAsc(PluginKind.DIAGRAM_RENDERER)).thenReturn(List.of(d));
 
-        ResolvedRegistration resolved = service.resolve("DIAGRAM_RENDERER");
+        ResolvedRegistration resolved = service.resolve("DIAGRAM_RENDERER", null);
 
         assertTrue(resolved.connected());
         assertEquals("https://drawio.example/", resolved.drawioUrl());
@@ -270,7 +277,109 @@ class PluginRegistrationServiceTest {
 
     @Test
     void 解決の種類が不明なら拒否する() {
-        assertThrows(IllegalArgumentException.class, () -> service.resolve("BOGUS"));
-        assertThrows(IllegalArgumentException.class, () -> service.resolve(null));
+        assertThrows(IllegalArgumentException.class, () -> service.resolve("BOGUS", null));
+        assertThrows(IllegalArgumentException.class, () -> service.resolve(null, null));
+    }
+
+    // ---- プロジェクト単位の上書き(issue #1808): プロジェクト → システム全体 → 未接続 ----
+
+    private static final long PROJECT = 10L;
+
+    private ProjectPluginRegistration projectRegistration(long id, PluginKind kind, String name, boolean inUse, String credential) {
+        ProjectPluginRegistration r = new ProjectPluginRegistration(PROJECT, kind, name, "http://gpu-pc.example:" + id, null);
+        r.setId(id);
+        r.setInUse(inUse);
+        if (credential != null) {
+            r.setCredentialEncrypted(cipher.encrypt(credential));
+        }
+        return r;
+    }
+
+    @Test
+    void プロジェクトに上書きがあれば_上書き側の使用中だけを返し_システム全体は見ない_認証情報は復号して返す() {
+        when(projectRepository.findByProjectIdAndKindOrderByIdAsc(PROJECT, PluginKind.LLM)).thenReturn(List.of(
+                projectRegistration(1, PluginKind.LLM, "予備", false, null),
+                projectRegistration(2, PluginKind.LLM, "本命", true, "sk-secret")));
+
+        ResolvedRegistration resolved = service.resolve("LLM", PROJECT);
+
+        assertEquals(new ResolvedRegistration(true, 2L, "本命", "http://gpu-pc.example:2", "PROJECT", null, "sk-secret"), resolved);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void 上書きの認証情報が無ければnullを返す() {
+        when(projectRepository.findByProjectIdAndKindOrderByIdAsc(PROJECT, PluginKind.IMAGE_GENERATION))
+                .thenReturn(List.of(projectRegistration(3, PluginKind.IMAGE_GENERATION, "画像", true, null)));
+
+        ResolvedRegistration resolved = service.resolve("IMAGE_GENERATION", PROJECT);
+
+        assertEquals("PROJECT", resolved.scope());
+        assertNull(resolved.credential());
+    }
+
+    @Test
+    void 上書きがあっても使用中が無ければシステム全体へ混ぜず_未接続を返す() {
+        when(projectRepository.findByProjectIdAndKindOrderByIdAsc(PROJECT, PluginKind.LLM))
+                .thenReturn(List.of(projectRegistration(1, PluginKind.LLM, "予備", false, "k")));
+
+        ResolvedRegistration resolved = service.resolve("LLM", PROJECT);
+
+        assertFalse(resolved.connected());
+        assertNull(resolved.credential());
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void 図のレンダリングの上書きは唯一の登録を返す() {
+        ProjectPluginRegistration d = projectRegistration(4, PluginKind.DIAGRAM_RENDERER, "図", false, null);
+        d.setDrawioUrl("https://drawio.example/");
+        when(projectRepository.findByProjectIdAndKindOrderByIdAsc(PROJECT, PluginKind.DIAGRAM_RENDERER)).thenReturn(List.of(d));
+
+        ResolvedRegistration resolved = service.resolve("DIAGRAM_RENDERER", PROJECT);
+
+        assertTrue(resolved.connected());
+        assertEquals("PROJECT", resolved.scope());
+        assertEquals("https://drawio.example/", resolved.drawioUrl());
+    }
+
+    @Test
+    void プロジェクトに上書きが無い種類はシステム全体の使用中を返し_認証情報は返さない() {
+        when(projectRepository.findByProjectIdAndKindOrderByIdAsc(PROJECT, PluginKind.LLM)).thenReturn(List.of());
+        PluginRegistration r = existing(7, PluginKind.LLM, "社内", "http://lbx-ollama:11434/v1", true);
+        when(repository.findFirstByKindAndInUseTrue(PluginKind.LLM)).thenReturn(Optional.of(r));
+
+        ResolvedRegistration resolved = service.resolve("LLM", PROJECT);
+
+        assertEquals(new ResolvedRegistration(true, 7L, "社内", "http://lbx-ollama:11434/v1", "SYSTEM", null, null), resolved);
+    }
+
+    @Test
+    void どちらにも無ければ未接続を返す() {
+        when(projectRepository.findByProjectIdAndKindOrderByIdAsc(PROJECT, PluginKind.LLM)).thenReturn(List.of());
+        when(repository.findFirstByKindAndInUseTrue(PluginKind.LLM)).thenReturn(Optional.empty());
+
+        assertFalse(service.resolve("LLM", PROJECT).connected());
+    }
+
+    @Test
+    void Penpotはプロジェクトを指定してもシステム全体だけを見る() {
+        when(repository.findByKindOrderByIdAsc(PluginKind.PENPOT))
+                .thenReturn(List.of(existing(9, PluginKind.PENPOT, "p", "http://lbx-ollama:3449", false)));
+
+        ResolvedRegistration resolved = service.resolve("PENPOT", PROJECT);
+
+        assertEquals("SYSTEM", resolved.scope());
+        verifyNoInteractions(projectRepository);
+    }
+
+    @Test
+    void 解決の結果を文字列にしても認証情報の値は出ない() {
+        ResolvedRegistration withKey = new ResolvedRegistration(true, 2L, "本命", "http://gpu-pc:1", "PROJECT", null, "sk-secret");
+        ResolvedRegistration withoutKey = new ResolvedRegistration(true, 7L, "社内", "http://lbx-ollama:1", "SYSTEM", null, null);
+
+        assertFalse(withKey.toString().contains("sk-secret"));
+        assertTrue(withKey.toString().contains("credential=****"));
+        assertTrue(withoutKey.toString().contains("credential=null"));
     }
 }

@@ -153,6 +153,13 @@ app:
       # 「ファサードごと1サービスへ移す」のではなく所有サービスへ分割した(ADR-0004のデータ所有権)。
       # パスは変えていないので、gatewayがサブパスごとに振り分ける。
       # より広い /api/projects/*/api-keys/** を最後に置き、載せ忘れが404で表面化するようにする。
+      # プロジェクト単位のプラグインの登録の上書き(ProjectPluginRegistrationController、issue #1808)はplatform-serviceが持つ。
+      # 欠けるとより広い /api/projects/**(下のprojectルート)に落ちて、project-serviceの404になる。
+      - id: project-plugin-registrations
+        uri: ${PLATFORM_SERVICE_URI:http://platform:8080}
+        paths:
+          - /api/projects/*/plugin-registrations
+          - /api/projects/*/plugin-registrations/**
       - id: project-api-keys-github-token
         uri: ${PROJECT_SERVICE_URI:http://project:8080}
         paths:

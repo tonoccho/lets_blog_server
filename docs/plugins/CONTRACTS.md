@@ -200,6 +200,13 @@ draw.io の**編集画面**はサーバー間の契約ではなく、VS Code 拡
 (`system_settings` #1567 と、プロジェクト単位の上書き #1503 の型。環境変数へはフォールバックしない)。
 プロジェクトで上書きしたら、その種類の登録は上書き側のものだけを見る(項目ごとの混ぜ合わせはしない)。
 
+**実装(#1808)**: 上書きは `project_plugin_registrations`(platform-service、V6)に持ち、編集できるのは「プロジェクトのメンバーまたは管理者」(現行のプロジェクトの API キーと同じ
+`requireProjectMemberOrAdmin`。本文の「プロジェクトの管理者」より広いが挙動を変えない既定案)。Penpot は上書きできない。上書きの URL は
+`ConnectionDestinationGuard#check`(docker ネットワーク内も拒否)で検査する。内部の解決 API は `GET /api/internal/platform/plugin-registrations/resolve?kind=&projectId=`
+で、`projectId` は任意。その種類にプロジェクトの上書きが1件でもあれば上書き側の使用中だけを返し(使用中が無ければ未接続。システム全体へは落とさない)、
+無ければシステム全体の使用中、どちらも無ければ `connected=false`。応答の `scope` は `PROJECT` / `SYSTEM`(利用側は `SYSTEM` のときだけ ADR-0012 のツール用トークンを付ける)、
+`credential` は復号した認証情報でプロジェクトの登録の分だけ。
+
 **認証情報はプロジェクト単位の登録にだけ置ける**(決定。現行の ChatGPT / Claude の API キーはプロジェクト単位だけで、システム設定へフォールバックしない
 (#1568 / #1521)という規則を維持する)。システム全体の登録は、登録の項目としての認証情報を持たない。
 ただし [ADR-0012](../adr/0012-extensions-tools-keycloak-auth.md) により、システム設定の宛先(Ollama・ComfyUI・PlantUML)へは、登録の項目ではなく

@@ -19,9 +19,17 @@ class InternalPluginRegistrationControllerTest {
 
     @Test
     void 種類を指定して解決をサービスへ委譲する() {
-        ResolvedRegistration resolved = new ResolvedRegistration(false, null, null, null, null, null);
-        when(service.resolve("LLM")).thenReturn(resolved);
+        ResolvedRegistration resolved = new ResolvedRegistration(false, null, null, null, null, null, null);
+        when(service.resolve("LLM", null)).thenReturn(resolved);
 
-        assertSame(resolved, new InternalPluginRegistrationController(service).resolve("LLM"));
+        assertSame(resolved, new InternalPluginRegistrationController(service).resolve("LLM", null));
+    }
+
+    @Test
+    void プロジェクトIDを任意で受け取り_解決へ渡す() {
+        ResolvedRegistration resolved = new ResolvedRegistration(true, 2L, "本命", "http://gpu-pc:1", "PROJECT", null, "sk");
+        when(service.resolve("LLM", 10L)).thenReturn(resolved);
+
+        assertSame(resolved, new InternalPluginRegistrationController(service).resolve("LLM", 10L));
     }
 }

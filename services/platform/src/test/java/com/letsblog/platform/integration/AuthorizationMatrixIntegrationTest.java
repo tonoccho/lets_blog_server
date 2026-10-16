@@ -107,6 +107,14 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("DELETE", "/api/system-settings/plugin-registrations/1"),
                 new Endpoint("PUT", "/api/system-settings/plugin-registrations/1/in-use"),
 
+                // -- ProjectPluginRegistrationController (6、issue #1808) --
+                new Endpoint("GET", "/api/projects/1/plugin-registrations"),
+                new Endpoint("POST", "/api/projects/1/plugin-registrations"),
+                new Endpoint("PUT", "/api/projects/1/plugin-registrations/1"),
+                new Endpoint("DELETE", "/api/projects/1/plugin-registrations/1"),
+                new Endpoint("PUT", "/api/projects/1/plugin-registrations/1/in-use"),
+                new Endpoint("DELETE", "/api/projects/1/plugin-registrations/1/credential"),
+
                 // -- DashboardController (5、issue #695) --
                 new Endpoint("GET", "/api/dashboard/service-status"),
                 new Endpoint("GET", "/api/dashboard/service-status/stream"),

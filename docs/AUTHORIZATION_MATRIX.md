@@ -877,13 +877,26 @@ platform-service所有(issue #1807)。システム全体のプラグインの登
 | DELETE /api/system-settings/plugin-registrations/{id} | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.delete()`内でrequireAdmin() |
 | PUT /api/system-settings/plugin-registrations/{id}/in-use | requireAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `PluginRegistrationService.activate()`内でrequireAdmin() |
 
+## ProjectPluginRegistrationController (6エンドポイント、ベースパス `/api/projects/{projectId}/plugin-registrations`)
+
+platform-service所有(issue #1808)。プロジェクト単位のプラグインの登録の上書き(LLM・画像生成・図のレンダリング。Penpotは対象外)。gatewayの`project-plugin-registrations`ルートが`/api/projects/**`より先にplatform-serviceへ振る。認証情報は`CredentialCipher`で暗号化して保存し、取得は`credentialConfigured`(設定済みか)だけで値を返さない。
+
+| HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET .../plugin-registrations | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `ProjectPluginRegistrationService.list()`内。現行のプロジェクトのAPIキーと同じ「メンバーまたは管理者」(#1808 Open Question 1の既定案) |
+| POST .../plugin-registrations | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `create()`内。接続先は`ConnectionDestinationGuard#check`で検査(禁止アドレスに加えdockerネットワーク内も拒否)。Penpotは409 |
+| PUT .../plugin-registrations/{id} | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `update()`内。認証情報が空なら保存済みの値を変えない |
+| DELETE .../plugin-registrations/{id} | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `delete()`内 |
+| PUT .../plugin-registrations/{id}/in-use | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `activate()`内 |
+| DELETE .../plugin-registrations/{id}/credential | requireProjectMemberOrAdmin(service層) | 401 | 403 | 認可OK | 現状維持 | `clearCredential()`内 |
+
 ## InternalPluginRegistrationController (1エンドポイント、ベースパス `/api/internal/platform/plugin-registrations`)
 
 platform-service所有(issue #1807)。`InternalPlatformSettingsController`と同じ内部ブリッジ(gatewayには載らない。JWT必須・ロール判定なし)。
 
 | HTTPメソッド + パス | 認可チェック | 未認証 | 権限不足 | 権限あり | あるべき | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET /api/internal/platform/plugin-registrations/resolve | なし(内部ブリッジ) | 401 | 該当なし | 認可OK | 現状維持 | 種類を指定して使用中の登録(無ければ`connected=false`)を返す。環境変数へはフォールバックしない |
+| GET /api/internal/platform/plugin-registrations/resolve | なし(内部ブリッジ) | 401 | 該当なし | 認可OK | 現状維持 | 種類を指定して使用中の登録(無ければ`connected=false`)を返す。`projectId`を任意で受け、プロジェクトの上書き → システム全体 → 未接続の順に解決する(#1808)。応答の`scope`は`PROJECT` / `SYSTEM`で、復号した`credential`はプロジェクトの登録の分だけ。環境変数へはフォールバックしない |
 
 ## ArticlePlanController (15エンドポイント、ベースパス `/api/projects/{projectId}/article-plan`)
 
