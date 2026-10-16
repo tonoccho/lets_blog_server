@@ -1,16 +1,12 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.cms.CmsAdapter;
-import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
-import com.letsblog.publishing.cms.CmsType;
-import com.letsblog.publishing.cms.MediaUploadResult;
-import com.letsblog.publishing.render.MediaRenderClient;
+import com.letsblog.publishing.testsupport.FakeHttpServer.Response;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.WpCliStubs;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -19,37 +15,33 @@ import java.util.HexFormat;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * PlantUmlEmbedServiceの回帰テスト。```plantumlフェンスコードブロックの抽出・アップロードに加え、
  * 同一内容のダイアグラムを再投稿時に再生成・再アップロードしない再利用キャッシュ(issue #499)を検証する。
+ *
+ * <p>issue #1815で書き直し: MediaRenderClient・CmsAdapterFactory・WordPressAdapterは実物を使い、
+ * media-serviceへのHTTP({@code FakeHttpServer})とWordPressへのSSH({@code FakeSshCommandExecutor})だけを差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class PlantUmlEmbedServiceTest {
 
-    @Mock
-    private MediaRenderClient mediaRenderClient;
-    @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-    @Mock
-    private CmsAdapter cmsAdapter;
-
+    private PublishingWorld world;
     private PlantUmlEmbedService service;
 
-    private final CmsCredentials.WordPressCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
+    private final CmsCredentials.WordPressCredentials credentials = PublishingWorld.sshCreds();
 
     @BeforeEach
     void setUp() {
-        service = new PlantUmlEmbedService(mediaRenderClient, cmsAdapterFactory);
-        lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        world = new PublishingWorld();
+        service = new PlantUmlEmbedService(world.mediaRenderClient, world.cmsAdapterFactory);
+        world.media.on("POST", "/api/render/plantuml", Response.bytes(200, "image/png", new byte[]{1}));
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
@@ -57,16 +49,12 @@ class PlantUmlEmbedServiceTest {
         DiagramEmbedResult result = service.embedDiagrams(credentials, "普通の本文です。", Map.of());
 
         assertEquals("普通の本文です。", result.markdown());
-        verifyNoInteractions(mediaRenderClient);
+        assertTrue(world.media.requests().isEmpty(), "PlantUMLのレンダリングは呼ばれない");
     }
 
     @Test
     void embedDiagrams_複数ブロックをそれぞれ連番ファイル名でアップロードする() {
-        when(mediaRenderClient.renderPlantUml(any())).thenReturn(new byte[]{1});
-        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-1.png"), eq("image/png"), any()))
-                .thenReturn(new MediaUploadResult("10", "https://example.com/1.png"));
-        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-2.png"), eq("image/png"), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/2.png"));
+        WpCliStubs.mediaUploads(world.ssh, "10", "https://example.com/1.png", "11", "https://example.com/2.png");
 
         String markdown = "```plantuml\nA->B\n```\n本文\n```plantuml\nC->D\n```";
         DiagramEmbedResult result = service.embedDiagrams(credentials, markdown, Map.of());
@@ -74,6 +62,9 @@ class PlantUmlEmbedServiceTest {
         assertEquals("![diagram](https://example.com/1.png)\n本文\n![diagram](https://example.com/2.png)",
                 result.markdown());
         assertEquals(2, result.uploadedImages().size());
+        assertEquals(2, world.media.requests("POST", "/api/render/plantuml").size());
+        assertTrue(world.ssh.uploaded.keySet().stream().anyMatch(p -> p.endsWith("-plantuml-1.png")));
+        assertTrue(world.ssh.uploaded.keySet().stream().anyMatch(p -> p.endsWith("-plantuml-2.png")));
     }
 
     @Test
@@ -84,13 +75,13 @@ class PlantUmlEmbedServiceTest {
         Map<String, UploadedImageInfo> priorUploads = Map.of(
                 "plantuml:" + sha256,
                 new UploadedImageInfo(sha256, "https://example.com/cached.png", "10"));
-        when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(true);
+        world.ssh.whenOk("post get '10' --field=ID", "10");
 
         DiagramEmbedResult result = service.embedDiagrams(credentials, "```plantuml\nA->B\n```", priorUploads);
 
         assertEquals("![diagram](https://example.com/cached.png)", result.markdown());
-        verifyNoInteractions(mediaRenderClient);
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertTrue(world.media.requests().isEmpty(), "再生成しない");
+        assertTrue(world.ssh.uploaded.isEmpty(), "再アップロードしない");
     }
 
     @Test
@@ -100,15 +91,25 @@ class PlantUmlEmbedServiceTest {
         Map<String, UploadedImageInfo> priorUploads = Map.of(
                 "plantuml:" + sha256,
                 new UploadedImageInfo(sha256, "https://example.com/old.png", "10"));
-        when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(false);
-        when(mediaRenderClient.renderPlantUml(wrapped)).thenReturn(new byte[]{1});
-        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-1.png"), eq("image/png"), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/new.png"));
+        world.ssh.whenFail("post get '10' --field=ID", "Error: Invalid post ID.");
+        WpCliStubs.mediaUploads(world.ssh, "11", "https://example.com/new.png");
 
         DiagramEmbedResult result = service.embedDiagrams(credentials, "```plantuml\nA->B\n```", priorUploads);
 
         assertEquals("![diagram](https://example.com/new.png)", result.markdown());
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("plantuml-1.png"), eq("image/png"), any());
+        assertTrue(world.media.last().bodyText().contains("A->B"));
+        assertFalse(world.ssh.uploaded.isEmpty(), "再アップロードされる");
+    }
+
+    @Test
+    void embedDiagrams_既にstartumlを含むブロックは包み直さずそのままレンダリングする() {
+        WpCliStubs.mediaUploads(world.ssh, "10", "https://example.com/1.png");
+
+        service.embedDiagrams(credentials, "```plantuml\n@startuml\nA->B\n@enduml\n```", Map.of());
+
+        String sent = world.media.last().bodyText();
+        assertTrue(sent.contains("@startuml\\nA->B\\n@enduml"), sent);
+        assertFalse(sent.contains("@startuml\\n@startuml"), sent);
     }
 
     private String sha256Hex(String source) {

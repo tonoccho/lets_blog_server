@@ -196,4 +196,11 @@ class ArticleFrontMatterParserTest {
         assertThat(ArticleFrontMatterParser.parse("---\ntags: [a, ~, b]\n---\n").frontMatter().tags())
                 .containsExactly("a", "b");
     }
+
+    @Test
+    @DisplayName("categoriesが空でない文字列ならcategoryに負けない")
+    void nonEmptyStringCategoriesWinsOverCategory() {
+        assertThat(ArticleFrontMatterParser.parse("---\ncategories: x\ncategory: y\n---\n")
+                .frontMatter().categories()).containsExactly("x");
+    }
 }

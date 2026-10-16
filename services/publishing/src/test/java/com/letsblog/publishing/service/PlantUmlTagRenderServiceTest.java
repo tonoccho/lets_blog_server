@@ -1,66 +1,50 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.render.MediaRenderException;
-import com.letsblog.publishing.cms.CmsAdapter;
-import com.letsblog.publishing.cms.CmsAdapterFactory;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import com.letsblog.publishing.cms.CmsCredentials;
-import com.letsblog.publishing.cms.CmsType;
-import com.letsblog.publishing.cms.MediaUploadResult;
-import com.letsblog.publishing.render.MediaRenderClient;
 import com.letsblog.publishing.render.PlantUmlRenderRejectedException;
+import com.letsblog.publishing.testsupport.FakeHttpServer.Response;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.WpCliStubs;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
 /**
  * PlantUmlTagRenderServiceの回帰テスト(issue #344)。[plantuml]〜[/plantuml]タグの抽出、
- * プレビュー向けdata URI埋め込み、投稿向けCMSアップロード、エラー時の
- * InvalidPlantUmlTagException送出を検証する。
+ * 投稿向けCMSアップロード、エラー時の例外送出を検証する。
+ *
+ * <p>issue #1815で書き直し: MediaRenderClient・CmsAdapterFactory・WordPressAdapterは実物を使い、
+ * media-serviceへのHTTP({@code FakeHttpServer})とWordPressへのSSH({@code FakeSshCommandExecutor})だけを差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class PlantUmlTagRenderServiceTest {
 
-    @Mock
-    private MediaRenderClient mediaRenderClient;
-    @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-    @Mock
-    private CmsAdapter cmsAdapter;
-
+    private PublishingWorld world;
     private PlantUmlTagRenderService service;
 
-    private final CmsCredentials.WordPressCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
+    private final CmsCredentials.WordPressCredentials credentials = PublishingWorld.sshCreds();
 
     @BeforeEach
     void setUp() {
-        service = new PlantUmlTagRenderService(mediaRenderClient, cmsAdapterFactory);
-        lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        world = new PublishingWorld();
+        service = new PlantUmlTagRenderService(world.mediaRenderClient, world.cmsAdapterFactory);
+        world.media.on("POST", "/api/render/plantuml", Response.bytes(200, "image/png", new byte[]{1}));
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void render_複数タグをそれぞれ連番ファイル名でアップロードする() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
-        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any()))
-                .thenReturn(new MediaUploadResult("10", "https://example.com/1.png"));
-        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-2.png"), eq("image/png"), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/2.png"));
+        WpCliStubs.mediaUploads(world.ssh, "10", "https://example.com/1.png", "11", "https://example.com/2.png");
 
         String markdown = "[plantuml]\nA->B\n[/plantuml]\n本文\n[plantuml]\nC->D\n[/plantuml]";
         DiagramEmbedResult result = service.render(credentials, markdown, Map.of());
@@ -68,6 +52,8 @@ class PlantUmlTagRenderServiceTest {
         assertEquals("![diagram](https://example.com/1.png)\n本文\n![diagram](https://example.com/2.png)",
                 result.markdown());
         assertEquals(2, result.uploadedImages().size());
+        assertTrue(world.ssh.uploaded.keySet().stream().anyMatch(p -> p.endsWith("-plantuml-tag-1.png")));
+        assertTrue(world.ssh.uploaded.keySet().stream().anyMatch(p -> p.endsWith("-plantuml-tag-2.png")));
     }
 
     @Test
@@ -78,13 +64,13 @@ class PlantUmlTagRenderServiceTest {
         Map<String, UploadedImageInfo> priorUploads = Map.of(
                 "plantuml:" + sha256,
                 new UploadedImageInfo(sha256, "https://example.com/cached.png", "10"));
-        when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(true);
+        world.ssh.whenOk("post get '10' --field=ID", "10");
 
         DiagramEmbedResult result = service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", priorUploads);
 
         assertEquals("![diagram](https://example.com/cached.png)", result.markdown());
-        verifyNoInteractions(mediaRenderClient);
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertTrue(world.media.requests().isEmpty(), "再生成しない");
+        assertTrue(world.ssh.uploaded.isEmpty(), "再アップロードしない");
     }
 
     @Test
@@ -94,46 +80,52 @@ class PlantUmlTagRenderServiceTest {
         Map<String, UploadedImageInfo> priorUploads = Map.of(
                 "plantuml:" + sha256,
                 new UploadedImageInfo(sha256, "https://example.com/old.png", "10"));
-        when(cmsAdapter.mediaExists(credentials, "10")).thenReturn(false);
-        when(mediaRenderClient.renderPlantUml(wrapped)).thenReturn(new byte[]{1});
-        when(cmsAdapter.uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/new.png"));
+        world.ssh.whenFail("post get '10' --field=ID", "Error: Invalid post ID.");
+        WpCliStubs.mediaUploads(world.ssh, "11", "https://example.com/new.png");
 
         DiagramEmbedResult result = service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", priorUploads);
 
         assertEquals("![diagram](https://example.com/new.png)", result.markdown());
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("plantuml-tag-1.png"), eq("image/png"), any());
+        assertTrue(world.ssh.uploaded.keySet().stream().anyMatch(p -> p.endsWith("-plantuml-tag-1.png")));
     }
 
     @Test
     void render_アップロード対象が無ければPlantUMLサーバーへ問い合わせない() {
         service.render(credentials, "タグなしの本文です。", Map.of());
 
-        verifyNoInteractions(mediaRenderClient);
+        assertTrue(world.media.requests().isEmpty());
+    }
+
+    @Test
+    void render_markdownが空ならそのまま返す() {
+        DiagramEmbedResult nullResult = service.render(credentials, null, Map.of());
+        DiagramEmbedResult emptyResult = service.render(credentials, "", Map.of());
+
+        assertEquals(null, nullResult.markdown());
+        assertEquals("", emptyResult.markdown());
+        assertTrue(world.media.requests().isEmpty());
     }
 
     @Test
     void render_media呼び出し失敗時はPlantUmlServerUnavailableExceptionを投げアップロードしない() {
-        when(mediaRenderClient.renderPlantUml(anyString()))
-                .thenThrow(new MediaRenderException("PlantUMLサーバーに接続できません", null));
+        world.media.status("POST", "/api/render/plantuml", 500, "{\"error\":\"down\"}");
 
         PlantUmlServerUnavailableException e = assertThrows(PlantUmlServerUnavailableException.class,
                 () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", Map.of()));
         assertTrue(e.getMessage().contains("PlantUMLサーバーに接続できません"));
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertTrue(world.ssh.uploaded.isEmpty());
     }
 
     @Test
     void render_PlantUMLの拒否は接続不能に変えずそのまま伝えアップロードしない() {
-        PlantUmlRenderRejectedException rejected =
-                new PlantUmlRenderRejectedException("PlantUML が図を描けませんでした: Syntax Error?");
-        when(mediaRenderClient.renderPlantUml(anyString())).thenThrow(rejected);
+        world.media.status("POST", "/api/render/plantuml", 400,
+                "{\"error\":\"PlantUML が図を描けませんでした: Syntax Error?\"}");
 
         PlantUmlRenderRejectedException e = assertThrows(PlantUmlRenderRejectedException.class,
                 () -> service.render(credentials, "[plantuml]\nA->B\n[/plantuml]", Map.of()));
 
-        assertEquals(rejected, e);
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertTrue(e.getMessage().contains("Syntax Error?"));
+        assertTrue(world.ssh.uploaded.isEmpty());
     }
 
     private String sha256Hex(String source) {
@@ -144,5 +136,16 @@ class PlantUmlTagRenderServiceTest {
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    @Test
+    void render_既に_startumlを含む本文は包み直さずそのままレンダリングする() {
+        WpCliStubs.mediaUploads(world.ssh, "10", "https://example.com/1.png");
+
+        service.render(credentials, "[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]", Map.of());
+
+        String sent = world.media.last().bodyText();
+        assertTrue(sent.contains("@startuml\\nA->B\\n@enduml"), sent);
+        assertFalse(sent.contains("@startuml\\n@startuml"), sent);
     }
 }

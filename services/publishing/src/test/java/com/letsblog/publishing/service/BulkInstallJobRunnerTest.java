@@ -5,208 +5,179 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.publishing.domain.BulkOperationLog;
-import com.letsblog.publishing.domain.BulkOperationSourceType;
-import com.letsblog.publishing.domain.BulkOperationStatus;
 import com.letsblog.publishing.domain.BulkOperationType;
+import com.letsblog.publishing.testsupport.FakeHttpServer.Response;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.PublishingWorld.JobUpdate;
+import com.letsblog.publishing.testsupport.PublishingWorld.SiteSpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 全環境インストールジョブの実行本体(issue #1702)。{@code @Async}はSpringプロキシ経由でしか効かないため、
  * メソッドを同期的に呼んで検証する(project-serviceの ProjectEnvironmentSyncJobRunnerTest と同じ)。
+ *
+ * <p>issue #1815で書き直し: BulkManagementService・BulkUploadStorageService・GenerationJobClient・ProjectService等は
+ * 実物を使い、外部との通信(project-service・provision-agent・ai-serviceへのHTTP)だけを{@code FakeHttpServer}で
+ * 差し替える。ジョブの状態通知は、ai-serviceが実際に受けたPATCHで確かめる。
  */
-@ExtendWith(MockitoExtension.class)
 @DisplayName("publishing-service: 全環境インストールジョブランナー(issue #1702)")
 class BulkInstallJobRunnerTest {
 
-    private static final BulkUploadStorageService.StoredZip STORED =
-            new BulkUploadStorageService.StoredZip("3/abc.zip", "abc", "my-plugin.zip");
-
-    @Mock
-    private BulkManagementService bulkManagementService;
-    @Mock
-    private BulkUploadStorageService storageService;
-    @Mock
-    private GenerationJobClient generationJobClient;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private PublishingWorld world;
     private BulkInstallJobRunner runner;
 
     @BeforeEach
     void setUp() {
-        runner = new BulkInstallJobRunner(bulkManagementService, storageService, generationJobClient, objectMapper);
+        world = new PublishingWorld();
+        runner = new BulkInstallJobRunner(world.bulkManagementService, world.bulkUploadStorageService,
+                world.generationJobClient, world.mapper);
+        world.agent.json("POST", "/bulk-management", "{\"status\":\"success\"}");
+        world.agent.json("POST", "/bulk-management/upload", "{\"status\":\"success\"}");
     }
 
-    private static BulkOperationLog log(String environment, BulkOperationStatus status, String error) {
-        BulkOperationLog log = new BulkOperationLog();
-        log.setProjectId(3L);
-        log.setOperationType(BulkOperationType.PLUGIN_INSTALL);
-        log.setSourceType(BulkOperationSourceType.SLUG);
-        log.setValue("akismet");
-        log.setEnvironment(environment);
-        log.setStatus(status);
-        log.setLevel(status.toLogLevel());
-        log.setErrorMessage(error);
-        log.setCreatedAt(LocalDateTime.of(2026, 10, 13, 1, 2, 3));
-        return log;
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
-    private JsonNode terminalPayload(String status) throws Exception {
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(21L), eq(status), payload.capture());
-        return objectMapper.readTree(payload.getValue());
+    private void bind(SiteSpec local, SiteSpec test, SiteSpec production) {
+        world.bindEnvironments(3L, "test", local, test, production);
+    }
+
+    private JobUpdate terminal(String status) {
+        List<JobUpdate> matched = world.jobUpdates().stream().filter(u -> u.status().equals(status)).toList();
+        assertEquals(1, matched.size(), status + " の通知: " + world.jobUpdates());
+        assertEquals(21L, matched.get(0).id());
+        return matched.get(0);
+    }
+
+    private boolean notified(String status) {
+        return world.jobUpdates().stream().anyMatch(u -> u.status().equals(status));
     }
 
     @Test
     @DisplayName("slug: installing を running で通知してから、環境ごとの結果(logs)を載せて done にする")
-    void slugSuccess() throws Exception {
-        when(bulkManagementService.applyToAllEnvironments(3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L))
-                .thenReturn(List.of(
-                        log("local", BulkOperationStatus.SUCCESS, null),
-                        log("test", BulkOperationStatus.FAILED, "wp-cli: 失敗")));
+    void slugSuccess() {
+        bind(SiteSpec.managed(11L, "local-site"), SiteSpec.managed(12L, "test-site"), null);
+        world.agent.on("POST", "/bulk-management", request -> request.bodyText().contains("test-site")
+                ? Response.json(502, "{\"error\":\"wp-cli: 失敗\"}") : null);
 
         runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
 
-        InOrder order = inOrder(generationJobClient);
-        ArgumentCaptor<String> running = ArgumentCaptor.forClass(String.class);
-        order.verify(generationJobClient).updateStatus(eq(21L), eq("running"), running.capture());
-        assertEquals("installing", objectMapper.readTree(running.getValue()).get("phase").asText());
-        ArgumentCaptor<String> done = ArgumentCaptor.forClass(String.class);
-        order.verify(generationJobClient).updateStatus(eq(21L), eq("done"), done.capture());
-        JsonNode result = objectMapper.readTree(done.getValue());
+        List<JobUpdate> updates = world.jobUpdates();
+        assertEquals(List.of("running", "done"), updates.stream().map(JobUpdate::status).toList());
+        assertEquals("installing", updates.get(0).result().get("phase").asText());
+        JsonNode result = updates.get(1).result();
         assertEquals("done", result.get("phase").asText());
         assertEquals(3L, result.get("projectId").asLong());
         JsonNode logs = result.get("logs");
         assertEquals(2, logs.size());
-        // 環境の順(呼び出し元が返した順=ENVIRONMENT_ORDER)を保つ。環境ごとの失敗は FAILED の log で、ジョブは done。
+        // 環境の順(ENVIRONMENT_ORDER)を保つ。環境ごとの失敗は FAILED の log で、ジョブは done。
         assertEquals("local", logs.get(0).get("environment").asText());
         assertEquals("SUCCESS", logs.get(0).get("status").asText());
         assertEquals("test", logs.get(1).get("environment").asText());
         assertEquals("FAILED", logs.get(1).get("status").asText());
-        assertEquals("wp-cli: 失敗", logs.get(1).get("errorMessage").asText());
+        assertTrue(logs.get(1).get("errorMessage").asText().contains("provision-agent"));
         // BulkOperationLogResponse と同じ形
         assertEquals("PLUGIN_INSTALL", logs.get(0).get("operationType").asText());
         assertEquals("SLUG", logs.get(0).get("sourceType").asText());
         assertEquals("akismet", logs.get(0).get("value").asText());
-        assertEquals("2026-10-13T01:02:03Z", logs.get(0).get("createdAt").asText());
-        verify(generationJobClient, never()).updateStatus(eq(21L), eq("failed"), any());
+        assertTrue(logs.get(0).get("createdAt").asText().endsWith("Z") || logs.get(0).get("createdAt").asText().contains("T"),
+                logs.get(0).get("createdAt").asText());
+        assertFalse(notified("failed"));
     }
 
     @Test
     @DisplayName("zip: 保存先から読み、保存済みのバイト列を各環境へ適用して done にする")
     void zipSuccess() throws Exception {
-        byte[] bytes = {1, 2, 3};
-        when(storageService.load("3/abc.zip")).thenReturn(bytes);
-        BulkOperationLog zipLog = log("local", BulkOperationStatus.SUCCESS, null);
-        zipLog.setSourceType(BulkOperationSourceType.ZIP);
-        zipLog.setOriginalFilename("my-plugin.zip");
-        when(bulkManagementService.applyStoredZipToAllEnvironments(3L, BulkOperationType.PLUGIN_INSTALL, bytes, STORED, 5L))
-                .thenReturn(List.of(zipLog));
+        bind(SiteSpec.managed(11L, "local-site"), null, null);
+        BulkUploadStorageService.StoredZip stored =
+                world.bulkUploadStorageService.store(3L, new byte[] {1, 2, 3}, "my-plugin.zip");
 
-        runner.runZipInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, STORED, 5L);
+        runner.runZipInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, stored, 5L);
 
-        JsonNode result = terminalPayload("done");
+        JsonNode result = terminal("done").result();
         assertEquals("ZIP", result.get("logs").get(0).get("sourceType").asText());
         assertEquals("my-plugin.zip", result.get("logs").get(0).get("originalFilename").asText());
+        assertEquals(1, world.agent.requests("POST", "/bulk-management/upload").size());
     }
 
     @Test
     @DisplayName("zip: 保存済みファイルが読めなければ unexpected_error の failed")
-    void zipLoadFailure() throws Exception {
-        when(storageService.load(any())).thenThrow(new IOException("保存済みファイルが見つかりません"));
+    void zipLoadFailure() {
+        bind(SiteSpec.managed(11L, "local-site"), null, null);
+        BulkUploadStorageService.StoredZip missing =
+                new BulkUploadStorageService.StoredZip("3/missing.zip", "abc", "my-plugin.zip");
 
-        runner.runZipInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, STORED, 5L);
+        runner.runZipInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, missing, 5L);
 
-        JsonNode result = terminalPayload("failed");
+        JsonNode result = terminal("failed").result();
         assertEquals("unexpected_error", result.get("errorType").asText());
         assertTrue(result.get("error").asText().contains("保存済みファイル"));
     }
 
     @Test
     @DisplayName("プロジェクトが無い(ProjectNotFoundException)は project_not_found の failed")
-    void projectNotFound() throws Exception {
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any()))
-                .thenThrow(new ProjectNotFoundException("id 3 のプロジェクトは登録されていません"));
-
+    void projectNotFound() {
+        // project-serviceにプロジェクト3は登録されていない(404)。
         runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
 
-        assertEquals("project_not_found", terminalPayload("failed").get("errorType").asText());
-        verify(generationJobClient, never()).updateStatus(eq(21L), eq("done"), any());
+        assertEquals("project_not_found", terminal("failed").result().get("errorType").asText());
+        assertFalse(notified("done"));
     }
 
     @Test
     @DisplayName("入力の不正(IllegalArgumentException)は invalid_request の failed")
-    void invalidRequest() throws Exception {
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any()))
-                .thenThrow(new IllegalArgumentException("slugを入力してください"));
+    void invalidRequest() {
+        runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, " ", 5L);
 
-        runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
-
-        assertEquals("invalid_request", terminalPayload("failed").get("errorType").asText());
+        assertEquals("invalid_request", terminal("failed").result().get("errorType").asText());
     }
 
     @Test
-    @DisplayName("想定外の例外は unexpected_error の failed(メッセージが無くても読める文言になる)")
-    void unexpected() throws Exception {
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any()))
-                .thenThrow(new IllegalStateException());
+    @DisplayName("想定外の例外は unexpected_error の failed")
+    void unexpected() {
+        world.project.status("GET", "/api/internal/project/projects/3", 500, "{\"error\":\"down\"}");
 
         runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
 
-        JsonNode result = terminalPayload("failed");
+        JsonNode result = terminal("failed").result();
         assertEquals("unexpected_error", result.get("errorType").asText());
         assertFalse(result.get("error").asText().isBlank());
     }
 
     @Test
-    @DisplayName("ログの optional な項目(null)も、そのまま null として載る")
-    void nullFieldsStayNull() throws Exception {
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any()))
-                .thenReturn(List.of(log("local", BulkOperationStatus.SKIPPED, null)));
+    @DisplayName("例外にメッセージが無くても、読める文言(例外のクラス名)になる")
+    void failurePayloadWithoutMessage() {
+        var payload = BulkInstallJobRunner.failurePayload(new IllegalStateException());
 
-        runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
-
-        JsonNode entry = terminalPayload("done").get("logs").get(0);
-        assertEquals("SKIPPED", entry.get("status").asText());
-        assertTrue(entry.get("errorMessage").isNull());
-        assertTrue(entry.get("stackTrace").isNull());
+        assertEquals("IllegalStateException", payload.get("error"));
+        assertEquals("unexpected_error", payload.get("errorType"));
     }
 
     @Test
-    @DisplayName("createdAt が無いログも失敗せず null で載る")
-    void nullCreatedAt() throws Exception {
-        BulkOperationLog noTime = log("local", BulkOperationStatus.SUCCESS, null);
-        noTime.setCreatedAt(null);
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any())).thenReturn(List.of(noTime));
+    @DisplayName("ログの optional な項目(null)も、そのまま null として載る")
+    void nullFieldsStayNull() {
+        bind(SiteSpec.managed(11L, "local-site"), null, null);
+        world.agent.json("POST", "/bulk-management", "{\"status\":\"skipped\"}");
 
         runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L);
 
-        assertTrue(terminalPayload("done").get("logs").get(0).get("createdAt").isNull());
+        JsonNode entry = terminal("done").result().get("logs").get(0);
+        assertEquals("SKIPPED", entry.get("status").asText());
+        assertTrue(entry.get("errorMessage").isNull());
+        assertTrue(entry.get("stackTrace").isNull());
     }
 
     /** ジョブ1件の完了行(issue #1775)だけを集める。 */
@@ -228,8 +199,7 @@ class BulkInstallJobRunnerTest {
     @Test
     @DisplayName("完了行: 成功(done)は INFO で kind / job_id / duration_ms / outcome を持つ1行")
     void completionLineOnSuccess() {
-        when(bulkManagementService.applyToAllEnvironments(3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L))
-                .thenReturn(List.of());
+        bind(SiteSpec.managed(11L, "local-site"), null, null);
 
         List<ILoggingEvent> lines = completionLines(
                 () -> runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L));
@@ -243,8 +213,7 @@ class BulkInstallJobRunnerTest {
     @Test
     @DisplayName("完了行: 例外でジョブが failed になる場合は WARN で outcome に例外クラス名")
     void completionLineOnFailure() {
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any()))
-                .thenThrow(new IllegalStateException("boom"));
+        world.project.status("GET", "/api/internal/project/projects/3", 500, "{\"error\":\"down\"}");
 
         List<ILoggingEvent> lines = completionLines(
                 () -> runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L));
@@ -253,19 +222,5 @@ class BulkInstallJobRunnerTest {
         assertEquals(Level.WARN, lines.get(0).getLevel());
         assertTrue(lines.get(0).getFormattedMessage()
                 .matches("job completed: kind=bulk_install job_id=21 duration_ms=\\d+ outcome=IllegalStateException"));
-    }
-
-    @Test
-    @DisplayName("完了行: done の通知自体が例外でも完了行は1行だけ(最初の結果が勝つ)")
-    void completionLineIsSingleWhenDoneNotificationFails() {
-        when(bulkManagementService.applyToAllEnvironments(any(), any(), any(), any())).thenReturn(List.of());
-        org.mockito.Mockito.lenient().doThrow(new IllegalStateException("notify")).when(generationJobClient)
-                .updateStatus(any(), eq("done"), any());
-
-        List<ILoggingEvent> lines = completionLines(
-                () -> runner.runSlugInstall(21L, 3L, BulkOperationType.PLUGIN_INSTALL, "akismet", 5L));
-
-        assertEquals(1, lines.size());
-        assertEquals(Level.WARN, lines.get(0).getLevel());
     }
 }

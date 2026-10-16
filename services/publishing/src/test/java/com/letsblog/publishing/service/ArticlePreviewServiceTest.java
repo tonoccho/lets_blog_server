@@ -1,116 +1,91 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.cms.CmsType;
-import com.letsblog.publishing.domain.Project;
-import com.letsblog.publishing.domain.Site;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.publishing.cms.LetsblogPluginUnavailableException;
+import com.letsblog.publishing.dto.SignedPreviewUrlRequest;
+import com.letsblog.publishing.dto.SignedPreviewUrlResponse;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * publishing-serviceのArticlePreviewService(署名付きプレビューURLの発行、issue #1561)を検証する。
  * 旧プレビュー経路(fetchThemeCss/renderSkeleton/renderRealPrivatePost/deletePreviewPost)は
  * issue #1564で削除したため、そのテストも併せて削除した。記事本文レンダリング(renderHtml)は
  * content-serviceが持つ。
+ *
+ * <p>issue #1815で書き直し: ProjectService・SiteService・ProjectServiceClient・CmsAdapterFactory・WordPressAdapterは
+ * 実物を使い、project-serviceへのHTTP({@code FakeHttpServer})とWordPressへのSSH({@code FakeWordPress})だけを差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class ArticlePreviewServiceTest {
 
-    @Mock
-    private ProjectService projectService;
+    private static final String PREVIEW_OUTPUT =
+            "{\"url\":\"https://localhost/sites/local-site/?letsblog_preview=t\",\"expires_at\":1800000600}";
 
-    @Mock
-    private SiteService siteService;
-
-    @Mock
-    private com.letsblog.publishing.cms.CmsAdapterFactory cmsAdapterFactory;
-
+    private PublishingWorld world;
     private ArticlePreviewService service;
 
     @BeforeEach
     void setUp() {
-        service = new ArticlePreviewService(projectService, siteService, cmsAdapterFactory);
+        world = new PublishingWorld();
+        world.asUser("Bearer user-token");
+        service = new ArticlePreviewService(world.projectService, world.siteService, world.cmsAdapterFactory);
+        world.ssh.whenOk("letsblog preview", PREVIEW_OUTPUT);
     }
 
-    private Project projectWithMaster(String masterEnvironment, Long testSiteId, Long productionSiteId) {
-        Project project = new Project();
-        project.setId(1L);
-        project.setMasterEnvironment(masterEnvironment);
-        project.setTestSiteId(testSiteId);
-        project.setProductionSiteId(productionSiteId);
-        return project;
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
-    private Site wordPressSite(Long id, String baseUrl) {
-        Site site = new Site();
-        site.setId(id);
-        site.setCmsType(CmsType.WORDPRESS);
-        site.setBaseUrl(baseUrl);
-        return site;
+    /** プロジェクト1に、テスト(30)・本番(31)・ローカル(29)のサイトを置く。 */
+    private void projectWithSites(String masterEnvironment, Long localSiteId, Long testSiteId, Long productionSiteId) {
+        world.bindProject(30L, 1L, localSiteId, testSiteId, productionSiteId, masterEnvironment);
+        world.stubSite(29L, "local-site", true);
+        world.stubSite(30L, "test-site", true);
+        world.stubSite(31L, "prod-site", true);
+        world.stubCredentials("local-site", PublishingWorld.sshCredentialsMap());
+        world.stubCredentials("test-site", PublishingWorld.sshCredentialsMap());
+        world.stubCredentials("prod-site", PublishingWorld.sshCredentialsMap());
     }
 
-    private Site managedWordPressSite(Long id, String siteKey, String publicBaseUrl, String wpSlug) {
-        Site site = wordPressSite(id, publicBaseUrl);
-        site.setSiteKey(siteKey);
-        site.setManagedWordpress(true);
-        site.setWpSlug(wpSlug);
-        return site;
+    private SignedPreviewUrlRequest signedRequest(Long siteId, String featuredImage, Integer ttl) {
+        return new SignedPreviewUrlRequest(
+                siteId, "プレビュー題", "<p>本文</p>", List.of("news"), List.of("a", "b"), featuredImage, ttl);
     }
 
-    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials agentCredentials(String wpSlug) {
-        return new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
-                "https://localhost/sites/" + wpSlug, "admin",
-                "AGENT", null, null, null, null, null, null, wpSlug);
+    private JsonNode sentPayload() throws Exception {
+        assertEquals(1, world.ssh.uploaded.size(), "プレビューの内容が1つだけ送られる");
+        return world.mapper.readTree(world.ssh.uploaded.values().iterator().next());
+    }
+
+    private boolean previewCommandRan() {
+        return world.ssh.ran("letsblog preview");
     }
 
     // ---- issue #1561: 投稿を作らない署名付きプレビュー URL ----
 
-    private com.letsblog.publishing.dto.SignedPreviewUrlRequest signedRequest(
-            Long siteId, String featuredImage, Integer ttl) {
-        return new com.letsblog.publishing.dto.SignedPreviewUrlRequest(
-                siteId, "プレビュー題", "<p>本文</p>", java.util.List.of("news"), java.util.List.of("a", "b"),
-                featuredImage, ttl);
-    }
-
-    private com.letsblog.publishing.cms.CmsAdapter givenAgentSiteForSignedPreview() {
-        Project project = projectWithMaster("test", 30L, null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        Site site = managedWordPressSite(30L, "local-site", "https://localhost/sites/local-site", "local-site");
-        when(siteService.getById(30L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
-                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        return cmsAdapter;
-    }
-
     @Test
     void createSignedPreviewUrl_内容をプラグインへ渡して署名付きURLを返す() throws Exception {
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
-        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.eq(agentCredentials("local-site")),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(600)))
-                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://localhost/sites/local-site/?letsblog_preview=t", 1800000600L));
+        projectWithSites("test", null, 30L, null);
 
-        com.letsblog.publishing.dto.SignedPreviewUrlResponse response = service.createSignedPreviewUrl(
+        SignedPreviewUrlResponse response = service.createSignedPreviewUrl(
                 1L, signedRequest(30L, "data:image/png;base64,AAAA", 600));
 
         assertEquals("https://localhost/sites/local-site/?letsblog_preview=t", response.url());
         assertEquals(1800000600L, response.expiresAt());
-        org.mockito.ArgumentCaptor<String> payload = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(cmsAdapter).requireLetsblogPlugin(agentCredentials("local-site"));
-        verify(cmsAdapter).createSignedPreview(org.mockito.ArgumentMatchers.any(), payload.capture(),
-                org.mockito.ArgumentMatchers.eq(600));
-        com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload.getValue());
+        assertTrue(world.ssh.ran("--ttl=600"));
+        assertTrue(world.ssh.indexOf("letsblog status") < world.ssh.indexOf("letsblog preview"),
+                "プラグインの状態確認が先");
+        JsonNode node = sentPayload();
         assertEquals("プレビュー題", node.path("title").asText());
         assertEquals("<p>本文</p>", node.path("content").asText());
         assertEquals("news", node.path("categories").get(0).asText());
@@ -120,122 +95,102 @@ class ArticlePreviewServiceTest {
 
     @Test
     void createSignedPreviewUrl_カテゴリ_タグ_アイキャッチが無ければ空として渡す() throws Exception {
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
-        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.isNull()))
-                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+        projectWithSites("test", null, 30L, null);
 
-        service.createSignedPreviewUrl(1L, new com.letsblog.publishing.dto.SignedPreviewUrlRequest(
+        service.createSignedPreviewUrl(1L, new SignedPreviewUrlRequest(
                 30L, "題", "<p>x</p>", null, null, " ", null));
 
-        org.mockito.ArgumentCaptor<String> payload = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(cmsAdapter).createSignedPreview(org.mockito.ArgumentMatchers.any(), payload.capture(),
-                org.mockito.ArgumentMatchers.isNull());
-        com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload.getValue());
+        JsonNode node = sentPayload();
         assertEquals(0, node.path("categories").size());
         assertEquals(0, node.path("tags").size());
         assertTrue(node.path("featured_image").isMissingNode());
+        assertFalse(world.ssh.ran("--ttl"), "有効期限を指定しなければプラグインの規定値");
     }
 
     @Test
     void createSignedPreviewUrl_投稿もメディアも作らない() {
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
-        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+        projectWithSites("test", null, 30L, null);
 
         service.createSignedPreviewUrl(1L, signedRequest(30L, "data:image/png;base64,AAAA", null));
 
-        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(cmsAdapter, org.mockito.Mockito.never()).uploadMedia(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(cmsAdapter, org.mockito.Mockito.never()).generateAuthCookie(org.mockito.ArgumentMatchers.any());
+        assertTrue(world.ssh.posts.isEmpty());
+        assertTrue(world.ssh.media.isEmpty());
+        assertFalse(world.ssh.ran("post create"));
+        assertFalse(world.ssh.ran("media import"));
+        assertFalse(world.ssh.ran("eval"), "認証Cookieの発行もしない");
     }
 
     @Test
     void createSignedPreviewUrl_プラグインが使えなければ発行せずに拒否する() {
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
-        org.mockito.Mockito.doThrow(new com.letsblog.publishing.cms.LetsblogPluginUnavailableException(
-                com.letsblog.publishing.cms.LetsblogPluginStatus.notInstalled()))
-                .when(cmsAdapter).requireLetsblogPlugin(org.mockito.ArgumentMatchers.any());
+        projectWithSites("test", null, 30L, null);
+        world.ssh.site().letsblogStatusOutput = null;
 
-        assertThrows(com.letsblog.publishing.cms.LetsblogPluginUnavailableException.class,
+        assertThrows(LetsblogPluginUnavailableException.class,
                 () -> service.createSignedPreviewUrl(1L, signedRequest(30L, null, null)));
-        verify(cmsAdapter, org.mockito.Mockito.never()).createSignedPreview(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertFalse(previewCommandRan());
+        assertTrue(world.ssh.uploaded.isEmpty(), "何も渡さない");
     }
 
     @Test
     void createSignedPreviewUrl_プロジェクトに紐づかないサイトは理由つきで拒否する() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 30L, null));
+        projectWithSites("test", null, 30L, null);
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> service.createSignedPreviewUrl(1L, signedRequest(999L, null, null)));
         assertTrue(e.getMessage().contains("紐づいていません"));
-        org.mockito.Mockito.verifyNoInteractions(cmsAdapterFactory);
+        assertTrue(world.ssh.commands.isEmpty());
     }
 
     @Test
     void createSignedPreviewUrl_siteId未指定ならマスター環境のサイトを対象にする() {
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter = givenAgentSiteForSignedPreview();
-        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+        projectWithSites("test", null, 30L, null);
 
         service.createSignedPreviewUrl(1L, signedRequest(null, null, null));
 
-        verify(cmsAdapter).createSignedPreview(org.mockito.ArgumentMatchers.eq(agentCredentials("local-site")),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull());
+        assertEquals(1, world.project.requests("GET", "/api/internal/project/sites/test-site/credentials").size(),
+                "マスター環境(テスト)のサイトの認証情報で接続する");
+        assertTrue(previewCommandRan());
     }
 
     // ---- サイトの解決(resolveSiteForPreview)の分岐 ----
 
     @Test
     void createSignedPreviewUrl_siteIdのサイトが見つからなければ理由つきで拒否する() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 30L, null));
-        when(siteService.getById(30L)).thenReturn(Optional.empty());
+        world.bindProject(30L, 1L, null, 30L, null, "test");
+        // サイト30はproject-serviceに無い(404)。
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> service.createSignedPreviewUrl(1L, signedRequest(30L, null, null)));
         assertTrue(e.getMessage().contains("見つかりません"));
-        org.mockito.Mockito.verifyNoInteractions(cmsAdapterFactory);
+        assertTrue(world.ssh.commands.isEmpty());
     }
 
     @Test
     void createSignedPreviewUrl_WordPress以外のCMSは理由つきで拒否する() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 30L, null));
-        Site site = wordPressSite(30L, "https://example.com");
-        site.setCmsType(null);
-        when(siteService.getById(30L)).thenReturn(Optional.of(site));
+        world.bindProject(30L, 1L, null, 30L, null, "test");
+        world.project.json("GET", "/api/internal/project/sites/30",
+                "{\"id\":30,\"siteKey\":\"test-site\",\"name\":\"n\",\"baseUrl\":\"https://example.com\","
+                        + "\"cmsType\":null,\"managedWordpress\":false,\"wpSlug\":null}");
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> service.createSignedPreviewUrl(1L, signedRequest(30L, null, null)));
         assertTrue(e.getMessage().contains("WordPress以外"));
-        org.mockito.Mockito.verifyNoInteractions(cmsAdapterFactory);
+        assertTrue(world.ssh.commands.isEmpty());
     }
 
     @Test
     void createSignedPreviewUrl_マスター環境が本番ならsiteId未指定で本番サイトを対象にする() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("production", null, 31L));
-        Site site = managedWordPressSite(31L, "prod-site", "https://example.com", "prod-site");
-        when(siteService.getById(31L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("prod-site")).thenReturn(agentCredentials("prod-site"));
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
-                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=t", 1L));
+        projectWithSites("production", null, null, 31L);
 
-        assertEquals("https://x/?letsblog_preview=t",
-                service.createSignedPreviewUrl(1L, signedRequest(null, null, null)).url());
+        SignedPreviewUrlResponse response = service.createSignedPreviewUrl(1L, signedRequest(null, null, null));
+
+        assertEquals("https://localhost/sites/local-site/?letsblog_preview=t", response.url());
+        assertEquals(1, world.project.requests("GET", "/api/internal/project/sites/prod-site/credentials").size());
     }
 
     @Test
     void createSignedPreviewUrl_マスター環境がテストでもlocalでも未紐付けなら理由つきで拒否する() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("local", null, null));
+        projectWithSites("local", null, null, null);
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> service.createSignedPreviewUrl(1L, signedRequest(null, null, null)));
@@ -244,8 +199,8 @@ class ArticlePreviewServiceTest {
 
     @Test
     void createSignedPreviewUrl_マスター環境のサイトがproject_serviceに無ければ理由つきで拒否する() {
-        when(projectService.getProjectEntity(1L)).thenReturn(projectWithMaster("test", 30L, null));
-        when(siteService.getById(30L)).thenReturn(Optional.empty());
+        world.bindProject(30L, 1L, null, 30L, null, "test");
+        // サイト30はproject-serviceに無い(404)。
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> service.createSignedPreviewUrl(1L, signedRequest(null, null, null)));
@@ -254,19 +209,21 @@ class ArticlePreviewServiceTest {
 
     @Test
     void createSignedPreviewUrl_ローカル環境のsiteIdも対象にできる() {
-        Project project = projectWithMaster("test", 30L, null);
-        project.setLocalSiteId(29L);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        Site site = managedWordPressSite(29L, "local-site", "https://localhost/sites/local-site", "local-site");
-        when(siteService.getById(29L)).thenReturn(Optional.of(site));
-        when(siteService.getCredentials("local-site")).thenReturn(agentCredentials("local-site"));
-        com.letsblog.publishing.cms.CmsAdapter cmsAdapter =
-                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.createSignedPreview(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any()))
-                .thenReturn(new com.letsblog.publishing.cms.SignedPreview("https://x/?letsblog_preview=l", 2L));
+        projectWithSites("test", 29L, 30L, null);
 
-        assertEquals(2L, service.createSignedPreviewUrl(1L, signedRequest(29L, null, null)).expiresAt());
+        SignedPreviewUrlResponse response = service.createSignedPreviewUrl(1L, signedRequest(29L, null, null));
+
+        assertEquals(1800000600L, response.expiresAt());
+        assertEquals(1, world.project.requests("GET", "/api/internal/project/sites/local-site/credentials").size());
+    }
+
+    @Test
+    void createSignedPreviewUrl_本番環境のsiteIdも対象にできる() {
+        projectWithSites("test", null, 30L, 31L);
+
+        SignedPreviewUrlResponse response = service.createSignedPreviewUrl(1L, signedRequest(31L, null, null));
+
+        assertEquals(1800000600L, response.expiresAt());
+        assertEquals(1, world.project.requests("GET", "/api/internal/project/sites/prod-site/credentials").size());
     }
 }

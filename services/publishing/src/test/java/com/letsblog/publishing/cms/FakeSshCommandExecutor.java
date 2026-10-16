@@ -100,11 +100,20 @@ public class FakeSshCommandExecutor implements SshCommandExecutor {
         removed.add(remotePath);
     }
 
-    private SshCommandResult resolve(String command) {
+    /** 登録済みの規則のうち最初に一致した結果。どれにも一致しなければnull(サブクラスが別の応答を返せるように公開する)。 */
+    protected final SshCommandResult matchRule(String command) {
         for (Rule rule : rules) {
             if (command.contains(rule.needle())) {
                 return rule.next();
             }
+        }
+        return null;
+    }
+
+    private SshCommandResult resolve(String command) {
+        SshCommandResult matched = matchRule(command);
+        if (matched != null) {
+            return matched;
         }
         return fail("FakeSshCommandExecutor: 結果が登録されていないコマンドです: " + command);
     }

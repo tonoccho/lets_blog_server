@@ -1,139 +1,175 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.client.MediaSettingsBridgeClient;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationSourceType;
 import com.letsblog.publishing.domain.BulkOperationStatus;
 import com.letsblog.publishing.domain.BulkOperationType;
-import com.letsblog.publishing.domain.Project;
 import com.letsblog.publishing.domain.Site;
-import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient.BulkApplyCommand;
-import com.letsblog.publishing.provisioning.WordPressBulkManagementClient.BulkApplyResult;
+import com.letsblog.publishing.testsupport.FakeHttpServer.Response;
+import com.letsblog.publishing.testsupport.FakeWordPress;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.PublishingWorld.SiteSpec;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * BulkManagementServiceの回帰テスト。
+ *
+ * <p>issue #1815で書き直し: 自前のクラス(SiteService・ProjectService・ProjectServiceClient・
+ * WordPressBulkManagementClient・WordPressSshOperations・CmsAdapterFactory・WordPressAdapter・
+ * BulkUploadStorageService・ImageResizeService・MediaSettingsBridgeClient)は実物を使い、外部との通信だけを
+ * 差し替える。HTTP(project-service・media-service・provision-agent)は{@code FakeHttpServer}、WordPressへのSSH
+ * (wp-cli)は{@code FakeWordPress}。managed環境への操作は、provision-agentが実際に受け取った要求で確かめる。
+ */
 class BulkManagementServiceTest {
 
-    @Mock
-    private WordPressBulkManagementClient bulkManagementClient;
+    private PublishingWorld world;
+    private BulkManagementService service;
 
-    @Mock
-    private BulkUploadStorageService bulkUploadStorageService;
-
-    @Mock
-    private SiteService siteService;
-
-    @Mock
-    private com.letsblog.publishing.cms.ssh.WordPressSshOperations sshOperations;
-
-    @Mock
-    private com.letsblog.publishing.cms.CmsAdapterFactory cmsAdapterFactory;
-
-    @Mock
-    private ProjectService projectService;
-
-    @Mock
-    private ImageResizeService imageResizeService;
-
-    @Mock
-    private MediaSettingsBridgeClient mediaSettingsBridgeClient;
-
-    private BulkManagementService service() {
-        return new BulkManagementService(
-                bulkManagementClient,
-                bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
-                projectService, imageResizeService, mediaSettingsBridgeClient);
+    @BeforeEach
+    void setUp() {
+        world = new PublishingWorld();
+        service = world.bulkManagementService;
+        world.agent.json("POST", "/bulk-management", "{\"status\":\"success\"}");
+        world.agent.json("POST", "/bulk-management/upload", "{\"status\":\"success\"}");
     }
 
-    private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId) {
-        Project project = new Project();
-        project.setId(1L);
-        project.setName("テスト");
-        project.setSlug("test");
-        project.setLocalSiteId(localSiteId);
-        project.setTestSiteId(testSiteId);
-        project.setProductionSiteId(productionSiteId);
-        return project;
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
-    private Site buildManagedSite(Long id, String slug) {
+    // ---- 部品 ----
+
+    private static final String EXT_HOST = "203.0.113.5";
+
+    private SiteSpec managed(long id, String slug) {
+        return SiteSpec.managed(id, slug);
+    }
+
+    private SiteSpec external(long id, String slug) {
+        return SiteSpec.noSsh(id, slug);
+    }
+
+    private SiteSpec ssh(long id, String slug, String host) {
+        return SiteSpec.ssh(id, slug, host, "/var/www/" + slug);
+    }
+
+    private void bind(SiteSpec local, SiteSpec test, SiteSpec production) {
+        world.bindEnvironments(1L, "test", local, test, production);
+    }
+
+    private void bindThreeManagedSites() {
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), managed(30L, "production-site"));
+    }
+
+    private List<JsonNode> applied() {
+        return world.agent.requests("POST", "/bulk-management").stream().map(r -> {
+            try {
+                return world.mapper.readTree(r.body());
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        }).toList();
+    }
+
+    private boolean wasApplied(String slug, String action, String value, String categorySlug, String parentSlug,
+            String description, String targetSlug) {
+        JsonNode expected = world.mapper.valueToTree(
+                new BulkApplyCommand(slug, action, value, categorySlug, parentSlug, description, targetSlug));
+        return applied().contains(expected);
+    }
+
+    private boolean wasApplied(String slug, String action, String value) {
+        return wasApplied(slug, action, value, null, null, null, null);
+    }
+
+    private static Site siteOf(long id, String key) {
         Site site = new Site();
         site.setId(id);
-        site.setSiteKey(slug);
+        site.setSiteKey(key);
         site.setCmsType(CmsType.WORDPRESS);
-        site.setManagedWordpress(true);
-        site.setWpSlug(slug);
         return site;
+    }
+
+    private byte[] png(int width, int height) throws IOException {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", out);
+        return out.toByteArray();
+    }
+
+    private static int[] sizeOf(byte[] image) throws IOException {
+        BufferedImage read = ImageIO.read(new ByteArrayInputStream(image));
+        return new int[] {read.getWidth(), read.getHeight()};
     }
 
     // ---- applyToEnvironment: CATEGORY_CREATE ----
 
     @Test
     void applyToEnvironment_categoryCreate_スラッグ未指定は例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", null, null, null, null, 9L));
     }
 
     @Test
     void applyToEnvironment_categoryCreate_環境にサイトが紐付いていなければ例外() {
-        BulkManagementService service = service();
-        Project project = buildProject(null, null, null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        bind(null, null, null);
+        world.bindProject(10L, 1L, null, null, null, "test");
 
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
-        verify(bulkManagementClient, never()).apply(any());
+        assertTrue(applied().isEmpty());
+    }
+
+    @Test
+    void applyToEnvironment_categoryCreate_環境名が不正なら例外() {
+        bind(managed(10L, "local-site"), null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "staging", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
+    }
+
+    @Test
+    void applyToEnvironment_categoryCreate_登録されていないサイトはSiteNotFoundException() {
+        world.bindProject(10L, 1L, 10L, null, null, "test");
+
+        assertThrows(SiteNotFoundException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
     }
 
     @Test
     void applyToEnvironment_categoryCreate_非managedサイトの環境は例外() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = new Site();
-        externalSite.setId(10L);
-        externalSite.setSiteKey("external-site");
-        externalSite.setCmsType(CmsType.WORDPRESS);
-        externalSite.setManagedWordpress(false);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
+        bind(external(10L, "external-site"), null, null);
 
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L));
+        assertTrue(applied().isEmpty());
     }
 
     @Test
     void applyToEnvironment_categoryCreate_指定した環境のみへ適用してログを保存する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "category_create", "お知らせ", "oshirase", null, null, null)))
-                .thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), null);
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "お知らせ", "oshirase", null, null, null, 9L);
@@ -142,19 +178,14 @@ class BulkManagementServiceTest {
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         assertEquals(BulkOperationSourceType.SLUG, result.getSourceType());
         assertEquals("oshirase", result.getCategorySlug());
-        verify(siteService, never()).getById(20L);
+        assertTrue(wasApplied("local-site", "category_create", "お知らせ", "oshirase", null, null, null));
+        assertEquals(1, applied().size(), "指定した環境だけに適用する");
+        assertTrue(world.project.requests("GET", "/api/internal/project/sites/20").isEmpty());
     }
 
     @Test
     void applyToEnvironment_categoryCreate_親カテゴリと説明を渡せる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "category_create", "サブお知らせ", "sub-oshirase", "oshirase", "説明文", null)))
-                .thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_CREATE, "サブお知らせ", "sub-oshirase", "oshirase", "説明文",
@@ -163,110 +194,75 @@ class BulkManagementServiceTest {
         assertEquals("sub-oshirase", result.getCategorySlug());
         assertEquals("oshirase", result.getCategoryParentSlug());
         assertEquals("説明文", result.getCategoryDescription());
+        assertTrue(wasApplied("local-site", "category_create", "サブお知らせ", "sub-oshirase", "oshirase", "説明文", null));
     }
 
     @Test
     void applyToEnvironment_失敗結果もそのまま記録される() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "plugin_install", "akismet", null, null, null, null)))
-                .thenReturn(BulkApplyResult.failed(new RuntimeException("接続に失敗しました")));
+        bind(managed(10L, "local-site"), null, null);
+        world.agent.status("POST", "/bulk-management", 502, "{\"error\":\"接続に失敗しました\"}");
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
 
         assertEquals(BulkOperationStatus.FAILED, result.getStatus());
-        assertEquals("接続に失敗しました", result.getErrorMessage());
+        assertTrue(result.getErrorMessage().contains("provision-agentがエラー応答を返しました"), result.getErrorMessage());
+        assertNotNull(result.getStackTrace());
     }
 
     @Test
     void applyToEnvironment_SKIPPEDもそのまま記録される() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "theme_install", "twentytwentyfour", null, null, null, null)))
-                .thenReturn(BulkApplyResult.skipped());
+        bind(managed(10L, "local-site"), null, null);
+        world.agent.json("POST", "/bulk-management", "{\"status\":\"skipped\"}");
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.THEME_INSTALL, "twentytwentyfour", null, null, null, null, 9L);
 
         assertEquals(BulkOperationStatus.SKIPPED, result.getStatus());
+        assertTrue(wasApplied("local-site", "theme_install", "twentytwentyfour"));
     }
 
     @Test
     void applyToEnvironment_プラグイン系はslug未指定で例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "", null, null, null, null, 9L));
     }
 
     @Test
     void applyToEnvironment_プラグイン有効化_無効化_削除がそれぞれのactionで呼ばれる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
         service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_DEACTIVATE, "akismet", null, null, null, null, 9L);
         service.applyToEnvironment(1L, "local", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
 
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "plugin_activate", "akismet", null, null, null, null));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "plugin_deactivate", "akismet", null, null, null, null));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "plugin_delete", "akismet", null, null, null, null));
+        assertTrue(wasApplied("local-site", "plugin_activate", "akismet"));
+        assertTrue(wasApplied("local-site", "plugin_deactivate", "akismet"));
+        assertTrue(wasApplied("local-site", "plugin_delete", "akismet"));
     }
 
     @Test
     void applyToEnvironment_テーマ有効化_削除がそれぞれのactionで呼ばれる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         service.applyToEnvironment(1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
         service.applyToEnvironment(1L, "local", BulkOperationType.THEME_DELETE, "twentytwentyfour", null, null, null, null, 9L);
 
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "theme_activate", "twentytwentyfour", null, null, null, null));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "theme_delete", "twentytwentyfour", null, null, null, null));
+        assertTrue(wasApplied("local-site", "theme_activate", "twentytwentyfour"));
+        assertTrue(wasApplied("local-site", "theme_delete", "twentytwentyfour"));
     }
 
     // ---- applyToEnvironment: CATEGORY_EDIT / CATEGORY_DELETE / TAG_* ----
 
     @Test
     void applyToEnvironment_categoryEdit_targetSlug未指定は例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_EDIT, "新名前", "new-slug", null, null, null, 9L));
     }
 
     @Test
     void applyToEnvironment_categoryEdit_正しいコマンドで呼ばれる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "category_edit", "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明", "old-oshirase")))
-                .thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_EDIT, "新お知らせ", "new-oshirase", "parent-slug", "更新後の説明",
@@ -274,90 +270,81 @@ class BulkManagementServiceTest {
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         assertEquals("old-oshirase", result.getCategoryTargetSlug());
+        assertTrue(wasApplied("local-site", "category_edit", "新お知らせ", "new-oshirase", "parent-slug",
+                "更新後の説明", "old-oshirase"));
     }
 
     @Test
     void applyToEnvironment_categoryDelete_targetSlug未指定は例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, null, 9L));
     }
 
     @Test
+    void applyToEnvironment_categoryEdit_名前とスラッグが無ければ例外() {
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_EDIT, " ", "new-slug", null, null, "old", 9L));
+        assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.TAG_EDIT, "新名前", " ", null, null, "old", 9L));
+    }
+
+    @Test
     void applyToEnvironment_categoryDelete_valueが空でもtargetSlugで補われる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "category_delete", "oshirase", null, null, null, "oshirase")))
-                .thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, "oshirase", 9L);
 
         assertEquals("oshirase", result.getValue());
         assertEquals("oshirase", result.getCategoryTargetSlug());
+        assertTrue(wasApplied("local-site", "category_delete", "oshirase", null, null, null, "oshirase"));
+    }
+
+    @Test
+    void applyToEnvironment_categoryDelete_valueが指定されていればそのまま使う() {
+        bind(managed(10L, "local-site"), null, null);
+
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.TAG_DELETE, "お知らせ", null, null, null, "oshirase", 9L);
+
+        assertEquals("お知らせ", result.getValue());
     }
 
     @Test
     void applyToEnvironment_tagCreate_正しいactionで呼ばれる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(new BulkApplyCommand(
-                "local-site", "tag_create", "新着", "shinchaku", null, null, null)))
-                .thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.TAG_CREATE, "新着", "shinchaku", null, null, null, 9L);
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         assertEquals("shinchaku", result.getCategorySlug());
+        assertTrue(wasApplied("local-site", "tag_create", "新着", "shinchaku", null, null, null));
     }
 
     // ---- applyToAllEnvironments (issue #393) ----
 
     @Test
     void applyToAllEnvironments_カテゴリ系は例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
                 1L, BulkOperationType.CATEGORY_CREATE, "お知らせ", 9L));
     }
 
     @Test
     void applyToAllEnvironments_有効化等のアクションは例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_ACTIVATE, "akismet", 9L));
     }
 
     @Test
     void applyToAllEnvironments_slug未指定は例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class, () -> service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_INSTALL, "", 9L));
     }
 
     @Test
     void applyToAllEnvironments_紐付いている全環境へインストールしログを保存する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, 30L);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
-        Site productionSite = buildManagedSite(30L, "production-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
-        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+        bindThreeManagedSites();
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
@@ -367,22 +354,14 @@ class BulkManagementServiceTest {
         assertEquals("test", results.get(1).getEnvironment());
         assertEquals("production", results.get(2).getEnvironment());
         results.forEach(r -> assertEquals(BulkOperationStatus.SUCCESS, r.getStatus()));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "local-site", "plugin_install", "akismet", null, null, null, null));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "test-site", "plugin_install", "akismet", null, null, null, null));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "production-site", "plugin_install", "akismet", null, null, null, null));
+        assertTrue(wasApplied("local-site", "plugin_install", "akismet"));
+        assertTrue(wasApplied("test-site", "plugin_install", "akismet"));
+        assertTrue(wasApplied("production-site", "plugin_install", "akismet"));
     }
 
     @Test
     void applyToAllEnvironments_紐付いていない環境はスキップする() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), null, null);
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
@@ -393,15 +372,7 @@ class BulkManagementServiceTest {
 
     @Test
     void applyToAllEnvironments_1環境が対象外でも他環境の実行を止めずFAILEDとして記録する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site externalSite = buildExternalSite(20L, "external-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
-        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), external(20L, "external-site"), null);
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
@@ -411,15 +382,13 @@ class BulkManagementServiceTest {
         assertEquals("local", results.get(0).getEnvironment());
         assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
         assertEquals("test", results.get(1).getEnvironment());
-        verify(bulkManagementClient, never()).apply(new BulkApplyCommand(
-                "external-site", "plugin_install", "akismet", null, null, null, null));
+        assertFalse(wasApplied("external-site", "plugin_install", "akismet"));
     }
 
     // ---- executeFromUpload ----
 
     @Test
     void executeFromUpload_カテゴリ系は例外() {
-        BulkManagementService service = service();
         MockMultipartFile file = new MockMultipartFile("file", "theme.zip", "application/zip", new byte[]{1});
 
         assertThrows(IllegalArgumentException.class,
@@ -428,7 +397,6 @@ class BulkManagementServiceTest {
 
     @Test
     void executeFromUpload_有効化等のアクションは例外() {
-        BulkManagementService service = service();
         MockMultipartFile file = new MockMultipartFile("file", "theme.zip", "application/zip", new byte[]{1});
 
         assertThrows(IllegalArgumentException.class,
@@ -437,125 +405,98 @@ class BulkManagementServiceTest {
 
     @Test
     void executeFromUpload_拡張子がzipでなければ例外() {
-        BulkManagementService service = service();
         MockMultipartFile file = new MockMultipartFile("file", "theme.txt", "text/plain", new byte[]{1});
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L));
     }
 
+    private List<com.letsblog.publishing.testsupport.FakeHttpServer.Request> zipUploads() {
+        return world.agent.requests("POST", "/bulk-management/upload");
+    }
+
     @Test
     void executeFromUpload_保存してzipを各環境へ転送しログを保存する() throws IOException {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), null);
         byte[] content = new byte[]{1, 2, 3};
         MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
 
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
-        when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(BulkApplyResult.success());
-
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
 
+        String sha256 = com.letsblog.publishing.cms.MediaContentHash.sha256Hex(content);
         assertEquals(2, results.size());
         assertEquals(BulkOperationSourceType.ZIP, results.get(0).getSourceType());
         assertEquals("custom-theme.zip", results.get(0).getOriginalFilename());
-        assertEquals("1/abc.zip", results.get(0).getStoragePath());
-        verify(bulkManagementClient).applyZip(eq("local-site"), eq("theme_install"), any(byte[].class), eq("custom-theme.zip"));
-        verify(bulkManagementClient).applyZip(eq("test-site"), eq("theme_install"), any(byte[].class), eq("custom-theme.zip"));
+        assertEquals("1/" + sha256 + ".zip", results.get(0).getStoragePath());
+        assertEquals(sha256, results.get(0).getFileSha256());
+        assertArrayEquals(content, world.bulkUploadStorageService.load("1/" + sha256 + ".zip"));
+        assertEquals(2, zipUploads().size());
+        String body = zipUploads().stream().map(r -> r.bodyText()).reduce("", String::concat);
+        assertTrue(body.contains("local-site") && body.contains("test-site"), body);
+        assertTrue(body.contains("theme_install") && body.contains("custom-theme.zip"), body);
+    }
+
+    private static void assertArrayEquals(byte[] expected, byte[] actual) {
+        org.junit.jupiter.api.Assertions.assertArrayEquals(expected, actual);
     }
 
     @Test
     void executeFromUpload_SSH接続情報のある非managed環境にもSFTP転送で適用する() throws IOException {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site externalSite = buildExternalSite(20L, "external-site");
-        byte[] content = new byte[]{1, 2, 3};
-        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
-
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
-        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
-        when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(BulkApplyResult.success());
-        when(sshOperations.applyZip(eq(sshCreds()), eq(BulkOperationType.THEME_INSTALL), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(new com.letsblog.publishing.cms.ssh.WordPressSshOperations.SshApplyResult("SUCCESS", null, null));
+        bind(managed(10L, "local-site"), ssh(20L, "external-site", EXT_HOST), null);
+        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", new byte[]{1, 2, 3});
 
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
 
         assertEquals(2, results.size());
-        verify(bulkManagementClient).applyZip(eq("local-site"), eq("theme_install"), any(byte[].class), eq("custom-theme.zip"));
-        verify(sshOperations).applyZip(eq(sshCreds()), eq(BulkOperationType.THEME_INSTALL), any(byte[].class), eq("custom-theme.zip"));
+        assertEquals(1, zipUploads().size(), "managed環境へはprovision-agentへ");
+        FakeWordPress.Site remote = world.ssh.site(EXT_HOST, "/var/www/external-site");
+        assertTrue(remote.themes.containsKey("custom-theme"), "SSH環境へはwp theme installで: " + remote.themes);
+        assertTrue(world.ssh.commands.stream().anyMatch(c -> c.contains("'theme' install") && c.contains("--force")));
+        results.forEach(r -> assertEquals(BulkOperationStatus.SUCCESS, r.getStatus()));
     }
 
     @Test
     void executeFromUpload_SSHが無い非managed環境は対象外() throws IOException {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site externalSite = buildExternalSite(20L, "external-site");
-        byte[] content = new byte[]{1, 2, 3};
-        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", content);
-
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null));
-        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip"));
-        when(bulkManagementClient.applyZip(any(), eq("theme_install"), any(byte[].class), eq("custom-theme.zip")))
-                .thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), external(20L, "external-site"), null);
+        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", new byte[]{1, 2, 3});
 
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
 
         assertEquals(1, results.size());
         assertEquals("local", results.get(0).getEnvironment());
-        verify(sshOperations, never()).applyZip(any(), any(), any(), any());
+        assertTrue(world.ssh.commands.isEmpty());
+    }
+
+    @Test
+    void executeFromUpload_紐付けられたサイトが登録されていない環境は対象外() throws IOException {
+        bind(managed(10L, "local-site"), null, null);
+        world.bindProject(10L, 1L, 10L, 99L, null, "test");
+        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", new byte[]{1});
+
+        List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
+
+        assertEquals(List.of("local"), results.stream().map(BulkOperationLog::getEnvironment).toList());
+    }
+
+    @Test
+    void executeFromUpload_SSHへの転送が失敗した環境はFAILEDとして記録される() throws IOException {
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+        world.ssh.rejectHost("ssh-local");
+        MockMultipartFile file = new MockMultipartFile("file", "custom-theme.zip", "application/zip", new byte[]{1, 2, 3});
+
+        List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.THEME_INSTALL, file, 9L);
+
+        assertEquals(BulkOperationStatus.FAILED, results.get(0).getStatus());
+        assertTrue(results.get(0).getErrorMessage().contains("ssh-local"), results.get(0).getErrorMessage());
     }
 
     // ---- uploadImageToAllEnvironments ----
 
     @Test
     void uploadImageToAllEnvironments_紐付いた環境ごとにアップロードしログを記録する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials localCreds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials testCreds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://test.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
-        when(siteService.getCredentials("test-site")).thenReturn(testCreds);
-
+        bind(ssh(10L, "local-site", "ssh-local"), ssh(20L, "test-site", "ssh-test"), null);
+        world.ssh.rejectHost("ssh-test");
         byte[] originalData = new byte[]{1, 2, 3};
-        byte[] resizedData = new byte[]{9, 9, 9};
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
-                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/png"));
-
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        when(adapter.uploadMedia(eq(localCreds), eq("cat.png"), eq("image/png"), eq(resizedData)))
-                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", "https://local.test/cat.png"));
-        when(adapter.uploadMedia(eq(testCreds), eq("cat.png"), eq("image/png"), eq(resizedData)))
-                .thenThrow(new RuntimeException("接続に失敗しました"));
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
                 1L, originalData, "cat.png", "image/png", 9L);
@@ -563,51 +504,33 @@ class BulkManagementServiceTest {
         assertEquals(2, results.size());
         assertEquals("local", results.get(0).getEnvironment());
         assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
-        assertEquals("https://local.test/cat.png", results.get(0).getValue());
+        assertTrue(results.get(0).getValue().endsWith("-cat.png"), results.get(0).getValue());
         assertEquals("test", results.get(1).getEnvironment());
         assertEquals(BulkOperationStatus.FAILED, results.get(1).getStatus());
-        assertEquals("接続に失敗しました", results.get(1).getErrorMessage());
-        verify(adapter, never()).uploadMedia(any(), any(), any(), eq(originalData));
+        assertTrue(results.get(1).getErrorMessage().contains("接続に失敗しました"), results.get(1).getErrorMessage());
+        FakeWordPress.Site local = world.ssh.site("ssh-local", "/var/www/local-site");
+        assertEquals(1, local.media.size());
+        assertArrayEquals(originalData, local.media.values().iterator().next().bytes);
+        assertEquals(1, world.media.requests("GET", "/api/internal/media/projects/1/article-image-long-edge-px").size());
     }
 
     @Test
-    void uploadImageToAllEnvironments_解決済みの長辺pxを渡す形ではメディア設定を引かずにその値でリサイズする() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(creds);
-        byte[] originalData = new byte[]{1, 2, 3};
-        byte[] resizedData = new byte[]{9, 9, 9};
-        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 800, true))
-                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/png"));
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        when(adapter.uploadMedia(eq(creds), eq("cat.png"), eq("image/png"), eq(resizedData)))
-                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", "https://local.test/cat.png"));
+    void uploadImageToAllEnvironments_解決済みの長辺pxを渡す形ではメディア設定を引かずにその値でリサイズする() throws Exception {
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
-                1L, originalData, "cat.png", "image/png", 800, 9L);
+                1L, png(1600, 100), "cat.png", "image/png", 800, 9L);
 
         assertEquals(1, results.size());
         assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
-        verify(mediaSettingsBridgeClient, never()).resolveArticleImageLongEdgePx(any());
+        assertTrue(world.media.requests().isEmpty(), "メディア設定は引かない");
+        byte[] uploaded = world.ssh.site("ssh-local", "/var/www/local-site").media.values().iterator().next().bytes;
+        assertEquals(800, sizeOf(uploaded)[0]);
     }
 
     @Test
     void uploadImageToAllEnvironments_画素数が上限を超える画像はどの環境へもアップロードせず失敗として返す() {
-        BulkManagementService service = new BulkManagementService(
-                bulkManagementClient,
-                bulkUploadStorageService, siteService, sshOperations, cmsAdapterFactory,
-                projectService, new ImageResizeService(), mediaSettingsBridgeClient);
-        Project project = buildProject(10L, 20L, null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
+        bind(ssh(10L, "local-site", "ssh-local"), ssh(20L, "test-site", "ssh-test"), null);
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
                 1L, OversizedImageFixtures.pngHeaderOnly(30000, 30000), "bomb.png", "image/png", 9L);
@@ -615,60 +538,41 @@ class BulkManagementServiceTest {
         assertEquals(2, results.size());
         for (BulkOperationLog log : results) {
             assertEquals(BulkOperationStatus.FAILED, log.getStatus());
-            org.junit.jupiter.api.Assertions.assertTrue(log.getErrorMessage().contains("画素数"), log.getErrorMessage());
+            assertTrue(log.getErrorMessage().contains("画素数"), log.getErrorMessage());
         }
-        verify(adapter, never()).uploadMedia(any(), any(), any(), any());
-        verify(cmsAdapterFactory, never()).resolve(any());
+        assertTrue(world.ssh.commands.isEmpty(), "CMSへは何も送らない");
+        assertTrue(world.project.requests("GET", ".*/credentials").isEmpty(), "認証情報の解決にも進まない");
     }
 
     @Test
-    void uploadImageToAllEnvironments_JPEG変換された場合はファイル名拡張子とContentTypeもjpgに揃える() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials localCreds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(localCreds);
-
-        byte[] originalData = new byte[]{1, 2, 3};
-        byte[] resizedData = new byte[]{9, 9, 9};
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(originalData, "image/png", 1300, true))
-                .thenReturn(new ImageResizeService.ResizeResult(resizedData, "image/jpeg"));
-
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        when(adapter.uploadMedia(eq(localCreds), eq("comfyui-5.jpg"), eq("image/jpeg"), eq(resizedData)))
-                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", "https://local.test/comfyui-5.jpg"));
+    void uploadImageToAllEnvironments_JPEG変換された場合はファイル名拡張子とContentTypeもjpgに揃える() throws Exception {
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
-                1L, originalData, "comfyui-5.png", "image/png", 9L);
+                1L, png(100, 100), "comfyui-5.png", "image/png", 9L);
 
         assertEquals(1, results.size());
         assertEquals(BulkOperationStatus.SUCCESS, results.get(0).getStatus());
-        assertEquals("https://local.test/comfyui-5.jpg", results.get(0).getValue());
-        verify(adapter).uploadMedia(eq(localCreds), eq("comfyui-5.jpg"), eq("image/jpeg"), eq(resizedData));
+        assertTrue(results.get(0).getValue().endsWith("-comfyui-5.jpg"), results.get(0).getValue());
+        FakeWordPress.Media uploaded = world.ssh.site("ssh-local", "/var/www/local-site").media.values().iterator().next();
+        assertEquals(100, sizeOf(uploaded.bytes)[0]);
+        assertTrue(uploaded.bytes.length > 2 && (uploaded.bytes[0] & 0xFF) == 0xFF && (uploaded.bytes[1] & 0xFF) == 0xD8,
+                "JPEGとしてアップロードされる");
+    }
+
+    @Test
+    void uploadImageToAllEnvironments_画像でなければファイル名の拡張子を変えずそのままアップロードする() {
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, new byte[]{1, 2, 3}, "anim.gif", "image/gif", 9L);
+
+        assertTrue(results.get(0).getValue().endsWith("-anim.gif"), results.get(0).getValue());
     }
 
     @Test
     void uploadImageToAllEnvironments_サイト未紐付けの環境はスキップされる() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getCredentials("local-site")).thenReturn(
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH"));
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(any(), any(), eq(1300), eq(true)))
-                .thenReturn(new ImageResizeService.ResizeResult(new byte[]{1}, "image/png"));
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(any())).thenReturn(adapter);
-        when(adapter.uploadMedia(any(), any(), any(), any()))
-                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", "https://local.test/cat.png"));
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
 
         List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
                 1L, new byte[]{1}, "cat.png", "image/png", 9L);
@@ -679,102 +583,69 @@ class BulkManagementServiceTest {
 
     // ---- issue #1688: アセット画像の全環境アップロードの環境間並列 ----
 
-    private com.letsblog.publishing.cms.CmsAdapter bindThreeSitesForImageUpload(byte[] data) {
-        bindThreeManagedSites();
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(data, "image/png", 1300, true))
-                .thenReturn(new ImageResizeService.ResizeResult(data, "image/png"));
-        com.letsblog.publishing.cms.CmsAdapter adapter =
-                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        return adapter;
-    }
-
-    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials credsFor(String siteKey) {
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
-                        "https://" + siteKey + ".test", "admin", "SSH");
-        when(siteService.getCredentials(siteKey)).thenReturn(creds);
-        return creds;
+    private void bindThreeSshSites() {
+        bind(ssh(10L, "local-site", "ssh-local"), ssh(20L, "test-site", "ssh-test"),
+                ssh(30L, "production-site", "ssh-production"));
     }
 
     @Test
-    void uploadImageToAllEnvironments_環境ごとのアップロードが重なって走り_結果はENVIRONMENT_ORDER順_リサイズは1回() throws Exception {
-        BulkManagementService service = service();
-        byte[] data = new byte[]{1, 2, 3};
-        com.letsblog.publishing.cms.CmsAdapter adapter = bindThreeSitesForImageUpload(data);
-        credsFor("local-site");
-        credsFor("test-site");
-        credsFor("production-site");
+    void uploadImageToAllEnvironments_環境ごとのアップロードが重なって走り_結果はENVIRONMENT_ORDER順_リサイズは1回() {
+        bindThreeSshSites();
         OverlapProbe probe = new OverlapProbe(3);
-        when(adapter.uploadMedia(any(), any(), any(), any())).thenAnswer(invocation -> {
-            com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds = invocation.getArgument(0);
+        world.ssh.onCommand("media import", params -> {
             // localを最後に終わらせても、結果の並びは変わらない
-            if (creds.baseUrl().contains("local-site")) {
-                Thread.sleep(150);
+            if (params.host().equals("ssh-local")) {
+                sleep(150);
             }
             probe.enter();
-            return new com.letsblog.publishing.cms.MediaUploadResult("1", creds.baseUrl() + "/cat.png");
         });
 
-        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(1L, data, "cat.png", "image/png", 9L);
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
 
         assertTrue(probe.allOverlapped(), "3環境のアップロードが重なって呼ばれていない(逐次実行)");
         assertEquals(List.of("local", "test", "production"),
                 results.stream().map(BulkOperationLog::getEnvironment).toList());
-        assertEquals("https://local-site.test/cat.png", results.get(0).getValue());
-        verify(imageResizeService, org.mockito.Mockito.times(1)).resizeToLongEdge(data, "image/png", 1300, true);
+        assertTrue(results.get(0).getValue().endsWith("-cat.png"));
+        assertEquals(1, world.media.requests("GET", ".*/article-image-long-edge-px").size(), "設定の照会は1回");
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Test
     void uploadImageToAllEnvironments_先頭環境の失敗でも他環境は最後まで実行され_順序は保たれる() {
-        BulkManagementService service = service();
-        byte[] data = new byte[]{1, 2, 3};
-        com.letsblog.publishing.cms.CmsAdapter adapter = bindThreeSitesForImageUpload(data);
-        credsFor("local-site");
+        bindThreeSshSites();
+        world.ssh.rejectHost("ssh-local");
         // testは認証情報の解決自体が失敗する(並列タスク内に含まれる)
-        when(siteService.getCredentials("test-site")).thenThrow(new IllegalStateException("認証情報なし"));
-        credsFor("production-site");
-        when(adapter.uploadMedia(any(), any(), any(), any())).thenAnswer(invocation -> {
-            com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds = invocation.getArgument(0);
-            if (creds.baseUrl().contains("local-site")) {
-                throw new RuntimeException("接続に失敗しました");
-            }
-            Thread.sleep(100);
-            return new com.letsblog.publishing.cms.MediaUploadResult("1", creds.baseUrl() + "/cat.png");
-        });
+        world.project.status("GET", "/api/internal/project/sites/test-site/credentials", 500, "認証情報なし");
+        world.ssh.onCommand("media import", params -> sleep(100));
 
-        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(1L, data, "cat.png", "image/png", 9L);
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
 
         assertEquals(List.of("local", "test", "production"),
                 results.stream().map(BulkOperationLog::getEnvironment).toList());
         assertEquals(List.of(BulkOperationStatus.FAILED, BulkOperationStatus.FAILED, BulkOperationStatus.SUCCESS),
                 results.stream().map(BulkOperationLog::getStatus).toList());
-        assertEquals("接続に失敗しました", results.get(0).getErrorMessage());
-        assertEquals("認証情報なし", results.get(1).getErrorMessage());
+        assertTrue(results.get(0).getErrorMessage().contains("ssh-local"));
+        assertTrue(results.get(1).getErrorMessage().contains("認証情報"), results.get(1).getErrorMessage());
         assertEquals("cat.png", results.get(1).getValue());
-        assertEquals("https://production-site.test/cat.png", results.get(2).getValue());
+        assertTrue(results.get(2).getValue().endsWith("-cat.png"));
     }
 
     @Test
     void uploadImageToAllEnvironments_紐付けられたサイトが登録されていない環境はスキップされる() {
-        BulkManagementService service = service();
-        byte[] data = new byte[]{1, 2, 3};
-        Project project = buildProject(10L, 20L, null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.empty());
-        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(1L)).thenReturn(1300);
-        when(imageResizeService.resizeToLongEdge(data, "image/png", 1300, true))
-                .thenReturn(new ImageResizeService.ResizeResult(data, "image/png"));
-        com.letsblog.publishing.cms.CmsAdapter adapter =
-                org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds = credsFor("test-site");
-        when(cmsAdapterFactory.resolve(com.letsblog.publishing.cms.CmsType.WORDPRESS)).thenReturn(adapter);
-        when(adapter.uploadMedia(any(), any(), any(), any()))
-                .thenReturn(new com.letsblog.publishing.cms.MediaUploadResult("1", creds.baseUrl() + "/cat.png"));
+        bind(null, ssh(20L, "test-site", "ssh-test"), null);
+        world.bindProject(20L, 1L, 10L, 20L, null, "test");
 
-        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(1L, data, "cat.png", "image/png", 9L);
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, new byte[]{1, 2, 3}, "cat.png", "image/png", 9L);
 
         assertEquals(List.of("test"), results.stream().map(BulkOperationLog::getEnvironment).toList());
     }
@@ -783,164 +654,133 @@ class BulkManagementServiceTest {
 
     @Test
     void deletePostAtEnvironment_成功時はCmsAdapter経由で削除しSUCCESSを記録する() {
-        BulkManagementService service = service();
-        Site site = buildManagedSite(10L, "local-site");
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(creds);
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+        FakeWordPress.Site remote = world.ssh.site("ssh-local", "/var/www/local-site");
+        remote.addPost("101", "post", "hello", "hello", "publish");
 
-        BulkOperationLog result = service.deletePostAtEnvironment(1L, "local", site, "101", "post", "hello", 9L);
+        BulkOperationLog result = service.deletePostAtEnvironment(
+                1L, "local", siteOf(10L, "local-site"), "101", "post", "hello", 9L);
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         assertEquals(BulkOperationType.POST_DELETE, result.getOperationType());
         assertEquals("hello", result.getValue());
-        verify(adapter).deletePost(creds, "101", "post");
+        assertEquals("trash", remote.posts.get("101").status);
     }
 
     @Test
     void deletePostAtEnvironment_失敗時はFAILEDを記録し例外を投げない() {
-        BulkManagementService service = service();
-        Site site = buildManagedSite(10L, "local-site");
-        when(siteService.getCredentials("local-site")).thenReturn(
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH"));
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
-        org.mockito.Mockito.doThrow(new RuntimeException("削除に失敗しました"))
-                .when(adapter).deletePost(any(), any(), any());
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+        // 投稿101はWordPressに存在しない。
 
-        BulkOperationLog result = service.deletePostAtEnvironment(1L, "local", site, "101", "post", "hello", 9L);
+        BulkOperationLog result = service.deletePostAtEnvironment(
+                1L, "local", siteOf(10L, "local-site"), "101", "post", "hello", 9L);
 
         assertEquals(BulkOperationStatus.FAILED, result.getStatus());
-        assertEquals("削除に失敗しました", result.getErrorMessage());
+        assertTrue(result.getErrorMessage().contains("101"), result.getErrorMessage());
     }
 
     @Test
     void updatePostStatusAtEnvironment_成功時はステータスをpost_statusへ記録する() {
-        BulkManagementService service = service();
-        Site site = buildManagedSite(10L, "local-site");
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials creds =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(creds);
-        com.letsblog.publishing.cms.CmsAdapter adapter = org.mockito.Mockito.mock(com.letsblog.publishing.cms.CmsAdapter.class);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(adapter);
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+        FakeWordPress.Site remote = world.ssh.site("ssh-local", "/var/www/local-site");
+        remote.addPost("101", "post", "hello", "hello", "draft");
 
         BulkOperationLog result = service.updatePostStatusAtEnvironment(
-                1L, "local", site, "101", "post", "hello", "publish", 9L);
+                1L, "local", siteOf(10L, "local-site"), "101", "post", "hello", "publish", 9L);
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
         assertEquals(BulkOperationType.POST_STATUS_UPDATE, result.getOperationType());
         assertEquals("publish", result.getPostStatus());
-        verify(adapter).updatePostStatus(creds, "101", "post", "publish");
+        assertEquals("publish", remote.posts.get("101").status);
+    }
+
+    @Test
+    void updatePostStatusAtEnvironment_失敗時はFAILEDを記録し例外を投げない() {
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+
+        BulkOperationLog result = service.updatePostStatusAtEnvironment(
+                1L, "local", siteOf(10L, "local-site"), "101", "post", "hello", "publish", 9L);
+
+        assertEquals(BulkOperationStatus.FAILED, result.getStatus());
+        assertNotNull(result.getErrorMessage());
     }
 
     // ---- 非managedサイト: SSH経由での適用 ----
 
-    private Site buildExternalSite(Long id, String slug) {
-        Site site = new Site();
-        site.setId(id);
-        site.setSiteKey(slug);
-        site.setCmsType(CmsType.WORDPRESS);
-        site.setManagedWordpress(false);
-        return site;
-    }
-
-    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials sshCreds() {
-        return new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", null, "SSH", "203.0.113.5", 22, "deploy",
-                "/var/www/html", "PEM", null, null);
-    }
-
     @Test
     void applyToEnvironment_非managedサイトはSSH経由で適用する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
-        when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet"))
-                .thenReturn(com.letsblog.publishing.cms.ssh.WordPressSshOperations.SshApplyResult.success());
+        bind(ssh(10L, "external-site", EXT_HOST), null, null);
+        FakeWordPress.Site remote = world.ssh.site(EXT_HOST, "/var/www/external-site");
+        remote.plugins.put("akismet", "inactive");
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
-        verify(sshOperations).applyPluginTheme(sshCreds(), BulkOperationType.PLUGIN_ACTIVATE, "akismet");
+        assertEquals("active", remote.plugins.get("akismet"));
+        assertTrue(applied().isEmpty(), "provision-agentは使わない");
     }
 
     @Test
     void applyToEnvironment_非managedサイトのカテゴリ削除もSSH経由で適用する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
-        when(sshOperations.applyTerm(eq(sshCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
-                any(), any(), any(), eq("oshirase")))
-                .thenReturn(com.letsblog.publishing.cms.ssh.WordPressSshOperations.SshApplyResult.success());
+        bind(ssh(10L, "external-site", EXT_HOST), null, null);
+        FakeWordPress.Site remote = world.ssh.site(EXT_HOST, "/var/www/external-site");
+        remote.addTerm("category", "5", "お知らせ", "oshirase", null, null);
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.CATEGORY_DELETE, null, null, null, null, "oshirase", 9L);
 
         assertEquals(BulkOperationStatus.SUCCESS, result.getStatus());
-        verify(sshOperations).applyTerm(eq(sshCreds()), eq(BulkOperationType.CATEGORY_DELETE), eq("oshirase"),
-                any(), any(), any(), eq("oshirase"));
+        assertTrue(remote.termsById.isEmpty(), "カテゴリが削除される");
+    }
+
+    @Test
+    void applyToEnvironment_非managedサイトのカテゴリ作成_編集もSSH経由で適用する() {
+        bind(ssh(10L, "external-site", EXT_HOST), null, null);
+        FakeWordPress.Site remote = world.ssh.site(EXT_HOST, "/var/www/external-site");
+
+        BulkOperationLog created = service.applyToEnvironment(
+                1L, "local", BulkOperationType.TAG_CREATE, "新着", "shinchaku", null, null, null, 9L);
+        BulkOperationLog edited = service.applyToEnvironment(
+                1L, "local", BulkOperationType.TAG_EDIT, "最新", "saishin", null, null, "shinchaku", 9L);
+
+        assertEquals(BulkOperationStatus.SUCCESS, created.getStatus());
+        assertEquals(BulkOperationStatus.SUCCESS, edited.getStatus());
+        assertEquals(1, remote.termsById.size());
+        assertEquals("saishin", remote.termsById.values().iterator().next().slug);
     }
 
     @Test
     void applyToEnvironment_SSHが失敗したらFAILEDを記録する() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, null, null);
-        Site externalSite = buildExternalSite(10L, "external-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds()));
-        when(sshOperations.applyPluginTheme(sshCreds(), BulkOperationType.THEME_ACTIVATE, "twentytwentyfour"))
-                .thenReturn(com.letsblog.publishing.cms.ssh.WordPressSshOperations.SshApplyResult.failed(new RuntimeException("SSH接続に失敗しました")));
+        bind(ssh(10L, "external-site", EXT_HOST), null, null);
+        // テーマtwentytwentyfourはインストールされていない。
 
         BulkOperationLog result = service.applyToEnvironment(
                 1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
 
         assertEquals(BulkOperationStatus.FAILED, result.getStatus());
+        assertTrue(result.getErrorMessage().contains("テーマの有効化に失敗しました"), result.getErrorMessage());
     }
 
     @Test
     void logFetchFailure_例外を投げずに完了する() {
-        BulkManagementService service = service();
-
         assertDoesNotThrow(() -> service.logFetchFailure(1L, BulkOperationType.CATEGORY_FETCH, "test",
                 "Connection refused", "java.io.IOException: Connection refused\n\tat ..."));
     }
 
     // ---- issue #1687: 環境間の並列実行 ----
 
-    private void bindThreeManagedSites() {
-        Project project = buildProject(10L, 20L, 30L);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
-        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
-    }
-
     @Test
     void applyToAllEnvironments_環境ごとのインストールが重なって走り_結果はENVIRONMENT_ORDER順() {
-        BulkManagementService service = service();
         bindThreeManagedSites();
         OverlapProbe probe = new OverlapProbe(3);
-        when(bulkManagementClient.apply(any())).thenAnswer(invocation -> {
-            BulkApplyCommand command = invocation.getArgument(0);
+        world.agent.on("POST", "/bulk-management", request -> {
             // localを最後に終わらせても、結果の並びは変わらない
-            if (command.slug().equals("local-site")) {
-                Thread.sleep(150);
+            if (request.bodyText().contains("local-site")) {
+                sleep(150);
             }
             probe.enter();
-            return BulkApplyResult.success();
+            return Response.ok("{\"status\":\"success\"}");
         });
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
@@ -953,38 +793,25 @@ class BulkManagementServiceTest {
 
     @Test
     void applyToAllEnvironments_1環境の実行時例外でも他環境は最後まで実行され_例外は呼び出し元へ伝わる() {
-        BulkManagementService service = service();
-        bindThreeManagedSites();
-        when(bulkManagementClient.apply(any())).thenAnswer(invocation -> {
-            BulkApplyCommand command = invocation.getArgument(0);
-            if (command.slug().equals("local-site")) {
-                throw new IllegalStateException("agent down");
-            }
-            Thread.sleep(100);
-            return BulkApplyResult.success();
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), managed(30L, "production-site"));
+        // サイト10は紐付いているのにproject-serviceに登録されていない(SiteNotFoundException)。
+        world.project.status("GET", "/api/internal/project/sites/10", 404, "{}");
+        world.agent.on("POST", "/bulk-management", request -> {
+            sleep(100);
+            return Response.ok("{\"status\":\"success\"}");
         });
 
-        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> service.applyToAllEnvironments(
+        SiteNotFoundException thrown = assertThrows(SiteNotFoundException.class, () -> service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L));
 
-        assertEquals("agent down", thrown.getMessage());
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "test-site", "plugin_install", "akismet", null, null, null, null));
-        verify(bulkManagementClient).apply(new BulkApplyCommand(
-                "production-site", "plugin_install", "akismet", null, null, null, null));
+        assertTrue(thrown.getMessage().contains("10"), thrown.getMessage());
+        assertTrue(wasApplied("test-site", "plugin_install", "akismet"));
+        assertTrue(wasApplied("production-site", "plugin_install", "akismet"));
     }
 
     @Test
     void applyToAllEnvironments_対象外環境のFAILEDは並列でも環境順の位置に記録される() {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, 30L);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        Site externalSite = buildExternalSite(20L, "external-site");
-        when(siteService.getById(20L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite)).thenReturn(new SiteService.SiteDataSource(false, null));
-        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
-        when(bulkManagementClient.apply(any())).thenReturn(BulkApplyResult.success());
+        bind(managed(10L, "local-site"), external(20L, "external-site"), managed(30L, "production-site"));
 
         List<BulkOperationLog> results = service.applyToAllEnvironments(
                 1L, BulkOperationType.PLUGIN_INSTALL, "akismet", 9L);
@@ -997,20 +824,16 @@ class BulkManagementServiceTest {
 
     @Test
     void executeFromUpload_環境ごとの転送が重なって走り_結果はENVIRONMENT_ORDER順() throws IOException {
-        BulkManagementService service = service();
         bindThreeManagedSites();
         MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1, 2});
-        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("p.zip")))
-                .thenReturn(new BulkUploadStorageService.StoredZip("1/a.zip", "abc", "p.zip"));
         OverlapProbe probe = new OverlapProbe(3);
-        when(bulkManagementClient.applyZip(any(), eq("plugin_install"), any(byte[].class), eq("p.zip")))
-                .thenAnswer(invocation -> {
-                    if ("local-site".equals(invocation.getArgument(0))) {
-                        Thread.sleep(150);
-                    }
-                    probe.enter();
-                    return BulkApplyResult.success();
-                });
+        world.agent.on("POST", "/bulk-management/upload", request -> {
+            if (request.bodyText().contains("local-site")) {
+                sleep(150);
+            }
+            probe.enter();
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
         List<BulkOperationLog> results = service.executeFromUpload(1L, BulkOperationType.PLUGIN_INSTALL, file, 9L);
 
@@ -1021,50 +844,34 @@ class BulkManagementServiceTest {
 
     @Test
     void executeFromUpload_1環境の実行時例外でも他環境は最後まで実行され_例外は呼び出し元へ伝わる() throws IOException {
-        BulkManagementService service = service();
-        bindThreeManagedSites();
+        bind(ssh(10L, "local-site", "ssh-local"), ssh(20L, "test-site", "ssh-test"),
+                ssh(30L, "production-site", "ssh-production"));
         MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1, 2});
-        when(bulkUploadStorageService.store(eq(1L), any(byte[].class), eq("p.zip")))
-                .thenReturn(new BulkUploadStorageService.StoredZip("1/a.zip", "abc", "p.zip"));
-        when(bulkManagementClient.applyZip(any(), eq("plugin_install"), any(byte[].class), eq("p.zip")))
-                .thenAnswer(invocation -> {
-                    if ("test-site".equals(invocation.getArgument(0))) {
-                        throw new IllegalStateException("zip failed");
-                    }
-                    Thread.sleep(100);
-                    return BulkApplyResult.success();
-                });
+        // SFTPクライアントが想定外の実行時例外を投げる(SshOperationExceptionに包まれない失敗)。
+        world.ssh.failPutFile(new IllegalStateException("zip failed"));
 
         IllegalStateException thrown = assertThrows(IllegalStateException.class,
                 () -> service.executeFromUpload(1L, BulkOperationType.PLUGIN_INSTALL, file, 9L));
 
         assertEquals("zip failed", thrown.getMessage());
-        verify(bulkManagementClient).applyZip(eq("local-site"), eq("plugin_install"), any(byte[].class), eq("p.zip"));
-        verify(bulkManagementClient).applyZip(eq("production-site"), eq("plugin_install"), any(byte[].class), eq("p.zip"));
     }
 
     // ---- issue #1702: ジョブ(非同期)から呼ぶための分離 ----
 
     @Test
     void validateSlugInstall_プラグインとテーマのインストールでslugがあれば通る() {
-        BulkManagementService service = service();
-
         assertDoesNotThrow(() -> service.validateSlugInstall(BulkOperationType.PLUGIN_INSTALL, "akismet"));
         assertDoesNotThrow(() -> service.validateSlugInstall(BulkOperationType.THEME_INSTALL, "twentytwentyfive"));
     }
 
     @Test
     void validateSlugInstall_インストール以外の操作は例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class,
                 () -> service.validateSlugInstall(BulkOperationType.PLUGIN_ACTIVATE, "akismet"));
     }
 
     @Test
     void validateSlugInstall_slugが空白またはnullなら例外() {
-        BulkManagementService service = service();
-
         assertThrows(IllegalArgumentException.class,
                 () -> service.validateSlugInstall(BulkOperationType.PLUGIN_INSTALL, " "));
         assertThrows(IllegalArgumentException.class,
@@ -1073,7 +880,6 @@ class BulkManagementServiceTest {
 
     @Test
     void validateZipInstall_zipなら通る() {
-        BulkManagementService service = service();
         MockMultipartFile file = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1});
 
         assertDoesNotThrow(() -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, file));
@@ -1081,10 +887,12 @@ class BulkManagementServiceTest {
 
     @Test
     void validateZipInstall_インストール以外_拡張子違い_空ファイルは例外() {
-        BulkManagementService service = service();
         MockMultipartFile ok = new MockMultipartFile("file", "p.zip", "application/zip", new byte[]{1});
         MockMultipartFile txt = new MockMultipartFile("file", "p.txt", "text/plain", new byte[]{1});
         MockMultipartFile empty = new MockMultipartFile("file", "p.zip", "application/zip", new byte[0]);
+        MockMultipartFile noName = new MockMultipartFile("file", null, "application/zip", new byte[]{1});
+        MockMultipartFile wrongType = new MockMultipartFile("file", "p.zip", "text/plain", new byte[]{1});
+        MockMultipartFile octet = new MockMultipartFile("file", "p.zip", "application/octet-stream", new byte[]{1});
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.validateZipInstall(BulkOperationType.CATEGORY_CREATE, ok));
@@ -1094,21 +902,19 @@ class BulkManagementServiceTest {
                 () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, empty));
         assertThrows(IllegalArgumentException.class,
                 () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, noName));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, wrongType));
+        assertDoesNotThrow(() -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, octet));
     }
 
     @Test
     void applyStoredZipToAllEnvironments_保存済みのバイト列を再保存せず各環境へ転送しログに保存先を載せる() throws IOException {
-        BulkManagementService service = service();
-        Project project = buildProject(10L, 20L, null);
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), null);
         byte[] content = new byte[]{1, 2, 3};
         BulkUploadStorageService.StoredZip stored =
                 new BulkUploadStorageService.StoredZip("1/abc.zip", "abc", "custom-theme.zip");
-
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
-        when(bulkManagementClient.applyZip(any(), eq("theme_install"), eq(content), eq("custom-theme.zip")))
-                .thenReturn(BulkApplyResult.success());
 
         List<BulkOperationLog> results =
                 service.applyStoredZipToAllEnvironments(1L, BulkOperationType.THEME_INSTALL, content, stored, 9L);
@@ -1118,6 +924,65 @@ class BulkManagementServiceTest {
         assertEquals("abc", results.get(0).getFileSha256());
         assertEquals(BulkOperationSourceType.ZIP, results.get(0).getSourceType());
         assertEquals(9L, results.get(0).getActorId());
-        verify(bulkUploadStorageService, never()).store(any(), any(), any());
+        assertEquals(2, zipUploads().size());
+        assertThrows(IOException.class, () -> world.bulkUploadStorageService.load("1/abc.zip"), "再保存しない");
+    }
+
+    // ---- 境界の補完(issue #1815) ----
+
+    @Test
+    void uploadImageToAllEnvironments_拡張子の無いファイル名でもJPEG変換後は拡張子jpgを付ける() throws Exception {
+        bind(ssh(10L, "local-site", "ssh-local"), null, null);
+
+        List<BulkOperationLog> results = service.uploadImageToAllEnvironments(
+                1L, png(100, 100), "cat", "image/png", 9L);
+
+        assertTrue(results.get(0).getValue().endsWith("-cat.jpg"), results.get(0).getValue());
+    }
+
+    @Test
+    void applyToEnvironment_categoryDelete_valueが空白でもtargetSlugで補われる() {
+        bind(managed(10L, "local-site"), null, null);
+
+        BulkOperationLog result = service.applyToEnvironment(
+                1L, "local", BulkOperationType.CATEGORY_DELETE, "  ", null, null, null, "oshirase", 9L);
+
+        assertEquals("oshirase", result.getValue());
+    }
+
+    @Test
+    void applyToEnvironment_SSH接続情報が適用の直前までに無くなっていたら例外() {
+        bind(ssh(10L, "external-site", EXT_HOST), null, null);
+        // 1回目(環境の検証)ではSSH接続情報があり、2回目(適用の直前)にはtransportがSSHでなくなっている。
+        Map<String, String> agent = new java.util.HashMap<>(PublishingWorld.sshCredentialsMap());
+        agent.put("transport", "AGENT");
+        world.project.sequence("GET", "/api/internal/project/sites/external-site/credentials",
+                Response.ok(world.json(Map.of("siteId", 10, "cmsType", "WORDPRESS",
+                        "credentials", sshCredentialsFor(EXT_HOST, "/var/www/external-site")))),
+                Response.ok(world.json(Map.of("siteId", 10, "cmsType", "WORDPRESS", "credentials", agent))));
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> service.applyToEnvironment(
+                1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L));
+
+        assertTrue(e.getMessage().contains("SSH接続が設定されていない"), e.getMessage());
+    }
+
+    private static Map<String, String> sshCredentialsFor(String host, String wpPath) {
+        Map<String, String> map = new java.util.HashMap<>(PublishingWorld.sshCredentialsMap());
+        map.put("sshHost", host);
+        map.put("wpPath", wpPath);
+        return map;
+    }
+
+    @Test
+    void validateZipInstall_ファイル名もContentTypeも無いzipは_名前が無い場合だけ例外() {
+        com.letsblog.publishing.service.BytesMultipartFile noName =
+                new com.letsblog.publishing.service.BytesMultipartFile("file", null, "application/zip", new byte[]{1});
+        com.letsblog.publishing.service.BytesMultipartFile noType =
+                new com.letsblog.publishing.service.BytesMultipartFile("file", "p.zip", null, new byte[]{1});
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, noName));
+        assertDoesNotThrow(() -> service.validateZipInstall(BulkOperationType.PLUGIN_INSTALL, noType));
     }
 }

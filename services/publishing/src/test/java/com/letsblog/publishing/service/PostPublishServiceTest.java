@@ -1,28 +1,22 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.client.ContentServiceClient;
-import com.letsblog.publishing.client.IdentityBridgeClient;
-import com.letsblog.publishing.client.MediaSettingsBridgeClient;
-import com.letsblog.publishing.client.ProjectServiceClient;
-import com.letsblog.publishing.cms.CmsAdapter;
-import com.letsblog.publishing.cms.CmsAdapterFactory;
-import com.letsblog.publishing.cms.CmsCredentials;
-import com.letsblog.publishing.cms.CmsType;
-import com.letsblog.publishing.cms.MediaUploadResult;
-import com.letsblog.publishing.cms.PostContent;
-import com.letsblog.publishing.cms.PostResult;
-import com.letsblog.publishing.dto.PostPublishCommand;
-import com.letsblog.publishing.dto.PostPublishResponse;
-import com.letsblog.publishing.messaging.DomainEventPublisher;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.common.messaging.PostPublishedEvent;
+import com.letsblog.publishing.cms.LetsblogPluginUnavailableException;
+import com.letsblog.publishing.dto.PostPublishCommand;
+import com.letsblog.publishing.dto.PostPublishResponse;
+import com.letsblog.publishing.render.PlantUmlRenderRejectedException;
+import com.letsblog.publishing.testsupport.FakeHttpServer;
+import com.letsblog.publishing.testsupport.FakeHttpServer.Response;
+import com.letsblog.publishing.testsupport.FakeWordPress;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,98 +25,54 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * PostPublishServiceの回帰テスト(legacy-apiから移設。issue #707)。画像ファイル名リネーム
- * ({slug}-{4桁連番}.{拡張子})とfeatured_image指定時のfeatured_media解決を中心に検証する。サイト本体・
- * CMS認証情報はProjectServiceClient、カスタムタグ/組み込みタグの展開・HTML変換・postsテーブルの
- * 読み書きはContentServiceClient、著者マッピング(user_site_authors)はIdentityBridgeClient経由に
- * なったため(#575設計判断1・2・4)、それらのモックへ差し替えている。
+ * ({slug}-{4桁連番}.{拡張子})とfeatured_image指定時のfeatured_media解決を中心に検証する。
+ *
+ * <p>issue #1815で書き直し: 自前のクラス(ProjectServiceClient・ContentServiceClient・IdentityBridgeClient・
+ * MediaSettingsBridgeClient・CurrentActorService・AdminAuthorizationService・CmsAdapterFactory・
+ * WordPressAdapter・PlantUml*Service・ImageResizeService・DomainEventPublisher)は実物を使い、
+ * 外部との通信だけを差し替える。HTTP(project/identity/content/media-service)は{@link FakeHttpServer}、
+ * WordPressへのSSH(wp-cli)は{@link FakeWordPress}、MQは{@code RabbitTemplate}のMockito。
+ * 投稿の内容(タイトル・本文・ステータス・アイキャッチ・著者・予約日時)は、WordPressのフェイクに
+ * 実際に書き込まれた状態で確かめる。
  */
-@ExtendWith(MockitoExtension.class)
 class PostPublishServiceTest {
 
-    @Mock
-    private ProjectServiceClient projectServiceClient;
-    @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-    @Mock
-    private ContentServiceClient contentServiceClient;
-    @Mock
-    private PlantUmlEmbedService plantUmlEmbedService;
-    @Mock
-    private PlantUmlTagRenderService plantUmlTagRenderService;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
-    private IdentityBridgeClient identityBridgeClient;
+    private static final String ADMIN = "Bearer admin-token";
 
-    @Mock
-    private MediaSettingsBridgeClient mediaSettingsBridgeClient;
-    @Mock
-    private CmsAdapter cmsAdapter;
-    @Mock
-    private DomainEventPublisher domainEventPublisher;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-
+    private PublishingWorld world;
     private PostPublishService service;
-
-    private final CmsCredentials.WordPressCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
 
     @BeforeEach
     void setUp() {
-        service = new PostPublishService(projectServiceClient, cmsAdapterFactory, contentServiceClient,
-                plantUmlEmbedService, plantUmlTagRenderService,
-                currentActorService, identityBridgeClient, mediaSettingsBridgeClient,
-                new com.fasterxml.jackson.databind.ObjectMapper(), new ImageResizeService(), domainEventPublisher,
-                adminAuthorizationService);
+        world = new PublishingWorld().withMainSite();
+        world.stubActor(ADMIN, 1L, "admin", "admin@example.com");
+        world.asUser(ADMIN);
+        service = world.postPublishService;
+    }
 
-        ProjectServiceClient.SiteBridge site =
-                new ProjectServiceClient.SiteBridge(1L, "main", "Main", "https://example.com", CmsType.WORDPRESS, false, null);
-        ProjectServiceClient.SiteCredentialsBridge credentialsBridge = new ProjectServiceClient.SiteCredentialsBridge(
-                1L, CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "username", "admin", "transport", "SSH"));
-
-        lenient().when(projectServiceClient.getSiteByKey("main")).thenReturn(site);
-        lenient().when(projectServiceClient.getCredentials("main")).thenReturn(credentialsBridge);
-        lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        lenient().when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(null);
-        lenient().when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(contentServiceClient.finalizeHtml(anyString(), any()))
-                .thenAnswer(inv -> "<p>" + inv.getArgument(0) + "</p>");
-        lenient().when(plantUmlTagRenderService.render(any(), anyString(), anyMap()))
-                .thenAnswer(inv -> new DiagramEmbedResult(inv.getArgument(1), inv.getArgument(2)));
-        lenient().when(plantUmlEmbedService.embedDiagrams(any(), anyString(), anyMap()))
-                .thenAnswer(inv -> new DiagramEmbedResult(inv.getArgument(1), inv.getArgument(2)));
-        lenient().when(cmsAdapter.resolveCategories(any(), any())).thenReturn(List.of());
-        lenient().when(cmsAdapter.resolveTags(any(), any())).thenReturn(List.of());
-        lenient().when(contentServiceClient.findPost(any(), any())).thenReturn(Optional.empty());
-        lenient().when(cmsAdapter.postExists(any(), any())).thenReturn(true);
-        lenient().when(cmsAdapter.mediaExists(any(), any())).thenReturn(true);
-        lenient().when(currentActorService.getCurrentActorId()).thenReturn(null);
-        lenient().when(identityBridgeClient.findUserSiteAuthor(any(), any())).thenReturn(Optional.empty());
-        lenient().when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     private PostPublishCommand command(String slug, String title, List<MultipartFile> images, String featuredImageFilename) {
@@ -136,9 +86,58 @@ class PostPublishServiceTest {
                 imageReferences, null);
     }
 
-    private ContentServiceClient.PostBridgeResponse bridgePost(String wpPostId, String uploadedImagesJson) {
-        return new ContentServiceClient.PostBridgeResponse(
-                1L, wpPostId, "my-article", "draft", uploadedImagesJson, null, null, null);
+    // ---- 観測用の部品 ----
+
+    private JsonNode lastJson(FakeHttpServer server, String method, String path) {
+        List<FakeHttpServer.Request> requests = server.requests(method, path);
+        assertFalse(requests.isEmpty(), method + " " + path + " が呼ばれていません: " + server.paths());
+        try {
+            return world.mapper.readTree(requests.get(requests.size() - 1).body());
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private JsonNode upsert() {
+        return lastJson(world.content, "PUT", "/api/internal/content/posts");
+    }
+
+    private JsonNode preImageRequest() {
+        return lastJson(world.content, "POST", "/api/internal/content/render/pre-image");
+    }
+
+    private String finalizedMarkdown() {
+        return lastJson(world.content, "POST", "/api/internal/content/render/finalize-html")
+                .path("markdown").asText();
+    }
+
+    private void preImageReturns(String markdown) {
+        world.content.json("POST", "/api/internal/content/render/pre-image", world.json(Map.of("markdown", markdown)));
+    }
+
+    private FakeWordPress.Media uploaded(String filename) {
+        return world.ssh.media.values().stream().filter(m -> m.url.endsWith("-" + filename)).findFirst()
+                .orElseThrow(() -> new AssertionError(filename + " はアップロードされていません: "
+                        + world.ssh.media.values().stream().map(m -> m.url).toList()));
+    }
+
+    private boolean wasUploaded(String filename) {
+        return world.ssh.media.values().stream().anyMatch(m -> m.url.endsWith("-" + filename));
+    }
+
+    private FakeWordPress.Post created(PostPublishResponse response) {
+        return world.ssh.posts.get(response.wpPostId());
+    }
+
+    private PostPublishedEvent publishedEvent() {
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(world.rabbitTemplate).convertAndSend(eq("letsblog.events"), eq("post.published"), captor.capture());
+        return (PostPublishedEvent) captor.getValue();
+    }
+
+    private static String uploadedImagesJson(String reference, String sha256, String url, String mediaId) {
+        return "{\"" + reference + "\":{\"sha256\":\"" + sha256 + "\",\"url\":\"" + url + "\",\"mediaId\":\""
+                + mediaId + "\"}}";
     }
 
     @Test
@@ -150,35 +149,29 @@ class PostPublishServiceTest {
                 () -> service.publish(command("my-article", "My Article", images, null)));
 
         assertTrue(e.getMessage().contains("画素数"), e.getMessage());
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
-        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+        assertTrue(world.ssh.media.isEmpty(), "メディアはアップロードされない");
+        assertTrue(world.ssh.posts.isEmpty(), "投稿は作成されない");
     }
 
     @Test
     void publish_画像が複数ある場合はslug連番でリネームされる() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.jpg"), any(), any()))
-                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/2.jpg"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}),
                 new MockMultipartFile("images", "photo.jpg", "image/jpeg", new byte[]{2}));
 
         PostPublishResponse response = service.publish(command("my-article", "My Article", images, null));
 
-        assertEquals("101", response.wpPostId());
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), eq("image/png"), any());
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0002.jpg"), eq("image/jpeg"), any());
+        assertNotEquals(null, response.wpPostId());
+        assertTrue(world.ssh.posts.containsKey(response.wpPostId()));
+        assertTrue(wasUploaded("my-article-0001.png"));
+        assertTrue(wasUploaded("my-article-0002.jpg"));
+        assertEquals(2, world.ssh.media.size());
     }
 
     @Test
     void publish_既存スラッグのwpPostIdを渡して再投稿するとcontent_serviceへ同じwpPostIdで反映を依頼する() {
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", null)));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.stubContentPost(1L, "55", "my-article", null);
+        world.ssh.addPost("55", "my-article", "draft");
 
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
@@ -186,139 +179,103 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        verify(contentServiceClient).upsertPost(
-                eq(1L), eq("55"), eq("my-article"), eq("draft"), any(), any(), any());
-        verify(domainEventPublisher).publishPostPublished(
-                eq(1L), any(), eq("55"), eq("https://example.com/?p=55"), eq("draft"));
+        JsonNode body = upsert();
+        assertEquals(1L, body.path("siteId").asLong());
+        assertEquals("55", body.path("wpPostId").asText());
+        assertEquals("my-article", body.path("slug").asText());
+        assertEquals("draft", body.path("status").asText());
+        PostPublishedEvent event = publishedEvent();
+        assertEquals(1L, event.siteId());
+        assertEquals("55", event.wpPostId());
+        assertEquals("https://example.com/?p=55", event.url());
+        assertEquals("draft", event.status());
     }
 
     @Test
     void publish_slug未指定時はtitleから簡易スラッグ化される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("hello-world-blog-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
         service.publish(command(null, "Hello, World! Blog", images, null));
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("hello-world-blog-0001.png"), any(), any());
+        assertTrue(wasUploaded("hello-world-blog-0001.png"));
     }
 
     @Test
     void publish_titleが特殊文字のみの場合はpostがデフォルトになる() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("post-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
         service.publish(command(null, "!!!###", images, null));
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("post-0001.png"), any(), any());
+        assertTrue(wasUploaded("post-0001.png"));
     }
 
     @Test
     void publish_元ファイル名の拡張子が保持される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.gif"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.gif"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "anim.gif", "image/gif", new byte[]{1}));
 
         service.publish(command("my-article", "My Article", images, null));
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.gif"), any(), any());
+        assertTrue(wasUploaded("my-article-0001.gif"));
     }
 
     @Test
     void publish_最終HTMLはcontent_serviceのfinalizeHtml結果がPostContentへ渡される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(contentServiceClient.finalizeHtml("本文", null))
-                .thenReturn("<div class=\"lets-blog-rendered\">wrapped</div>");
+        world.content.json("POST", "/api/internal/content/render/finalize-html",
+                world.json(Map.of("html", "<div class=\"lets-blog-rendered\">wrapped</div>")));
 
-        service.publish(command("my-article", "My Article", List.of(), null));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        verify(contentServiceClient).finalizeHtml("本文", null);
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertEquals("<div class=\"lets-blog-rendered\">wrapped</div>", contentCaptor.getValue().htmlContent());
+        assertEquals("本文", finalizedMarkdown());
+        assertTrue(lastJson(world.content, "POST", "/api/internal/content/render/finalize-html")
+                .path("projectId").isNull());
+        assertEquals("<div class=\"lets-blog-rendered\">wrapped</div>", world.ssh.contentOf(response.wpPostId()));
     }
 
     @Test
     void publish_featuredImageFilenameに一致する画像のfeaturedMediaIdがPostContentへ設定される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.jpg"), any(), any()))
-                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/2.jpg"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}),
                 new MockMultipartFile("images", "photo.jpg", "image/jpeg", new byte[]{2}));
 
-        service.publish(command("my-article", "My Article", images, "eyecatch.png"));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", images, "eyecatch.png"));
 
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertEquals("11", contentCaptor.getValue().featuredMediaId());
+        assertEquals(uploaded("my-article-0001.png").id, created(response).thumbnailId);
     }
 
     @Test
     void publish_アイキャッチなし投稿ではfeaturedMediaIdがnullになる() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        service.publish(command("my-article", "My Article", List.of(), null));
-
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertNull(contentCaptor.getValue().featuredMediaId());
+        assertNull(created(response).thumbnailId);
+        assertFalse(world.ssh.ran("_thumbnail_id"));
     }
 
     @Test
     void publish_Markdown中の元ファイル名参照がアップロード後のURLに置換される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean())).thenReturn("![alt](eyecatch.png)");
-
+        preImageReturns("![alt](eyecatch.png)");
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
         service.publish(command("my-article", "My Article", images, null));
 
-        verify(contentServiceClient).finalizeHtml("![alt](https://example.com/wp-content/uploads/1.png)", null);
+        assertEquals("![alt](" + uploaded("my-article-0001.png").url + ")", finalizedMarkdown());
     }
 
     @Test
     void publish_assetsサブフォルダ参照はimageReferencesを使い二重結合されずに置換される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenReturn("![alt](assets/eyecatch.png)");
-
+        preImageReturns("![alt](assets/eyecatch.png)");
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
-        service.publish(command("my-article", "My Article", images, "assets/eyecatch.png",
-                List.of("assets/eyecatch.png")));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", images,
+                "assets/eyecatch.png", List.of("assets/eyecatch.png")));
 
-        verify(contentServiceClient).finalizeHtml("![alt](https://example.com/wp-content/uploads/1.png)", null);
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertEquals("11", contentCaptor.getValue().featuredMediaId());
+        FakeWordPress.Media media = uploaded("my-article-0001.png");
+        assertEquals("![alt](" + media.url + ")", finalizedMarkdown());
+        assertEquals(media.id, created(response).thumbnailId);
     }
 
     // issue #1060: 一方の参照がもう一方の部分文字列になっている場合(eyecatch.png ⊂ assets/eyecatch.png、
@@ -327,15 +284,7 @@ class PostPublishServiceTest {
 
     @Test
     void publish_短い参照が長い参照の部分文字列でもそれぞれ正しいURLに置換される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/eyecatch.png"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/assets-eyecatch.png"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenReturn("![a](eyecatch.png)\n![b](assets/eyecatch.png)");
-
+        preImageReturns("![a](eyecatch.png)\n![b](assets/eyecatch.png)");
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}),
                 new MockMultipartFile("images", "eyecatch2.png", "image/png", new byte[]{2}));
@@ -343,25 +292,15 @@ class PostPublishServiceTest {
         service.publish(command("my-article", "My Article", images, null,
                 List.of("eyecatch.png", "assets/eyecatch.png")));
 
-        verify(contentServiceClient).finalizeHtml(
-                "![a](https://example.com/wp-content/uploads/eyecatch.png)\n"
-                        + "![b](https://example.com/wp-content/uploads/assets-eyecatch.png)",
-                null);
+        assertEquals("![a](" + uploaded("my-article-0001.png").url + ")\n![b]("
+                + uploaded("my-article-0002.png").url + ")", finalizedMarkdown());
     }
 
     @Test
     void publish_imagesの並び順を入れ替えても置換結果は同一になる() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        // 並び順が入れ替わったので、1番目(0001)がassets/eyecatch.png、2番目(0002)がeyecatch.pngの
-        // アップロード結果になる。それでも各参照の置換先URLは、順序を入れ替える前のテストと同じでなければならない。
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/assets-eyecatch.png"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/eyecatch.png"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenReturn("![a](eyecatch.png)\n![b](assets/eyecatch.png)");
-
+        preImageReturns("![a](eyecatch.png)\n![b](assets/eyecatch.png)");
+        // 1番目(0001)がassets/eyecatch.png、2番目(0002)がeyecatch.pngになる。それでも各参照の置換先URLは、
+        // その参照に対応する画像のアップロード結果でなければならない。
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch2.png", "image/png", new byte[]{2}),
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
@@ -369,45 +308,26 @@ class PostPublishServiceTest {
         service.publish(command("my-article", "My Article", images, null,
                 List.of("assets/eyecatch.png", "eyecatch.png")));
 
-        verify(contentServiceClient).finalizeHtml(
-                "![a](https://example.com/wp-content/uploads/eyecatch.png)\n"
-                        + "![b](https://example.com/wp-content/uploads/assets-eyecatch.png)",
-                null);
+        assertEquals("![a](" + uploaded("my-article-0002.png").url + ")\n![b]("
+                + uploaded("my-article-0001.png").url + ")", finalizedMarkdown());
     }
 
     @Test
     void publish_数字接尾辞違いの参照でも短い方が長い方の内部を書き換えない() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/img1.png"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/img10.png"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenReturn("![a](img1.png)\n![b](img10.png)");
-
+        preImageReturns("![a](img1.png)\n![b](img10.png)");
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "img1.png", "image/png", new byte[]{1}),
                 new MockMultipartFile("images", "img10.png", "image/png", new byte[]{2}));
 
-        service.publish(command("my-article", "My Article", images, null,
-                List.of("img1.png", "img10.png")));
+        service.publish(command("my-article", "My Article", images, null, List.of("img1.png", "img10.png")));
 
-        verify(contentServiceClient).finalizeHtml(
-                "![a](https://example.com/wp-content/uploads/img1.png)\n"
-                        + "![b](https://example.com/wp-content/uploads/img10.png)",
-                null);
+        assertEquals("![a](" + uploaded("my-article-0001.png").url + ")\n![b]("
+                + uploaded("my-article-0002.png").url + ")", finalizedMarkdown());
     }
 
     @Test
     void publish_本文中に見つからない参照がある場合は警告ログを出す() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenReturn("![a](other.png)");
-
+        preImageReturns("![a](other.png)");
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
@@ -416,8 +336,7 @@ class PostPublishServiceTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            service.publish(command("my-article", "My Article", images, null,
-                    List.of("eyecatch.png")));
+            service.publish(command("my-article", "My Article", images, null, List.of("eyecatch.png")));
         } finally {
             logger.detachAppender(appender);
         }
@@ -426,33 +345,27 @@ class PostPublishServiceTest {
                 .anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
                         && event.getFormattedMessage().contains("eyecatch.png"));
         assertTrue(warned, "本文中に見つからなかった参照についてWARNレベルのログが出力されること");
-        verify(contentServiceClient).finalizeHtml("![a](other.png)", null);
+        assertEquals("![a](other.png)", finalizedMarkdown());
     }
 
     // 以下は#1060の変更でこのファイル全体のC1/C2カバレッジがゲート(90%)を割ったために追加した、
-    // 既存分岐(このIssueの変更対象ではない箇所を含む)のカバレッジ補完。CLAUDE.mdのカバレッジ節が
-    // 変更後ファイル単位でゲートするため、このIssueで触れたファイルの既存の未検証分岐も対象になる。
+    // 既存分岐(このIssueの変更対象ではない箇所を含む)のカバレッジ補完。
 
     @Test
     void publish_statusが未指定の場合はdraftとして投稿される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", null, List.of(), List.of(), null, "本文", List.of(), null,
                 List.of(), null);
 
-        service.publish(command);
+        PostPublishResponse response = service.publish(command);
 
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertEquals("draft", contentCaptor.getValue().status());
+        assertEquals("draft", created(response).status);
     }
 
     @Test
     void publish_投稿済み画像情報が空文字の場合はパースせず再アップロードして続行する() {
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", "  ")));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.stubContentPost(1L, "55", "my-article", "  ");
+        world.ssh.addPost("55", "my-article", "draft");
 
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
@@ -464,172 +377,164 @@ class PostPublishServiceTest {
     }
 
     @Test
+    void publish_投稿済み画像情報がJSONとして壊れていても再アップロードして続行する() {
+        world.stubContentPost(1L, "55", "my-article", "{壊れたJSON");
+        world.ssh.addPost("55", "my-article", "draft");
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
+
+        PostPublishResponse response = service.publish(new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
+                List.of("assets/eyecatch.png"), null));
+
+        assertEquals("55", response.wpPostId());
+        assertTrue(wasUploaded("my-article-0001.png"), "前回の情報を読めないので再アップロードする");
+    }
+
+    @Test
     void publish_発信者は判明しているがメールアドレス未設定なら著者未設定のまま続行する() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(currentActorService.getCurrentActorEmail()).thenReturn(null);
+        world.stubActor(ADMIN, 10L, "admin", null);
 
-        service.publish(command("my-article", "My Article", List.of(), null));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertNull(contentCaptor.getValue().authorId());
-        verify(cmsAdapter, never()).findAuthorIdByEmail(any(), any());
+        assertNull(created(response).author);
+        assertFalse(world.ssh.ran("user list"), "メールが無いのでWordPressのユーザー検索は行わない");
     }
 
     @Test
     void publish_imagesがnullの場合は空扱いで画像処理をスキップする() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), null, "本文", null, null,
                 List.of(), null);
 
         PostPublishResponse response = service.publish(command);
 
-        assertEquals("101", response.wpPostId());
+        assertTrue(world.ssh.posts.containsKey(response.wpPostId()));
+        assertTrue(world.ssh.media.isEmpty());
     }
 
     @Test
     void publish_imagesが空でfeaturedImageFilenameのみ指定された場合は警告して続行する() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), "eyecatch.png"));
 
-        service.publish(command("my-article", "My Article", List.of(), "eyecatch.png"));
-
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertNull(contentCaptor.getValue().featuredMediaId());
+        assertNull(created(response).thumbnailId);
     }
 
     @Test
     void publish_imageReferencesがimagesより短い場合は不足分をoriginalFilenameで補う() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0002.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("12", "https://example.com/wp-content/uploads/2.png"));
-
+        preImageReturns("![a](assets/eyecatch.png)\n![b](photo.png)");
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}),
                 new MockMultipartFile("images", "photo.png", "image/png", new byte[]{2}));
 
         service.publish(command("my-article", "My Article", images, null, List.of("assets/eyecatch.png")));
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0002.png"), any(), any());
+        assertTrue(wasUploaded("my-article-0001.png"));
+        assertTrue(wasUploaded("my-article-0002.png"));
+        assertEquals("![a](" + uploaded("my-article-0001.png").url + ")\n![b](" + uploaded("my-article-0002.png").url
+                + ")", finalizedMarkdown());
     }
 
     @Test
     void publish_参照文字列が空文字の画像はアップロード対象から除外される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
         service.publish(command("my-article", "My Article", images, null, List.of("  ")));
 
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertTrue(world.ssh.media.isEmpty());
+    }
+
+    @Test
+    void publish_originalFilenameも参照も無い画像はアップロード対象から除外される() {
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", null, "image/png", new byte[]{1}));
+
+        service.publish(command("my-article", "My Article", images, null, null));
+
+        assertTrue(world.ssh.media.isEmpty());
     }
 
     @Test
     void publish_slugもtitleも未指定の場合はpostがデフォルトになる() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("post-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("11", "https://example.com/wp-content/uploads/1.png"));
-
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
 
         service.publish(command(null, null, images, null));
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("post-0001.png"), any(), any());
+        assertTrue(wasUploaded("post-0001.png"));
     }
 
     @Test
     void publish_発信者に対応するWordPressユーザーが見つかればauthorIdを設定する() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(currentActorService.getCurrentActorEmail()).thenReturn("author@example.com");
-        when(cmsAdapter.findAuthorIdByEmail(credentials, "author@example.com")).thenReturn(Optional.of("7"));
+        world.stubActor(ADMIN, 10L, "admin", "author@example.com");
+        world.ssh.users.put("author@example.com", "7");
 
-        service.publish(command("my-article", "My Article", List.of(), null));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertEquals("7", contentCaptor.getValue().authorId());
+        assertEquals("7", created(response).author);
     }
 
     @Test
     void publish_user_site_authorsに対応表があればメール検索せずそれを使う() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(identityBridgeClient.findUserSiteAuthor(10L, 1L)).thenReturn(Optional.of("7"));
+        world.stubActor(ADMIN, 10L, "admin", "author@example.com");
+        world.identity.json("GET", "/api/internal/identity/user-site-authors/10/1", "{\"cmsAuthorId\":\"7\"}");
 
-        service.publish(command("my-article", "My Article", List.of(), null));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertEquals("7", contentCaptor.getValue().authorId());
-        verify(cmsAdapter, org.mockito.Mockito.never()).findAuthorIdByEmail(any(), any());
+        assertEquals("7", created(response).author);
+        assertFalse(world.ssh.ran("user list"), "対応表があればメール検索しない");
     }
 
     @Test
     void publish_メール検索で解決できた場合はuser_site_authorsへキャッシュする() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(currentActorService.getCurrentActorEmail()).thenReturn("author@example.com");
-        when(cmsAdapter.findAuthorIdByEmail(credentials, "author@example.com")).thenReturn(Optional.of("7"));
+        world.stubActor(ADMIN, 10L, "admin", "author@example.com");
+        world.ssh.users.put("author@example.com", "7");
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        verify(identityBridgeClient).cacheUserSiteAuthor(10L, 1L, "7");
+        JsonNode cached = lastJson(world.identity, "POST", "/api/internal/identity/user-site-authors");
+        assertEquals(10L, cached.path("userId").asLong());
+        assertEquals(1L, cached.path("siteId").asLong());
+        assertEquals("7", cached.path("cmsAuthorId").asText());
+    }
+
+    @Test
+    void publish_メール検索でも見つからなければキャッシュせず著者未設定のまま投稿する() {
+        world.stubActor(ADMIN, 10L, "admin", "nobody@example.com");
+
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
+
+        assertNull(created(response).author);
+        assertTrue(world.identity.requests("POST", "/api/internal/identity/user-site-authors").isEmpty());
     }
 
     @Test
     void publish_発信者不明時はauthorIdがnullのまま投稿を続行する() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        // adminだがidを解決できないプロフィール(identity-serviceがidを返さない)。
+        world.stubActor(ADMIN, null, "admin", null);
 
-        service.publish(command("my-article", "My Article", List.of(), null));
+        PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertNull(contentCaptor.getValue().authorId());
+        assertNull(created(response).author);
+        assertTrue(world.identity.requests("GET", "/api/internal/identity/user-site-authors/.*").isEmpty());
     }
 
     @Test
     void publish_著者解決が例外を投げても投稿は続行される() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(currentActorService.getCurrentActorId()).thenReturn(10L);
-        when(identityBridgeClient.findUserSiteAuthor(10L, 1L)).thenThrow(new RuntimeException("接続エラー"));
+        world.stubActor(ADMIN, 10L, "admin", "author@example.com");
+        world.identity.status("GET", "/api/internal/identity/user-site-authors/10/1", 500, "{\"error\":\"down\"}");
 
         PostPublishResponse response = service.publish(command("my-article", "My Article", List.of(), null));
 
-        assertEquals("101", response.wpPostId());
-        ArgumentCaptor<PostContent> contentCaptor = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(eq(credentials), contentCaptor.capture(), any());
-        assertNull(contentCaptor.getValue().authorId());
+        assertTrue(world.ssh.posts.containsKey(response.wpPostId()));
+        assertNull(created(response).author);
     }
 
     @Test
     void publish_長編が閾値を超える画像はリサイズしてからアップロードする() throws Exception {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
-        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(100);
-
+        world.media.json("GET", "/api/internal/media/projects/\\d+/article-image-long-edge-px", "{\"value\":100}");
+        world.bindProject(1L, 7L, null, null, 1L);
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
         PostPublishCommand command = new PostPublishCommand(
@@ -638,20 +543,14 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(bytesCaptor.getValue()));
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(uploaded("my-article-0001.jpg").bytes));
         assertEquals(100, uploaded.getWidth());
         assertEquals(50, uploaded.getHeight());
     }
 
     @Test
     void publish_長編が閾値以下の画像はリサイズしない() throws Exception {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("1", "https://example.com/?p=1", "draft"));
-        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.jpg"), any(), bytesCaptor.capture()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/wp-content/uploads/1.jpg"));
-        when(mediaSettingsBridgeClient.resolveArticleImageLongEdgePx(any())).thenReturn(1300);
-
+        world.bindProject(1L, 7L, null, null, 1L);
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(400, 200)));
         PostPublishCommand command = new PostPublishCommand(
@@ -660,9 +559,23 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(bytesCaptor.getValue()));
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(uploaded("my-article-0001.jpg").bytes));
         assertEquals(400, uploaded.getWidth());
         assertEquals(200, uploaded.getHeight());
+    }
+
+    @Test
+    void publish_media_serviceの設定照会が空応答ならアプリ全体の既定値でリサイズする() throws Exception {
+        world.bindProject(1L, 7L, null, null, 1L);
+        world.media.on("GET", "/api/internal/media/projects/\\d+/article-image-long-edge-px",
+                Response.empty(200));
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "eyecatch.png", "image/png", renderPng(1500, 100)));
+
+        service.publish(command("my-article", "My Article", images, null, List.of("assets/eyecatch.png")));
+
+        BufferedImage uploaded = ImageIO.read(new ByteArrayInputStream(uploaded("my-article-0001.jpg").bytes));
+        assertEquals(1300, uploaded.getWidth());
     }
 
     private byte[] renderPng(int width, int height) throws Exception {
@@ -672,19 +585,17 @@ class PostPublishServiceTest {
         return out.toByteArray();
     }
 
-    private String sha256Hex(byte[] data) throws Exception {
-        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-        return java.util.HexFormat.of().formatHex(digest.digest(data));
+    private String sha256Hex(byte[] data) {
+        return com.letsblog.publishing.cms.MediaContentHash.sha256Hex(data);
     }
 
     @Test
-    void publish_再投稿時に内容が同じ画像は再アップロードしない() throws Exception {
+    void publish_再投稿時に内容が同じ画像は再アップロードしない() {
         String sha256 = sha256Hex(new byte[]{1});
-        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
-                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.stubContentPost(1L, "55", "my-article", uploadedImagesJson(
+                "assets/eyecatch.png", sha256, "https://example.com/wp-content/uploads/1.png", "11"));
+        world.ssh.addPost("55", "my-article", "draft");
+        world.ssh.addMedia("11", "https://example.com/wp-content/uploads/1.png", new byte[]{1});
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
@@ -694,19 +605,16 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        verify(cmsAdapter, org.mockito.Mockito.never()).uploadMedia(any(), any(), any(), any());
+        assertFalse(world.ssh.ran("media import"), "同一内容の画像は再アップロードしない");
+        assertEquals(1, world.ssh.media.size());
     }
 
     @Test
-    void publish_再投稿時に内容が異なる画像は再アップロードされる() throws Exception {
+    void publish_再投稿時に内容が異なる画像は再アップロードされる() {
         String oldSha256 = sha256Hex(new byte[]{9, 9, 9});
-        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + oldSha256 + "\","
-                        + "\"url\":\"https://example.com/old.png\",\"mediaId\":\"1\"}}";
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        world.stubContentPost(1L, "55", "my-article", uploadedImagesJson(
+                "assets/eyecatch.png", oldSha256, "https://example.com/old.png", "1"));
+        world.ssh.addPost("55", "my-article", "draft");
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
@@ -716,21 +624,15 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        assertTrue(wasUploaded("my-article-0001.png"));
     }
 
     @Test
-    void publish_既存投稿がCMS側に存在しない場合は画像キャッシュを再利用せず再アップロードする() throws Exception {
+    void publish_既存投稿がCMS側に存在しない場合は画像キャッシュを再利用せず再アップロードする() {
         String sha256 = sha256Hex(new byte[]{1});
-        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
-                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
-        lenient().when(contentServiceClient.findPost(1L, "55"))
-                .thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
-        when(cmsAdapter.postExists(credentials, "55")).thenReturn(false);
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("70", "https://example.com/?p=70", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        world.stubContentPost(1L, "55", "my-article", uploadedImagesJson(
+                "assets/eyecatch.png", sha256, "https://example.com/wp-content/uploads/1.png", "11"));
+        // wpPostId=55の投稿も、メディア11もCMS側には無い。
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
@@ -738,23 +640,20 @@ class PostPublishServiceTest {
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", images, null,
                 List.of("assets/eyecatch.png"), null);
 
-        service.publish(command);
+        PostPublishResponse response = service.publish(command);
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
-        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+        assertTrue(wasUploaded("my-article-0001.png"));
+        assertNotEquals("55", response.wpPostId(), "実在しない投稿IDは新規作成にフォールバックする");
+        assertTrue(world.ssh.posts.containsKey(response.wpPostId()));
     }
 
     @Test
-    void publish_ハッシュが一致してもメディアがCMS側に実在しなければ再アップロードする() throws Exception {
+    void publish_ハッシュが一致してもメディアがCMS側に実在しなければ再アップロードする() {
         String sha256 = sha256Hex(new byte[]{1});
-        String uploadedImagesJson = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha256 + "\","
-                        + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
-        when(cmsAdapter.mediaExists(credentials, "11")).thenReturn(false);
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
+        world.stubContentPost(1L, "55", "my-article", uploadedImagesJson(
+                "assets/eyecatch.png", sha256, "https://example.com/wp-content/uploads/1.png", "11"));
+        world.ssh.addPost("55", "my-article", "draft");
+        // メディア11はCMS側に実在しない。
 
         List<MultipartFile> images = List.of(
                 new MockMultipartFile("images", "eyecatch.png", "image/png", new byte[]{1}));
@@ -764,7 +663,7 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        assertTrue(wasUploaded("my-article-0001.png"));
     }
 
     private PostPublishCommand scheduledCommand(String publishScheduledAt) {
@@ -779,270 +678,233 @@ class PostPublishServiceTest {
 
     /** siteId=1 を本番サイトに持つプロジェクトを紐づける。 */
     private void bindProductionSite() {
-        ProjectServiceClient.ProjectBridge project = new ProjectServiceClient.ProjectBridge(7L, null, null, 1L, "test");
-        lenient().when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
-        lenient().when(projectServiceClient.getProject(7L)).thenReturn(project);
+        world.bindProject(1L, 7L, null, null, 1L);
     }
 
     /** siteId=1 をテスト環境に持つ(本番は別サイト)プロジェクトを紐づける。 */
     private void bindNonProductionSite() {
-        ProjectServiceClient.ProjectBridge project = new ProjectServiceClient.ProjectBridge(7L, null, 1L, 99L, "test");
-        when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
-        when(projectServiceClient.getProject(7L)).thenReturn(project);
+        world.bindProject(1L, 7L, null, 1L, 99L);
     }
 
     @Test
     void publish_本番サイトへの投稿ではcontent_serviceへisProductionSite_trueを渡す() {
         bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
 
         service.publish(command("slug", "title", List.of(), null));
 
-        verify(contentServiceClient).renderPreImage(anyString(), eq(7L), eq(true));
+        assertEquals(7L, preImageRequest().path("projectId").asLong());
+        assertTrue(preImageRequest().path("productionSite").asBoolean());
     }
 
     @Test
     void publish_本番以外のサイトへの投稿ではcontent_serviceへisProductionSite_falseを渡す() {
         bindNonProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
 
         service.publish(command("slug", "title", List.of(), null));
 
-        verify(contentServiceClient).renderPreImage(anyString(), eq(7L), eq(false));
+        assertEquals(7L, preImageRequest().path("projectId").asLong());
+        assertFalse(preImageRequest().path("productionSite").asBoolean());
     }
 
     @Test
     void publish_本番サイトでは公開予定日時がstatus_futureとして送られる() {
         bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "future"));
-        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
-                .withNano(0).toString();
+        String scheduledAt = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).withNano(0).toString();
 
-        service.publish(scheduledCommand(scheduledAt));
+        PostPublishResponse response = service.publish(scheduledCommand(scheduledAt));
 
-        org.mockito.ArgumentCaptor<PostContent> captor =
-                org.mockito.ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
-        assertEquals("future", captor.getValue().status());
-        assertEquals(java.time.OffsetDateTime.parse(scheduledAt).toInstant(),
-                captor.getValue().publishScheduledAt());
+        FakeWordPress.Post post = created(response);
+        assertEquals("future", post.status);
+        assertEquals(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .format(OffsetDateTime.parse(scheduledAt).toInstant().atOffset(ZoneOffset.UTC)), post.dateGmt);
     }
 
     @Test
     void publish_本番以外のサイトでは公開予定日時を無視する() {
         bindNonProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        String scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1).toString();
+        String scheduledAt = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).toString();
 
-        service.publish(scheduledCommand(scheduledAt));
+        PostPublishResponse response = service.publish(scheduledCommand(scheduledAt));
 
-        org.mockito.ArgumentCaptor<PostContent> captor =
-                org.mockito.ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
-        assertEquals("draft", captor.getValue().status());
-        assertNull(captor.getValue().publishScheduledAt());
+        FakeWordPress.Post post = created(response);
+        assertEquals("draft", post.status);
+        assertNull(post.dateGmt);
     }
 
     @Test
     void publish_本番サイトで過去の公開予定日時かつstatus_publishの場合は無視して即時公開する() {
         bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "publish"));
-        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+        String past = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1).toString();
 
-        service.publish(scheduledCommand(past, "publish"));
+        PostPublishResponse response = service.publish(scheduledCommand(past, "publish"));
 
-        org.mockito.ArgumentCaptor<PostContent> captor =
-                org.mockito.ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
-        assertEquals("publish", captor.getValue().status());
-        assertNull(captor.getValue().publishScheduledAt());
+        FakeWordPress.Post post = created(response);
+        assertEquals("publish", post.status);
+        assertNull(post.dateGmt);
     }
 
     @Test
     void publish_本番サイトで過去の公開予定日時かつstatus_publish以外の場合は無視して非公開のまま投稿する() {
         bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+        String past = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1).toString();
 
-        service.publish(scheduledCommand(past, "draft"));
+        PostPublishResponse response = service.publish(scheduledCommand(past, "draft"));
 
-        org.mockito.ArgumentCaptor<PostContent> captor =
-                org.mockito.ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
-        assertEquals("draft", captor.getValue().status());
-        assertNull(captor.getValue().publishScheduledAt());
+        FakeWordPress.Post post = created(response);
+        assertEquals("draft", post.status);
+        assertNull(post.dateGmt);
     }
 
     @Test
     void publish_本番以外のサイトでは過去の公開予定日時も無視する() {
         bindNonProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        String past = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).toString();
+        String past = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1).toString();
 
-        service.publish(scheduledCommand(past));
+        PostPublishResponse response = service.publish(scheduledCommand(past));
 
-        org.mockito.ArgumentCaptor<PostContent> captor =
-                org.mockito.ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
-        assertEquals("draft", captor.getValue().status());
-        assertNull(captor.getValue().publishScheduledAt());
+        FakeWordPress.Post post = created(response);
+        assertEquals("draft", post.status);
+        assertNull(post.dateGmt);
     }
 
     @Test
     void publish_ISO8601以外の公開予定日時は拒否する() {
         bindProductionSite();
 
-        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException e = assertThrows(
                 IllegalArgumentException.class, () -> service.publish(scheduledCommand("2026/12/25 09:00")));
         assertTrue(e.getMessage().contains("ISO 8601"));
+        assertTrue(world.ssh.posts.isEmpty());
     }
 
     @Test
     void publish_公開予定日時が空文字の場合は通常投稿として扱う() {
         bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
 
-        service.publish(scheduledCommand("  "));
+        PostPublishResponse response = service.publish(scheduledCommand("  "));
 
-        org.mockito.ArgumentCaptor<PostContent> captor =
-                org.mockito.ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), captor.capture(), any());
-        assertEquals("draft", captor.getValue().status());
-        assertNull(captor.getValue().publishScheduledAt());
+        FakeWordPress.Post post = created(response);
+        assertEquals("draft", post.status);
+        assertNull(post.dateGmt);
     }
 
     @Test
     void publish_rechartsタグが不正な場合は投稿を拒否する() {
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
+        world.content.status("POST", "/api/internal/content/render/pre-image", 400, "type属性は必須です");
 
-        InvalidRechartsTagException e = org.junit.jupiter.api.Assertions.assertThrows(
-                InvalidRechartsTagException.class,
+        InvalidRechartsTagException e = assertThrows(InvalidRechartsTagException.class,
                 () -> service.publish(command("my-article", "My Article", List.of(), null)));
         assertTrue(e.getMessage().contains("type属性"));
-        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
+        assertTrue(world.ssh.posts.isEmpty());
+    }
+
+    @Test
+    void publish_content_serviceのレンダリングが失敗したら投稿しない() {
+        world.content.status("POST", "/api/internal/content/render/pre-image", 500, "boom");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> service.publish(command("my-article", "My Article", List.of(), null)));
+        assertTrue(e.getMessage().contains("content-service"));
+        assertTrue(world.ssh.posts.isEmpty());
     }
 
     @Test
     void publish_plantumlタグをレンダリングしCMSへアップロードする() {
-        when(plantUmlTagRenderService.render(eq(credentials), anyString(), anyMap()))
-                .thenReturn(new DiagramEmbedResult("![diagram](https://example.com/plantuml-tag-1.png)", Map.of()));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        preImageReturns("[plantuml]\nA->B\n[/plantuml]");
+        world.media.on("POST", "/api/render/plantuml", Response.bytes(200, "image/png", new byte[]{1}));
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        verify(plantUmlTagRenderService).render(eq(credentials), anyString(), anyMap());
+        assertEquals("![diagram](" + uploaded("plantuml-tag-1.png").url + ")", finalizedMarkdown());
     }
 
     @Test
     void publish_plantumlタグが不正な場合は投稿を拒否する() {
-        when(plantUmlTagRenderService.render(eq(credentials), anyString(), anyMap()))
-                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
+        preImageReturns("[plantuml]\nA->\n[/plantuml]");
+        world.media.status("POST", "/api/render/plantuml", 400,
+                "{\"error\":\"PlantUML が図を描けませんでした: Syntax Error\"}");
 
-        InvalidPlantUmlTagException e = org.junit.jupiter.api.Assertions.assertThrows(
-                InvalidPlantUmlTagException.class,
+        PlantUmlRenderRejectedException e = assertThrows(PlantUmlRenderRejectedException.class,
                 () -> service.publish(command("my-article", "My Article", List.of(), null)));
         assertTrue(e.getMessage().contains("PlantUML"));
-        verify(cmsAdapter, org.mockito.Mockito.never()).createOrUpdatePost(any(), any(), any());
+        assertTrue(world.ssh.posts.isEmpty());
     }
 
     @Test
     void publish_前回投稿時のPlantUMLキャッシュはtagRenderServiceとembedServiceへ引き継がれる() {
-        String uploadedImagesJson = "{\"plantuml:tag-hash\":{\"sha256\":\"tag-hash\","
-                        + "\"url\":\"https://example.com/plantuml-tag-1.png\",\"mediaId\":\"9\"}}";
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", uploadedImagesJson)));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        String tagSha = sha256Hex("@startuml\nA->B\n@enduml".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String fenceSha = sha256Hex("@startuml\nC->D\n@enduml".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        world.stubContentPost(1L, "55", "my-article", "{\"plantuml:" + tagSha + "\":{\"sha256\":\"" + tagSha
+                + "\",\"url\":\"https://example.com/tag.png\",\"mediaId\":\"9\"},\"plantuml:" + fenceSha
+                + "\":{\"sha256\":\"" + fenceSha + "\",\"url\":\"https://example.com/fence.png\",\"mediaId\":\"10\"}}");
+        world.ssh.addPost("55", "my-article", "draft");
+        world.ssh.addMedia("9", "https://example.com/tag.png", new byte[]{1});
+        world.ssh.addMedia("10", "https://example.com/fence.png", new byte[]{2});
+        preImageReturns("[plantuml]\nA->B\n[/plantuml]\n```plantuml\nC->D\n```");
 
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文", List.of(), null,
                 List.of(), null);
         service.publish(command);
 
-        ArgumentCaptor<Map> tagPriorUploadsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(plantUmlTagRenderService).render(eq(credentials), anyString(), tagPriorUploadsCaptor.capture());
-        assertTrue(tagPriorUploadsCaptor.getValue().containsKey("plantuml:tag-hash"));
-
-        ArgumentCaptor<Map> embedPriorUploadsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(plantUmlEmbedService).embedDiagrams(eq(credentials), anyString(), embedPriorUploadsCaptor.capture());
-        assertTrue(embedPriorUploadsCaptor.getValue().containsKey("plantuml:tag-hash"));
+        assertTrue(world.media.requests().isEmpty(), "キャッシュがあるので再レンダリングしない");
+        assertEquals("![diagram](https://example.com/tag.png)\n![diagram](https://example.com/fence.png)",
+                finalizedMarkdown());
+        String json = upsert().path("uploadedImagesJson").asText();
+        assertTrue(json.contains("plantuml:" + tagSha));
+        assertTrue(json.contains("plantuml:" + fenceSha));
     }
 
     @Test
     void publish_PlantUMLダイアグラムのアップロード結果がcontent_service反映時のキャッシュに含まれる() {
-        when(plantUmlEmbedService.embedDiagrams(any(), anyString(), anyMap()))
-                .thenReturn(new DiagramEmbedResult("本文",
-                        Map.of("plantuml:diagram-hash", new UploadedImageInfo(
-                                "diagram-hash", "https://example.com/plantuml-1.png", "12"))));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("200", "https://example.com/?p=200", "draft"));
+        preImageReturns("```plantuml\nA->B\n```");
+        world.media.on("POST", "/api/render/plantuml", Response.bytes(200, "image/png", new byte[]{1}));
 
         service.publish(command("my-article", "My Article", List.of(), null));
 
-        ArgumentCaptor<String> uploadedImagesJsonCaptor = ArgumentCaptor.forClass(String.class);
-        verify(contentServiceClient).upsertPost(
-                any(), eq("200"), any(), any(), uploadedImagesJsonCaptor.capture(), any(), any());
-        assertTrue(uploadedImagesJsonCaptor.getValue().contains("plantuml:diagram-hash"));
+        String sha = sha256Hex("@startuml\nA->B\n@enduml".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(upsert().path("uploadedImagesJson").asText().contains("plantuml:" + sha));
     }
 
     @Test
     void publish_categoriesがcontent_serviceへの反映呼び出しに含まれる() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("201", "https://example.com/?p=201", "draft"));
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of("技術", "お知らせ"), List.of(), null, "本文",
                 List.of(), null, List.of(), null);
 
         service.publish(command);
 
-        ArgumentCaptor<String> categoriesCaptor = ArgumentCaptor.forClass(String.class);
-        verify(contentServiceClient).upsertPost(
-                any(), eq("201"), any(), any(), any(), categoriesCaptor.capture(), any());
-        assertTrue(categoriesCaptor.getValue().contains("技術"));
-        assertTrue(categoriesCaptor.getValue().contains("お知らせ"));
+        String categories = upsert().path("categories").asText();
+        assertTrue(categories.contains("技術"));
+        assertTrue(categories.contains("お知らせ"));
+        assertTrue(world.ssh.terms.containsKey("category:技術"), "カテゴリはWordPressで解決(作成)される");
     }
 
     @Test
     void publish_publishScheduledAtがcontent_serviceへの反映呼び出しに含まれる() {
         bindProductionSite();
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("202", "https://example.com/?p=202", "future"));
-        java.time.OffsetDateTime scheduledAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(1)
-                .withNano(0);
+        OffsetDateTime scheduledAt = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1).withNano(0);
 
         service.publish(scheduledCommand(scheduledAt.toString()));
 
-        ArgumentCaptor<java.time.LocalDateTime> scheduledAtCaptor =
-                ArgumentCaptor.forClass(java.time.LocalDateTime.class);
-        verify(contentServiceClient).upsertPost(
-                any(), eq("202"), any(), any(), any(), any(), scheduledAtCaptor.capture());
-        assertEquals(scheduledAt.toInstant(), scheduledAtCaptor.getValue().toInstant(java.time.ZoneOffset.UTC));
+        LocalDateTime sent = LocalDateTime.parse(upsert().path("publishScheduledAt").asText());
+        assertEquals(scheduledAt.toInstant(), sent.toInstant(ZoneOffset.UTC));
     }
 
     @Test
     void publish_プロジェクトメンバーでもadminでもなければCMSへ触れずに拒否する() {
         // issue #830: WordPressへの公開が「認証済みなら誰でも」通っていた。CMSへの副作用
-        // (画像アップロード・投稿作成)が始まる前に弾まれることを確かめる。
-        lenient().when(projectServiceClient.findProjectIdBySiteId(1L)).thenReturn(7L);
-        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdminForSite(7L);
+        // (画像アップロード・投稿作成)が始まる前に弾かれることを確かめる。
+        world.bindProject(1L, 7L, null, null, 1L);
+        world.stubActor("Bearer member-token", 10L, "user", "m@example.com").stubProjectMember(7L, 10L, false);
+        world.asUser("Bearer member-token");
 
         assertThrows(ForbiddenException.class,
                 () -> service.publish(command("my-article", "My Article", List.of(), null)));
 
-        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
-        verify(contentServiceClient, never()).renderPreImage(anyString(), any(), anyBoolean());
-        verify(domainEventPublisher, never())
-                .publishPostPublished(any(), any(), anyString(), anyString(), anyString());
+        assertTrue(world.ssh.commands.stream().noneMatch(c -> c.contains("post create")));
+        assertTrue(world.content.requests("POST", "/api/internal/content/render/pre-image").isEmpty());
+        verify(world.rabbitTemplate, never()).convertAndSend(any(String.class), any(String.class), any(Object.class));
     }
 
     // ---- issue #1431: WordPress側のスラッグ照会 ----
@@ -1055,94 +917,85 @@ class PostPublishServiceTest {
 
     @Test
     void publish_wpPostIdが無くWordPressに同じスラッグの投稿が1件あればその投稿を更新しpostsへupsertする() {
-        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of("55"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.ssh.addPost("55", "my-article", "draft");
 
         PostPublishResponse response = service.publish(commandWithWpPostId("my-article", null));
 
         assertEquals("55", response.wpPostId());
-        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
-        verify(contentServiceClient).upsertPost(
-                eq(1L), eq("55"), eq("my-article"), eq("draft"), any(), any(), any());
+        assertEquals(1, world.ssh.posts.size(), "新規作成せず既存投稿を更新する");
+        JsonNode body = upsert();
+        assertEquals("55", body.path("wpPostId").asText());
+        assertEquals("my-article", body.path("slug").asText());
+        assertEquals("draft", body.path("status").asText());
     }
 
     @Test
     void publish_wpPostIdが空文字でも未指定と同じく照会する() {
-        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of("55"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.ssh.addPost("55", "my-article", "draft");
 
         service.publish(commandWithWpPostId("my-article", " "));
 
-        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+        assertEquals(1, world.ssh.posts.size());
+        assertTrue(world.ssh.ran("--name='my-article'"));
     }
 
     @Test
     void publish_WordPressに同じスラッグの投稿が無ければ新規作成する() {
-        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of());
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
         PostPublishResponse response = service.publish(commandWithWpPostId("my-article", null));
 
-        assertEquals("101", response.wpPostId());
-        verify(cmsAdapter).createOrUpdatePost(any(), any(), org.mockito.ArgumentMatchers.isNull());
+        assertTrue(world.ssh.ran("--name='my-article'"), "スラッグで照会する");
+        assertTrue(world.ssh.ran("post create"));
+        assertEquals("my-article", created(response).slug);
     }
 
     @Test
     void publish_slug未指定なら照会せず新規作成する() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
         service.publish(commandWithWpPostId(null, null));
 
-        verify(cmsAdapter, never()).findPostIdsBySlug(any(), any());
-        verify(cmsAdapter).createOrUpdatePost(any(), any(), org.mockito.ArgumentMatchers.isNull());
+        assertFalse(world.ssh.ran("--name="), "スラッグが無ければ照会しない");
+        assertTrue(world.ssh.ran("post create"));
     }
 
     @Test
     void publish_slugが空白なら照会せず新規作成する() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
         service.publish(commandWithWpPostId("  ", null));
 
-        verify(cmsAdapter, never()).findPostIdsBySlug(any(), any());
+        assertFalse(world.ssh.ran("--name="));
+        assertTrue(world.ssh.ran("post create"));
     }
 
     @Test
     void publish_wpPostIdが指定されていれば照会しない() {
-        when(cmsAdapter.createOrUpdatePost(any(), any(), eq("55")))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.ssh.addPost("55", "my-article", "draft");
 
         service.publish(commandWithWpPostId("my-article", "55"));
 
-        verify(cmsAdapter, never()).findPostIdsBySlug(any(), any());
-        verify(cmsAdapter).createOrUpdatePost(any(), any(), eq("55"));
+        assertFalse(world.ssh.ran("--name="));
+        assertTrue(world.ssh.ran("post update '55'"));
     }
 
     @Test
     void publish_同じスラッグの投稿が複数あれば候補IDを示して中止し作成も更新もしない() {
-        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article")).thenReturn(List.of("55", "56"));
+        world.ssh.addPost("55", "my-article", "draft");
+        world.ssh.addPost("56", "my-article", "publish");
 
         IllegalStateException thrown = assertThrows(IllegalStateException.class,
                 () -> service.publish(commandWithWpPostId("my-article", null)));
 
         assertTrue(thrown.getMessage().contains("55"));
         assertTrue(thrown.getMessage().contains("56"));
-        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
-        verify(contentServiceClient, never()).upsertPost(any(), any(), any(), any(), any(), any(), any());
+        assertFalse(world.ssh.ran("post create"));
+        assertFalse(world.ssh.ran("post update"));
+        assertTrue(world.content.requests("PUT", "/api/internal/content/posts").isEmpty());
     }
 
     @Test
     void publish_照会に失敗したら新規作成へ進まず中止する() {
-        when(cmsAdapter.findPostIdsBySlug(credentials, "my-article"))
-                .thenThrow(new RuntimeException("ssh timeout"));
+        world.ssh.whenFail("--name=", "ssh timeout");
 
         assertThrows(RuntimeException.class, () -> service.publish(commandWithWpPostId("my-article", null)));
 
-        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
+        assertFalse(world.ssh.ran("post create"));
     }
 
     // ---- issue #1432: WordPress側の内容ハッシュ(sha256)照会によるメディア再利用 ----
@@ -1158,78 +1011,53 @@ class PostPublishServiceTest {
     }
 
     @Test
-    void publish_ローカルに記録が無くてもWordPress側に同一sha256のメディアがあれば再アップロードせず既存URLを使う() throws Exception {
-        String sha = sha256Hex(new byte[]{1});
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
-                .thenReturn(Map.of(sha, new MediaUploadResult("88", "https://example.com/wp-content/uploads/existing.png")));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-        when(contentServiceClient.renderPreImage(anyString(), any(), anyBoolean()))
-                .thenReturn("![a](assets/eyecatch.png)");
+    void publish_ローカルに記録が無くてもWordPress側に同一sha256のメディアがあれば再アップロードせず既存URLを使う() {
+        world.ssh.addMedia("88", "https://example.com/wp-content/uploads/existing.png", new byte[]{1});
+        preImageReturns("![a](assets/eyecatch.png)");
 
         service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
 
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
-        ArgumentCaptor<String> html = ArgumentCaptor.forClass(String.class);
-        verify(contentServiceClient).finalizeHtml(html.capture(), any());
-        assertTrue(html.getValue().contains("https://example.com/wp-content/uploads/existing.png"));
+        assertFalse(world.ssh.ran("media import"));
+        assertTrue(finalizedMarkdown().contains("https://example.com/wp-content/uploads/existing.png"));
     }
 
     @Test
-    void publish_アイキャッチに指定した画像もWordPress側の既存メディアを再利用しfeaturedMediaIdになる() throws Exception {
-        String sha = sha256Hex(new byte[]{1});
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
-                .thenReturn(Map.of(sha, new MediaUploadResult("88", "https://example.com/wp-content/uploads/existing.png")));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+    void publish_アイキャッチに指定した画像もWordPress側の既存メディアを再利用しfeaturedMediaIdになる() {
+        world.ssh.addMedia("88", "https://example.com/wp-content/uploads/existing.png", new byte[]{1});
 
-        service.publish(imageCommand("assets/eyecatch.png", List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+        PostPublishResponse response = service.publish(
+                imageCommand("assets/eyecatch.png", List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
 
-        ArgumentCaptor<PostContent> content = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), content.capture(), any());
-        assertEquals("88", content.getValue().featuredMediaId());
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertEquals("88", created(response).thumbnailId);
+        assertFalse(world.ssh.ran("media import"));
     }
 
     @Test
     void publish_WordPress側に同一sha256が無ければ新規アップロードする() {
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenReturn(Map.of());
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
         service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
 
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        assertTrue(wasUploaded("my-article-0001.png"));
     }
 
     @Test
-    void publish_照会は画像の枚数によらず1回で全画像のsha256をまとめて渡す() throws Exception {
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenReturn(Map.of());
-        when(cmsAdapter.uploadMedia(any(), any(), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
+    void publish_照会は画像の枚数によらず1回で全画像のsha256をまとめて渡す() {
         service.publish(imageCommand(null, List.of(new byte[]{1}, new byte[]{2}, new byte[]{3}),
                 List.of("a.png", "b.png", "c.png")));
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<java.util.Collection<String>> hashes = ArgumentCaptor.forClass(java.util.Collection.class);
-        verify(cmsAdapter, org.mockito.Mockito.times(1)).findMediaBySha256(eq(credentials), hashes.capture());
-        assertEquals(java.util.Set.of(sha256Hex(new byte[]{1}), sha256Hex(new byte[]{2}), sha256Hex(new byte[]{3})),
-                new java.util.HashSet<>(hashes.getValue()));
+        List<String> lookups = world.ssh.commands.stream().filter(c -> c.contains("get_posts")).toList();
+        assertEquals(1, lookups.size(), "照会は1回だけ: " + lookups);
+        for (byte b = 1; b <= 3; b++) {
+            assertTrue(lookups.get(0).contains(sha256Hex(new byte[]{b})));
+        }
     }
 
     @Test
-    void publish_ローカルのキャッシュで再利用できる画像だけなら照会しない() throws Exception {
+    void publish_ローカルのキャッシュで再利用できる画像だけなら照会しない() {
         String sha = sha256Hex(new byte[]{1});
-        String json = "{\"assets/eyecatch.png\":{\"sha256\":\"" + sha + "\","
-                + "\"url\":\"https://example.com/wp-content/uploads/1.png\",\"mediaId\":\"11\"}}";
-        when(contentServiceClient.findPost(1L, "55")).thenReturn(Optional.of(bridgePost("55", json)));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("55", "https://example.com/?p=55", "draft"));
+        world.stubContentPost(1L, "55", "my-article", uploadedImagesJson(
+                "assets/eyecatch.png", sha, "https://example.com/wp-content/uploads/1.png", "11"));
+        world.ssh.addPost("55", "my-article", "draft");
+        world.ssh.addMedia("11", "https://example.com/wp-content/uploads/1.png", new byte[]{1});
         PostPublishCommand command = new PostPublishCommand(
                 "main", "My Article", "my-article", "draft", List.of(), List.of(), "55", "本文",
                 List.of(new MockMultipartFile("images", "e.png", "image/png", new byte[]{1})), null,
@@ -1237,88 +1065,131 @@ class PostPublishServiceTest {
 
         service.publish(command);
 
-        verify(cmsAdapter, never()).findMediaBySha256(any(), any());
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
+        assertFalse(world.ssh.ran("get_posts"), "WordPressへの内容ハッシュ照会は行わない");
+        assertFalse(world.ssh.ran("media import"));
     }
 
     @Test
-    void publish_WordPress側で再利用したメディアもuploadedImagesJsonに記録する() throws Exception {
+    void publish_WordPress側で再利用したメディアもuploadedImagesJsonに記録する() {
         String sha = sha256Hex(new byte[]{1});
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
-                .thenReturn(Map.of(sha, new MediaUploadResult("88", "https://example.com/wp-content/uploads/existing.png")));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        world.ssh.addMedia("88", "https://example.com/wp-content/uploads/existing.png", new byte[]{1});
 
         service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
 
-        ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(contentServiceClient).upsertPost(eq(1L), eq("101"), any(), any(), json.capture(), any(), any());
-        assertTrue(json.getValue().contains("\"mediaId\":\"88\""));
-        assertTrue(json.getValue().contains(sha));
+        String json = upsert().path("uploadedImagesJson").asText();
+        assertTrue(json.contains("\"mediaId\":\"88\""));
+        assertTrue(json.contains(sha));
     }
 
     @Test
     void publish_照会に失敗しても従来どおり新規アップロードして投稿を続行する() {
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenThrow(new RuntimeException("ssh timeout"));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        world.ssh.whenFail("get_posts", "ssh timeout");
 
         PostPublishResponse response =
                 service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
 
-        assertEquals("101", response.wpPostId());
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        assertTrue(world.ssh.posts.containsKey(response.wpPostId()));
+        assertTrue(wasUploaded("my-article-0001.png"));
     }
 
     @Test
-    void publish_内容が異なる画像は同じ参照名でも既存メディアを再利用せず新規アップロードする() throws Exception {
+    void publish_内容が異なる画像は同じ参照名でも既存メディアを再利用せず新規アップロードする() {
         // WordPress側にあるのは別内容(sha256が異なる)のメディアだけ。
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any()))
-                .thenReturn(Map.of(sha256Hex(new byte[]{9}),
-                        new MediaUploadResult("88", "https://example.com/wp-content/uploads/other.png")));
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
+        world.ssh.addMedia("88", "https://example.com/wp-content/uploads/other.png", new byte[]{9});
 
-        service.publish(imageCommand("assets/eyecatch.png", List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
+        PostPublishResponse response = service.publish(
+                imageCommand("assets/eyecatch.png", List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
 
-        ArgumentCaptor<PostContent> content = ArgumentCaptor.forClass(PostContent.class);
-        verify(cmsAdapter).createOrUpdatePost(any(), content.capture(), any());
-        assertEquals("22", content.getValue().featuredMediaId());
-    }
-
-    @Test
-    void publish_照会結果がnullでも新規アップロードして続行する() {
-        when(cmsAdapter.findMediaBySha256(eq(credentials), any())).thenReturn(null);
-        when(cmsAdapter.uploadMedia(any(), eq("my-article-0001.png"), any(), any()))
-                .thenReturn(new MediaUploadResult("22", "https://example.com/wp-content/uploads/2.png"));
-        when(cmsAdapter.createOrUpdatePost(any(), any(), any()))
-                .thenReturn(new PostResult("101", "https://example.com/?p=101", "draft"));
-
-        service.publish(imageCommand(null, List.of(new byte[]{1}), List.of("assets/eyecatch.png")));
-
-        verify(cmsAdapter).uploadMedia(eq(credentials), eq("my-article-0001.png"), any(), any());
+        assertEquals(uploaded("my-article-0001.png").id, created(response).thumbnailId);
+        assertNotEquals("88", created(response).thumbnailId);
     }
 
     // ---- issue #1557: プラグインが使えないサイトへの投稿は拒否する ----
 
     @Test
     void publish_letsblogプラグインが使えないサイトは拒否しCMSへ何も書き込まない() {
-        doThrow(new com.letsblog.publishing.cms.LetsblogPluginUnavailableException(
-                com.letsblog.publishing.cms.LetsblogPluginStatus.notInstalled()))
-                .when(cmsAdapter).requireLetsblogPlugin(any());
+        world.ssh.site().letsblogStatusOutput = null;
 
-        com.letsblog.publishing.cms.LetsblogPluginUnavailableException e = assertThrows(
-                com.letsblog.publishing.cms.LetsblogPluginUnavailableException.class,
+        LetsblogPluginUnavailableException e = assertThrows(LetsblogPluginUnavailableException.class,
                 () -> service.publish(command("slug", "title", List.of(), null)));
 
         assertTrue(e.getMessage().contains("再導入"));
-        verify(cmsAdapter, never()).createOrUpdatePost(any(), any(), any());
-        verify(cmsAdapter, never()).uploadMedia(any(), any(), any(), any());
-        verify(cmsAdapter, never()).resolveCategories(any(), any());
-        verify(domainEventPublisher, never()).publishPostPublished(any(), any(), any(), any(), any());
+        assertTrue(world.ssh.posts.isEmpty());
+        assertTrue(world.ssh.media.isEmpty());
+        assertTrue(world.ssh.terms.isEmpty(), "カテゴリ・タグの解決にも進まない");
+        verify(world.rabbitTemplate, never()).convertAndSend(any(String.class), any(String.class), any(Object.class));
+    }
+
+    // ---- 画像の参照・ファイル名・アイキャッチの境界(issue #1815) ----
+
+    @Test
+    void publish_imageReferencesの一部がnullなら_その画像はoriginalFilenameを参照にする() {
+        preImageReturns("![a](assets/a.png)\n![b](b.png)");
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "a.png", "image/png", new byte[]{1}),
+                new MockMultipartFile("images", "b.png", "image/png", new byte[]{2}));
+
+        service.publish(command("my-article", "My Article", images, null,
+                java.util.Arrays.asList("assets/a.png", null)));
+
+        assertEquals("![a](" + uploaded("my-article-0001.png").url + ")\n![b](" + uploaded("my-article-0002.png").url
+                + ")", finalizedMarkdown());
+    }
+
+    @Test
+    void publish_参照もoriginalFilenameも無い画像は読み飛ばし_他の画像だけをアップロードする() {
+        List<MultipartFile> images = List.of(
+                new com.letsblog.publishing.service.BytesMultipartFile("images", null, "image/png", new byte[]{1}),
+                new MockMultipartFile("images", "b.png", "image/png", new byte[]{2}));
+
+        service.publish(command("my-article", "My Article", images, null, null));
+
+        assertEquals(1, world.ssh.media.size());
+        assertTrue(wasUploaded("my-article-0002.png"), "連番は元の並びの位置のまま");
+    }
+
+    @Test
+    void publish_アイキャッチに指定した参照がどの画像とも一致しなければfeaturedMediaIdはnullのまま投稿する() {
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "a.png", "image/png", new byte[]{1}));
+
+        PostPublishResponse response = service.publish(command("my-article", "My Article", images, "other.png",
+                List.of("assets/a.png")));
+
+        assertNull(created(response).thumbnailId);
+        assertTrue(wasUploaded("my-article-0001.png"));
+    }
+
+    @Test
+    void publish_slugが空白ならtitleからファイル名を作る() {
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "a.png", "image/png", new byte[]{1}));
+
+        service.publish(command("   ", "Hello World", images, null));
+
+        assertTrue(wasUploaded("hello-world-0001.png"));
+    }
+
+    @Test
+    void publish_拡張子の無い参照のPNG以外の画像は拡張子binでアップロードする() {
+        List<MultipartFile> images = List.of(
+                new MockMultipartFile("images", "noext", "image/webp", new byte[]{1}));
+
+        service.publish(command("my-article", "My Article", images, null, List.of("noext")));
+
+        assertTrue(wasUploaded("my-article-0001.bin"));
+    }
+
+    @Test
+    void publish_カテゴリもタグも未指定ならWordPressのタームは作らずpostsへのカテゴリも空で反映する() {
+        PostPublishCommand command = new PostPublishCommand(
+                "main", "My Article", "my-article", "draft", null, null, null, "本文", List.of(), null, List.of(),
+                null);
+
+        PostPublishResponse response = service.publish(command);
+
+        assertTrue(world.ssh.terms.isEmpty());
+        assertTrue(upsert().path("categories").isNull());
+        assertTrue(world.ssh.posts.containsKey(response.wpPostId()));
     }
 }

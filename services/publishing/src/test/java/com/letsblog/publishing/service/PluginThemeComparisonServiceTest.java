@@ -1,90 +1,132 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.cms.CmsType;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.publishing.domain.BulkOperationLog;
 import com.letsblog.publishing.domain.BulkOperationType;
-import com.letsblog.publishing.domain.Project;
-import com.letsblog.publishing.domain.Site;
 import com.letsblog.publishing.dto.ReconcileStateRequest.StateChangeRequest;
 import com.letsblog.publishing.dto.StatusComparisonPage;
 import com.letsblog.publishing.provisioning.WordPressBulkManagementClient;
-import com.letsblog.publishing.provisioning.WordPressBulkManagementClient.PluginThemeInfo;
+import com.letsblog.publishing.testsupport.AgentListings.Extension;
+import com.letsblog.publishing.testsupport.FakeHttpServer.Response;
+import com.letsblog.publishing.testsupport.FakeWordPress;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.PublishingWorld.SiteSpec;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * PluginThemeComparisonServiceの回帰テスト。
+ *
+ * <p>issue #1815で書き直し: 自前のクラス(SiteService・ProjectService・ProjectServiceClient・BulkManagementService・
+ * WordPressBulkManagementClient・WordPressSshOperations等)は実物を使い、外部との通信だけを差し替える。
+ * HTTP(project-service・provision-agent)は{@code FakeHttpServer}({@code AgentListings}が一覧の応答を持つ)、
+ * WordPressへのSSHは{@code FakeWordPress}。環境への書き込みは、provision-agentが実際に受け取った要求と
+ * WordPress(SSH)の状態で確かめる。
+ */
 class PluginThemeComparisonServiceTest {
 
-    @Mock
-    private WordPressBulkManagementClient bulkManagementClient;
+    private static final String HOST = "203.0.113.5";
 
-    @Mock
-    private BulkManagementService bulkManagementService;
+    private PublishingWorld world;
+    private PluginThemeComparisonService service;
+    private ListAppender<ILoggingEvent> bulkLogs;
 
-    @Mock
-    private SiteService siteService;
-
-    @Mock
-    private ProjectService projectService;
-
-    @Mock
-    private com.letsblog.publishing.cms.ssh.WordPressSshOperations sshOperations;
-
-    private PluginThemeComparisonService service() {
-        return new PluginThemeComparisonService(
-                bulkManagementClient, bulkManagementService, siteService, projectService,
-                sshOperations);
+    @BeforeEach
+    void setUp() {
+        world = new PublishingWorld();
+        service = new PluginThemeComparisonService(world.bulkManagementClient, world.bulkManagementService,
+                world.siteService, world.projectService, world.sshOperations);
+        world.agent.json("POST", "/bulk-management", "{\"status\":\"success\"}");
+        bulkLogs = new ListAppender<>();
+        bulkLogs.start();
+        ((Logger) LoggerFactory.getLogger(BulkManagementService.class)).addAppender(bulkLogs);
     }
 
-    private Project buildProject(Long localSiteId, Long testSiteId, Long productionSiteId, String masterEnvironment) {
-        Project project = new Project();
-        project.setId(1L);
-        project.setName("テスト");
-        project.setSlug("test");
-        project.setLocalSiteId(localSiteId);
-        project.setTestSiteId(testSiteId);
-        project.setProductionSiteId(productionSiteId);
-        project.setMasterEnvironment(masterEnvironment);
-        return project;
+    @AfterEach
+    void tearDown() {
+        ((Logger) LoggerFactory.getLogger(BulkManagementService.class)).detachAppender(bulkLogs);
+        world.close();
     }
 
-    private Site buildManagedSite(Long id, String slug) {
-        Site site = new Site();
-        site.setId(id);
-        site.setSiteKey(slug);
-        site.setCmsType(CmsType.WORDPRESS);
-        site.setManagedWordpress(true);
-        site.setWpSlug(slug);
-        return site;
+    // ---- 部品 ----
+
+    private SiteSpec managed(long id, String slug) {
+        return SiteSpec.managed(id, slug);
+    }
+
+    private SiteSpec ssh(long id, String slug, String host, String path) {
+        return SiteSpec.ssh(id, slug, host, path);
+    }
+
+    private void bind(SiteSpec local, SiteSpec test, SiteSpec production) {
+        world.bindEnvironments(1L, "test", local, test, production);
+    }
+
+    private void bindLocalOnly() {
+        bind(managed(10L, "local-site"), null, null);
+    }
+
+    private void bindLocalAndTestManaged() {
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), null);
+    }
+
+    private void bindThreeManagedSites() {
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), managed(30L, "production-site"));
+    }
+
+    private static Extension ext(String name, String status) {
+        return new Extension(name, status);
+    }
+
+    /** provision-agentが受けた書き込みの「サイトslug:action」を、受けた順に返す。 */
+    private List<String> appliedActions() {
+        return world.agent.requests("POST", "/bulk-management").stream().map(r -> {
+            try {
+                JsonNode node = world.mapper.readTree(r.body());
+                return node.path("slug").asText() + ":" + node.path("action").asText();
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        }).toList();
+    }
+
+    private List<String> fetchFailureLogs() {
+        return bulkLogs.list.stream()
+                .filter(e -> e.getLevel() == Level.WARN && e.getFormattedMessage().startsWith("一覧取得に失敗しました"))
+                .map(ILoggingEvent::getFormattedMessage).toList();
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Test
     void listPluginComparison_未紐付け環境はavailable_falseになり_未インストールはNOT_INSTALLEDになる() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, 20L, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        bindLocalAndTestManaged();
+        world.agentListings.plugins("test-site", ext("akismet", "active"));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
@@ -98,289 +140,212 @@ class PluginThemeComparisonServiceTest {
     }
 
     @Test
+    void listPluginComparison_20件単位でページングされる() {
+        bindLocalOnly();
+        Extension[] plugins = java.util.stream.IntStream.range(0, 25)
+                .mapToObj(i -> ext(String.format("plugin-%02d", i), "active")).toArray(Extension[]::new);
+        world.agentListings.plugins("local-site", plugins);
+
+        StatusComparisonPage first = service.listPluginComparison(1L, 0, 20);
+        StatusComparisonPage second = service.listPluginComparison(1L, 1, 20);
+
+        assertEquals(20, first.items().size());
+        assertEquals(5, second.items().size());
+        assertEquals(25, first.totalCount());
+    }
+
+    @Test
     void reconcilePlugin_未インストールから有効へはインストールと有効化を実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
 
         service.reconcilePlugin(1L, "akismet", List.of(new StateChangeRequest("local", "ACTIVE")), 9L);
 
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:plugin_install", "local-site:plugin_activate"), appliedActions());
     }
 
     @Test
     void reconcilePlugin_現在状態と希望状態が同じなら何も実行しない() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        bindLocalOnly();
+        world.agentListings.plugins("local-site", ext("akismet", "active"));
 
         List<BulkOperationLog> results = service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "ACTIVE")), 9L);
 
         assertTrue(results.isEmpty());
-        verify(bulkManagementService, never()).applyToEnvironment(any(), any(), any(), any(), any(), any(), any(), any(), any());
+        assertTrue(appliedActions().isEmpty());
     }
 
     @Test
     void reconcileTheme_有効から無効への遷移は例外_テーマは間接的にのみ切替可能() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listThemes("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("twentytwentyfour", "active")));
+        bindLocalOnly();
+        world.agentListings.themes("local-site", ext("twentytwentyfour", "active"));
 
         assertThrows(IllegalArgumentException.class, () -> service.reconcileTheme(
                 1L, "twentytwentyfour", List.of(new StateChangeRequest("local", "INACTIVE")), 9L));
+        assertTrue(appliedActions().isEmpty());
     }
 
     @Test
     void deletePluginEverywhere_インストール済みの環境のみ削除される() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, 20L, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildManagedSite(20L, "test-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalAndTestManaged();
+        world.agentListings.plugins("test-site", ext("akismet", "inactive"));
 
         List<BulkOperationLog> results = service.deletePluginEverywhere(1L, "akismet", 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "test", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
-        verify(bulkManagementService, never()).applyToEnvironment(
-                eq(1L), eq("local"), any(), any(), any(), any(), any(), any(), eq(9L));
+        assertEquals(List.of("test-site:plugin_delete"), appliedActions());
     }
 
     @Test
     void deletePluginEverywhere_どの環境にもインストールされていなければ例外() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
+        bindLocalOnly();
 
         assertThrows(IllegalArgumentException.class, () -> service.deletePluginEverywhere(1L, "akismet", 9L));
     }
 
     // ---- 非managedサイト: SSHホスト単位まとめ取得・エラー ----
 
-    private Site buildExternalSite(Long id, String slug) {
-        Site site = new Site();
-        site.setId(id);
-        site.setSiteKey(slug);
-        site.setCmsType(CmsType.WORDPRESS);
-        site.setManagedWordpress(false);
-        return site;
-    }
-
-    private com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials sshCreds(String wpPath) {
-        return new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
-                "https://example.com", null, "SSH", "203.0.113.5", 22, "deploy", wpPath, "PEM", null, null);
-    }
-
     @Test
     void listPluginComparison_同一ホストのSSH環境は1回のfetchPluginsOrThemesForEnvironmentsにまとめる() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(null, 20L, 30L, "test");
-        Site testSite = buildExternalSite(20L, "test-site");
-        Site productionSite = buildExternalSite(30L, "production-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
-        when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
-        when(siteService.resolveDataSource(productionSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/production")));
-        when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
-                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(
-                                "test", List.of(new com.letsblog.publishing.cms.ssh.WordPressSshOperations.PluginThemeInfo(
-                                        "akismet", "active")),
-                                "production", List.of(new com.letsblog.publishing.cms.ssh.WordPressSshOperations.PluginThemeInfo(
-                                        "akismet", "inactive"))),
-                        java.util.Map.of(), java.util.Map.of()));
+        bind(null, ssh(20L, "test-site", HOST, "/var/www/html/test"),
+                ssh(30L, "production-site", HOST, "/var/www/html/production"));
+        world.ssh.site(HOST, "/var/www/html/test").plugins.put("akismet", "active");
+        world.ssh.site(HOST, "/var/www/html/production").plugins.put("akismet", "inactive");
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertEquals(1, page.items().size());
         assertEquals("ACTIVE", page.items().get(0).test().status());
         assertEquals("INACTIVE", page.items().get(0).production().status());
-        verify(sshOperations, org.mockito.Mockito.times(1))
-                .fetchPluginsOrThemesForEnvironments(eq("plugin"), any());
+        assertEquals(1, world.ssh.batches.size());
     }
 
-    /** issue #1137レビュー対応: toValue()のerror()分岐(L141)のカバレッジを補う。 */
+    /** issue #1137レビュー対応: toValue()のerror()分岐のカバレッジを補う。 */
     @Test
     void listPluginComparison_一部環境がエラーでも他環境のslugはerror値として表示される() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, 20L, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        Site testSite = buildExternalSite(20L, "test-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
-        when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
-        when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
-                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
-                        java.util.Map.of("test", "stacktrace")));
+        bind(managed(10L, "local-site"), ssh(20L, "test-site", HOST, "/var/www/html/test"), null);
+        world.agentListings.plugins("local-site", ext("akismet", "active"));
+        world.ssh.when("'plugin' list", FakeWordPress.fail("Connection refused"));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertEquals(1, page.items().size());
         assertEquals("ACTIVE", page.items().get(0).local().status());
         assertFalse(page.items().get(0).test().available());
-        assertEquals("Connection refused", page.items().get(0).test().errorMessage());
+        assertTrue(page.items().get(0).test().errorMessage().contains("Connection refused"),
+                page.items().get(0).test().errorMessage());
     }
 
     // ---- issue #1682: agent経由の一覧取得失敗はerror値になり作業ログに記録される ----
 
-    private void bindLocalAndTestManaged() {
-        Project project = buildProject(10L, 20L, null, "test");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
-    }
-
     @Test
     void listPluginComparison_agentの読み取りタイムアウトはerror値になりPLUGIN_FETCHで記録する() {
-        PluginThemeComparisonService service = service();
         bindLocalAndTestManaged();
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        WordPressBulkManagementClient shortTimeout =
+                new WordPressBulkManagementClient(world.agent.baseUrl(), PublishingWorld.PROVISION_TOKEN, 1, 1);
+        PluginThemeComparisonService timeoutService = new PluginThemeComparisonService(shortTimeout,
+                world.bulkManagementService, world.siteService, world.projectService, world.sshOperations);
+        world.agent.on("POST", "/plugins", request -> {
+            if (request.bodyText().contains("local-site")) {
+                sleep(2000);
+            }
+            return Response.ok("{\"plugins\":[{\"name\":\"akismet\",\"status\":\"active\"}]}");
+        });
 
-        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+        StatusComparisonPage page = timeoutService.listPluginComparison(1L, 0, 20);
 
         assertEquals(1, page.items().size());
         assertFalse(page.items().get(0).local().available());
-        assertEquals("Read timed out", page.items().get(0).local().errorMessage());
+        assertTrue(page.items().get(0).local().errorMessage().contains("I/O error"),
+                page.items().get(0).local().errorMessage());
         assertEquals("ACTIVE", page.items().get(0).test().status());
-        verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("local"), eq("Read timed out"), any());
+        assertEquals(1, fetchFailureLogs().size());
+        assertTrue(fetchFailureLogs().get(0).contains("type=PLUGIN_FETCH"), fetchFailureLogs().get(0));
+        assertTrue(fetchFailureLogs().get(0).contains("environment=local"), fetchFailureLogs().get(0));
     }
 
     @Test
     void listThemeComparison_agentの読み取りタイムアウトはerror値になりTHEME_FETCHで記録する() {
-        PluginThemeComparisonService service = service();
         bindLocalAndTestManaged();
-        when(bulkManagementClient.listThemes("local-site"))
-                .thenThrow(new org.springframework.web.client.ResourceAccessException("Read timed out"));
-        when(bulkManagementClient.listThemes("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("twentytwenty", "active")));
+        WordPressBulkManagementClient shortTimeout =
+                new WordPressBulkManagementClient(world.agent.baseUrl(), PublishingWorld.PROVISION_TOKEN, 1, 1);
+        PluginThemeComparisonService timeoutService = new PluginThemeComparisonService(shortTimeout,
+                world.bulkManagementService, world.siteService, world.projectService, world.sshOperations);
+        world.agent.on("POST", "/themes", request -> {
+            if (request.bodyText().contains("local-site")) {
+                sleep(2000);
+            }
+            return Response.ok("{\"themes\":[{\"name\":\"twentytwenty\",\"status\":\"active\"}]}");
+        });
 
-        StatusComparisonPage page = service.listThemeComparison(1L, 0, 20);
+        StatusComparisonPage page = timeoutService.listThemeComparison(1L, 0, 20);
 
         assertEquals(1, page.items().size());
         assertFalse(page.items().get(0).local().available());
-        assertEquals("Read timed out", page.items().get(0).local().errorMessage());
-        verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.THEME_FETCH), eq("local"), eq("Read timed out"), any());
+        assertTrue(fetchFailureLogs().get(0).contains("type=THEME_FETCH"), fetchFailureLogs().get(0));
     }
 
     @Test
     void listPluginComparison_agentが5xxを返した環境もerror値になり作業ログに記録する() {
-        PluginThemeComparisonService service = service();
         bindLocalAndTestManaged();
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
-        when(bulkManagementClient.listPlugins("test-site")).thenThrow(
-                new org.springframework.web.client.HttpServerErrorException(
-                        org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR));
+        world.agentListings.plugins("local-site", ext("akismet", "active"))
+                .fail("test-site", 500, "{\"error\":\"boom\"}");
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertEquals(1, page.items().size());
         assertFalse(page.items().get(0).test().available());
         assertTrue(page.items().get(0).test().errorMessage().contains("500"));
-        verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("test"), any(), any());
+        assertEquals(1, fetchFailureLogs().size());
+        assertTrue(fetchFailureLogs().get(0).contains("environment=test"), fetchFailureLogs().get(0));
+        assertTrue(fetchFailureLogs().get(0).contains("type=PLUGIN_FETCH"), fetchFailureLogs().get(0));
     }
 
     @Test
     void listPluginComparison_agentが4xxを返した環境もerror値になる() {
-        PluginThemeComparisonService service = service();
         bindLocalAndTestManaged();
-        when(bulkManagementClient.listPlugins("local-site")).thenThrow(
-                new org.springframework.web.client.HttpClientErrorException(
-                        org.springframework.http.HttpStatus.UNAUTHORIZED));
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        world.agentListings.fail("local-site", 401, "{\"error\":\"unauthorized\"}")
+                .plugins("test-site", ext("akismet", "active"));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertFalse(page.items().get(0).local().available());
-        verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("local"), any(), any());
+        assertTrue(fetchFailureLogs().get(0).contains("environment=local"), fetchFailureLogs().get(0));
     }
 
     @Test
     void listPluginComparison_agentがその他のRestClientExceptionを投げた環境もerror値になる() {
-        PluginThemeComparisonService service = service();
         bindLocalAndTestManaged();
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenThrow(new org.springframework.web.client.RestClientException("unexpected body"));
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        world.agentListings.plugins("test-site", ext("akismet", "active"));
+        // local-siteは、本文が読めない応答(JSONではない)を返す。
+        world.agent.on("POST", "/plugins", request -> request.bodyText().contains("local-site")
+                ? Response.bytes(200, "application/json", "unexpected body".getBytes()) : null);
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertFalse(page.items().get(0).local().available());
-        assertEquals("unexpected body", page.items().get(0).local().errorMessage());
+        assertTrue(page.items().get(0).local().error());
+        assertFalse(page.items().get(0).local().errorMessage().isBlank());
     }
 
     @Test
     void listPluginComparison_agentが正常に0件を返した環境はエラーにならず未インストールになる() {
-        PluginThemeComparisonService service = service();
         bindLocalAndTestManaged();
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        world.agentListings.plugins("test-site", ext("akismet", "active"));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertTrue(page.items().get(0).local().available());
         assertEquals("NOT_INSTALLED", page.items().get(0).local().status());
-        verify(bulkManagementService, org.mockito.Mockito.never())
-                .logFetchFailure(any(), any(), any(), any(), any());
+        assertTrue(fetchFailureLogs().isEmpty());
     }
 
-    // ---- reconcile: byEnvironment側の対象外分岐(L162) ----
+    // ---- reconcile: byEnvironment側の対象外分岐 ----
 
     /** issue #1137レビュー対応: 対応する環境自体が存在しない(envInfos==null)分岐のカバレッジを補う。 */
     @Test
     void reconcilePlugin_未知の環境名を指定すると例外() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
+        bindLocalOnly();
 
         IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("staging", "ACTIVE")), 9L));
@@ -390,328 +355,201 @@ class PluginThemeComparisonServiceTest {
     /** issue #1137レビュー対応: 環境は存在するが対象外(infos()==null)分岐のカバレッジを補う。 */
     @Test
     void reconcilePlugin_サイト未紐付けの環境を指定すると例外() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
+        bindLocalOnly();
 
         IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("test", "ACTIVE")), 9L));
         assertTrue(thrown.getMessage().contains("test"));
     }
 
-    // ---- stepsFor: 状態遷移の分岐網羅(L184/L185/L189/L190/L192/L195) ----
+    // ---- stepsFor: 状態遷移の分岐網羅 ----
 
     @Test
     void reconcileTheme_未インストールから有効へはテーマのインストールと有効化を実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listThemes("local-site")).thenReturn(List.of());
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
 
         service.reconcileTheme(1L, "twentytwentyfour", List.of(new StateChangeRequest("local", "ACTIVE")), 9L);
 
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_INSTALL, "twentytwentyfour", null, null, null, null, 9L);
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:theme_install", "local-site:theme_activate"), appliedActions());
     }
 
     @Test
     void reconcilePlugin_未インストールから無効へはインストールのみ実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
 
         List<BulkOperationLog> results = service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "INACTIVE")), 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
-        verify(bulkManagementService, never()).applyToEnvironment(
-                eq(1L), eq("local"), eq(BulkOperationType.PLUGIN_ACTIVATE), any(), any(), any(), any(), any(), any());
+        assertEquals(List.of("local-site:plugin_install"), appliedActions());
     }
 
     @Test
     void reconcileTheme_未インストールから無効へはテーマのインストールのみ実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listThemes("local-site")).thenReturn(List.of());
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
 
         List<BulkOperationLog> results = service.reconcileTheme(
                 1L, "twentytwentyfour", List.of(new StateChangeRequest("local", "INACTIVE")), 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_INSTALL, "twentytwentyfour", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:theme_install"), appliedActions());
     }
 
     @Test
     void reconcilePlugin_無効から有効へは有効化のみ実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
+        world.agentListings.plugins("local-site", ext("akismet", "inactive"));
 
         List<BulkOperationLog> results = service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "ACTIVE")), 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_ACTIVATE, "akismet", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:plugin_activate"), appliedActions());
     }
 
     @Test
     void reconcileTheme_無効から有効へはテーマの有効化のみ実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listThemes("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("twentytwentyfour", "inactive")));
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
+        world.agentListings.themes("local-site", ext("twentytwentyfour", "inactive"));
 
         List<BulkOperationLog> results = service.reconcileTheme(
                 1L, "twentytwentyfour", List.of(new StateChangeRequest("local", "ACTIVE")), 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_ACTIVATE, "twentytwentyfour", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:theme_activate"), appliedActions());
     }
 
-    /** issue #1137レビュー対応: 無効(INACTIVE)から未インストールへの遷移は未サポート(L192の残余分岐)。 */
+    /** issue #1137レビュー対応: 無効(INACTIVE)から未インストールへの遷移は未サポート。 */
     @Test
     void reconcilePlugin_無効から未インストールへの遷移は例外() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
+        bindLocalOnly();
+        world.agentListings.plugins("local-site", ext("akismet", "inactive"));
 
         assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "NOT_INSTALLED")), 9L));
     }
 
-    /** issue #1137レビュー対応: 有効から未インストールへの遷移は未サポート(L195のdesired!=INACTIVE分岐)。 */
+    /** issue #1137レビュー対応: 有効から未インストールへの遷移は未サポート。 */
     @Test
     void reconcilePlugin_有効から未インストールへの遷移は例外() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
+        bindLocalOnly();
+        world.agentListings.plugins("local-site", ext("akismet", "active"));
 
         assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "NOT_INSTALLED")), 9L));
     }
 
-    /** issue #1137レビュー対応: 有効から無効へのプラグイン無効化(L195が真になる唯一の成功経路)。 */
+    /** issue #1137レビュー対応: 有効から無効へのプラグイン無効化(成功する唯一の経路)。 */
     @Test
     void reconcilePlugin_有効から無効へは無効化のみ実行する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
+        world.agentListings.plugins("local-site", ext("akismet", "active"));
 
         List<BulkOperationLog> results = service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "INACTIVE")), 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.PLUGIN_DEACTIVATE, "akismet", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:plugin_deactivate"), appliedActions());
     }
 
-    /**
-     * issue #1137レビュー対応: 未インストール状態から{@code desired}がINACTIVEでもACTIVEでもない
-     * (未サポートな)希望状態を指定した場合の残余分岐(L189のdesired.equals(INACTIVE)=false)。
-     */
+    /** issue #1137レビュー対応: 未インストール状態から未サポートな希望状態を指定した場合の残余分岐。 */
     @Test
     void reconcilePlugin_未インストールから未サポートな希望状態への遷移は例外() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
+        bindLocalOnly();
 
         assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(
                 1L, "akismet", List.of(new StateChangeRequest("local", "BOGUS")), 9L));
     }
 
-    // ---- deleteEverywhere: isTheme分岐(L204) ----
+    // ---- deleteEverywhere: isTheme分岐 ----
 
-    /** issue #1137レビュー対応: deleteThemeEverywhereでのdeleteType三項演算子(L204)のカバレッジを補う。 */
     @Test
     void deleteThemeEverywhere_インストール済みの環境のみ削除される() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site localSite = buildManagedSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(localSite));
-        when(bulkManagementClient.listThemes("local-site"))
-                .thenReturn(List.of(new PluginThemeInfo("twentytwentyfour", "inactive")));
-        when(bulkManagementService.applyToEnvironment(eq(1L), any(), any(), any(), any(), any(), any(), any(), eq(9L)))
-                .thenReturn(new BulkOperationLog());
+        bindLocalOnly();
+        world.agentListings.themes("local-site", ext("twentytwentyfour", "inactive"));
 
         List<BulkOperationLog> results = service.deleteThemeEverywhere(1L, "twentytwentyfour", 9L);
 
         assertEquals(1, results.size());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "local", BulkOperationType.THEME_DELETE, "twentytwentyfour", null, null, null, null, 9L);
+        assertEquals(List.of("local-site:theme_delete"), appliedActions());
     }
 
-    // ---- resolveInfosByEnvironment: SSH非対応(L246)/テーマ側SSH(L257,L291,L293) ----
+    // ---- resolveInfosByEnvironment: SSH非対応/テーマ側SSH ----
 
-    /** issue #1137レビュー対応: 非managedかつSSHも使えないサイトはunavailableになる分岐(L246)のカバレッジを補う。 */
     @Test
     void listPluginComparison_SSHも使えない非managedサイトはunavailableになる() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, null, null, "test");
-        Site externalSite = buildExternalSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(externalSite));
-        when(siteService.resolveDataSource(externalSite))
-                .thenReturn(new SiteService.SiteDataSource(false, null));
+        bind(SiteSpec.noSsh(10L, "local-site"), null, null);
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertEquals(0, page.items().size());
-        verify(sshOperations, never()).fetchPluginsOrThemesForEnvironments(any(), any());
+        assertTrue(world.ssh.commands.isEmpty());
     }
 
-    /** issue #1137レビュー対応: テーマ一覧のSSH取得(L257のisTheme=true側/L291/L293)のカバレッジを補う。 */
     @Test
     void listThemeComparison_SSH取得失敗時はerror値になり作業ログに記録する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(null, 20L, null, "test");
-        Site testSite = buildExternalSite(20L, "test-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
-        when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("theme"), any())).thenReturn(
-                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
-                        java.util.Map.of("test", "stacktrace")));
+        bind(null, ssh(20L, "test-site", HOST, "/var/www/html/test"), null);
+        world.ssh.when("'theme' list", FakeWordPress.fail("Connection refused"));
 
         StatusComparisonPage page = service.listThemeComparison(1L, 0, 20);
 
         assertEquals(0, page.items().size());
-        verify(sshOperations).fetchPluginsOrThemesForEnvironments(eq("theme"), any());
-        verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.THEME_FETCH), eq("test"), eq("Connection refused"), eq("stacktrace"));
+        assertTrue(world.ssh.commands.stream().anyMatch(c -> c.contains("'theme' list")));
+        assertEquals(1, fetchFailureLogs().size());
+        assertTrue(fetchFailureLogs().get(0).contains("type=THEME_FETCH"), fetchFailureLogs().get(0));
+        assertTrue(fetchFailureLogs().get(0).contains("Connection refused"), fetchFailureLogs().get(0));
     }
 
-    /** issue #1137レビュー対応: sshPort未設定時は既定の22番ポートでホストキーをまとめる分岐(L285)のカバレッジを補う。 */
     @Test
     void listPluginComparison_sshPort未設定なら既定の22番でホストをまとめる() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(null, 20L, 30L, "test");
-        Site testSite = buildExternalSite(20L, "test-site");
-        Site productionSite = buildExternalSite(30L, "production-site");
-        com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials credsWithoutPort =
-                new com.letsblog.publishing.cms.CmsCredentials.WordPressCredentials(
-                        "https://example.com", null, "SSH", "203.0.113.5", null, "deploy",
-                        "/var/www/html/test", "PEM", null, null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(siteService.getById(30L)).thenReturn(Optional.of(productionSite));
-        when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, credsWithoutPort));
-        when(siteService.resolveDataSource(productionSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/production")));
-        when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
-                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(), java.util.Map.of(), java.util.Map.of()));
+        bind(null, ssh(20L, "test-site", HOST, "/var/www/html/test"),
+                ssh(30L, "production-site", HOST, "/var/www/html/production"));
+        Map<String, String> withoutPort = new HashMap<>(PublishingWorld.sshCredentialsMap());
+        withoutPort.put("sshHost", HOST);
+        withoutPort.put("wpPath", "/var/www/html/test");
+        withoutPort.remove("sshPort");
+        world.stubCredentials("test-site", withoutPort);
 
         service.listPluginComparison(1L, 0, 20);
 
         // 双方とも同一ホスト(203.0.113.5)かつポート未設定=既定22番なので、production側の
         // 明示的な22番指定と同一ホストキーになり1回のfetchにまとまる。
-        verify(sshOperations, org.mockito.Mockito.times(1))
-                .fetchPluginsOrThemesForEnvironments(eq("plugin"), any());
+        assertEquals(1, world.ssh.batches.size());
     }
 
     @Test
     void listPluginComparison_SSH取得失敗時はerror値になり作業ログに記録する() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(null, 20L, null, "test");
-        Site testSite = buildExternalSite(20L, "test-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(20L)).thenReturn(Optional.of(testSite));
-        when(siteService.resolveDataSource(testSite))
-                .thenReturn(new SiteService.SiteDataSource(false, sshCreds("/var/www/html/test")));
-        when(sshOperations.fetchPluginsOrThemesForEnvironments(eq("plugin"), any())).thenReturn(
-                new com.letsblog.publishing.cms.ssh.WordPressSshOperations.EnvironmentFetchResult<>(
-                        java.util.Map.of(), java.util.Map.of("test", "Connection refused"),
-                        java.util.Map.of("test", "java.io.IOException: Connection refused\n\tat ...")));
+        bind(null, ssh(20L, "test-site", HOST, "/var/www/html/test"), null);
+        world.ssh.when("'plugin' list", FakeWordPress.fail("Connection refused"));
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
 
         assertEquals(0, page.items().size());
-        verify(bulkManagementService).logFetchFailure(
-                eq(1L), eq(BulkOperationType.PLUGIN_FETCH), eq("test"), eq("Connection refused"),
-                eq("java.io.IOException: Connection refused\n\tat ..."));
+        assertEquals(1, fetchFailureLogs().size());
+        assertTrue(fetchFailureLogs().get(0).contains("type=PLUGIN_FETCH"), fetchFailureLogs().get(0));
+        assertTrue(fetchFailureLogs().get(0).contains("environment=test"), fetchFailureLogs().get(0));
+    }
+
+    @Test
+    void listPluginComparison_SSHに接続できなければその環境の全てがerror値になる() {
+        bind(null, ssh(20L, "test-site", HOST, "/var/www/html/test"), null);
+        world.ssh.rejectHost(HOST);
+
+        StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
+
+        assertEquals(0, page.items().size());
+        assertEquals(1, fetchFailureLogs().size());
     }
 
     // ---- issue #1687: 環境間の並列実行 ----
 
-    private void bindThreeManagedSites() {
-        Project project = buildProject(10L, 20L, 30L, "test");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        when(siteService.getById(20L)).thenReturn(Optional.of(buildManagedSite(20L, "test-site")));
-        when(siteService.getById(30L)).thenReturn(Optional.of(buildManagedSite(30L, "production-site")));
-    }
-
-    private BulkOperationLog logOf(String environment, BulkOperationType type) {
-        BulkOperationLog log = new BulkOperationLog();
-        log.setEnvironment(environment);
-        log.setOperationType(type);
-        return log;
-    }
-
     @Test
     void 一覧取得_managed環境ごとのagent取得が重なって走る() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
         OverlapProbe probe = new OverlapProbe(3);
-        when(bulkManagementClient.listPlugins(any())).thenAnswer(invocation -> {
+        world.agent.on("POST", "/plugins", request -> {
             probe.enter();
-            return List.of(new PluginThemeInfo("akismet", "active"));
+            return Response.ok("{\"plugins\":[{\"name\":\"akismet\",\"status\":\"active\"}]}");
         });
 
         StatusComparisonPage page = service.listPluginComparison(1L, 0, 20);
@@ -722,35 +560,35 @@ class PluginThemeComparisonServiceTest {
 
     @Test
     void 一覧取得_agent取得の実行時例外は並列でも呼び出し元へそのまま伝わる() {
-        PluginThemeComparisonService service = service();
-        bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins("local-site")).thenThrow(new IllegalStateException("agent down"));
-        when(bulkManagementClient.listPlugins("test-site")).thenReturn(List.of());
-        when(bulkManagementClient.listPlugins("production-site")).thenReturn(List.of());
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), managed(30L, "production-site"));
+        // managedなのにwpSlugが無いサイト(project-serviceの登録不備)。リクエスト本文を作る段階でNullPointerExceptionになる。
+        world.project.json("GET", "/api/internal/project/sites/10",
+                "{\"id\":10,\"siteKey\":\"local-site\",\"name\":\"n\",\"baseUrl\":\"https://e.example\","
+                        + "\"cmsType\":\"WORDPRESS\",\"managedWordpress\":true,\"wpSlug\":null}");
 
-        IllegalStateException thrown = assertThrows(IllegalStateException.class,
-                () -> service.listPluginComparison(1L, 0, 20));
+        assertThrows(NullPointerException.class, () -> service.listPluginComparison(1L, 0, 20));
+    }
 
-        assertEquals("agent down", thrown.getMessage());
+    /** 1回目だけ成功し、2回目以降は404になるサイト(一覧取得の時点では登録されていたが、書き込み時には消えていた)。 */
+    private void siteVanishesAfterListing(SiteSpec spec) {
+        world.project.sequence("GET", "/api/internal/project/sites/" + spec.id(),
+                Response.ok(world.siteJson(spec)), Response.json(404, "{}"));
     }
 
     @Test
     void deletePluginEverywhere_環境ごとの削除が重なって走り_結果はENVIRONMENT_ORDER順() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins(any()))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
+        for (String slug : List.of("local-site", "test-site", "production-site")) {
+            world.agentListings.plugins(slug, ext("akismet", "inactive"));
+        }
         OverlapProbe probe = new OverlapProbe(3);
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), any(), eq(BulkOperationType.PLUGIN_DELETE), eq("akismet"), any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    String environment = invocation.getArgument(1);
-                    if (environment.equals("local")) {
-                        Thread.sleep(150);
-                    }
-                    probe.enter();
-                    return logOf(environment, BulkOperationType.PLUGIN_DELETE);
-                });
+        world.agent.on("POST", "/bulk-management", request -> {
+            if (request.bodyText().contains("local-site")) {
+                sleep(150);
+            }
+            probe.enter();
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
         List<BulkOperationLog> results = service.deletePluginEverywhere(1L, "akismet", 9L);
 
@@ -761,78 +599,69 @@ class PluginThemeComparisonServiceTest {
 
     @Test
     void deleteThemeEverywhere_環境ごとの削除が重なって走り_結果はENVIRONMENT_ORDER順() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listThemes(any()))
-                .thenReturn(List.of(new PluginThemeInfo("twentytwentyfour", "inactive")));
+        for (String slug : List.of("local-site", "test-site", "production-site")) {
+            world.agentListings.themes(slug, ext("twentytwentyfour", "inactive"));
+        }
         OverlapProbe probe = new OverlapProbe(3);
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), any(), eq(BulkOperationType.THEME_DELETE), eq("twentytwentyfour"),
-                any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    String environment = invocation.getArgument(1);
-                    if (environment.equals("local")) {
-                        Thread.sleep(150);
-                    }
-                    probe.enter();
-                    return logOf(environment, BulkOperationType.THEME_DELETE);
-                });
+        world.agent.on("POST", "/bulk-management", request -> {
+            if (request.bodyText().contains("local-site")) {
+                sleep(150);
+            }
+            probe.enter();
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
         List<BulkOperationLog> results = service.deleteThemeEverywhere(1L, "twentytwentyfour", 9L);
 
         assertTrue(probe.allOverlapped(), "3環境のテーマ削除が重なって呼ばれていない(逐次実行)");
         assertEquals(List.of("local", "test", "production"),
                 results.stream().map(BulkOperationLog::getEnvironment).toList());
+        assertTrue(results.stream().allMatch(r -> r.getOperationType() == BulkOperationType.THEME_DELETE));
     }
 
     @Test
     void deletePluginEverywhere_1環境の実行時例外でも他環境の削除は最後まで実行される() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins(any()))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "inactive")));
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), any(), eq(BulkOperationType.PLUGIN_DELETE), eq("akismet"), any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    String environment = invocation.getArgument(1);
-                    if (environment.equals("local")) {
-                        throw new IllegalStateException("delete failed");
-                    }
-                    Thread.sleep(100);
-                    return logOf(environment, BulkOperationType.PLUGIN_DELETE);
-                });
+        for (String slug : List.of("local-site", "test-site", "production-site")) {
+            world.agentListings.plugins(slug, ext("akismet", "inactive"));
+        }
+        siteVanishesAfterListing(managed(10L, "local-site"));
+        world.agent.on("POST", "/bulk-management", request -> {
+            sleep(100);
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
-        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+        SiteNotFoundException thrown = assertThrows(SiteNotFoundException.class,
                 () -> service.deletePluginEverywhere(1L, "akismet", 9L));
 
-        assertEquals("delete failed", thrown.getMessage());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "test", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "production", BulkOperationType.PLUGIN_DELETE, "akismet", null, null, null, null, 9L);
+        assertTrue(thrown.getMessage().contains("10"), thrown.getMessage());
+        assertTrue(appliedActions().contains("test-site:plugin_delete"));
+        assertTrue(appliedActions().contains("production-site:plugin_delete"));
     }
 
     @Test
     void reconcilePlugin_環境間は重なって走り_結果はchangesの順_環境内の段階順は保たれる() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins(any())).thenReturn(List.of());
         OverlapProbe probe = new OverlapProbe(3);
-        java.util.concurrent.ConcurrentLinkedQueue<String> calls = new java.util.concurrent.ConcurrentLinkedQueue<>();
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), any(), any(), eq("akismet"), any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    String environment = invocation.getArgument(1);
-                    BulkOperationType type = invocation.getArgument(2);
-                    calls.add(environment + ":" + type);
-                    if (type == BulkOperationType.PLUGIN_INSTALL) {
-                        probe.enter();
-                    } else {
-                        // INSTALLより後に走ることが環境内の段階順の証拠になる
-                        Thread.sleep(50);
-                    }
-                    return logOf(environment, type);
-                });
+        ConcurrentLinkedQueue<String> calls = new ConcurrentLinkedQueue<>();
+        world.agent.on("POST", "/bulk-management", request -> {
+            try {
+                JsonNode node = world.mapper.readTree(request.body());
+                String site = node.path("slug").asText();
+                String action = node.path("action").asText();
+                calls.add(site + ":" + action);
+                if (action.equals("plugin_install")) {
+                    probe.enter();
+                } else {
+                    // INSTALLより後に走ることが環境内の段階順の証拠になる
+                    sleep(50);
+                }
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
         // changesは local/test/production の逆順
         List<BulkOperationLog> results = service.reconcilePlugin(1L, "akismet", List.of(
@@ -846,28 +675,20 @@ class PluginThemeComparisonServiceTest {
                 "test:PLUGIN_INSTALL", "test:PLUGIN_ACTIVATE",
                 "local:PLUGIN_INSTALL", "local:PLUGIN_ACTIVATE"),
                 results.stream().map(r -> r.getEnvironment() + ":" + r.getOperationType()).toList());
-        for (String environment : List.of("local", "test", "production")) {
-            List<String> perEnvironment = calls.stream().filter(c -> c.startsWith(environment + ":")).toList();
-            assertEquals(List.of(environment + ":PLUGIN_INSTALL", environment + ":PLUGIN_ACTIVATE"), perEnvironment);
+        for (String site : List.of("local-site", "test-site", "production-site")) {
+            List<String> perSite = calls.stream().filter(c -> c.startsWith(site + ":")).toList();
+            assertEquals(List.of(site + ":plugin_install", site + ":plugin_activate"), perSite);
         }
     }
 
     @Test
     void reconcileTheme_環境間は重なって走る() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listThemes(any())).thenReturn(List.of());
         OverlapProbe probe = new OverlapProbe(2);
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), any(), any(), eq("twentytwentyfour"), any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    String environment = invocation.getArgument(1);
-                    BulkOperationType type = invocation.getArgument(2);
-                    if (type == BulkOperationType.THEME_INSTALL) {
-                        probe.enter();
-                    }
-                    return logOf(environment, type);
-                });
+        world.agent.on("POST", "/bulk-management", request -> {
+            probe.enter();
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
         List<BulkOperationLog> results = service.reconcileTheme(1L, "twentytwentyfour", List.of(
                 new StateChangeRequest("test", "INACTIVE"),
@@ -879,45 +700,33 @@ class PluginThemeComparisonServiceTest {
 
     @Test
     void reconcilePlugin_1環境の実行時例外でも他環境の反映は最後まで実行される() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins(any())).thenReturn(List.of());
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), any(), any(), eq("akismet"), any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    String environment = invocation.getArgument(1);
-                    if (environment.equals("local")) {
-                        throw new IllegalStateException("install failed");
-                    }
-                    Thread.sleep(100);
-                    return logOf(environment, invocation.getArgument(2));
-                });
+        siteVanishesAfterListing(managed(10L, "local-site"));
+        world.agent.on("POST", "/bulk-management", request -> {
+            sleep(100);
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
-        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> service.reconcilePlugin(
+        SiteNotFoundException thrown = assertThrows(SiteNotFoundException.class, () -> service.reconcilePlugin(
                 1L, "akismet", List.of(
                         new StateChangeRequest("local", "INACTIVE"),
                         new StateChangeRequest("test", "INACTIVE")), 9L));
 
-        assertEquals("install failed", thrown.getMessage());
-        verify(bulkManagementService).applyToEnvironment(
-                1L, "test", BulkOperationType.PLUGIN_INSTALL, "akismet", null, null, null, null, 9L);
+        assertTrue(thrown.getMessage().contains("10"), thrown.getMessage());
+        assertTrue(appliedActions().contains("test-site:plugin_install"));
     }
 
     @Test
     void reconcilePlugin_同じ環境を複数指定しても環境内は直列で実行される() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins(any())).thenReturn(List.of());
-        java.util.concurrent.atomic.AtomicInteger running = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicInteger maxRunning = new java.util.concurrent.atomic.AtomicInteger();
-        when(bulkManagementService.applyToEnvironment(
-                eq(1L), eq("local"), any(), eq("akismet"), any(), any(), any(), any(), eq(9L)))
-                .thenAnswer(invocation -> {
-                    maxRunning.accumulateAndGet(running.incrementAndGet(), Math::max);
-                    Thread.sleep(50);
-                    running.decrementAndGet();
-                    return logOf("local", invocation.getArgument(2));
-                });
+        AtomicInteger running = new AtomicInteger();
+        AtomicInteger maxRunning = new AtomicInteger();
+        world.agent.on("POST", "/bulk-management", request -> {
+            maxRunning.accumulateAndGet(running.incrementAndGet(), Math::max);
+            sleep(50);
+            running.decrementAndGet();
+            return Response.ok("{\"status\":\"success\"}");
+        });
 
         List<BulkOperationLog> results = service.reconcilePlugin(1L, "akismet", List.of(
                 new StateChangeRequest("local", "INACTIVE"),
@@ -929,39 +738,32 @@ class PluginThemeComparisonServiceTest {
 
     @Test
     void reconcilePlugin_サポート外の遷移を含む場合は他の変更も実行せず例外() {
-        PluginThemeComparisonService service = service();
         bindThreeManagedSites();
-        when(bulkManagementClient.listPlugins("local-site")).thenReturn(List.of());
-        when(bulkManagementClient.listPlugins("test-site"))
-                .thenReturn(List.of(new PluginThemeInfo("akismet", "active")));
-        when(bulkManagementClient.listPlugins("production-site")).thenReturn(List.of());
+        world.agentListings.plugins("test-site", ext("akismet", "active"));
 
         assertThrows(IllegalArgumentException.class, () -> service.reconcilePlugin(1L, "akismet", List.of(
                 new StateChangeRequest("local", "ACTIVE"),
                 new StateChangeRequest("test", "NOT_INSTALLED")), 9L));
 
-        verify(bulkManagementService, never()).applyToEnvironment(
-                any(), any(), any(), any(), any(), any(), any(), any(), any());
+        assertTrue(appliedActions().isEmpty(), "どの環境へも書き込まない");
     }
 
     @Test
     void 一覧取得_後続環境の解決が失敗しても_投入済みのagent取得を待ち終えてから例外を投げる() {
-        PluginThemeComparisonService service = service();
-        Project project = buildProject(10L, 20L, null, "test");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(buildManagedSite(10L, "local-site")));
-        when(siteService.getById(20L)).thenThrow(new IllegalStateException("resolve failed"));
-        java.util.concurrent.atomic.AtomicBoolean fetchFinished = new java.util.concurrent.atomic.AtomicBoolean();
-        when(bulkManagementClient.listPlugins("local-site")).thenAnswer(invocation -> {
-            Thread.sleep(300);
+        bind(managed(10L, "local-site"), managed(20L, "test-site"), null);
+        // 後続の環境(test)のサイト解決がproject-serviceの障害で失敗する。
+        world.project.status("GET", "/api/internal/project/sites/20", 500, "{\"error\":\"down\"}");
+        AtomicBoolean fetchFinished = new AtomicBoolean();
+        world.agent.on("POST", "/plugins", request -> {
+            sleep(300);
             fetchFinished.set(true);
-            return List.of();
+            return Response.ok("{\"plugins\":[]}");
         });
 
         IllegalStateException thrown = assertThrows(IllegalStateException.class,
                 () -> service.listPluginComparison(1L, 0, 20));
 
-        assertEquals("resolve failed", thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("サイト照会"), thrown.getMessage());
         assertTrue(fetchFinished.get(), "投入済みのagent取得が終わる前に例外が呼び出し元へ伝わった(ワーカーが孤児になる)");
     }
 }

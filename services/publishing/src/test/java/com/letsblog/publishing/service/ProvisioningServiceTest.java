@@ -1,51 +1,53 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.cms.AuthorProvisioningRequest;
-import com.letsblog.publishing.cms.CmsAdapter;
 import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsCredentials;
 import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** ProvisioningServiceの回帰テスト(issue #577 stage2でlegacy-api向けに作成、issue #710でpublishing-serviceへ移管)。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * ProvisioningServiceの回帰テスト(issue #577 stage2でlegacy-api向けに作成、issue #710でpublishing-serviceへ移管)。
+ *
+ * <p>issue #1815で書き直し: CmsAdapterFactory・WordPressAdapterは実物を使い、外部との通信(SSH)だけを
+ * {@code FakeSshCommandExecutor}(手書きフェイク)で差し替える。
+ */
 class ProvisioningServiceTest {
 
-    @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
+    private final CmsCredentials credentials = new CmsCredentials.WordPressCredentials(
+            "https://example.com", "admin", "SSH", "ssh.example.com", 22, "deploy", "/var/www/html",
+            "PRIVATE-KEY-PEM", null, null);
 
-    @Mock
-    private CmsAdapter cmsAdapter;
-
-    // CmsCredentialsはsealed interfaceのためモック化できず、実インスタンスを使う
-    private final CmsCredentials credentials =
-            new CmsCredentials.WordPressCredentials("https://example.com", "admin", "SSH");
-
+    private PublishingWorld world;
     private ProvisioningService service;
 
     @BeforeEach
     void setUp() {
-        service = new ProvisioningService(cmsAdapterFactory);
-        org.mockito.Mockito.lenient().when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        world = new PublishingWorld();
+        service = new ProvisioningService(world.cmsAdapterFactory);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void provisionSite_カテゴリ_タグ_著者すべて成功する() {
-        when(cmsAdapter.provisionDefaultCategory(credentials)).thenReturn("cat-1");
-        when(cmsAdapter.provisionDefaultTag(credentials)).thenReturn("tag-1");
-        when(cmsAdapter.provisionAuthor(credentials, AuthorProvisioningRequest.of("actor@example.com"))).thenReturn("author-1");
+        world.ssh.whenOk("term list", "[]")
+                .whenOk("term create 'category'", "cat-1").whenOk("term create 'post_tag'", "tag-1")
+                .whenOk("user list", "[]").whenOk("user create", "author-1").whenOk("user update", "");
 
         ProvisioningService.ProvisioningResult result =
                 service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com");
@@ -60,50 +62,52 @@ class ProvisioningServiceTest {
 
     @Test
     void provisionSite_actorEmailがnullなら著者プロビジョニングをスキップする() {
-        when(cmsAdapter.provisionDefaultCategory(credentials)).thenReturn("cat-1");
-        when(cmsAdapter.provisionDefaultTag(credentials)).thenReturn("tag-1");
+        world.ssh.whenOk("term list", "[]")
+                .whenOk("term create 'category'", "cat-1").whenOk("term create 'post_tag'", "tag-1");
 
         ProvisioningService.ProvisioningResult result = service.provisionSite(CmsType.WORDPRESS, credentials, null);
 
         assertNull(result.authorId);
         assertNull(result.authorError);
-        verify(cmsAdapter, never()).provisionAuthor(any(), any());
+        assertFalse(world.ssh.ran("user "), "著者関連のコマンドは実行されない: " + world.ssh.commands);
     }
 
     @Test
     void provisionSite_カテゴリ作成失敗は部分的失敗として記録し続行する() {
-        when(cmsAdapter.provisionDefaultCategory(credentials)).thenThrow(new RuntimeException("category failed"));
-        when(cmsAdapter.provisionDefaultTag(credentials)).thenReturn("tag-1");
-        when(cmsAdapter.provisionAuthor(credentials, AuthorProvisioningRequest.of("actor@example.com"))).thenReturn("author-1");
+        world.ssh.whenOk("term list", "[]")
+                .whenFail("term create 'category'", "category failed").whenOk("term create 'post_tag'", "tag-1")
+                .whenOk("user list", "[]").whenOk("user create", "author-1").whenOk("user update", "");
 
         ProvisioningService.ProvisioningResult result =
                 service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com");
 
         assertNull(result.defaultCategoryId);
-        assertEquals("category failed", result.categoryError);
+        assertNotNull(result.categoryError);
+        assertTrue(result.categoryError.contains("category failed"), result.categoryError);
         assertEquals("tag-1", result.defaultTagId);
         assertEquals("author-1", result.authorId);
     }
 
     @Test
     void provisionSite_全リソース失敗しても例外は投げない() {
-        when(cmsAdapter.provisionDefaultCategory(credentials)).thenThrow(new RuntimeException("category failed"));
-        when(cmsAdapter.provisionDefaultTag(credentials)).thenThrow(new RuntimeException("tag failed"));
-        when(cmsAdapter.provisionAuthor(credentials, AuthorProvisioningRequest.of("actor@example.com"))).thenThrow(new RuntimeException("author failed"));
+        world.ssh.whenOk("term list", "[]")
+                .whenFail("term create 'category'", "category failed")
+                .whenFail("term create 'post_tag'", "tag failed")
+                .whenOk("user list", "[]").whenFail("user create", "author failed");
 
         ProvisioningService.ProvisioningResult result =
                 service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com");
 
-        assertEquals("category failed", result.categoryError);
-        assertEquals("tag failed", result.tagError);
-        assertEquals("author failed", result.authorError);
+        assertTrue(result.categoryError.contains("category failed"), result.categoryError);
+        assertTrue(result.tagError.contains("tag failed"), result.tagError);
+        assertTrue(result.authorError.contains("author failed"), result.authorError);
     }
 
     @Test
     void provisionSite_CMSアダプタ解決に失敗すると致命的エラーとして例外を投げる() {
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenThrow(new RuntimeException("unsupported"));
+        ProvisioningService withoutAdapters = new ProvisioningService(new CmsAdapterFactory(List.of()));
 
         assertThrows(ProvisioningException.class,
-                () -> service.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com"));
+                () -> withoutAdapters.provisionSite(CmsType.WORDPRESS, credentials, "actor@example.com"));
     }
 }

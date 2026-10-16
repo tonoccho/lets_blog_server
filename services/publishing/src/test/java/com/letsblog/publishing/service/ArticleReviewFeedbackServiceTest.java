@@ -2,55 +2,61 @@ package com.letsblog.publishing.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.letsblog.publishing.client.ProjectServiceClient;
-import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.publishing.domain.ArticleReview;
 import com.letsblog.publishing.domain.ArticleReviewState;
 import com.letsblog.publishing.dto.ArticleRejectResponse;
 import com.letsblog.publishing.dto.MyArticleReviewResponse;
 import com.letsblog.publishing.github.GithubApiException;
-import com.letsblog.publishing.github.GithubIssueComment;
-import com.letsblog.publishing.github.GithubPullRequestClient;
 import com.letsblog.publishing.repository.ArticleReviewRepository;
+import com.letsblog.publishing.testsupport.GithubStubs;
+import com.letsblog.publishing.testsupport.PublishingWorld;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentMatchers;
 
-/** {@link ArticleReviewFeedbackService}の単体テスト(issue #1344)。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * {@link ArticleReviewFeedbackService}の単体テスト(issue #1344)。
+ *
+ * <p>issue #1815で書き直し: GithubPullRequestClient・ProjectServiceClientは実物を使い、GitHubとproject-serviceへの
+ * HTTP({@code FakeHttpServer})だけを差し替える。{@link ArticleReviewRepository}はDBアクセスそのものなのでMockito。
+ */
 class ArticleReviewFeedbackServiceTest {
 
-    private static final GithubAccess ACCESS = new GithubAccess("t", "octo", "blog");
     private static final long PROJECT_ID = 7L;
     private static final long ACTOR_ID = 3L;
     private static final int PR = 201;
 
-    @Mock
+    private PublishingWorld world;
     private ArticleReviewRepository repository;
-    @Mock
-    private GithubPullRequestClient githubClient;
-    @Mock
-    private ProjectServiceClient projectServiceClient;
+
+    @BeforeEach
+    void setUp() {
+        world = new PublishingWorld();
+        repository = mock(ArticleReviewRepository.class);
+        world.stubGithubAccess(PROJECT_ID, "t", "octo", "blog");
+        world.asUser("Bearer user-token");
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private ArticleReviewFeedbackService service() {
-        return new ArticleReviewFeedbackService(repository, githubClient, projectServiceClient);
+        return new ArticleReviewFeedbackService(repository, world.githubPullRequestClient, world.projectServiceClient);
     }
 
     private static ArticleReview review(ArticleReviewState state) {
@@ -65,28 +71,32 @@ class ArticleReviewFeedbackServiceTest {
         return review;
     }
 
-    private String postedBody() {
-        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(githubClient).createIssueComment(any(), anyInt(), captor.capture());
-        return captor.getValue();
+    private String postedBody() throws Exception {
+        var requests = world.github.requests("POST", "/repos/octo/blog/issues/" + PR + "/comments");
+        assertThat(requests).hasSize(1);
+        JsonNode body = world.mapper.readTree(requests.get(0).body());
+        return body.path("body").asText();
+    }
+
+    private void assertNoRemoteCalls() {
+        assertThat(world.github.requests()).isEmpty();
+        assertThat(world.project.requests()).isEmpty();
     }
 
     @Test
     @DisplayName("レビュー中のPRに、実施者のメールとIDと指摘を含む本文でコメントを投稿し、差し戻しへ遷移して実施者・時刻・コメントIDを記録する")
-    void rejectsInReview() {
+    void rejectsInReview() throws Exception {
         ArticleReview review = review(ArticleReviewState.IN_REVIEW);
         when(repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, PR)).thenReturn(Optional.of(review));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, 9L)).thenReturn(ACCESS);
-        when(githubClient.createIssueComment(any(), anyInt(), anyString()))
-                .thenReturn(new GithubIssueComment(5001L, "x"));
+        GithubStubs.createIssueComment(world.github, "octo", "blog", PR, 5001L);
 
         ArticleRejectResponse response = service().reject(PROJECT_ID, 9L, "admin@example.com", PR, "見出しを直して");
 
-        verify(githubClient).createIssueComment(org.mockito.ArgumentMatchers.eq(ACCESS), org.mockito.ArgumentMatchers.eq(PR), anyString());
         assertThat(postedBody())
                 .contains("見出しを直して")
                 .contains("admin@example.com")
                 .contains("ID 9");
+        assertThat(world.github.last().header("Authorization")).isEqualTo("Bearer t");
         assertThat(review.getState()).isEqualTo(ArticleReviewState.CHANGES_REQUESTED);
         assertThat(review.getRejectedByUserId()).isEqualTo(9L);
         assertThat(review.getRejectCommentId()).isEqualTo(5001L);
@@ -101,12 +111,10 @@ class ArticleReviewFeedbackServiceTest {
 
     @Test
     @DisplayName("メールアドレスを解決できない実施者でも、ユーザーIDで実施者が判別できる本文にする")
-    void bodyWithoutEmailStillNamesActorId() {
+    void bodyWithoutEmailStillNamesActorId() throws Exception {
         ArticleReview review = review(ArticleReviewState.IN_REVIEW);
         when(repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, PR)).thenReturn(Optional.of(review));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, 9L)).thenReturn(ACCESS);
-        when(githubClient.createIssueComment(any(), anyInt(), anyString()))
-                .thenReturn(new GithubIssueComment(5002L, "x"));
+        GithubStubs.createIssueComment(world.github, "octo", "blog", PR, 5002L);
 
         service().reject(PROJECT_ID, 9L, null, PR, "直して");
 
@@ -121,8 +129,8 @@ class ArticleReviewFeedbackServiceTest {
         assertThatThrownBy(() -> service().reject(PROJECT_ID, 9L, "a@b", PR, "x"))
                 .isInstanceOf(ArticleReviewNotFoundException.class)
                 .hasMessageContaining("#" + PR);
-        verifyNoInteractions(githubClient, projectServiceClient);
-        verify(repository, never()).save(any());
+        assertNoRemoteCalls();
+        verify(repository, never()).save(ArgumentMatchers.any());
     }
 
     @ParameterizedTest
@@ -135,8 +143,8 @@ class ArticleReviewFeedbackServiceTest {
         assertThatThrownBy(() -> service().reject(PROJECT_ID, 9L, "a@b", PR, "x"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("レビュー中");
-        verifyNoInteractions(githubClient, projectServiceClient);
-        verify(repository, never()).save(any());
+        assertNoRemoteCalls();
+        verify(repository, never()).save(ArgumentMatchers.any());
         assertThat(review.getState()).isEqualTo(state);
         assertThat(review.getRejectedByUserId()).isNull();
     }
@@ -146,14 +154,12 @@ class ArticleReviewFeedbackServiceTest {
     void commentFailureKeepsState() {
         ArticleReview review = review(ArticleReviewState.IN_REVIEW);
         when(repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, PR)).thenReturn(Optional.of(review));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, 9L)).thenReturn(ACCESS);
-        when(githubClient.createIssueComment(any(), anyInt(), anyString()))
-                .thenThrow(new GithubApiException("失敗"));
+        world.github.status("POST", "/repos/octo/blog/issues/" + PR + "/comments", 500, "{\"message\":\"失敗\"}");
 
         assertThatThrownBy(() -> service().reject(PROJECT_ID, 9L, "a@b", PR, "x"))
                 .isInstanceOf(GithubApiException.class);
         assertThat(review.getState()).isEqualTo(ArticleReviewState.IN_REVIEW);
-        verify(repository, never()).save(any());
+        verify(repository, never()).save(ArgumentMatchers.any());
     }
 
     @Test
@@ -163,9 +169,7 @@ class ArticleReviewFeedbackServiceTest {
         rejected.markChangesRequested(9L, 5001L);
         when(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, ACTOR_ID))
                 .thenReturn(List.of(rejected));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, ACTOR_ID)).thenReturn(ACCESS);
-        when(githubClient.findIssueComment(ACCESS, 5001L))
-                .thenReturn(Optional.of(new GithubIssueComment(5001L, "見出しを直して")));
+        GithubStubs.issueComment(world.github, "octo", "blog", 5001L, "見出しを直して");
 
         List<MyArticleReviewResponse> result = service().myReviews(PROJECT_ID, ACTOR_ID);
 
@@ -193,7 +197,7 @@ class ArticleReviewFeedbackServiceTest {
             assertThat(row.rejectComment()).isNull();
             assertThat(row.rejectedAt()).isNull();
         });
-        verifyNoInteractions(githubClient, projectServiceClient);
+        assertNoRemoteCalls();
     }
 
     @Test
@@ -203,7 +207,7 @@ class ArticleReviewFeedbackServiceTest {
                 .thenReturn(List.of());
 
         assertThat(service().myReviews(PROJECT_ID, ACTOR_ID)).isEmpty();
-        verifyNoInteractions(githubClient, projectServiceClient);
+        assertNoRemoteCalls();
     }
 
     @Test
@@ -213,8 +217,7 @@ class ArticleReviewFeedbackServiceTest {
         rejected.markChangesRequested(9L, 5001L);
         when(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, ACTOR_ID))
                 .thenReturn(List.of(rejected));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, ACTOR_ID)).thenReturn(ACCESS);
-        when(githubClient.findIssueComment(ACCESS, 5001L)).thenReturn(Optional.empty());
+        world.github.status("GET", "/repos/octo/blog/issues/comments/5001", 404, "{\"message\":\"Not Found\"}");
 
         MyArticleReviewResponse row = service().myReviews(PROJECT_ID, ACTOR_ID).get(0);
 
@@ -233,7 +236,7 @@ class ArticleReviewFeedbackServiceTest {
         MyArticleReviewResponse row = service().myReviews(PROJECT_ID, ACTOR_ID).get(0);
 
         assertThat(row.rejectComment()).isNull();
-        verify(githubClient, never()).findIssueComment(any(), anyLong());
+        assertThat(world.github.requests("GET", ".*/issues/comments/.*")).isEmpty();
     }
 
     @Test
@@ -245,26 +248,21 @@ class ArticleReviewFeedbackServiceTest {
         second.markChangesRequested(9L, 5002L);
         when(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, ACTOR_ID))
                 .thenReturn(List.of(first, second));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, ACTOR_ID)).thenReturn(ACCESS);
-        when(githubClient.findIssueComment(ACCESS, 5001L))
-                .thenReturn(Optional.of(new GithubIssueComment(5001L, "一つ目")));
-        when(githubClient.findIssueComment(ACCESS, 5002L))
-                .thenReturn(Optional.of(new GithubIssueComment(5002L, "二つ目")));
+        GithubStubs.issueComment(world.github, "octo", "blog", 5001L, "一つ目");
+        GithubStubs.issueComment(world.github, "octo", "blog", 5002L, "二つ目");
 
         List<MyArticleReviewResponse> result = service().myReviews(PROJECT_ID, ACTOR_ID);
 
         assertThat(result).extracting(MyArticleReviewResponse::rejectComment).containsExactly("一つ目", "二つ目");
-        verify(projectServiceClient, org.mockito.Mockito.times(1)).resolveGithubAccess(PROJECT_ID, ACTOR_ID);
+        assertThat(world.project.requests("GET", "/api/internal/project/projects/7/github-access")).hasSize(1);
     }
 
     @Test
     @DisplayName("メールアドレスが空白の実施者でも、ユーザーIDで実施者が判別できる本文にする")
-    void bodyWithBlankEmail() {
+    void bodyWithBlankEmail() throws Exception {
         ArticleReview review = review(ArticleReviewState.IN_REVIEW);
         when(repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, PR)).thenReturn(Optional.of(review));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, 9L)).thenReturn(ACCESS);
-        when(githubClient.createIssueComment(any(), anyInt(), anyString()))
-                .thenReturn(new GithubIssueComment(5003L, "x"));
+        GithubStubs.createIssueComment(world.github, "octo", "blog", PR, 5003L);
 
         service().reject(PROJECT_ID, 9L, "  ", PR, "直して");
 

@@ -1,67 +1,63 @@
 package com.letsblog.publishing.service;
 
-import com.letsblog.publishing.client.ProjectServiceClient;
 import com.letsblog.publishing.cms.AuthorProvisioningRequest;
-import com.letsblog.publishing.cms.CmsAdapter;
-import com.letsblog.publishing.cms.CmsAdapterFactory;
 import com.letsblog.publishing.cms.CmsApiException;
-import com.letsblog.publishing.cms.CmsType;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * AuthorProvisioningServiceの回帰テスト(issue #707、#575設計判断4の書き込み側)。
+ *
+ * <p>issue #1815で書き直し: ProjectServiceClient・CmsAdapterFactory・WordPressAdapterは実物を使い、
+ * 外部との通信だけを差し替える。project-serviceへのHTTPは{@code FakeHttpServer}、SSHはFakeSshCommandExecutor。
  */
-@ExtendWith(MockitoExtension.class)
 class AuthorProvisioningServiceTest {
 
-    @Mock
-    private ProjectServiceClient projectServiceClient;
-    @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-    @Mock
-    private CmsAdapter cmsAdapter;
-
+    private PublishingWorld world;
     private AuthorProvisioningService service;
 
     @BeforeEach
     void setUp() {
-        service = new AuthorProvisioningService(projectServiceClient, cmsAdapterFactory);
-        ProjectServiceClient.SiteCredentialsBridge credentialsBridge = new ProjectServiceClient.SiteCredentialsBridge(
-                1L, CmsType.WORDPRESS,
-                Map.of("baseUrl", "https://example.com", "username", "admin", "transport", "SSH"));
-        when(projectServiceClient.getCredentials("main")).thenReturn(credentialsBridge);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        world = new PublishingWorld();
+        service = new AuthorProvisioningService(world.projectServiceClient, world.cmsAdapterFactory);
+        world.stubCredentials("main", PublishingWorld.sshCredentialsMap());
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void provisionAuthor_権限があればCmsAdapterへ委譲する() {
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(true);
-        when(cmsAdapter.provisionAuthor(any(), any())).thenReturn("9");
+        world.ssh.whenOk("echo ok", "ok").whenOk("core version", "6.4.2")
+                .whenOk("user list", "[]").whenOk("user create", "9").whenOk("user update", "");
         AuthorProvisioningRequest request = new AuthorProvisioningRequest(
                 "member@example.com", "editor", null, null, null, null, null, null);
 
         String cmsAuthorId = service.provisionAuthor("main", request);
 
         assertEquals("9", cmsAuthorId);
+        assertTrue(world.ssh.ran("user create"), "著者の作成コマンドがSSHで実行されること: " + world.ssh.commands);
+        assertTrue(world.ssh.ran("user update '9'"), "作成した著者のプロフィールが更新されること");
     }
 
     @Test
     void provisionAuthor_権限がなければCmsApiExceptionを投げる() {
-        when(cmsAdapter.hasAuthorProvisioningCapability(any())).thenReturn(false);
+        world.ssh.whenFail("echo ok", "Permission denied");
         AuthorProvisioningRequest request = new AuthorProvisioningRequest(
                 "member@example.com", "editor", null, null, null, null, null, null);
 
-        assertThrows(CmsApiException.class, () -> service.provisionAuthor("main", request));
+        CmsApiException e = assertThrows(CmsApiException.class, () -> service.provisionAuthor("main", request));
+
+        assertTrue(e.getMessage().contains("サイト 'main'"));
+        assertFalse(world.ssh.ran("user create"), "権限が無ければ著者は作成されない");
     }
 }
