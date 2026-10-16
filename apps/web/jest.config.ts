@@ -74,7 +74,10 @@ const config: Config = {
 // 配布される(#1566)。next/jest は `/node_modules/` 全体を transformIgnorePatterns に積み、
 // こちらの設定を後ろへ足すだけなので、設定オブジェクトに書いても ESM が変換されない。
 // 生成された設定を取り出し、変換を除外するパターンを ESM パッケージだけ抜いたものへ差し替える。
+// jose(JWT のデコード)も ESM のみで配布される。jsdom の環境では ESM ビルドが選ばれるため、
+// 変換しないと import で落ちる。テストで jose を差し替えず実物を使えるようにここへ足す(#1832)。
 const ESM_PACKAGES = [
+  'jose',
   'react-markdown',
   'remark-.*',
   'rehype-.*',

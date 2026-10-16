@@ -132,4 +132,38 @@ describe('I18nProvider (issue #721)', () => {
     errorSpy.mockRestore()
     document.body.removeChild(container)
   })
+  // --- t() が返す文言(#1832) --------------------------------------------------------------
+  it('知らない言語が initialLocale に渡されたら、t は引いたキーをそのまま返す', () => {
+    render(
+      <I18nProvider initialLocale={'zz' as never}>
+        <Probe />
+      </I18nProvider>
+    )
+    expect(screen.getByTestId('message')).toHaveTextContent('appName')
+  })
+
+  it('知らない名前空間や、文言の無いキーでも、t は引いたキーをそのまま返す', () => {
+    function Lookup() {
+      const { t } = useI18n()
+      return (
+        <div>
+          <span data-testid="namespace">{t('noSuchNamespace' as never, 'appName')}</span>
+          <span data-testid="key">{t('common', 'noSuchKey')}</span>
+        </div>
+      )
+    }
+    render(
+      <I18nProvider>
+        <Lookup />
+      </I18nProvider>
+    )
+    expect(screen.getByTestId('namespace')).toHaveTextContent('appName')
+    expect(screen.getByTestId('key')).toHaveTextContent('noSuchKey')
+  })
+
+  it('I18nProvider の外で useI18n を呼ぶと例外になる', () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => render(<Probe />)).toThrow('useI18n must be used within I18nProvider')
+    errorSpy.mockRestore()
+  })
 })

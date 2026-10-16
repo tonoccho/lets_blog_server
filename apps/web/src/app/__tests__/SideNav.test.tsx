@@ -7,15 +7,6 @@ import type { NavItem } from '@/lib/navigation'
 let mockPathname = '/'
 jest.mock('next/navigation', () => ({ usePathname: () => mockPathname }))
 
-jest.mock('next/link', () => {
-  const Link = ({ children, href, ...rest }: { children: ReactNode; href: string }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  )
-  Link.displayName = 'MockLink'
-  return Link
-})
 
 const navItems: NavItem[] = [
   { href: '/', labelKey: 'dashboard', icon: 'Home' },

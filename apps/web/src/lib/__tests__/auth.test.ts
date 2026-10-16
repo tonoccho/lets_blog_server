@@ -10,20 +10,6 @@
  */
 jest.mock('server-only', () => ({}))
 
-// 'jose' はESM専用ビルドを配布しており、next/jestの既定transformIgnorePatternsでは
-// node_modules内のESMをトランスパイルしないため、そのままではJestが構文エラーで落ちる
-// (auth.tsが'jose'をimportしているため間接的に踏む。#969の壁がserver-onlyだけではない
-// ことがこれで分かった)。deriveRole()は署名検証をしない表示用ロールフラグの読み取りに
-// しか使わないため、テストでは同じ入出力のスタブへ差し替える。
-jest.mock('jose', () => ({
-  decodeJwt: (token: string) => {
-    if (token === 'malformed-token') {
-      throw new Error('invalid token')
-    }
-    return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf-8'))
-  },
-}))
-
 import { encodeJwtForTest } from './testUtils/fakeJwt'
 import { authOptions } from '@/lib/auth'
 import type { Account } from 'next-auth'
@@ -79,6 +65,16 @@ describe('jwtコールバック(issue #1053)', () => {
     expect(result.role).toBe('admin')
     expect(result.error).toBeUndefined()
     expect(result.accessTokenExpires).toBeGreaterThanOrEqual(before + 300 * 1000)
+  })
+
+  it('expires_in が無ければ、アクセストークンの寿命を300秒とみなす', async () => {
+    const account: Partial<Account> = { access_token: encodeJwtForTest({}), refresh_token: 'r-1' }
+    const before = Date.now()
+
+    const result = await jwtCallback({ token: {} as JWT, user: { id: 'user-1' }, account: account as Account })
+
+    expect(result.accessTokenExpires).toBeGreaterThanOrEqual(before + 300 * 1000)
+    expect(result.accessTokenExpires).toBeLessThan(before + 301 * 1000 + 1000)
   })
 
   it('account.access_tokenが無ければroleはuser', async () => {
@@ -148,6 +144,16 @@ describe('refreshAccessToken(jwtコールバック経由、issue #1053)', () => 
 
     expect(result.error).toBe('RefreshAccessTokenError')
     expect(result.accessToken).toBeUndefined()
+  })
+
+  it('失敗応答に error が無くても、HTTP ステータスつきの理由で更新失敗にする', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 503))
+    const token: JWT = { refreshToken: 'r-1', accessTokenExpires: Date.now() - 1000 } as JWT
+
+    const result = await jwtCallback({ token })
+
+    expect(result.error).toBe('RefreshAccessTokenError')
+    expect(consoleErrorSpy).toHaveBeenCalledWith('アクセストークンのリフレッシュに失敗しました', expect.objectContaining({ message: 'token refresh failed (503)' }))
   })
 
   it('レスポンスにrefresh_tokenが含まれなければ既存のrefreshTokenを維持する', async () => {

@@ -5,10 +5,10 @@ import { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { proxy } from '../proxy';
 
+// 自前の @/lib/apiBaseUrl は差し替えない(gateway の宛先は環境変数 LETS_BLOG_GATEWAY_URL で決まる)。
+// 差し替えるのは next-auth/jwt の getToken(セッション Cookie の復号。Next.js のリクエスト文脈に依存する)と、
+// 外部との通信(global.fetch)だけ(#1832)。
 jest.mock('next-auth/jwt', () => ({ getToken: jest.fn() }));
-jest.mock('@/lib/apiBaseUrl', () => ({
-  gatewayUrl: (path: string) => `http://gateway:8080${path}`,
-}));
 
 const mockGetToken = getToken as jest.MockedFunction<typeof getToken>;
 
@@ -18,15 +18,19 @@ function request(pathname: string): NextRequest {
 
 describe('proxy', () => {
   const originalFetch = global.fetch;
+  const originalGatewayUrl = process.env.LETS_BLOG_GATEWAY_URL;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.LETS_BLOG_GATEWAY_URL = 'http://gateway:8080';
     // needsInitialSetup() が false を返すようにして、未認証時の遷移先を /login に固定する。
     global.fetch = jest.fn().mockResolvedValue({ ok: false } as Response);
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+    if (originalGatewayUrl === undefined) delete process.env.LETS_BLOG_GATEWAY_URL;
+    else process.env.LETS_BLOG_GATEWAY_URL = originalGatewayUrl;
   });
 
   describe('/client-errors (issue #791)', () => {
@@ -64,6 +68,46 @@ describe('proxy', () => {
 
       expect(res.headers.get('location')).toBe('https://localhost/login');
       expect(mockGetToken).toHaveBeenCalled();
+    });
+  });
+
+  describe('公開パス', () => {
+    it.each([['/login'], ['/login/error'], ['/setup']])('%s は認証なしで素通しする', async (pathname) => {
+      const res = await proxy(request(pathname));
+
+      expect(res.headers.get('location')).toBeNull();
+      expect(mockGetToken).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('初回セットアップの誘導', () => {
+    it('未認証で、ユーザーが 1 人もいなければ /setup へリダイレクトする(認証なしで gateway に確認する)', async () => {
+      mockGetToken.mockResolvedValue(null);
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ needsSetup: true }) } as Response);
+
+      const res = await proxy(request('/projects'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/setup');
+      expect(global.fetch).toHaveBeenCalledWith('http://gateway:8080/api/auth/setup-status', { cache: 'no-store' });
+    });
+
+    it('未認証で、セットアップ済みなら /login へリダイレクトする', async () => {
+      mockGetToken.mockResolvedValue(null);
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ needsSetup: false }) } as Response);
+
+      const res = await proxy(request('/projects'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/login');
+    });
+
+    it('状態の確認で例外が出たら、セットアップ済みとみなして /login へリダイレクトする', async () => {
+      mockGetToken.mockResolvedValue(null);
+      global.fetch = jest.fn().mockRejectedValue(new Error('network error'));
+
+      const res = await proxy(request('/projects'));
+
+      expect(res.headers.get('location')).toBe('https://localhost/login');
     });
   });
 

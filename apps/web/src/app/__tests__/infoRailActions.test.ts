@@ -1,26 +1,43 @@
-const mockRequireSession = jest.fn()
-const mockGetViewerTimeZone = jest.fn()
-jest.mock('@/lib/session', () => ({
-  requireSession: () => mockRequireSession(),
-  getViewerTimeZone: () => mockGetViewerTimeZone(),
+jest.mock('server-only', () => ({}))
+// 自前の @/lib/session・@/lib/apiClient は差し替えない。差し替えるのは Next.js の実行基盤(next-auth・
+// next/headers・next/server・next/navigation の redirect)と、外部との通信(fetch)だけ(#1832)。
+// fetch の向こうのバックエンド(gateway)の振る舞いは、下の jest.fn() で書く(自前モジュールの代役ではない)。
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`redirect:${path}`)
+  },
 }))
+
+import { fetchQueueJobsAction, fetchRecentOperationLogsAction } from '../infoRailActions'
+import {
+  getServerSessionMock as mockRequireSession,
+  installFetch,
+  resetServerRuntime,
+  respondWith,
+} from '@/lib/__tests__/testUtils/serverRuntime'
+
+// バックエンド(gateway)の代役。
+const mockGetMe = jest.fn()
 const mockList = jest.fn()
 const mockListJobs = jest.fn()
 const mockGetJob = jest.fn()
 const mockGetImage = jest.fn()
-jest.mock('@/lib/apiClient', () => ({
-  listUnifiedOperationLogs: (...args: unknown[]) => mockList(...args),
-  listGenerationJobs: () => mockListJobs(),
-  getGenerationJob: (...args: unknown[]) => mockGetJob(...args),
-  getGeneratedImage: (...args: unknown[]) => mockGetImage(...args),
-}))
-
-import { fetchQueueJobsAction, fetchRecentOperationLogsAction } from '../infoRailActions'
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockRequireSession.mockResolvedValue({ user: {} })
-  mockGetViewerTimeZone.mockResolvedValue('Asia/Tokyo')
+  resetServerRuntime({ user: {} })
+  installFetch({
+    'GET /api/identity/me': respondWith(() => mockGetMe()),
+    'GET /api/operation-logs/unified?page=0&size=10': respondWith(() => mockList()),
+    'GET /api/generation-jobs': respondWith(() => mockListJobs()),
+    'GET /api/generation-jobs/:id': respondWith((id) => mockGetJob(Number(id))),
+    'GET /api/generated-images/:id': respondWith((id) => mockGetImage(Number(id))),
+  })
+  mockGetMe.mockResolvedValue({ timezone: 'Asia/Tokyo' })
   mockList.mockResolvedValue({ content: [{ id: 1 }] })
 })
 
@@ -28,7 +45,8 @@ describe('fetchRecentOperationLogsAction (#1489)', () => {
   it('requires a session, fetches only the newest page of 10, without filters, and returns the viewer time zone', async () => {
     const result = await fetchRecentOperationLogsAction()
     expect(mockRequireSession).toHaveBeenCalled()
-    expect(mockList).toHaveBeenCalledWith({ page: 0, size: 10 })
+    // 件数 10・先頭ページ・絞り込みなしは、リクエスト URL(上のルートのキー)で固定される。
+    expect(mockList).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ entries: [{ id: 1 }], timeZone: 'Asia/Tokyo' })
   })
 

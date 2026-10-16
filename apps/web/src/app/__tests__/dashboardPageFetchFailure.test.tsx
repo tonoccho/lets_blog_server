@@ -2,57 +2,58 @@
  * @jest-environment node
  */
 jest.mock("server-only", () => ({}));
+// 自前の @/lib/apiClient・@/lib/session・@/lib/auth・子コンポーネントは差し替えない。差し替えるのは
+// Next.js の実行基盤(next/navigation の redirect、next-auth、next/headers など)と、外部との通信(fetch)だけ(#1832)。
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 const redirect = jest.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
 });
-const notFound = jest.fn(() => {
-  throw new Error("NEXT_NOT_FOUND");
-});
-jest.mock("next/navigation", () => ({ redirect: (p: string) => redirect(p), notFound: () => notFound() }));
-jest.mock("next/link", () => ({ __esModule: true, default: ({ children }: { children: unknown }) => children }));
-const getServerSession = jest.fn();
-jest.mock("next-auth", () => ({ getServerSession: (...a: unknown[]) => getServerSession(...a) }));
-jest.mock("@/lib/auth", () => ({ authOptions: {} }));
+jest.mock("next/navigation", () => ({ redirect: (p: string) => redirect(p), notFound: () => { throw new Error("NEXT_NOT_FOUND"); } }));
 import { renderToStaticMarkup } from "react-dom/server";
+import {
+  getServerSessionMock as getServerSession,
+  installFetch,
+  jsonResponse,
+  resetServerRuntime,
+  textResponse,
+  type FetchRoutes,
+} from "@/lib/__tests__/testUtils/serverRuntime";
 const SESSION_EXPIRED = "セッションの有効期限が切れました。お手数ですが再度ログインしてください。";
-const DOWN = new Error("APIエラー (503): Service Unavailable");
+const DOWN = () => textResponse("Service Unavailable", 503);
 
-const api = {
-  listSites: jest.fn(), listPosts: jest.fn(), listUnifiedOperationLogs: jest.fn(),
-  getConnectedServiceStatuses: jest.fn(), getConnectedServiceStatusDetail: jest.fn(),
-  getContainerStatuses: jest.fn(), getMyProfile: jest.fn(),
-};
-jest.mock("@/lib/apiClient", () => ({
-  listSites: (...a: unknown[]) => api.listSites(...a),
-  listPosts: (...a: unknown[]) => api.listPosts(...a),
-  listUnifiedOperationLogs: (...a: unknown[]) => api.listUnifiedOperationLogs(...a),
-  getConnectedServiceStatuses: (...a: unknown[]) => api.getConnectedServiceStatuses(...a),
-  getConnectedServiceStatusDetail: (...a: unknown[]) => api.getConnectedServiceStatusDetail(...a),
-  getContainerStatuses: (...a: unknown[]) => api.getContainerStatuses(...a),
-  getMyProfile: (...a: unknown[]) => api.getMyProfile(...a),
-}));
-jest.mock("../ConnectedServiceStatusPanel", () => ({ ConnectedServiceStatusPanel: () => null }));
-jest.mock("../ContainerStatusPanel", () => ({ ContainerStatusPanel: () => null }));
+const EMPTY_LOG_PAGE = { content: [], totalElements: 0, totalPages: 0, number: 0, size: 1 };
+const LOGS = "GET /api/operation-logs/unified?type=AI_JOB&page=0&size=1";
+
+/** ダッシュボードが呼ぶ gateway の API を、すべて「空・正常」で返す。`overrides` で差し替える。 */
+function dashboardApi(overrides: FetchRoutes = {}) {
+  return installFetch({
+    "GET /api/sites": () => jsonResponse([]),
+    "GET /api/posts": () => jsonResponse([]),
+    [LOGS]: () => jsonResponse(EMPTY_LOG_PAGE),
+    "GET /api/dashboard/service-status": () => jsonResponse([]),
+    "GET /api/dashboard/service-status/detail": () => jsonResponse(null),
+    "GET /api/dashboard/container-status": () => jsonResponse([]),
+    "GET /api/identity/me": () => jsonResponse(null),
+    ...overrides,
+  });
+}
+
 import DashboardPage from "../page";
 
 describe("ダッシュボードの取得失敗表示(issue #1235)", () => {
   let errorSpy: jest.SpyInstance;
   beforeEach(() => {
-    jest.clearAllMocks();
+    resetServerRuntime({ user: { role: "admin" } });
+    redirect.mockClear();
     errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-    getServerSession.mockResolvedValue({ user: { role: "admin" } });
-    api.listSites.mockResolvedValue([]);
-    api.listPosts.mockResolvedValue([]);
-    api.listUnifiedOperationLogs.mockResolvedValue({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 1 });
-    api.getConnectedServiceStatuses.mockResolvedValue([]);
-    api.getConnectedServiceStatusDetail.mockResolvedValue(null);
-    api.getContainerStatuses.mockResolvedValue([]);
-    api.getMyProfile.mockResolvedValue(null);
   });
   afterEach(() => errorSpy.mockRestore());
 
   it("取得に失敗したとき、失敗の通知を出し、失敗した件数カードを0件と表示しない", async () => {
-    api.listSites.mockRejectedValue(DOWN);
+    dashboardApi({ "GET /api/sites": DOWN });
     const html = renderToStaticMarkup(await DashboardPage());
     expect(html).toContain('role="alert"');
     expect(html).toContain("サイト一覧を取得できませんでした");
@@ -62,6 +63,7 @@ describe("ダッシュボードの取得失敗表示(issue #1235)", () => {
   });
 
   it("成功して実際に0件のときは従来通り0を表示し、通知は出さない", async () => {
+    dashboardApi();
     const html = renderToStaticMarkup(await DashboardPage());
     expect(html).not.toContain('role="alert"');
     expect(html).toContain("登録サイト数</div><div class=\"mt-1 text-3xl font-semibold\">0</div>");
@@ -69,19 +71,25 @@ describe("ダッシュボードの取得失敗表示(issue #1235)", () => {
   });
 
   it("セッション切れの失敗は /login へリダイレクトする", async () => {
-    api.listPosts.mockRejectedValue(new Error(SESSION_EXPIRED));
+    // 401 は apiClient が SESSION_EXPIRED_MESSAGE の例外に変える。
+    dashboardApi({ "GET /api/posts": () => textResponse(SESSION_EXPIRED, 401) });
     await expect(DashboardPage()).rejects.toThrow("NEXT_REDIRECT:/login");
   });
 
   it("AIジョブ数は、リンク先(type=AI_JOB)と同じ統合操作ログの件数(totalElements)を表示する(issue #1595)", async () => {
-    api.listUnifiedOperationLogs.mockResolvedValue({ content: [], totalElements: 7, totalPages: 1, number: 0, size: 1 });
+    const fetchMock = dashboardApi({
+      [LOGS]: () => jsonResponse({ ...EMPTY_LOG_PAGE, totalElements: 7, totalPages: 1 }),
+    });
     const html = renderToStaticMarkup(await DashboardPage());
-    expect(api.listUnifiedOperationLogs).toHaveBeenCalledWith(expect.objectContaining({ type: "AI_JOB" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://localhost/api/operation-logs/unified?type=AI_JOB&page=0&size=1",
+      expect.anything(),
+    );
     expect(html).toContain("AIジョブ数</div><div class=\"mt-1 text-3xl font-semibold\">7</div>");
   });
 
   it("AIジョブ件数の取得に失敗したときは0件でなく「-」を表示し、通知を出す(issue #1595)", async () => {
-    api.listUnifiedOperationLogs.mockRejectedValue(DOWN);
+    dashboardApi({ [LOGS]: DOWN });
     const html = renderToStaticMarkup(await DashboardPage());
     expect(html).toContain("AIジョブ数</div><div class=\"mt-1 text-3xl font-semibold\">-</div>");
     expect(html).toContain("AIジョブ件数を取得できませんでした");

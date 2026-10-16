@@ -1,26 +1,24 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import type { ReactNode } from 'react'
 import { InfoRail } from '../InfoRail'
 import { I18nProvider } from '../I18nProvider'
 
 let mockPathname = '/'
+// 自前の InfoRail・Server Action(../infoRailActions)・@/lib/session・@/lib/apiClient・next/link は差し替えない。
+// 差し替えるのは Next.js の実行基盤(next/navigation・next-auth・next/headers・next/server)と、外部との通信
+// (fetch)だけ(#1832)。fetch の向こうのバックエンド(gateway)の振る舞いは下の jest.fn() で書く。
+jest.mock('server-only', () => ({}))
 jest.mock('next/navigation', () => ({ usePathname: () => mockPathname }))
-jest.mock('next/link', () => {
-  const Link = ({ children, href, ...rest }: { children: ReactNode; href: string }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  )
-  Link.displayName = 'MockLink'
-  return Link
-})
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
 
+import { installFetch, resetServerRuntime, respondWith } from '@/lib/__tests__/testUtils/serverRuntime'
+
+// バックエンド(gateway)の代役。mockFetch = 操作ログ API、mockFetchQueue = ジョブ一覧 API が呼ばれた回数。
 const mockFetch = jest.fn()
 const mockFetchQueue = jest.fn()
-jest.mock('../infoRailActions', () => ({
-  fetchRecentOperationLogsAction: (...args: unknown[]) => mockFetch(...args),
-  fetchQueueJobsAction: (...args: unknown[]) => mockFetchQueue(...args),
-}))
+const mockMe = jest.fn()
 
 const entries = [
   { sourceType: 'OPERATION', id: 2, createdAt: '2026-09-30T10:00:00', title: 'POST /api/sites', detail: null, status: 'SUCCESS', operationId: 'a', actorKeycloakSub: null },
@@ -38,10 +36,15 @@ function setup(locale: 'ja' | 'en' = 'ja') {
 beforeEach(() => {
   mockPathname = '/'
   window.localStorage.clear()
-  mockFetch.mockReset()
-  mockFetchQueue.mockReset()
-  mockFetchQueue.mockResolvedValue({ jobs: [], timeZone: 'UTC' })
-  mockFetch.mockResolvedValue({ entries, timeZone: 'UTC' })
+  resetServerRuntime({ user: {} })
+  installFetch({
+    'GET /api/identity/me': respondWith(() => mockMe()),
+    'GET /api/operation-logs/unified?page=0&size=10': respondWith(() => mockFetch()),
+    'GET /api/generation-jobs': respondWith(() => mockFetchQueue()),
+  })
+  mockMe.mockReset().mockResolvedValue({ timezone: 'UTC' })
+  mockFetchQueue.mockReset().mockResolvedValue([])
+  mockFetch.mockReset().mockResolvedValue({ content: entries })
 })
 
 describe('InfoRail (#1489)', () => {
@@ -78,7 +81,8 @@ describe('InfoRail (#1489)', () => {
   })
 
   it('shows an empty message when there are no logs', async () => {
-    mockFetch.mockResolvedValue({ entries: [], timeZone: null })
+    mockMe.mockResolvedValue({ timezone: null })
+    mockFetch.mockResolvedValue({ content: [] })
     setup()
     fireEvent.click(screen.getByRole('button', { name: '操作ログ' }))
     expect(await screen.findByText('操作ログはありません')).toBeInTheDocument()
@@ -111,7 +115,7 @@ describe('InfoRail (#1489)', () => {
     const { unmount } = setup()
     fireEvent.click(screen.getByRole('button', { name: '操作ログ' }))
     unmount()
-    resolve({ entries, timeZone: null })
+    resolve({ content: entries })
     await Promise.resolve()
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
@@ -212,5 +216,17 @@ describe('InfoRail (#1489)', () => {
     setup('en')
     expect(screen.getByRole('button', { name: 'Queue' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Operation log' })).toBeInTheDocument()
+  })
+  it('shows the time placeholder while neither the personal nor the browser time zone is known', async () => {
+    // ブラウザの Intl が時刻帯を返せない環境(ICU が無い等)を再現する。
+    const spy = jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => {
+      throw new Error('no intl')
+    })
+    mockMe.mockResolvedValue({ timezone: null })
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: '操作ログ' }))
+    const items = await screen.findAllByTestId('info-rail-log-item')
+    spy.mockRestore()
+    expect(items[0].querySelector('time')).toHaveTextContent('読み込み中…')
   })
 })

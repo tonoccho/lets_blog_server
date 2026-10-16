@@ -1,36 +1,14 @@
-import { render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import type { ConnectedServiceStatusDetail } from "@/lib/apiClient";
 
 /**
  * issue #1362: 「マウント前は固定プレースホルダーを表示する」(ThemeSwitcher.tsx:23-58と
  * 同じmountedフラグ方式)を単独のファイルで検証する。
  *
- * `ConnectedServiceStatusPanel.tsx`は`"use client"`を持ち、Next.jsのSWC変換対象になるため、
- * `jest.spyOn(React, "useEffect")`で個々のテストだけ`useEffect`を無効化する手法が効かない
- * (importが`React.useEffect`というプロパティ経由の呼び出しにならず、spyの差し替えを
- * 素通りすることを実測で確認済み)。`jest.mock("react", ...)`でモジュール自体を差し替える
- * 手法は効くが、同じファイル内の他のテスト(SSEで`lastUpdatedAt`を更新する等、実際の
- * `useEffect`実行を必要とするテスト)を巻き添えにしてしまうため、この検証だけを
- * 専用ファイルへ分離した。
- *
- * issue #1363: `TIMEZONE_PENDING_PLACEHOLDER` はこのファイルが元々ローカル定数として
- * 持っていたが、`ImageGalleryGrid.tsx` 等3つ目以降の利用先が増えたため `formatDate.ts` へ
- * 共有化した(Requirement 2)。このモックは実モジュールを差し替えるため、
- * 実装がその値を import できるよう明示的に含める。
+ * マウント前の描画は、`useEffect`を走らせないサーバー描画(`renderToString`)で得る。これなら
+ * `react`も`@/lib/formatDate`も差し替えずに済む(#1832)。
  */
-jest.mock("react", () => ({
-  __esModule: true,
-  ...jest.requireActual("react"),
-  useEffect: jest.fn(),
-}));
-
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn(() => "FORMATTED_CHECKED_AT"),
-  TIMEZONE_PENDING_PLACEHOLDER: "読み込み中…",
-}));
-
 import { ConnectedServiceStatusPanel } from "../ConnectedServiceStatusPanel";
-import { formatDateTime } from "@/lib/formatDate";
 
 function detail(overrides: Partial<ConnectedServiceStatusDetail> = {}): ConnectedServiceStatusDetail {
   return {
@@ -50,11 +28,11 @@ function detail(overrides: Partial<ConnectedServiceStatusDetail> = {}): Connecte
 
 describe("ConnectedServiceStatusPanel(マウント前)", () => {
   it("個人設定TZが未設定のとき、マウント前は固定プレースホルダーを表示する(ThemeSwitcher.tsx:23-58と同じmountedフラグ方式、issue #1362)", () => {
-    const d = detail();
-    render(<ConnectedServiceStatusPanel initialStatuses={[]} initialDetail={[d]} personalTimeZone={null} />);
+    const html = renderToString(
+      <ConnectedServiceStatusPanel initialStatuses={[]} initialDetail={[detail()]} personalTimeZone={null} />
+    );
 
-    expect(formatDateTime).not.toHaveBeenCalled();
-    expect(screen.queryByText("FORMATTED_CHECKED_AT")).not.toBeInTheDocument();
-    expect(screen.getByText("読み込み中…")).toBeInTheDocument();
+    expect(html).not.toContain("2026/9/8");
+    expect(html).toContain("読み込み中…");
   });
 });

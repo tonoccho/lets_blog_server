@@ -83,4 +83,20 @@ describe('ThemeSwitcher', () => {
     const button = await screen.findByRole('button')
     expect(button).toHaveAttribute('aria-label')
   })
+  it('auto は OS が dark を好むなら dark に解決する', async () => {
+    // jsdom は matchMedia を持たない(ブラウザ API)。ここでは OS が dark を好む環境を再現する。
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: jest.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      })),
+    })
+    render(<ThemeSwitcher />)
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
+    })
+  })
 })

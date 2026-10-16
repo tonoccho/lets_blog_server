@@ -12,14 +12,6 @@ import PostsError from '../posts/error';
 import UsersError from '../users/error';
 import ProjectsError from '../projects/error';
 
-jest.mock('next/link', () => ({
-  __esModule: true,
-  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
-}));
 
 type Boundary = (props: { error: Error & { digest?: string }; reset: () => void }) => React.ReactElement;
 

@@ -21,12 +21,10 @@ import LoginPage from "../page";
  * ref でガードすると、StrictMode の2回目で `setTimeout` が張られず、フォールバックが
  * 永久に出なくなる。ガードしてよいのは `signIn` の発行だけである。
  */
+// 自前の Server Action(../actions)は差し替えない。差し替えるのは next-auth/react の signIn
+// (実物は NextAuth サーバーへ通信してページ遷移する)だけ(#1832)。
 jest.mock("next-auth/react", () => ({
   signIn: jest.fn(),
-}));
-
-jest.mock("../actions", () => ({
-  startNoJsLoginAction: jest.fn(),
 }));
 
 const signInMock = signIn as jest.MockedFunction<typeof signIn>;

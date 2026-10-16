@@ -25,6 +25,15 @@ const eslintConfig = defineConfig([
       "react-hooks/rules-of-hooks": "off",
     },
   },
+  // jest.mock の factory は巻き上げられるため、factory の中では import を使えず require で
+  // 共有の補助(src/lib/__tests__/testUtils/serverRuntime)を読む必要がある(#1832)。
+  // テストファイルだけルールを外す。
+  {
+    files: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/__tests__/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",

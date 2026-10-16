@@ -240,3 +240,39 @@ describe('formatUtcIso8601(issue #1260: コピー用のUTC日時)', () => {
     expect(formatUtcIso8601('not-a-date')).toBe('not-a-date')
   })
 })
+
+/**
+ * ブラウザ既定のタイムゾーンを解決できない環境(Intl が無い・使えない・時刻帯の部品を返さない)の再現(#1832)。
+ * Intl は実行環境(ICU)の機能で、ここでは「その機能が欠けた環境」を作るために差し替える。
+ */
+describe('ブラウザ既定のタイムゾーンを解決できない環境', () => {
+  const iso = '2024-01-15T10:30:00Z'
+  const realIntl = globalThis.Intl
+
+  afterEach(() => {
+    globalThis.Intl = realIntl
+    jest.restoreAllMocks()
+  })
+
+  it('Intl が無ければ UTC で整形する', () => {
+    ;(globalThis as { Intl?: unknown }).Intl = undefined
+    expect(formatDateTime(iso)).toBe('2024/1/15 10:30:00')
+  })
+
+  it('Intl.DateTimeFormat が無ければ UTC で整形する', () => {
+    ;(globalThis as { Intl?: unknown }).Intl = {}
+    expect(formatDateTime(iso)).toBe('2024/1/15 10:30:00')
+  })
+
+  it('Intl.DateTimeFormat が例外を投げたら UTC で整形する', () => {
+    jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => {
+      throw new Error('no icu')
+    })
+    expect(formatDateTime(iso)).toBe('2024/1/15 10:30:00')
+  })
+
+  it('日付の部品が得られなければ、その部分は空文字になる', () => {
+    jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => ({ formatToParts: () => [] }) as never)
+    expect(formatDateYYYYMMDD(iso, 'Asia/Tokyo')).toBe('')
+  })
+})

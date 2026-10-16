@@ -8,12 +8,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import RootError from '../error';
 
-jest.mock('next/link', () => ({
-  __esModule: true,
-  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
-  ),
-}));
 
 describe('app/error.tsx の描画構造', () => {
   it('html / body 要素を入れ子で描画しない', () => {

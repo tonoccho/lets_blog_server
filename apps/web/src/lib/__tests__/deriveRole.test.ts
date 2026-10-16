@@ -8,20 +8,8 @@
  * 未検証だった)、deriveRole()単体を`src/lib/deriveRole.ts`へ切り出し、このテストから直接
  * importして検証する。
  *
- * 'jose' はESM専用ビルドを配布しており、next/jestの既定transformIgnorePatternsでは
- * node_modules内のESMをトランスパイルしないため、そのままではJestが構文エラーで落ちる
- * (`__tests__/auth.test.ts` と同じ理由・同じ回避策)。deriveRole()は署名検証をしない
- * 表示用ロールフラグの読み取りにしか使わないため、テストでは同じ入出力のスタブへ差し替える。
+ * 'jose' は差し替えず実物を使う(ESM の変換は jest.config.ts、TextEncoder は jest.setup.ts。#1832)。
  */
-jest.mock('jose', () => ({
-  decodeJwt: (token: string) => {
-    if (token === 'malformed-token') {
-      throw new Error('invalid token')
-    }
-    return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf-8'))
-  },
-}))
-
 import { encodeJwtForTest } from './testUtils/fakeJwt'
 import { deriveRole } from '@/lib/deriveRole'
 

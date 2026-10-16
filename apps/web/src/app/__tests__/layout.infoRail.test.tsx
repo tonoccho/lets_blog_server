@@ -4,40 +4,23 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactElement } from 'react'
 
-let mockSession: unknown = { user: { role: 'user', email: 'u@example.com' } }
-
+jest.mock('server-only', () => ({}))
+// 自前の @/lib/session・@/lib/auth・子コンポーネント(SideNav / InfoRail / Footer など)は差し替えない。
+// 差し替えるのは Next.js の実行基盤(next/font・next/navigation・CSS・next-auth のセッション取得)だけ(#1832)。
 jest.mock('next/font/google', () => ({
   Geist: () => ({ variable: 'geist' }),
   Geist_Mono: () => ({ variable: 'geist-mono' }),
 }))
 jest.mock('next/navigation', () => ({ useServerInsertedHTML: jest.fn(), usePathname: () => '/' }))
-jest.mock('@/lib/session', () => ({ getSession: () => Promise.resolve(mockSession) }))
-jest.mock('../SideNav', () => ({
-  SideNavProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SideNavToggle: () => null,
-  SideNav: () => <aside data-testid="side-nav" />,
-}))
-jest.mock('../InfoRail', () => ({ InfoRail: () => <aside data-testid="info-rail" /> }))
-jest.mock('../LogoutButton', () => ({ LogoutButton: () => null }))
-jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => null }))
-jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => null }))
-jest.mock('../DownloadMenu', () => ({ DownloadMenu: () => null }))
-// useI18n も返す。子コンポーネントのモックが負荷時に外れても(#1516)、実物の子が useI18n を
-// 呼んで落ちないようにする。
-jest.mock('../I18nProvider', () => ({
-  I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useI18n: () => ({ t: (key: string) => key, locale: 'ja' }),
-}))
-jest.mock('../SessionProvider', () => ({ SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
 jest.mock('../globals.css', () => ({}), { virtual: true })
-jest.mock('../ThemeScript', () => ({ ThemeScript: () => null }))
-jest.mock('../Footer', () => ({ Footer: () => <footer data-testid="footer" /> }))
 
+import { getServerSessionMock } from '@/lib/__tests__/testUtils/serverRuntime'
 import RootLayout from '../layout'
 
 describe('RootLayout info rail (#1489)', () => {
   it('places the rail right of main, inside the middle row, when logged in', async () => {
-    mockSession = { user: { role: 'user', email: 'u@example.com' } }
+    getServerSessionMock.mockResolvedValue({ user: { role: 'user', email: 'u@example.com' } })
     const html = renderToStaticMarkup((await RootLayout({ children: <p>c</p> })) as ReactElement)
     const rail = html.indexOf('data-testid="info-rail"')
     expect(rail).toBeGreaterThan(html.indexOf('</main>'))
@@ -45,7 +28,7 @@ describe('RootLayout info rail (#1489)', () => {
   })
 
   it('does not render the rail when logged out', async () => {
-    mockSession = null
+    getServerSessionMock.mockResolvedValue(null)
     const html = renderToStaticMarkup((await RootLayout({ children: <p>c</p> })) as ReactElement)
     expect(html).not.toContain('info-rail')
     expect(html).toContain('<main')

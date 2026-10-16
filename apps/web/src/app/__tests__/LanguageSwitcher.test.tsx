@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nProvider } from '../I18nProvider'
-import { LanguageSwitcher, pageReloader } from '../LanguageSwitcher'
+import { LanguageSwitcher } from '../LanguageSwitcher'
 
 /**
  * issue #800: locale の解決を I18nProvider へ一本化した際に、
@@ -20,9 +20,9 @@ describe('LanguageSwitcher (issue #800)', () => {
   let reloadSpy: jest.SpyInstance
 
   beforeEach(() => {
-    // jsdomの window.location は再定義もメソッド差し替えもできないため、
-    // LanguageSwitcher が用意している継ぎ目(pageReloader)を差し替える。
-    reloadSpy = jest.spyOn(pageReloader, 'reload').mockImplementation(() => {})
+    // jsdomの window.location.reload は実際には遷移せず「Not implemented: navigation」を
+    // コンソールに出す。自前の継ぎ目(pageReloader)は差し替えず、その出力で再読み込みの要求を観測する(#1832)。
+    reloadSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
   })
 
   afterEach(() => {
@@ -57,6 +57,9 @@ describe('LanguageSwitcher (issue #800)', () => {
 
     expect(window.localStorage.getItem('locale')).toBe('en')
     expect(reloadSpy).toHaveBeenCalledTimes(1)
+    expect(reloadSpy.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ message: expect.stringContaining('Not implemented: navigation') })
+    )
   })
 
   it('選択肢はi18nConfigのlocalesから生成する', () => {

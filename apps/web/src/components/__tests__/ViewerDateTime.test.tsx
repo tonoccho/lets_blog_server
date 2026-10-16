@@ -9,30 +9,20 @@ import { render, screen } from "@testing-library/react";
  * `ViewerDateTime`へ共通化した。マウント前のプレースホルダー表示は
  * `ViewerDateTime.mountGate.test.tsx`で別途検証する。
  */
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn(() => "FORMATTED_DATETIME"),
-  TIMEZONE_PENDING_PLACEHOLDER: "読み込み中…",
-}));
-
 import { ViewerDateTime } from "../ViewerDateTime";
-import { formatDateTime } from "@/lib/formatDate";
 
 describe("ViewerDateTime", () => {
-  beforeEach(() => {
-    (formatDateTime as jest.Mock).mockClear();
-  });
-
   it("個人設定TZが設定されているとき、formatDateTimeにそのTZを渡す(issue #1364、gateなし)", () => {
     render(<ViewerDateTime iso="2026-09-08T20:03:35" personalTimeZone="Asia/Tokyo" />);
 
-    expect(formatDateTime).toHaveBeenCalledWith("2026-09-08T20:03:35", "Asia/Tokyo");
-    expect(screen.getByText("FORMATTED_DATETIME")).toBeInTheDocument();
+    // オフセット無しはUTCとして解釈され、個人設定TZ(Asia/Tokyo, +9)の壁時計で出る。
+    expect(screen.getByText("2026/9/9 5:03:35")).toBeInTheDocument();
   });
 
   it("個人設定TZが未設定のとき、マウント後はformatDateTimeをTZ引数無しで呼ぶ(issue #1364)", () => {
     render(<ViewerDateTime iso="2026-09-08T20:03:35" personalTimeZone={null} />);
 
-    expect(formatDateTime).toHaveBeenCalledWith("2026-09-08T20:03:35");
-    expect(screen.getByText("FORMATTED_DATETIME")).toBeInTheDocument();
+    // jest はTZをUTC固定で動かす(jest.config.ts)ので、ブラウザ既定TZ=UTCの壁時計で出る。
+    expect(screen.getByText("2026/9/8 20:03:35")).toBeInTheDocument();
   });
 });

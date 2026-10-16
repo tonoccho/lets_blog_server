@@ -1,43 +1,28 @@
 /**
- * @jest-environment jsdom
+ * @jest-environment node
  */
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactElement } from 'react'
+import { JSDOM } from 'jsdom'
 
+jest.mock('server-only', () => ({}))
+// 自前の @/lib/session・@/lib/auth・子コンポーネント(SideNav / InfoRail / Footer など)は差し替えない。
+// 差し替えるのは Next.js の実行基盤(next/font・next/navigation・CSS・next-auth のセッション取得)だけ(#1832)。
 jest.mock('next/font/google', () => ({
   Geist: () => ({ variable: 'geist' }),
   Geist_Mono: () => ({ variable: 'geist-mono' }),
 }))
 jest.mock('next/navigation', () => ({ useServerInsertedHTML: jest.fn(), usePathname: () => '/' }))
-jest.mock('@/lib/session', () => ({ getSession: jest.fn() }))
-jest.mock('../SideNav', () => ({
-  SideNavProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SideNavToggle: () => <i data-testid="side-nav-toggle" />,
-  SideNav: () => <aside data-testid="side-nav" />,
-}))
-jest.mock('../InfoRail', () => ({ InfoRail: () => <aside data-testid="info-rail" /> }))
-jest.mock('../LogoutButton', () => ({ LogoutButton: () => <button data-testid="logout">logout</button> }))
-jest.mock('../ThemeSwitcher', () => ({ ThemeSwitcher: () => <i data-testid="theme" /> }))
-jest.mock('../LanguageSwitcher', () => ({ LanguageSwitcher: () => <i data-testid="lang" /> }))
-jest.mock('../DownloadMenu', () => ({ DownloadMenu: () => <div data-testid="download-menu" /> }))
-// useI18n も返す。子コンポーネントのモックが負荷時に外れても(#1516)、実物の子が useI18n を
-// 呼んで落ちないようにする。
-jest.mock('../I18nProvider', () => ({
-  I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useI18n: () => ({ t: (key: string) => key, locale: 'ja' }),
-}))
-jest.mock('../SessionProvider', () => ({ SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
 jest.mock('../globals.css', () => ({}), { virtual: true })
-jest.mock('../ThemeScript', () => ({ ThemeScript: () => null }))
-jest.mock('../Footer', () => ({ Footer: () => <footer /> }))
 
-import { getSession } from '@/lib/session'
+import { getServerSessionMock } from '@/lib/__tests__/testUtils/serverRuntime'
 import RootLayout from '../layout'
 
 async function renderHeader(session: unknown) {
-  ;(getSession as jest.Mock).mockResolvedValue(session)
+  getServerSessionMock.mockResolvedValue(session)
   const html = renderToStaticMarkup((await RootLayout({ children: <p>c</p> })) as ReactElement)
-  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const doc = new JSDOM(html).window.document
   return doc.querySelector('header') as HTMLElement
 }
 
@@ -51,7 +36,8 @@ describe('RootLayout header groups (#1490)', () => {
     expect(account).not.toBeNull()
     expect(download).not.toBeNull()
     expect(logo?.textContent).toContain("Let's Blog Server")
-    expect(download?.querySelector('[data-testid="download-menu"]')).not.toBeNull()
+    expect(download?.querySelector('button[aria-label="ダウンロード"]')).not.toBeNull()
+    expect(logo?.querySelector('button[aria-label="メニューを開く"]')).not.toBeNull()
     expect(logo?.contains(account as Node)).toBe(false)
     expect(account?.contains(download as Node)).toBe(false)
   })
@@ -60,11 +46,11 @@ describe('RootLayout header groups (#1490)', () => {
     const header = await renderHeader({ user: { role: 'user', email: 'u@example.com' } })
     const account = header.querySelector('[data-testid="header-account"]') as HTMLElement
     expect(account.textContent).toContain('u@example.com')
-    expect(account.querySelector('[data-testid="logout"]')).not.toBeNull()
-    expect(account.querySelector('[data-testid="lang"]')).toBeNull()
-    expect(account.querySelector('[data-testid="theme"]')).toBeNull()
-    expect(header.querySelector('[data-testid="lang"]')).not.toBeNull()
-    expect(header.querySelector('[data-testid="theme"]')).not.toBeNull()
+    expect(account.querySelector('button[aria-label="ログアウト"]')).not.toBeNull()
+    expect(account.querySelector('[data-testid="language-switcher"]')).toBeNull()
+    expect(account.querySelector('[data-testid="theme-switcher"]')).toBeNull()
+    expect(header.querySelector('[data-testid="language-switcher"] select[aria-label="言語選択"]')).not.toBeNull()
+    expect(header.querySelector('[data-testid="theme-switcher"]')).not.toBeNull()
   })
 
   it('wraps rather than overflowing so the groups stay usable at narrow widths', async () => {

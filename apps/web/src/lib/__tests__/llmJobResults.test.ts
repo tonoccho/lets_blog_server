@@ -4,11 +4,12 @@
  * ジョブの結果にだけあるので、画面はここを通して読み、「保存」を押したときに初めて保存APIへ渡す。
  */
 jest.mock('server-only', () => ({}))
+// 自前の @/lib/apiClient は差し替えない。差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1832)。
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
 
-const mockGetGenerationJob = jest.fn()
-jest.mock('@/lib/apiClient', () => ({
-  getGenerationJob: (...args: unknown[]) => mockGetGenerationJob(...args),
-}))
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime'
 
 import {
   loadLlmJobResult,
@@ -110,32 +111,43 @@ describe('readTagDesignJobResult', () => {
 describe('loadLlmJobResult', () => {
   const read = (payload: string | null) => (payload === 'ok' ? { value: 1 } : null)
 
+  /** GET /api/generation-jobs/9 の応答を差し替え、ジョブ詳細への GET の呼び出し URL を返す。 */
+  function jobApi(handler: () => Response) {
+    const fetchMock = installFetch({ 'GET /api/generation-jobs/9': handler })
+    return () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('/api/generation-jobs/'))
+  }
+
   beforeEach(() => {
-    mockGetGenerationJob.mockReset()
+    resetServerRuntime()
   })
 
   it('reads the done job of the expected type through the user token API and names the job id', async () => {
-    mockGetGenerationJob.mockResolvedValue({ id: 9, type: 'tag_design_generation', status: 'done', resultPayload: 'ok' })
+    const jobCalls = jobApi(() => jsonResponse({ id: 9, type: 'tag_design_generation', status: 'done', resultPayload: 'ok' }))
     await expect(loadLlmJobResult('9', 'tag_design_generation', read)).resolves.toEqual({ value: 1, jobId: 9 })
-    expect(mockGetGenerationJob).toHaveBeenCalledWith(9)
+    expect(jobCalls()).toEqual(['https://localhost/api/generation-jobs/9'])
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://localhost/api/generation-jobs/9',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer access-token' }) })
+    )
   })
 
   it.each([undefined, '', 'abc', '0', '-3', '1.5'])('does not call the API for the job id %p', async (raw) => {
+    const jobCalls = jobApi(() => jsonResponse({}))
     await expect(loadLlmJobResult(raw, 'tag_design_generation', read)).resolves.toBeNull()
-    expect(mockGetGenerationJob).not.toHaveBeenCalled()
+    expect(jobCalls()).toEqual([])
   })
 
   it('gives nothing when the job cannot be read (not found / not the viewer\'s job)', async () => {
-    mockGetGenerationJob.mockRejectedValue(new Error('404'))
+    jobApi(() => textResponse('not found', 404))
     await expect(loadLlmJobResult('9', 'tag_design_generation', read)).resolves.toBeNull()
   })
 
-  it('gives nothing for a job of another type, a job that is not done, or an unreadable result', async () => {
-    mockGetGenerationJob.mockResolvedValueOnce({ id: 9, type: 'image_generation', status: 'done', resultPayload: 'ok' })
-    await expect(loadLlmJobResult('9', 'tag_design_generation', read)).resolves.toBeNull()
-    mockGetGenerationJob.mockResolvedValueOnce({ id: 9, type: 'tag_design_generation', status: 'running', resultPayload: 'ok' })
-    await expect(loadLlmJobResult('9', 'tag_design_generation', read)).resolves.toBeNull()
-    mockGetGenerationJob.mockResolvedValueOnce({ id: 9, type: 'tag_design_generation', status: 'done', resultPayload: null })
+  it.each([
+    ['a job of another type', { id: 9, type: 'image_generation', status: 'done', resultPayload: 'ok' }],
+    ['a job that is not done', { id: 9, type: 'tag_design_generation', status: 'running', resultPayload: 'ok' }],
+    ['an unreadable result', { id: 9, type: 'tag_design_generation', status: 'done', resultPayload: null }],
+  ])('gives nothing for %s', async (_label, job) => {
+    jobApi(() => jsonResponse(job))
     await expect(loadLlmJobResult('9', 'tag_design_generation', read)).resolves.toBeNull()
   })
 })
