@@ -1,16 +1,12 @@
 package com.letsblog.ai.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
-import com.letsblog.ai.client.PlatformServiceClient;
-import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
-import com.letsblog.ai.client.PlatformServiceClient.ProviderConnectionConfig;
+import com.letsblog.ai.testsupport.AiWorld;
 import com.letsblog.ai.dto.AiConnectionResponse;
 import com.letsblog.ai.dto.AiConnectionResponse.Provider;
 import com.letsblog.ai.dto.AiConnectionResponse.Status;
@@ -19,6 +15,8 @@ import com.letsblog.common.auth.ToolsTokenProvider;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -32,19 +30,34 @@ class AiConnectionServiceToolsTokenTest {
     private static final String OLLAMA = "http://ollama:11434/v1";
     private static final String COMFY = "http://comfy:8188";
 
-    private final PlatformServiceClient platform = mock(PlatformServiceClient.class);
-    private final CurrentActorService actor = mock(CurrentActorService.class);
-    private final ProjectAiSettingsService settings = mock(ProjectAiSettingsService.class);
+    private AiWorld world;
     private final AtomicInteger requests = new AtomicInteger();
 
+    @BeforeEach
+    void setUp() {
+        world = new AiWorld().admin();
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    private static String cfg(String baseUrl, String source, boolean configured) {
+        return "{\"baseUrl\":" + (baseUrl == null ? "null" : "\"" + baseUrl + "\"")
+                + ",\"source\":\"" + source + "\",\"configured\":" + configured + "}";
+    }
+
     private AiConnectionService service(String ollamaSource, String comfySource, ToolsTokenProvider tools, boolean expectToken) {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(platform.resolveAiConnectionsConfig("Bearer t")).thenReturn(new AiConnectionsConfig(
-                new ProviderConnectionConfig(OLLAMA, ollamaSource, true),
-                new ProviderConnectionConfig(COMFY, comfySource, true),
-                new ProviderConnectionConfig(null, "NONE", false),
-                new ProviderConnectionConfig(null, "NONE", false)));
-        return new AiConnectionService(platform, actor, settings, baseUrl -> {
+        // 設定の出所がPROJECTのときは、実際にプロジェクトが接続先を上書きした状態にする(platform-serviceはPROJECTを返さない)。
+        boolean ollamaOverride = "PROJECT".equals(ollamaSource);
+        boolean comfyOverride = "PROJECT".equals(comfySource);
+        world.projectAiSettingsService.setConnectionUrls(1L, ollamaOverride ? OLLAMA : null, comfyOverride ? COMFY : null);
+        world.http.json("GET", "/api/internal/platform/ai-connections-config",
+                "{\"ollama\":" + cfg(OLLAMA, ollamaOverride ? "NONE" : ollamaSource, !ollamaOverride)
+                        + ",\"comfyui\":" + cfg(COMFY, comfyOverride ? "NONE" : comfySource, !comfyOverride)
+                        + ",\"openai\":" + cfg(null, "NONE", false) + ",\"claude\":" + cfg(null, "NONE", false) + "}");
+        return new AiConnectionService(world.platformServiceClient, world.currentActorService, world.projectAiSettingsService, baseUrl -> {
             RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
             MockRestServiceServer server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
             String path = baseUrl.equals(OLLAMA) ? "/models" : "/system_stats";

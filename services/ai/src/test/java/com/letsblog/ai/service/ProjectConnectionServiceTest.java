@@ -1,58 +1,56 @@
 package com.letsblog.ai.service;
 
-import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
 import com.letsblog.ai.client.PlatformServiceClient.ProviderConnectionConfig;
 import com.letsblog.ai.dto.AiConnectionResponse.Source;
 import com.letsblog.ai.dto.ProjectConnectionsResponse;
 import com.letsblog.ai.dto.UpdateProjectConnectionsRequest;
+import com.letsblog.ai.testsupport.AiWorld;
+import com.letsblog.ai.testsupport.FakeHttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * ProjectConnectionService(issue #1503)。解決順は プロジェクト上書き → システム設定(DB) → 環境変数既定 で、
  * 上書きが無い(null/空)ときは従来どおりplatform-serviceの解決結果をそのまま返す。
  */
-@ExtendWith(MockitoExtension.class)
+/**
+ * 設定の読み書きはProjectAiSettingsService(実物)、システム設定の解決はPlatformServiceClient(実物)がplatform-serviceの
+ * HTTPフェイクへ問い合わせる(issue #1823。自前のクラスはモックしない)。
+ */
 class ProjectConnectionServiceTest {
 
     private static final String SYSTEM_OLLAMA = "http://ollama:11434/v1";
     private static final String SYSTEM_COMFY = "http://comfy:8188";
+    private static final String CONFIG_PATH = "/api/internal/platform/ai-connections-config";
 
-    @Mock
-    private ProjectAiSettingsService settingsService;
-    @Mock
-    private PlatformServiceClient platformServiceClient;
-    @Mock
-    private CurrentActorService currentActorService;
-
+    private AiWorld world;
     private ProjectConnectionService service;
 
     @BeforeEach
     void setUp() {
-        service = new ProjectConnectionService(settingsService, platformServiceClient, currentActorService);
+        world = new AiWorld().actor(5L, "user");
+        service = world.projectConnectionService;
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     private void stubPlatform() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(platformServiceClient.resolveAiConnectionsConfig("Bearer t")).thenReturn(new AiConnectionsConfig(
-                new ProviderConnectionConfig(SYSTEM_OLLAMA, "ENVIRONMENT", true),
-                new ProviderConnectionConfig(SYSTEM_COMFY, "DATABASE", true),
-                new ProviderConnectionConfig(null, "NONE", false),
-                new ProviderConnectionConfig(null, "NONE", false)));
+        world.http.json("GET", CONFIG_PATH, """
+                {"ollama":{"baseUrl":"%s","source":"ENVIRONMENT","configured":true},
+                 "comfyui":{"baseUrl":"%s","source":"DATABASE","configured":true},
+                 "openai":{"baseUrl":null,"source":"NONE","configured":false},
+                 "claude":{"baseUrl":null,"source":"NONE","configured":false}}
+                """.formatted(SYSTEM_OLLAMA, SYSTEM_COMFY));
     }
 
     @Test
@@ -67,13 +65,13 @@ class ProjectConnectionServiceTest {
         assertNull(response.comfyui().overrideBaseUrl());
         assertEquals(SYSTEM_COMFY, response.comfyui().baseUrl());
         assertEquals(Source.DATABASE, response.comfyui().source());
+        assertEquals(AiWorld.BEARER, world.http.requests("GET", CONFIG_PATH).get(0).header("Authorization"));
     }
 
     @Test
     void get_上書きがあればそのURLがPROJECTとして解決される() {
         stubPlatform();
-        when(settingsService.getOllamaBaseUrl(7L)).thenReturn("http://gpu:11434/v1");
-        when(settingsService.getComfyuiBaseUrl(7L)).thenReturn("http://gpu:8188");
+        world.projectAiSettingsService.setConnectionUrls(7L, "http://gpu:11434/v1", "http://gpu:8188");
 
         ProjectConnectionsResponse response = service.get(7L);
 
@@ -87,8 +85,7 @@ class ProjectConnectionServiceTest {
     @Test
     void get_片方だけ上書きしても他方は影響を受けない() {
         stubPlatform();
-        when(settingsService.getOllamaBaseUrl(7L)).thenReturn("http://gpu:11434/v1");
-        when(settingsService.getComfyuiBaseUrl(7L)).thenReturn("");
+        world.projectAiSettingsService.setConnectionUrls(7L, "http://gpu:11434/v1", "");
 
         ProjectConnectionsResponse response = service.get(7L);
 
@@ -99,27 +96,47 @@ class ProjectConnectionServiceTest {
     }
 
     @Test
+    void get_保存済みの上書きが空白だけなら上書き無しとして扱う() {
+        stubPlatform();
+        var row = world.projectAiSettingsService.getOrCreate(7L);
+        row.setOllamaBaseUrl("   ");
+        row.setComfyuiBaseUrl("");
+
+        ProjectConnectionsResponse response = service.get(7L);
+
+        assertNull(response.ollama().overrideBaseUrl());
+        assertEquals(SYSTEM_OLLAMA, response.ollama().baseUrl());
+        assertNull(response.comfyui().overrideBaseUrl());
+        assertEquals(SYSTEM_COMFY, response.comfyui().baseUrl());
+    }
+
+    @Test
     void update_保存してから解決結果を返す() {
         stubPlatform();
 
-        ProjectConnectionsResponse response =
-                service.update(7L, new UpdateProjectConnectionsRequest("", null));
+        // 保存が先なら、解決結果にその上書きが反映される。
+        ProjectConnectionsResponse saved =
+                service.update(7L, new UpdateProjectConnectionsRequest("http://gpu:11434/v1", null));
 
-        InOrder order = inOrder(settingsService, platformServiceClient);
-        order.verify(settingsService).setConnectionUrls(7L, "", null);
-        order.verify(platformServiceClient).resolveAiConnectionsConfig("Bearer t");
-        assertEquals(SYSTEM_OLLAMA, response.ollama().baseUrl());
+        assertEquals("http://gpu:11434/v1", world.projectAiSettingsRows.rows.values().iterator().next().getOllamaBaseUrl());
+        assertEquals("http://gpu:11434/v1", saved.ollama().baseUrl());
+        assertEquals(Source.PROJECT, saved.ollama().source());
+
+        // 空文字は上書きを解除し、システム設定の解決結果へ戻る。
+        ProjectConnectionsResponse cleared = service.update(7L, new UpdateProjectConnectionsRequest("", null));
+
+        assertNull(world.projectAiSettingsRows.rows.values().iterator().next().getOllamaBaseUrl());
+        assertEquals(SYSTEM_OLLAMA, cleared.ollama().baseUrl());
+        assertEquals(2, world.http.requests("GET", CONFIG_PATH).size());
     }
 
     @Test
     void update_不正なURLなら例外を伝播しplatformを呼ばない() {
-        doThrow(new InvalidConnectionUrlException("bad")).when(settingsService)
-                .setConnectionUrls(7L, "ftp://x", null);
-
         assertThrows(InvalidConnectionUrlException.class,
                 () -> service.update(7L, new UpdateProjectConnectionsRequest("ftp://x", null)));
 
-        verify(platformServiceClient, never()).resolveAiConnectionsConfig(org.mockito.ArgumentMatchers.any());
+        assertEquals(0, world.http.requests("GET", CONFIG_PATH).size());
+        assertTrue(world.projectAiSettingsRows.saved.isEmpty());
     }
 
     @Test
@@ -151,9 +168,7 @@ class ProjectConnectionServiceTest {
 
     @Test
     void get_platformが接続先を返さない場合は解決結果がnullでsourceはNONE() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(platformServiceClient.resolveAiConnectionsConfig("Bearer t"))
-                .thenReturn(new AiConnectionsConfig(null, null, null, null));
+        world.http.json("GET", CONFIG_PATH, "{}");
 
         ProjectConnectionsResponse response = service.get(7L);
 

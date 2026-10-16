@@ -13,7 +13,7 @@ import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.common.net.ConnectionDestinationGuard;
 import com.letsblog.common.net.ForbiddenDestinationException;
-import com.letsblog.common.net.GuardedTarget;
+import com.letsblog.ai.testsupport.FakeHttpServer;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -42,7 +42,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -55,8 +54,9 @@ class OllamaPullJobRunnerTest {
 
     @Mock
     private GenerationJobRepository repository;
-    @Mock
-    private ConnectionDestinationGuard guard;
+    /** 宛先検査(実物)。名前解決は実物のDNS、ネットワークインタフェースの列挙とコンテナ判定は「コンテナ外」に固定する(issue #1823)。 */
+    private final ConnectionDestinationGuard guard =
+            new ConnectionDestinationGuard(java.net.InetAddress::getAllByName, List::of, () -> false);
 
     private HttpServer server;
     private String root;
@@ -160,7 +160,9 @@ class OllamaPullJobRunnerTest {
                 && s.contains("\"percent\":25") && s.contains("\"bytesDone\":250") && s.contains("\"bytesTotal\":1000")), snapshots.toString());
         assertTrue(snapshots.stream().anyMatch(s -> s.startsWith("running|") && s.contains("pulling manifest")), snapshots.toString());
         assertEquals("done|{\"success\":\"true\"}", last());
-        verifyNoInteractions(guard);
+        // プロジェクトの上書きではないので宛先検査を通さない: 検査(実物)はループバックを必ず拒否するため、
+        // ループバックのこのサーバーに届いたこと自体が、検査を通していない証拠になる。
+        assertEquals("POST /api/pull", requestLines.get(0));
     }
 
     @Test
@@ -177,6 +179,39 @@ class OllamaPullJobRunnerTest {
         assertTrue(elapsedMs < 10_000, "止まったストリームで戻らない: " + elapsedMs + "ms");
         assertTrue(last().startsWith("failed|"), last());
         assertTrue(last().contains("途絶"), last());
+    }
+
+    @Test
+    void 成功行を送ったあと接続を閉じずに止まった場合もアイドルタイムアウトでfailedにする() {
+        // 成功行は届いたが、ストリームが終わらないまま途絶えた。成功とは扱わず、打ち切ったことを理由に残す。
+        CountDownLatch release = new CountDownLatch(1);
+        server.createContext("/api/pull", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/x-ndjson");
+            exchange.sendResponseHeaders(200, 0);
+            OutputStream out = exchange.getResponseBody();
+            out.write("{\"status\":\"success\"}\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            try {
+                release.await(20, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        server.start();
+
+        runner(clock::get, Duration.ofMillis(300)).run(11L, root, false, "llama3");
+        release.countDown();
+
+        assertTrue(last().startsWith("failed|"), last());
+        assertTrue(last().contains("途絶"), last());
+    }
+
+    @Test
+    void 接続先が区切りだけで根が空になる場合はfailedにして理由を残す() {
+        runner().run(11L, "///", false, "llama3");
+
+        assertTrue(last().startsWith("failed|"), last());
     }
 
     @Test
@@ -295,24 +330,36 @@ class OllamaPullJobRunnerTest {
 
     @Test
     void プロジェクトの上書きは宛先検査を通し_検査済みのアドレスへ接続する() {
-        respond(200, "{\"status\":\"success\"}");
-        when(guard.check("Ollama", "http://override.example:11434")).thenReturn(new GuardedTarget(root, null));
+        // 宛先検査はループバックを必ず拒否するので、ループバックでないアドレスで待ち受けるサーバーを使う。
+        try (FakeHttpServer lan = FakeHttpServer.onAllInterfaces()) {
+            lan.on("POST", "/api/pull", FakeHttpServer.Response.bytes(
+                    200, "application/x-ndjson", "{\"status\":\"success\"}".getBytes(StandardCharsets.UTF_8)));
 
-        runner().run(11L, "http://override.example:11434/v1", true, "llama3");
+            runner().run(11L, lan.lanBaseUrl() + "/v1", true, "llama3");
 
-        verify(guard).check("Ollama", "http://override.example:11434");
-        assertEquals("POST /api/pull", requestLines.get(0));
-        assertEquals("done|{\"success\":\"true\"}", last());
+            assertEquals(1, lan.requests("POST", "/api/pull").size());
+            assertTrue(lan.requests("POST", "/api/pull").get(0).bodyText().contains("\"model\":\"llama3\""));
+            assertEquals("done|{\"success\":\"true\"}", last());
+        }
     }
 
     @Test
     void 宛先検査が拒否したら接続せずfailedにして理由を残す() {
-        when(guard.check("Ollama", "http://169.254.169.254")).thenThrow(new ForbiddenDestinationException("禁止された宛先です"));
-
+        // リンクローカル(クラウドのメタデータ)は検査(実物)が拒否する。
         runner().run(11L, "http://169.254.169.254/v1", true, "llama3");
 
         assertTrue(last().startsWith("failed|"), last());
-        assertTrue(last().contains("禁止された宛先です"), last());
+        assertTrue(last().contains("禁止された宛先"), last());
+    }
+
+    @Test
+    void プロジェクトの上書きがループバックなら検査が拒否し接続しない() {
+        respond(200, "{\"status\":\"success\"}");
+
+        runner().run(11L, root, true, "llama3");
+
+        assertTrue(last().startsWith("failed|"), last());
+        assertEquals(0, requestLines.size());
     }
 
     @Test

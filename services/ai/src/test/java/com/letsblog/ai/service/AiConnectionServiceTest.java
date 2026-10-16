@@ -2,9 +2,8 @@ package com.letsblog.ai.service;
 
 import org.slf4j.MDC;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.ai.client.PlatformServiceClient;
-import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
-import com.letsblog.ai.client.PlatformServiceClient.ProviderConnectionConfig;
+import com.letsblog.ai.testsupport.AiWorld;
+import com.letsblog.ai.testsupport.FakeHttpServer;
 import com.letsblog.ai.dto.AiConnectionResponse;
 import com.letsblog.ai.dto.AiConnectionResponse.Provider;
 import com.letsblog.ai.dto.AiConnectionResponse.Source;
@@ -15,11 +14,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -31,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
@@ -41,26 +37,40 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  * AiConnectionService(issue #1499)。OpenAI/Claudeは実HTTPを送らずAPIキーの有無だけで判定し、
  * Ollama/ComfyUIだけをConnectedServiceStatusServiceと同じ規約(4xxも到達可能、5xxは警告、
  * 接続不可はエラー)で疎通確認することを検証する。
+ *
+ * <p>issue #1823: PlatformServiceClient・CurrentActorService・ProjectAiSettingsServiceは実物で、platform-serviceと
+ * identity-serviceはHTTPフェイク、DBはメモリ上のリポジトリで差し替える。疎通確認の相手(Ollama / ComfyUI)は
+ * 従来どおりMockRestServiceServer(HTTPのサーバー側を模す層)。
  */
-@ExtendWith(MockitoExtension.class)
 class AiConnectionServiceTest {
 
     private static final String OLLAMA = "http://ollama:11434/v1";
     private static final String COMFY = "http://comfy:8188";
 
-    @Mock
-    private PlatformServiceClient platformServiceClient;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
-    private ProjectAiSettingsService projectAiSettingsService;
+    private static final String CONFIG_PATH = "/api/internal/platform/ai-connections-config";
+
+    private AiWorld world;
 
     /** 疎通確認のために組み立てたbaseUrlの記録。OpenAI/Anthropicへの実リクエストが無いことの確認に使う。 */
     private final List<String> builtBaseUrls = Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void setUp() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
+        world = new AiWorld().admin();
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    /** プロジェクトのChatGPT(OpenAI)のキーを保存した状態にする。 */
+    private void openAiKey(long projectId) {
+        world.projectAiSettingsService.setOpenAiApiKeyEncrypted(projectId, world.credentialCipher.encrypt("sk-openai"));
+    }
+
+    private void claudeKey(long projectId) {
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(projectId, world.credentialCipher.encrypt("sk-ant"));
     }
 
     private Function<String, RestClient.Builder> mockFactory() {
@@ -72,22 +82,23 @@ class AiConnectionServiceTest {
 
     private AiConnectionService service(Function<String, RestClient.Builder> factory, Duration timeout) {
         return new AiConnectionService(
-                platformServiceClient, currentActorService, projectAiSettingsService, factory, timeout);
+                world.platformServiceClient, world.currentActorService, world.projectAiSettingsService, factory, timeout);
     }
 
     private AiConnectionService service() {
         return service(mockFactory(), Duration.ofSeconds(3));
     }
 
-    private static ProviderConnectionConfig cfg(String baseUrl, String source, boolean configured) {
-        return new ProviderConnectionConfig(baseUrl, source, configured);
+    /** platform-serviceが返す1プロバイダーぶんの設定(JSON)。 */
+    private static String cfg(String baseUrl, String source, boolean configured) {
+        return "{\"baseUrl\":" + (baseUrl == null ? "null" : "\"" + baseUrl + "\"")
+                + ",\"source\":" + (source == null ? "null" : "\"" + source + "\"")
+                + ",\"configured\":" + configured + "}";
     }
 
-    private void platformReturns(
-            ProviderConnectionConfig ollama, ProviderConnectionConfig comfy,
-            ProviderConnectionConfig openai, ProviderConnectionConfig claude) {
-        when(platformServiceClient.resolveAiConnectionsConfig("Bearer t"))
-                .thenReturn(new AiConnectionsConfig(ollama, comfy, openai, claude));
+    private void platformReturns(String ollama, String comfy, String openai, String claude) {
+        world.http.json("GET", CONFIG_PATH,
+                "{\"ollama\":" + ollama + ",\"comfyui\":" + comfy + ",\"openai\":" + openai + ",\"claude\":" + claude + "}");
     }
 
     private void allConfigured() {
@@ -140,8 +151,7 @@ class AiConnectionServiceTest {
     @Test
     void プロジェクトの上書きがあればその接続先をPROJECTとして疎通確認する() {
         allConfigured();
-        when(projectAiSettingsService.getOllamaBaseUrl(1L)).thenReturn("http://gpu:11434/v1");
-        when(projectAiSettingsService.getComfyuiBaseUrl(1L)).thenReturn("http://gpu:8188");
+        world.projectAiSettingsService.setConnectionUrls(1L, "http://gpu:11434/v1", "http://gpu:8188");
         Function<String, RestClient.Builder> factory = baseUrl -> {
             builtBaseUrls.add(baseUrl);
             RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
@@ -199,8 +209,8 @@ class AiConnectionServiceTest {
     @Test
     void 接続拒否ならERRORで理由を返し他の行に影響しない() {
         allConfigured();
-        when(projectAiSettingsService.hasOpenAiApiKey(1L)).thenReturn(true);
-        when(projectAiSettingsService.hasClaudeApiKey(1L)).thenReturn(true);
+        openAiKey(1L);
+        claudeKey(1L);
 
         List<AiConnectionResponse> rows = service(factoryRespondingTo("refused", "ok"), Duration.ofSeconds(3))
                 .listConnections(1L);
@@ -254,7 +264,7 @@ class AiConnectionServiceTest {
     void APIキー設定済みならconfiguredでNORMAL_未設定ならWARNINGで実リクエストは送らない() {
         platformReturns(cfg(null, "NONE", false), cfg(null, "NONE", false),
                 cfg(null, "NONE", false), cfg(null, "NONE", false));
-        when(projectAiSettingsService.hasOpenAiApiKey(1L)).thenReturn(true);
+        openAiKey(1L);
 
         List<AiConnectionResponse> rows = service().listConnections(1L);
 
@@ -304,9 +314,21 @@ class AiConnectionServiceTest {
     }
 
     @Test
+    void 取得元がnullや空の接続先はsourceがNONEになりそのまま疎通確認する() {
+        platformReturns(cfg(OLLAMA, null, true), cfg(COMFY, "unknown-source", true),
+                cfg(null, "NONE", false), cfg(null, "NONE", false));
+
+        List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
+                .listConnections(1L);
+
+        assertEquals(Source.NONE, row(rows, Provider.OLLAMA).source());
+        assertEquals(Status.NORMAL, row(rows, Provider.OLLAMA).status());
+        assertEquals(Source.NONE, row(rows, Provider.COMFYUI).source());
+    }
+
+    @Test
     void 設定オブジェクトの項目が欠けていても4件返す() {
-        when(platformServiceClient.resolveAiConnectionsConfig("Bearer t"))
-                .thenReturn(new AiConnectionsConfig(null, null, null, null));
+        world.http.json("GET", CONFIG_PATH, "{}");
 
         List<AiConnectionResponse> rows = service().listConnections(1L);
 
@@ -351,8 +373,7 @@ class AiConnectionServiceTest {
 
     @Test
     void platform_serviceから設定を取得できなければ例外を伝播する() {
-        when(platformServiceClient.resolveAiConnectionsConfig("Bearer t"))
-                .thenThrow(new IllegalStateException("down"));
+        world.http.status("GET", CONFIG_PATH, 500, "down");
 
         assertThrows(IllegalStateException.class, () -> service().listConnections(1L));
     }
@@ -361,7 +382,7 @@ class AiConnectionServiceTest {
     void ChatGPTはプロジェクトにキーがあればsourceがPROJECTで設定済みになりキー値は応答に含まれない() {
         platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
                 cfg(null, "NONE", false), cfg(null, "NONE", false));
-        when(projectAiSettingsService.hasOpenAiApiKey(7L)).thenReturn(true);
+        openAiKey(7L);
 
         List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
                 .listConnections(7L);
@@ -377,7 +398,6 @@ class AiConnectionServiceTest {
     void ChatGPTはプロジェクトにキーが無ければplatformがシステム設定を返しても未設定のNONE() {
         platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
                 cfg(null, "DATABASE", true), cfg(null, "NONE", false));
-        when(projectAiSettingsService.hasOpenAiApiKey(7L)).thenReturn(false);
 
         List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
                 .listConnections(7L);
@@ -392,7 +412,7 @@ class AiConnectionServiceTest {
     void ClaudeはプロジェクトにキーがあればsourceがPROJECTで設定済みになりキー値は応答に含まれない() {
         platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
                 cfg(null, "NONE", false), cfg(null, "NONE", false));
-        when(projectAiSettingsService.hasClaudeApiKey(7L)).thenReturn(true);
+        claudeKey(7L);
 
         List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
                 .listConnections(7L);
@@ -408,7 +428,6 @@ class AiConnectionServiceTest {
     void Claudeはプロジェクトにキーが無ければplatformがシステム設定を返しても未設定のNONE() {
         platformReturns(cfg(OLLAMA, "ENVIRONMENT", true), cfg(COMFY, "DATABASE", true),
                 cfg(null, "NONE", false), cfg(null, "DATABASE", true));
-        when(projectAiSettingsService.hasClaudeApiKey(7L)).thenReturn(false);
 
         List<AiConnectionResponse> rows = service(factoryRespondingTo("ok", "ok"), Duration.ofSeconds(3))
                 .listConnections(7L);

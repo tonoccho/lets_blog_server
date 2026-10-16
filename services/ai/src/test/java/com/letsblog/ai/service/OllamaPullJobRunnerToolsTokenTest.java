@@ -11,7 +11,7 @@ import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.common.auth.ServiceTokenUnavailableException;
 import com.letsblog.common.auth.ToolsTokenProvider;
 import com.letsblog.common.net.ConnectionDestinationGuard;
-import com.letsblog.common.net.GuardedTarget;
+import com.letsblog.ai.testsupport.FakeHttpServer;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -28,7 +28,10 @@ import org.junit.jupiter.api.Test;
 class OllamaPullJobRunnerToolsTokenTest {
 
     private final GenerationJobRepository repository = mock(GenerationJobRepository.class);
-    private final ConnectionDestinationGuard guard = mock(ConnectionDestinationGuard.class);
+    /** 宛先検査(実物。ループバックは必ず拒否する)。名前解決は実物のDNS、インタフェース列挙とコンテナ判定は固定(issue #1823)。 */
+    private final ConnectionDestinationGuard guard =
+            new ConnectionDestinationGuard(java.net.InetAddress::getAllByName, List::of, () -> false);
+    private FakeHttpServer lan;
     private final GenerationJob job = new GenerationJob();
     private final List<String> authorizations = new CopyOnWriteArrayList<>();
     private HttpServer server;
@@ -53,11 +56,18 @@ class OllamaPullJobRunnerToolsTokenTest {
         });
         server.start();
         root = "http://127.0.0.1:" + server.getAddress().getPort();
-        when(guard.check(any(), any())).thenReturn(new GuardedTarget(root, null));
+        // 宛先検査を通る(ループバックでない)アドレスで待ち受けるサーバー。プロジェクトの上書き先に見立てる。
+        lan = FakeHttpServer.onAllInterfaces();
+        lan.on("POST", "/api/pull", request -> {
+            String header = request.header("Authorization");
+            authorizations.add(header == null ? "(none)" : header);
+            return FakeHttpServer.Response.bytes(200, "application/x-ndjson", "{\"status\":\"success\"}".getBytes(StandardCharsets.UTF_8));
+        });
     }
 
     @AfterEach
     void tearDown() {
+        lan.close();
         server.stop(0);
     }
 
@@ -78,9 +88,11 @@ class OllamaPullJobRunnerToolsTokenTest {
     @Test
     @DisplayName("プロジェクト単位の上書き先へのpullには付かない")
     void 上書き先には付かない() {
-        runner(ToolsTokenProvider.fromSupplier(() -> "tok-1")).run(11L, root, true, "llama3");
+        runner(ToolsTokenProvider.fromSupplier(() -> "tok-1")).run(11L, lan.lanBaseUrl(), true, "llama3");
 
         assertThat(authorizations).containsExactly("(none)");
+        assertThat(job.getStatus()).isEqualTo("done");
+        assertThat(lan.requests("POST", "/api/pull")).hasSize(1);
     }
 
     @Test
