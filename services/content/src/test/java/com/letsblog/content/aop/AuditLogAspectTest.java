@@ -2,59 +2,67 @@ package com.letsblog.content.aop;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.common.messaging.AuditLogMessage;
+import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.content.domain.AuditLogAction;
-import com.letsblog.content.service.AuditLogService;
-import com.letsblog.content.service.CurrentActorService;
-import org.aspectj.lang.ProceedingJoinPoint;
-import org.aspectj.lang.reflect.MethodSignature;
+import com.letsblog.content.testsupport.BrokenObjectMapper;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-/** 監査ログのchangesへ、バイナリや上限超のペイロードを入れない(issue #1246)。 */
-@ExtendWith(MockitoExtension.class)
-@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
+/**
+ * 監査ログのchangesへ、バイナリや上限超のペイロードを入れない(issue #1246)。
+ *
+ * <p>アスペクトは実物の{@link AuditLogAspect}を、Springの{@link AspectJProxyFactory}で{@link AuditLog}付きメソッドへ
+ * 実際に織り込んで動かす({@code ProceedingJoinPoint}・{@code MethodSignature}は模さない)。
+ * {@code AuditLogService}・{@code CurrentActorService}も実物で、差し替えるのは外部との通信(MQの
+ * {@code RabbitTemplate}、identity-serviceのHTTP)だけ({@link ContentWorld})。
+ */
 class AuditLogAspectTest {
 
     private static final int MAX_BYTES = 65_535;
 
-    @Mock
-    private AuditLogService auditLogService;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
-    private ProceedingJoinPoint joinPoint;
-    @Mock
-    private MethodSignature signature;
+    private ContentWorld world;
+    private Target target;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private AuditLogAspect aspect;
+    /** {@link AuditLog}を付けた業務メソッドを持つ対象。 */
+    public static class Target {
+        @AuditLog(action = AuditLogAction.CUSTOM_TAG_CREATED, resourceType = "T")
+        public Object annotated(Long id, Supplier<Object> body) {
+            return body.get();
+        }
 
-    @AuditLog(action = AuditLogAction.CUSTOM_TAG_CREATED, resourceType = "T")
-    public Object annotated(Long id) {
-        return null;
+        @AuditLog(action = AuditLogAction.CUSTOM_TAG_CREATED, resourceType = "T")
+        public Object annotatedWithText(String text, Supplier<Object> body) {
+            return body.get();
+        }
+
+        /** {@link AuditLog}が無いので織り込まれない。 */
+        public Object plain(Supplier<Object> body) {
+            return body.get();
+        }
     }
 
     public static class Row {
@@ -75,6 +83,13 @@ class AuditLogAspectTest {
         }
     }
 
+    /** idを返すアクセサはあるが、戻り値がLongではない。 */
+    public static class TextId {
+        public String getId() {
+            return "abc";
+        }
+    }
+
     private static class Unserializable {
         public Object getBroken() {
             throw new IllegalStateException("boom");
@@ -87,32 +102,45 @@ class AuditLogAspectTest {
     }
 
     @BeforeEach
-    void setUp() throws Exception {
-        aspect = new AuditLogAspect(auditLogService, currentActorService, objectMapper);
-        Method method = AuditLogAspectTest.class.getMethod("annotated", Long.class);
-        when(joinPoint.getSignature()).thenReturn(signature);
-        when(signature.getMethod()).thenReturn(method);
-        when(joinPoint.getArgs()).thenReturn(new Object[]{7L});
+    void setUp() {
+        world = new ContentWorld();
+        target = proxyOf(new ObjectMapper());
     }
 
-    private String runAndCaptureChanges(Object result) throws Throwable {
-        when(joinPoint.proceed()).thenReturn(result);
-        Object returned = aspect.auditLogAdvice(joinPoint);
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    private Target proxyOf(ObjectMapper mapper) {
+        AspectJProxyFactory factory = new AspectJProxyFactory(new Target());
+        factory.addAspect(new AuditLogAspect(world.auditLogService, world.currentActorService, mapper));
+        return factory.getProxy();
+    }
+
+    private AuditLogMessage published() {
+        ArgumentCaptor<Object> message = ArgumentCaptor.forClass(Object.class);
+        verify(world.rabbitTemplate).convertAndSend(
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.AUDIT_LOG_ROUTING_KEY), message.capture());
+        assertEquals(AuditLogAction.CUSTOM_TAG_CREATED.name(), ((AuditLogMessage) message.getValue()).action());
+        assertEquals("T", ((AuditLogMessage) message.getValue()).resourceType());
+        return (AuditLogMessage) message.getValue();
+    }
+
+    private String runAndCaptureChanges(Object result) {
+        Object returned = target.annotated(7L, () -> result);
         assertSame(result, returned);
-        ArgumentCaptor<String> changes = ArgumentCaptor.forClass(String.class);
-        verify(auditLogService).log(any(), any(), eq(AuditLogAction.CUSTOM_TAG_CREATED), eq("T"), any(), changes.capture(),
-                any(), any());
-        return changes.getValue();
+        return published().changes();
     }
 
     @Test
-    void byte配列の戻り値は中身を記録せず種別とサイズだけを記録する() throws Throwable {
+    void byte配列の戻り値は中身を記録せず種別とサイズだけを記録する() throws Exception {
         byte[] zip = new byte[300_000];
-        java.util.Arrays.fill(zip, (byte) 0x50);
+        Arrays.fill(zip, (byte) 0x50);
 
         String changes = runAndCaptureChanges(zip);
 
-        JsonNode node = objectMapper.readTree(changes);
+        JsonNode node = new ObjectMapper().readTree(changes);
         assertEquals("binary", node.get("type").asText());
         assertEquals(300_000, node.get("size").asLong());
         assertFalse(changes.contains(Base64.getEncoder().encodeToString(new byte[]{0x50, 0x50, 0x50, 0x50})));
@@ -120,38 +148,37 @@ class AuditLogAspectTest {
     }
 
     @Test
-    void 戻り値が呼び出し元へそのまま返り_byte配列でも監査は1件だけ記録される() throws Throwable {
+    void 戻り値が呼び出し元へそのまま返り_byte配列でも監査は1件だけ記録される() {
         byte[] bytes = "PK".getBytes(StandardCharsets.UTF_8);
-        when(joinPoint.proceed()).thenReturn(bytes);
 
-        Object returned = aspect.auditLogAdvice(joinPoint);
+        Object returned = target.annotated(7L, () -> bytes);
 
         assertArrayEquals(bytes, (byte[]) returned);
-        verify(auditLogService).log(any(), any(), any(), anyString(), any(), anyString(), any(), any());
+        assertEquals("{\"type\":\"binary\",\"size\":2}", published().changes());
     }
 
     @Test
-    void 上限を超えるJSONは上限内の有効なJSONへ切り詰めて記録する() throws Throwable {
+    void 上限を超えるJSONは上限内の有効なJSONへ切り詰めて記録する() throws Exception {
         String big = "あ".repeat(50_000);
 
         String changes = runAndCaptureChanges(new Row(1L, big));
 
         assertTrue(changes.getBytes(StandardCharsets.UTF_8).length <= MAX_BYTES);
-        JsonNode node = objectMapper.readTree(changes);
+        JsonNode node = new ObjectMapper().readTree(changes);
         assertTrue(node.get("truncated").asBoolean());
         assertTrue(node.get("originalSize").asLong() > MAX_BYTES);
         assertTrue(node.get("preview").asText().length() > 0);
     }
 
     @Test
-    void 上限内のJSONはそのまま記録する() throws Throwable {
+    void 上限内のJSONはそのまま記録する() throws Exception {
         String changes = runAndCaptureChanges(new Row(1L, "small"));
 
-        assertEquals(objectMapper.writeValueAsString(new Row(1L, "small")), changes);
+        assertEquals(new ObjectMapper().writeValueAsString(new Row(1L, "small")), changes);
     }
 
     @Test
-    void シリアライズできない戻り値のtoString文字列も上限を超えれば切り詰める() throws Throwable {
+    void シリアライズできない戻り値のtoString文字列も上限を超えれば切り詰める() throws Exception {
         Object hugeToString = new Object() {
             public Object getBroken() {
                 throw new IllegalStateException("boom");
@@ -166,11 +193,11 @@ class AuditLogAspectTest {
         String changes = runAndCaptureChanges(hugeToString);
 
         assertTrue(changes.getBytes(StandardCharsets.UTF_8).length <= MAX_BYTES);
-        assertTrue(objectMapper.readTree(changes).get("truncated").asBoolean());
+        assertTrue(new ObjectMapper().readTree(changes).get("truncated").asBoolean());
     }
 
     @Test
-    void 切り詰め位置がサロゲートペアの途中なら手前で切り_有効なJSONにする() throws Throwable {
+    void 切り詰め位置がサロゲートペアの途中なら手前で切り_有効なJSONにする() throws Exception {
         Object surrogateAtCut = new Object() {
             public Object getBroken() {
                 throw new IllegalStateException("boom");
@@ -178,68 +205,118 @@ class AuditLogAspectTest {
 
             @Override
             public String toString() {
-                return "x".repeat(999) + "\uD83D\uDE00" + "x".repeat(100_000);
+                return "x".repeat(999) + "😀" + "x".repeat(100_000);
             }
         };
 
         String changes = runAndCaptureChanges(surrogateAtCut);
 
-        JsonNode node = objectMapper.readTree(changes);
+        JsonNode node = new ObjectMapper().readTree(changes);
         assertEquals(999, node.get("preview").asText().length());
         assertTrue(changes.getBytes(StandardCharsets.UTF_8).length <= MAX_BYTES);
     }
 
     @Test
-    void シリアライズできない戻り値の短いtoStringはそのまま記録する() throws Throwable {
+    void 要約のJSON化にも失敗するときは_originalSizeだけの固定JSONを記録する() {
+        // 値の書き出しが必ず失敗する実物のObjectMapper: 戻り値はtoStringへ、要約もMapの書き出しに失敗して固定JSONになる。
+        Target broken = proxyOf(BrokenObjectMapper.create());
+        Object huge = new Object() {
+            @Override
+            public String toString() {
+                return "x".repeat(100_000);
+            }
+        };
+
+        broken.annotated(7L, () -> huge);
+
+        assertEquals("{\"truncated\":true,\"originalSize\":100000}", published().changes());
+    }
+
+    @Test
+    void シリアライズできない戻り値の短いtoStringはそのまま記録する() {
         String changes = runAndCaptureChanges(new Unserializable());
 
         assertEquals("Unserializable", changes);
     }
 
     @Test
-    void 戻り値がnullならchangesもnull() throws Throwable {
+    void 戻り値がnullならchangesもnull() {
         assertNull(runAndCaptureChanges(null));
     }
 
     @Test
-    void 記録に失敗しても業務処理の戻り値は返す() throws Throwable {
-        when(joinPoint.proceed()).thenReturn(Map.of("k", "v"));
-        doThrow(new IllegalStateException("mq down")).when(auditLogService)
-                .log(any(), any(), any(), anyString(), any(), any(), any(), any());
+    void 記録に失敗しても業務処理の戻り値は返す() {
+        doThrow(new IllegalStateException("mq down")).when(world.rabbitTemplate)
+                .convertAndSend(eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.AUDIT_LOG_ROUTING_KEY), any(Object.class));
 
-        assertEquals(Map.of("k", "v"), aspect.auditLogAdvice(joinPoint));
+        assertEquals(Map.of("k", "v"), target.annotated(7L, () -> Map.of("k", "v")));
     }
 
     @Test
-    void 戻り値のidが取れなければLong引数をresourceIdにする() throws Throwable {
-        when(joinPoint.proceed()).thenReturn("plain");
-        aspect.auditLogAdvice(joinPoint);
-        verify(auditLogService).log(any(), any(), any(), anyString(), eq(7L), any(), any(), any());
+    void 操作者の情報を取れなくても業務処理の戻り値は返し_監査は記録しない() {
+        world.identityServiceDown().actingAsUser(5L);
+
+        assertEquals("ok", target.annotated(7L, () -> "ok"));
+
+        verify(world.rabbitTemplate, never()).convertAndSend(any(String.class), any(String.class), any(Object.class));
     }
 
     @Test
-    void 戻り値のidをresourceIdにする() throws Throwable {
-        when(joinPoint.proceed()).thenReturn(new Row(42L, "n"));
-        aspect.auditLogAdvice(joinPoint);
-        verify(auditLogService).log(any(), any(), any(), anyString(), eq(42L), any(), any(), any());
+    void 操作者_JWTのsub_接続元_UserAgentを監査ログへ記録する() {
+        world.actingAsUser(5L).signedInAs("kc-sub-1");
+        world.request.setRemoteAddr("192.0.2.9");
+        world.request.addHeader("User-Agent", "JUnit");
+
+        target.annotated(7L, () -> "plain");
+
+        AuditLogMessage message = published();
+        assertEquals(5L, message.userId());
+        assertEquals("kc-sub-1", message.actorKeycloakSub());
+        assertEquals("192.0.2.9", message.remoteIp());
+        assertEquals("JUnit", message.userAgent());
     }
 
     @Test
-    void resourceIdが特定できなければnull() throws Throwable {
-        when(joinPoint.getArgs()).thenReturn(new Object[]{"str"});
-        when(joinPoint.proceed()).thenReturn("plain");
-        aspect.auditLogAdvice(joinPoint);
-        verify(auditLogService).log(any(), any(), any(), anyString(), eq((Long) null), any(), any(), any());
+    void 戻り値のidが取れなければLong引数をresourceIdにする() {
+        target.annotated(7L, () -> "plain");
+
+        assertEquals(7L, published().resourceId());
     }
 
     @Test
-    void 業務処理が例外なら監査ログは記録しない() throws Throwable {
-        when(joinPoint.proceed()).thenThrow(new IllegalArgumentException("x"));
-        try {
-            aspect.auditLogAdvice(joinPoint);
-        } catch (IllegalArgumentException expected) {
-            // expected
-        }
-        verify(auditLogService, never()).log(any(), any(), any(), anyString(), any(), any(), any(), any());
+    void 戻り値のidをresourceIdにする() {
+        target.annotated(7L, () -> new Row(42L, "n"));
+
+        assertEquals(42L, published().resourceId());
+    }
+
+    @Test
+    void 戻り値のidアクセサがLongを返さなければLong引数をresourceIdにする() {
+        target.annotated(7L, TextId::new);
+
+        assertEquals(7L, published().resourceId());
+    }
+
+    @Test
+    void resourceIdが特定できなければnull() {
+        target.annotatedWithText("str", () -> "plain");
+
+        assertNull(published().resourceId());
+    }
+
+    @Test
+    void 業務処理が例外なら監査ログは記録しない() {
+        assertThrows(IllegalArgumentException.class, () -> target.annotated(7L, () -> {
+            throw new IllegalArgumentException("x");
+        }));
+
+        verify(world.rabbitTemplate, never()).convertAndSend(any(String.class), any(String.class), any(Object.class));
+    }
+
+    @Test
+    void AuditLogの無いメソッドは監査対象にならない() {
+        assertEquals("v", target.plain(() -> "v"));
+
+        verify(world.rabbitTemplate, never()).convertAndSend(any(String.class), any(String.class), any(Object.class));
     }
 }

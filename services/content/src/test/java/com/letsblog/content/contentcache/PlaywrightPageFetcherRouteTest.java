@@ -11,6 +11,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
@@ -40,8 +41,9 @@ class PlaywrightPageFetcherRouteTest {
     private Browser browser;
     @Mock
     private Page page;
-    @Mock
-    private OutboundUrlGuard outboundUrlGuard;
+    /** 実物のガード。名前解決(DNS)だけを差し替える。 */
+    private final OutboundUrlGuard outboundUrlGuard =
+            TestOutboundUrlGuards.resolving(Map.of("example.com", "203.0.113.10"));
     @Mock
     private Route route;
     @Mock
@@ -59,8 +61,6 @@ class PlaywrightPageFetcherRouteTest {
         assertThat(html)
                 .as("レンダリング済みHTMLをそのまま返す")
                 .contains("ok");
-        verify(outboundUrlGuard).requireAllowed("https://example.com/article");
-
         ArgumentCaptor<Consumer<Route>> captor = ArgumentCaptor.forClass(Consumer.class);
         verify(page).route(eq("**/*"), captor.capture());
         return captor.getValue();
@@ -72,7 +72,6 @@ class PlaywrightPageFetcherRouteTest {
         Consumer<Route> handler = capturedRouteHandler();
         when(route.request()).thenReturn(request);
         when(request.url()).thenReturn("https://example.com/style.css");
-        when(outboundUrlGuard.isAllowed("https://example.com/style.css")).thenReturn(true);
 
         handler.accept(route);
 
@@ -86,7 +85,6 @@ class PlaywrightPageFetcherRouteTest {
         Consumer<Route> handler = capturedRouteHandler();
         when(route.request()).thenReturn(request);
         when(request.url()).thenReturn("http://169.254.169.254/latest/meta-data/");
-        when(outboundUrlGuard.isAllowed("http://169.254.169.254/latest/meta-data/")).thenReturn(false);
 
         handler.accept(route);
 

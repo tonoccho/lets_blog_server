@@ -2,6 +2,7 @@ package com.letsblog.content.controller;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.content.contentcache.OutboundUrlGuard;
+import com.letsblog.content.contentcache.TestOutboundUrlGuards;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.PlaywrightException;
@@ -9,7 +10,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -17,6 +21,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -27,8 +32,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,8 +43,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  *
  * <p>設計は{@code com.letsblog.media.controller.RenderControllerConcurrentAccessTest}と同じ
  * (MockMvcを選んだ理由・限界・決定論的なレース検出の説明はそちらのJavadocを参照。本サービスにも
- * {@code RANDOM_PORT}の前例は無い)。{@link Browser}に加えて{@link OutboundUrlGuard}も
- * {@code @MockitoBean}で置き換える。実DNS解決(issue #902対策)はこのテストの関心事ではなく、
+ * {@code RANDOM_PORT}の前例は無い)。外部との通信である{@link Browser}は{@code @MockitoBean}で、
+ * {@link OutboundUrlGuard}は名前解決(DNS)だけを差し替えた実物で置き換える。実DNS解決(issue #902対策)はこのテストの関心事ではなく、
  * 宛先検証を経路に残したままだとテスト環境のネットワーク到達性に結果が左右されてしまうため。
  *
  * <p>各リクエストは別々のURL(クエリ文字列だけが異なる、かつ実行のたびに変わる乱数を含む)を使い、
@@ -66,15 +69,22 @@ class ContentCacheControllerConcurrentAccessTest {
     @MockitoBean
     private Browser browser;
 
-    @MockitoBean
-    private OutboundUrlGuard outboundUrlGuard;
+    /**
+     * 実物のガード。名前解決(DNS、外部との通信)だけを差し替え、example.com を公開アドレスへ解決させる。
+     * テスト環境のネットワーク到達性に結果が左右されないようにするため。
+     */
+    @TestConfiguration
+    static class GuardConfig {
+        @Bean
+        @Primary
+        OutboundUrlGuard outboundUrlGuard() {
+            return TestOutboundUrlGuards.resolving(Map.of("example.com", "203.0.113.10"));
+        }
+    }
 
     @Test
     @DisplayName("4並行以上・キャッシュミスのHTTPリクエストが全て200を返す")
     void 並行httpリクエストは全て200を返す() throws Exception {
-        lenient().when(outboundUrlGuard.isAllowed(anyString())).thenReturn(true);
-        doNothing().when(outboundUrlGuard).requireAllowed(anyString());
-
         AtomicInteger active = new AtomicInteger(0);
 
         lenient().when(browser.newPage()).thenAnswer(invocation -> {

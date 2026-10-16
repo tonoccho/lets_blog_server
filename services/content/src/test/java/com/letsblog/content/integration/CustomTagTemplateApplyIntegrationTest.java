@@ -1,32 +1,21 @@
 package com.letsblog.content.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.content.client.IdentityBridgeClient;
-import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.CustomTagTemplate;
 import com.letsblog.content.repository.CustomTagRepository;
 import com.letsblog.content.repository.CustomTagTemplateRepository;
-import java.util.Optional;
+import com.letsblog.content.testsupport.ContentIntegrationTestBase;
+import com.letsblog.content.testsupport.ExternalServices;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -39,12 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 対象プロジェクトの {@code custom_tags} 行を作り、記事で {@code [tagname]} として使える状態にする。
  * 従来の {@code /clone} はテンプレート間の複製で、{@code custom_tags} には触れない。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@ActiveProfiles("test")
 @DisplayName("content-service: テンプレートのプロジェクト適用(issue #1131)")
-class CustomTagTemplateApplyIntegrationTest {
+class CustomTagTemplateApplyIntegrationTest extends ContentIntegrationTestBase {
 
     private static final long PROJECT_ID = 91131L;
     private static final String TAG_NAME = "applied1131";
@@ -55,15 +40,6 @@ class CustomTagTemplateApplyIntegrationTest {
     private CustomTagTemplateRepository customTagTemplateRepository;
     @Autowired
     private CustomTagRepository customTagRepository;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-    @MockitoBean
-    private IdentityClient identityClient;
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-    @MockitoBean
-    private ProjectBridgeClient projectBridgeClient;
 
     @AfterEach
     void cleanUp() {
@@ -84,10 +60,7 @@ class CustomTagTemplateApplyIntegrationTest {
 
     private String adminHeader() throws Exception {
         when(jwtDecoder.decode("admin-jwt-1131")).thenReturn(JwtTestFixtures.jwt("sub-1131", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt-1131"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
-        when(projectBridgeClient.resolveTagDesign(anyLong(), anyString(), anyString()))
-                .thenReturn(new ProjectBridgeClient.TagDesignResponse(null, null, null, null, null));
+        ExternalServices.actor("Bearer admin-jwt-1131", 1L, "admin");
         return "Bearer admin-jwt-1131";
     }
 
@@ -154,9 +127,8 @@ class CustomTagTemplateApplyIntegrationTest {
     void 非メンバーは403() throws Exception {
         CustomTagTemplate template = persistTemplate();
         when(jwtDecoder.decode("user-jwt-1131")).thenReturn(JwtTestFixtures.jwt("sub-u1131", "user"));
-        when(identityClient.lookupProfile("Bearer user-jwt-1131"))
-                .thenReturn(Optional.of(new ActorProfile(20L, "user")));
-        when(identityBridgeClient.isProjectMember(PROJECT_ID, 20L, "Bearer user-jwt-1131")).thenReturn(false);
+        ExternalServices.actor("Bearer user-jwt-1131", 20L, "user");
+        ExternalServices.projectMember(PROJECT_ID, 20L, false);
 
         mockMvc.perform(post("/api/custom-tag-templates/" + template.getId() + "/apply")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt-1131")

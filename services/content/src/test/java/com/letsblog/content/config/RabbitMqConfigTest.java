@@ -45,7 +45,8 @@ class RabbitMqConfigTest {
      */
     @Test
     void 相関ID_adviceが既存のadvice_chainの先頭に追加される() {
-        Advice retryAdvice = mock(Advice.class);
+        Advice retryAdvice = new Advice() {
+        };
 
         Advice[] combined = config.prependCorrelationAdvice(new Advice[] {retryAdvice});
 

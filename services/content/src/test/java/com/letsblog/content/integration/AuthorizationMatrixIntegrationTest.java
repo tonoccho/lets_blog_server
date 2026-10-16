@@ -1,24 +1,17 @@
 package com.letsblog.content.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.content.client.IdentityBridgeClient;
-import com.letsblog.content.client.ProjectBridgeClient;
+import com.letsblog.content.testsupport.ContentIntegrationTestBase;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.oauth2.jwt.BadJwtException;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.stream.Stream;
@@ -41,29 +34,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>ロール単位の認可(プロジェクトメンバー/adminの403)は{@link AdminAuthorizationIntegrationTest}が
  * 担当し、ここでは重複させない。
  *
- * <p>identity-service/identity-service/project-serviceは外部境界のため{@link IdentityClient}/{@link IdentityBridgeClient}/{@link ProjectBridgeClient}を
- * {@code @MockitoBean}で置き換える(ADR-0006のモック方針)。
+ * <p>issue #1822: Beanは実物。差し替えるのは外部との通信(JWTの公開鍵取得を伴う{@code JwtDecoder}、
+ * 他サービスのHTTP)だけ({@link ContentIntegrationTestBase})。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("content-service: 認証ゲートの認可マトリクス統合テスト(issue #772)")
-class AuthorizationMatrixIntegrationTest {
+class AuthorizationMatrixIntegrationTest extends ContentIntegrationTestBase {
 
     @Autowired
     private MockMvc mockMvc;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-
-    @MockitoBean
-    private ProjectBridgeClient projectBridgeClient;
 
     /**
      * content-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code content}ルート:

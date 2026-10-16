@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -19,7 +20,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -38,14 +38,13 @@ class PlaywrightPageFetcherConcurrentAccessTest {
 
     @Mock
     private Browser browser;
-    @Mock
-    private OutboundUrlGuard outboundUrlGuard;
+    /** 実物のガード。名前解決(DNS)だけを差し替える。 */
+    private final OutboundUrlGuard outboundUrlGuard =
+            TestOutboundUrlGuards.resolving(Map.of("example.com", "203.0.113.10"));
 
     @Test
     @DisplayName("newPage()からclose()までの区間は常に1スレッドしか実行していない")
     void fetchHtml呼び出しはnewPageからcloseまで直列に実行される() throws Exception {
-        lenient().when(outboundUrlGuard.isAllowed(anyString())).thenReturn(true);
-
         AtomicInteger active = new AtomicInteger(0);
         AtomicInteger maxObserved = new AtomicInteger(0);
         int concurrency = 8;

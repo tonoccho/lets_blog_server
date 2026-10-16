@@ -2,33 +2,23 @@ package com.letsblog.content.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.content.client.ProjectBridgeClient;
-import com.letsblog.content.contentcache.AmazonProductParser;
-import com.letsblog.content.contentcache.ContentCacheService;
-import com.letsblog.content.contentcache.OgpMetadataParser;
-import com.letsblog.content.contentcache.OutboundUrlGuard;
-import com.letsblog.content.contentcache.PlaywrightPageFetcher;
 import com.letsblog.content.controller.PostController;
 import com.letsblog.content.domain.ContentCache;
 import com.letsblog.content.domain.ContentType;
 import com.letsblog.content.domain.CustomTag;
 import com.letsblog.content.domain.CustomTagTemplate;
 import com.letsblog.content.domain.Post;
-import com.letsblog.content.repository.ContentCacheRepository;
 import com.letsblog.content.repository.PostRepository;
-import com.letsblog.content.service.AdminAuthorizationService;
-import com.letsblog.content.service.CurrentActorService;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -56,27 +46,25 @@ class ResponseDateTimeSerializationTest {
         return mapper.valueToTree(value);
     }
 
-    private final ContentCacheRepository cacheRepository = mock(ContentCacheRepository.class);
-    private final PlaywrightPageFetcher fetcher = mock(PlaywrightPageFetcher.class);
-    private final OgpMetadataParser ogp = mock(OgpMetadataParser.class);
+    private ContentWorld world;
 
-    private ContentCacheService cacheService() {
-        return new ContentCacheService(
-                cacheRepository, fetcher, ogp, mock(AmazonProductParser.class),
-                new ObjectMapper(), mock(OutboundUrlGuard.class), 1_000_000L);
+    @BeforeEach
+    void setUp() {
+        // キャッシュの期限切れで取り直さないよう、TTL を十分に長くする。
+        world = new ContentWorld(1_000_000L);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void contentCacheResponse_キャッシュヒットはDBの壁時計と同じ実時刻のZ終端で返る() {
-        ContentCache cache = new ContentCache();
-        cache.setUrl("https://example.com/a");
-        cache.setContentType(ContentType.BLOGCARD);
-        cache.setDataJson("{\"title\":\"t\"}");
-        cache.setLastCheckedAt(A);
+        ContentCache cache = world.cached("https://example.com/a", ContentType.BLOGCARD, Map.of("title", "t"), A);
         cache.setLastUpdatedAt(B);
-        when(cacheRepository.findByUrlHash(anyString())).thenReturn(Optional.of(cache));
 
-        JsonNode node = json(cacheService().resolve("https://example.com/a"));
+        JsonNode node = json(world.contentCacheService.resolve("https://example.com/a"));
 
         assertEquals(A_Z, node.get("lastCheckedAt").asString());
         assertEquals(B_Z, node.get("lastUpdatedAt").asString());
@@ -84,12 +72,9 @@ class ResponseDateTimeSerializationTest {
 
     @Test
     void contentCacheResponse_新規取得もZ終端で返る() {
-        when(cacheRepository.findByUrlHash(anyString())).thenReturn(Optional.empty());
-        when(fetcher.fetchHtml(anyString())).thenReturn("<html></html>");
-        when(ogp.parse(anyString(), anyString())).thenReturn(Map.of("title", "t"));
-        when(cacheRepository.save(any(ContentCache.class))).thenAnswer(i -> i.getArgument(0));
+        world.page("https://example.com/new", "<html></html>");
 
-        JsonNode node = json(cacheService().resolve("https://example.com/new"));
+        JsonNode node = json(world.contentCacheService.resolve("https://example.com/new"));
 
         assertTrue(node.get("lastCheckedAt").asString().matches("\\d{4}-\\d{2}-\\d{2}T[\\d:.]+Z"),
                 node.get("lastCheckedAt").asString());
@@ -127,12 +112,17 @@ class ResponseDateTimeSerializationTest {
         assertEquals(B_Z, node.get("updatedAt").asString());
     }
 
+    private PostController postController(Post post) {
+        PostRepository postRepository = mock(PostRepository.class);
+        when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(post)));
+        world.http.json("GET", "/api/internal/project/sites", "[]");
+        world.actingAsAdmin(1L);
+        return new PostController(postRepository, world.projectBridgeClient, world.currentActorService,
+                world.objectMapper, world.adminAuthorizationService);
+    }
+
     @Test
     void postSummaryResponse_はZ終端のRFC3339で返る() {
-        PostRepository postRepository = mock(PostRepository.class);
-        ProjectBridgeClient bridge = mock(ProjectBridgeClient.class);
-        CurrentActorService actor = mock(CurrentActorService.class);
-        AdminAuthorizationService authorization = mock(AdminAuthorizationService.class);
         Post post = new Post();
         post.setId(1L);
         post.setSiteId(1L);
@@ -140,12 +130,8 @@ class ResponseDateTimeSerializationTest {
         post.setUpdatedAt(B);
         post.setLastPublishedAt(A);
         post.setPublishScheduledAt(B);
-        when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(post)));
-        when(bridge.listSites(any())).thenReturn(List.of());
-        when(authorization.accessibleSiteIds()).thenReturn(Optional.empty());
-        PostController controller = new PostController(postRepository, bridge, actor, new ObjectMapper(), authorization);
 
-        JsonNode node = json(controller.list(null, null).get(0));
+        JsonNode node = json(postController(post).list(null, null).get(0));
 
         assertEquals(A_Z, node.get("lastPublishedAt").asString());
         assertEquals(B_Z, node.get("publishScheduledAt").asString());
@@ -153,21 +139,13 @@ class ResponseDateTimeSerializationTest {
 
     @Test
     void 日時が未設定ならnullのまま返る() {
-        PostRepository postRepository = mock(PostRepository.class);
-        ProjectBridgeClient bridge = mock(ProjectBridgeClient.class);
-        AdminAuthorizationService authorization = mock(AdminAuthorizationService.class);
         Post post = new Post();
         post.setId(1L);
         post.setSiteId(1L);
         post.setStatus("draft");
         post.setUpdatedAt(B);
-        when(postRepository.findAll()).thenReturn(new ArrayList<>(List.of(post)));
-        when(bridge.listSites(any())).thenReturn(List.of());
-        when(authorization.accessibleSiteIds()).thenReturn(Optional.empty());
-        PostController controller = new PostController(
-                postRepository, bridge, mock(CurrentActorService.class), new ObjectMapper(), authorization);
 
-        JsonNode node = json(controller.list(null, null).get(0));
+        JsonNode node = json(postController(post).list(null, null).get(0));
 
         assertTrue(node.get("lastPublishedAt").isNull());
         assertTrue(node.get("publishScheduledAt").isNull());

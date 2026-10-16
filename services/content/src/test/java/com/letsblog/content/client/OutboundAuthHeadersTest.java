@@ -18,8 +18,6 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * 内部ブリッジ呼び出しの認証(issue #1409)。カスタムタグ生成ジョブは{@code @Async}スレッドで動き、
@@ -31,7 +29,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("content-service: リクエストの無いスレッドでの内部ブリッジ認証(issue #1409)")
 class OutboundAuthHeadersTest {
 
-    private final ServiceTokenClient serviceTokenClient = mock(ServiceTokenClient.class);
+    private ServiceTokenClient serviceTokenClient;
     private HttpServer server;
     private final List<String> seenAuthorization = new CopyOnWriteArrayList<>();
 
@@ -39,14 +37,22 @@ class OutboundAuthHeadersTest {
     void startServer() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
-            seenAuthorization.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
-            byte[] bytes = "{\"result\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
+            // トークンエンドポイント(Keycloakの代わり)。実物のServiceTokenClientがここからトークンを取る。
+            boolean tokenEndpoint = exchange.getRequestURI().getPath().equals("/token");
+            if (!tokenEndpoint) {
+                seenAuthorization.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
+            }
+            byte[] bytes = (tokenEndpoint
+                    ? "{\"access_token\":\"svc-token\",\"expires_in\":3600}"
+                    : "{\"result\":\"ok\"}").getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });
         server.start();
+        serviceTokenClient = new ServiceTokenClient(
+                RestClient.builder(), baseUrl() + "/token", "content-service", "secret");
     }
 
     @AfterEach
@@ -79,7 +85,6 @@ class OutboundAuthHeadersTest {
     @Test
     @DisplayName("リクエストの無いスレッドではサービス自身のトークンでai-serviceを呼ぶ")
     void usesServiceTokenOutsideRequest() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
         AiGenerationClient client = new AiGenerationClient(
                 RestClient.builder(), baseUrl(), new OutboundAuthHeaders(new MockHttpServletRequest(), serviceTokenClient));
         AtomicReference<String> result = new AtomicReference<>();

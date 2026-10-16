@@ -42,6 +42,9 @@ class OutboundUrlGuardTest {
             "192.168.1.1",      // プライベート 192.168/16
             "100.64.0.1",       // 共有アドレス空間(CGNAT)
             "198.18.0.1",       // ベンチマーク用
+            "198.19.255.254",   // ベンチマーク用 198.18.0.0/15 の端
+            "192.0.0.8",        // IETFプロトコル割当 192.0.0.0/24
+            "100.127.255.254",  // 共有アドレス空間(CGNAT)の端
             "224.0.0.1",        // マルチキャスト
             "::1",              // IPv6 ループバック
             "fe80::1",          // IPv6 リンクローカル
@@ -61,7 +64,17 @@ class OutboundUrlGuardTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"93.184.216.34", "8.8.8.8", "2606:2800:220:1:248:1893:25c8:1946"})
+    @ValueSource(strings = {
+            "93.184.216.34", "8.8.8.8", "2606:2800:220:1:248:1893:25c8:1946",
+            "100.63.255.255",   // CGNAT(100.64.0.0/10)のすぐ外側(下)
+            "100.128.0.1",      // CGNAT のすぐ外側(上)
+            "101.64.0.1",       // 先頭が100ではない
+            "192.0.1.1",        // 192.0.0.0/24 のすぐ外側(3番目のバイトが違う)
+            "192.1.0.1",        // 192.0.x.x ではない
+            "198.17.255.255",   // 198.18.0.0/15 のすぐ外側(下)
+            "198.20.0.1",       // 198.18.0.0/15 のすぐ外側(上)
+            "199.18.0.1",       // 先頭が198ではない
+    })
     @DisplayName("外部の公開アドレスへ解決される宛先は通す")
     void 外部アドレスは通す(String address) throws UnknownHostException {
         assertFalse(OutboundUrlGuard.isBlocked(InetAddress.getByName(address)), address);
@@ -105,6 +118,15 @@ class OutboundUrlGuardTest {
         OutboundUrlGuard guard = new OutboundUrlGuard(host -> new InetAddress[0]);
 
         assertThrows(ContentScrapingException.class, () -> guard.requireAllowed("https://example.test/"));
+    }
+
+    @Test
+    @DisplayName("名前解決の結果がnullでも通さない")
+    void 解決結果がnullなら拒否する() {
+        OutboundUrlGuard guard = new OutboundUrlGuard(host -> null);
+
+        assertThrows(ContentScrapingException.class, () -> guard.requireAllowed("https://example.test/"));
+        assertFalse(guard.isAllowed("https://example.test/"));
     }
 
     @Test

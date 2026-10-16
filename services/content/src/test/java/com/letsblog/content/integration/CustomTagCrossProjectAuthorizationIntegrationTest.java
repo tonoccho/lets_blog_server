@@ -1,24 +1,15 @@
 package com.letsblog.content.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.content.client.IdentityBridgeClient;
-import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.CustomTagTemplate;
 import com.letsblog.content.repository.CustomTagTemplateRepository;
-import java.util.Optional;
+import com.letsblog.content.testsupport.ContentIntegrationTestBase;
+import com.letsblog.content.testsupport.ExternalServices;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
@@ -34,16 +25,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 非メンバーでも{@code projectId}をクエリで指定するだけで他プロジェクトのカスタムタグ/
  * 未公開テンプレートを読めていたことを固定する。
  *
- * <p>{@link AdminAuthorizationIntegrationTest}と同じ観点・同じモック方針(ADR-0006、
- * identity-service/project-serviceは外部境界のため{@code @MockitoBean}で置き換える)を、
- * {@code CustomTagController}/{@code CustomTagTemplateController}のGET経路に対して行う。
+ * <p>{@link AdminAuthorizationIntegrationTest}と同じ観点・同じ方針(identity-service/project-serviceのHTTPは
+ * {@link ExternalServices}で受け、Beanは実物)を、{@code CustomTagController}/{@code CustomTagTemplateController}の
+ * GET経路に対して行う。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@ActiveProfiles("test")
 @DisplayName("content-service: カスタムタグのクロスプロジェクト認可(issue #1057)")
-class CustomTagCrossProjectAuthorizationIntegrationTest {
+class CustomTagCrossProjectAuthorizationIntegrationTest extends ContentIntegrationTestBase {
 
     private static final long OTHER_PROJECT_ID = 77L;
 
@@ -52,18 +39,6 @@ class CustomTagCrossProjectAuthorizationIntegrationTest {
 
     @Autowired
     private CustomTagTemplateRepository customTagTemplateRepository;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-
-    @MockitoBean
-    private ProjectBridgeClient projectBridgeClient;
 
     @AfterEach
     void cleanUp() {
@@ -84,9 +59,8 @@ class CustomTagCrossProjectAuthorizationIntegrationTest {
     private String nonMemberHeader() throws Exception {
         String token = "cross-project-jwt";
         when(jwtDecoder.decode(token)).thenReturn(JwtTestFixtures.jwt("sub-1057", "user"));
-        when(identityClient.lookupProfile("Bearer " + token))
-                .thenReturn(Optional.of(new ActorProfile(20L, "user")));
-        when(identityBridgeClient.isProjectMember(OTHER_PROJECT_ID, 20L, "Bearer " + token)).thenReturn(false);
+        ExternalServices.actor("Bearer " + token, 20L, "user");
+        ExternalServices.projectMember(OTHER_PROJECT_ID, 20L, false);
         return "Bearer " + token;
     }
 
