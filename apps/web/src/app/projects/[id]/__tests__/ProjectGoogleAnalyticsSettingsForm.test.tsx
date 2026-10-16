@@ -1,23 +1,33 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectGoogleAnalyticsSettingsForm } from "../ProjectGoogleAnalyticsSettingsForm";
-import {
-  clearProjectGoogleAnalyticsCredentialsAction,
-  selectProjectGoogleAnalyticsPropertyAction,
-  setProjectGoogleAnalyticsClientAction,
-} from "../actions";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies, calledRequests, failWith, installBackend, noContent } from "./projectCoreRuntime";
 
-jest.mock("../actions", () => ({
-  setProjectGoogleAnalyticsClientAction: jest.fn(),
-  selectProjectGoogleAnalyticsPropertyAction: jest.fn(),
-  clearProjectGoogleAnalyticsCredentialsAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
 /**
  * issue #1231: GA設定画面は「OAuthクライアント保存 → Googleアカウント連携 → プロパティ選択」の導線。
  * サービスアカウントJSONの入力欄は無く、保存済みのクライアントシークレット/リフレッシュトークンは
  * 再表示しない(受け入れ基準2・5)。
+ * Server Action(`../actions`)・`@/lib/apiClient`・`@/lib/session` は実物を通し、差し替えるのは
+ * Next.js の実行基盤と外部との通信(`fetch`)だけ(#1838)。ブラウザの確認ダイアログ(`window.confirm`)は jsdom に無いので差し替える。
  */
+const CLIENT = "PUT /api/projects/5/api-keys/google-analytics/client";
+const PROPERTY = "PUT /api/projects/5/api-keys/google-analytics/property";
+const CLEAR = "DELETE /api/projects/5/api-keys/google-analytics";
+
 const PROPERTIES = [
   { propertyId: "987654321", displayName: "E2E Stub Site", accountDisplayName: "E2E Account" },
   { propertyId: "555000111", displayName: "Second Site", accountDisplayName: "Other Account" },
@@ -37,14 +47,14 @@ function renderForm(overrides: Partial<React.ComponentProps<typeof ProjectGoogle
   );
 }
 
-describe("ProjectGoogleAnalyticsSettingsForm", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (setProjectGoogleAnalyticsClientAction as jest.Mock).mockResolvedValue({ success: true });
-    (selectProjectGoogleAnalyticsPropertyAction as jest.Mock).mockResolvedValue({ success: true });
-    (clearProjectGoogleAnalyticsCredentialsAction as jest.Mock).mockResolvedValue(undefined);
-  });
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({ [CLIENT]: noContent, [PROPERTY]: noContent, [CLEAR]: noContent });
+});
 
+describe("ProjectGoogleAnalyticsSettingsForm", () => {
   it("未連携なら「未設定」と表示し、サービスアカウントJSONの入力欄は無い", () => {
     renderForm();
 
@@ -118,20 +128,40 @@ describe("ProjectGoogleAnalyticsSettingsForm", () => {
     await user.selectOptions(document.querySelector('select[name="propertyId"]') as HTMLSelectElement, "987654321");
     await user.click(screen.getByRole("button", { name: "プロパティを保存" }));
 
-    expect(selectProjectGoogleAnalyticsPropertyAction).toHaveBeenCalledTimes(1);
-    const formData = (selectProjectGoogleAnalyticsPropertyAction as jest.Mock).mock.calls[0][2] as FormData;
-    expect(formData.get("propertyId")).toBe("987654321");
     expect(await screen.findByText("プロパティを保存しました。")).toBeInTheDocument();
+    expect(bodies(backend, PROPERTY)).toEqual([{ propertyId: "987654321" }]);
   });
 
   it("プロパティ保存が失敗したらエラーを表示する", async () => {
-    (selectProjectGoogleAnalyticsPropertyAction as jest.Mock).mockResolvedValue({ error: "保存に失敗" });
+    installBackend({ [PROPERTY]: failWith(500, "保存に失敗") });
+    const user = userEvent.setup();
+    renderForm({ connected: true, clientId: "cid", hasClientSecret: true, properties: PROPERTIES });
+
+    await user.selectOptions(document.querySelector('select[name="propertyId"]') as HTMLSelectElement, "987654321");
+    await user.click(screen.getByRole("button", { name: "プロパティを保存" }));
+
+    expect(await screen.findByText("APIエラー (500): 保存に失敗")).toBeInTheDocument();
+  });
+
+  it("プロパティを選ばずに保存すると、バックエンドへ送らず選択を求める", async () => {
     const user = userEvent.setup();
     renderForm({ connected: true, clientId: "cid", hasClientSecret: true, properties: PROPERTIES });
 
     await user.click(screen.getByRole("button", { name: "プロパティを保存" }));
 
-    expect(await screen.findByText("保存に失敗")).toBeInTheDocument();
+    expect(await screen.findByText("GA4プロパティを選択してください。")).toBeInTheDocument();
+    expect(bodies(backend, PROPERTY)).toEqual([]);
+  });
+
+  it("名称もアカウント名も無いプロパティは「(名称なし)」とプロパティIDだけで示す", () => {
+    renderForm({
+      connected: true,
+      clientId: "cid",
+      hasClientSecret: true,
+      properties: [{ propertyId: "111222333", displayName: null, accountDisplayName: null }],
+    });
+
+    expect(screen.getByRole("option", { name: "(名称なし) (111222333)" })).toBeInTheDocument();
   });
 
   it("連携済みでアクセスできるプロパティが無ければ、その旨を表示する", () => {
@@ -168,21 +198,38 @@ describe("ProjectGoogleAnalyticsSettingsForm", () => {
     await user.type(document.querySelector('input[name="clientSecret"]') as HTMLInputElement, "secret");
     await user.click(screen.getByRole("button", { name: "クライアントを保存" }));
 
-    expect(setProjectGoogleAnalyticsClientAction).toHaveBeenCalledTimes(1);
-    const formData = (setProjectGoogleAnalyticsClientAction as jest.Mock).mock.calls[0][2] as FormData;
-    expect(formData.get("clientId")).toBe("cid");
-    expect(formData.get("clientSecret")).toBe("secret");
     expect(await screen.findByText("保存しました。")).toBeInTheDocument();
+    expect(bodies(backend, CLIENT)).toEqual([{ clientId: "cid", clientSecret: "secret" }]);
   });
 
   it("クライアント保存が失敗したらエラーを表示する", async () => {
-    (setProjectGoogleAnalyticsClientAction as jest.Mock).mockResolvedValue({ error: "クライアントIDを入力してください。" });
     const user = userEvent.setup();
     renderForm();
 
     await user.click(screen.getByRole("button", { name: "クライアントを保存" }));
 
-    expect(await screen.findByText("クライアントIDを入力してください。")).toBeInTheDocument();
+    expect(await screen.findByText("Google OAuthクライアントIDを入力してください。")).toBeInTheDocument();
+    expect(calledRequests(backend)).toEqual([]);
+  });
+
+  it("シークレット欄が空なら、シークレットを送らずクライアントIDだけ保存する", async () => {
+    const user = userEvent.setup();
+    renderForm({ clientId: "cid", hasClientSecret: true });
+
+    await user.click(screen.getByRole("button", { name: "クライアントを保存" }));
+
+    expect(await screen.findByText("保存しました。")).toBeInTheDocument();
+    expect(bodies(backend, CLIENT)).toEqual([{ clientId: "cid" }]);
+  });
+
+  it("クライアント保存がバックエンドに拒否されたらエラーを表示する", async () => {
+    installBackend({ [CLIENT]: failWith(400, "不正なクライアントID") });
+    const user = userEvent.setup();
+    renderForm({ clientId: "cid", hasClientSecret: true });
+
+    await user.click(screen.getByRole("button", { name: "クライアントを保存" }));
+
+    expect(await screen.findByText("APIエラー (400): 不正なクライアントID")).toBeInTheDocument();
   });
 
   it("連携完了/失敗のバナーを表示する", () => {
@@ -208,7 +255,7 @@ describe("ProjectGoogleAnalyticsSettingsForm", () => {
 
     await user.click(screen.getByRole("button", { name: "連携を解除" }));
 
-    expect(clearProjectGoogleAnalyticsCredentialsAction).toHaveBeenCalledWith(5);
+    await waitFor(() => expect(calledRequests(backend)).toEqual([CLEAR]));
     confirmSpy.mockRestore();
   });
 
@@ -219,7 +266,7 @@ describe("ProjectGoogleAnalyticsSettingsForm", () => {
 
     await user.click(screen.getByRole("button", { name: "連携を解除" }));
 
-    expect(clearProjectGoogleAnalyticsCredentialsAction).not.toHaveBeenCalled();
+    expect(calledRequests(backend)).toEqual([]);
     confirmSpy.mockRestore();
   });
 

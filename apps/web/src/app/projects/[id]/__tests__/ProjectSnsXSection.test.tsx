@@ -1,19 +1,32 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectSnsXSection } from "../ProjectSnsXSection";
-import { startProjectXConnectionAction, testProjectXPostAction } from "../snsXActions";
 import type { XConnectionView } from "@/lib/apiClient";
-
-jest.mock("../snsXActions", () => ({
-  startProjectXConnectionAction: jest.fn(),
-  testProjectXPostAction: jest.fn(),
-}));
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies, calledRequests, failFetchWith, failWith, installBackend, jsonResponse } from "./projectCoreRuntime";
 
 /**
  * issue #1574: 設定画面の「SNS 告知」欄。接続状態・接続できない理由・テスト投稿・告知履歴を示す。
  * 本番サイトに届かないときは「取得できない」と表示し、画面は壊れない。トークンもクライアントの秘密も再表示しない。
+ * Server Action(`../snsXActions`)・`@/lib/apiClient`・`@/lib/session` は実物を通し、差し替えるのは
+ * Next.js の実行基盤と外部との通信(`fetch`)だけ(#1838)。
  */
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+
 const CALLBACK_URL = "https://localhost/connect/x/callback";
+const AUTHORIZE = "POST /api/projects/5/sns/x/authorize";
+const TEST = "POST /api/projects/5/sns/x/test";
 
 const connectedView: XConnectionView = {
   connectable: true,
@@ -36,13 +49,19 @@ function renderSection(props: Partial<React.ComponentProps<typeof ProjectSnsXSec
   );
 }
 
-describe("ProjectSnsXSection", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (startProjectXConnectionAction as jest.Mock).mockResolvedValue({});
-    (testProjectXPostAction as jest.Mock).mockResolvedValue({ success: true });
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  process.env.NEXTAUTH_URL = "https://localhost";
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({
+    // 認可の開始は、既定では本番サイトに拒否された状態にする(成功は redirect で画面を離れる)。
+    [AUTHORIZE]: failWith(400, "本番サイトが設定されていません"),
+    [TEST]: () => jsonResponse({ success: true, error: null }),
   });
+});
 
+describe("ProjectSnsXSection", () => {
   it("見出しと、X のアプリに登録するコールバックURLを示す", () => {
     renderSection();
 
@@ -94,6 +113,14 @@ describe("ProjectSnsXSection", () => {
     expect(screen.getByTestId("sns-x-status")).toHaveTextContent("接続失敗");
   });
 
+  it("接続状態を取得できず理由も無ければ「取得できない」とだけ示す", () => {
+    renderSection({
+      view: { ...connectedView, status: { available: false, state: null, accountName: null, error: null } },
+    });
+
+    expect(screen.getByTestId("sns-x-status")).toHaveTextContent(/^取得できない$/);
+  });
+
   it("接続できないときは理由を示し、接続ボタンは押せない", () => {
     renderSection({
       view: { connectable: false, reason: "本番サイトが設定されていません", siteName: null, status: null, log: null },
@@ -136,6 +163,19 @@ describe("ProjectSnsXSection", () => {
     expect(screen.getByTestId("sns-x-log-entry")).toHaveTextContent("milestone");
   });
 
+  it("失敗の理由が無い履歴は失敗とだけ示す", () => {
+    renderSection({
+      view: {
+        ...connectedView,
+        log: { available: true, error: null, entries: [{ kind: "publish", success: false, error: null, at: "a" }] },
+      },
+    });
+
+    const entry = screen.getByTestId("sns-x-log-entry");
+    expect(entry).toHaveTextContent("失敗");
+    expect(entry).not.toHaveTextContent("失敗:");
+  });
+
   it("履歴が空ならまだ無いと示す", () => {
     renderSection({ view: { ...connectedView, log: { available: true, entries: [], error: null } } });
 
@@ -150,7 +190,7 @@ describe("ProjectSnsXSection", () => {
     expect(screen.queryByTestId("sns-x-log-entry")).not.toBeInTheDocument();
   });
 
-  it("接続できる状態でクライアントの情報を入れて押すと、認可の開始アクションへ渡る", async () => {
+  it("接続できる状態でクライアントの情報を入れて押すと、認可の開始がバックエンドへ送られる", async () => {
     const user = userEvent.setup();
     renderSection({
       view: { ...connectedView, status: { available: true, state: "UNSET", accountName: null, error: null } },
@@ -160,11 +200,10 @@ describe("ProjectSnsXSection", () => {
     await user.type(document.querySelector('input[name="clientSecret"]') as HTMLInputElement, "csecret");
     await user.click(screen.getByRole("button", { name: "X と接続" }));
 
-    expect(startProjectXConnectionAction).toHaveBeenCalledTimes(1);
-    const [projectId, , formData] = (startProjectXConnectionAction as jest.Mock).mock.calls[0];
-    expect(projectId).toBe(5);
-    expect((formData as FormData).get("clientId")).toBe("cid");
-    expect((formData as FormData).get("clientSecret")).toBe("csecret");
+    expect(await screen.findByText(/本番サイトが設定されていません/)).toBeInTheDocument();
+    expect(bodies(backend, AUTHORIZE)).toEqual([
+      { clientId: "cid", clientSecret: "csecret", redirectUri: CALLBACK_URL },
+    ]);
   });
 
   it("クライアントシークレットは伏せ字の入力欄で、保存済みの値を再表示しない", () => {
@@ -176,33 +215,54 @@ describe("ProjectSnsXSection", () => {
   });
 
   it("認可の開始に失敗したら理由を示す", async () => {
-    (startProjectXConnectionAction as jest.Mock).mockResolvedValue({ error: "本番サイトが設定されていません" });
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.type(document.querySelector('input[name="clientId"]') as HTMLInputElement, "cid");
+    await user.type(document.querySelector('input[name="clientSecret"]') as HTMLInputElement, "csecret");
+    await user.click(screen.getByRole("button", { name: "X と接続" }));
+
+    expect(await screen.findByText("APIエラー (400): 本番サイトが設定されていません")).toBeInTheDocument();
+  });
+
+  it("入力が空のまま押すと、バックエンドへ送らず入力を求める", async () => {
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "X と接続" }));
 
-    expect(await screen.findByText("本番サイトが設定されていません")).toBeInTheDocument();
+    expect(await screen.findByText(/クライアントIDを入力してください/)).toBeInTheDocument();
+    expect(bodies(backend, AUTHORIZE)).toEqual([]);
   });
 
-  it("接続済みでテスト投稿を押すと、投稿アクションを呼び成功を示す", async () => {
+  it("接続済みでテスト投稿を押すと、投稿がバックエンドへ送られ成功を示す", async () => {
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "テスト投稿" }));
 
-    expect(testProjectXPostAction).toHaveBeenCalledWith(5);
     expect(await screen.findByText("テスト投稿を送りました。")).toBeInTheDocument();
+    expect(calledRequests(backend)).toEqual([TEST]);
   });
 
   it("テスト投稿が失敗したら理由を示す", async () => {
-    (testProjectXPostAction as jest.Mock).mockResolvedValue({ error: "X の投稿に失敗しました(HTTP 403)" });
+    installBackend({ [TEST]: () => jsonResponse({ success: false, error: "X の投稿に失敗しました(HTTP 403)" }) });
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "テスト投稿" }));
 
     expect(await screen.findByText(/HTTP 403/)).toBeInTheDocument();
+  });
+
+  it("通信そのものが失敗しても、テスト投稿の失敗の理由を示す", async () => {
+    failFetchWith("boom");
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "テスト投稿" }));
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
   });
 
   it("接続完了と失敗のバナーを示す", () => {

@@ -1,24 +1,33 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectSnsHatenaSection } from "../ProjectSnsHatenaSection";
-import {
-  disconnectProjectHatenaAction,
-  startProjectHatenaConnectionAction,
-  testProjectHatenaPostAction,
-} from "../snsHatenaActions";
 import type { XConnectionView } from "@/lib/apiClient";
-
-jest.mock("../snsHatenaActions", () => ({
-  startProjectHatenaConnectionAction: jest.fn(),
-  testProjectHatenaPostAction: jest.fn(),
-  disconnectProjectHatenaAction: jest.fn(),
-}));
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies, calledRequests, failFetchWith, failWith, installBackend, jsonResponse, noContent } from "./projectCoreRuntime";
 
 /**
  * issue #1582: 設定画面の はてなブックマーク 欄。接続・切断・テスト投稿・接続状態・告知履歴(要件を満たさず投稿しなかった理由を含む)を示す。
  * 本番サイトに届かないときは「取得できない」と示し、Consumer Secretやトークンは再表示しない。
+ * Server Action(`../snsHatenaActions`)・`@/lib/apiClient`・`@/lib/session` は実物を通し、差し替えるのは
+ * Next.js の実行基盤と外部との通信(`fetch`)だけ(#1838)。
  */
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+
 const CALLBACK_URL = "https://localhost/connect/hatena/callback";
+const AUTHORIZE = "POST /api/projects/5/sns/hatena/authorize";
+const TEST = "POST /api/projects/5/sns/hatena/test";
+const DISCONNECT = "DELETE /api/projects/5/sns/hatena";
 
 const connectedView: XConnectionView = {
   connectable: true,
@@ -46,14 +55,20 @@ function renderSection(props: Partial<React.ComponentProps<typeof ProjectSnsHate
   );
 }
 
-describe("ProjectSnsHatenaSection", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (startProjectHatenaConnectionAction as jest.Mock).mockResolvedValue({});
-    (testProjectHatenaPostAction as jest.Mock).mockResolvedValue({ success: true });
-    (disconnectProjectHatenaAction as jest.Mock).mockResolvedValue({ success: true });
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  process.env.NEXTAUTH_URL = "https://localhost";
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({
+    // 認可の開始は、既定では本番サイトに拒否された状態にする(成功は redirect で画面を離れる)。
+    [AUTHORIZE]: failWith(400, "本番サイトが設定されていません"),
+    [TEST]: () => jsonResponse({ success: true, error: null }),
+    [DISCONNECT]: noContent,
   });
+});
 
+describe("ProjectSnsHatenaSection", () => {
   it("見出しと、はてなブックマーク のアプリに登録するリダイレクトURLを示す", () => {
     renderSection();
 
@@ -107,6 +122,14 @@ describe("ProjectSnsHatenaSection", () => {
     expect(screen.getByTestId("sns-hatena-status")).toHaveTextContent("接続失敗");
   });
 
+  it("接続状態を取得できず理由も無ければ「取得できない」とだけ示す", () => {
+    renderSection({
+      view: { ...connectedView, status: { available: false, state: null, accountName: null, error: null } },
+    });
+
+    expect(screen.getByTestId("sns-hatena-status")).toHaveTextContent(/^取得できない$/);
+  });
+
   it("接続できないときは理由を示し、接続ボタンは押せない", () => {
     renderSection({
       view: { connectable: false, reason: "本番サイトが設定されていません", siteName: null, status: null, log: null },
@@ -125,7 +148,7 @@ describe("ProjectSnsHatenaSection", () => {
     expect(screen.getByRole("button", { name: "はてなブックマーク と接続" })).toBeDisabled();
   });
 
-  it("告知履歴を種類・成功/失敗・理由つきで示す(失敗の理由も)", () => {
+  it("告知履歴を種類・成功/失敗・理由つきで示す(要件を満たさず投稿しなかった理由)", () => {
     renderSection();
 
     const entries = screen.getAllByTestId("sns-hatena-log-entry");
@@ -172,7 +195,7 @@ describe("ProjectSnsHatenaSection", () => {
     expect(screen.getByTestId("sns-hatena-log")).toHaveTextContent("まだありません");
   });
 
-  it("アプリの情報を入れて押すと、認可の開始アクションへ渡る", async () => {
+  it("アプリの情報を入れて押すと、認可の開始がバックエンドへ送られる", async () => {
     const user = userEvent.setup();
     renderSection({
       view: { ...connectedView, status: { available: true, state: "UNSET", accountName: null, error: null } },
@@ -182,11 +205,10 @@ describe("ProjectSnsHatenaSection", () => {
     await user.type(document.querySelector('input[name="hatenaConsumerSecret"]') as HTMLInputElement, "app-secret");
     await user.click(screen.getByRole("button", { name: "はてなブックマーク と接続" }));
 
-    expect(startProjectHatenaConnectionAction).toHaveBeenCalledTimes(1);
-    const [projectId, , formData] = (startProjectHatenaConnectionAction as jest.Mock).mock.calls[0];
-    expect(projectId).toBe(5);
-    expect((formData as FormData).get("hatenaConsumerKey")).toBe("app-id");
-    expect((formData as FormData).get("hatenaConsumerSecret")).toBe("app-secret");
+    expect(await screen.findByText(/本番サイトが設定されていません/)).toBeInTheDocument();
+    expect(bodies(backend, AUTHORIZE)).toEqual([
+      { clientId: "app-id", clientSecret: "app-secret", redirectUri: CALLBACK_URL },
+    ]);
   });
 
   it("Consumer Secretは伏せ字の入力欄で、保存済みの値を再表示しない", () => {
@@ -198,27 +220,38 @@ describe("ProjectSnsHatenaSection", () => {
   });
 
   it("認可の開始に失敗したら理由を示す", async () => {
-    (startProjectHatenaConnectionAction as jest.Mock).mockResolvedValue({ error: "本番サイトが設定されていません" });
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.type(document.querySelector('input[name="hatenaConsumerKey"]') as HTMLInputElement, "app-id");
+    await user.type(document.querySelector('input[name="hatenaConsumerSecret"]') as HTMLInputElement, "app-secret");
+    await user.click(screen.getByRole("button", { name: "はてなブックマーク と接続" }));
+
+    expect(await screen.findByText("APIエラー (400): 本番サイトが設定されていません")).toBeInTheDocument();
+  });
+
+  it("入力が空のまま押すと、バックエンドへ送らず入力を求める", async () => {
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "はてなブックマーク と接続" }));
 
-    expect(await screen.findByText("本番サイトが設定されていません")).toBeInTheDocument();
+    expect(await screen.findByText(/Consumer Key.*を入力してください/)).toBeInTheDocument();
+    expect(bodies(backend, AUTHORIZE)).toEqual([]);
   });
 
-  it("接続済みでテスト投稿を押すと、投稿アクションを呼び成功を示す", async () => {
+  it("接続済みでテスト投稿を押すと、投稿がバックエンドへ送られ成功を示す", async () => {
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "はてなブックマーク 投稿テスト" }));
 
-    expect(testProjectHatenaPostAction).toHaveBeenCalledWith(5);
     expect(await screen.findByText("はてなブックマーク へ投稿テストを送りました。")).toBeInTheDocument();
+    expect(calledRequests(backend)).toEqual([TEST]);
   });
 
   it("テスト投稿が失敗したら理由を示す", async () => {
-    (testProjectHatenaPostAction as jest.Mock).mockResolvedValue({ error: "はてなブックマーク の投稿に失敗しました(HTTP 403)" });
+    installBackend({ [TEST]: () => jsonResponse({ success: false, error: "はてなブックマーク の投稿に失敗しました(HTTP 403)" }) });
     const user = userEvent.setup();
     renderSection();
 
@@ -227,24 +260,34 @@ describe("ProjectSnsHatenaSection", () => {
     expect(await screen.findByText(/HTTP 403/)).toBeInTheDocument();
   });
 
-  it("接続済みで切断を押すと、切断アクションを呼び切断したことを示す", async () => {
+  it("接続済みで切断を押すと、切断がバックエンドへ送られ切断したことを示す", async () => {
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "はてなブックマーク を切断" }));
 
-    expect(disconnectProjectHatenaAction).toHaveBeenCalledWith(5);
     expect(await screen.findByText("はてなブックマーク の接続を切断しました。")).toBeInTheDocument();
+    expect(calledRequests(backend)).toEqual([DISCONNECT]);
   });
 
   it("切断に失敗したら理由を示す", async () => {
-    (disconnectProjectHatenaAction as jest.Mock).mockResolvedValue({ error: "本番サイトに届かない" });
+    installBackend({ [DISCONNECT]: failWith(502, "本番サイトに届かない") });
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "はてなブックマーク を切断" }));
 
-    expect(await screen.findByText("本番サイトに届かない")).toBeInTheDocument();
+    expect(await screen.findByText("APIエラー (502): 本番サイトに届かない")).toBeInTheDocument();
+  });
+
+  it("通信そのものが失敗しても、テスト投稿の失敗の理由を示す", async () => {
+    failFetchWith("boom");
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "はてなブックマーク 投稿テスト" }));
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
   });
 
   it("接続完了と失敗のバナーを示す", () => {

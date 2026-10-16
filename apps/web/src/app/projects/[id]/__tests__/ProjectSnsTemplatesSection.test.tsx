@@ -1,18 +1,32 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectSnsTemplatesSection } from "../ProjectSnsTemplatesSection";
-import { resendProjectSnsTemplatesAction, saveProjectSnsTemplatesAction } from "../snsTemplateActions";
 import type { SnsTemplatesView } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies, calledRequests, failFetchWith, failWith, installBackend, jsonResponse } from "./projectCoreRuntime";
 
-jest.mock("../snsTemplateActions", () => ({
-  saveProjectSnsTemplatesAction: jest.fn(),
-  resendProjectSnsTemplatesAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
 /**
  * issue #1583: 「SNS 告知」欄の告知文テンプレート。公開時と PV 達成時を別々の欄で編集して保存する。
  * 差し込み項目の案内、空なら既定の告知文を使う旨、本番サイトへの送信状態(失敗のときは「再送」)。
+ * Server Action(`../snsTemplateActions`)・`@/lib/apiClient`・`@/lib/session` は実物を通し、差し替えるのは
+ * Next.js の実行基盤と外部との通信(`fetch`)だけ(#1838)。
  */
+const SAVE = "PUT /api/projects/5/sns/templates";
+const RESEND = "POST /api/projects/5/sns/templates/resend";
+
 const view: SnsTemplatesView = {
   publishTemplate: "【新着】{title} {url}",
   pvTemplate: "{period}で{threshold}PV達成 {url}",
@@ -23,13 +37,14 @@ function renderSection(props: Partial<React.ComponentProps<typeof ProjectSnsTemp
   return render(<ProjectSnsTemplatesSection projectId={5} view={view} {...props} />);
 }
 
-describe("ProjectSnsTemplatesSection", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (saveProjectSnsTemplatesAction as jest.Mock).mockResolvedValue({ success: true });
-    (resendProjectSnsTemplatesAction as jest.Mock).mockResolvedValue({ success: true });
-  });
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({ [SAVE]: () => jsonResponse(view), [RESEND]: () => jsonResponse(view) });
+});
 
+describe("ProjectSnsTemplatesSection", () => {
   it("見出しと、差し込み項目(公開時は title・url、PV 達成時はさらに period・threshold)と、空なら既定の告知文を使う旨を示す", () => {
     renderSection();
 
@@ -72,21 +87,20 @@ describe("ProjectSnsTemplatesSection", () => {
     await user.type(screen.getByLabelText("公開時の告知文"), "公開: ");
     await user.click(screen.getByRole("button", { name: "テンプレートを保存" }));
 
-    expect(saveProjectSnsTemplatesAction).toHaveBeenCalledTimes(1);
-    const [projectId, , formData] = (saveProjectSnsTemplatesAction as jest.Mock).mock.calls[0];
-    expect(projectId).toBe(5);
-    expect(formData.get("publishTemplate")).toBe("公開: ");
-    expect(formData.get("pvTemplate")).toBe("{period}で{threshold}PV達成 {url}");
+    await waitFor(() => expect(bodies(backend, SAVE)).toHaveLength(1));
+    expect(bodies(backend, SAVE)).toEqual([
+      { publishTemplate: "公開: ", pvTemplate: "{period}で{threshold}PV達成 {url}" },
+    ]);
   });
 
   it("保存が拒否されたら理由を示す", async () => {
-    (saveProjectSnsTemplatesAction as jest.Mock).mockResolvedValue({ error: "テンプレートは1000文字以内です" });
+    installBackend({ [SAVE]: failWith(400, "テンプレートは1000文字以内です") });
     const user = userEvent.setup();
     renderSection();
 
     await user.click(screen.getByRole("button", { name: "テンプレートを保存" }));
 
-    expect(await screen.findByText("テンプレートは1000文字以内です")).toBeInTheDocument();
+    expect(await screen.findByText("APIエラー (400): テンプレートは1000文字以内です")).toBeInTheDocument();
   });
 
   it("送信済みなら送信済みと示し、再送は出さない", () => {
@@ -110,7 +124,7 @@ describe("ProjectSnsTemplatesSection", () => {
     expect(screen.getByTestId("sns-templates-send-status")).toHaveTextContent("本番サイトに届きません");
     await user.click(screen.getByRole("button", { name: "再送" }));
 
-    expect(resendProjectSnsTemplatesAction).toHaveBeenCalledWith(5);
+    await waitFor(() => expect(calledRequests(backend)).toEqual([RESEND]));
   });
 
   it("失敗の理由が無くても送信失敗と示す", () => {
@@ -119,8 +133,30 @@ describe("ProjectSnsTemplatesSection", () => {
     expect(screen.getByTestId("sns-templates-send-status")).toHaveTextContent("送信失敗");
   });
 
+  it("保存の通信そのものが失敗したら、その理由を示す", async () => {
+    failFetchWith("boom");
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "テンプレートを保存" }));
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+  });
+
+  it("保存が通ると、エラーを出さずに保存できたままにする", async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "テンプレートを保存" }));
+
+    await waitFor(() => expect(bodies(backend, SAVE)).toHaveLength(1));
+    expect(screen.queryByText(/APIエラー/)).not.toBeInTheDocument();
+  });
+
   it("再送がまた失敗したら理由を示す", async () => {
-    (resendProjectSnsTemplatesAction as jest.Mock).mockResolvedValue({ error: "まだ届きません" });
+    installBackend({
+      [RESEND]: () => jsonResponse({ ...view, send: { state: "FAILED", error: "まだ届きません", at: null } }),
+    });
     const user = userEvent.setup();
     renderSection({ view: { ...view, send: { state: "FAILED", error: "本番サイトに届きません", at: null } } });
 

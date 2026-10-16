@@ -1,22 +1,33 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectAdSenseSettingsForm } from "../ProjectAdSenseSettingsForm";
-import {
-  clearProjectAdSenseCredentialsAction,
-  selectProjectAdSenseAccountAction,
-  setProjectAdSenseSettingsAction,
-} from "../actions";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies, calledRequests, failWith, installBackend, noContent } from "./projectCoreRuntime";
 
-jest.mock("../actions", () => ({
-  setProjectAdSenseSettingsAction: jest.fn(),
-  selectProjectAdSenseAccountAction: jest.fn(),
-  clearProjectAdSenseCredentialsAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
 /**
  * issue #1232: AdSense設定画面。パブリッシャーIDは任意入力で、Googleアカウント連携後に
  * 自動取得される。複数件のときは一覧から選び、取得に失敗したときは理由を示して手入力で復旧できる。
+ * Server Action(`../actions`)・`@/lib/apiClient`・`@/lib/session` は実物を通し、差し替えるのは
+ * Next.js の実行基盤と外部との通信(`fetch`)だけ(#1838)。ブラウザの確認ダイアログ(`window.confirm`)は jsdom に無いので差し替える。
  */
+const SETTINGS = "PUT /api/projects/5/api-keys/adsense";
+const SECRET = "PUT /api/projects/5/api-keys/adsense/client-secret";
+const ACCOUNT = "PUT /api/projects/5/api-keys/adsense/account";
+const CLEAR = "DELETE /api/projects/5/api-keys/adsense";
+
 const ACCOUNTS = [
   { accountId: "pub-1111111111111111", displayName: "E2E Stub Publisher" },
   { accountId: "pub-2222222222222222", displayName: null },
@@ -37,14 +48,14 @@ function renderForm(overrides: Partial<React.ComponentProps<typeof ProjectAdSens
   );
 }
 
-describe("ProjectAdSenseSettingsForm", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (setProjectAdSenseSettingsAction as jest.Mock).mockResolvedValue({ success: true });
-    (selectProjectAdSenseAccountAction as jest.Mock).mockResolvedValue({ success: true });
-    (clearProjectAdSenseCredentialsAction as jest.Mock).mockResolvedValue(undefined);
-  });
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({ [SETTINGS]: noContent, [SECRET]: noContent, [ACCOUNT]: noContent, [CLEAR]: noContent });
+});
 
+describe("ProjectAdSenseSettingsForm", () => {
   it("未連携なら「未設定」と表示し、パブリッシャーIDは任意入力である", () => {
     renderForm();
 
@@ -131,20 +142,32 @@ describe("ProjectAdSenseSettingsForm", () => {
     );
     await user.click(screen.getByRole("button", { name: "パブリッシャーIDを保存" }));
 
-    expect(selectProjectAdSenseAccountAction).toHaveBeenCalledTimes(1);
-    const formData = (selectProjectAdSenseAccountAction as jest.Mock).mock.calls[0][2] as FormData;
-    expect(formData.get("selectedAccountId")).toBe("pub-2222222222222222");
     expect(await screen.findByText("パブリッシャーIDを保存しました。")).toBeInTheDocument();
+    expect(bodies(backend, ACCOUNT)).toEqual([{ accountId: "pub-2222222222222222" }]);
   });
 
   it("アカウント保存が失敗したらエラーを表示する", async () => {
-    (selectProjectAdSenseAccountAction as jest.Mock).mockResolvedValue({ error: "保存に失敗" });
+    installBackend({ [ACCOUNT]: failWith(500, "保存に失敗") });
+    const user = userEvent.setup();
+    renderForm({ connected: true, clientId: "cid", hasClientSecret: true, accounts: ACCOUNTS });
+
+    await user.selectOptions(
+      document.querySelector('select[name="selectedAccountId"]') as HTMLSelectElement,
+      "pub-1111111111111111"
+    );
+    await user.click(screen.getByRole("button", { name: "パブリッシャーIDを保存" }));
+
+    expect(await screen.findByText("APIエラー (500): 保存に失敗")).toBeInTheDocument();
+  });
+
+  it("アカウントを選ばずに保存すると、バックエンドへ送らず選択を求める", async () => {
     const user = userEvent.setup();
     renderForm({ connected: true, clientId: "cid", hasClientSecret: true, accounts: ACCOUNTS });
 
     await user.click(screen.getByRole("button", { name: "パブリッシャーIDを保存" }));
 
-    expect(await screen.findByText("保存に失敗")).toBeInTheDocument();
+    expect(await screen.findByText("AdSenseアカウントを選択してください。")).toBeInTheDocument();
+    expect(bodies(backend, ACCOUNT)).toEqual([]);
   });
 
   it("連携済みでアカウントが0件ならその旨を示し、手入力を案内する", () => {
@@ -185,21 +208,30 @@ describe("ProjectAdSenseSettingsForm", () => {
     await user.type(document.querySelector('input[name="clientSecret"]') as HTMLInputElement, "secret");
     await user.click(screen.getByRole("button", { name: "まとめて保存" }));
 
-    expect(setProjectAdSenseSettingsAction).toHaveBeenCalledTimes(1);
-    const formData = (setProjectAdSenseSettingsAction as jest.Mock).mock.calls[0][2] as FormData;
-    expect(formData.get("accountId")).toBe("");
-    expect(formData.get("clientId")).toBe("cid");
     expect(await screen.findByText("保存しました。")).toBeInTheDocument();
+    expect(bodies(backend, SETTINGS)).toEqual([{ accountId: "", clientId: "cid" }]);
+    expect(bodies(backend, SECRET)).toEqual([{ clientSecret: "secret" }]);
   });
 
   it("まとめて保存が失敗したらエラーを表示する", async () => {
-    (setProjectAdSenseSettingsAction as jest.Mock).mockResolvedValue({ error: "Google OAuthクライアントIDを入力してください。" });
     const user = userEvent.setup();
     renderForm();
 
     await user.click(screen.getByRole("button", { name: "まとめて保存" }));
 
     expect(await screen.findByText("Google OAuthクライアントIDを入力してください。")).toBeInTheDocument();
+    expect(calledRequests(backend)).toEqual([]);
+  });
+
+  it("保存がバックエンドに拒否されたらエラーを表示する", async () => {
+    installBackend({ [SETTINGS]: failWith(400, "不正なクライアントID") });
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(document.querySelector('input[name="clientId"]') as HTMLInputElement, "cid");
+    await user.click(screen.getByRole("button", { name: "まとめて保存" }));
+
+    expect(await screen.findByText("APIエラー (400): 不正なクライアントID")).toBeInTheDocument();
   });
 
   it("連携完了/失敗のバナーは指定されたときだけ表示する", () => {
@@ -223,7 +255,7 @@ describe("ProjectAdSenseSettingsForm", () => {
 
     await user.click(screen.getByRole("button", { name: "設定を削除" }));
 
-    expect(clearProjectAdSenseCredentialsAction).toHaveBeenCalledWith(5);
+    await waitFor(() => expect(calledRequests(backend)).toEqual([CLEAR]));
     confirmSpy.mockRestore();
   });
 
@@ -234,7 +266,7 @@ describe("ProjectAdSenseSettingsForm", () => {
 
     await user.click(screen.getByRole("button", { name: "設定を削除" }));
 
-    expect(clearProjectAdSenseCredentialsAction).not.toHaveBeenCalled();
+    expect(calledRequests(backend)).toEqual([]);
     confirmSpy.mockRestore();
   });
 

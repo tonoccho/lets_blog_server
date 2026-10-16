@@ -1,23 +1,34 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectPvRulesSection } from "../ProjectPvRulesSection";
-import {
-  addProjectPvRuleAction,
-  deleteProjectPvRuleAction,
-  resendProjectPvRulesAction,
-} from "../pvRuleActions";
 import type { PvRulesView } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies, calledRequests, failFetchWith, failWith, installBackend, jsonResponse } from "./projectCoreRuntime";
 
-jest.mock("../pvRuleActions", () => ({
-  addProjectPvRuleAction: jest.fn(),
-  deleteProjectPvRuleAction: jest.fn(),
-  resendProjectPvRulesAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
 /**
  * issue #1578: 「SNS 告知」欄の PV 達成ルール。一覧と追加・削除、GA 未連携のときは追加できず理由を示す、
  * 本番サイトへの送信状態(失敗のときは「再送」)、GA の集計遅れの注記。
+ * Server Action(`../pvRuleActions`)・`@/lib/apiClient`・`@/lib/session` は実物を通し、差し替えるのは
+ * Next.js の実行基盤と外部との通信(`fetch`)だけ(#1838)。
  */
+const ADD = "POST /api/projects/5/sns/pv/rules";
+const DELETE_R1 = "DELETE /api/projects/5/sns/pv/rules/r1";
+const DELETE_R2 = "DELETE /api/projects/5/sns/pv/rules/r2";
+const RESEND = "POST /api/projects/5/sns/pv/resend";
+
 const view: PvRulesView = {
   addable: true,
   reason: null,
@@ -32,14 +43,19 @@ function renderSection(props: Partial<React.ComponentProps<typeof ProjectPvRules
   return render(<ProjectPvRulesSection projectId={5} view={view} {...props} />);
 }
 
-describe("ProjectPvRulesSection", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    (addProjectPvRuleAction as jest.Mock).mockResolvedValue({ success: true });
-    (deleteProjectPvRuleAction as jest.Mock).mockResolvedValue({ success: true });
-    (resendProjectPvRulesAction as jest.Mock).mockResolvedValue({ success: true });
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({
+    [ADD]: () => jsonResponse(view),
+    [DELETE_R1]: () => jsonResponse(view),
+    [DELETE_R2]: () => jsonResponse(view),
+    [RESEND]: () => jsonResponse(view),
   });
+});
 
+describe("ProjectPvRulesSection", () => {
   it("見出しと、GA の集計遅れで告知が遅れることがある旨を示す", () => {
     renderSection();
 
@@ -72,11 +88,8 @@ describe("ProjectPvRulesSection", () => {
     await user.type(screen.getByRole("spinbutton"), "3000");
     await user.click(screen.getByRole("button", { name: "ルールを追加" }));
 
-    expect(addProjectPvRuleAction).toHaveBeenCalledTimes(1);
-    const [projectId, , formData] = (addProjectPvRuleAction as jest.Mock).mock.calls[0];
-    expect(projectId).toBe(5);
-    expect(formData.get("period")).toBe("total");
-    expect(formData.get("threshold")).toBe("3000");
+    await waitFor(() => expect(bodies(backend, ADD)).toHaveLength(1));
+    expect(bodies(backend, ADD)).toEqual([{ period: "total", threshold: 3000 }]);
   });
 
   it("期間の選択肢は 1日 と 累計", () => {
@@ -87,14 +100,23 @@ describe("ProjectPvRulesSection", () => {
   });
 
   it("追加が拒否されたら理由を示す", async () => {
-    (addProjectPvRuleAction as jest.Mock).mockResolvedValue({ error: "閾値は1以上の整数で入力してください。" });
+    installBackend({ [ADD]: failWith(409, "GA が連携されていません") });
     const user = userEvent.setup();
     renderSection();
 
     await user.type(screen.getByRole("spinbutton"), "5");
     await user.click(screen.getByRole("button", { name: "ルールを追加" }));
 
-    expect(await screen.findByText("閾値は1以上の整数で入力してください。")).toBeInTheDocument();
+    expect(await screen.findByText("APIエラー (409): GA が連携されていません")).toBeInTheDocument();
+  });
+
+  it("閾値が空のまま追加を送信すると、バックエンドへ送らず入力を求める", async () => {
+    renderSection();
+
+    fireEvent.submit(screen.getByRole("button", { name: "ルールを追加" }).closest("form") as HTMLFormElement);
+
+    expect(await screen.findByText("閾値は 1 以上の整数で入力してください。")).toBeInTheDocument();
+    expect(bodies(backend, ADD)).toEqual([]);
   });
 
   it("GA が未連携なら追加ボタンは押せず、理由を示す", () => {
@@ -119,17 +141,17 @@ describe("ProjectPvRulesSection", () => {
 
     await user.click(within(screen.getAllByTestId("pv-rule-item")[1]).getByRole("button", { name: "削除" }));
 
-    expect(deleteProjectPvRuleAction).toHaveBeenCalledWith(5, "r2");
+    await waitFor(() => expect(calledRequests(backend)).toEqual([DELETE_R2]));
   });
 
   it("削除が拒否されたら理由を示す", async () => {
-    (deleteProjectPvRuleAction as jest.Mock).mockResolvedValue({ error: "ルールが見つかりません" });
+    installBackend({ [DELETE_R1]: failWith(404, "ルールが見つかりません") });
     const user = userEvent.setup();
     renderSection();
 
     await user.click(within(screen.getAllByTestId("pv-rule-item")[0]).getByRole("button", { name: "削除" }));
 
-    expect(await screen.findByText("ルールが見つかりません")).toBeInTheDocument();
+    expect(await screen.findByText("APIエラー (404): ルールが見つかりません")).toBeInTheDocument();
   });
 
   it("送信済みなら送信済みと示し、再送は出さない", () => {
@@ -155,7 +177,7 @@ describe("ProjectPvRulesSection", () => {
     expect(screen.getByTestId("pv-send-status")).toHaveTextContent("本番サイトに届きません");
     await user.click(screen.getByRole("button", { name: "再送" }));
 
-    expect(resendProjectPvRulesAction).toHaveBeenCalledWith(5);
+    await waitFor(() => expect(calledRequests(backend)).toEqual([RESEND]));
   });
 
   it("失敗の理由が無くても送信失敗と示す", () => {
@@ -165,13 +187,25 @@ describe("ProjectPvRulesSection", () => {
   });
 
   it("再送がまた失敗したら理由を示す", async () => {
-    (resendProjectPvRulesAction as jest.Mock).mockResolvedValue({ error: "まだ届きません" });
+    installBackend({
+      [RESEND]: () => jsonResponse({ ...view, send: { state: "FAILED", error: "まだ届きません", at: null } }),
+    });
     const user = userEvent.setup();
     renderSection({ view: { ...view, send: { state: "FAILED", error: "本番サイトに届きません", at: null } } });
 
     await user.click(screen.getByRole("button", { name: "再送" }));
 
     expect(await screen.findByText("まだ届きません")).toBeInTheDocument();
+  });
+
+  it("削除の通信そのものが失敗したら、その理由を示す", async () => {
+    failFetchWith("boom");
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(within(screen.getAllByTestId("pv-rule-item")[0]).getByRole("button", { name: "削除" }));
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
   });
 
   it("取得できなければ取得できないと示し、画面は壊れない(追加はできない)", () => {
