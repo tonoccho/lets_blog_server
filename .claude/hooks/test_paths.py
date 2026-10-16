@@ -89,6 +89,9 @@ class ProductionCodeClassification(unittest.TestCase):
         # #1812: plugins/<name>/ は参照プラグイン(Gradle サブプロジェクト)の置き場。
         "plugins/claude-adapter/src/main/java/com/letsblog/plugins/claude/ClaudeAdapter.java",
         "plugins/claude-adapter/Dockerfile",
+        # #1813: ComfyUI アダプターも同じ plugins/<name>/ の形。
+        "plugins/comfyui-adapter/src/main/java/com/letsblog/plugins/comfyui/ComfyUiAdapter.java",
+        "plugins/comfyui-adapter/Dockerfile",
         # #983 の決定: 拡張の Webview 実装。
         "apps/extension/webviews/diagramGallery.js",
         "apps/extension/webviews/plan.html",
