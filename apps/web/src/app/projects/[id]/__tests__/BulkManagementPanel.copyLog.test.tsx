@@ -1,12 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BulkManagementPanel } from "../BulkManagementPanel";
 import type { BulkOperationLog, Project, Site, TermComparisonPage } from "@/lib/apiClient";
+import { jsonResponse, resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION, installFetchByPath } from "@/lib/__tests__/testUtils/webAdminRuntime";
 
 /**
  * issue #1363(親issue #1261 分割B)Requirement 4 / Acceptance Criteria 4。
  *
- * `describeLogText()`(:308)は失敗ログの「コピー」ボタンの`onClick`(`CopyLogButton`の
- * `handleCopy`、:326)からしか呼ばれず、`ImageGalleryGrid`等と違いJSXの描画中には走らない
+ * `describeLogText()` は失敗ログの「コピー」ボタンの`onClick`(`CopyLogButton`の
+ * `handleCopy`)からしか呼ばれず、`ImageGalleryGrid`等と違いJSXの描画中には走らない
  * (`ZipUploadPanel`の`uploadState.results`はアップロード完了後にしか埋まらない)。
  * サーバー描画時点の値が存在しないため、#1362/#1363の`mounted`ゲートが防ぐ
  * ハイドレーション不一致はそもそも起こり得ず、本番コードの変更は不要という結論を
@@ -17,27 +19,22 @@ import type { BulkOperationLog, Project, Site, TermComparisonPage } from "@/lib/
  * その表示から使うので、本テストもその経路で失敗ログを表示する。)
  *
  * ここでは「本番コードを変えない」という判断そのものを固定するため、コピーされる
- * テキストが受け取った`timezone`を素直に`formatDateTime`へ渡していることを確かめる。
- * `timezone`がnullのときに`formatDateTime`自身がブラウザTZへフォールバックする挙動は
- * `formatDate.test.ts`で既に確認済みのため、ここでは伝播の正しさだけを見る。
+ * テキストが受け取った`timezone`で書式化されていることを確かめる。`formatDateTime` は差し替えず実物を通す
+ * (`Asia/Tokyo` の日時は UTC から +9 時間ずれる)。自前の `../actions`・`@/lib/apiClient`・比較表のコンポーネントも
+ * 差し替えず、外部との通信(`fetch`)と Next.js の実行基盤だけを代替する(#1836)。
  */
-jest.mock("../actions", () => ({
-  runBulkOperationUploadAction: jest.fn(),
-  fetchGenerationJobAction: jest.fn(),
-  fetchTermComparisonAction: jest.fn(),
-  fetchStatusComparisonAction: jest.fn(),
-  fetchPostComparisonAction: jest.fn(),
-}));
-
-jest.mock("../TermComparisonTable", () => ({ TermComparisonTable: () => null }));
-jest.mock("../PluginThemeComparisonTable", () => ({ PluginThemeComparisonTable: () => null }));
-jest.mock("../PostComparisonTable", () => ({ PostComparisonTable: () => null }));
-
-jest.mock("@/lib/formatDate", () => ({
-  formatDateTime: jest.fn((iso: string, tz?: string | null) => `FORMATTED(${iso}|${tz})`),
-}));
-
-import { fetchGenerationJobAction } from "../actions";
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
+}))
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
 
 function buildSite(overrides: Partial<Site> = {}): Site {
   return {
@@ -98,14 +95,17 @@ function buildFailedLog(overrides: Partial<BulkOperationLog> = {}): BulkOperatio
 
 /** 処理キューの「結果を見る」から開いたときと同じく、ジョブの結果を表示し、失敗ログの「コピー」ボタンが現れるまで待つ。 */
 async function openJobResultWithFailure(timezone: string | null, log: BulkOperationLog) {
-  (fetchGenerationJobAction as jest.Mock).mockResolvedValue({
-    id: 9,
-    type: "bulk_zip_install",
-    status: "done",
-    requestPayload: null,
-    resultPayload: JSON.stringify({ phase: "done", projectId: 1, logs: [log] }),
-    createdAt: "",
-    updatedAt: "",
+  installFetchByPath({
+    "GET /api/generation-jobs/9": () =>
+      jsonResponse({
+        id: 9,
+        type: "bulk_zip_install",
+        status: "done",
+        requestPayload: null,
+        resultPayload: JSON.stringify({ phase: "done", projectId: 1, logs: [log] }),
+        createdAt: "",
+        updatedAt: "",
+      }),
   });
 
   render(
@@ -123,35 +123,134 @@ async function openJobResultWithFailure(timezone: string | null, log: BulkOperat
   });
 }
 
+async function copiedText(timezone: string | null, log: BulkOperationLog): Promise<string> {
+  await openJobResultWithFailure(timezone, log);
+  fireEvent.click(screen.getByRole("button", { name: "コピー" }));
+  await waitFor(() => {
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+  });
+  return (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0] as string;
+}
+
 describe("BulkManagementPanel 失敗ログのコピー(issue #1363 Requirement 4)", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    resetServerRuntime(ADMIN_SESSION);
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } });
   });
 
-  it("個人設定TZがあるとき、コピーした内容はそのTZでformatDateTimeを呼ぶ", async () => {
-    const log = buildFailedLog();
-    await openJobResultWithFailure("Asia/Tokyo", log);
+  it("個人設定TZがあるとき、コピーした内容はそのTZで書式化した日時を含む", async () => {
+    const copied = await copiedText("Asia/Tokyo", buildFailedLog());
 
-    fireEvent.click(screen.getByRole("button", { name: "コピー" }));
-
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
-    });
-    const copied = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0] as string;
-    expect(copied).toContain(`日時: FORMATTED(${log.createdAt}|Asia/Tokyo)`);
+    // 2026-09-08T20:03:35(オフセット無し = UTC)は、Asia/Tokyo では翌日の 05:03:35
+    expect(copied).toContain("日時: 2026/9/9 5:03:35");
   });
 
-  it("個人設定TZが未設定のとき、コピーした内容はTZ引数無しでformatDateTimeを呼ぶ(ブラウザTZへフォールバック)", async () => {
-    const log = buildFailedLog();
-    await openJobResultWithFailure(null, log);
+  it("個人設定TZが未設定のとき、コピーした内容はブラウザ既定TZで書式化した日時を含む", async () => {
+    const copied = await copiedText(null, buildFailedLog());
 
-    fireEvent.click(screen.getByRole("button", { name: "コピー" }));
+    expect(copied).toMatch(/^日時: \d{4}\/\d{1,2}\/\d{1,2} \d{1,2}:\d{2}:\d{2}\n/);
+  });
 
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
-    });
-    const copied = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0] as string;
-    expect(copied).toContain(`日時: FORMATTED(${log.createdAt}|null)`);
+  it("zip のログは「元のファイル名(zip)」を値として示し、エラーとスタックトレースも含める", async () => {
+    const copied = await copiedText("UTC", buildFailedLog());
+
+    expect(copied).toBe(
+      [
+        "日時: 2026/9/8 20:03:35",
+        "操作: プラグインインストール",
+        "値: custom.zip(zip)",
+        "環境: テスト",
+        "ステータス: 失敗",
+        "エラー: boom",
+        "",
+        "スタックトレース:",
+        "trace",
+      ].join("\n")
+    );
+  });
+
+  it("zip で元のファイル名が無いときは値をそのまま示し、エラーとスタックトレースが無ければ「(なし)」にする", async () => {
+    const copied = await copiedText(
+      "UTC",
+      buildFailedLog({ originalFilename: null, errorMessage: null, stackTrace: null })
+    );
+
+    expect(copied).toContain("値: custom.zip(zip)");
+    expect(copied).toContain("エラー: (なし)");
+    expect(copied.endsWith("スタックトレース:\n(なし)")).toBe(true);
+  });
+
+  it("カテゴリ・タグの操作は、スラッグ(編集・削除は対象のスラッグ)を値に添える", async () => {
+    const withSlug = await copiedText(
+      "UTC",
+      buildFailedLog({ operationType: "CATEGORY_CREATE", sourceType: "SLUG", value: "お知らせ", categorySlug: "news" })
+    );
+    expect(withSlug).toContain("値: お知らせ(news)");
+  });
+
+  it("カテゴリ・タグの操作でスラッグが無ければ、値だけを示す", async () => {
+    const copied = await copiedText(
+      "UTC",
+      buildFailedLog({ operationType: "TAG_DELETE", sourceType: "SLUG", value: "雑記", categorySlug: null, categoryTargetSlug: null })
+    );
+    expect(copied).toContain("値: 雑記\n");
+  });
+
+  it("カテゴリ・タグの編集は、対象のスラッグを値に添える", async () => {
+    const copied = await copiedText(
+      "UTC",
+      buildFailedLog({ operationType: "TAG_EDIT", sourceType: "SLUG", value: "雑記", categorySlug: null, categoryTargetSlug: "misc" })
+    );
+    expect(copied).toContain("値: 雑記(misc)");
+  });
+
+  it("ポスト/ページのステータス変更は「値 → 変更後のステータス」を示す", async () => {
+    const copied = await copiedText(
+      "UTC",
+      buildFailedLog({ operationType: "POST_STATUS_UPDATE", sourceType: "SLUG", value: "hello", postStatus: "draft" })
+    );
+    expect(copied).toContain("操作: ポスト/ページステータス変更");
+    expect(copied).toContain("値: hello → draft");
+  });
+
+  it("ステータス変更でも変更後のステータスが無ければ、値だけを示す", async () => {
+    const copied = await copiedText(
+      "UTC",
+      buildFailedLog({ operationType: "POST_STATUS_UPDATE", sourceType: "SLUG", value: "hello", postStatus: null })
+    );
+    expect(copied).toContain("値: hello\n");
+  });
+
+  it("その他の操作は値をそのまま示し、コピー後は「コピーしました」に変わって2秒で戻る", async () => {
+    jest.useFakeTimers();
+    try {
+      installFetchByPath({
+        "GET /api/generation-jobs/9": () =>
+          jsonResponse({
+            id: 9,
+            type: "bulk_slug_install",
+            status: "done",
+            requestPayload: null,
+            resultPayload: JSON.stringify({ phase: "done", projectId: 1, logs: [buildFailedLog({ sourceType: "SLUG", value: "akismet" })] }),
+            createdAt: "",
+            updatedAt: "",
+          }),
+      });
+      render(
+        <BulkManagementPanel projectId={1} project={buildProject()} categoryPage={buildCategoryPage()} timezone="UTC" bulkJobId={9} />
+      );
+      const copyButton = await screen.findByRole("button", { name: "コピー" });
+
+      fireEvent.click(copyButton);
+      expect(await screen.findByRole("button", { name: "コピーしました" })).toBeInTheDocument();
+      expect((navigator.clipboard.writeText as jest.Mock).mock.calls[0][0]).toContain("値: akismet\n");
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(2000);
+      });
+
+      expect(screen.getByRole("button", { name: "コピー" })).toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

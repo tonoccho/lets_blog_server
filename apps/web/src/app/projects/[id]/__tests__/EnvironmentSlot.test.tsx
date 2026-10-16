@@ -1,13 +1,26 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { EnvironmentSlot } from "../EnvironmentSlot";
 import type { Site } from "@/lib/apiClient";
+import { jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { bodies } from "./projectCoreRuntime";
+import { ADMIN_SESSION, calledRequests, installFetchByPath } from "@/lib/__tests__/testUtils/webAdminRuntime";
 
-const unbindEnvironmentAction = jest.fn();
+// 自前の `../actions`・`@/lib/apiClient`・`@/lib/session` は差し替えず、Next.js の実行基盤と外部との通信(`fetch`)だけを代替する(#1836)。
+jest.mock('server-only', () => ({}))
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule)
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule)
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule)
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule)
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
+}))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-jest.mock("../actions", () => ({
-  bindEnvironmentAction: jest.fn(),
-  unbindEnvironmentAction: (...args: unknown[]) => unbindEnvironmentAction(...args),
-}));
+const UNBIND = "DELETE /api/projects/1/environments/test";
+const BIND = "POST /api/projects/1/environments";
 
 function buildSite(overrides: Partial<Site> = {}): Site {
   return {
@@ -27,7 +40,8 @@ function buildSite(overrides: Partial<Site> = {}): Site {
 
 describe("EnvironmentSlot", () => {
   beforeEach(() => {
-    unbindEnvironmentAction.mockReset().mockResolvedValue(undefined);
+    resetServerRuntime(ADMIN_SESSION);
+    installFetchByPath({ [UNBIND]: () => jsonResponse({}), [BIND]: () => jsonResponse({}) });
   });
 
   it("未紐付け(site=null)のとき、サイト選択のselectと候補一覧を表示する(issue #944: aria-label付き)", () => {
@@ -75,7 +89,8 @@ describe("EnvironmentSlot", () => {
     expect(screen.queryByLabelText("本番環境に紐付けるサイト")).not.toBeInTheDocument();
   });
 
-  it("切離しボタンを押すとunbindEnvironmentActionが呼ばれる", async () => {
+  it("切離しボタンを押すと環境の切離しがバックエンドへ送られる", async () => {
+    const fetchMock = installFetchByPath({ [UNBIND]: () => jsonResponse({}) });
     render(
       <EnvironmentSlot
         projectId={1}
@@ -89,8 +104,68 @@ describe("EnvironmentSlot", () => {
     fireEvent.click(screen.getByRole("button", { name: "切離し" }));
 
     await waitFor(() => {
-      expect(unbindEnvironmentAction).toHaveBeenCalledWith(1, "test");
+      expect(calledRequests(fetchMock)).toEqual([UNBIND]);
     });
+  });
+
+  it("切離しの往復の間は「切離し中…」を示して押せなくする", async () => {
+    let release: (r: Response) => void = () => {};
+    installFetchByPath({ [UNBIND]: () => new Promise<Response>((resolve) => (release = resolve)) });
+    render(<EnvironmentSlot projectId={1} environment="test" site={buildSite()} candidateSites={[]} adminPath="wp-admin" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "切離し" }));
+
+    expect(await screen.findByRole("button", { name: "切離し中…" })).toBeDisabled();
+    await act(async () => {
+      release(jsonResponse({}));
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "切離し" })).toBeEnabled());
+  });
+
+  it("未紐付けでサイトを選んで紐付けると、選んだサイトが環境へ紐付けられる", async () => {
+    const fetchMock = installFetchByPath({ [BIND]: () => jsonResponse({}) });
+    render(
+      <EnvironmentSlot
+        projectId={1}
+        environment="test"
+        site={null}
+        candidateSites={[buildSite({ id: 10, name: "候補サイト", siteKey: "candidate" })]}
+        adminPath="wp-admin"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("テスト環境に紐付けるサイト"), { target: { value: "10" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("button", { name: "紐付ける" }).closest("form") as HTMLFormElement);
+    });
+
+    expect(calledRequests(fetchMock)).toEqual([BIND]);
+    expect(bodies(fetchMock, BIND)).toEqual([{ environment: "test", siteId: 10 }]);
+  });
+
+  it("紐付けの往復の間は「紐付中…」を示し、失敗するとその理由を示す", async () => {
+    let release: (r: Response) => void = () => {};
+    installFetchByPath({ [BIND]: () => new Promise<Response>((resolve) => (release = resolve)) });
+    render(
+      <EnvironmentSlot
+        projectId={1}
+        environment="test"
+        site={null}
+        candidateSites={[buildSite({ id: 10, name: "候補サイト", siteKey: "candidate" })]}
+        adminPath="wp-admin"
+      />
+    );
+    fireEvent.change(screen.getByLabelText("テスト環境に紐付けるサイト"), { target: { value: "10" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("button", { name: "紐付ける" }).closest("form") as HTMLFormElement);
+    });
+
+    expect(await screen.findByRole("button", { name: "紐付中…" })).toBeDisabled();
+    await act(async () => {
+      release(textResponse("すでに紐付いています", 409));
+    });
+    expect(await screen.findByText("APIエラー (409): すでに紐付いています")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "紐付ける" })).toBeEnabled();
   });
 
   it("紐付け済みのとき、公開URLを文字列として表示しない(issue #1530)", () => {

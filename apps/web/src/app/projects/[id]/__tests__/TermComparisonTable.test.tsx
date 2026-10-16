@@ -1,14 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TermComparisonTable } from "../TermComparisonTable";
-import {
-  applyToEnvironmentAction,
-  syncTermToMasterAction,
-  deleteTermEverywhereAction,
-  fetchTermComparisonAction,
-  editTermAndSyncAction,
-  syncAllTermsToMasterAction,
-} from "../actions";
 import type { TermComparisonPage, TermComparisonRow, TermEnvironmentValue } from "@/lib/apiClient";
+import { jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION, calledRequests, installFetchByPath } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { bodies } from "./projectCoreRuntime";
 
 /**
  * issue #1051: 新規追加・編集フォームの<form>にmethod="post"を明示した(JS無効時のネイティブ
@@ -17,22 +12,30 @@ import type { TermComparisonPage, TermComparisonRow, TermEnvironmentValue } from
  * `scripts/check-changed-coverage.py` はファイル単位で分岐カバレッジを見るため、この変更に
  * よって「変更したファイル」として扱われる本コンポーネントの既存ロジック(環境間の同期・
  * 編集・削除・一括同期・ページング)も、この機会にあわせて可能な範囲で押さえる。
+ *
+ * 自前の `../actions`・`@/lib/apiClient`・`@/lib/session` は差し替えず、Next.js の実行基盤と外部との通信(`fetch`)だけを
+ * 代替する(#1836)。バックエンドへ送られた要求は `fetch` の層で確かめる。
  */
-jest.mock("../actions", () => ({
-  applyToEnvironmentAction: jest.fn(),
-  syncTermToMasterAction: jest.fn(),
-  deleteTermEverywhereAction: jest.fn(),
-  fetchTermComparisonAction: jest.fn(),
-  editTermAndSyncAction: jest.fn(),
-  syncAllTermsToMasterAction: jest.fn(),
-}));
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
+}))
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
 
-const applyMock = applyToEnvironmentAction as jest.MockedFunction<typeof applyToEnvironmentAction>;
-const syncMock = syncTermToMasterAction as jest.MockedFunction<typeof syncTermToMasterAction>;
-const deleteMock = deleteTermEverywhereAction as jest.MockedFunction<typeof deleteTermEverywhereAction>;
-const fetchPageMock = fetchTermComparisonAction as jest.MockedFunction<typeof fetchTermComparisonAction>;
-const editMock = editTermAndSyncAction as jest.MockedFunction<typeof editTermAndSyncAction>;
-const syncAllMock = syncAllTermsToMasterAction as jest.MockedFunction<typeof syncAllTermsToMasterAction>;
+const COMPARISON = "GET /api/projects/1/bulk-management/categories/comparison";
+const SYNC = "POST /api/projects/1/bulk-management/categories/sync";
+const DELETE_ALL = "POST /api/projects/1/bulk-management/categories/delete-all";
+const EDIT_SYNC = "POST /api/projects/1/bulk-management/categories/edit-sync";
+const SYNC_ALL = "POST /api/projects/1/bulk-management/categories/sync-all";
+const APPLY = "POST /api/projects/1/bulk-management/apply";
+const TAG_COMPARISON = "GET /api/projects/1/bulk-management/tags/comparison";
 
 function envValue(overrides: Partial<TermEnvironmentValue> = {}): TermEnvironmentValue {
   return {
@@ -69,14 +72,25 @@ function page(overrides: Partial<TermComparisonPage> = {}): TermComparisonPage {
 }
 
 describe("TermComparisonTable", () => {
+  let confirmSpy: jest.SpyInstance;
+  let backend: jest.Mock;
+
+  /** 既定は何も起きない(想定外の通信は例外)。テストごとに必要な応答だけ足す。 */
+  function install(routes: Record<string, () => Response> = {}) {
+    backend = installFetchByPath({
+      [COMPARISON]: () => jsonResponse(page()),
+      [TAG_COMPARISON]: () => jsonResponse(page()),
+      ...routes,
+    });
+  }
+
   beforeEach(() => {
-    applyMock.mockReset();
-    syncMock.mockReset();
-    deleteMock.mockReset();
-    fetchPageMock.mockReset();
-    editMock.mockReset();
-    syncAllMock.mockReset();
-    window.confirm = jest.fn();
+    resetServerRuntime(ADMIN_SESSION);
+    install();
+    confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
+  });
+  afterEach(() => {
+    confirmSpy.mockRestore();
   });
 
   function renderTable(overrides: Partial<TermComparisonPage> = {}, kind: "category" | "tag" = "category") {
@@ -131,18 +145,17 @@ describe("TermComparisonTable", () => {
   });
 
   it("同期確認をキャンセルすると同期アクションを呼ばない", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "同期" }));
 
-    expect(syncMock).not.toHaveBeenCalled();
+    expect(calledRequests(backend)).toEqual([]);
   });
 
   it("同期に成功すると成功メッセージを表示する", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    syncMock.mockResolvedValue({});
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [SYNC]: () => jsonResponse([]) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "同期" }));
@@ -150,43 +163,44 @@ describe("TermComparisonTable", () => {
     await waitFor(() => {
       expect(screen.getByText("同期しました。")).toBeInTheDocument();
     });
+    expect(bodies(backend, SYNC)).toEqual([{ slug: "news" }]);
+    expect(calledRequests(backend)).toEqual([SYNC, `${COMPARISON}?page=0`]);
   });
 
   it("同期に失敗するとエラーメッセージを表示する", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    syncMock.mockResolvedValue({ error: "同期に失敗しました" });
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [SYNC]: () => textResponse("同期に失敗しました", 500) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "同期" }));
 
     await waitFor(() => {
-      expect(screen.getByText("同期に失敗しました")).toBeInTheDocument();
+      expect(screen.getByText("APIエラー (500): 同期に失敗しました")).toBeInTheDocument();
     });
   });
 
   it("削除確認をキャンセルすると削除アクションを呼ばない", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
-    expect(deleteMock).not.toHaveBeenCalled();
+    expect(calledRequests(backend)).toEqual([]);
   });
 
   it("削除の確認に、項目が存在する環境の数と環境名を表示する", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
-    expect(window.confirm).toHaveBeenCalledWith(
+    expect(confirmSpy).toHaveBeenCalledWith(
       "「お知らせ」を、存在する3つの環境(ローカル・テスト・本番)から削除します。よろしいですか?"
     );
   });
 
   it("一部の環境にしか無い項目では、存在しない環境を確認に含めない", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable({
       items: [
         row({
@@ -199,14 +213,14 @@ describe("TermComparisonTable", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
-    const message = (window.confirm as jest.Mock).mock.calls[0][0] as string;
+    const message = confirmSpy.mock.calls[0][0] as string;
     expect(message).toContain("存在する1つの環境(本番)");
     expect(message).not.toContain("ローカル");
     expect(message).not.toContain("テスト");
   });
 
   it("どの環境にも存在しない行は、従来の文言で確認する", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable({
       items: [
         row({
@@ -219,13 +233,12 @@ describe("TermComparisonTable", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
-    expect(window.confirm).toHaveBeenCalledWith("「お知らせ」を、存在するすべての環境から削除します。よろしいですか?");
+    expect(confirmSpy).toHaveBeenCalledWith("「お知らせ」を、存在するすべての環境から削除します。よろしいですか?");
   });
 
   it("削除すると成功メッセージを表示し、編集中の行を閉じる", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    deleteMock.mockResolvedValue({});
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [DELETE_ALL]: () => jsonResponse([]) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "編集" }));
@@ -237,18 +250,18 @@ describe("TermComparisonTable", () => {
       expect(screen.getByText("削除しました。")).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "保存(全環境に反映)" })).not.toBeInTheDocument();
+    expect(bodies(backend, DELETE_ALL)).toEqual([{ slug: "news" }]);
   });
 
   it("削除に失敗するとエラーメッセージを表示する", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    deleteMock.mockResolvedValue({ error: "削除に失敗しました" });
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [DELETE_ALL]: () => textResponse("削除に失敗しました", 500) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "削除" }));
 
     await waitFor(() => {
-      expect(screen.getByText("削除に失敗しました")).toBeInTheDocument();
+      expect(screen.getByText("APIエラー (500): 削除に失敗しました")).toBeInTheDocument();
     });
   });
 
@@ -263,19 +276,18 @@ describe("TermComparisonTable", () => {
   });
 
   it("マスターに値がある行の編集を確認キャンセルすると保存アクションを呼ばない", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "編集" }));
     fireEvent.submit(screen.getByRole("button", { name: "保存(全環境に反映)" }).closest("form") as HTMLFormElement);
 
-    expect(editMock).not.toHaveBeenCalled();
+    expect(calledRequests(backend)).toEqual([]);
   });
 
   it("マスターに値が無い行の編集は新規作成の確認文言になり、保存できる", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    editMock.mockResolvedValue({});
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [EDIT_SYNC]: () => jsonResponse([]) });
     renderTable({
       items: [row({ production: envValue({ available: false, slug: null }) })],
     });
@@ -284,37 +296,70 @@ describe("TermComparisonTable", () => {
     fireEvent.submit(screen.getByRole("button", { name: "保存(全環境に反映)" }).closest("form") as HTMLFormElement);
 
     await waitFor(() => {
-      expect(editMock).toHaveBeenCalled();
+      expect(bodies(backend, EDIT_SYNC)).toEqual([{ targetSlug: "news", value: "お知らせ", slug: "akismet" }]);
     });
-    expect((window.confirm as jest.Mock).mock.calls[0][0]).toContain("新規作成");
+    expect(confirmSpy.mock.calls[0][0]).toContain("新規作成");
+  });
+
+  it("マスターに値が無い行の編集フォームは、ローカル→テスト→本番の順で最初にある値を初期値にする", () => {
+    renderTable({
+      items: [
+        row({
+          local: envValue({ available: false, slug: null }),
+          test: envValue({ slug: "from-test", description: "テストの説明" }),
+          production: envValue({ available: false, slug: null }),
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "編集" }));
+
+    expect(screen.getByLabelText("スラッグ", { selector: "form input" })).toHaveValue("from-test");
+    expect(screen.getByLabelText("説明(任意)")).toHaveValue("テストの説明");
+  });
+
+  it("どの環境にも値が無い行の編集フォームは、スラッグ・説明を空で開く", () => {
+    renderTable({
+      items: [
+        row({
+          local: envValue({ available: false, slug: null }),
+          test: envValue({ available: false, slug: null }),
+          production: envValue({ available: false, slug: null }),
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "編集" }));
+
+    expect(screen.getByLabelText("スラッグ", { selector: "form input" })).toHaveValue("");
+    expect(screen.getByLabelText("説明(任意)")).toHaveValue("");
   });
 
   it("編集の保存に失敗するとエラーを表示したままにする", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    editMock.mockResolvedValue({ error: "保存に失敗しました" });
+    confirmSpy.mockReturnValue(true);
+    install({ [EDIT_SYNC]: () => textResponse("保存に失敗しました", 500) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "編集" }));
     fireEvent.submit(screen.getByRole("button", { name: "保存(全環境に反映)" }).closest("form") as HTMLFormElement);
 
     await waitFor(() => {
-      expect(screen.getByText("保存に失敗しました")).toBeInTheDocument();
+      expect(screen.getByText("APIエラー (500): 保存に失敗しました")).toBeInTheDocument();
     });
   });
 
   it("一括同期確認をキャンセルするとアクションを呼ばない", () => {
-    (window.confirm as jest.Mock).mockReturnValue(false);
+    confirmSpy.mockReturnValue(false);
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "マスターに一括で揃える" }));
 
-    expect(syncAllMock).not.toHaveBeenCalled();
+    expect(calledRequests(backend)).toEqual([]);
   });
 
   it("一括同期で差分が無い場合は専用メッセージを表示する", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    syncAllMock.mockResolvedValue({ results: [] });
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [SYNC_ALL]: () => jsonResponse([]) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "マスターに一括で揃える" }));
@@ -325,9 +370,8 @@ describe("TermComparisonTable", () => {
   });
 
   it("一括同期で操作が発生した場合は件数を表示する", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    syncAllMock.mockResolvedValue({ results: [{ slug: "a" }, { slug: "b" }] as never });
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [SYNC_ALL]: () => jsonResponse([{ slug: "a" }, { slug: "b" }]) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "マスターに一括で揃える" }));
@@ -338,26 +382,24 @@ describe("TermComparisonTable", () => {
   });
 
   it("一括同期に失敗するとエラーメッセージを表示する", async () => {
-    (window.confirm as jest.Mock).mockReturnValue(true);
-    syncAllMock.mockResolvedValue({ error: "一括同期に失敗しました" });
-    fetchPageMock.mockResolvedValue(page());
+    confirmSpy.mockReturnValue(true);
+    install({ [SYNC_ALL]: () => textResponse("一括同期に失敗しました", 500) });
     renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "マスターに一括で揃える" }));
 
     await waitFor(() => {
-      expect(screen.getByText("一括同期に失敗しました")).toBeInTheDocument();
+      expect(screen.getByText("APIエラー (500): 一括同期に失敗しました")).toBeInTheDocument();
     });
   });
 
   it("環境更新ボタンで一覧を再取得する", async () => {
-    fetchPageMock.mockResolvedValue(page());
     renderTable();
 
     fireEvent.click(screen.getAllByRole("button", { name: /を更新$/ })[0]);
 
     await waitFor(() => {
-      expect(fetchPageMock).toHaveBeenCalled();
+      expect(calledRequests(backend)).toEqual([`${COMPARISON}?page=0`]);
     });
   });
 
@@ -369,19 +411,19 @@ describe("TermComparisonTable", () => {
   });
 
   it("次のページがある場合は「次へ」で取得する", async () => {
-    fetchPageMock.mockResolvedValue(page({ page: 1 }));
+    install({ [COMPARISON]: () => jsonResponse(page({ page: 1, size: 1, totalCount: 2 })) });
     renderTable({ page: 0, size: 1, totalCount: 2 });
 
     fireEvent.click(screen.getByRole("button", { name: "次へ" }));
 
     await waitFor(() => {
-      expect(fetchPageMock).toHaveBeenCalledWith(1, "category", 1);
+      expect(calledRequests(backend)).toEqual([`${COMPARISON}?page=1`]);
     });
+    expect(await screen.findByText("2 / 2")).toBeInTheDocument();
   });
 
   it("新規追加フォームを送信すると一覧を更新して閉じる", async () => {
-    applyMock.mockResolvedValue({});
-    fetchPageMock.mockResolvedValue(page());
+    install({ [APPLY]: () => jsonResponse({}) });
     const { container } = renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "+ 新規追加" }));
@@ -390,7 +432,9 @@ describe("TermComparisonTable", () => {
     fireEvent.submit(container.querySelector("form") as HTMLFormElement);
 
     await waitFor(() => {
-      expect(applyMock).toHaveBeenCalled();
+      expect(bodies(backend, APPLY)).toEqual([
+        { environment: "production", operationType: "CATEGORY_CREATE", value: "イベント", categorySlug: "event" },
+      ]);
     });
     await waitFor(() => {
       expect(screen.queryByLabelText("スラッグ")).not.toBeInTheDocument();
@@ -398,7 +442,7 @@ describe("TermComparisonTable", () => {
   });
 
   it("新規追加に失敗するとエラーを表示したままフォームを開いておく", async () => {
-    applyMock.mockResolvedValue({ error: "追加に失敗しました" });
+    install({ [APPLY]: () => textResponse("追加に失敗しました", 500) });
     const { container } = renderTable();
 
     fireEvent.click(screen.getByRole("button", { name: "+ 新規追加" }));
@@ -407,9 +451,46 @@ describe("TermComparisonTable", () => {
     fireEvent.submit(container.querySelector("form") as HTMLFormElement);
 
     await waitFor(() => {
-      expect(screen.getByText("追加に失敗しました")).toBeInTheDocument();
+      expect(screen.getByText("APIエラー (500): 追加に失敗しました")).toBeInTheDocument();
     });
     expect(screen.getByLabelText("スラッグ")).toBeInTheDocument();
+  });
+
+  it("タグの新規追加はタグの作成として送り、親カテゴリ欄は出さない", async () => {
+    install({ [APPLY]: () => jsonResponse({}) });
+    const { container } = renderTable({}, "tag");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ 新規追加" }));
+    expect(screen.queryByLabelText("親カテゴリのスラッグ(任意)")).not.toBeInTheDocument();
+    fireEvent.change(screen.getAllByLabelText("名前")[0], { target: { value: "雑記" } });
+    fireEvent.change(screen.getByLabelText("スラッグ"), { target: { value: "misc" } });
+    fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(bodies(backend, APPLY)).toEqual([
+        { environment: "production", operationType: "TAG_CREATE", value: "雑記", categorySlug: "misc" },
+      ]);
+    });
+  });
+
+  it("タグの編集は親カテゴリを送らず、カテゴリの編集は親カテゴリと説明を送る", async () => {
+    confirmSpy.mockReturnValue(true);
+    const TAG_EDIT = "POST /api/projects/1/bulk-management/tags/edit-sync";
+    install({ [EDIT_SYNC]: () => jsonResponse([]), [TAG_EDIT]: () => jsonResponse([]) });
+    const tag = renderTable({}, "tag");
+    fireEvent.click(screen.getByRole("button", { name: "編集" }));
+    fireEvent.submit(screen.getByRole("button", { name: "保存(全環境に反映)" }).closest("form") as HTMLFormElement);
+    await waitFor(() => expect(bodies(backend, TAG_EDIT)).toEqual([{ targetSlug: "news", value: "お知らせ", slug: "akismet" }]));
+    tag.unmount();
+
+    renderTable({ items: [row({ production: envValue({ slug: "news", parentSlug: "parent", description: "説明" }) })] });
+    fireEvent.click(screen.getByRole("button", { name: "編集" }));
+    fireEvent.submit(screen.getByRole("button", { name: "保存(全環境に反映)" }).closest("form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(bodies(backend, EDIT_SYNC)).toEqual([
+        { targetSlug: "news", value: "お知らせ", slug: "news", parentSlug: "parent", description: "説明" },
+      ])
+    );
   });
 
   it("マスターと異なる値のセルは赤字で強調表示する", () => {

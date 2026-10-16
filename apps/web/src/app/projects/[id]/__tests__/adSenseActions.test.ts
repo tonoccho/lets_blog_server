@@ -4,92 +4,103 @@
 
 /**
  * issue #1232: AdSense連携のServer Action(設定保存 / パブリッシャーID選択)の検証。
- * `../actions` は他のコンポーネントテストから常にモックされるため、ここでは実体を直接importする
- * (googleAnalyticsActions.test.ts と同じ方針)。
+ * `../actions` の実体を直接importし、`@/lib/apiClient`・`@/lib/session` も実物を通す。
+ * 差し替えるのは Next.js の実行基盤と外部との通信(`fetch`)だけ(#1836)。
  */
 jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
 const revalidatePath = jest.fn();
 jest.mock('next/cache', () => ({ revalidatePath: (...args: unknown[]) => revalidatePath(...args) }));
 
-const requireAdminSession = jest.fn();
-jest.mock('@/lib/session', () => ({
-  requireAdminSession: (...args: unknown[]) => requireAdminSession(...args),
-}));
-
-const setSettings = jest.fn();
-const setClientSecret = jest.fn();
-const selectAccount = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  ...jest.requireActual('@/lib/apiClient'),
-  setProjectAdSenseSettings: (...args: unknown[]) => setSettings(...args),
-  setProjectAdSenseClientSecret: (...args: unknown[]) => setClientSecret(...args),
-  selectProjectAdSenseAccount: (...args: unknown[]) => selectAccount(...args),
-}));
-
+import { resetServerRuntime } from '@/lib/__tests__/testUtils/serverRuntime';
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime';
+import { bodies, failFetchWith, failWith, form, installBackend, noContent, requestCount } from './projectCoreRuntime';
 import { selectProjectAdSenseAccountAction, setProjectAdSenseSettingsAction } from '../actions';
 
-function form(values: Record<string, string>): FormData {
-  const data = new FormData();
-  for (const [key, value] of Object.entries(values)) data.set(key, value);
-  return data;
-}
+const SETTINGS = 'PUT /api/projects/7/api-keys/adsense';
+const SECRET = 'PUT /api/projects/7/api-keys/adsense/client-secret';
+const ACCOUNT = 'PUT /api/projects/7/api-keys/adsense/account';
+
+let backend: jest.Mock;
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installBackend({
+    [SETTINGS]: noContent,
+    [SECRET]: noContent,
+    [ACCOUNT]: noContent,
+  });
+});
 
 describe('AdSense連携のServer Action(issue #1232)', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    requireAdminSession.mockResolvedValue({ user: { role: 'admin' } });
-  });
-
   describe('setProjectAdSenseSettingsAction', () => {
     it('パブリッシャーIDが空でもクライアントIDがあれば保存できる', async () => {
-      setSettings.mockResolvedValue(undefined);
-
       const result = await setProjectAdSenseSettingsAction(
         7, {}, form({ accountId: '  ', clientId: ' cid ', clientSecret: '' })
       );
 
-      expect(setSettings).toHaveBeenCalledWith(7, { accountId: '', clientId: 'cid' });
-      expect(setClientSecret).not.toHaveBeenCalled();
+      expect(bodies(backend, SETTINGS)).toEqual([{ accountId: '', clientId: 'cid' }]);
+      expect(bodies(backend, SECRET)).toEqual([]);
       expect(revalidatePath).toHaveBeenCalledWith('/projects/7/settings/adsense');
       expect(revalidatePath).toHaveBeenCalledWith('/projects/7/dashboard');
       expect(result).toEqual({ success: true });
     });
 
     it('パブリッシャーIDを入力したときはそのまま送り、シークレットも保存する', async () => {
-      setSettings.mockResolvedValue(undefined);
-      setClientSecret.mockResolvedValue(undefined);
-
       await setProjectAdSenseSettingsAction(
         7, {}, form({ accountId: ' pub-1 ', clientId: 'cid', clientSecret: ' secret ' })
       );
 
-      expect(setSettings).toHaveBeenCalledWith(7, { accountId: 'pub-1', clientId: 'cid' });
-      expect(setClientSecret).toHaveBeenCalledWith(7, 'secret');
+      expect(bodies(backend, SETTINGS)).toEqual([{ accountId: 'pub-1', clientId: 'cid' }]);
+      expect(bodies(backend, SECRET)).toEqual([{ clientSecret: 'secret' }]);
     });
 
     it('フォームにaccountIdが無くても保存できる', async () => {
-      setSettings.mockResolvedValue(undefined);
-
       const result = await setProjectAdSenseSettingsAction(7, {}, form({ clientId: 'cid' }));
 
-      expect(setSettings).toHaveBeenCalledWith(7, { accountId: '', clientId: 'cid' });
+      expect(bodies(backend, SETTINGS)).toEqual([{ accountId: '', clientId: 'cid' }]);
       expect(result).toEqual({ success: true });
     });
 
     it('クライアントIDが空ならAPIを呼ばずエラーを返す', async () => {
       const result = await setProjectAdSenseSettingsAction(7, {}, form({ accountId: 'pub-1', clientId: ' ' }));
 
-      expect(setSettings).not.toHaveBeenCalled();
+      expect(requestCount(backend)).toBe(0);
       expect(result.error).toContain('クライアントID');
     });
 
-    it('APIが失敗したらエラーメッセージを返す(Errorでない例外も文字列化する)', async () => {
-      setSettings.mockRejectedValueOnce(new Error('APIエラー'));
-      expect(await setProjectAdSenseSettingsAction(7, {}, form({ clientId: 'cid' }))).toEqual({
-        error: 'APIエラー',
-      });
+    it('クライアントIDの欄そのものが無くてもAPIを呼ばずエラーを返す', async () => {
+      const result = await setProjectAdSenseSettingsAction(7, {}, form({ accountId: 'pub-1' }));
 
-      setSettings.mockRejectedValueOnce('失敗');
+      expect(requestCount(backend)).toBe(0);
+      expect(result.error).toContain('クライアントID');
+    });
+
+    it('APIが失敗したらエラーメッセージを返す', async () => {
+      installBackend({ [SETTINGS]: failWith(500, 'APIエラー') });
+      expect(await setProjectAdSenseSettingsAction(7, {}, form({ clientId: 'cid' }))).toEqual({
+        error: 'APIエラー (500): APIエラー',
+      });
+    });
+
+    it('シークレットの保存が失敗したらエラーを返し、再検証しない', async () => {
+      installBackend({ [SETTINGS]: noContent, [SECRET]: failWith(500, 'secret NG') });
+      expect(
+        await setProjectAdSenseSettingsAction(7, {}, form({ clientId: 'cid', clientSecret: 's' }))
+      ).toEqual({ error: 'APIエラー (500): secret NG' });
+      expect(revalidatePath).not.toHaveBeenCalled();
+    });
+
+    it('通信そのものがErrorでない値で失敗しても文字列化する', async () => {
+      failFetchWith('失敗');
       expect(await setProjectAdSenseSettingsAction(7, {}, form({ clientId: 'cid' }))).toEqual({
         error: '失敗',
       });
@@ -98,14 +109,11 @@ describe('AdSense連携のServer Action(issue #1232)', () => {
 
   describe('selectProjectAdSenseAccountAction', () => {
     it('選んだパブリッシャーIDを保存し、設定画面とダッシュボードを再検証する', async () => {
-      selectAccount.mockResolvedValue(undefined);
-
       const result = await selectProjectAdSenseAccountAction(
         7, {}, form({ selectedAccountId: ' pub-2222222222222222 ' })
       );
 
-      expect(requireAdminSession).toHaveBeenCalled();
-      expect(selectAccount).toHaveBeenCalledWith(7, 'pub-2222222222222222');
+      expect(bodies(backend, ACCOUNT)).toEqual([{ accountId: 'pub-2222222222222222' }]);
       expect(revalidatePath).toHaveBeenCalledWith('/projects/7/settings/adsense');
       expect(revalidatePath).toHaveBeenCalledWith('/projects/7/dashboard');
       expect(result).toEqual({ success: true });
@@ -114,20 +122,26 @@ describe('AdSense連携のServer Action(issue #1232)', () => {
     it('未選択ならAPIを呼ばずエラーを返す', async () => {
       const result = await selectProjectAdSenseAccountAction(7, {}, form({}));
 
-      expect(selectAccount).not.toHaveBeenCalled();
+      expect(requestCount(backend)).toBe(0);
       expect(result.error).toContain('選択');
     });
 
     it('APIが失敗したらエラーメッセージを返す(Errorでない例外も文字列化する)', async () => {
-      selectAccount.mockRejectedValueOnce(new Error('APIエラー'));
+      installBackend({ [ACCOUNT]: failWith(500, 'APIエラー') });
       expect(await selectProjectAdSenseAccountAction(7, {}, form({ selectedAccountId: 'pub-1' }))).toEqual({
-        error: 'APIエラー',
+        error: 'APIエラー (500): APIエラー',
       });
 
-      selectAccount.mockRejectedValueOnce('失敗');
+      failFetchWith('失敗');
       expect(await selectProjectAdSenseAccountAction(7, {}, form({ selectedAccountId: 'pub-1' }))).toEqual({
         error: '失敗',
       });
     });
+  });
+
+  it('管理者でなければ / へ戻し、バックエンドへ問い合わせない', async () => {
+    resetServerRuntime({ user: { id: 'u-1', role: 'user' } });
+    await expect(selectProjectAdSenseAccountAction(7, {}, form({ selectedAccountId: 'p' }))).rejects.toThrow('NEXT_REDIRECT:/');
+    expect(requestCount(backend)).toBe(0);
   });
 });
