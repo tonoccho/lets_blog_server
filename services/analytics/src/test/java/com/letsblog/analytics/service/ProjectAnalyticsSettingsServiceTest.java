@@ -1,19 +1,15 @@
 package com.letsblog.analytics.service;
 
 import com.letsblog.analytics.adsense.AdSenseAccountSummary;
-import com.letsblog.analytics.adsense.AdSenseClient;
 import com.letsblog.analytics.adsense.AdSenseException;
-import com.letsblog.analytics.adsense.GoogleOAuthTokens;
-import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
+import com.letsblog.analytics.analytics.GoogleAnalyticsException;
 import com.letsblog.analytics.analytics.GoogleAnalyticsPropertySummary;
-import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.analytics.domain.AnalyticsCredentials;
+import com.letsblog.analytics.testsupport.AnalyticsWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Base64;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,138 +17,155 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * ProjectAnalyticsSettingsServiceのGoogle Analytics OAuth連携の回帰テスト(issue #1231)。
  * サービスアカウントJSONの検証・保存経路は廃止され、OAuthクライアントの保存 → 認可コード交換 →
  * プロパティ一覧 → プロパティ選択 → 解除、が唯一の経路になった。
+ *
+ * <p>issue #1827: {@code AnalyticsCredentialsService}・{@code GoogleAnalyticsClient}・{@code AdSenseClient}は実物。
+ * 外部との通信である Google の各 API(サーバー側フェイクのHTTP)と DB(メモリ上のリポジトリ)だけを差し替え、
+ * 保存された内容は「テーブル」({@link AnalyticsWorld#store})の中身で確かめる。
  */
-@ExtendWith(MockitoExtension.class)
 class ProjectAnalyticsSettingsServiceTest {
 
-    @Mock
-    private AnalyticsCredentialsService analyticsCredentialsService;
-    @Mock
-    private AdSenseClient adSenseClient;
-    @Mock
-    private GoogleAnalyticsClient googleAnalyticsClient;
+    private static final String TOKEN_PATH = "/oauth/token";
+    private static final String GA_ACCOUNT_SUMMARIES = "/ga-admin/v1beta/accountSummaries";
+    private static final String ADSENSE_ACCOUNTS = "/adsense/v2/accounts";
 
-    private final CredentialCipher credentialCipher =
-            new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32]));
+    private AnalyticsWorld world;
+
+    @BeforeEach
+    void setUp() {
+        world = new AnalyticsWorld();
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private ProjectAnalyticsSettingsService service() {
-        return new ProjectAnalyticsSettingsService(
-                analyticsCredentialsService, adSenseClient, googleAnalyticsClient, credentialCipher);
+        return world.settings;
     }
+
+    private AnalyticsCredentials row() {
+        return world.store.get(1L);
+    }
+
+    private String decrypt(byte[] encrypted) {
+        return world.cipher.decrypt(encrypted);
+    }
+
+    private void tokenEndpointReturns(String json) {
+        world.http.json("POST", TOKEN_PATH, json);
+    }
+
+    // ---- Google Analytics ----
 
     @Test
     void setGoogleAnalyticsClient_シークレットは暗号化して保存する() {
         service().setGoogleAnalyticsClient(1L, "cid", "plain-secret");
 
-        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
-        verify(analyticsCredentialsService).setGaOauthClient(eq(1L), eq("cid"), captor.capture());
-        assertEquals("plain-secret", credentialCipher.decrypt(captor.getValue()));
+        assertEquals("cid", row().getGaOauthClientId());
+        assertEquals("plain-secret", decrypt(row().getGaOauthClientSecretEncrypted()));
     }
 
     @Test
     void setGoogleAnalyticsClient_シークレットが空なら既存を変更しない() {
-        service().setGoogleAnalyticsClient(1L, "cid", "  ");
-        service().setGoogleAnalyticsClient(1L, "cid", null);
+        world.seedGa(1L, null, "old-cid", "keep-secret", null);
 
-        verify(analyticsCredentialsService, org.mockito.Mockito.times(2)).setGaOauthClient(1L, "cid", null);
+        service().setGoogleAnalyticsClient(1L, "cid", "  ");
+        assertEquals("cid", row().getGaOauthClientId());
+        assertEquals("keep-secret", decrypt(row().getGaOauthClientSecretEncrypted()));
+
+        service().setGoogleAnalyticsClient(1L, "cid-2", null);
+        assertEquals("cid-2", row().getGaOauthClientId());
+        assertEquals("keep-secret", decrypt(row().getGaOauthClientSecretEncrypted()));
     }
 
     @Test
     void completeGoogleAnalyticsOAuth_認可コードを交換してリフレッシュトークンを暗号化保存する() {
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("secret"));
-        when(googleAnalyticsClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
-                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
+        world.seedGa(1L, null, "cid", "secret", null);
+        tokenEndpointReturns("{\"access_token\":\"access\",\"refresh_token\":\"refresh-xyz\"}");
 
         service().completeGoogleAnalyticsOAuth(1L, "code", "https://x/cb");
 
-        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
-        verify(analyticsCredentialsService).setGaRefreshTokenEncrypted(eq(1L), captor.capture());
-        assertEquals("refresh-xyz", credentialCipher.decrypt(captor.getValue()));
+        assertEquals("refresh-xyz", decrypt(row().getGaRefreshTokenEncrypted()));
+        var exchange = world.http.requests("POST", TOKEN_PATH);
+        assertEquals(1, exchange.size());
+        String form = exchange.get(0).bodyText();
+        assertTrue(form.contains("grant_type=authorization_code"), form);
+        assertTrue(form.contains("code=code"), form);
+        assertTrue(form.contains("client_id=cid"), form);
+        assertTrue(form.contains("client_secret=secret"), form);
     }
 
     @Test
-    void completeGoogleAnalyticsOAuth_クライアントシークレット未保存ならnullを渡してクライアント側で拒否する() {
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn(null);
-        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(false);
-        when(googleAnalyticsClient.exchangeAuthorizationCode(null, null, "code", "https://x/cb"))
-                .thenThrow(new com.letsblog.analytics.analytics.GoogleAnalyticsException("未設定", null));
-
-        assertThrows(com.letsblog.analytics.analytics.GoogleAnalyticsException.class,
+    void completeGoogleAnalyticsOAuth_クライアントシークレット未保存ならGoogleへ問い合わせず拒否する() {
+        assertThrows(GoogleAnalyticsException.class,
                 () -> service().completeGoogleAnalyticsOAuth(1L, "code", "https://x/cb"));
-        verify(analyticsCredentialsService, never()).setGaRefreshTokenEncrypted(eq(1L), any());
+
+        assertTrue(world.http.requests().isEmpty());
+        assertNull(world.store.get(1L));
     }
 
     @Test
     void listGoogleAnalyticsProperties_保存済みのリフレッシュトークンで一覧を取得する() {
-        stubConnected();
-        List<GoogleAnalyticsPropertySummary> expected =
-                List.of(new GoogleAnalyticsPropertySummary("111", "Site A", "Account One"));
-        when(googleAnalyticsClient.refreshAccessToken("cid", "secret", "refresh")).thenReturn("access");
-        when(googleAnalyticsClient.listProperties("access")).thenReturn(expected);
+        world.seedGa(1L, null, "cid", "secret", "refresh");
+        tokenEndpointReturns("{\"access_token\":\"access\"}");
+        world.http.json("GET", GA_ACCOUNT_SUMMARIES, """
+                {"accountSummaries":[{"account":"accounts/1","displayName":"Account One",
+                  "propertySummaries":[{"property":"properties/111","displayName":"Site A"}]}]}
+                """);
 
-        assertEquals(expected, service().listGoogleAnalyticsProperties(1L));
+        List<GoogleAnalyticsPropertySummary> properties = service().listGoogleAnalyticsProperties(1L);
+
+        assertEquals(List.of(new GoogleAnalyticsPropertySummary("111", "Site A", "Account One")), properties);
+        assertTrue(world.http.requests("POST", TOKEN_PATH).get(0).bodyText().contains("refresh_token=refresh"));
+        assertEquals("Bearer access", world.http.requests("GET", GA_ACCOUNT_SUMMARIES).get(0).header("Authorization"));
     }
 
     @Test
     void listGoogleAnalyticsProperties_未連携なら拒否してGoogleへ問い合わせない() {
-        when(analyticsCredentialsService.hasGaRefreshToken(1L)).thenReturn(false);
-
         assertThrows(IllegalArgumentException.class, () -> service().listGoogleAnalyticsProperties(1L));
-        verify(googleAnalyticsClient, never()).listProperties(any());
+
+        assertTrue(world.http.requests().isEmpty());
     }
 
     @Test
     void selectGoogleAnalyticsProperty_数字のIDを保存する() {
-        when(analyticsCredentialsService.hasGaRefreshToken(1L)).thenReturn(true);
+        world.seedGa(1L, null, "cid", "secret", "refresh");
 
         service().selectGoogleAnalyticsProperty(1L, "987654321");
 
-        verify(analyticsCredentialsService).setGaPropertyId(1L, "987654321");
+        assertEquals("987654321", row().getGaPropertyId());
     }
 
     @Test
     void selectGoogleAnalyticsProperty_propertiesプレフィックスは取り除く() {
-        when(analyticsCredentialsService.hasGaRefreshToken(1L)).thenReturn(true);
+        world.seedGa(1L, null, "cid", "secret", "refresh");
 
         service().selectGoogleAnalyticsProperty(1L, "properties/555");
 
-        verify(analyticsCredentialsService).setGaPropertyId(1L, "555");
+        assertEquals("555", row().getGaPropertyId());
     }
 
     @Test
     void selectGoogleAnalyticsProperty_未連携や数字でないIDは拒否する() {
-        when(analyticsCredentialsService.hasGaRefreshToken(1L)).thenReturn(false);
         assertThrows(IllegalArgumentException.class, () -> service().selectGoogleAnalyticsProperty(1L, "123"));
+        assertNull(world.store.get(1L));
 
-        when(analyticsCredentialsService.hasGaRefreshToken(2L)).thenReturn(true);
+        world.seedGa(2L, null, "cid", "secret", "refresh");
         assertThrows(IllegalArgumentException.class, () -> service().selectGoogleAnalyticsProperty(2L, "abc"));
         assertThrows(IllegalArgumentException.class, () -> service().selectGoogleAnalyticsProperty(2L, ""));
-        verify(analyticsCredentialsService, never()).setGaPropertyId(any(), any());
+        assertThrows(IllegalArgumentException.class, () -> service().selectGoogleAnalyticsProperty(2L, null));
+        assertNull(world.store.get(2L).getGaPropertyId());
     }
 
     @Test
     void googleAnalyticsCredentials_連携済みなら復号したOAuthの認証情報とプロパティIDを返す() {
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("987");
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("secret"));
-        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("refresh"));
+        world.seedGa(1L, "987", "cid", "secret", "refresh");
 
         var credentials = service().googleAnalyticsCredentials(1L);
 
@@ -164,9 +177,18 @@ class ProjectAnalyticsSettingsServiceTest {
     }
 
     @Test
-    void googleAnalyticsCredentials_未連携なら設定済みでなく秘密は返さない() {
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(false);
+    void googleAnalyticsCredentials_toStringは秘密を出さない() {
+        world.seedGa(1L, "987", "cid", "secret", "refresh");
 
+        String text = service().googleAnalyticsCredentials(1L).toString();
+
+        assertTrue(text.contains("987"));
+        assertFalse(text.contains("secret"));
+        assertFalse(text.contains("refresh"));
+    }
+
+    @Test
+    void googleAnalyticsCredentials_未連携なら設定済みでなく秘密は返さない() {
         var credentials = service().googleAnalyticsCredentials(1L);
 
         assertFalse(credentials.configured());
@@ -174,14 +196,11 @@ class ProjectAnalyticsSettingsServiceTest {
         assertNull(credentials.clientId());
         assertNull(credentials.clientSecret());
         assertNull(credentials.refreshToken());
-        verify(analyticsCredentialsService, never()).getGaRefreshTokenEncrypted(any());
     }
 
     @Test
     void googleAnalyticsCredentials_クライアントのシークレットが無ければ設定済みとしない() {
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(false);
+        world.seedGa(1L, "987", "cid", null, "refresh");
 
         var credentials = service().googleAnalyticsCredentials(1L);
 
@@ -191,225 +210,241 @@ class ProjectAnalyticsSettingsServiceTest {
 
     @Test
     void googleAnalyticsCredentials_クライアントIDが未保存でも設定済みとしない() {
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn(null);
+        world.seedGa(1L, "987", null, "secret", "refresh");
 
         assertFalse(service().googleAnalyticsCredentials(1L).configured());
     }
 
     @Test
-    void googleAnalyticsCredentials_クライアントIDが無ければ設定済みとしない() {
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn(" ");
+    void googleAnalyticsCredentials_クライアントIDが空白なら設定済みとしない() {
+        world.seedGa(1L, "987", " ", "secret", "refresh");
 
         assertFalse(service().googleAnalyticsCredentials(1L).configured());
     }
 
     @Test
-    void 状態の読み取りは資格情報サービスへ委譲する() {
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123");
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(true);
-        when(analyticsCredentialsService.hasGaRefreshToken(1L)).thenReturn(true);
+    void 状態の読み取りは保存された内容を返す() {
+        world.seedGa(1L, "123", "cid", "secret", "refresh");
 
-        ProjectAnalyticsSettingsService service = service();
-        assertTrue(service.hasGoogleAnalytics(1L));
-        assertEquals("123", service.googleAnalyticsPropertyId(1L));
-        assertEquals("cid", service.googleAnalyticsClientId(1L));
-        assertTrue(service.hasGoogleAnalyticsClientSecret(1L));
-        assertTrue(service.isGoogleAnalyticsConnected(1L));
+        assertTrue(service().hasGoogleAnalytics(1L));
+        assertEquals("123", service().googleAnalyticsPropertyId(1L));
+        assertEquals("cid", service().googleAnalyticsClientId(1L));
+        assertTrue(service().hasGoogleAnalyticsClientSecret(1L));
+        assertTrue(service().isGoogleAnalyticsConnected(1L));
     }
 
     @Test
-    void clearGoogleAnalyticsCredentials_資格情報サービスへ委譲する() {
+    void 状態の読み取りは未保存なら未設定を返す() {
+        assertFalse(service().hasGoogleAnalytics(1L));
+        assertNull(service().googleAnalyticsPropertyId(1L));
+        assertNull(service().googleAnalyticsClientId(1L));
+        assertFalse(service().hasGoogleAnalyticsClientSecret(1L));
+        assertFalse(service().isGoogleAnalyticsConnected(1L));
+    }
+
+    @Test
+    void clearGoogleAnalyticsCredentials_保存された連携をすべて破棄する() {
+        world.seedGa(1L, "123", "cid", "secret", "refresh");
+
         service().clearGoogleAnalyticsCredentials(1L);
 
-        verify(analyticsCredentialsService).clearGoogleAnalyticsCredentials(1L);
-        assertNull(analyticsCredentialsService.getGaPropertyId(1L));
-        assertFalse(analyticsCredentialsService.hasGaRefreshToken(1L));
+        assertNull(service().googleAnalyticsPropertyId(1L));
+        assertFalse(service().isGoogleAnalyticsConnected(1L));
+        assertFalse(service().hasGoogleAnalyticsClientSecret(1L));
+        assertNull(service().googleAnalyticsClientId(1L));
     }
 
     // ---- AdSense: パブリッシャーIDの自動発見(issue #1232) ----
 
-    private void stubAdSenseClient() {
-        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getAdsenseOauthClientSecretEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("secret"));
+    private void adSenseClientSaved() {
+        world.seedAdSense(1L, null, "cid", "secret", null);
     }
 
-    private void stubAdSenseConnected() {
-        stubAdSenseClient();
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("refresh"));
+    private void adSenseConnected() {
+        world.seedAdSense(1L, null, "cid", "secret", "refresh");
     }
 
     @Test
     void completeAdSenseOAuth_アカウントが1件なら素のパブリッシャーIDを自動保存する() {
-        stubAdSenseClient();
-        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
-                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
-        when(adSenseClient.listAccounts("access"))
-                .thenReturn(List.of(new AdSenseAccountSummary("pub-1234567890123456", "Site")));
+        adSenseClientSaved();
+        tokenEndpointReturns("{\"access_token\":\"access\",\"refresh_token\":\"refresh-xyz\"}");
+        world.http.json("GET", ADSENSE_ACCOUNTS,
+                "{\"accounts\":[{\"name\":\"accounts/pub-1234567890123456\",\"displayName\":\"Site\"}]}");
 
         service().completeAdSenseOAuth(1L, "code", "https://x/cb");
 
-        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
-        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), captor.capture());
-        assertEquals("refresh-xyz", credentialCipher.decrypt(captor.getValue()));
-        verify(analyticsCredentialsService).setAdsenseAccountId(1L, "pub-1234567890123456");
+        assertEquals("refresh-xyz", decrypt(row().getAdsenseRefreshTokenEncrypted()));
+        assertEquals("pub-1234567890123456", row().getAdsenseAccountId());
+        assertEquals("Bearer access", world.http.requests("GET", ADSENSE_ACCOUNTS).get(0).header("Authorization"));
     }
 
     @Test
     void completeAdSenseOAuth_アカウントが複数なら自動保存しない() {
-        stubAdSenseClient();
-        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
-                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
-        when(adSenseClient.listAccounts("access")).thenReturn(List.of(
-                new AdSenseAccountSummary("pub-1", "A"), new AdSenseAccountSummary("pub-2", "B")));
+        adSenseClientSaved();
+        tokenEndpointReturns("{\"access_token\":\"access\",\"refresh_token\":\"refresh-xyz\"}");
+        world.http.json("GET", ADSENSE_ACCOUNTS, """
+                {"accounts":[{"name":"accounts/pub-1","displayName":"A"},{"name":"accounts/pub-2","displayName":"B"}]}
+                """);
 
         service().completeAdSenseOAuth(1L, "code", "https://x/cb");
 
-        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), any());
-        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+        assertEquals("refresh-xyz", decrypt(row().getAdsenseRefreshTokenEncrypted()));
+        assertNull(row().getAdsenseAccountId());
     }
 
     @Test
     void completeAdSenseOAuth_アカウントが0件でもリフレッシュトークンは保存する() {
-        stubAdSenseClient();
-        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
-                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
-        when(adSenseClient.listAccounts("access")).thenReturn(List.of());
+        adSenseClientSaved();
+        tokenEndpointReturns("{\"access_token\":\"access\",\"refresh_token\":\"refresh-xyz\"}");
+        world.http.json("GET", ADSENSE_ACCOUNTS, "{\"accounts\":[]}");
 
         service().completeAdSenseOAuth(1L, "code", "https://x/cb");
 
-        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), any());
-        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+        assertEquals("refresh-xyz", decrypt(row().getAdsenseRefreshTokenEncrypted()));
+        assertNull(row().getAdsenseAccountId());
     }
 
     @Test
     void completeAdSenseOAuth_一覧の取得に失敗してもリフレッシュトークンは保存され例外は伝えない() {
-        stubAdSenseClient();
-        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "code", "https://x/cb"))
-                .thenReturn(new GoogleOAuthTokens("access", "refresh-xyz"));
-        when(adSenseClient.listAccounts("access")).thenThrow(new AdSenseException("403", null));
+        adSenseClientSaved();
+        tokenEndpointReturns("{\"access_token\":\"access\",\"refresh_token\":\"refresh-xyz\"}");
+        world.http.status("GET", ADSENSE_ACCOUNTS, 403, "{}");
 
         service().completeAdSenseOAuth(1L, "code", "https://x/cb");
 
-        verify(analyticsCredentialsService).setAdsenseRefreshTokenEncrypted(eq(1L), any());
-        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+        assertEquals("refresh-xyz", decrypt(row().getAdsenseRefreshTokenEncrypted()));
+        assertNull(row().getAdsenseAccountId());
     }
 
     @Test
     void completeAdSenseOAuth_認可コードの交換に失敗したら何も保存しない() {
-        stubAdSenseClient();
-        when(adSenseClient.exchangeAuthorizationCode("cid", "secret", "bad", "https://x/cb"))
-                .thenThrow(new AdSenseException("invalid_grant", null));
+        adSenseClientSaved();
+        world.http.status("POST", TOKEN_PATH, 400, "{\"error\":\"invalid_grant\"}");
 
         assertThrows(AdSenseException.class, () -> service().completeAdSenseOAuth(1L, "bad", "https://x/cb"));
 
-        verify(analyticsCredentialsService, never()).setAdsenseRefreshTokenEncrypted(any(), any());
-        verify(adSenseClient, never()).listAccounts(any());
+        assertNull(row().getAdsenseRefreshTokenEncrypted());
+        assertTrue(world.http.requests("GET", ADSENSE_ACCOUNTS).isEmpty());
     }
 
     @Test
-    void completeAdSenseOAuth_クライアントシークレット未保存ならnullを渡してクライアント側で拒否する() {
-        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn(null);
-        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(false);
-        when(adSenseClient.exchangeAuthorizationCode(null, null, "code", "https://x/cb"))
-                .thenThrow(new AdSenseException("未設定", null));
-
+    void completeAdSenseOAuth_クライアントシークレット未保存ならGoogleへ問い合わせず拒否する() {
         assertThrows(AdSenseException.class, () -> service().completeAdSenseOAuth(1L, "code", "https://x/cb"));
+
+        assertTrue(world.http.requests().isEmpty());
     }
 
     @Test
     void listAdSenseAccounts_保存済みのリフレッシュトークンで一覧を取得する() {
-        stubAdSenseConnected();
-        List<AdSenseAccountSummary> expected = List.of(new AdSenseAccountSummary("pub-1", "A"));
-        when(adSenseClient.refreshAccessToken("cid", "secret", "refresh")).thenReturn("access");
-        when(adSenseClient.listAccounts("access")).thenReturn(expected);
+        adSenseConnected();
+        tokenEndpointReturns("{\"access_token\":\"access\"}");
+        world.http.json("GET", ADSENSE_ACCOUNTS, "{\"accounts\":[{\"name\":\"accounts/pub-1\",\"displayName\":\"A\"}]}");
 
-        assertEquals(expected, service().listAdSenseAccounts(1L));
+        List<AdSenseAccountSummary> accounts = service().listAdSenseAccounts(1L);
+
+        assertEquals(List.of(new AdSenseAccountSummary("pub-1", "A")), accounts);
+        assertTrue(world.http.requests("POST", TOKEN_PATH).get(0).bodyText().contains("refresh_token=refresh"));
     }
 
     @Test
     void listAdSenseAccounts_未連携なら拒否してGoogleへ問い合わせない() {
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(false);
-
         assertThrows(IllegalArgumentException.class, () -> service().listAdSenseAccounts(1L));
-        verify(adSenseClient, never()).listAccounts(any());
+
+        assertTrue(world.http.requests().isEmpty());
     }
 
     @Test
-    void listAdSenseAccounts_クライアントシークレット未保存ならnullを渡す() {
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getAdsenseOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasAdsenseOauthClientSecret(1L)).thenReturn(false);
-        when(analyticsCredentialsService.getAdsenseRefreshTokenEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("refresh"));
-        when(adSenseClient.refreshAccessToken("cid", null, "refresh"))
-                .thenThrow(new AdSenseException("未設定", null));
+    void listAdSenseAccounts_クライアントシークレット未保存なら拒否される() {
+        world.seedAdSense(1L, null, "cid", null, "refresh");
 
         assertThrows(AdSenseException.class, () -> service().listAdSenseAccounts(1L));
+        assertTrue(world.http.requests().isEmpty());
     }
 
     @Test
     void selectAdSenseAccount_素のパブリッシャーIDを保存する() {
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+        adSenseConnected();
 
         service().selectAdSenseAccount(1L, " pub-2222222222222222 ");
 
-        verify(analyticsCredentialsService).setAdsenseAccountId(1L, "pub-2222222222222222");
+        assertEquals("pub-2222222222222222", row().getAdsenseAccountId());
     }
 
     @Test
     void selectAdSenseAccount_accountsプレフィックスは取り除く() {
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+        adSenseConnected();
 
         service().selectAdSenseAccount(1L, "accounts/pub-333");
 
-        verify(analyticsCredentialsService).setAdsenseAccountId(1L, "pub-333");
+        assertEquals("pub-333", row().getAdsenseAccountId());
     }
 
     @Test
     void selectAdSenseAccount_未連携やpub形式でないIDは拒否する() {
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(false);
         assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(1L, "pub-1"));
+        assertNull(world.store.get(1L));
 
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(2L)).thenReturn(true);
+        world.seedAdSense(2L, null, "cid", "secret", "refresh");
         assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, "abc"));
         assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, "accounts/pub-1/x"));
         assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, ""));
         assertThrows(IllegalArgumentException.class, () -> service().selectAdSenseAccount(2L, null));
-        verify(analyticsCredentialsService, never()).setAdsenseAccountId(any(), any());
+        assertNull(world.store.get(2L).getAdsenseAccountId());
     }
 
     @Test
     void setAdSenseSettings_パブリッシャーIDが空ならnullとして保存する() {
-        service().setAdSenseSettings(1L, "  ", "cid");
-        service().setAdSenseSettings(1L, null, "cid");
-        service().setAdSenseSettings(1L, " pub-1 ", "cid");
+        world.seedAdSense(1L, "pub-old", null, null, null);
 
-        verify(analyticsCredentialsService, org.mockito.Mockito.times(2)).setAdSenseSettings(1L, null, "cid");
-        verify(analyticsCredentialsService).setAdSenseSettings(1L, "pub-1", "cid");
+        service().setAdSenseSettings(1L, "  ", "cid");
+        assertNull(row().getAdsenseAccountId());
+        assertEquals("cid", row().getAdsenseOauthClientId());
+
+        world.seedAdSense(1L, "pub-old", null, null, null);
+        service().setAdSenseSettings(1L, null, "cid");
+        assertNull(row().getAdsenseAccountId());
+
+        service().setAdSenseSettings(1L, " pub-1 ", "cid");
+        assertEquals("pub-1", row().getAdsenseAccountId());
     }
 
     @Test
-    void isAdSenseConnected_資格情報サービスへ委譲する() {
-        when(analyticsCredentialsService.hasAdsenseRefreshToken(1L)).thenReturn(true);
+    void setAdSenseClientSecret_シークレットは暗号化して保存する() {
+        service().setAdSenseClientSecret(1L, "plain-secret");
 
+        assertEquals("plain-secret", decrypt(row().getAdsenseOauthClientSecretEncrypted()));
+        assertTrue(service().hasAdSenseClientSecret(1L));
+    }
+
+    @Test
+    void AdSenseの状態の読み取りは保存された内容を返す() {
+        world.seedAdSense(1L, "pub-1", "cid", "secret", "refresh");
+
+        assertTrue(service().hasAdSense(1L));
+        assertEquals("pub-1", service().adSenseAccountId(1L));
+        assertEquals("cid", service().adSenseClientId(1L));
+        assertTrue(service().hasAdSenseClientSecret(1L));
         assertTrue(service().isAdSenseConnected(1L));
     }
 
-    private void stubConnected() {
-        when(analyticsCredentialsService.hasGaRefreshToken(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("cid");
-        when(analyticsCredentialsService.hasGaOauthClientSecret(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("secret"));
-        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("refresh"));
+    @Test
+    void AdSenseの状態の読み取りは未保存なら未設定を返す() {
+        assertFalse(service().hasAdSense(1L));
+        assertNull(service().adSenseAccountId(1L));
+        assertNull(service().adSenseClientId(1L));
+        assertFalse(service().hasAdSenseClientSecret(1L));
+        assertFalse(service().isAdSenseConnected(1L));
+    }
+
+    @Test
+    void clearAdSenseCredentials_保存された連携をすべて破棄する() {
+        world.seedAdSense(1L, "pub-1", "cid", "secret", "refresh");
+
+        service().clearAdSenseCredentials(1L);
+
+        assertFalse(service().hasAdSense(1L));
+        assertFalse(service().isAdSenseConnected(1L));
+        assertFalse(service().hasAdSenseClientSecret(1L));
+        assertNull(service().adSenseClientId(1L));
     }
 }

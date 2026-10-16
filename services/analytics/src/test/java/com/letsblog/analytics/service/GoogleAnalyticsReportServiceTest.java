@@ -1,34 +1,18 @@
 package com.letsblog.analytics.service;
 
-import com.letsblog.analytics.analytics.GoogleAnalyticsChannelBreakdown;
-import com.letsblog.analytics.analytics.GoogleAnalyticsClient;
-import com.letsblog.analytics.analytics.GoogleAnalyticsDailyDataPoint;
-import com.letsblog.analytics.analytics.GoogleAnalyticsException;
-import com.letsblog.analytics.analytics.GoogleAnalyticsReport;
-import com.letsblog.analytics.client.ProjectBridgeClient;
 import com.letsblog.analytics.dto.GoogleAnalyticsReportResponse;
-import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.analytics.testsupport.AnalyticsWorld;
+import com.letsblog.analytics.testsupport.GoogleFakes;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.Base64;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * GoogleAnalyticsReportServiceの回帰テスト(issue #386、issue #578でanalytics-serviceへ移設)。
@@ -36,78 +20,59 @@ import static org.mockito.Mockito.when;
  * レポート取得失敗時にeligible=trueのままerrorMessageを設定する(例外を投げない)ことを検証する。
  * legacy-api版と異なり、本番サイトの有無はProjectRepositoryではなくProjectBridgeClient経由の
  * ブリッジ呼び出しで判定する(project-service未抽出のためprojectsテーブルはlegacy-apiに残るため)。
+ *
+ * <p>issue #1827: 認可・資格情報・{@code GoogleAnalyticsClient}・{@code ProjectBridgeClient}はすべて実物。
+ * 外部との通信である identity-service / project-service / Google(サーバー側フェイクのHTTP)と
+ * DB(メモリ上のリポジトリ)だけを差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class GoogleAnalyticsReportServiceTest {
 
-    @Mock
-    private ProjectBridgeClient projectBridgeClient;
-    @Mock
-    private AnalyticsCredentialsService analyticsCredentialsService;
-    @Mock
-    private GoogleAnalyticsClient googleAnalyticsClient;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-    @Mock
-    private CurrentActorService currentActorService;
+    private static final String RUN_REPORT = "/ga-data/v1beta/properties/123456789:runReport";
 
-    private final CredentialCipher credentialCipher = new CredentialCipher(
-            Base64.getEncoder().encodeToString(new byte[32]));
+    private AnalyticsWorld world;
 
-    private GoogleAnalyticsReportService service() {
-        return new GoogleAnalyticsReportService(
-                projectBridgeClient, analyticsCredentialsService, googleAnalyticsClient,
-                adminAuthorizationService, currentActorService, credentialCipher);
+    @BeforeEach
+    void setUp() {
+        world = new AnalyticsWorld();
+        world.actor("admin-token", 1L, "admin");
+        world.asBearer("admin-token");
     }
 
-    /** 保存済みのリフレッシュトークンとOAuthクライアントを返すよう、資格情報サービスをスタブする。 */
-    private void stubOauthCredentials() {
-        when(analyticsCredentialsService.getGaPropertyId(1L)).thenReturn("123456789");
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("client-id");
-        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("client-secret"));
-        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("refresh-token"));
-        when(googleAnalyticsClient.refreshAccessToken("client-id", "client-secret", "refresh-token"))
-                .thenReturn("access-token");
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void getReport_GA未設定なら未対象でAPIを呼ばない() {
-        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(false);
+        world.project(1L, true);
 
-        GoogleAnalyticsReportResponse response = service().getReport(1L);
+        GoogleAnalyticsReportResponse response = world.gaReports.getReport(1L);
 
         assertFalse(response.eligible());
-        verify(googleAnalyticsClient, never()).fetchReport(any(), any(), anyInt());
+        assertNull(response.errorMessage());
+        assertTrue(world.http.requests("*", "/(ga-data|oauth)/.*").isEmpty());
     }
 
     @Test
     void getReport_本番サイト未紐付けなら未対象でAPIを呼ばない() {
-        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new ProjectBridgeClient.ProjectEligibility(false));
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
+        world.project(1L, false);
+        world.seedGa(1L, "123456789", "client-id", "client-secret", "refresh-token");
 
-        GoogleAnalyticsReportResponse response = service().getReport(1L);
+        GoogleAnalyticsReportResponse response = world.gaReports.getReport(1L);
 
         assertFalse(response.eligible());
-        verify(googleAnalyticsClient, never()).fetchReport(any(), any(), anyInt());
+        assertTrue(world.http.requests("*", "/(ga-data|oauth)/.*").isEmpty());
     }
 
     @Test
     void getReport_設定済みかつ本番サイトありならレポートを取得する() {
-        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        stubOauthCredentials();
-        when(googleAnalyticsClient.fetchReport(eq("access-token"), eq("123456789"), anyInt()))
-                .thenReturn(new GoogleAnalyticsReport(120, 80, 300,
-                        List.of(new GoogleAnalyticsDailyDataPoint("2024-01-01", 10, 5, 20)),
-                        List.of(new GoogleAnalyticsChannelBreakdown("Organic Search", 120, 80, 300))));
+        world.project(1L, true);
+        world.seedGa(1L, "123456789", "client-id", "client-secret", "refresh-token");
+        world.http.json("POST", "/oauth/token", "{\"access_token\":\"access-token\"}");
+        GoogleFakes.gaReport(world.http, "123456789");
 
-        GoogleAnalyticsReportResponse response = service().getReport(1L);
+        GoogleAnalyticsReportResponse response = world.gaReports.getReport(1L);
 
         assertTrue(response.eligible());
         assertEquals(120L, response.sessions());
@@ -118,46 +83,64 @@ class GoogleAnalyticsReportServiceTest {
         assertEquals("2024-01-01", response.dailyDataPoints().get(0).date());
         assertEquals(1, response.channelBreakdown().size());
         assertEquals("Organic Search", response.channelBreakdown().get(0).channel());
+        // 保存された資格情報を復号して、Googleへ渡している。
+        String form = world.http.requests("POST", "/oauth/token").get(0).bodyText();
+        assertTrue(form.contains("refresh_token=refresh-token"), form);
+        assertTrue(form.contains("client_id=client-id"), form);
+        assertTrue(form.contains("client_secret=client-secret"), form);
+        assertEquals("Bearer access-token", world.http.requests("POST", RUN_REPORT).get(0).header("Authorization"));
+        // 呼び出し元のトークンを project-service へ転送している。
+        assertEquals("Bearer admin-token",
+                world.http.requests("GET", "/api/internal/project/projects/1/eligibility").get(0).header("Authorization"));
     }
 
     @Test
     void getReport_クライアントシークレットが未保存ならnullを渡しクライアント側で失敗として返す() {
-        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        when(analyticsCredentialsService.getGaOauthClientId(1L)).thenReturn("client-id");
-        when(analyticsCredentialsService.getGaOauthClientSecretEncrypted(1L)).thenReturn(null);
-        when(analyticsCredentialsService.getGaRefreshTokenEncrypted(1L))
-                .thenReturn(credentialCipher.encrypt("refresh-token"));
-        when(googleAnalyticsClient.refreshAccessToken("client-id", null, "refresh-token"))
-                .thenThrow(new GoogleAnalyticsException("クライアントが未設定です", null));
+        world.project(1L, true);
+        world.seedGa(1L, "123456789", "client-id", null, "refresh-token");
 
-        GoogleAnalyticsReportResponse response = service().getReport(1L);
+        GoogleAnalyticsReportResponse response = world.gaReports.getReport(1L);
 
         assertTrue(response.eligible());
-        assertEquals("クライアントが未設定です", response.errorMessage());
-        verify(googleAnalyticsClient, never()).fetchReport(any(), any(), anyInt());
+        assertTrue(response.errorMessage().contains("クライアントID/シークレットが設定されていません"), response.errorMessage());
+        assertTrue(world.http.requests("*", "/(ga-data|oauth)/.*").isEmpty());
     }
 
     @Test
     void getReport_取得に失敗したら対象のままerrorMessageを設定する() {
-        lenient().when(projectBridgeClient.getProjectEligibility(eq(1L), any()))
-                .thenReturn(new ProjectBridgeClient.ProjectEligibility(true));
-        when(analyticsCredentialsService.hasGoogleAnalyticsCredentials(1L)).thenReturn(true);
-        stubOauthCredentials();
-        when(googleAnalyticsClient.fetchReport(eq("access-token"), eq("123456789"), anyInt()))
-                .thenThrow(new GoogleAnalyticsException("APIエラー", null));
+        world.project(1L, true);
+        world.seedGa(1L, "123456789", "client-id", "client-secret", "refresh-token");
+        world.http.json("POST", "/oauth/token", "{\"access_token\":\"access-token\"}");
+        world.http.status("POST", RUN_REPORT, 500, "{\"error\":\"boom\"}");
 
-        GoogleAnalyticsReportResponse response = service().getReport(1L);
+        GoogleAnalyticsReportResponse response = world.gaReports.getReport(1L);
 
         assertTrue(response.eligible());
-        assertEquals("APIエラー", response.errorMessage());
+        assertTrue(response.errorMessage().contains("Google Analytics Data APIの呼び出し"), response.errorMessage());
+        assertNull(response.sessions());
     }
 
     @Test
-    void getReport_プロジェクトメンバーでなければForbidden() {
-        doThrow(new ForbiddenException("拒否")).when(adminAuthorizationService).requireProjectMemberOrAdmin(1L);
+    void getReport_プロジェクトメンバーでなければForbiddenでproject_serviceへ問い合わせない() {
+        world.actor("user-token", 10L, "user");
+        world.asBearer("user-token");
 
-        assertThrows(ForbiddenException.class, () -> service().getReport(1L));
+        assertThrows(ForbiddenException.class, () -> world.gaReports.getReport(1L));
+        assertTrue(world.http.requests("*", "/api/internal/project/.*").isEmpty());
+    }
+
+    @Test
+    void getReport_プロジェクトメンバーなら取得できる() {
+        world.actor("member-token", 10L, "user").member(1L, 10L);
+        world.asBearer("member-token");
+        world.project(1L, true);
+
+        assertFalse(world.gaReports.getReport(1L).eligible());
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/1/members/10").size());
+    }
+
+    @Test
+    void getReport_プロジェクトが存在しなければProjectNotFoundException() {
+        assertThrows(ProjectNotFoundException.class, () -> world.gaReports.getReport(1L));
     }
 }

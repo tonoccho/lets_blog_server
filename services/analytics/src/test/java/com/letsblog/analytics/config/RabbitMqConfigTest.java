@@ -3,6 +3,7 @@ package com.letsblog.analytics.config;
 import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
 import com.rabbitmq.client.Channel;
 import org.aopalliance.aop.Advice;
+import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.aop.framework.ProxyFactory;
@@ -54,7 +55,8 @@ class RabbitMqConfigTest {
      */
     @Test
     void 相関ID_adviceが既存のadvice_chainの先頭に追加される() {
-        Advice retryAdvice = mock(Advice.class);
+        // 何もせず通すだけの実物のadvice(Mockitoのモックではない)。
+        Advice retryAdvice = (MethodInterceptor) invocation -> invocation.proceed();
 
         Advice[] combined = config.prependCorrelationAdvice(new Advice[] {retryAdvice});
 

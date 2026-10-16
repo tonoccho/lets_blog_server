@@ -1,24 +1,12 @@
 package com.letsblog.analytics.integration;
 
-import com.letsblog.analytics.client.IdentityBridgeClient;
-import com.letsblog.common.client.ActorProfile;
-import java.util.Optional;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.oauth2.jwt.BadJwtException;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -32,31 +20,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@link com.letsblog.analytics.controller.ProjectDashboardController#getGoogleAnalyticsReport}で
  * 検証する。
  *
- * <p>identity-serviceは外部境界のため{@link IdentityClient}を{@code @MockitoBean}で置き換える
- * (ADR-0006のモック方針)。{@link IdentityBridgeClient#isProjectMember}は非member/admin判定に
- * 必要なためモックする。認可通過後に呼ばれる{@code getProjectEligibility}は、legacy-apiが
- * テスト環境で稼働していないため接続失敗(502)にはなるが、403にはならないため「403にならない」
- * ケースの検証には影響しない。
+ * <p>issue #1827: {@code IdentityClient}・{@code IdentityBridgeClient}・{@code ProjectBridgeClient}は実物のBeanで、
+ * 外部との通信である identity-service・project-service を{@link AnalyticsIntegrationTestBase}のサーバー側フェイクの
+ * HTTPで差し替える(JWTの検証だけは Keycloak の鍵取得を伴うため{@code JwtDecoder}を{@code @MockitoBean}にする)。
+ * 「操作者の解決が実際に identity-service の {@code /api/identity/me} を通っている」ことは、フェイクが受けた
+ * 要求で確かめる(issue #916)。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("analytics-service: AdminAuthorizationServiceの認可マトリクス統合テスト(issue #644)")
-class AdminAuthorizationIntegrationTest {
+class AdminAuthorizationIntegrationTest extends AnalyticsIntegrationTestBase {
 
     private static final String GA_REPORT_PATH = "/api/projects/42/dashboard/google-analytics";
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
 
     @Test
     @DisplayName("Authorizationヘッダーなしは401(issue #772でSecurityConfigの認証ゲートを復元したため、"
@@ -78,50 +51,45 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("有効なJWTでも非member・非adminなら403")
     void 非メンバー非adminは403() throws Exception {
         when(jwtDecoder.decode("member-check-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
-        when(identityClient.lookupProfile("Bearer member-check-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(10L, "user")));
-        when(identityBridgeClient.isProjectMember(42L, 10L, "Bearer member-check-jwt")).thenReturn(false);
+        BACKENDS.actor("member-check-jwt", 10L, "user");
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-check-jwt"))
                 .andExpect(status().isForbidden());
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer member-check-jwt");
+        // 呼び出し先が変わっても気付けるように、フェイクが受けた要求で確かめる(#906 / #583 で実際に起きた)。
+        assertThat(HTTP.requests("GET", "/api/identity/me")).hasSize(1);
+        assertThat(HTTP.requests("GET", "/api/identity/me").get(0).header("Authorization")).isEqualTo("Bearer member-check-jwt");
     }
 
     @Test
     @DisplayName("プロジェクトメンバーなら403にならない")
     void プロジェクトメンバーは403にならない() throws Exception {
         when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
-        when(identityClient.lookupProfile("Bearer member-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(11L, "user")));
-        when(identityBridgeClient.isProjectMember(42L, 11L, "Bearer member-jwt")).thenReturn(true);
+        BACKENDS.actor("member-jwt", 11L, "user").member(42L, 11L).project(42L, true);
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer member-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer member-jwt");
+        // 呼び出し先が変わっても気付けるように、フェイクが受けた要求で確かめる(#906 / #583 で実際に起きた)。
+        assertThat(HTTP.requests("GET", "/api/identity/me")).hasSize(1);
+        assertThat(HTTP.requests("GET", "/api/identity/me").get(0).header("Authorization")).isEqualTo("Bearer member-jwt");
     }
 
     @Test
     @DisplayName("adminなら所属に関わらず403にならない(プロジェクトメンバー判定はバイパスされる)")
     void adminは403にならない() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        BACKENDS.actor("admin-jwt", 1L, "admin").project(42L, true);
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer admin-jwt");
+        // 呼び出し先が変わっても気付けるように、フェイクが受けた要求で確かめる(#906 / #583 で実際に起きた)。
+        assertThat(HTTP.requests("GET", "/api/identity/me")).hasSize(1);
+        assertThat(HTTP.requests("GET", "/api/identity/me").get(0).header("Authorization")).isEqualTo("Bearer admin-jwt");
     }
 
     /**
@@ -137,11 +105,12 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("無効化ユーザー(identityが401/403 → 操作者なし)は403。502にはしない")
     void 操作者を解決できない場合は403() throws Exception {
         when(jwtDecoder.decode("disabled-jwt")).thenReturn(JwtTestFixtures.jwt("sub-disabled", "user"));
-        when(identityClient.lookupProfile("Bearer disabled-jwt")).thenReturn(Optional.empty());
+        // BACKENDS に登録の無いトークンは identity-service が401を返す(= 操作者なし)。
 
         mockMvc.perform(get(GA_REPORT_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer disabled-jwt"))
                 .andExpect(status().isForbidden());
 
-        verify(identityClient).lookupProfile("Bearer disabled-jwt");
+        assertThat(HTTP.requests("GET", "/api/identity/me")).hasSize(1);
+        assertThat(HTTP.requests("GET", "/api/identity/me").get(0).header("Authorization")).isEqualTo("Bearer disabled-jwt");
     }
 }

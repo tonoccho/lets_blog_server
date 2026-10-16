@@ -348,6 +348,47 @@ class GoogleAnalyticsClientTest {
         assertThrows(GoogleAnalyticsException.class, () -> client.listProperties("token-abc"));
     }
 
+    @Test
+    void exchangeAuthorizationCode_リフレッシュトークンが空文字でも例外() {
+        server.expect(requestTo(TOKEN_URI))
+                .andRespond(withSuccess(
+                        "{\"access_token\":\"access-abc\",\"refresh_token\":\" \"}", MediaType.APPLICATION_JSON));
+
+        GoogleAnalyticsException exception = assertThrows(GoogleAnalyticsException.class,
+                () -> client.exchangeAuthorizationCode("cid", "csecret", "code", "https://x.test/cb"));
+
+        assertTrue(exception.getMessage().contains("リフレッシュトークンを取得できませんでした"), exception.getMessage());
+    }
+
+    @Test
+    void listProperties_propertiesプレフィックスが無い名前はそのままIDにする() {
+        server.expect(requestTo(ADMIN_API_BASE_URL + "/v1beta/accountSummaries?pageSize=200"))
+                .andRespond(withSuccess("""
+                        {"accountSummaries":[{"account":"accounts/1","displayName":"Account One",
+                          "propertySummaries":[{"property":"444","displayName":"Site D"},
+                                               {"displayName":"No Name"}]}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        List<GoogleAnalyticsPropertySummary> properties = client.listProperties("token-abc");
+
+        assertEquals(2, properties.size());
+        assertEquals("444", properties.get(0).propertyId());
+        assertEquals("", properties.get(1).propertyId());
+    }
+
+    @Test
+    void listProperties_nextPageTokenが空文字なら次のページを取りに行かない() {
+        server.expect(requestTo(ADMIN_API_BASE_URL + "/v1beta/accountSummaries?pageSize=200"))
+                .andRespond(withSuccess("""
+                        {"accountSummaries":[{"account":"accounts/1","displayName":"Account One",
+                          "propertySummaries":[{"property":"properties/111","displayName":"Site A"}]}],
+                         "nextPageToken":""}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertEquals(1, client.listProperties("token-abc").size());
+        server.verify();
+    }
+
     /** fetchReport は runReport を3回(合計・日次・チャネル別)呼ぶ。全て本文の無い200で返す。 */
     private void expectEmptyReports() {
         for (int i = 0; i < 3; i++) {

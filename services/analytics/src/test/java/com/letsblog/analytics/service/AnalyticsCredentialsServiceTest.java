@@ -1,52 +1,51 @@
 package com.letsblog.analytics.service;
 
 import com.letsblog.analytics.domain.AnalyticsCredentials;
-import com.letsblog.analytics.repository.AnalyticsCredentialsRepository;
+import com.letsblog.analytics.testsupport.AnalyticsWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 
 /**
  * AnalyticsCredentialsServiceの回帰テスト(issue #571)。analytics_credentialsは初回書き込み時に
  * 遅延作成されること、GA/AdSenseそれぞれのクリア処理が全項目をnullにすることを検証する。
  */
-@ExtendWith(MockitoExtension.class)
 class AnalyticsCredentialsServiceTest {
 
-    @Mock
-    private AnalyticsCredentialsRepository repository;
+    /** issue #1827: DB(リポジトリ)だけをメモリ上の「テーブル」に差し替える。サービスは実物。 */
+    private AnalyticsWorld world;
+
+    @BeforeEach
+    void setUp() {
+        world = new AnalyticsWorld();
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private AnalyticsCredentialsService service() {
-        return new AnalyticsCredentialsService(repository);
+        return world.credentials;
     }
 
     @Test
     void hasGoogleAnalyticsCredentials_未設定なら行が無くてもfalse() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
 
         assertFalse(service().hasGoogleAnalyticsCredentials(1L));
     }
 
     @Test
     void setGaRefreshTokenEncrypted_新規行を作成して保存する() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
-        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
 
         service().setGaRefreshTokenEncrypted(1L, new byte[]{1, 2, 3});
 
-        org.mockito.ArgumentCaptor<AnalyticsCredentials> captor = org.mockito.ArgumentCaptor.forClass(AnalyticsCredentials.class);
-        org.mockito.Mockito.verify(repository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
-        AnalyticsCredentials saved = captor.getValue();
+        AnalyticsCredentials saved = world.store.get(1L);
         assertEquals(3, saved.getGaRefreshTokenEncrypted().length);
         assertTrue(saved.hasGoogleAnalyticsConnection());
         // プロパティ未選択なので、ダッシュボードの資格情報としては未設定のまま
@@ -56,8 +55,7 @@ class AnalyticsCredentialsServiceTest {
     @Test
     void hasGoogleAnalyticsCredentials_プロパティIDとリフレッシュトークンの両方が必要() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
-        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+        world.store.put(1L, existing);
 
         assertFalse(service().hasGoogleAnalyticsCredentials(1L));
         assertFalse(service().hasGaRefreshToken(1L));
@@ -83,8 +81,7 @@ class AnalyticsCredentialsServiceTest {
     void setGaOauthClient_シークレットがnullなら既存のシークレットを保つ() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
         existing.setGaOauthClientSecretEncrypted(new byte[]{9});
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
-        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+        world.store.put(1L, existing);
 
         service().setGaOauthClient(1L, "client-id", null);
 
@@ -99,7 +96,7 @@ class AnalyticsCredentialsServiceTest {
     @Test
     void hasGaOauthClientSecret_行があってもシークレットがnullや空なら未保存() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        world.store.put(1L, existing);
 
         assertFalse(service().hasGaOauthClientSecret(1L));
         existing.setGaOauthClientSecretEncrypted(new byte[0]);
@@ -110,7 +107,6 @@ class AnalyticsCredentialsServiceTest {
 
     @Test
     void gaの読み取りは行が無ければ未設定として返す() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
 
         assertNull(service().getGaOauthClientId(1L));
         assertFalse(service().hasGaOauthClientSecret(1L));
@@ -126,8 +122,7 @@ class AnalyticsCredentialsServiceTest {
         existing.setGaRefreshTokenEncrypted(new byte[]{1, 2, 3});
         existing.setGaOauthClientId("client-id");
         existing.setGaOauthClientSecretEncrypted(new byte[]{4});
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
-        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+        world.store.put(1L, existing);
 
         service().clearGoogleAnalyticsCredentials(1L);
 
@@ -145,8 +140,7 @@ class AnalyticsCredentialsServiceTest {
         existing.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
         existing.setAdsenseOauthClientId("client-id");
         existing.setAdsenseOauthClientSecretEncrypted(new byte[]{4, 5, 6});
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
-        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+        world.store.put(1L, existing);
 
         service().clearAdSenseCredentials(1L);
 
@@ -158,7 +152,7 @@ class AnalyticsCredentialsServiceTest {
     void hasAdsenseCredentials_accountIdとrefreshTokenの両方が必要() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
         existing.setAdsenseAccountId("pub-1234567890123456");
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        world.store.put(1L, existing);
 
         assertFalse(service().hasAdsenseCredentials(1L));
 
@@ -169,7 +163,7 @@ class AnalyticsCredentialsServiceTest {
     @Test
     void hasAdsenseRefreshToken_パブリッシャーID未取得でもリフレッシュトークンがあればtrue() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        world.store.put(1L, existing);
         assertFalse(service().hasAdsenseRefreshToken(1L));
 
         existing.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
@@ -182,14 +176,13 @@ class AnalyticsCredentialsServiceTest {
     void hasAdsenseRefreshToken_空のリフレッシュトークンは連携済みと見なさない() {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
         existing.setAdsenseRefreshTokenEncrypted(new byte[0]);
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+        world.store.put(1L, existing);
 
         assertFalse(service().hasAdsenseRefreshToken(1L));
     }
 
     @Test
     void hasAdsenseRefreshToken_行が無ければfalse() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
 
         assertFalse(service().hasAdsenseRefreshToken(1L));
     }
@@ -199,8 +192,7 @@ class AnalyticsCredentialsServiceTest {
         AnalyticsCredentials existing = new AnalyticsCredentials(1L);
         existing.setAdsenseRefreshTokenEncrypted(new byte[]{1, 2, 3});
         existing.setAdsenseOauthClientId("client-id");
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
-        when(repository.save(any(AnalyticsCredentials.class))).thenAnswer(inv -> inv.getArgument(0));
+        world.store.put(1L, existing);
 
         service().setAdsenseAccountId(1L, "pub-1234567890123456");
 
