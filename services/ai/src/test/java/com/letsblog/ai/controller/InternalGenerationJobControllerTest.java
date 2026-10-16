@@ -4,26 +4,19 @@ import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.dto.CreateGenerationJobRequest;
 import com.letsblog.ai.dto.GenerationJobResponse;
 import com.letsblog.ai.dto.UpdateGenerationJobRequest;
-import com.letsblog.ai.repository.GenerationJobRepository;
-import com.letsblog.ai.service.CurrentActorService;
 import com.letsblog.ai.service.GenerationJobNotFoundException;
+import com.letsblog.ai.testsupport.AiWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * InternalGenerationJobControllerの回帰テスト。#573 stage2で追加したPATCH /{id}
@@ -34,115 +27,102 @@ import static org.mockito.Mockito.when;
  * <p>issue #830 で、この2つはコンテナ間専用でありながらgatewayのルート表に載る
  * {@code /api/generation-jobs/**} に同居していたため、{@code /api/internal/ai/generation-jobs} へ
  * 分離した。テストクラスもそれに合わせて移した(元は GenerationJobControllerTest)。
+ *
+ * <p>issue #1824: CurrentActorServiceは実物で、操作者はidentity-serviceのHTTPフェイクが返す。
+ * DBはメモリ上のリポジトリで差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class InternalGenerationJobControllerTest {
 
-    @Mock
-    private GenerationJobRepository generationJobRepository;
-
-    @Mock
-    private CurrentActorService currentActorService;
-
+    private AiWorld world;
     private InternalGenerationJobController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new InternalGenerationJobController(generationJobRepository, currentActorService);
+        world = new AiWorld();
+        controller = new InternalGenerationJobController(world.generationJobRepository, world.currentActorService);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    private GenerationJob running(String type, Long owner) {
+        GenerationJob job = new GenerationJob();
+        job.setType(type);
+        job.setStatus("running");
+        job.setOwnerUserId(owner);
+        job.setCreatedAt(LocalDateTime.now());
+        job.setUpdatedAt(LocalDateTime.now());
+        return world.generationJobRepository.save(job);
     }
 
     @Test
     void update_statusとresultPayloadを更新して保存する() {
-        GenerationJob job = new GenerationJob();
-        job.setId(5L);
-        job.setType("comfyui_checkpoint_download");
-        job.setStatus("running");
-        job.setCreatedAt(LocalDateTime.now());
-        job.setUpdatedAt(LocalDateTime.now());
+        GenerationJob job = running("comfyui_checkpoint_download", null);
 
-        when(generationJobRepository.findById(5L)).thenReturn(Optional.of(job));
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        GenerationJobResponse response =
+                controller.update(job.getId(), new UpdateGenerationJobRequest("done", "{\"success\":\"true\"}"));
 
-        GenerationJobResponse response = controller.update(5L, new UpdateGenerationJobRequest("done", "{\"success\":\"true\"}"));
-
-        assertEquals(5L, response.id());
+        assertEquals(job.getId(), response.id());
         assertEquals("done", response.status());
-        assertEquals("done", job.getStatus());
-        assertEquals("{\"success\":\"true\"}", job.getResultPayload());
+        assertEquals("done", world.jobRows.rows.get(job.getId()).getStatus());
+        assertEquals("{\"success\":\"true\"}", world.jobRows.rows.get(job.getId()).getResultPayload());
+        // 更新は2回保存される(作成時と更新時)。
+        assertEquals(2, world.jobRows.saved.size());
     }
 
     @Test
     void update_存在しないジョブはGenerationJobNotFoundException() {
-        when(generationJobRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThrows(GenerationJobNotFoundException.class,
                 () -> controller.update(99L, new UpdateGenerationJobRequest("failed", "{}")));
+        assertTrue(world.jobRows.saved.isEmpty());
     }
 
     @Test
     void create_type_requestPayloadを保存しstatusはrunningで返す() {
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> {
-            GenerationJob job = invocation.getArgument(0);
-            job.setId(10L);
-            job.setCreatedAt(LocalDateTime.now());
-            job.setUpdatedAt(LocalDateTime.now());
-            return job;
-        });
-
         GenerationJobResponse response = controller.create(
                 new CreateGenerationJobRequest("media_garbage_collection_delete", "{\"mediaIds\":[\"1\"]}"));
 
-        assertEquals(10L, response.id());
+        assertEquals(1L, response.id());
         assertEquals("media_garbage_collection_delete", response.type());
         assertEquals("running", response.status());
         assertNotNull(response.createdAt());
 
-        ArgumentCaptor<GenerationJob> savedJob = ArgumentCaptor.forClass(GenerationJob.class);
-        verify(generationJobRepository).save(savedJob.capture());
-        assertEquals("media_garbage_collection_delete", savedJob.getValue().getType());
-        assertEquals("running", savedJob.getValue().getStatus());
-        assertEquals("{\"mediaIds\":[\"1\"]}", savedJob.getValue().getRequestPayload());
+        GenerationJob saved = world.jobRows.rows.get(response.id());
+        assertEquals("media_garbage_collection_delete", saved.getType());
+        assertEquals("running", saved.getStatus());
+        assertEquals("{\"mediaIds\":[\"1\"]}", saved.getRequestPayload());
     }
 
     @Test
     void create_転送されたBearerの利用者を所有者として記録する() {
-        when(currentActorService.getCurrentActorId()).thenReturn(42L);
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        world.actor(42L, "user");
 
-        controller.create(new CreateGenerationJobRequest("media_garbage_collection_delete", "{}"));
+        GenerationJobResponse response =
+                controller.create(new CreateGenerationJobRequest("media_garbage_collection_delete", "{}"));
 
-        ArgumentCaptor<GenerationJob> savedJob = ArgumentCaptor.forClass(GenerationJob.class);
-        verify(generationJobRepository).save(savedJob.capture());
-        assertEquals(42L, savedJob.getValue().getOwnerUserId());
+        assertEquals(42L, world.jobRows.rows.get(response.id()).getOwnerUserId());
+        assertEquals("Bearer t", world.http.requests("GET", "/api/identity/me").get(0).header("Authorization"));
     }
 
     @Test
     void create_操作者を解決できない場合は所有者不明で記録する() {
-        when(currentActorService.getCurrentActorId()).thenReturn(null);
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        // Authorizationヘッダーが無い(client credentialsなど)。
+        GenerationJobResponse response =
+                controller.create(new CreateGenerationJobRequest("media_garbage_collection_delete", "{}"));
 
-        controller.create(new CreateGenerationJobRequest("media_garbage_collection_delete", "{}"));
-
-        ArgumentCaptor<GenerationJob> savedJob = ArgumentCaptor.forClass(GenerationJob.class);
-        verify(generationJobRepository).save(savedJob.capture());
-        assertNull(savedJob.getValue().getOwnerUserId());
+        assertNull(world.jobRows.rows.get(response.id()).getOwnerUserId());
     }
 
     @Test
     void update_client_credentialsによる更新は所有者を上書きしない() {
-        GenerationJob job = new GenerationJob();
-        job.setId(5L);
-        job.setType("comfyui_checkpoint_download");
-        job.setStatus("running");
-        job.setOwnerUserId(42L);
-        job.setCreatedAt(LocalDateTime.now());
-        job.setUpdatedAt(LocalDateTime.now());
-        when(generationJobRepository.findById(5L)).thenReturn(Optional.of(job));
-        when(generationJobRepository.save(any(GenerationJob.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        GenerationJob job = running("comfyui_checkpoint_download", 42L);
 
-        controller.update(5L, new UpdateGenerationJobRequest("done", "{}"));
+        controller.update(job.getId(), new UpdateGenerationJobRequest("done", "{}"));
 
-        assertEquals(42L, job.getOwnerUserId());
-        org.mockito.Mockito.verifyNoInteractions(currentActorService);
+        assertEquals(42L, world.jobRows.rows.get(job.getId()).getOwnerUserId());
+        // 更新は操作者を解決しない(identity-serviceへ問い合わせない)。
+        assertTrue(world.http.requests().isEmpty());
     }
 }

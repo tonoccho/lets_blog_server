@@ -1,10 +1,11 @@
 package com.letsblog.ai.integration;
 
-import com.letsblog.common.client.IdentityClient;
-import com.letsblog.ai.client.IdentityBridgeClient;
+import com.letsblog.ai.testsupport.BackendIntegrationTest;
+import com.letsblog.ai.testsupport.IntegrationBackends;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,25 +41,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>ロール単位の認可(プロジェクトメンバー/adminの403)は{@link AdminAuthorizationIntegrationTest}が
  * 担当し、ここでは重複させない。
  *
- * <p>identity-service等の外部境界は{@code @MockitoBean}で置き換える(ADR-0006のモック方針)。
+ * <p>issue #1824: identity-service等の外部境界はHTTPフェイク({@link IntegrationBackends})で、モックのままなのは
+ * Keycloakの鍵取得を伴う{@code JwtDecoder}だけ(ADR-0006のモック方針)。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("ai-service: 認証ゲートの認可マトリクス統合テスト(issue #772)")
-class AuthorizationMatrixIntegrationTest {
+class AuthorizationMatrixIntegrationTest extends BackendIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
 
     /**
      * ai-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code ai}ルート:
@@ -70,6 +66,11 @@ class AuthorizationMatrixIntegrationTest {
      * <p>Authorizationヘッダーの有無だけでSecurityConfigが401を返すため、リクエストボディ/
      * クエリパラメータの妥当性は問わない。
      */
+    @BeforeEach
+    void resetBackends() {
+        IntegrationBackends.reset();
+    }
+
     static Stream<Endpoint> allProtectedEndpoints() {
         return Stream.of(
                 // -- AiController --

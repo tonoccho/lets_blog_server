@@ -1,16 +1,13 @@
 package com.letsblog.ai.integration;
 
-import com.letsblog.ai.client.IdentityBridgeClient;
-import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.domain.GenerationJob;
 import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.ai.repository.ProjectReviewStepSettingRepository;
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
+import com.letsblog.ai.testsupport.BackendIntegrationTest;
+import com.letsblog.ai.testsupport.IntegrationBackends;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import java.util.List;
-import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("ai-service: レビュー関連APIの入力検証統合テスト(issue #1222)")
-class ReviewApiInputValidationIntegrationTest {
+class ReviewApiInputValidationIntegrationTest extends BackendIntegrationTest {
 
     private static final String ADMIN_TOKEN = "review-validation-admin-token";
     private static final String MEMBER_TOKEN = "review-validation-member-token";
@@ -59,34 +56,24 @@ class ReviewApiInputValidationIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-
-    @MockitoBean
-    private PlatformServiceClient platformServiceClient;
+    @BeforeEach
+    void resetBackends() {
+        IntegrationBackends.reset();
+        // listSettings()がllmConfigProvider.availableModels()経由でplatform-serviceへ問い合わせる。platform-serviceも
+        // Ollamaのモデル一覧もHTTPフェイクが返す(本物のOpenAIなど外部のホストへは出ない)。本テストが検証したいのは
+        // 入力検証(400/409の作り分け)であり、この経路の可用性ではない。
+        IntegrationBackends.llmConfig("gpt-4o-mini");
+    }
 
     private void stubAdmin() {
         when(jwtDecoder.decode(ADMIN_TOKEN)).thenReturn(JwtTestFixtures.jwt("sub-admin-1222", "admin"));
-        when(identityClient.lookupProfile("Bearer " + ADMIN_TOKEN))
-                .thenReturn(Optional.of(new ActorProfile(900L, "admin")));
-        // listSettings()がllmConfigProvider.availableModels()経由でplatform-serviceへ問い合わせるため、
-        // 実際のHTTP到達先が無いテスト環境(application-test.yml)では未モックだと接続失敗が
-        // IllegalStateException→409に化けてしまう(GlobalExceptionHandler#handleIllegalState)。
-        // 本テストが検証したいのは入力検証(400/409の作り分け)であり、この経路の可用性ではないため
-        // モックする。
-        when(platformServiceClient.resolveLlmConfig(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn(new PlatformServiceClient.LlmConfig(
-                        "OPENAI", "https://api.openai.com", "test-api-key", "gpt-4o-mini", List.of("gpt-4o-mini"), 30));
+        IntegrationBackends.actor(ADMIN_TOKEN, 900L, "admin");
     }
 
     private void stubProjectMember(long projectId) {
         when(jwtDecoder.decode(MEMBER_TOKEN)).thenReturn(JwtTestFixtures.jwt("sub-member-1222", "user"));
-        when(identityClient.lookupProfile("Bearer " + MEMBER_TOKEN))
-                .thenReturn(Optional.of(new ActorProfile(901L, "user")));
-        when(identityBridgeClient.isProjectMember(projectId, 901L, "Bearer " + MEMBER_TOKEN)).thenReturn(true);
+        IntegrationBackends.actor(MEMBER_TOKEN, 901L, "user");
+        IntegrationBackends.membership(projectId, 901L, true);
     }
 
     @Test

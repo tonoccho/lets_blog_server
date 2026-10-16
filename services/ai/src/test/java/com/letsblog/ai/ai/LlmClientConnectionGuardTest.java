@@ -2,95 +2,70 @@ package com.letsblog.ai.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-import com.letsblog.common.net.ForbiddenDestinationException;
-import com.letsblog.common.net.GuardedTarget;
-import com.sun.net.httpserver.HttpServer;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicInteger;
+import com.letsblog.ai.testsupport.AiWorld;
+import com.letsblog.ai.testsupport.FakeHttpServer;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** 接続時検査で拒否されたOllama接続先へ、LlmClientは接続せずに生成を失敗させる(issue #1547)。 */
+/**
+ * 接続時検査で拒否されたOllama接続先へ、LlmClientは接続せずに生成を失敗させる(issue #1547)。
+ *
+ * <p>issue #1824: LlmClientとRemoteLlmConfigProvider(宛先検査を含む)は実物で、platform-serviceとLLMの相手は
+ * HTTPフェイク、DBはメモリ上のリポジトリで差し替える。宛先検査は、ループバックを必ず拒否する実物の規則をそのまま使う。
+ */
 class LlmClientConnectionGuardTest {
 
-    private HttpServer server;
-    private final AtomicInteger hits = new AtomicInteger();
+    private static final String OK = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}";
+
+    private AiWorld world;
+
+    @BeforeEach
+    void setUp() {
+        world = new AiWorld().ollamaDefault("m");
+    }
 
     @AfterEach
     void tearDown() {
-        if (server != null) {
-            server.stop(0);
-        }
-    }
-
-    private String startServer() throws Exception {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/v1/chat/completions", exchange -> {
-            hits.incrementAndGet();
-            byte[] bytes = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
-        });
-        server.start();
-        return "http://127.0.0.1:" + server.getAddress().getPort() + "/v1";
-    }
-
-    private LlmConfigProvider provider(java.util.function.Supplier<GuardedTarget> target) {
-        LlmConfigProvider provider = mock(LlmConfigProvider.class);
-        when(provider.provider()).thenReturn(AiProvider.OLLAMA);
-        when(provider.defaultModelFor(AiProvider.OLLAMA)).thenReturn("m");
-        when(provider.requestTimeoutSeconds()).thenReturn(5L);
-        when(provider.targetFor(AiProvider.OLLAMA)).thenAnswer(inv -> target.get());
-        return provider;
+        world.close();
     }
 
     @Test
-    void forbiddenDestinationFailsGenerationWithoutConnecting() throws Exception {
-        String url = startServer();
-        LlmClient client = new LlmClient(provider(() -> {
-            throw new ForbiddenDestinationException(
-                    "プロジェクト設定の「Ollama の接続先」がサーバ内部のネットワーク(または禁止された宛先)のため接続しませんでした");
-        }));
-        assertThatThrownBy(() -> client.generate("hi"))
+    void forbiddenDestinationFailsGenerationWithoutConnecting() {
+        // ループバックのサーバーを、プロジェクト単位の上書き先にする。実物の宛先検査は必ず拒否する。
+        world.http.on("POST", ".*/chat/completions", FakeHttpServer.Response.ok(OK));
+        world.projectAiSettingsService.getOrCreate(7L).setOllamaBaseUrl(world.http.baseUrl() + "/v1");
+        world.llmClient.useProject(7L);
+
+        assertThatThrownBy(() -> world.llmClient.generate("hi"))
                 .isInstanceOf(AiServiceException.class)
                 .hasMessageContaining("Ollama")
                 .hasMessageContaining("サーバ内部のネットワーク");
-        assertThat(hits.get()).isZero();
-        assertThat(url).isNotBlank();
+        assertThat(world.llmRequests()).isEmpty();
     }
 
     @Test
-    void allowedTargetIsConnectedTo() throws Exception {
-        String url = startServer();
-        LlmClient client = new LlmClient(provider(() -> new GuardedTarget(url, null)));
-        assertThat(client.generate("hi")).isEqualTo("ok");
-        assertThat(hits.get()).isEqualTo(1);
+    void allowedTargetIsConnectedTo() {
+        FakeHttpServer lan = world.lan();
+        lan.on("POST", ".*/chat/completions", FakeHttpServer.Response.ok(OK));
+        world.projectAiSettingsService.getOrCreate(7L).setOllamaBaseUrl(lan.lanBaseUrl() + "/v1");
+        world.llmClient.useProject(7L);
+
+        assertThat(world.llmClient.generate("hi")).isEqualTo("ok");
+        assertThat(lan.requests("POST", ".*/chat/completions")).hasSize(1);
     }
 
     @Test
-    void defaultTargetForFallsBackToBaseUrlFor() throws Exception {
-        String url = startServer();
-        LlmConfigProvider plain = new LlmConfigProvider() {
-            public String baseUrl() { return url; }
-            public String apiKey() { return ""; }
-            public String defaultModel() { return "m"; }
-            public long requestTimeoutSeconds() { return 5; }
-            public AiProvider provider() { return AiProvider.OLLAMA; }
-            public String apiKeyFor(AiProvider p) { return ""; }
-            public String defaultModelFor(AiProvider p) { return "m"; }
-            public String baseUrlFor(AiProvider p) { return url; }
-            public java.util.List<String> availableModels() { return java.util.List.of(); }
-            public java.util.List<String> availableModelsFor(AiProvider p) { return java.util.List.of(); }
-        };
-        GuardedTarget target = plain.targetFor(AiProvider.OLLAMA);
-        assertThat(target.baseUrl()).isEqualTo(url);
-        assertThat(target.sniHost()).isNull();
-        assertThat(new LlmClient(plain).generate("hi")).isEqualTo("ok");
+    void defaultTargetForFallsBackToBaseUrlFor() {
+        // LlmConfigProviderのtargetForの既定実装は、検査をせずbaseUrlForをそのまま使う。
+        // この既定実装を使う実装は、LlmClientが固定値のために自分で組み立てる匿名の実装(テスト専用コンストラクタ)だけ。
+        world.http.on("POST", ".*/chat/completions", FakeHttpServer.Response.ok(OK));
+        String url = world.http.baseUrl() + "/v1";
+        LlmClient plain = new LlmClient(url, "k", "m", 5L);
+
+        assertThat(plain.generate("hi")).isEqualTo("ok");
+        assertThat(world.llmRequests()).hasSize(1);
+        assertThat(world.llmRequests().get(0).header("Authorization")).isEqualTo("Bearer k");
     }
 }

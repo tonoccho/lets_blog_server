@@ -2,78 +2,92 @@ package com.letsblog.ai.controller;
 
 import com.letsblog.ai.dto.ProjectApiKeyStatusResponse;
 import com.letsblog.ai.dto.SetProjectClaudeApiKeyRequest;
-import com.letsblog.ai.service.AdminAuthorizationService;
 import com.letsblog.ai.service.ForbiddenException;
-import com.letsblog.ai.service.ProjectAiSettingsService;
-import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.ai.testsupport.AiWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
-/** ProjectClaudeApiKeyController(issue #1507)。認可は requireProjectMemberOrAdmin、キーは暗号化して保存する。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * ProjectClaudeApiKeyController(issue #1507)。認可は requireProjectMemberOrAdmin、キーは暗号化して保存する。
+ *
+ * <p>issue #1824: ProjectAiSettingsService・CredentialCipher・AdminAuthorizationServiceは実物で、
+ * identity-serviceはHTTPフェイク、DBはメモリ上のリポジトリで差し替える。
+ */
 class ProjectClaudeApiKeyControllerTest {
 
-    @Mock
-    private ProjectAiSettingsService settingsService;
-    @Mock
-    private CredentialCipher cipher;
-    @Mock
-    private AdminAuthorizationService authorization;
+    private AiWorld world;
+    private ProjectClaudeApiKeyController controller;
 
-    private ProjectClaudeApiKeyController controller() {
-        return new ProjectClaudeApiKeyController(settingsService, cipher, authorization);
+    @BeforeEach
+    void setUp() {
+        world = new AiWorld();
+        controller = new ProjectClaudeApiKeyController(
+                world.projectAiSettingsService, world.credentialCipher, world.adminAuthorizationService);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    private void member() {
+        world.member(10L);
+        world.http.json("GET", "/api/internal/identity/projects/7/members/10", "true");
     }
 
     @Test
     void status_メンバー判定後に設定有無だけを返す() {
-        when(settingsService.hasClaudeApiKey(7L)).thenReturn(true, false);
+        member();
 
-        assertTrue(controller().status(7L).configured());
-        ProjectApiKeyStatusResponse second = controller().status(7L);
-        assertFalse(second.configured());
+        assertFalse(controller.status(7L).configured());
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-abc"));
+        ProjectApiKeyStatusResponse second = controller.status(7L);
+        assertTrue(second.configured());
 
-        verify(authorization, org.mockito.Mockito.times(2)).requireProjectMemberOrAdmin(7L);
+        assertEquals(2, world.http.requests("GET", "/api/internal/identity/projects/7/members/10").size());
     }
 
     @Test
     void set_暗号化して保存し204を返す() {
-        byte[] encrypted = {4, 5};
-        when(cipher.encrypt("sk-abc")).thenReturn(encrypted);
+        member();
 
-        assertEquals(204, controller().set(7L, new SetProjectClaudeApiKeyRequest("sk-abc")).getStatusCode().value());
+        assertEquals(204, controller.set(7L, new SetProjectClaudeApiKeyRequest("sk-abc")).getStatusCode().value());
 
-        verify(authorization).requireProjectMemberOrAdmin(7L);
-        verify(settingsService).setClaudeApiKeyEncrypted(7L, encrypted);
+        byte[] stored = world.projectAiSettingsService.getClaudeApiKeyEncrypted(7L);
+        // 平文では保存されず、実物の暗号器で復号すると元のキーに戻る。
+        assertFalse(new String(stored, java.nio.charset.StandardCharsets.UTF_8).contains("sk-abc"));
+        assertEquals("sk-abc", world.credentialCipher.decrypt(stored));
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/7/members/10").size());
     }
 
     @Test
     void clear_nullを保存して削除し204を返す() {
-        assertEquals(204, controller().clear(7L).getStatusCode().value());
+        member();
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-abc"));
 
-        verify(authorization).requireProjectMemberOrAdmin(7L);
-        verify(settingsService).setClaudeApiKeyEncrypted(7L, null);
+        assertEquals(204, controller.clear(7L).getStatusCode().value());
+
+        assertNull(world.projectAiSettingsService.getClaudeApiKeyEncrypted(7L));
+        assertFalse(world.projectAiSettingsService.hasClaudeApiKey(7L));
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/7/members/10").size());
     }
 
     @Test
     void メンバーでなければForbiddenで何も保存しない() {
-        doThrow(new ForbiddenException("拒否")).when(authorization).requireProjectMemberOrAdmin(7L);
+        world.member(10L);
+        world.http.json("GET", "/api/internal/identity/projects/7/members/10", "false");
 
-        assertThrows(ForbiddenException.class, () -> controller().status(7L));
-        assertThrows(ForbiddenException.class,
-                () -> controller().set(7L, new SetProjectClaudeApiKeyRequest("sk")));
-        assertThrows(ForbiddenException.class, () -> controller().clear(7L));
+        assertThrows(ForbiddenException.class, () -> controller.status(7L));
+        assertThrows(ForbiddenException.class, () -> controller.set(7L, new SetProjectClaudeApiKeyRequest("sk")));
+        assertThrows(ForbiddenException.class, () -> controller.clear(7L));
 
-        verifyNoInteractions(settingsService, cipher);
+        assertTrue(world.projectAiSettingsRows.saved.isEmpty());
     }
 }

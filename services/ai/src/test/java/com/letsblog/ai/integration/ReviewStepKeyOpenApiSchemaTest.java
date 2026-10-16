@@ -2,13 +2,13 @@ package com.letsblog.ai.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.ai.client.IdentityBridgeClient;
-import com.letsblog.ai.client.PlatformServiceClient;
 import com.letsblog.ai.domain.ReviewStepKey;
-import com.letsblog.common.client.IdentityClient;
+import com.letsblog.ai.testsupport.BackendIntegrationTest;
+import com.letsblog.ai.testsupport.IntegrationBackends;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,13 +29,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * springdocはJavaの型からスキーマを推論するため、{@code @Schema}/{@code @Parameter}で明示しない限り
  * 生成される{@code /v3/api-docs}(ひいては再生成した{@code openapi/ai.json})から旧enum制約(5値)が
  * 失われる。実サービス(springdoc)から取得したspecが引き続きenum制約を持つことを検証する
- * (JwtDecoder/IdentityClient等はこのテストの関心事ではない外部境界のためモックする)。
+ * (JwtDecoder以外の外部通信はHTTPフェイク。issue #1824)。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("ai-service: stepKeyのOpenAPIスキーマがenum制約を保持すること(issue #1222)")
-class ReviewStepKeyOpenApiSchemaTest {
+class ReviewStepKeyOpenApiSchemaTest extends BackendIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -46,14 +46,10 @@ class ReviewStepKeyOpenApiSchemaTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-
-    @MockitoBean
-    private PlatformServiceClient platformServiceClient;
+    @BeforeEach
+    void resetBackends() {
+        IntegrationBackends.reset();
+    }
 
     @Test
     @DisplayName("設定保存API(PUT .../review-steps/{stepKey})のstepKeyはReviewStepKeyの5値をenumとして持つ")

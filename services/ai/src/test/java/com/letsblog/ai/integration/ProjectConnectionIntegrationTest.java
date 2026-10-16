@@ -1,13 +1,8 @@
 package com.letsblog.ai.integration;
 
-import com.letsblog.ai.client.IdentityBridgeClient;
-import com.letsblog.ai.client.PlatformServiceClient;
-import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
-import com.letsblog.ai.client.PlatformServiceClient.ProviderConnectionConfig;
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
+import com.letsblog.ai.testsupport.BackendIntegrationTest;
+import com.letsblog.ai.testsupport.IntegrationBackends;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +17,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -37,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("ai-service: プロジェクト単位の接続先上書き(issue #1503)")
-class ProjectConnectionIntegrationTest {
+class ProjectConnectionIntegrationTest extends BackendIntegrationTest {
 
     private static final String ADMIN = "conn-admin-token";
     private static final String OUTSIDER = "conn-outsider-token";
@@ -49,30 +43,15 @@ class ProjectConnectionIntegrationTest {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-    @MockitoBean
-    private IdentityClient identityClient;
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-    @MockitoBean
-    private PlatformServiceClient platformServiceClient;
 
     @BeforeEach
     void stubActors() {
+        IntegrationBackends.reset();
         when(jwtDecoder.decode(ADMIN)).thenReturn(JwtTestFixtures.jwt("sub-conn-admin", "admin"));
-        when(identityClient.lookupProfile("Bearer " + ADMIN)).thenReturn(Optional.of(new ActorProfile(1L, "admin")));
         when(jwtDecoder.decode(OUTSIDER)).thenReturn(JwtTestFixtures.jwt("sub-conn-out", "user"));
-        when(identityClient.lookupProfile("Bearer " + OUTSIDER))
-                .thenReturn(Optional.of(new ActorProfile(2L, "user")));
-        when(identityBridgeClient.isProjectMember(anyLong(), anyLong(), anyString())).thenReturn(false);
-        when(platformServiceClient.resolveAiConnectionsConfig(anyString())).thenReturn(new AiConnectionsConfig(
-                new ProviderConnectionConfig(SYSTEM_OLLAMA, "ENVIRONMENT", true),
-                new ProviderConnectionConfig(SYSTEM_COMFY, "DATABASE", true),
-                new ProviderConnectionConfig(null, "NONE", false),
-                new ProviderConnectionConfig(null, "NONE", false)));
-    }
-
-    private static long anyLong() {
-        return org.mockito.ArgumentMatchers.anyLong();
+        IntegrationBackends.actor(ADMIN, 1, "admin");
+        IntegrationBackends.actor(OUTSIDER, 2, "user");
+        IntegrationBackends.aiConnectionsConfig(SYSTEM_OLLAMA, "ENVIRONMENT", SYSTEM_COMFY, "DATABASE");
     }
 
     private ResultActions getConnections(long projectId, String token) throws Exception {

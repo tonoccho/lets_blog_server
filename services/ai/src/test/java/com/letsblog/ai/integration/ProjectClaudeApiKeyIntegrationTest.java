@@ -1,13 +1,8 @@
 package com.letsblog.ai.integration;
 
-import com.letsblog.ai.client.IdentityBridgeClient;
-import com.letsblog.ai.client.PlatformServiceClient;
-import com.letsblog.ai.client.PlatformServiceClient.AiConnectionsConfig;
-import com.letsblog.ai.client.PlatformServiceClient.ProviderConnectionConfig;
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
+import com.letsblog.ai.testsupport.BackendIntegrationTest;
+import com.letsblog.ai.testsupport.IntegrationBackends;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +17,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("ai-service: プロジェクト単位のClaude APIキー(issue #1507)")
-class ProjectClaudeApiKeyIntegrationTest {
+class ProjectClaudeApiKeyIntegrationTest extends BackendIntegrationTest {
 
     private static final String ADMIN = "cla-admin-token";
     private static final String OUTSIDER = "cla-out-token";
@@ -50,27 +44,16 @@ class ProjectClaudeApiKeyIntegrationTest {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-    @MockitoBean
-    private IdentityClient identityClient;
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-    @MockitoBean
-    private PlatformServiceClient platformServiceClient;
 
     @BeforeEach
     void stubActors() {
+        IntegrationBackends.reset();
         when(jwtDecoder.decode(ADMIN)).thenReturn(JwtTestFixtures.jwt("sub-cla-admin", "admin"));
-        when(identityClient.lookupProfile("Bearer " + ADMIN)).thenReturn(Optional.of(new ActorProfile(1L, "admin")));
         when(jwtDecoder.decode(OUTSIDER)).thenReturn(JwtTestFixtures.jwt("sub-cla-out", "user"));
-        when(identityClient.lookupProfile("Bearer " + OUTSIDER))
-                .thenReturn(Optional.of(new ActorProfile(2L, "user")));
-        when(identityBridgeClient.isProjectMember(org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.anyLong(), anyString())).thenReturn(false);
-        when(platformServiceClient.resolveAiConnectionsConfig(anyString())).thenReturn(new AiConnectionsConfig(
-                new ProviderConnectionConfig("http://ollama.invalid:11434/v1", "ENVIRONMENT", true),
-                new ProviderConnectionConfig("http://comfyui.invalid:8188", "ENVIRONMENT", true),
-                new ProviderConnectionConfig(null, "NONE", false),
-                new ProviderConnectionConfig(null, "DATABASE", true)));
+        IntegrationBackends.actor(ADMIN, 1, "admin");
+        IntegrationBackends.actor(OUTSIDER, 2, "user");
+        IntegrationBackends.aiConnectionsConfig(
+                "http://ollama.invalid:11434/v1", "ENVIRONMENT", "http://comfyui.invalid:8188", "ENVIRONMENT");
     }
 
     private static String path(long projectId) {

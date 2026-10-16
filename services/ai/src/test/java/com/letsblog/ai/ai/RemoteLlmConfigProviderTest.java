@@ -4,56 +4,67 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-import com.letsblog.ai.client.PlatformServiceClient;
-import com.letsblog.ai.service.ProjectAiSettingsService;
-import com.letsblog.ai.service.CurrentActorService;
-import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.ai.testsupport.AiWorld;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.mock.web.MockHttpServletRequest;
 
-/** provider別の選択可能モデル一覧の解決(issue #1088)。 */
+/**
+ * provider別の選択可能モデル一覧の解決(issue #1088)。
+ *
+ * <p>issue #1824: PlatformServiceClient・CurrentActorService・ProjectAiSettingsService・CredentialCipherは実物で、
+ * platform-service・identity-serviceはHTTPフェイク、DBはメモリ上のリポジトリで差し替える。
+ */
 class RemoteLlmConfigProviderTest {
 
-    private final PlatformServiceClient client = mock(PlatformServiceClient.class);
-    private final CurrentActorService actor = mock(CurrentActorService.class);
-    private final MockHttpServletRequest request = new MockHttpServletRequest();
-    private final ProjectAiSettingsService projectSettings = mock(ProjectAiSettingsService.class);
-    private final CredentialCipher cipher = mock(CredentialCipher.class);
-    private final RemoteLlmConfigProvider provider =
-            new RemoteLlmConfigProvider(client, actor, request, projectSettings, cipher);
+    private static final String LLM_CONFIG = "/api/internal/platform/llm-config";
+
+    private AiWorld world;
+    private RemoteLlmConfigProvider provider;
+
+    @BeforeEach
+    void setUp() {
+        world = new AiWorld().admin();
+        provider = new RemoteLlmConfigProvider(
+                world.platformServiceClient, world.currentActorService, world.request,
+                world.projectAiSettingsService, world.credentialCipher);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private void stubSystemConfig(String provider, String baseUrl) {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig(provider, "Bearer t")).thenReturn(
-                new PlatformServiceClient.LlmConfig(provider, baseUrl, "", "m", List.of("m"), 10L));
+        world.llmConfig(AiProvider.valueOf(provider), baseUrl, "", "m", List.of("m"), false);
+    }
+
+    private void projectOllama(long projectId, String override) {
+        world.projectAiSettingsService.getOrCreate(projectId).setOllamaBaseUrl(override);
     }
 
     @Test
     void availableModelsFor_指定providerで解決した一覧を返す() {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig("OLLAMA", "Bearer t")).thenReturn(
-                new PlatformServiceClient.LlmConfig("OLLAMA", "u", "", "qwen", List.of("qwen"), 10L));
+        world.llmConfig(AiProvider.OLLAMA, "u", "", "qwen", List.of("qwen"), false);
 
         assertEquals(List.of("qwen"), provider.availableModelsFor(AiProvider.OLLAMA));
+        assertEquals("provider=OLLAMA", world.http.requests("GET", LLM_CONFIG).get(0).query());
+        assertEquals(AiWorld.BEARER, world.http.requests("GET", LLM_CONFIG).get(0).header("Authorization"));
     }
 
     @Test
     void availableModelsFor_同一リクエスト内では往復を増やさない() {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig("CLAUDE", "Bearer t")).thenReturn(
-                new PlatformServiceClient.LlmConfig("CLAUDE", "u", "k", "c", List.of("c"), 10L));
+        world.llmConfig(AiProvider.CLAUDE, "u", "k", "c", List.of("c"), false);
 
         provider.availableModelsFor(AiProvider.CLAUDE);
         provider.availableModelsFor(AiProvider.CLAUDE);
 
-        verify(client, times(1)).resolveLlmConfig("CLAUDE", "Bearer t");
+        assertEquals(1, world.http.requests("GET", LLM_CONFIG).size());
     }
 
     // ---- Ollama接続先のプロジェクト単位上書き(issue #1503) ----
@@ -61,7 +72,7 @@ class RemoteLlmConfigProviderTest {
     @Test
     void baseUrlFor_OLLAMAでプロジェクトの上書きがあればそれを使う() {
         stubSystemConfig("OLLAMA", "http://ollama:11434/v1");
-        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn("http://gpu:11434/v1");
+        projectOllama(7L, "http://gpu:11434/v1");
 
         provider.useProject(7L);
 
@@ -73,10 +84,10 @@ class RemoteLlmConfigProviderTest {
         stubSystemConfig("OLLAMA", "http://ollama:11434/v1");
         provider.useProject(7L);
 
-        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn(null);
+        projectOllama(7L, null);
         assertEquals("http://ollama:11434/v1", provider.baseUrlFor(AiProvider.OLLAMA));
 
-        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn("  ");
+        projectOllama(7L, "  ");
         assertEquals("http://ollama:11434/v1", provider.baseUrlFor(AiProvider.OLLAMA));
     }
 
@@ -86,13 +97,13 @@ class RemoteLlmConfigProviderTest {
 
         assertEquals("http://ollama:11434/v1", provider.baseUrlFor(AiProvider.OLLAMA));
 
-        org.mockito.Mockito.verifyNoInteractions(projectSettings);
+        verify(world.projectAiSettingsRepository, never()).findByProjectId(any());
     }
 
     @Test
     void useProject_nullで範囲を解除する() {
         stubSystemConfig("OLLAMA", "http://ollama:11434/v1");
-        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn("http://gpu:11434/v1");
+        projectOllama(7L, "http://gpu:11434/v1");
         provider.useProject(7L);
         provider.useProject(null);
 
@@ -107,7 +118,8 @@ class RemoteLlmConfigProviderTest {
         assertEquals("https://api.openai.com/v1", provider.baseUrlFor(AiProvider.OPENAI));
         assertEquals(LlmClient.ANTHROPIC_BASE_URL, provider.baseUrlFor(AiProvider.CLAUDE));
 
-        verify(projectSettings, never()).getOllamaBaseUrl(7L);
+        // OLLAMA以外では、プロジェクトの設定行を読みにも行かない。
+        verify(world.projectAiSettingsRepository, never()).findByProjectId(any());
     }
 
     // ---- ChatGPT(OPENAI)のベースURLはコード内の定数(issue #1569) ----
@@ -136,10 +148,14 @@ class RemoteLlmConfigProviderTest {
         stubs.setActiveProfiles("e2e-stubs");
 
         assertEquals("https://api.openai.com/v1",
-                new RemoteLlmConfigProvider(client, actor, request, projectSettings, cipher, production)
+                new RemoteLlmConfigProvider(
+                        world.platformServiceClient, world.currentActorService, world.request,
+                        world.projectAiSettingsService, world.credentialCipher, production)
                         .baseUrlFor(AiProvider.OPENAI));
         RemoteLlmConfigProvider underStubs =
-                new RemoteLlmConfigProvider(client, actor, request, projectSettings, cipher, stubs);
+                new RemoteLlmConfigProvider(
+                world.platformServiceClient, world.currentActorService, world.request,
+                world.projectAiSettingsService, world.credentialCipher, stubs);
         assertEquals("http://llm-stub:8080", underStubs.baseUrlFor(AiProvider.OPENAI));
         assertEquals("http://llm-stub:8080", underStubs.targetFor(AiProvider.OPENAI).baseUrl());
         // Claudeはスタブ化しない
@@ -149,17 +165,13 @@ class RemoteLlmConfigProviderTest {
     // ---- ChatGPT(OPENAI)のAPIキーのプロジェクト単位上書き(issue #1506) ----
 
     private void stubSystemOpenAiKey(String systemKey) {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig("OPENAI", "Bearer t")).thenReturn(new PlatformServiceClient.LlmConfig(
-                "OPENAI", "https://api.openai.com/v1", systemKey, "gpt", List.of("gpt"), 10L));
+        world.llmConfig(AiProvider.OPENAI, "https://api.openai.com/v1", systemKey, "gpt", List.of("gpt"), false);
     }
 
     @Test
     void apiKeyFor_OPENAIでプロジェクトのキーがあればシステム設定より優先して復号した値を使う() {
         stubSystemOpenAiKey("sk-system");
-        byte[] encrypted = {1, 2, 3};
-        when(projectSettings.getOpenAiApiKeyEncrypted(7L)).thenReturn(encrypted);
-        when(cipher.decrypt(encrypted)).thenReturn("sk-project");
+        world.projectAiSettingsService.setOpenAiApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-project"));
 
         provider.useProject(7L);
 
@@ -171,15 +183,13 @@ class RemoteLlmConfigProviderTest {
         stubSystemOpenAiKey("sk-system");
         provider.useProject(8L);
 
-        when(projectSettings.getOpenAiApiKeyEncrypted(8L)).thenReturn(null);
         AiServiceException e1 = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
         assertTrue(e1.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e1.getMessage());
         assertFalse(e1.getMessage().contains("sk-system"));
 
-        when(projectSettings.getOpenAiApiKeyEncrypted(8L)).thenReturn(new byte[0]);
-        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
-
-        verify(cipher, never()).decrypt(org.mockito.ArgumentMatchers.any());
+        world.projectAiSettingsService.setOpenAiApiKeyEncrypted(8L, new byte[0]);
+        AiServiceException e2 = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
+        assertFalse(e2.getMessage().contains("sk-system"));
     }
 
     @Test
@@ -189,34 +199,29 @@ class RemoteLlmConfigProviderTest {
         AiServiceException e = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
         assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
 
-        verify(projectSettings, never()).getOpenAiApiKeyEncrypted(org.mockito.ArgumentMatchers.anyLong());
+        verify(world.projectAiSettingsRepository, never()).findByProjectId(any());
     }
 
     @Test
     void apiKeyFor_OPENAI以外のプロバイダーにはOPENAIのプロジェクトのキーを適用しない() {
         provider.useProject(7L);
-        when(projectSettings.getOpenAiApiKeyEncrypted(7L)).thenReturn(new byte[] {1});
-        when(projectSettings.getClaudeApiKeyEncrypted(7L)).thenReturn(null);
+        world.projectAiSettingsService.setOpenAiApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-openai"));
 
-        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
-
-        verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
+        // CLAUDEのキーは未設定。OPENAIのキーがあっても、CLAUDEには使われずエラーになる。
+        AiServiceException e = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
+        assertFalse(e.getMessage().contains("sk-openai"));
     }
 
     // ---- Claude(CLAUDE)のAPIキーのプロジェクト単位上書き(issue #1507) ----
 
     private void stubSystemClaudeKey(String systemKey) {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig("CLAUDE", "Bearer t")).thenReturn(new PlatformServiceClient.LlmConfig(
-                "CLAUDE", "https://api.anthropic.com/v1", systemKey, "claude", List.of("claude"), 10L));
+        world.llmConfig(AiProvider.CLAUDE, "https://api.anthropic.com/v1", systemKey, "claude", List.of("claude"), false);
     }
 
     @Test
     void apiKeyFor_CLAUDEでプロジェクトのキーがあればシステム設定より優先して復号した値を使う() {
         stubSystemClaudeKey("sk-ant-system");
-        byte[] encrypted = {7, 8, 9};
-        when(projectSettings.getClaudeApiKeyEncrypted(7L)).thenReturn(encrypted);
-        when(cipher.decrypt(encrypted)).thenReturn("sk-ant-project");
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-ant-project"));
 
         provider.useProject(7L);
 
@@ -228,14 +233,12 @@ class RemoteLlmConfigProviderTest {
         stubSystemClaudeKey("sk-ant-system");
         provider.useProject(8L);
 
-        when(projectSettings.getClaudeApiKeyEncrypted(8L)).thenReturn(null);
         AiServiceException e = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
         assertTrue(e.getMessage().contains("このプロジェクトでAPIキーを設定してください"), "実際: " + e.getMessage());
+        assertFalse(e.getMessage().contains("sk-ant-system"));
 
-        when(projectSettings.getClaudeApiKeyEncrypted(8L)).thenReturn(new byte[0]);
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(8L, new byte[0]);
         assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
-
-        verify(cipher, never()).decrypt(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -244,31 +247,26 @@ class RemoteLlmConfigProviderTest {
 
         assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.CLAUDE));
 
-        verify(projectSettings, never()).getClaudeApiKeyEncrypted(org.mockito.ArgumentMatchers.anyLong());
+        verify(world.projectAiSettingsRepository, never()).findByProjectId(any());
     }
 
     @Test
     void apiKeyFor_CLAUDEのプロジェクトのキーはOPENAIには適用されない() {
         provider.useProject(7L);
-        when(projectSettings.getOpenAiApiKeyEncrypted(7L)).thenReturn(null);
-        when(projectSettings.getClaudeApiKeyEncrypted(7L)).thenReturn(new byte[] {1});
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-ant-project"));
 
-        assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
-
-        verify(projectSettings, never()).getClaudeApiKeyEncrypted(7L);
+        AiServiceException e = assertThrows(AiServiceException.class, () -> provider.apiKeyFor(AiProvider.OPENAI));
+        assertFalse(e.getMessage().contains("sk-ant-project"));
     }
 
     @Test
     void apiKeyFor_OLLAMAはプロジェクトが指定されてもキーの上書きを引かずシステム設定の値を使う() {
-        when(actor.getAuthorizationHeader()).thenReturn("Bearer t");
-        when(client.resolveLlmConfig("OLLAMA", "Bearer t")).thenReturn(
-                new PlatformServiceClient.LlmConfig("OLLAMA", "http://o", "ollama-key", "m", List.of("m"), 10L));
+        world.llmConfig(AiProvider.OLLAMA, "http://o", "ollama-key", "m", List.of("m"), false);
+        world.projectAiSettingsService.setOpenAiApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-openai"));
+        world.projectAiSettingsService.setClaudeApiKeyEncrypted(7L, world.credentialCipher.encrypt("sk-ant"));
         provider.useProject(7L);
 
         assertEquals("ollama-key", provider.apiKeyFor(AiProvider.OLLAMA));
-
-        verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
-        verify(projectSettings, never()).getClaudeApiKeyEncrypted(7L);
     }
 
     // ---- extensionsのツールへのトークンを付ける宛先(#1804) ----
@@ -288,7 +286,7 @@ class RemoteLlmConfigProviderTest {
 
     @Test
     void toolsAuthorized_OLLAMAでプロジェクトの上書きがあれば付けない() {
-        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn("http://gpu:11434/v1");
+        projectOllama(7L, "http://gpu:11434/v1");
         provider.useProject(7L);
 
         assertFalse(provider.toolsAuthorized(AiProvider.OLLAMA));
@@ -296,7 +294,7 @@ class RemoteLlmConfigProviderTest {
 
     @Test
     void toolsAuthorized_上書きが空文字ならシステム設定の宛先として付ける() {
-        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn(" ");
+        projectOllama(7L, " ");
         provider.useProject(7L);
 
         assertTrue(provider.toolsAuthorized(AiProvider.OLLAMA));
@@ -306,5 +304,29 @@ class RemoteLlmConfigProviderTest {
     void toolsAuthorized_OLLAMA以外には付けない() {
         assertFalse(provider.toolsAuthorized(AiProvider.OPENAI));
         assertFalse(provider.toolsAuthorized(AiProvider.CLAUDE));
+    }
+
+    // ---- プロバイダーがnull(=システム既定のプロバイダー)の解決(issue #1824) ----
+
+    @Test
+    void プロバイダーがnullならシステム既定のプロバイダーの設定で解決する() {
+        world.llmConfig(AiProvider.OLLAMA, "http://default-ollama/v1", "key-d", "m-default", List.of("m-default"), true);
+
+        assertEquals("http://default-ollama/v1", provider.baseUrlFor(null));
+        assertEquals("m-default", provider.defaultModelFor(null));
+        assertEquals(List.of("m-default"), provider.availableModelsFor(null));
+        // provider指定なしの問い合わせ(クエリ無し)としてplatform-serviceに届く。
+        assertTrue(world.http.requests("GET", LLM_CONFIG).stream().allMatch(request -> request.query() == null));
+    }
+
+    @Test
+    void 解決結果がプロバイダー名を持たなくてもキャッシュできる() {
+        // 古いplatform-serviceのように、応答が「provider」を持たない場合。
+        world.http.json("GET", LLM_CONFIG, "{\"baseUrl\":\"http://o/v1\",\"apiKey\":\"\",\"defaultModel\":\"m\","
+                + "\"availableModels\":[\"m\"],\"requestTimeoutSeconds\":10}");
+
+        assertEquals("m", provider.defaultModelFor(AiProvider.OLLAMA));
+        assertEquals("m", provider.defaultModelFor(AiProvider.OLLAMA));
+        assertEquals(1, world.http.requests("GET", LLM_CONFIG).size());
     }
 }

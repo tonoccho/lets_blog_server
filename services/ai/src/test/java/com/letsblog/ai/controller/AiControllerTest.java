@@ -2,59 +2,65 @@ package com.letsblog.ai.controller;
 
 import com.letsblog.ai.domain.ReviewStepKey;
 import com.letsblog.ai.dto.AiProofreadRequest;
+import com.letsblog.ai.dto.AiProofreadResponse;
 import com.letsblog.ai.dto.AiReviewStepSuggestionsRequest;
 import com.letsblog.ai.dto.AiReviewStepSuggestionsResponse;
 import com.letsblog.ai.dto.AiTagsRequest;
 import com.letsblog.ai.dto.AiTagsResponse;
-import com.letsblog.ai.dto.AiProofreadResponse;
-import com.letsblog.ai.dto.ProofreadIssue;
-import com.letsblog.ai.dto.ReviewStepSuggestion;
-import com.letsblog.ai.service.AdminAuthorizationService;
-import com.letsblog.ai.service.AiAssistService;
 import com.letsblog.ai.service.ForbiddenException;
+import com.letsblog.ai.testsupport.AiWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * AiControllerの回帰テスト(issue #574)。legacy-apiに残った画像生成関連エンドポイント
  * (generateImagePrompt/image/image-options)を除き、テキスト生成系エンドポイントがAiAssistServiceへ
  * 委譲することを検証する。
+ *
+ * <p>issue #1824: AiAssistService・AdminAuthorizationServiceなどは実物で、LLM・identity-serviceはHTTPフェイク、
+ * DBはメモリ上のリポジトリで差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class AiControllerTest {
 
-    @Mock
-    private AiAssistService aiAssistService;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    private AiWorld world;
+    private AiController controller;
 
-    private AiController controller() {
-        return new AiController(aiAssistService, adminAuthorizationService);
+    @BeforeEach
+    void setUp() {
+        world = new AiWorld().ollamaDefault("qwen2.5:7b-instruct");
+        controller = new AiController(world.aiAssistService, world.adminAuthorizationService);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    private void nonMember(long userId, long projectId) {
+        world.member(userId);
+        world.http.json("GET", "/api/internal/identity/projects/" + projectId + "/members/" + userId, "false");
     }
 
     @Test
     void proofread_サービスへ委譲する() {
-        AiController controller = controller();
-        AiProofreadRequest request = new AiProofreadRequest("記事本文", null, null);
-        AiProofreadResponse expected = new AiProofreadResponse(
-                List.of(new ProofreadIssue("typo", "誤字", "指摘内容", "修正案")));
-        when(aiAssistService.proofreadContent(request)).thenReturn(expected);
+        world.admin();
+        world.llmReplies("[{\"type\": \"typo\", \"originalText\": \"記事\", \"message\": \"指摘内容\", \"suggestion\": \"修正案\"}]");
 
-        AiProofreadResponse response = controller.proofread(request);
+        AiProofreadResponse response = controller.proofread(new AiProofreadRequest("記事本文", null, null));
 
-        assertEquals(expected, response);
+        assertEquals(1, response.issues().size());
+        assertEquals("typo", response.issues().get(0).type());
+        assertEquals("記事", response.issues().get(0).originalText());
+        assertEquals("指摘内容", response.issues().get(0).message());
+        assertEquals("修正案", response.issues().get(0).suggestion());
+        assertTrue(world.llmPrompts().get(0).contains("記事本文"));
     }
 
     // ---- issue #830 ----
@@ -62,33 +68,39 @@ class AiControllerTest {
     @Test
     void tags_projectId指定時はプロジェクトメンバー判定を通す() {
         // projectIdが指定されると既存タグ(保存済みリソース)を読むため、他の生成系と違い認可が要る。
-        AiTagsRequest request = new AiTagsRequest("本文", null, 7L);
-        when(aiAssistService.suggestTags(request)).thenReturn(new AiTagsResponse(List.of("カテゴリ"), List.of("タグ")));
+        world.member(10L);
+        world.http.json("GET", "/api/internal/identity/projects/7/members/10", "true");
+        world.http.json("GET", "/api/internal/ai/projects/7/existing-tags", "[\"Java\"]");
+        world.llmReplies("{\"categories\": [\"カテゴリ\"], \"tags\": [\"タグ\"]}");
 
-        controller().tags(request);
+        AiTagsResponse response = controller.tags(new AiTagsRequest("本文", null, 7L));
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+        assertEquals(List.of("カテゴリ"), response.categories());
+        assertEquals(List.of("タグ"), response.tags());
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/7/members/10").size());
+        assertEquals("Bearer t", world.http.requests("GET", "/api/internal/identity/projects/7/members/10").get(0)
+                .header("Authorization"));
     }
 
     @Test
     void tags_プロジェクトメンバーでなければ生成せずに拒否する() {
-        AiTagsRequest request = new AiTagsRequest("本文", null, 7L);
-        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+        nonMember(10L, 7L);
 
-        assertThrows(ForbiddenException.class, () -> controller().tags(request));
+        assertThrows(ForbiddenException.class, () -> controller.tags(new AiTagsRequest("本文", null, 7L)));
 
-        verifyNoInteractions(aiAssistService);
+        assertTrue(world.llmRequests().isEmpty());
+        assertTrue(world.jobRows.saved.isEmpty());
     }
 
     @Test
     void tags_projectId未指定なら読むものが無いので認可判定しない() {
-        AiTagsRequest request = new AiTagsRequest("本文", null, null);
-        when(aiAssistService.suggestTags(request)).thenReturn(new AiTagsResponse(List.of("カテゴリ"), List.of("タグ")));
+        world.llmReplies("{\"categories\": [\"カテゴリ\"], \"tags\": [\"タグ\"]}");
 
-        controller().tags(request);
+        AiTagsResponse response = controller.tags(new AiTagsRequest("本文", null, null));
 
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(org.mockito.ArgumentMatchers.anyLong());
+        assertEquals(List.of("タグ"), response.tags());
+        // 認可判定をしないので、identity-serviceへは一度も問い合わせない。
+        assertTrue(world.http.requests("GET", "/api/(internal/)?identity/.*").isEmpty());
     }
 
     // ---- issue #1213: レビューステップ単位の指摘生成 ----
@@ -98,28 +110,28 @@ class AiControllerTest {
         // issue #1222レビュー(2026-09-28)対応: ステップキーの検証(未知の値の400化とgeneration_jobs
         // への失敗記録)をコントローラからAiAssistServiceへ移したため、委譲先はenumではなく
         // パス変数の生のStringを受け取るオーバーロードになった。
-        AiReviewStepSuggestionsRequest request = new AiReviewStepSuggestionsRequest("本文");
-        AiReviewStepSuggestionsResponse expected = new AiReviewStepSuggestionsResponse(
-                List.of(new ReviewStepSuggestion("id1", "JAPANESE", "本文", "指摘")));
-        when(aiAssistService.generateReviewStepSuggestions(7L, ReviewStepKey.JAPANESE.name(), "本文"))
-                .thenReturn(expected);
+        world.member(10L);
+        world.http.json("GET", "/api/internal/identity/projects/7/members/10", "true");
+        world.llmReplies("[{\"originalText\": \"ら抜き言葉の例\", \"message\": \"指摘\"}]");
 
-        AiReviewStepSuggestionsResponse response =
-                controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE.name(), request);
+        AiReviewStepSuggestionsResponse response = controller.reviewStepSuggestions(
+                7L, ReviewStepKey.JAPANESE.name(), new AiReviewStepSuggestionsRequest("これはら抜き言葉の例です"));
 
-        assertEquals(expected, response);
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+        assertEquals(1, response.suggestions().size());
+        assertEquals("JAPANESE", response.suggestions().get(0).stepKey());
+        assertEquals("ら抜き言葉の例", response.suggestions().get(0).originalText());
+        assertEquals("指摘", response.suggestions().get(0).message());
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/7/members/10").size());
     }
 
     @Test
     void reviewStepSuggestions_プロジェクトメンバーでなければ生成せずに拒否する() {
-        AiReviewStepSuggestionsRequest request = new AiReviewStepSuggestionsRequest("本文");
-        doThrow(new ForbiddenException("この操作にはプロジェクトメンバーまたはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+        nonMember(10L, 7L);
 
-        assertThrows(ForbiddenException.class,
-                () -> controller().reviewStepSuggestions(7L, ReviewStepKey.JAPANESE.name(), request));
+        assertThrows(ForbiddenException.class, () -> controller.reviewStepSuggestions(
+                7L, ReviewStepKey.JAPANESE.name(), new AiReviewStepSuggestionsRequest("本文")));
 
-        verifyNoInteractions(aiAssistService);
+        assertTrue(world.llmRequests().isEmpty());
+        assertTrue(world.jobRows.saved.isEmpty());
     }
 }

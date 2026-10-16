@@ -84,6 +84,7 @@ public final class InMemoryRepositories {
             return row;
         });
         when(repository.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(store.rows.get(inv.<Long>getArgument(0))));
+        when(repository.findAll()).thenAnswer(inv -> new ArrayList<>(store.rows.values()));
         when(repository.findByOwnerUserId(anyLong())).thenAnswer(inv -> store.rows.values().stream()
                 .filter(row -> inv.<Long>getArgument(0).equals(row.getOwnerUserId())).toList());
         when(repository.findByStatusAndUpdatedAtBefore(anyString(), any())).thenAnswer(inv -> store.rows.values().stream()

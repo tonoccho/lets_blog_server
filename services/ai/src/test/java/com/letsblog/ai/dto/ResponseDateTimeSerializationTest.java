@@ -2,21 +2,16 @@ package com.letsblog.ai.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import com.letsblog.ai.controller.GenerationJobController;
 import com.letsblog.ai.controller.InternalGenerationJobController;
 import com.letsblog.ai.domain.ArticlePlanSession;
 import com.letsblog.ai.domain.GenerationJob;
-import com.letsblog.ai.repository.ArticlePlanSessionRepository;
-import com.letsblog.ai.repository.GenerationJobRepository;
 import com.letsblog.ai.service.ArticlePlanService;
-import com.letsblog.ai.service.CurrentActorService;
+import com.letsblog.ai.testsupport.AiWorld;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -40,8 +35,13 @@ class ResponseDateTimeSerializationTest {
 
     private final JsonMapper mapper = JsonMapper.builder().build();
 
-    private final GenerationJobRepository jobRepository = mock(GenerationJobRepository.class);
-    private final CurrentActorService actor = mock(CurrentActorService.class);
+    /** 外部との通信(identity-service・DB)だけを差し替えた世界(issue #1824)。コントローラとサービスは実物。 */
+    private final AiWorld world = new AiWorld();
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private JsonNode json(Object value) {
         return mapper.valueToTree(value);
@@ -68,10 +68,16 @@ class ResponseDateTimeSerializationTest {
         return session;
     }
 
-    private ArticlePlanService planService(ArticlePlanSessionRepository repo) {
-        return new ArticlePlanService(
-                null, null, null, jobRepository, new com.fasterxml.jackson.databind.ObjectMapper(),
-                null, repo, null, null, actor);
+    private ArticlePlanService planService() {
+        return world.articlePlanService;
+    }
+
+    private GenerationJobController jobs() {
+        return new GenerationJobController(world.generationJobRepository, world.currentActorService);
+    }
+
+    private InternalGenerationJobController internalJobs() {
+        return new InternalGenerationJobController(world.generationJobRepository, world.currentActorService);
     }
 
     private void assertZ(JsonNode node) {
@@ -81,64 +87,55 @@ class ResponseDateTimeSerializationTest {
 
     @Test
     void generationJobResponse_一覧はZ終端のRFC3339で返る() {
-        when(actor.isAdmin()).thenReturn(true);
-        when(jobRepository.findAll()).thenReturn(List.of(job()));
-        List<GenerationJobResponse> list = new GenerationJobController(jobRepository, actor).list();
+        world.admin();
+        world.generationJobRepository.save(job());
+        List<GenerationJobResponse> list = jobs().list();
         assertZ(json(list.get(0)));
     }
 
     @Test
     void generationJobResponse_内部APIの更新もZ終端のRFC3339で返る() {
-        when(jobRepository.findById(7L)).thenReturn(Optional.of(job()));
-        when(jobRepository.save(any(GenerationJob.class))).thenAnswer(i -> i.getArgument(0));
-        GenerationJobResponse response = new InternalGenerationJobController(jobRepository, actor)
-                .update(7L, new UpdateGenerationJobRequest("done", null));
+        GenerationJob saved = world.generationJobRepository.save(job());
+        GenerationJobResponse response = internalJobs().update(saved.getId(), new UpdateGenerationJobRequest("done", null));
         assertZ(json(response));
     }
 
     @Test
     void generationJobResponse_内部APIの作成もZ終端のRFC3339で返る() {
-        when(jobRepository.save(any(GenerationJob.class))).thenAnswer(i -> {
-            GenerationJob saved = i.getArgument(0);
-            saved.setId(8L);
-            saved.setCreatedAt(CREATED);
-            saved.setUpdatedAt(UPDATED);
-            return saved;
-        });
-        GenerationJobResponse response = new InternalGenerationJobController(jobRepository, actor)
-                .create(new CreateGenerationJobRequest("t", null));
-        assertZ(json(response));
+        // 作成時刻はリポジトリ(DB)が付ける。メモリ上のリポジトリは保存時の現在時刻を付けるので、
+        // 形式(Z終端のRFC3339)だけを確かめる。
+        GenerationJobResponse response = internalJobs().create(new CreateGenerationJobRequest("t", null));
+        JsonNode node = json(response);
+        assertTrue(node.get("createdAt").asString().endsWith("Z"), node.toString());
+        assertTrue(node.get("updatedAt").asString().endsWith("Z"), node.toString());
     }
 
     @Test
     void generationJobDetailResponse_はZ終端のRFC3339で返る() {
-        when(actor.isAdmin()).thenReturn(true);
-        when(jobRepository.findById(7L)).thenReturn(Optional.of(job()));
-        assertZ(json(new GenerationJobController(jobRepository, actor).get(7L)));
+        world.admin();
+        GenerationJob saved = world.generationJobRepository.save(job());
+        assertZ(json(jobs().get(saved.getId())));
     }
 
     @Test
     void articlePlanSessionSummaryResponse_はZ終端のRFC3339で返る() {
-        ArticlePlanSessionRepository repo = mock(ArticlePlanSessionRepository.class);
-        when(repo.findByProjectIdOrderByUpdatedAtDescIdDesc(2L)).thenReturn(List.of(session()));
-        assertZ(json(planService(repo).listSessions(2L).get(0)));
+        world.articlePlanSessionRepository.save(session());
+        assertZ(json(planService().listSessions(2L).get(0)));
     }
 
     @Test
     void articlePlanSessionDetailResponse_はZ終端のRFC3339で返る() {
-        ArticlePlanSessionRepository repo = mock(ArticlePlanSessionRepository.class);
-        when(repo.findById(1L)).thenReturn(Optional.of(session()));
-        assertZ(json(planService(repo).getSession(2L, 1L)));
+        ArticlePlanSession saved = world.articlePlanSessionRepository.save(session());
+        assertZ(json(planService().getSession(2L, saved.getId())));
     }
 
     @Test
     void 日時が未設定ならnullのまま返る() {
-        ArticlePlanSession session = session();
-        session.setCreatedAt(null);
-        session.setUpdatedAt(null);
-        ArticlePlanSessionRepository repo = mock(ArticlePlanSessionRepository.class);
-        when(repo.findById(1L)).thenReturn(Optional.of(session));
-        JsonNode node = json(planService(repo).getSession(2L, 1L));
+        // メモリ上のリポジトリは保存時に日時を補うので、保存したあとの行(DBから読み出した状態)で未設定にする。
+        ArticlePlanSession saved = world.articlePlanSessionRepository.save(session());
+        saved.setCreatedAt(null);
+        saved.setUpdatedAt(null);
+        JsonNode node = json(planService().getSession(2L, saved.getId()));
         assertTrue(node.get("createdAt").isNull());
         assertTrue(node.get("updatedAt").isNull());
     }
