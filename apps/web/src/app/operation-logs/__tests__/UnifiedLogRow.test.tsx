@@ -1,9 +1,19 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { UnifiedLogRow } from "../UnifiedLogRow";
 import type { UnifiedLogEntry } from "@/lib/apiClient";
+import { installFetch, jsonResponse, resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
 
-jest.mock("../actions", () => ({
-  copyOperationTraceAction: jest.fn().mockResolvedValue("copied-trace"),
+// 自前の ../actions・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1833)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
 function entry(overrides: Partial<UnifiedLogEntry> = {}): UnifiedLogEntry {
@@ -59,7 +69,27 @@ describe("UnifiedLogRow", () => {
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
-  it("OPERATIONかつoperationIdがあればコピーボタンを表示し、クリックでクリップボードへコピーする", async () => {
+  it("OPERATIONかつoperationIdがあればコピーボタンを表示し、クリックでトレース全体をクリップボードへコピーする", async () => {
+    resetServerRuntime(ADMIN_SESSION);
+    installFetch({
+      "GET /api/operation-logs/op-1": () =>
+        jsonResponse([
+          {
+            id: 1,
+            operationId: "op-1",
+            userId: 1,
+            actorKeycloakSub: null,
+            method: "GET",
+            path: "/api/projects",
+            statusCode: 200,
+            durationMs: 10,
+            success: true,
+            errorMessage: null,
+            createdAt: "2026-09-08T00:00:00",
+          },
+        ]),
+    });
+    // jsdom にはクリップボードが無い。ブラウザの機能を記録用に置く。
     Object.assign(navigator, { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } });
     render(<UnifiedLogRow entry={entry({ operationId: "op-1" })} timezone={null} />);
 
@@ -67,7 +97,18 @@ describe("UnifiedLogRow", () => {
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("copied-trace");
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        [
+          "操作ID: op-1",
+          "開始日時: 2026-09-08T00:00:00Z",
+          "呼び出し件数: 1",
+          "結果: 成功",
+          "",
+          "呼び出し一覧:",
+          "1. [2026-09-08T00:00:00Z] GET /api/projects",
+          "   ステータス: 200 / 10ms / 成功",
+        ].join("\n")
+      );
     });
     expect(await screen.findByRole("button", { name: "コピーしました" })).toBeInTheDocument();
   });

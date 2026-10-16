@@ -3,8 +3,13 @@
  */
 import { NextRequest } from "next/server";
 import { GET } from "../callback/route";
-import { completeProjectFacebookAuthorization } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import {
+  installFetch,
+  jsonResponse,
+  resetServerRuntime,
+  type FetchHandler,
+  textResponse,
+} from "@/lib/__tests__/testUtils/serverRuntime";
 
 /**
  * Facebook の OAuth コールバック(X・Threads と同型)(issue #1580)。state の突き合わせ・クライアントの秘密は
@@ -12,17 +17,35 @@ import { requireAdminSession } from "@/lib/session";
  * state と認可コードを渡すだけ。認可のあとは投稿先のページを選ぶので、設定画面へは
  * `facebookState=<state>` を付けて戻す(ページの一覧はその画面がバックエンドから取る。トークンはこの経路にも現れない)。
  */
-jest.mock("@/lib/apiClient", () => ({
-  completeProjectFacebookAuthorization: jest.fn(),
+// 自前の @/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤
+// (next/headers・next/server の after・next-auth・next/navigation の redirect)と、外部との通信(fetch)だけ(#1833)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => ({
+  ...jest.requireActual("next/server"),
+  ...require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule,
 }));
-jest.mock("@/lib/session", () => ({
-  requireAdminSession: jest.fn(),
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
-const mockComplete = completeProjectFacebookAuthorization as jest.MockedFunction<typeof completeProjectFacebookAuthorization>;
-const mockRequireAdminSession = requireAdminSession as jest.MockedFunction<typeof requireAdminSession>;
+/** project-service の代役(gateway の向こう側)。呼び出しは HTTP の本文として届く。 */
+const mockComplete = jest.fn();
+const ADMIN_SESSION = { user: { id: "admin-1", role: "admin", email: "admin@example.com" } };
+const completeHandler: FetchHandler = async (_url, init) => {
+  try {
+    return jsonResponse((await mockComplete(JSON.parse(String(init.body)))) ?? null);
+  } catch (err) {
+    return textResponse(err instanceof Error ? err.message : String(err), 500);
+  }
+};
 
 const PROJECT_ID = 42;
+const COMPLETE = `POST /api/projects/${PROJECT_ID}/sns/facebook/callback`;
 const STATE = `${PROJECT_ID}.abcDEF123_-`;
 
 function callback(params: Record<string, string>): NextRequest {
@@ -39,16 +62,17 @@ function redirectTarget(response: Response): URL {
 
 describe("GET /connect/facebook/callback", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockComplete.mockReset();
     process.env.NEXTAUTH_URL = "https://localhost";
-    mockRequireAdminSession.mockResolvedValue({} as never);
+    resetServerRuntime(ADMIN_SESSION);
     mockComplete.mockResolvedValue({ projectId: PROJECT_ID, pages: [{ id: "100", name: "ページA" }] });
+    installFetch({ [COMPLETE]: completeHandler });
   });
 
   it("stateと認可コードをバックエンドへ渡し、ページ選択のため facebookState を付けて設定画面へ戻す", async () => {
     const response = await GET(callback({ code: "auth-code", state: STATE }));
 
-    expect(mockComplete).toHaveBeenCalledWith(PROJECT_ID, { state: STATE, code: "auth-code" });
+    expect(mockComplete).toHaveBeenCalledWith({ state: STATE, code: "auth-code" });
     const target = redirectTarget(response);
     expect(target.pathname).toBe(`/projects/${PROJECT_ID}/settings/sns`);
     expect(target.searchParams.get("facebookState")).toBe(STATE);
@@ -97,22 +121,37 @@ describe("GET /connect/facebook/callback", () => {
 
     const target = redirectTarget(response);
     expect(target.pathname).toBe(`/projects/${PROJECT_ID}/settings/sns`);
-    expect(target.searchParams.get("error")).toBe("接続できる Facebook ページがありません");
+    expect(target.searchParams.get("error")).toBe("APIエラー (500): 接続できる Facebook ページがありません");
     expect(target.searchParams.get("facebookState")).toBeNull();
     expect(target.searchParams.get("sns")).toBe("facebook");
   });
 
   it("Errorでない例外も文字列にして戻す", async () => {
-    mockComplete.mockRejectedValue("boom");
+    // fetch 自体が Error でない値で失敗した場合(ネットワーク層の失敗)
+    installFetch({
+      [COMPLETE]: () => {
+        throw "boom";
+      },
+    });
 
     const response = await GET(callback({ code: "auth-code", state: STATE }));
 
     expect(redirectTarget(response).searchParams.get("error")).toBe("boom");
   });
 
-  it("交換の前に管理者セッションを要求する", async () => {
-    await GET(callback({ code: "auth-code", state: STATE }));
+  it("管理者でなければ、認可コードを交換せずトップへ送る", async () => {
+    resetServerRuntime({ user: { id: "u-1", role: "user", email: "u@example.com" } });
 
-    expect(mockRequireAdminSession).toHaveBeenCalled();
+    await expect(GET(callback({ code: "auth-code", state: STATE }))).rejects.toThrow("NEXT_REDIRECT:/");
+
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it("未ログインならログイン画面へ送り、認可コードを交換しない", async () => {
+    resetServerRuntime(null);
+
+    await expect(GET(callback({ code: "auth-code", state: STATE }))).rejects.toThrow("NEXT_REDIRECT:/login");
+
+    expect(mockComplete).not.toHaveBeenCalled();
   });
 });

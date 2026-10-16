@@ -3,8 +3,13 @@
  */
 import { NextRequest } from "next/server";
 import { GET } from "../callback/route";
-import { completeProjectHatenaAuthorization } from "@/lib/apiClient";
-import { requireAdminSession } from "@/lib/session";
+import {
+  installFetch,
+  jsonResponse,
+  resetServerRuntime,
+  type FetchHandler,
+  textResponse,
+} from "@/lib/__tests__/testUtils/serverRuntime";
 
 /**
  * はてなブックマーク の OAuth 1.0a コールバック(X と同型。他の SNS の画面と区別するため、戻り先に sns=hatena を付ける)(issue #1582)。
@@ -12,17 +17,35 @@ import { requireAdminSession } from "@/lib/session";
  * ここは state の形から対象プロジェクトを決め、state・oauth_token・oauth_verifier を渡すだけ。
  * トークンはこの経路にも現れない(戻りはアカウント名だけ)。
  */
-jest.mock("@/lib/apiClient", () => ({
-  completeProjectHatenaAuthorization: jest.fn(),
+// 自前の @/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤
+// (next/headers・next/server の after・next-auth・next/navigation の redirect)と、外部との通信(fetch)だけ(#1833)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => ({
+  ...jest.requireActual("next/server"),
+  ...require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule,
 }));
-jest.mock("@/lib/session", () => ({
-  requireAdminSession: jest.fn(),
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
-const mockComplete = completeProjectHatenaAuthorization as jest.MockedFunction<typeof completeProjectHatenaAuthorization>;
-const mockRequireAdminSession = requireAdminSession as jest.MockedFunction<typeof requireAdminSession>;
+/** project-service の代役(gateway の向こう側)。呼び出しは HTTP の本文として届く。 */
+const mockComplete = jest.fn();
+const ADMIN_SESSION = { user: { id: "admin-1", role: "admin", email: "admin@example.com" } };
+const completeHandler: FetchHandler = async (_url, init) => {
+  try {
+    return jsonResponse((await mockComplete(JSON.parse(String(init.body)))) ?? null);
+  } catch (err) {
+    return textResponse(err instanceof Error ? err.message : String(err), 500);
+  }
+};
 
 const PROJECT_ID = 42;
+const COMPLETE = `POST /api/projects/${PROJECT_ID}/sns/hatena/callback`;
 const STATE = `${PROJECT_ID}.abcDEF123_-`;
 
 function callback(params: Record<string, string>): NextRequest {
@@ -39,16 +62,17 @@ function redirectTarget(response: Response): URL {
 
 describe("GET /connect/hatena/callback", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockComplete.mockReset();
     process.env.NEXTAUTH_URL = "https://localhost";
-    mockRequireAdminSession.mockResolvedValue({} as never);
+    resetServerRuntime(ADMIN_SESSION);
     mockComplete.mockResolvedValue({ projectId: PROJECT_ID, accountName: "Let's Blog E2E" });
+    installFetch({ [COMPLETE]: completeHandler });
   });
 
   it("state・リクエストトークン・verifierをバックエンドへ渡し、接続完了として設定画面へ戻す", async () => {
     const response = await GET(callback({ oauth_token: "request-token", oauth_verifier: "the-verifier", state: STATE }));
 
-    expect(mockComplete).toHaveBeenCalledWith(PROJECT_ID, {
+    expect(mockComplete).toHaveBeenCalledWith({
       state: STATE,
       oauthToken: "request-token",
       oauthVerifier: "the-verifier",
@@ -119,22 +143,37 @@ describe("GET /connect/hatena/callback", () => {
 
     const target = redirectTarget(response);
     expect(target.pathname).toBe(`/projects/${PROJECT_ID}/settings/sns`);
-    expect(target.searchParams.get("error")).toBe("本番サイトへトークンを送れませんでした(接続失敗)");
+    expect(target.searchParams.get("error")).toBe("APIエラー (500): 本番サイトへトークンを送れませんでした(接続失敗)");
     expect(target.searchParams.get("connected")).toBeNull();
     expect(target.searchParams.get("sns")).toBe("hatena");
   });
 
   it("Errorでない例外も文字列にして戻す", async () => {
-    mockComplete.mockRejectedValue("boom");
+    // fetch 自体が Error でない値で失敗した場合(ネットワーク層の失敗)
+    installFetch({
+      [COMPLETE]: () => {
+        throw "boom";
+      },
+    });
 
     const response = await GET(callback({ oauth_token: "request-token", oauth_verifier: "the-verifier", state: STATE }));
 
     expect(redirectTarget(response).searchParams.get("error")).toBe("boom");
   });
 
-  it("交換の前に管理者セッションを要求する", async () => {
-    await GET(callback({ oauth_token: "request-token", oauth_verifier: "the-verifier", state: STATE }));
+  it("管理者でなければ、認可コードを交換せずトップへ送る", async () => {
+    resetServerRuntime({ user: { id: "u-1", role: "user", email: "u@example.com" } });
 
-    expect(mockRequireAdminSession).toHaveBeenCalled();
+    await expect(GET(callback({ oauth_token: "request-token", oauth_verifier: "the-verifier", state: STATE }))).rejects.toThrow("NEXT_REDIRECT:/");
+
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it("未ログインならログイン画面へ送り、認可コードを交換しない", async () => {
+    resetServerRuntime(null);
+
+    await expect(GET(callback({ oauth_token: "request-token", oauth_verifier: "the-verifier", state: STATE }))).rejects.toThrow("NEXT_REDIRECT:/login");
+
+    expect(mockComplete).not.toHaveBeenCalled();
   });
 });

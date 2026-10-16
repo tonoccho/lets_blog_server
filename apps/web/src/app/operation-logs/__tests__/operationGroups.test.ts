@@ -94,4 +94,15 @@ describe('describeOperationTraceText', () => {
     expect(text).toContain('1. [2026-09-11T09:10:35Z] GET /api/sites')
     expect(text).toContain('2. [2026-09-11T09:10:36Z] GET /api/sites')
   })
+
+  it('応答が無かった呼び出し(statusCode が null)は「応答なし」と書く', () => {
+    const [group] = groupOperationLogEntries([
+      entry({ id: 1, operationId: 'op-1', statusCode: null, durationMs: 30, success: false, errorMessage: 'fetch failed' }),
+    ])
+
+    const text = describeOperationTraceText(group)
+
+    expect(text).toContain('ステータス: (応答なし) / 30ms / 失敗')
+    expect(text).toContain('エラー: fetch failed')
+  })
 })

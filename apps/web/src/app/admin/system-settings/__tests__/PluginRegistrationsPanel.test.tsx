@@ -1,21 +1,42 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { PluginRegistrationsPanel } from '../PluginRegistrationsPanel'
-import {
-  activatePluginRegistrationAction,
-  deletePluginRegistrationAction,
-  savePluginRegistrationAction,
-} from '../pluginRegistrationActions'
 import type { PluginRegistration } from '@/lib/apiClient'
+// 自前の @/lib/apiClient・@/lib/session・../pluginRegistrationActionsは差し替えない。差し替えるのは Next.js の実行基盤と
+// 外部との通信(fetch)だけ(#1833)。
+jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }));
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
 
-jest.mock('../pluginRegistrationActions', () => ({
-  savePluginRegistrationAction: jest.fn(),
-  deletePluginRegistrationAction: jest.fn(),
-  activatePluginRegistrationAction: jest.fn(),
-}))
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime'
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime'
 
-const saveMock = savePluginRegistrationAction as jest.MockedFunction<typeof savePluginRegistrationAction>
-const deleteMock = deletePluginRegistrationAction as jest.MockedFunction<typeof deletePluginRegistrationAction>
-const activateMock = activatePluginRegistrationAction as jest.MockedFunction<typeof activatePluginRegistrationAction>
+const BASE = '/api/system-settings/plugin-registrations'
+let fetchMock: jest.Mock
+/** gateway へ送られた「<METHOD> <パス>」と本文(JSON)。 */
+const sent = () =>
+  fetchMock.mock.calls
+    .filter(([url]) => String(url).includes(BASE))
+    .map(([url, init]) => ({
+      request: `${init?.method ?? 'GET'} ${String(url).replace(/^https?:\/\/[^/]+/, '')}`,
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+    }))
+
+function installOk() {
+  fetchMock = installFetch({
+    [`POST ${BASE}`]: () => jsonResponse({}, 201),
+    [`PUT ${BASE}/:id`]: () => jsonResponse({}),
+    [`DELETE ${BASE}/:id`]: () => jsonResponse(null),
+    [`PUT ${BASE}/:id/in-use`]: () => jsonResponse({}),
+  })
+}
 
 const REGISTRATIONS: PluginRegistration[] = [
   { id: 1, kind: 'LLM', name: '社内のOllama', url: 'http://lbx-ollama:11434/v1', inUse: true, drawioUrl: null },
@@ -29,9 +50,8 @@ function region(name: string): HTMLElement {
 
 describe('PluginRegistrationsPanel(issue #1807)', () => {
   beforeEach(() => {
-    saveMock.mockReset().mockResolvedValue({ saved: true })
-    deleteMock.mockReset().mockResolvedValue({ saved: true })
-    activateMock.mockReset().mockResolvedValue({ saved: true })
+    resetServerRuntime(ADMIN_SESSION)
+    installOk()
   })
 
   it('従来の設定項目が使われることを1行で注記し、4種類の欄を出す', () => {
@@ -78,16 +98,16 @@ describe('PluginRegistrationsPanel(issue #1807)', () => {
     fireEvent.change(within(llm).getByLabelText('URL'), { target: { value: 'http://lbx-ollama:11434/v1' } })
     fireEvent.click(within(llm).getByRole('button', { name: '追加' }))
 
-    await waitFor(() => expect(saveMock).toHaveBeenCalled())
-    const data = saveMock.mock.calls[0][1] as FormData
-    expect(data.get('kind')).toBe('LLM')
-    expect(data.get('name')).toBe('社内')
-    expect(data.get('url')).toBe('http://lbx-ollama:11434/v1')
     expect(await within(llm).findByRole('status')).toHaveTextContent('保存しました')
+    expect(sent()).toEqual([
+      { request: `POST ${BASE}`, body: { kind: 'LLM', name: '社内', url: 'http://lbx-ollama:11434/v1', drawioUrl: null } },
+    ])
   })
 
   it('保存が拒否されたら理由を表示する', async () => {
-    saveMock.mockResolvedValue({ error: '接続先のホスト(127.0.0.1)が禁止されたアドレスを指しています' })
+    installFetch({
+      [`POST ${BASE}`]: () => textResponse('{"message":"接続先のホスト(127.0.0.1)が禁止されたアドレスを指しています"}', 409),
+    })
     render(<PluginRegistrationsPanel registrations={[]} />)
     const llm = region('LLM の登録')
 
@@ -108,10 +128,11 @@ describe('PluginRegistrationsPanel(issue #1807)', () => {
     fireEvent.change(within(form).getByLabelText('名前'), { target: { value: '予備2' } })
     fireEvent.click(within(form).getByRole('button', { name: '更新' }))
 
-    await waitFor(() => expect(saveMock).toHaveBeenCalled())
-    const data = saveMock.mock.calls[0][1] as FormData
-    expect(data.get('id')).toBe('2')
-    expect(data.get('name')).toBe('予備2')
+    await waitFor(() => expect(sent()).toHaveLength(1))
+    expect(sent()[0]).toEqual({
+      request: `PUT ${BASE}/2`,
+      body: { name: '予備2', url: 'http://backup.lan:11434/v1', drawioUrl: null },
+    })
 
     // 更新を送ると編集フォームは閉じる(送信の完了は非同期なので待つ)
     fireEvent.click(await within(within(llm).getAllByRole('listitem')[1]).findByRole('button', { name: '編集' }))
@@ -134,8 +155,7 @@ describe('PluginRegistrationsPanel(issue #1807)', () => {
 
     fireEvent.click(within(within(region('LLM の登録')).getAllByRole('listitem')[1]).getByRole('button', { name: '削除' }))
 
-    await waitFor(() => expect(deleteMock).toHaveBeenCalled())
-    expect((deleteMock.mock.calls[0][1] as FormData).get('id')).toBe('2')
+    await waitFor(() => expect(sent()).toEqual([{ request: `DELETE ${BASE}/2`, body: null }]))
   })
 
   it('使用中にするは id を送る', async () => {
@@ -143,13 +163,14 @@ describe('PluginRegistrationsPanel(issue #1807)', () => {
 
     fireEvent.click(within(region('LLM の登録')).getByRole('button', { name: '使用中にする' }))
 
-    await waitFor(() => expect(activateMock).toHaveBeenCalled())
-    expect((activateMock.mock.calls[0][1] as FormData).get('id')).toBe('2')
+    await waitFor(() => expect(sent()).toEqual([{ request: `PUT ${BASE}/2/in-use`, body: null }]))
   })
 
   it('削除・使用中の切り替えが失敗したら理由を表示する', async () => {
-    deleteMock.mockResolvedValue({ error: '削除できません' })
-    activateMock.mockResolvedValue({ error: '切り替えられません' })
+    installFetch({
+      [`DELETE ${BASE}/2`]: () => textResponse('{"message":"削除できません"}', 409),
+      [`PUT ${BASE}/2/in-use`]: () => textResponse('{"message":"切り替えられません"}', 409),
+    })
     render(<PluginRegistrationsPanel registrations={REGISTRATIONS} />)
     const llm = region('LLM の登録')
 

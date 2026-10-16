@@ -21,26 +21,38 @@
  * 「要素が見つからない」という意味のある失敗のまま書ける。
  */
 
-const requireAdminSession = jest.fn();
-const getViewerTimeZone = jest.fn();
-const getViewerProfile = jest.fn();
-jest.mock('@/lib/session', () => ({
-  requireAdminSession: (...a: unknown[]) => requireAdminSession(...a),
-  getViewerTimeZone: (...a: unknown[]) => getViewerTimeZone(...a),
-  getViewerProfile: (...a: unknown[]) => getViewerProfile(...a),
+// 自前の @/lib/apiClient・@/lib/session・UserForm・DeleteUserButton は差し替えない(ページが返すツリーは描画しない)。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1833)。
+jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime';
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime';
+
+/** identity-service と project-service の代役(gateway の向こう側)。 */
 const listUsers = jest.fn();
 const listProjects = jest.fn();
 const listAllProjectUsers = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  listUsers: (...a: unknown[]) => listUsers(...a),
-  listProjects: (...a: unknown[]) => listProjects(...a),
-  listAllProjectUsers: (...a: unknown[]) => listAllProjectUsers(...a),
-}));
+const getMyProfile = jest.fn();
 
-jest.mock('../UserForm', () => ({ UserForm: () => null }));
-jest.mock('../DeleteUserButton', () => ({ DeleteUserButton: () => null }));
+/** バックエンドの代役を gateway の応答にする。拒否は 500 になる。 */
+function respond(backend: jest.Mock) {
+  return async () => {
+    try {
+      return jsonResponse(await backend());
+    } catch (err) {
+      return textResponse(err instanceof Error ? err.message : String(err), 500);
+    }
+  };
+}
 
 import UsersPage from '../page';
 
@@ -72,11 +84,17 @@ function collectElementsByTypeName(node: unknown, name: string, results: ReactEl
 
 describe('/users の登録日セルとTZ受け渡し(issue #1364)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    requireAdminSession.mockResolvedValue({ user: { role: 'admin' } });
+    for (const backend of [listUsers, listProjects, listAllProjectUsers, getMyProfile]) backend.mockReset();
+    resetServerRuntime(ADMIN_SESSION);
     listProjects.mockResolvedValue([]);
     listAllProjectUsers.mockResolvedValue([]);
-    getViewerProfile.mockResolvedValue(null);
+    getMyProfile.mockResolvedValue(null);
+    installFetch({
+      'GET /api/users': respond(listUsers),
+      'GET /api/projects': respond(listProjects),
+      'GET /api/project-users': respond(listAllProjectUsers),
+      'GET /api/identity/me': respond(getMyProfile),
+    });
   });
 
   it('一覧取得に成功したとき、各ユーザーのcreatedAtと個人設定TZをそのままViewerDateTimeへ渡す', async () => {
@@ -85,7 +103,7 @@ describe('/users の登録日セルとTZ受け渡し(issue #1364)', () => {
       { id: 2, email: 'b@example.com', role: 'admin', createdAt: '2026-09-09T01:00:00' },
     ];
     listUsers.mockResolvedValue(users);
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+    getMyProfile.mockResolvedValue({ id: 99, timezone: 'Asia/Tokyo' });
 
     const result = (await UsersPage()) as unknown as ReactElementLike;
 
@@ -97,12 +115,32 @@ describe('/users の登録日セルとTZ受け渡し(issue #1364)', () => {
     expect(elements[1].props.personalTimeZone).toBe('Asia/Tokyo');
   });
 
-  it('一覧取得に失敗したとき、catch(() => [])で空配列にフォールバックしViewerDateTimeを描画しない', async () => {
+  it('一覧取得に失敗したとき、空配列にフォールバックしViewerDateTimeを描画しない', async () => {
     listUsers.mockRejectedValue(new Error('一覧取得に失敗しました(テスト用)'));
-    getViewerTimeZone.mockResolvedValue(null);
 
     const result = (await UsersPage()) as unknown as ReactElementLike;
 
     expect(collectElementsByTypeName(result, 'ViewerDateTime')).toHaveLength(0);
+  });
+
+  it('自分自身の行と、ログイン中ユーザーを確定できないときは削除ボタンを出さない(canDeleteをfalseにする)', async () => {
+    listUsers.mockResolvedValue([
+      { id: 1, email: 'a@example.com', role: 'user', createdAt: '2026-09-08T20:03:35' },
+      { id: 2, email: 'b@example.com', role: 'admin', createdAt: '2026-09-09T01:00:00' },
+    ]);
+    getMyProfile.mockResolvedValue({ id: 1, timezone: null });
+
+    const self = collectElementsByTypeName((await UsersPage()) as unknown as ReactElementLike, 'UserRow');
+
+    expect(self.map((row) => [row.props.id, row.props.canDelete])).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+
+    getMyProfile.mockResolvedValue(null);
+
+    const unknownViewer = collectElementsByTypeName((await UsersPage()) as unknown as ReactElementLike, 'UserRow');
+
+    expect(unknownViewer.map((row) => row.props.canDelete)).toEqual([false, false]);
   });
 });

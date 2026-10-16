@@ -1,15 +1,30 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { AppSettingsPanel } from '../AppSettingsPanel'
-import { updateAppSettingsAction } from '../actions'
 import type { AppSetting } from '@/lib/apiClient'
 
-jest.mock('../actions', () => ({
-  updateAppSettingsAction: jest.fn(),
-}))
+// 自前の @/lib/apiClient・@/lib/session・../actionsは差し替えない。差し替えるのは Next.js の実行基盤と
+// 外部との通信(fetch)だけ(#1833)。
+jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }));
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+}));
 
-const updateAppSettingsActionMock = updateAppSettingsAction as jest.MockedFunction<
-  typeof updateAppSettingsAction
->
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime'
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime'
+
+const UPDATE = 'PUT /api/system-settings/app-settings'
+let fetchMock: jest.Mock
+const sentBodies = () =>
+  fetchMock.mock.calls
+    .filter(([url, init]) => String(url).endsWith('/api/system-settings/app-settings') && init?.method === 'PUT')
+    .map(([, init]) => JSON.parse(String(init.body)))
 
 function setting(overrides: Partial<AppSetting> & { key: string }): AppSetting {
   return {
@@ -72,7 +87,8 @@ function field(name: string): HTMLElement | null {
 
 describe('AppSettingsPanel', () => {
   beforeEach(() => {
-    updateAppSettingsActionMock.mockReset()
+    resetServerRuntime(ADMIN_SESSION)
+    fetchMock = installFetch({ [UPDATE]: () => jsonResponse(null) })
   })
 
   it('画像生成用のAPIキー入力欄は表示せず、ベースURLだけを画像生成AI連携グループに描画する(issue #1521)', () => {
@@ -264,7 +280,9 @@ describe('AppSettingsPanel', () => {
   })
 
   it('保存に失敗するとエラーを表示する', async () => {
-    updateAppSettingsActionMock.mockResolvedValue({ error: 'llm_ollama_base_url はhttp://またはhttps://から始まるURLを指定してください' })
+    installFetch({
+      [UPDATE]: () => textResponse('llm_ollama_base_url はhttp://またはhttps://から始まるURLを指定してください', 409),
+    })
     render(<AppSettingsPanel settings={allSettings()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'まとめて保存' }))
@@ -275,7 +293,6 @@ describe('AppSettingsPanel', () => {
   })
 
   it('保存に成功すると成功メッセージを表示する', async () => {
-    updateAppSettingsActionMock.mockResolvedValue({ success: true })
     render(<AppSettingsPanel settings={allSettings()} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'まとめて保存' }))
@@ -283,5 +300,63 @@ describe('AppSettingsPanel', () => {
     await waitFor(() => {
       expect(screen.getByText('保存しました。')).toBeInTheDocument()
     })
+    expect(screen.queryByText(/この保存操作での変更は反映されていません/)).not.toBeInTheDocument()
+  })
+
+  it('入力した値と、全項目をまとめて送る(秘匿項目の空欄は空文字、値は trim される)', async () => {
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    fireEvent.change(field('llm_provider') as HTMLSelectElement, { target: { value: 'CLAUDE' } })
+    fireEvent.change(field('mail_host') as HTMLInputElement, { target: { value: '  smtp.new.example.com  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'まとめて保存' }))
+
+    await screen.findByText('保存しました。')
+    const body = sentBodies()[0]
+    expect(body.llm_provider).toBe('CLAUDE')
+    expect(body.mail_host).toBe('smtp.new.example.com')
+    expect(body.mail_password).toBe('')
+    expect(body.site_admin_path).toBe('wp-admin')
+  })
+
+  it('保存に失敗したときは、この保存操作での変更が反映されていないことを併せて示す', async () => {
+    installFetch({ [UPDATE]: () => textResponse('不正な値', 409) })
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'まとめて保存' }))
+
+    expect(await screen.findByText('APIエラー (409): 不正な値(この保存操作での変更は反映されていません)')).toBeInTheDocument()
+    expect(screen.queryByText('保存しました。')).not.toBeInTheDocument()
+  })
+
+  it('保存中はボタンを無効にして「保存中…」と表示する', async () => {
+    let release: (response: Response) => void = () => {}
+    installFetch({ [UPDATE]: () => new Promise<Response>((resolve) => (release = resolve)) as unknown as Response })
+    render(<AppSettingsPanel settings={allSettings()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'まとめて保存' }))
+
+    const pending = await screen.findByRole('button', { name: '保存中…' })
+    expect(pending).toBeDisabled()
+    release(jsonResponse(null))
+    await screen.findByText('保存しました。')
+  })
+
+  it('未設定の秘匿項目には「未設定」のプレースホルダを出し、値は持たない', () => {
+    render(
+      <AppSettingsPanel
+        settings={[setting({ key: 'mail_password', secret: true, value: null, configured: false, source: 'NONE' })]}
+      />
+    )
+
+    const input = field('mail_password') as HTMLInputElement
+    expect(input.type).toBe('password')
+    expect(input.placeholder).toBe('未設定')
+    expect(input.value).toBe('')
+  })
+
+  it('値が null の通常項目は空欄で描画する', () => {
+    render(<AppSettingsPanel settings={[setting({ key: 'mail_host', value: null, configured: false, source: 'NONE' })]} />)
+
+    expect((field('mail_host') as HTMLInputElement).value).toBe('')
   })
 })

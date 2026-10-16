@@ -8,25 +8,36 @@
  * ページ送りのリンクにも範囲を引き継ぐ。ページを直接呼び、返るJSXツリーを検査する
  * (`projects/__tests__/page.test.tsx` と同じ手法)。
  */
+// 自前の @/lib/apiClient・@/lib/session・子コンポーネントは差し替えない(ページが返すツリーは描画しない)。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1833)。
 jest.mock('server-only', () => ({}));
-
-const requireSession = jest.fn();
-const getViewerTimeZone = jest.fn();
-jest.mock('@/lib/session', () => ({
-  requireSession: (...a: unknown[]) => requireSession(...a),
-  getViewerTimeZone: (...a: unknown[]) => getViewerTimeZone(...a),
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
-const listUnifiedOperationLogs = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  listUnifiedOperationLogs: (...a: unknown[]) => listUnifiedOperationLogs(...a),
-}));
-
-jest.mock('../UnifiedLogRow', () => ({ UnifiedLogRow: () => null }));
+import { jsonResponse, resetServerRuntime } from '@/lib/__tests__/testUtils/serverRuntime';
+import { ADMIN_SESSION, USER_SESSION, installFetchByPath, queryOf } from '@/lib/__tests__/testUtils/webAdminRuntime';
 import { OperationLogTimeZoneLabel } from '../OperationLogTimeZoneLabel';
-jest.mock('../OperationLogTimeZoneLabel', () => ({ OperationLogTimeZoneLabel: () => null }));
 import { BrowserTimeZoneField } from '../BrowserTimeZoneField';
-jest.mock('../BrowserTimeZoneField', () => ({ BrowserTimeZoneField: () => null }));
+
+/** operation-log-service と identity-service の代役(gateway の向こう側)。引数は検索文字列。 */
+const listUnifiedOperationLogs = jest.fn();
+const getMyProfile = jest.fn();
+
+/** 閲覧者の個人設定TZ(identity-service が返すプロフィールの timezone)。 */
+function setViewerTimeZone(timezone: string | null) {
+  getMyProfile.mockResolvedValue({ id: 1, timezone });
+}
+
+function useSession(role: 'admin' | 'user') {
+  resetServerRuntime(role === 'admin' ? ADMIN_SESSION : USER_SESSION);
+}
 
 import OperationLogsPage from '../page';
 
@@ -50,6 +61,13 @@ function collect(node: unknown, predicate: (e: ElementLike) => boolean, out: Ele
 const inputNamed = (root: unknown, name: string) =>
   collect(root, (e) => e.type === 'input' && e.props.name === name)[0];
 
+function installApi() {
+  installFetchByPath({
+    'GET /api/operation-logs/unified': async (url) => jsonResponse(await listUnifiedOperationLogs(queryOf(url))),
+    'GET /api/identity/me': async () => jsonResponse(await getMyProfile()),
+  });
+}
+
 const emptyPage = { content: [], totalElements: 0, totalPages: 0, number: 0, size: 50 };
 
 async function render(searchParams: Record<string, string>) {
@@ -58,10 +76,12 @@ async function render(searchParams: Record<string, string>) {
 
 describe('/operation-logs の日時範囲(issue #1138)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    requireSession.mockResolvedValue({ user: { role: 'admin' } });
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+    listUnifiedOperationLogs.mockReset();
+    getMyProfile.mockReset();
+    useSession('admin');
+    setViewerTimeZone('Asia/Tokyo');
     listUnifiedOperationLogs.mockResolvedValue(emptyPage);
+    installApi();
   });
 
   it('フォームに開始日時・終了日時の datetime-local 入力がある', async () => {
@@ -111,8 +131,20 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
     expect(query.get('page')).toBe('1');
   });
 
+  it('ページ送りのリンクへキーワードを引き継ぐ', async () => {
+    listUnifiedOperationLogs.mockResolvedValue({ ...emptyPage, totalElements: 120, totalPages: 3 });
+
+    const tree = await render({ q: '/api/sites' });
+
+    expect(listUnifiedOperationLogs).toHaveBeenCalledWith(expect.objectContaining({ q: '/api/sites' }));
+    const links = collect(tree, (e) => typeof e.props?.href === 'string' && String(e.props.href).includes('page='));
+    const query = new URL(links[1].props.href as string, 'http://localhost').searchParams;
+    expect(query.get('q')).toBe('/api/sites');
+    expect(query.get('page')).toBe('1');
+  });
+
   it('閲覧者TZが未設定でも例外を投げない', async () => {
-    getViewerTimeZone.mockResolvedValue(null);
+    setViewerTimeZone(null);
 
     await expect(render({ startDate: '2026-09-10T09:30' })).resolves.toBeDefined();
     expect(listUnifiedOperationLogs.mock.calls[0][0].startDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
@@ -125,7 +157,7 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
   });
 
   it('非adminでも描画できる(監査を選択肢に出さない)', async () => {
-    requireSession.mockResolvedValue({ user: { role: 'user' } });
+    useSession('user');
 
     const tree = await render({});
     const options = collect(tree, (e) => e.type === 'option').map((e) => e.props.value);
@@ -146,7 +178,7 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
   });
 
   it('adminでなければ「遅い操作」画面への導線を出さない(issue #1471)', async () => {
-    requireSession.mockResolvedValue({ user: { role: 'user' } });
+    useSession('user');
 
     const tree = await render({});
 
@@ -161,7 +193,7 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
   });
 
   it('個人設定TZが未設定ならnullを渡す(ブラウザTZはクライアントで解決する)', async () => {
-    getViewerTimeZone.mockResolvedValue(null);
+    setViewerTimeZone(null);
 
     const tree = await render({});
 
@@ -172,10 +204,12 @@ describe('/operation-logs の日時範囲(issue #1138)', () => {
 
 describe('/operation-logs の日時範囲は表示と同じTZで解釈する(issue #1437)', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    requireSession.mockResolvedValue({ user: { role: 'admin' } });
-    getViewerTimeZone.mockResolvedValue(null);
+    listUnifiedOperationLogs.mockReset();
+    getMyProfile.mockReset();
+    useSession('admin');
+    setViewerTimeZone(null);
     listUnifiedOperationLogs.mockResolvedValue(emptyPage);
+    installApi();
   });
 
   it('個人設定TZが未設定なら、フォームで送られたブラウザTZの壁時計として換算する', async () => {
@@ -188,7 +222,7 @@ describe('/operation-logs の日時範囲は表示と同じTZで解釈する(iss
   });
 
   it('個人設定TZがあれば、ブラウザTZより個人設定TZを優先する', async () => {
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+    setViewerTimeZone('Asia/Tokyo');
 
     await render({ startDate: '2026-09-10T09:30', tz: 'Pacific/Auckland' });
 
@@ -202,7 +236,7 @@ describe('/operation-logs の日時範囲は表示と同じTZで解釈する(iss
   });
 
   it('フォームにブラウザTZを送る入力を、個人設定TZを渡して置く', async () => {
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+    setViewerTimeZone('Asia/Tokyo');
 
     const tree = await render({});
 
@@ -221,7 +255,7 @@ describe('/operation-logs の日時範囲は表示と同じTZで解釈する(iss
   });
 
   it('個人設定TZがあるときはページ送りへtzを付けない', async () => {
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
+    setViewerTimeZone('Asia/Tokyo');
     listUnifiedOperationLogs.mockResolvedValue({ ...emptyPage, totalElements: 120, totalPages: 3 });
 
     const tree = await render({ startDate: '2026-09-10T09:30', tz: 'Pacific/Auckland' });

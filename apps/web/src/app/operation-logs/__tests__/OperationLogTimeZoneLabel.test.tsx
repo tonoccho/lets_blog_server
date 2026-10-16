@@ -9,8 +9,16 @@ import { OperationLogTimeZoneLabel } from "../OperationLogTimeZoneLabel";
 import { UnifiedLogRow } from "../UnifiedLogRow";
 import type { UnifiedLogEntry } from "@/lib/apiClient";
 
-jest.mock("../actions", () => ({
-  copyOperationTraceAction: jest.fn().mockResolvedValue("copied-trace"),
+// 自前の ../actions・@/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1833)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
 const entry: UnifiedLogEntry = {

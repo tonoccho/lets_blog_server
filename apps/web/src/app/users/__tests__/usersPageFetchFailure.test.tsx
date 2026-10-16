@@ -2,6 +2,13 @@
  * @jest-environment node
  */
 
+// 自前の @/lib/session・@/lib/apiClient・UserForm・DeleteUserButton・ViewerDateTime と next/link は差し替えない。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1833)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 const redirect = jest.fn((path: string) => {
   throw new Error(`NEXT_REDIRECT:${path}`);
 });
@@ -9,31 +16,40 @@ const notFound = jest.fn(() => {
   throw new Error("NEXT_NOT_FOUND");
 });
 jest.mock("next/navigation", () => ({ redirect: (p: string) => redirect(p), notFound: () => notFound() }));
-jest.mock("next/link", () => ({ __esModule: true, default: ({ children }: { children: unknown }) => children }));
 import { renderToStaticMarkup } from "react-dom/server";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
 const SESSION_EXPIRED = "セッションの有効期限が切れました。お手数ですが再度ログインしてください。";
 const DOWN = new Error("APIエラー (503): Service Unavailable");
 
-jest.mock("@/lib/session", () => ({
-  requireAdminSession: jest.fn().mockResolvedValue(undefined),
-  getViewerTimeZone: jest.fn().mockResolvedValue(null),
-  getViewerProfile: jest.fn().mockResolvedValue({ id: 99 }),
-}));
+/** identity-service と project-service の代役(gateway の向こう側)。拒否は 401(セッション切れ)か 503 の応答になる。 */
 const api = { listUsers: jest.fn(), listProjects: jest.fn(), listAllProjectUsers: jest.fn() };
-jest.mock("@/lib/apiClient", () => ({
-  listUsers: (...a: unknown[]) => api.listUsers(...a),
-  listProjects: (...a: unknown[]) => api.listProjects(...a),
-  listAllProjectUsers: (...a: unknown[]) => api.listAllProjectUsers(...a),
-}));
-jest.mock("../UserForm", () => ({ UserForm: () => "USER_FORM" }));
-jest.mock("../DeleteUserButton", () => ({ DeleteUserButton: () => "DELETE" }));
-jest.mock("@/components/ViewerDateTime", () => ({ ViewerDateTime: () => "DATETIME" }));
+const getMyProfile = jest.fn();
+function respond(backend: jest.Mock) {
+  return async () => {
+    try {
+      return jsonResponse(await backend());
+    } catch (err) {
+      if (err instanceof Error && err.message === SESSION_EXPIRED) return textResponse("Unauthorized", 401);
+      return textResponse("Service Unavailable", 503);
+    }
+  };
+}
 import UsersPage from "../page";
 
 describe("ユーザー管理ページの取得失敗表示(issue #1458)", () => {
   let errorSpy: jest.SpyInstance;
   beforeEach(() => {
     jest.clearAllMocks();
+    getMyProfile.mockReset();
+    getMyProfile.mockResolvedValue({ id: 99, timezone: null });
+    resetServerRuntime(ADMIN_SESSION);
+    installFetch({
+      "GET /api/users": respond(api.listUsers),
+      "GET /api/projects": respond(api.listProjects),
+      "GET /api/project-users": respond(api.listAllProjectUsers),
+      "GET /api/identity/me": respond(getMyProfile),
+    });
     errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
     api.listUsers.mockResolvedValue([]);
     api.listProjects.mockResolvedValue([]);
@@ -48,7 +64,7 @@ describe("ユーザー管理ページの取得失敗表示(issue #1458)", () => 
     expect(html).toContain("ユーザー一覧を取得できませんでした");
     expect(html).not.toContain("全0件");
     expect(html).not.toContain("登録済みユーザーはありません");
-    expect(html).toContain("USER_FORM");
+    expect(html).toContain("ユーザーを追加");
     expect(errorSpy).toHaveBeenCalled();
   });
 
@@ -82,7 +98,8 @@ describe("ユーザー管理ページの取得失敗表示(issue #1458)", () => 
     const html = renderToStaticMarkup(await UsersPage());
     expect(html).toContain("a@example.com");
     expect(html).toContain("案件X");
-    expect(html).toContain("DELETE");
+    expect(html).toContain("削除");
+    expect(html).toContain("/users/1/edit");
   });
 
   it("セッション切れは /login へ", async () => {

@@ -6,23 +6,43 @@
  * issue #1471: admin 限定の「遅い操作」画面。ページを直接呼び、返る JSX ツリーを検査する
  * (`operation-logs/__tests__/page.test.tsx` と同じ手法)。
  */
+// 自前の @/lib/apiClient・@/lib/session は差し替えない(ページが返すツリーは描画しない)。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1833)。
 jest.mock('server-only', () => ({}))
-
-const requireAdminSession = jest.fn()
-const getViewerTimeZone = jest.fn()
-jest.mock('@/lib/session', () => ({
-  requireAdminSession: (...a: unknown[]) => requireAdminSession(...a),
-  getViewerTimeZone: (...a: unknown[]) => getViewerTimeZone(...a),
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
 }))
 
+import { jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime'
+import { ADMIN_SESSION, USER_SESSION, installFetchByPath, queryOf } from '@/lib/__tests__/testUtils/webAdminRuntime'
+
+/** operation-log-service と identity-service の代役(gateway の向こう側)。引数は検索文字列(トレースは operationId)。 */
 const getRouteStats = jest.fn()
 const getOperationStats = jest.fn()
 const getOperationTrace = jest.fn()
-jest.mock('@/lib/apiClient', () => ({
-  getRouteStats: (...a: unknown[]) => getRouteStats(...a),
-  getOperationStats: (...a: unknown[]) => getOperationStats(...a),
-  getOperationTrace: (...a: unknown[]) => getOperationTrace(...a),
-}))
+const getMyProfile = jest.fn()
+
+/** 閲覧者の個人設定TZ(identity-service が返すプロフィールの timezone)。 */
+function setViewerTimeZone(timezone: string | null) {
+  getMyProfile.mockResolvedValue({ id: 1, timezone })
+}
+
+/** バックエンドの代役を gateway の応答にする。拒否は 500 になる。 */
+function respond(backend: jest.Mock, arg: (url: string, id: string) => unknown) {
+  return async (url: string, _init: RequestInit, [id]: string[]) => {
+    try {
+      return jsonResponse(await backend(arg(url, id)))
+    } catch (err) {
+      return textResponse(err instanceof Error ? err.message : String(err), 500)
+    }
+  }
+}
 
 import Link from 'next/link'
 import SlowOperationsPage from '../page'
@@ -65,18 +85,24 @@ const operation = { operationId: 'op-slow-1', totalDurationMs: 900, callCount: 3
 
 describe('/operation-logs/slow(issue #1471)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    requireAdminSession.mockResolvedValue({ user: { role: 'admin' } })
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo')
+    for (const backend of [getRouteStats, getOperationStats, getOperationTrace, getMyProfile]) backend.mockReset()
+    resetServerRuntime(ADMIN_SESSION)
+    setViewerTimeZone('Asia/Tokyo')
     getRouteStats.mockResolvedValue([route])
     getOperationStats.mockResolvedValue([operation])
     getOperationTrace.mockResolvedValue([])
+    installFetchByPath({
+      'GET /api/operation-logs/stats/routes': respond(getRouteStats, (url) => queryOf(url)),
+      'GET /api/operation-logs/stats/operations': respond(getOperationStats, (url) => queryOf(url)),
+      'GET /api/operation-logs/:id': respond(getOperationTrace, (_url, id) => decodeURIComponent(id)),
+      'GET /api/identity/me': respond(getMyProfile, () => undefined),
+    })
   })
 
   it('admin セッションを要求し、admin でなければ集計を取得しない', async () => {
-    requireAdminSession.mockRejectedValue(new Error('NEXT_REDIRECT'))
+    resetServerRuntime(USER_SESSION)
 
-    await expect(render()).rejects.toThrow('NEXT_REDIRECT')
+    await expect(render()).rejects.toThrow('NEXT_REDIRECT:/')
     expect(getRouteStats).not.toHaveBeenCalled()
     expect(getOperationStats).not.toHaveBeenCalled()
   })
@@ -98,7 +124,7 @@ describe('/operation-logs/slow(issue #1471)', () => {
   })
 
   it('個人設定TZが無ければフォームが送ったブラウザTZで解釈する', async () => {
-    getViewerTimeZone.mockResolvedValue(null)
+    setViewerTimeZone(null)
 
     await render({ startDate: '2026-10-01T09:00', endDate: '2026-10-01T10:00', tz: 'Asia/Tokyo' })
     expect(getRouteStats).toHaveBeenCalledWith(expect.objectContaining({ startDate: '2026-10-01T00:00:00' }))
@@ -199,7 +225,7 @@ describe('/operation-logs/slow(issue #1471)', () => {
   })
 
   it('個人設定TZが無くtzも未指定ならサーバー既定のTZで解釈する', async () => {
-    getViewerTimeZone.mockResolvedValue(null)
+    setViewerTimeZone(null)
 
     await expect(render({ startDate: '2026-10-01T09:00' })).resolves.toBeDefined()
     expect(getRouteStats).toHaveBeenCalledWith(expect.objectContaining({ startDate: '2026-10-01T09:00:00' }))

@@ -1,10 +1,35 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AvatarUploadField } from "../AvatarUploadField";
-import * as actions from "../actions";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { USER_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
 
-jest.mock("../actions", () => ({
-  uploadAvatarAction: jest.fn(),
+// 自前の ../actions・@/lib/session・@/lib/apiClient は差し替えない。差し替えるのは Next.js の実行基盤と
+// 外部との通信(fetch)だけ(#1833)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
+
+let fetchMock: jest.Mock;
+/** identity-service へアップロードされたリクエストの本文(FormData)。 */
+const uploads = (userId: number) =>
+  fetchMock.mock.calls
+    .filter(([url, init]) => String(url).endsWith(`/api/users/${userId}/avatar`) && init?.method === "POST")
+    .map(([, init]) => init.body as FormData);
+
+function installApi(userId: number, upload: () => Response = () => jsonResponse({ id: userId })) {
+  fetchMock = installFetch({
+    "GET /api/identity/me": () => jsonResponse({ id: userId }),
+    [`POST /api/users/${userId}/avatar`]: upload,
+  });
+}
 
 /**
  * issue #1241: プロフィール編集画面のアバターアップロード・切り抜きUI。
@@ -46,6 +71,8 @@ afterAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  resetServerRuntime(USER_SESSION);
+  installApi(1);
   installGoodCanvasMocks();
 });
 
@@ -120,7 +147,7 @@ describe("AvatarUploadField", () => {
   });
 
   it("切り抜きを確定して保存に成功するとプレビューが配信URLへ切り替わり切り抜きUIが畳まれる", async () => {
-    (actions.uploadAvatarAction as jest.Mock).mockResolvedValue({ success: true });
+    installApi(7);
     render(<AvatarUploadField userId={7} initialAvatarUrl={null} />);
     const input = screen.getByTestId("avatar-file-input") as HTMLInputElement;
 
@@ -130,8 +157,11 @@ describe("AvatarUploadField", () => {
     fireEvent.click(screen.getByTestId("avatar-crop-confirm"));
 
     await waitFor(() => {
-      expect(actions.uploadAvatarAction).toHaveBeenCalledWith(7, {}, expect.any(FormData));
+      expect(uploads(7)).toHaveLength(1);
     });
+    const sent = uploads(7)[0].get("file") as File;
+    expect(sent.name).toBe("avatar.png");
+    expect(sent.type).toBe("image/png");
     await waitFor(() => {
       expect(screen.queryByTestId("avatar-crop-frame")).not.toBeInTheDocument();
     });
@@ -140,7 +170,7 @@ describe("AvatarUploadField", () => {
   });
 
   it("保存に失敗するとエラーが表示され切り抜きUIは残る", async () => {
-    (actions.uploadAvatarAction as jest.Mock).mockResolvedValue({ error: "対応していない画像形式です" });
+    installApi(1, () => textResponse("対応していない画像形式です", 400));
     render(<AvatarUploadField userId={1} initialAvatarUrl={null} />);
     const input = screen.getByTestId("avatar-file-input") as HTMLInputElement;
 
@@ -150,7 +180,7 @@ describe("AvatarUploadField", () => {
     fireEvent.click(screen.getByTestId("avatar-crop-confirm"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("avatar-upload-error")).toHaveTextContent("対応していない画像形式です");
+      expect(screen.getByTestId("avatar-upload-error")).toHaveTextContent("APIエラー (400): 対応していない画像形式です");
     });
     expect(screen.getByTestId("avatar-crop-frame")).toBeInTheDocument();
   });
@@ -211,5 +241,33 @@ describe("AvatarUploadField", () => {
     await waitFor(() => {
       expect(screen.getByTestId("avatar-upload-error")).toHaveTextContent("画像の生成に失敗しました");
     });
+  });
+
+  it("保存中はボタンを無効にして「アップロード中…」と表示する", async () => {
+    let release: (response: Response) => void = () => {};
+    installApi(1, () => new Promise<Response>((resolve) => (release = resolve)) as unknown as Response);
+    render(<AvatarUploadField userId={1} initialAvatarUrl={null} />);
+    const input = screen.getByTestId("avatar-file-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [pngFile("square.png", 1024)] } });
+    loadSelectedImage(600, 600);
+    expect(screen.getByTestId("avatar-crop-confirm")).toHaveTextContent("この内容でアバターとして保存");
+    fireEvent.click(screen.getByTestId("avatar-crop-confirm"));
+
+    await waitFor(() => expect(screen.getByTestId("avatar-crop-confirm")).toHaveTextContent("アップロード中…"));
+    expect(screen.getByTestId("avatar-crop-confirm")).toBeDisabled();
+    release(jsonResponse({ id: 1 }));
+    await waitFor(() => expect(screen.queryByTestId("avatar-crop-frame")).not.toBeInTheDocument());
+  });
+
+  it("画像の読み込みが終わるまでは切り抜きの枠を出さず、保存ボタンも押せない", () => {
+    render(<AvatarUploadField userId={1} initialAvatarUrl={null} />);
+    const input = screen.getByTestId("avatar-file-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [pngFile("square.png", 1024)] } });
+
+    expect(screen.getByTestId("avatar-crop-image")).toBeInTheDocument();
+    expect(screen.queryByTestId("avatar-crop-frame")).not.toBeInTheDocument();
+    expect(screen.getByTestId("avatar-crop-confirm")).toBeDisabled();
   });
 });
