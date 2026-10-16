@@ -127,3 +127,23 @@ Then(
     }
   }
 );
+
+// ------------------------------------------------------------------ lets_blog の API がこのトークンを受け付けない(issue #1806)
+
+/**
+ * 各サービスの JwtDecoder は `azp` を許可リスト(letsblog-web / -services / -vscode / -e2e)で絞る。
+ * 専用クライアントのトークンは realm の issuer で署名されているが、`azp` が許可リストに無いので 401 になる。
+ * トークンは Node 側の argv に載せず、標準入力のヘッダー設定ファイル(curl -H @-)で渡す。
+ */
+When(/^専用クライアントの client credentials でトークンを取得して gateway 経由で「GET (\/\S*)」を呼ぶ$/, async ({ ctx }, path: string) => {
+  const token = fetchToolsAccessToken();
+  const status = execFileSync('docker', [
+    'exec', '-i', 'lbs-ai', 'sh', '-c',
+    `curl --silent --output /dev/null --write-out '%{http_code}' --max-time 30 -H @- http://gateway:8080${path}`,
+  ], { encoding: 'utf8', timeout: 60_000, input: `Authorization: Bearer ${token}\n` });
+  ctx.toolsApiStatus = Number(status);
+});
+
+Then(/^lets_blog の API の応答は (\d+) である$/, async ({ ctx }, status: string) => {
+  expect(ctx.toolsApiStatus, '専用クライアントのトークンで lets_blog の API を呼べてしまう').toBe(Number(status));
+});

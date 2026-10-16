@@ -20,3 +20,7 @@
     ならば トークンの azp は「letsblog-tools-client」で、audience に「lbx-tools」を含む
     かつ トークンに admin・editor・viewer のロールが無い
     かつ トークンに realm-management のロールが無い
+
+  シナリオ: 専用クライアントのトークンでは、ロールを要求しない lets_blog の API も呼べない(issue #1806)
+    もし 専用クライアントの client credentials でトークンを取得して gateway 経由で「GET /api/identity/me」を呼ぶ
+    ならば lets_blog の API の応答は 401 である

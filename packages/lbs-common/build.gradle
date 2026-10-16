@@ -16,6 +16,9 @@ dependencies {
     api 'com.fasterxml.jackson.core:jackson-annotations'
     api 'org.slf4j:slf4j-api'
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    // AuthorizedPartyValidator(#1806)がJwt/OAuth2TokenValidatorを参照する。JWTを検証する各サービスは
+    // oauth2-resource-serverで実体を持つため、jakarta.servlet-apiと同じ方針でcompileOnlyとする。
+    compileOnly 'org.springframework.security:spring-security-oauth2-jose'
     // CorrelationIdRestClientCustomizer(#1730)がRestClientCustomizerを実装するために必要。
     // 全サービスがspring-boot-starter-restclientで実体を提供するためcompileOnlyとする。
     compileOnly 'org.springframework.boot:spring-boot-restclient'
@@ -39,6 +42,7 @@ dependencies {
 
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.springframework:spring-test'
+    testImplementation 'org.springframework.security:spring-security-oauth2-jose'
     testImplementation 'org.springframework.boot:spring-boot-restclient'
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
     testImplementation 'org.springframework.amqp:spring-amqp'

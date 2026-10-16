@@ -15,6 +15,31 @@ Bearerトークンが提示されていれば検証するが、トークンが�
 [ADR-0008: 認証ゲートは各サービス自身の SecurityConfig で担い、gateway では実施しない](adr/0008-auth-gate-in-each-service-security-config.md)
 を参照。
 
+### 受け付けるトークンは `azp` の許可リストで絞る(#1806)
+
+署名・有効期限・issuer が正しくても、同じ realm の用途違いのクライアント(extensions へ送る
+`letsblog-tools-client`、`lbx-gitlab`・`lbx-penpot`・`lbx-proxy`、Keycloak 組み込みの `account`・
+`admin-cli` など)のトークンは受け付けない。JWT を検証する 10 サービス(gateway・identity・content・
+project・publishing・ai・media・platform・analytics・log-writer)の `JwtDecoderConfig` は、
+lbs-common の `AuthorizedPartyValidator.withIssuer(issuer)` を使い、`azp` クレームが次の 4 つの
+いずれかであることを検査する。
+
+| `azp` | 用途 |
+|---|---|
+| `letsblog-web` | web のログイン(Authorization Code) |
+| `letsblog-services` | サービス間の Client Credentials |
+| `letsblog-vscode` | VS Code 拡張のデバイスフロー |
+| `letsblog-e2e` | 受け入れテストのパスワードグラント |
+
+- 許可リスト外の `azp`、および **`azp` の無いトークンは拒否**する。拒否は JWT の検証の失敗なので、
+  servlet のサービスでも gateway(リアクティブ)でも **401** になる。
+- 検査は `aud` ではなく `azp`。Keycloak の設定(realm-export・mapper)は変えない。
+- `azp` を持たないのは、テスト用の鍵で署名したトークンだけ(Keycloak は `azp` の無いアクセストークンを
+  発行しない)。各サービスの `JwtAzpAllowListIntegrationTest` が、実デコーダーで 401 を確かめる。
+  `letsblog-tools-client` のトークンが 401 になることは、受け入れテスト
+  `auth/tools-client-token.feature` が確かめる。
+- 新しいクライアントを lets_blog の API の呼び出し元にするときは、`AuthorizedPartyValidator.DEFAULT_ALLOWED` に足す。
+
 ### ランタイム別の実施状況(2026-08-30時点、#772適用後)
 
 | ランタイム | 認証ゲートの担い手 | 公開パス | 対応する統合テスト |

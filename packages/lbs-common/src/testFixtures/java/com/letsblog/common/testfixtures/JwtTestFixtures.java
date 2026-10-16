@@ -51,6 +51,8 @@ public final class JwtTestFixtures {
                 .header("alg", "RS256")
                 .subject(subject)
                 .claim("sub", subject)
+                // 各サービスのJwtDecoderはazpの許可リストで検査する(#1806)。許可リストのクライアントを名乗らせる。
+                .claim("azp", "letsblog-web")
                 .claim("realm_access", Map.of("roles", List.of(realmRoles)))
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(DEFAULT_TTL_SECONDS))
