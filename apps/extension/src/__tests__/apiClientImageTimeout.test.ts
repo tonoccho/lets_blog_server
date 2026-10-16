@@ -1,11 +1,7 @@
 import { setConfiguration, resetMocks } from '../__mocks__/vscode';
 import * as apiClient from '../apiClient';
-import { httpRequest } from '../httpClient';
 import { TimeoutError } from '../errorHandler';
-
-jest.mock('../httpClient', () => ({ httpRequest: jest.fn() }));
-
-const mockedRequest = httpRequest as jest.MockedFunction<typeof httpRequest>;
+import { LocalHttpServer } from './support/localHttpServer';
 
 /**
  * 画像生成(POST /api/ai/image)のクライアント側タイムアウト(issue #1105)。
@@ -63,13 +59,10 @@ describe('画像生成が最低限確保するタイムアウト', () => {
 
 describe('画像生成リクエストの実際のタイムアウト', () => {
   /** 応答を返さないサーバー。中断シグナルだけを観測する。 */
+  let server: LocalHttpServer;
+
   function neverResponds(): void {
-    mockedRequest.mockImplementation(
-      (_url, options) =>
-        new Promise((_resolve, reject) => {
-          options.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-        })
-    );
+    server.respondWith({ status: 200, hang: true });
   }
 
   /** 保留中かどうかを観測できる形で待つ。 */
@@ -89,25 +82,28 @@ describe('画像生成リクエストの実際のタイムアウト', () => {
 
   /**
    * 偽タイマーを進め、中断がリクエスト層を伝わり切るまでマイクロタスクを流す。
-   * httpRequest → request → withRetry → requestJson と await が重なるため、1回では足りない。
+   * 中断は実際の fetch を通って拒否されるため、マイクロタスクではなく実 I/O の周回を数回待つ。
+   * (setImmediate は偽タイマーの対象から外してある。)
    */
   async function advance(ms: number): Promise<void> {
     jest.advanceTimersByTime(ms);
-    for (let i = 0; i < 20; i += 1) {
-      await Promise.resolve();
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
 
-  beforeEach(() => {
-    jest.useFakeTimers();
-    mockedRequest.mockReset();
+  beforeEach(async () => {
+    // 実サーバーを立ててから、タイマーだけを偽物にする(ソケットの I/O は実物のまま)。
+    server = await LocalHttpServer.start();
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
     resetMocks();
     apiClient.clearResponseCache();
-    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
+    setConfiguration('letsBlog.serverUrl', server.url);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.useRealTimers();
+    await server.stop();
   });
 
   it('既定設定のままでも batch size 16 の生成が120秒で打ち切られない', async () => {

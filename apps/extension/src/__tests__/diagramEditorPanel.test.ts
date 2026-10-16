@@ -5,26 +5,20 @@ import * as vscode from 'vscode';
 import { appliedEdits, lastCreatedWebviewPanel, resetMocks, shownInformations } from '../__mocks__/vscode';
 import { DIAGRAM_REFERENCE_PATTERN, DiagramEditorPanel } from '../diagramEditorPanel';
 
-jest.mock('../apiClient', () => ({
-  createDiagram: jest.fn(),
-  updateDiagram: jest.fn(),
-}));
-jest.mock('../config', () => ({
-  requireAccessToken: jest.fn(async () => 'token'),
-  getActor: jest.fn(async () => ({ id: 1, email: 'a@example.test', name: 'a' })),
-  getServerUrl: jest.fn(() => 'https://server.example.test'),
-}));
-
+import { setConfiguration } from '../__mocks__/vscode';
 import * as api from '../apiClient';
+import { LocalHttpServer, jsonReply } from './support/localHttpServer';
+import { createContext as createTestContext, loginAs } from './support/extensionContext';
 
-const createDiagramMock = api.createDiagram as unknown as jest.Mock;
-const updateDiagramMock = api.updateDiagram as unknown as jest.Mock;
-
+// 外部通信(gateway の /api/diagrams)だけを実サーバーで受ける。config.ts・apiClient.ts は実物。
+let server: LocalHttpServer;
 let extensionRoot: string;
 let baseDir: string;
 
+let loggedInContext: vscode.ExtensionContext;
+
 function createContext(): vscode.ExtensionContext {
-  return { extensionUri: `file://${extensionRoot}` } as unknown as vscode.ExtensionContext;
+  return createTestContext(`file://${extensionRoot}`);
 }
 
 function createEditor(uri: string): vscode.TextEditor {
@@ -43,9 +37,17 @@ function posted(): { command: string; payload: unknown }[] {
   return (lastCreatedWebviewPanel?.webview.posted ?? []) as { command: string; payload: unknown }[];
 }
 
+/**
+ * Webview からのメッセージを送り、拡張の応答(Webview への投稿・パネルを閉じる)を待つ。
+ * 保存は実サーバーへの HTTP を挟むので、1 回の setImmediate では終わらない。
+ */
 async function send(message: unknown): Promise<void> {
-  lastCreatedWebviewPanel?.webview.postMessageToExtension(message);
-  await new Promise((resolve) => setImmediate(resolve));
+  const panel = lastCreatedWebviewPanel;
+  const before = posted().length;
+  panel?.webview.postMessageToExtension(message);
+  for (let i = 0; i < 200 && posted().length === before && !panel?.disposed; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 /**
@@ -58,26 +60,33 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
     extensionRoot = path.resolve(__dirname, '..', '..');
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'letsblog-diagram-editor-'));
-    createDiagramMock.mockReset();
-    updateDiagramMock.mockReset();
+    resetMocks();
+    api.clearResponseCache();
+    server = await LocalHttpServer.start();
+    setConfiguration('letsBlog.serverUrl', server.url);
+    server.respondWith(jsonReply({ id: 1, name: '図', xml: '<mxfile/>', svg: '<svg/>' }));
+    // パネルは起動時に config.ts でトークンを読むので、ログイン済みの context を使う。
+    loggedInContext = createContext();
+    await loginAs(loggedInContext);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     lastCreatedWebviewPanel?.fireDispose();
     resetMocks();
     fs.rmSync(baseDir, { recursive: true, force: true });
+    await server.stop();
   });
 
   it('New Diagramを開いたあと閉じずにEdit Diagramを実行すると、編集モードのinitが再送される', async () => {
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'create',
     });
     await send({ command: 'ready' });
     expect(posted().filter((m) => m.command === 'init')).toHaveLength(1);
 
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'edit',
       diagramId: 42,
       name: '既存図',
@@ -93,7 +102,7 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
   });
 
   it('Edit Diagramを開いたあと閉じずにNew Diagramを実行すると、新規モードのタイトルへ戻る', async () => {
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'edit',
       diagramId: 1,
       name: '既存図',
@@ -101,7 +110,7 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
       existingFileName: 'diagram-1-1.svg',
     });
 
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, { kind: 'create' });
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, { kind: 'create' });
     await send({ command: 'ready' });
 
     const initMessages = posted().filter((m) => m.command === 'init');
@@ -111,9 +120,9 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
   });
 
   it('新規ダイアグラムの挿入は記事名を含む通知を出し、記事へ挿入される (issue #1063 要件4)', async () => {
-    createDiagramMock.mockResolvedValue({ id: 9, name: '新規図', svg: '<svg/>' });
+    server.respondWith(jsonReply({ id: 9, name: '新規図', xml: '<mxfile/>', svg: '<svg/>' }));
     const editor = createEditor('file:///a.md');
-    DiagramEditorPanel.createOrShow(createContext(), editor, baseDir, 1, { kind: 'create' });
+    DiagramEditorPanel.createOrShow(loggedInContext, editor, baseDir, 1, { kind: 'create' });
 
     await send({ command: 'insertNew', name: '新規図', xml: '<mxfile/>', svg: '<svg/>' });
 
@@ -123,9 +132,19 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
     expect(inserted?.uri).toBe('file:///a.md');
   });
 
+  it('名前が空白だけのダイアグラムは、既定の代替テキストで記事へ挿入する', async () => {
+    server.respondWith(jsonReply({ id: 9, name: ' ', xml: '<mxfile/>', svg: '<svg/>' }));
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, { kind: 'create' });
+
+    await send({ command: 'insertNew', name: '   ', xml: '<mxfile/>', svg: '<svg/>' });
+
+    const inserted = appliedEdits.find((e) => e.kind === 'insert');
+    expect(inserted?.text).toMatch(/^!\[ダイアグラム\]\(assets\/diagram-9-\d+\.svg\)$/);
+  });
+
   it('上書き保存は記事名を含む通知を出す (issue #1063 要件4)', async () => {
-    updateDiagramMock.mockResolvedValue({ id: 1, svg: '<svg/>' });
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    server.respondWith(jsonReply({ id: 1, name: '既存図', xml: '<mxfile/>', svg: '<svg/>' }));
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'edit',
       diagramId: 1,
       name: '既存図',
@@ -140,8 +159,8 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
   });
 
   it('別名保存(saveAsNew)は記事名を含む通知を出す (issue #1063 要件4)', async () => {
-    createDiagramMock.mockResolvedValue({ id: 9, name: '新規図', svg: '<svg/>' });
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    server.respondWith(jsonReply({ id: 9, name: '新規図', xml: '<mxfile/>', svg: '<svg/>' }));
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'create',
     });
 
@@ -152,7 +171,7 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
   });
 
   it('cancelを受け取るとパネルを閉じる', async () => {
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'create',
     });
     const panel = lastCreatedWebviewPanel;
@@ -163,13 +182,13 @@ describe('DiagramEditorPanel: シングルトン再利用時のmode更新 (issue
   });
 
   it('createモードでsaveOverwriteを受け取るとエラーを通知する', async () => {
-    DiagramEditorPanel.createOrShow(createContext(), createEditor('file:///a.md'), baseDir, 1, {
+    DiagramEditorPanel.createOrShow(loggedInContext, createEditor('file:///a.md'), baseDir, 1, {
       kind: 'create',
     });
 
     await send({ command: 'saveOverwrite', xml: '<mxfile/>', svg: '<svg/>' });
 
-    expect(updateDiagramMock).not.toHaveBeenCalled();
+    expect(server.recorded).toHaveLength(0);
     expect(payloadOf('error')).toEqual(
       expect.objectContaining({ error: expect.stringContaining('編集対象のダイアグラムがありません') })
     );

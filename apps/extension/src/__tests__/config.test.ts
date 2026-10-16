@@ -16,8 +16,7 @@ import {
   requireProjectId,
   logout,
 } from '../config';
-import * as deviceAuth from '../deviceAuth';
-import { ApiError, NetworkError, TimeoutError } from '../errorHandler';
+import { LocalHttpServer, Reply, jsonReply, unreachableUrl } from './support/localHttpServer';
 import {
   ConfigurationTarget,
   configurationUpdates,
@@ -94,10 +93,19 @@ describe('allowsInsecureTls', () => {
 describe('アクセストークン(issue #565: Device Authorization Grant)', () => {
   const FUTURE_TOKENS = { accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: Date.now() + 3_600_000 };
   const EXPIRED_TOKENS = { accessToken: 'access-old', refreshToken: 'refresh-old', expiresAt: Date.now() - 1_000 };
-  const TOKEN_URL = 'https://localhost/auth/realms/letsblog/protocol/openid-connect/token';
+  const TOKEN_PATH = '/auth/realms/letsblog/protocol/openid-connect/token';
+  /** Keycloak のトークンエンドポイントの成功応答。 */
+  const REFRESHED = jsonReply({ access_token: 'access-new', refresh_token: 'refresh-new', expires_in: 3600 });
+  let server: LocalHttpServer;
 
-  afterEach(() => {
-    jest.restoreAllMocks();
+  // Keycloak の代役として実際に待ち受けるサーバーへ、deviceAuth → httpClient の実物を通して送る。
+  beforeEach(async () => {
+    server = await LocalHttpServer.start();
+    setConfiguration('letsBlog.serverUrl', server.url);
+  });
+
+  afterEach(async () => {
+    await server.stop();
   });
 
   it('requireAccessTokenは未ログインなら対応方法を含む例外を投げる', async () => {
@@ -107,22 +115,20 @@ describe('アクセストークン(issue #565: Device Authorization Grant)', () 
   it('requireAccessTokenは有効期限内ならリフレッシュせずアクセストークンを返す', async () => {
     const context = createContext();
     context.secretValues.set('letsBlog.tokens', JSON.stringify(FUTURE_TOKENS));
-    const refreshSpy = jest.spyOn(deviceAuth, 'refreshAccessToken');
 
     await expect(requireAccessToken(context)).resolves.toBe(FUTURE_TOKENS.accessToken);
-    expect(refreshSpy).not.toHaveBeenCalled();
+    expect(server.recorded).toHaveLength(0);
   });
 
   it('requireAccessTokenは期限切れの場合リフレッシュして新しいトークンを保存する', async () => {
     const context = createContext();
     context.secretValues.set('letsBlog.tokens', JSON.stringify(EXPIRED_TOKENS));
-    jest.spyOn(deviceAuth, 'refreshAccessToken').mockResolvedValue({
-      accessToken: 'access-new',
-      refreshToken: 'refresh-new',
-      expiresIn: 3600,
-    });
+    server.respondWith(REFRESHED);
 
     await expect(requireAccessToken(context)).resolves.toBe('access-new');
+    expect(server.recorded).toHaveLength(1);
+    expect(server.recorded[0].path).toBe(TOKEN_PATH);
+    expect(server.recorded[0].body).toContain('refresh_token=refresh-old');
     const stored = JSON.parse(context.secretValues.get('letsBlog.tokens') as string);
     expect(stored.accessToken).toBe('access-new');
     expect(stored.refreshToken).toBe('refresh-new');
@@ -133,9 +139,7 @@ describe('アクセストークン(issue #565: Device Authorization Grant)', () 
   it('requireAccessTokenは確定的な失効なら保存済みトークンを破棄し再ログインを促す例外を投げる', async () => {
     const context = createContext();
     context.secretValues.set('letsBlog.tokens', JSON.stringify(EXPIRED_TOKENS));
-    jest
-      .spyOn(deviceAuth, 'refreshAccessToken')
-      .mockRejectedValue(new ApiError('トークンの更新に失敗しました (HTTP 400)', 400, '{"error":"invalid_grant"}', TOKEN_URL));
+    server.respondWith({ status: 400, body: '{"error":"invalid_grant"}' });
 
     await expect(requireAccessToken(context)).rejects.toThrow('Login');
     expect(context.secretValues.has('letsBlog.tokens')).toBe(false);
@@ -146,13 +150,18 @@ describe('アクセストークン(issue #565: Device Authorization Grant)', () 
    * まだ有効なリフレッシュトークンを失って強制ログアウトになる。
    */
   describe('一過性のリフレッシュ失敗ではトークンを保持する(issue #1098)', () => {
-    async function failRefreshWith(error: unknown): Promise<{
+    /** 一過性の失敗を作る: 応答(HTTP エラー)か、サーバーに到達できない状況('unreachable')。 */
+    async function failRefreshWith(failure: Reply | 'unreachable'): Promise<{
       context: ReturnType<typeof createContext>;
       thrown: Error;
     }> {
       const context = createContext();
       context.secretValues.set('letsBlog.tokens', JSON.stringify(EXPIRED_TOKENS));
-      jest.spyOn(deviceAuth, 'refreshAccessToken').mockRejectedValue(error);
+      if (failure === 'unreachable') {
+        setConfiguration('letsBlog.serverUrl', await unreachableUrl());
+      } else {
+        server.respondWith(failure);
+      }
       const thrown = await requireAccessToken(context).then(
         () => {
           throw new Error('例外が投げられませんでした');
@@ -163,25 +172,19 @@ describe('アクセストークン(issue #565: Device Authorization Grant)', () 
     }
 
     it('HTTP 503ではletsBlog.tokensがSecretStorageに残る', async () => {
-      const { context } = await failRefreshWith(
-        new ApiError('トークンの更新に失敗しました (HTTP 503)', 503, '', TOKEN_URL)
-      );
+      const { context } = await failRefreshWith({ status: 503 });
 
       expect(context.secretValues.get('letsBlog.tokens')).toBe(JSON.stringify(EXPIRED_TOKENS));
     });
 
     it('NetworkErrorではletsBlog.tokensがSecretStorageに残る', async () => {
-      const { context } = await failRefreshWith(
-        new NetworkError('トークンの更新でサーバーへ到達できませんでした', TOKEN_URL, new Error('ECONNREFUSED'))
-      );
+      const { context } = await failRefreshWith('unreachable');
 
       expect(context.secretValues.get('letsBlog.tokens')).toBe(JSON.stringify(EXPIRED_TOKENS));
     });
 
     it('一過性の失敗の例外は再ログインを案内せず、一時的な失敗であることを伝える', async () => {
-      const { thrown } = await failRefreshWith(
-        new ApiError('トークンの更新に失敗しました (HTTP 503)', 503, '', TOKEN_URL)
-      );
+      const { thrown } = await failRefreshWith({ status: 503 });
 
       expect(thrown.message).not.toContain('Login');
       expect(thrown.message).not.toContain('再ログイン');
@@ -192,10 +195,7 @@ describe('アクセストークン(issue #565: Device Authorization Grant)', () 
     it('復旧後は同じcontextで再ログインなしに更新が成功する', async () => {
       const context = createContext();
       context.secretValues.set('letsBlog.tokens', JSON.stringify(EXPIRED_TOKENS));
-      jest
-        .spyOn(deviceAuth, 'refreshAccessToken')
-        .mockRejectedValueOnce(new ApiError('トークンの更新に失敗しました (HTTP 503)', 503, '', TOKEN_URL))
-        .mockResolvedValueOnce({ accessToken: 'access-new', refreshToken: 'refresh-new', expiresIn: 3600 });
+      server.respondWith((request) => (server.recorded.length === 1 && request ? { status: 503 } : REFRESHED));
 
       await expect(requireAccessToken(context)).rejects.toThrow();
       await expect(requireAccessToken(context)).resolves.toBe('access-new');
@@ -208,9 +208,7 @@ describe('アクセストークン(issue #565: Device Authorization Grant)', () 
     it('getAccessTokenは一過性の失敗でも従来どおりundefinedを返す', async () => {
       const context = createContext();
       context.secretValues.set('letsBlog.tokens', JSON.stringify(EXPIRED_TOKENS));
-      jest
-        .spyOn(deviceAuth, 'refreshAccessToken')
-        .mockRejectedValue(new ApiError('トークンの更新に失敗しました (HTTP 503)', 503, '', TOKEN_URL));
+      server.respondWith({ status: 503 });
 
       await expect(getAccessToken(context)).resolves.toBeUndefined();
       expect(context.secretValues.has('letsBlog.tokens')).toBe(true);
@@ -302,25 +300,30 @@ describe('Actor', () => {
  */
 describe('logout(issue #1099)', () => {
   const LOGGED_IN_TOKENS = { accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: Date.now() + 3_600_000 };
+  let server: LocalHttpServer;
 
-  afterEach(() => {
-    jest.restoreAllMocks();
+  // Keycloak の代役として実際に待ち受けるサーバーへ、deviceAuth → httpClient の実物を通して送る。
+  beforeEach(async () => {
+    server = await LocalHttpServer.start();
+    setConfiguration('letsBlog.serverUrl', server.url);
+  });
+
+  afterEach(async () => {
+    await server.stop();
   });
 
   it('ログイン済みの場合、Keycloak側のoffline sessionを終了し端末側のトークン/Actorを削除する', async () => {
     const context = createContext();
     context.secretValues.set('letsBlog.tokens', JSON.stringify(LOGGED_IN_TOKENS));
     await setActor(context, ACTOR);
-    const revokeSpy = jest.spyOn(deviceAuth, 'revokeRefreshToken').mockResolvedValue(undefined);
+    server.respondWith({ status: 200 });
 
     const result = await logout(context);
 
-    expect(revokeSpy).toHaveBeenCalledWith(
-      'https://localhost',
-      LOGGED_IN_TOKENS.refreshToken,
-      false,
-      expect.any(AbortSignal)
-    );
+    expect(server.recorded).toHaveLength(1);
+    expect(server.recorded[0].method).toBe('POST');
+    expect(server.recorded[0].path).toBe('/auth/realms/letsblog/protocol/openid-connect/revoke');
+    expect(new URLSearchParams(server.recorded[0].body).get('token')).toBe(LOGGED_IN_TOKENS.refreshToken);
     expect(result).toEqual({ wasLoggedIn: true, keycloakSessionEnded: true });
     expect(context.secretValues.has('letsBlog.tokens')).toBe(false);
     await expect(getActor(context)).resolves.toBeUndefined();
@@ -330,7 +333,7 @@ describe('logout(issue #1099)', () => {
     const context = createContext();
     context.secretValues.set('letsBlog.tokens', JSON.stringify(LOGGED_IN_TOKENS));
     await setActor(context, ACTOR);
-    jest.spyOn(deviceAuth, 'revokeRefreshToken').mockRejectedValue(new NetworkError('到達できません', 'https://localhost', new Error('ECONNREFUSED')));
+    setConfiguration('letsBlog.serverUrl', await unreachableUrl());
 
     const result = await logout(context);
 
@@ -341,28 +344,21 @@ describe('logout(issue #1099)', () => {
 
   it('未ログイン状態で実行しても例外にならず、Keycloakへは通信しない', async () => {
     const context = createContext();
-    const revokeSpy = jest.spyOn(deviceAuth, 'revokeRefreshToken').mockResolvedValue(undefined);
 
     await expect(logout(context)).resolves.toEqual({ wasLoggedIn: false, keycloakSessionEnded: true });
-    expect(revokeSpy).not.toHaveBeenCalled();
+    expect(server.recorded).toHaveLength(0);
   });
 
   // requireAccessTokenの「リフレッシュが応答しない場合は中断する」テスト(config.ts:133近辺)と
   // 同じ理由で、logoutもKeycloakのoffline session終了要求に30秒のタイムアウトを設けている。
   it('Keycloakが応答しない場合は中断し、端末側の削除は完了したままkeycloakSessionEnded:falseを返す', async () => {
-    jest.useFakeTimers();
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
     try {
       const context = createContext();
       context.secretValues.set('letsBlog.tokens', JSON.stringify(LOGGED_IN_TOKENS));
       await setActor(context, ACTOR);
 
-      jest.spyOn(deviceAuth, 'revokeRefreshToken').mockImplementation((_serverUrl, _refreshToken, _allowInsecureTls, signal) => {
-        return new Promise((_resolve, reject) => {
-          signal.addEventListener('abort', () =>
-            reject(new TimeoutError('Keycloak側のoffline session終了がタイムアウトしました', 'https://localhost', 30_000))
-          );
-        });
-      });
+      server.respondWith({ status: 200, hang: true });
 
       const pending = logout(context);
       await jest.advanceTimersByTimeAsync(30_000);
@@ -428,15 +424,22 @@ describe('AIプロバイダー設定(issue #530 / カバレッジ補完 issue #7
 });
 
 describe('アクセストークン更新のタイムアウト(カバレッジ補完 issue #775)', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
+  let server: LocalHttpServer;
+
+  beforeEach(async () => {
+    server = await LocalHttpServer.start();
+    setConfiguration('letsBlog.serverUrl', server.url);
+  });
+
+  afterEach(async () => {
+    await server.stop();
   });
 
   // requireAccessTokenはリフレッシュ要求に30秒のタイムアウトを設けており、
   // 期限を過ぎるとAbortControllerで中断する(config.ts:133)。応答が返らないKeycloakを
   // 相手に拡張が無期限に固まらないための経路なので、実際に発火させて検証する。
   it('リフレッシュが応答しない場合は中断するが、保存済みトークンは破棄しない(issue #1098)', async () => {
-    jest.useFakeTimers();
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
     try {
       const context = createContext();
       const expiredTokens = {
@@ -446,18 +449,8 @@ describe('アクセストークン更新のタイムアウト(カバレッジ補
       };
       context.secretValues.set('letsBlog.tokens', JSON.stringify(expiredTokens));
 
-      let observedSignal: AbortSignal | undefined;
-      jest
-        .spyOn(deviceAuth, 'refreshAccessToken')
-        .mockImplementation((serverUrl, _refreshToken, _allowInsecureTls, signal) => {
-          observedSignal = signal;
-          return new Promise((_resolve, reject) => {
-            // 中断時にdeviceAuth.refreshAccessTokenが投げるのと同じ例外型で再現する。
-            signal.addEventListener('abort', () =>
-              reject(new TimeoutError('トークンの更新がタイムアウトしました', serverUrl, 30_000))
-            );
-          });
-        });
+      // 要求を受けても応答を返さないサーバー(応答が返らない Keycloak)。
+      server.respondWith({ status: 200, hang: true });
 
       const pending = requireAccessToken(context);
       const rejection = pending.then(
@@ -470,7 +463,6 @@ describe('アクセストークン更新のタイムアウト(カバレッジ補
       await jest.advanceTimersByTimeAsync(30_000);
       const thrown = await rejection;
 
-      expect(observedSignal?.aborted).toBe(true);
       // タイムアウトは一過性の失敗なので、まだ有効なリフレッシュトークンを捨てない(issue #1098)。
       expect(context.secretValues.get('letsBlog.tokens')).toBe(JSON.stringify(expiredTokens));
       expect(thrown.message).not.toContain('Login');

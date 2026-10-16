@@ -29,6 +29,167 @@ export function resetMocks(): void {
   progressRuns.length = 0;
   diagnosticCollections.length = 0;
   visibleTextEditors = [];
+  errorResponse = undefined;
+  outputChannels.length = 0;
+  // 拡張が作ったきり使い回している出力チャンネル(モジュールの変数に保持される)は、状態だけを初期化する。
+  for (const channel of channelsByName.values()) {
+    channel.lines.length = 0;
+    channel.shown = 0;
+    channel.disposed = false;
+  }
+  executedCommands.length = 0;
+  registeredCommands.clear();
+  eventListeners.clear();
+  registeredProviders.length = 0;
+  quickPickCalls.length = 0;
+  quickPickQueue.length = 0;
+  inputBoxCalls.length = 0;
+  inputBoxQueue.length = 0;
+  warningQueue.length = 0;
+  informationQueue.length = 0;
+  errorQueue.length = 0;
+  activeTextEditor = undefined;
+  progressStartsCancelled = false;
+  clipboardText = '';
+  showTextDocumentResolver = undefined;
+  untitledDocuments.length = 0;
+}
+
+// --- 拡張ホストの対話・イベント基盤の代替(issue #1840) -----------------------------------------
+// extension.ts は VS Code が呼び出すコマンド・イベントの登録先、利用者との対話(QuickPick・入力欄・
+// 通知への返答)、アクティブエディタ、クリップボードに依存する。これらは拡張ホストの外に実体が無いので、
+// 登録を記録し、利用者の返答はテストが順番に差し込む。
+
+/** registerCommand で登録された(コマンドID → 実行関数)。VS Code が利用者の操作で呼ぶ入口。 */
+export const registeredCommands = new Map<string, (...args: any[]) => unknown>();
+
+/** 利用者の操作(コマンドパレットなど)で登録済みコマンドを実行する。 */
+export function runRegisteredCommand(command: string, ...args: unknown[]): Promise<unknown> {
+  const handler = registeredCommands.get(command);
+  if (!handler) throw new Error(`コマンド ${command} は登録されていません`);
+  return Promise.resolve(handler(...args));
+}
+
+/** onDid... で登録されたイベントの購読者(イベント名 → 購読関数)。 */
+const eventListeners = new Map<string, ((event: any) => void)[]>();
+
+function onEvent(name: string) {
+  return (listener: (event: any) => void): { dispose: () => void } => {
+    const list = eventListeners.get(name) ?? [];
+    list.push(listener);
+    eventListeners.set(name, list);
+    return {
+      dispose: () => {
+        const current = eventListeners.get(name) ?? [];
+        eventListeners.set(name, current.filter((l) => l !== listener));
+      },
+    };
+  };
+}
+
+/** VS Code がイベントを発火した状況を再現する。 */
+export function fireEvent(name: string, event?: unknown): void {
+  for (const listener of [...(eventListeners.get(name) ?? [])]) listener(event);
+}
+
+/** registerCodeActionsProvider / registerCompletionItemProvider の登録内容。 */
+export const registeredProviders: { kind: 'codeActions' | 'completion'; selector: unknown; provider: any; extra: unknown[] }[] = [];
+
+/** showQuickPick の呼び出し記録と、利用者の返答(呼び出しごとに 1 つ消費。無ければ「閉じた」)。 */
+export const quickPickCalls: { items: any[]; options?: any }[] = [];
+const quickPickQueue: ((items: any[], options?: any) => unknown)[] = [];
+export function queueQuickPick(responder: (items: any[], options?: any) => unknown): void {
+  quickPickQueue.push(responder);
+}
+
+/** showInputBox の呼び出し記録と、利用者の返答。 */
+export const inputBoxCalls: { options?: any }[] = [];
+const inputBoxQueue: ((options?: any) => string | undefined)[] = [];
+export function queueInputBox(responder: (options?: any) => string | undefined): void {
+  inputBoxQueue.push(responder);
+}
+
+/** 通知(警告・情報・エラー)の選択肢への返答。呼び出しごとに 1 つ消費し、無ければ既定の返答を使う。 */
+const warningQueue: (string | undefined)[] = [];
+const informationQueue: (string | undefined)[] = [];
+const errorQueue: (string | undefined)[] = [];
+export function queueWarningResponse(value: string | undefined): void {
+  warningQueue.push(value);
+}
+export function queueInformationResponse(value: string | undefined): void {
+  informationQueue.push(value);
+}
+export function queueErrorResponse(value: string | undefined): void {
+  errorQueue.push(value);
+}
+
+/** true なら、withProgress の task が始まる時点で利用者が既にキャンセルしている状況にする。 */
+let progressStartsCancelled = false;
+export function setProgressStartsCancelled(value: boolean): void {
+  progressStartsCancelled = value;
+}
+
+/** window.activeTextEditor の差し替え口。 */
+let activeTextEditor: unknown;
+export function setActiveTextEditor(editor: unknown): void {
+  activeTextEditor = editor;
+}
+
+/** env.clipboard.readText が返すクリップボードの内容。 */
+let clipboardText = '';
+export function setClipboardText(text: string): void {
+  clipboardText = text;
+}
+
+/** showTextDocument が返すエディタを、開かれた文書から決める差し口(既定は undefined)。 */
+let showTextDocumentResolver: ((document: any) => unknown) | undefined;
+export function setShowTextDocumentResolver(resolver: ((document: any) => unknown) | undefined): void {
+  showTextDocumentResolver = resolver;
+}
+
+/** openTextDocument({content, language}) で作られた無題の文書。 */
+export const untitledDocuments: { content: string; language?: string }[] = [];
+
+/** vscode.Disposable の最小再現。 */
+export class Disposable {
+  constructor(private readonly callOnDispose?: () => void) {}
+  dispose(): void {
+    this.callOnDispose?.();
+  }
+  static from(...disposables: { dispose: () => unknown }[]): Disposable {
+    return new Disposable(() => disposables.forEach((d) => d.dispose()));
+  }
+}
+
+/** commands.executeCommand に渡された(コマンドID, 引数)の記録。 */
+export const executedCommands: { command: string; args: unknown[] }[] = [];
+
+/** vscode.commands の最小再現。実行は記録だけで、組み込みコマンドは動かさない。 */
+export const commands = {
+  registerCommand(command: string, handler: (...args: any[]) => unknown): { dispose: () => void } {
+    registeredCommands.set(command, handler);
+    return { dispose: () => registeredCommands.delete(command) };
+  },
+  executeCommand(command: string, ...args: unknown[]): Promise<unknown> {
+    executedCommands.push({ command, args });
+    const handler = registeredCommands.get(command);
+    return Promise.resolve(handler ? handler(...args) : undefined);
+  },
+};
+
+/** showErrorMessage が返す選択肢(未設定なら「閉じた」= undefined)。 */
+let errorResponse: string | undefined;
+export function setErrorResponse(value: string | undefined): void {
+  errorResponse = value;
+}
+
+/** createOutputChannel が作った出力チャンネルの記録(書かれた行・表示・破棄の確認用)。 */
+export const outputChannels: { name: string; lines: string[]; shown: number; disposed: boolean }[] = [];
+
+/** 名前で引ける出力チャンネル(最後に作られたもの)。テストをまたいで保持される。 */
+const channelsByName = new Map<string, { name: string; lines: string[]; shown: number; disposed: boolean }>();
+export function findOutputChannel(name: string): { name: string; lines: string[]; shown: number; disposed: boolean } | undefined {
+  return channelsByName.get(name);
 }
 
 /** showWarningMessage が返す選択肢(未設定なら「閉じた」= undefined)。 */
@@ -51,6 +212,7 @@ export const openedExternalUrls: string[] = [];
 
 /** vscode.env の最小再現。 */
 export const env = {
+  clipboard: { readText: (): Promise<string> => Promise.resolve(clipboardText) },
   openExternal(uri: { toString: () => string }): Promise<boolean> {
     openedExternalUrls.push(uri.toString());
     return Promise.resolve(true);
@@ -86,9 +248,18 @@ export const workspace = {
   get workspaceFolders() {
     return workspaceFolders;
   },
-  openTextDocument(fileName: string) {
-    openedDocuments.push(fileName);
-    return Promise.resolve({ fileName });
+  openTextDocument(target: string | { fsPath?: string; content?: string; language?: string }) {
+    if (typeof target === 'string') {
+      openedDocuments.push(target);
+      return Promise.resolve({ fileName: target });
+    }
+    if (target.content !== undefined) {
+      untitledDocuments.push({ content: target.content, language: target.language });
+      return Promise.resolve({ fileName: '', content: target.content });
+    }
+    // Uri を渡された場合は、そのパスを開いたものとして記録する。
+    openedDocuments.push(String(target.fsPath));
+    return Promise.resolve({ fileName: String(target.fsPath), uri: target });
   },
   getConfiguration(section: string) {
     return {
@@ -104,7 +275,10 @@ export const workspace = {
       },
     };
   },
-  onDidChangeConfiguration: () => ({ dispose: () => undefined }),
+  onDidChangeConfiguration: onEvent('workspace.onDidChangeConfiguration'),
+  onDidChangeTextDocument: onEvent('workspace.onDidChangeTextDocument'),
+  onDidOpenTextDocument: onEvent('workspace.onDidOpenTextDocument'),
+  onDidCloseTextDocument: onEvent('workspace.onDidCloseTextDocument'),
   applyEdit(edit: WorkspaceEdit): Promise<boolean> {
     appliedEdits.push(...edit.entries);
     return Promise.resolve(true);
@@ -170,6 +344,14 @@ export class CodeAction {
 export const diagnosticCollections: Map<string, Diagnostic[]>[] = [];
 
 export const languages = {
+  registerCodeActionsProvider: (selector: unknown, provider: unknown, metadata?: unknown) => {
+    registeredProviders.push({ kind: 'codeActions', selector, provider, extra: [metadata] });
+    return { dispose: () => undefined };
+  },
+  registerCompletionItemProvider: (selector: unknown, provider: unknown, ...triggers: string[]) => {
+    registeredProviders.push({ kind: 'completion', selector, provider, extra: triggers });
+    return { dispose: () => undefined };
+  },
   createDiagnosticCollection: () => {
     const store = new Map<string, Diagnostic[]>();
     diagnosticCollections.push(store);
@@ -216,6 +398,21 @@ export class WorkspaceEdit {
   }
 }
 
+/** createWebviewPanel が作ったすべてのパネル(テスト終了時にまとめて閉じるため)。 */
+const createdWebviewPanels: MockWebviewPanel[] = [];
+
+/** これまでに作られたすべての Webview パネル(閉じられていないもの)。 */
+export function allWebviewPanels(): { webview: { html: string } }[] {
+  return [...createdWebviewPanels];
+}
+
+/** VS Code がすべての Webview パネルを閉じた状況の再現(パネルのシングルトン登録も外れる)。 */
+export function disposeAllWebviewPanels(): void {
+  for (const panel of createdWebviewPanels.splice(0)) {
+    panel.fireDispose();
+  }
+}
+
 /** createWebviewPanelが返す最後のパネル(テストからwebview.html等を検査するために保持する)。 */
 export let lastCreatedWebviewPanel: MockWebviewPanel | undefined;
 
@@ -244,6 +441,22 @@ export const window = {
   get visibleTextEditors() {
     return visibleTextEditors;
   },
+  get activeTextEditor() {
+    return activeTextEditor;
+  },
+  onDidChangeVisibleTextEditors: onEvent('window.onDidChangeVisibleTextEditors'),
+  onDidChangeTextEditorSelection: onEvent('window.onDidChangeTextEditorSelection'),
+  onDidChangeActiveTextEditor: onEvent('window.onDidChangeActiveTextEditor'),
+  showQuickPick: (items: any[], options?: any) => {
+    quickPickCalls.push({ items, options });
+    const responder = quickPickQueue.shift();
+    return Promise.resolve(responder ? responder(items, options) : undefined);
+  },
+  showInputBox: (options?: any) => {
+    inputBoxCalls.push({ options });
+    const responder = inputBoxQueue.shift();
+    return Promise.resolve(responder ? responder(options) : undefined);
+  },
   createTextEditorDecorationType: (options: Record<string, unknown>): MockDecorationType => {
     const type: MockDecorationType = { options, disposed: false, dispose: () => { type.disposed = true; } };
     decorationTypes.push(type);
@@ -258,8 +471,10 @@ export const window = {
   ): Promise<T> => {
     const listeners: (() => void)[] = [];
     const token = {
-      isCancellationRequested: false,
+      isCancellationRequested: progressStartsCancelled,
       onCancellationRequested: (listener: () => void) => {
+        // 既に取り消された token に購読すると、VS Code は直ちに(取り消しを)通知する。
+        if (token.isCancellationRequested) listener();
         listeners.push(listener);
         return { dispose: () => undefined };
       },
@@ -275,26 +490,40 @@ export const window = {
     progressRuns.push(run);
     return task({ report: (value) => run.reports.push(value) }, token);
   },
-  createOutputChannel: () => ({
-    appendLine: () => undefined,
-    show: () => undefined,
-    dispose: () => undefined,
-  }),
-  showWarningMessage: (message: string, ..._items: string[]) => {
+  createOutputChannel: (name: string) => {
+    const channel = { name, lines: [] as string[], shown: 0, disposed: false };
+    outputChannels.push(channel);
+    channelsByName.set(name, channel);
+    return {
+      clear: () => {
+        channel.lines.length = 0;
+      },
+      appendLine: (line: string) => {
+        channel.lines.push(line);
+      },
+      show: () => {
+        channel.shown += 1;
+      },
+      dispose: () => {
+        channel.disposed = true;
+      },
+    };
+  },
+  showWarningMessage: (message: string, ..._items: unknown[]) => {
     shownWarnings.push(message);
-    return Promise.resolve(warningResponse);
+    return Promise.resolve(warningQueue.length > 0 ? warningQueue.shift() : warningResponse);
   },
-  showTextDocument: (document: { fileName: string }) => {
+  showTextDocument: (document: { fileName: string }, _options?: unknown) => {
     openedDocuments.push(document.fileName);
-    return Promise.resolve(undefined);
+    return Promise.resolve(showTextDocumentResolver ? showTextDocumentResolver(document) : undefined);
   },
-  showErrorMessage: (message: string) => {
+  showErrorMessage: (message: string, ..._items: string[]) => {
     shownErrors.push(message);
-    return Promise.resolve(undefined);
+    return Promise.resolve(errorQueue.length > 0 ? errorQueue.shift() : errorResponse);
   },
-  showInformationMessage: (message: string) => {
+  showInformationMessage: (message: string, ..._items: string[]) => {
     shownInformations.push(message);
-    return Promise.resolve(undefined);
+    return Promise.resolve(informationQueue.length > 0 ? informationQueue.shift() : undefined);
   },
   createWebviewPanel: (): MockWebviewPanel => {
     let receiveListener: ((message: unknown) => void) | undefined;
@@ -330,6 +559,7 @@ export const window = {
       disposed: false,
     };
     lastCreatedWebviewPanel = panel;
+    createdWebviewPanels.push(panel);
     return panel;
   },
 };
@@ -354,7 +584,7 @@ export const ProgressLocation = { Notification: 15 };
 export const extensions = { getExtension: jest.fn((): unknown => undefined) };
 
 /** vscode.CompletionItemKind の数値はVS Code APIの定義に合わせる(一部のみ)。 */
-export const CompletionItemKind = { Keyword: 13, Snippet: 14 } as const;
+export const CompletionItemKind = { Keyword: 13, Snippet: 14, EnumMember: 19 } as const;
 
 /** vscode.SnippetString の最小再現。 */
 export class SnippetString {

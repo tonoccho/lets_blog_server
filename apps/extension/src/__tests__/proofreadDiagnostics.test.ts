@@ -13,22 +13,56 @@ import { ProofreadController } from '../proofreadDiagnostics';
 import * as api from '../apiClient';
 import { REVIEW_STEPS } from '../proofreadLogic';
 import { ReviewChecklistStore } from '../reviewChecklistStore';
+import { LogLevel, logger } from '../logger';
+import { LocalHttpServer, RecordedRequest, Reply, jsonReply } from './support/localHttpServer';
+import { TestContext, createContext, loginAs, selectProject } from './support/extensionContext';
+import { waitFor } from './support/panelKit';
 
-jest.mock('../apiClient', () => ({
-  reviewStepSuggestions: jest.fn(),
-  getPostStatuses: jest.fn(),
-  listExistingCategories: jest.fn(),
-}));
-jest.mock('../config', () => ({
-  getAccessToken: jest.fn(async () => 'token'),
-  getActor: jest.fn(async () => undefined),
-  getProjectId: jest.fn(() => 7),
-  requireProjectId: jest.fn(() => 7),
-}));
+// 外部通信(gateway の /api)だけを実サーバーで受ける。config.ts・apiClient.ts・reviewChecklistStore.ts は実物。
+// stepHandler / statusesHandler / categoriesHandler は「サーバー側の振る舞い」を差し込む口で、
+// 呼び出し記録は実際にサーバーへ届いた要求を表す。
+let server: LocalHttpServer;
+let context: TestContext;
+type StepHandler = (step: string, request: RecordedRequest) => Reply | Promise<Reply>;
+const stepHandler = jest.fn<Reply | Promise<Reply>, Parameters<StepHandler>>();
+const statusesHandler = jest.fn<Reply | Promise<Reply>, []>();
+const categoriesHandler = jest.fn<Reply | Promise<Reply>, []>();
 
-import * as config from '../config';
+const NO_FINDINGS = { suggestions: [], skipped: false };
 
-const mocked = api as jest.Mocked<typeof api>;
+/** ステップごとの応答を関数で決める。投げた例外は HTTP 403(再試行されない失敗)になる。 */
+function byStep(fn: (step: string, request: RecordedRequest) => unknown | Promise<unknown>): void {
+  stepHandler.mockImplementation(async (step, request) => {
+    try {
+      return jsonReply(await fn(step, request));
+    } catch (error) {
+      return { status: 403, body: (error as Error).message };
+    }
+  });
+}
+
+function onceFor(payload: unknown): void {
+  stepHandler.mockResolvedValueOnce(jsonReply(payload));
+}
+
+function allFor(payload: unknown): void {
+  stepHandler.mockResolvedValue(jsonReply(payload));
+}
+
+/** サーバーへ届いた、レビューステップの要求のステップキー(届いた順)。 */
+function requestedSteps(): string[] {
+  return server.recorded
+    .map((r) => /review-steps\/([A-Z_]+)\/suggestions/.exec(r.path)?.[1])
+    .filter((step): step is string => step !== undefined);
+}
+
+/** サーバーへ届いたレビューステップ要求のうち、n 番目の要求の宛先プロジェクト。 */
+function requestedProjectIds(): number[] {
+  return server.recorded
+    .map((r) => /projects\/(\d+)\/ai\/review-steps/.exec(r.path)?.[1])
+    .filter((id): id is string => id !== undefined)
+    .map(Number);
+}
 
 interface FakeEditor {
   document: FakeDocument;
@@ -55,8 +89,12 @@ function makeEditor(document: FakeDocument): FakeEditor {
   return { document, setDecorations: jest.fn() };
 }
 
-const context = {} as never;
 const ARTICLE = '---\ntitle: t\nstatus: draft\n---\nAはBです。CはDです。';
+
+/** サーバーへ届いた、投稿ステータス一覧への要求。 */
+function statusRequests(): string[] {
+  return server.recorded.filter((r) => r.path === '/api/metadata/post-statuses').map((r) => r.path);
+}
 
 function controllerWith(): ProofreadController {
   return new ProofreadController(context);
@@ -68,16 +106,29 @@ function lastDecorations(editor: FakeEditor, type: unknown): { range: Range; hov
   return calls[calls.length - 1][1];
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetMocks();
   jest.resetAllMocks();
-  (config.getAccessToken as jest.Mock).mockResolvedValue('token');
-  (config.getActor as jest.Mock).mockResolvedValue(undefined);
-  (config.getProjectId as jest.Mock).mockReturnValue(7);
-  (config.requireProjectId as jest.Mock).mockReturnValue(7);
-  mocked.getPostStatuses.mockResolvedValue([{ value: 'draft' }] as never);
-  mocked.listExistingCategories.mockResolvedValue([]);
-  mocked.reviewStepSuggestions.mockResolvedValue({ suggestions: [], skipped: false } as never);
+  api.clearResponseCache();
+  server = await LocalHttpServer.start();
+  setConfiguration('letsBlog.serverUrl', server.url);
+  context = createContext();
+  await loginAs(context, null);
+  await selectProject(context, 7);
+  stepHandler.mockResolvedValue(jsonReply(NO_FINDINGS));
+  statusesHandler.mockResolvedValue(jsonReply([{ value: 'draft', label: '下書き' }]));
+  categoriesHandler.mockResolvedValue(jsonReply([]));
+  server.respondWith((request) => {
+    const step = /\/ai\/review-steps\/([A-Z_]+)\/suggestions$/.exec(request.path)?.[1];
+    if (request.method === 'POST' && step) return stepHandler(step, request);
+    if (request.method === 'GET' && request.path === '/api/metadata/post-statuses') return statusesHandler();
+    if (request.method === 'GET' && request.path.endsWith('/article-plan/categories')) return categoriesHandler();
+    return { status: 404, body: `no route: ${request.method} ${request.path}` };
+  });
+});
+
+afterEach(async () => {
+  await server.stop();
 });
 
 describe('ProofreadController.runManual(5ステップのレビュー)', () => {
@@ -85,24 +136,25 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     const controller = controllerWith();
     await controller.runManual(makeDocument(ARTICLE) as never);
 
-    expect(mocked.reviewStepSuggestions.mock.calls.map((c) => c[3])).toEqual([
+    expect(requestedSteps()).toEqual([
       'JAPANESE',
       'PROOFREADING',
       'FACT_CHECK',
       'READER_PERSPECTIVE',
       'STYLE',
     ]);
-    for (const call of mocked.reviewStepSuggestions.mock.calls) {
-      expect(call[2]).toBe(7);
-      expect(call[4]).toBe('AはBです。CはDです。');
+    expect(requestedProjectIds()).toEqual([7, 7, 7, 7, 7]);
+    for (const request of server.recorded.filter((r) => r.method === 'POST')) {
+      expect(JSON.parse(request.body)).toEqual({ text: 'AはBです。CはDです。' });
     }
   });
 
   it('front matterのproject_idがあれば選択中のプロジェクトより優先する', async () => {
     const text = '---\ntitle: t\nproject_id: 99\n---\n本文';
+    // 選択中のプロジェクトが無くても、front matter の project_id だけで実行できる。
+    context.stateValues.clear();
     await controllerWith().runManual(makeDocument(text) as never);
-    expect(mocked.reviewStepSuggestions.mock.calls[0][2]).toBe(99);
-    expect(config.requireProjectId).not.toHaveBeenCalled();
+    expect(requestedProjectIds()).toEqual([99, 99, 99, 99, 99]);
   });
 
   it('実行中は現在のステップ名を含む進捗を表示する', async () => {
@@ -124,7 +176,7 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     const editor = makeEditor(document);
     const otherEditor = makeEditor(makeDocument('x', 'file:///other.md'));
     setVisibleTextEditors([editor, otherEditor]);
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+    byStep((step) => {
       if (step === 'PROOFREADING') {
         return { suggestions: [{ stepKey: step, originalText: 'AはB', message: '誤り', suggestion: 'XはY', sources: [] }], skipped: false };
       }
@@ -132,7 +184,7 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
         return { suggestions: [{ stepKey: step, originalText: 'CはD', message: '文体', suggestion: null, sources: [] }], skipped: false };
       }
       return { suggestions: [], skipped: false };
-    }) as never);
+    });
 
     const controller = controllerWith();
     await controller.runManual(document as never);
@@ -160,19 +212,36 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     expect(otherEditor.setDecorations).not.toHaveBeenCalled();
   });
 
+  it('categoriesがすべてサイトに存在すれば、カテゴリの診断は出さない', async () => {
+    jest.useFakeTimers({ doNotFake: ['Date', 'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'performance'] });
+    try {
+      categoriesHandler.mockResolvedValue(jsonReply(['tech']));
+      await loginAs(context);
+      const text = '---\ntitle: t\nstatus: draft\ncategories: [tech]\n---\n本文';
+      controllerWith().scheduleCheck(makeDocument(text) as never);
+      await jest.advanceTimersByTimeAsync(500);
+      await waitFor(() => diagnosticCollections[0]?.has('file:///a.md') === true);
+
+      expect(categoriesHandler).toHaveBeenCalled();
+      expect(diagnosticCollections[0].get('file:///a.md')).toEqual([]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('再実行すると前回の装飾は新しい結果で置き換わり、装飾タイプは作り直さない', async () => {
     const document = makeDocument(ARTICLE);
     const editor = makeEditor(document);
     setVisibleTextEditors([editor]);
     const controller = controllerWith();
-    mocked.reviewStepSuggestions.mockResolvedValueOnce({
+    onceFor({
       suggestions: [{ stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }],
       skipped: false,
-    } as never);
+    });
     await controller.runManual(document as never);
     expect(lastDecorations(editor, decorationTypes[0])).toHaveLength(1);
 
-    mocked.reviewStepSuggestions.mockResolvedValue({ suggestions: [], skipped: false } as never);
+    allFor({ suggestions: [], skipped: false });
     await controller.runManual(document as never);
     expect(lastDecorations(editor, decorationTypes[0])).toEqual([]);
     expect(decorationTypes).toHaveLength(5);
@@ -184,19 +253,19 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     setVisibleTextEditors([editor]);
     await controllerWith().runManual(document as never);
 
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
     expect(lastDecorations(editor, decorationTypes[0])).toEqual([]);
   });
 
   it('未ログインなら案内つきで失敗する', async () => {
-    (config.getAccessToken as jest.Mock).mockResolvedValue(undefined);
+    context.secretValues.clear();
     await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).rejects.toThrow('ログインしていません');
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
   });
 
   it('APIエラーは呼び出し元へ伝える', async () => {
-    mocked.reviewStepSuggestions.mockRejectedValue(new Error('boom'));
-    await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).rejects.toThrow('boom');
+    stepHandler.mockResolvedValue({ status: 403, body: 'boom' });
+    await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).rejects.toMatchObject({ status: 403, responseBody: 'boom' });
   });
 
   it('後から始まった実行があれば、古い実行は結果を反映せず黙って終わる', async () => {
@@ -204,15 +273,18 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     const editor = makeEditor(document);
     setVisibleTextEditors([editor]);
     const controller = controllerWith();
-    let release: (v: unknown) => void = () => undefined;
-    mocked.reviewStepSuggestions.mockImplementationOnce(
-      () => new Promise((resolve) => (release = resolve)) as never
-    );
+    let release: (reply: Reply) => void = () => undefined;
+    stepHandler.mockImplementationOnce(() => new Promise<Reply>((resolve) => (release = resolve)));
     const first = controller.runManual(document as never);
-    await new Promise((r) => setImmediate(r));
-    mocked.reviewStepSuggestions.mockResolvedValue({ suggestions: [], skipped: false } as never);
+    await waitFor(() => requestedSteps().length === 1);
+    allFor({ suggestions: [], skipped: false });
     const second = controller.runManual(document as never);
-    release({ suggestions: [{ stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }], skipped: false });
+    release(
+      jsonReply({
+        suggestions: [{ stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }],
+        skipped: false,
+      })
+    );
     await expect(first).resolves.toBeUndefined();
     await second;
     expect(lastDecorations(editor, decorationTypes[0])).toEqual([]);
@@ -224,13 +296,13 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     setVisibleTextEditors([editor]);
     const controller = controllerWith();
     let release: (v: unknown) => void = () => undefined;
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+    byStep((step) =>
       step === 'STYLE'
         ? new Promise((resolve) => (release = resolve))
-        : { suggestions: [], skipped: false }) as never);
+        : { suggestions: [], skipped: false });
     const first = controller.runManual(document as never);
-    for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
-    mocked.reviewStepSuggestions.mockResolvedValue({ suggestions: [], skipped: false } as never);
+    await waitFor(() => requestedSteps().includes('STYLE'));
+    allFor({ suggestions: [], skipped: false });
     await controller.runManual(document as never);
     release({
       suggestions: [{ stepKey: 'STYLE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }],
@@ -240,14 +312,51 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
     expect(lastDecorations(editor, decorationTypes[4])).toEqual([]);
   });
 
+  it('最終ステップの応答ヘッダが届いた後、本文の受信中に別のレビューが始まっても、古い結果は反映しない', async () => {
+    const document = makeDocument(ARTICLE);
+    const editor = makeEditor(document);
+    setVisibleTextEditors([editor]);
+    const controller = controllerWith();
+    let openBody: () => void = () => undefined;
+    const bodyGate = new Promise<void>((resolve) => (openBody = resolve));
+    stepHandler.mockImplementation(async (step) =>
+      step === 'STYLE'
+        ? {
+            ...jsonReply({
+              suggestions: [{ stepKey: 'STYLE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }],
+              skipped: false,
+            }),
+            bodyGate,
+          }
+        : jsonReply(NO_FINDINGS)
+    );
+    // 拡張が最終ステップの応答ヘッダを受け取った時点を、ログ(通信の完了記録)で確かめる。
+    const logLines: string[] = [];
+    logger.setSink({ appendLine: (line) => logLines.push(line) });
+    logger.setMinLevel(LogLevel.Debug);
+    try {
+      const first = controller.runManual(document as never);
+      await waitFor(() => logLines.some((line) => line.includes('STYLE/suggestions -> 200')));
+      // 最終ステップは応答ヘッダを受け取った後で本文を止めている。その間に新しいレビューが始まる。
+      allFor({ suggestions: [], skipped: false });
+      await controller.runManual(document as never);
+      openBody();
+      await first;
+      expect(lastDecorations(editor, decorationTypes[4])).toEqual([]);
+    } finally {
+      logger.setSink(undefined);
+      logger.setMinLevel(LogLevel.Info);
+    }
+  });
+
   it('refreshEditorは保持している装飾を再表示する', async () => {
     const document = makeDocument(ARTICLE);
     setVisibleTextEditors([]);
     const controller = controllerWith();
-    mocked.reviewStepSuggestions.mockResolvedValueOnce({
+    onceFor({
       suggestions: [{ stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }],
       skipped: false,
-    } as never);
+    });
     await controller.runManual(document as never);
 
     const editor = makeEditor(document);
@@ -262,10 +371,10 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
   it('ドキュメントを閉じると保持した装飾を破棄し、disposeで装飾タイプを解放する', async () => {
     const document = makeDocument(ARTICLE);
     const controller = controllerWith();
-    mocked.reviewStepSuggestions.mockResolvedValueOnce({
+    onceFor({
       suggestions: [{ stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] }],
       skipped: false,
-    } as never);
+    });
     await controller.runManual(document as never);
     controller.clearDocument(document as never);
     const editor = makeEditor(document);
@@ -277,13 +386,8 @@ describe('ProofreadController.runManual(5ステップのレビュー)', () => {
   });
 });
 
-/** signalが中断されたら拒否する、応答待ちのAPI呼び出しの模擬。 */
-function pendingUntilAborted(signal: AbortSignal | undefined): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    if (signal?.aborted) reject(new Error('The operation was aborted'));
-    signal?.addEventListener('abort', () => reject(new Error('The operation was aborted')));
-  });
-}
+/** 要求を受けても応答を返さないサーバー(クライアントが中断するまで応答待ちになる)。 */
+const HANG: Reply = { status: 200, hang: true };
 
 const JAPANESE_FINDING = { stepKey: 'JAPANESE', originalText: 'AはB', message: 'm', suggestion: null, sources: [] };
 
@@ -294,69 +398,53 @@ describe('ProofreadController の中断・失敗・スキップ(issue #1224)', (
   });
 
   it('実行中にキャンセルすると、それ以降のステップは実行されず、応答待ちのリクエストも中断される', async () => {
-    let signal: AbortSignal | undefined;
-    mocked.reviewStepSuggestions.mockImplementation(((
-      _k: string,
-      _a: unknown,
-      _p: number,
-      _step: string,
-      _t: string,
-      sig?: AbortSignal
-    ) => {
-      signal = sig;
-      return pendingUntilAborted(sig);
-    }) as never);
+    stepHandler.mockResolvedValue(HANG);
     const running = controllerWith().runManual(makeDocument(ARTICLE) as never);
-    await new Promise((r) => setImmediate(r));
+    await waitFor(() => requestedSteps().length === 1);
     progressRuns[0].cancel();
 
     await expect(running).resolves.toBeUndefined();
-    expect(signal?.aborted).toBe(true);
-    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(1);
+    // 応答待ちのリクエストは、サーバー側から見て接続が閉じられている(中断された)。
+    await waitFor(() => server.abortedRequests === 1);
+    expect(server.abortedRequests).toBe(1);
+    expect(requestedSteps()).toHaveLength(1);
     expect(shownInformations.some((m) => m.includes('中断'))).toBe(true);
   });
 
   it('ステップの合間にキャンセルされても、次のステップは実行されない', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+    byStep((step) => {
       if (step === 'PROOFREADING') progressRuns[0].cancel();
       return { suggestions: [], skipped: false };
-    }) as never);
+    });
     await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).resolves.toBeUndefined();
-    expect(mocked.reviewStepSuggestions.mock.calls.map((c) => c[3])).toEqual(['JAPANESE', 'PROOFREADING']);
+    expect(requestedSteps()).toEqual(['JAPANESE', 'PROOFREADING']);
   });
 
   it('キャンセルしても、直前のレビュー結果の表示を途中結果で上書きしない(チェックリストにも記録しない)', async () => {
     const document = makeDocument(ARTICLE);
     const editor = makeEditor(document);
     setVisibleTextEditors([editor]);
-    const store = new ReviewChecklistStore({} as never);
-    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+    const store = new ReviewChecklistStore(context);
     const controller = new ProofreadController(context, store);
-    mocked.reviewStepSuggestions.mockResolvedValueOnce({ suggestions: [JAPANESE_FINDING], skipped: false } as never);
+    onceFor({ suggestions: [JAPANESE_FINDING], skipped: false });
     await controller.runManual(document as never);
     expect(lastDecorations(editor, decorationTypes[0])).toHaveLength(1);
-    recordReview.mockClear();
+    const recordedBefore = store.get(document.uri.toString());
+    expect(recordedBefore?.items).toHaveLength(1);
     editor.setDecorations.mockClear();
 
     // 2回目: 1ステップ目は指摘0件で完了、2ステップ目の途中でキャンセルされる。
-    mocked.reviewStepSuggestions.mockImplementation((async (
-      _k: string,
-      _a: unknown,
-      _p: number,
-      step: string,
-      _t: string,
-      sig?: AbortSignal
-    ) => {
+    stepHandler.mockImplementation(async (step) => {
       if (step === 'PROOFREADING') {
         progressRuns[1].cancel();
-        return pendingUntilAborted(sig);
+        return HANG;
       }
-      return { suggestions: [], skipped: false };
-    }) as never);
+      return jsonReply(NO_FINDINGS);
+    });
     await expect(controller.runManual(document as never)).resolves.toBeUndefined();
 
     expect(editor.setDecorations).not.toHaveBeenCalled();
-    expect(recordReview).not.toHaveBeenCalled();
+    expect(store.get(document.uri.toString())).toEqual(recordedBefore);
     const fresh = makeEditor(document);
     controller.refreshEditor(fresh as never);
     expect(lastDecorations(fresh, decorationTypes[0])).toHaveLength(1);
@@ -367,15 +455,13 @@ describe('ProofreadController の中断・失敗・スキップ(issue #1224)', (
     const editor = makeEditor(document);
     setVisibleTextEditors([editor]);
     const controller = controllerWith();
-    mocked.reviewStepSuggestions.mockImplementationOnce(((
-      _k: string, _a: unknown, _p: number, _s: string, _t: string, sig?: AbortSignal
-    ) => pendingUntilAborted(sig)) as never);
+    stepHandler.mockResolvedValueOnce(HANG);
     const first = controller.runManual(document as never);
-    await new Promise((r) => setImmediate(r));
+    await waitFor(() => requestedSteps().length === 1);
     progressRuns[0].cancel();
     await first;
 
-    mocked.reviewStepSuggestions.mockResolvedValue({ suggestions: [JAPANESE_FINDING], skipped: false } as never);
+    allFor({ suggestions: [JAPANESE_FINDING], skipped: false });
     await controller.runManual(document as never);
     expect(lastDecorations(editor, decorationTypes[0])).toHaveLength(1);
   });
@@ -384,32 +470,32 @@ describe('ProofreadController の中断・失敗・スキップ(issue #1224)', (
     const document = makeDocument(ARTICLE);
     const editor = makeEditor(document);
     setVisibleTextEditors([editor]);
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
-      if (step === 'PROOFREADING') throw new Error('500 Internal Server Error');
+    byStep((step) => {
+      if (step === 'PROOFREADING') throw new Error('Internal Server Error');
       if (step === 'STYLE') {
         return { suggestions: [{ stepKey: step, originalText: 'CはD', message: '文体', suggestion: null, sources: [] }], skipped: false };
       }
       return { suggestions: [], skipped: false };
-    }) as never);
+    });
 
     await expect(controllerWith().runManual(document as never)).resolves.toBeUndefined();
 
-    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(5);
+    expect(requestedSteps()).toHaveLength(5);
     expect(lastDecorations(editor, decorationTypes[4])).toHaveLength(1);
     expect(shownWarnings).toHaveLength(1);
     expect(shownWarnings[0]).toContain('校正チェック');
-    expect(shownWarnings[0]).toContain('500 Internal Server Error');
+    expect(shownWarnings[0]).toContain('403');
   });
 
   it('ステップが失敗したレビューは、完了したものとしてチェックリストへ記録しない', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+    byStep((step) => {
       if (step === 'STYLE') throw new Error('boom');
       return { suggestions: [], skipped: false };
-    }) as never);
-    const store = new ReviewChecklistStore({} as never);
-    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
-    await new ProofreadController(context, store).runManual(makeDocument(ARTICLE) as never);
-    expect(recordReview).not.toHaveBeenCalled();
+    });
+    const store = new ReviewChecklistStore(context);
+    const document = makeDocument(ARTICLE);
+    await new ProofreadController(context, store).runManual(document as never);
+    expect(store.get(document.uri.toString())).toBeUndefined();
   });
 
   it('全ステップが失敗した場合は、既存の表示を残したまま例外として伝える', async () => {
@@ -417,20 +503,20 @@ describe('ProofreadController の中断・失敗・スキップ(issue #1224)', (
     const editor = makeEditor(document);
     setVisibleTextEditors([editor]);
     const controller = controllerWith();
-    mocked.reviewStepSuggestions.mockResolvedValueOnce({ suggestions: [JAPANESE_FINDING], skipped: false } as never);
+    onceFor({ suggestions: [JAPANESE_FINDING], skipped: false });
     await controller.runManual(document as never);
     editor.setDecorations.mockClear();
 
-    mocked.reviewStepSuggestions.mockRejectedValue(new Error('down'));
-    await expect(controller.runManual(document as never)).rejects.toThrow('down');
+    stepHandler.mockResolvedValue({ status: 403, body: 'down' });
+    await expect(controller.runManual(document as never)).rejects.toMatchObject({ status: 403, responseBody: 'down' });
     expect(editor.setDecorations).not.toHaveBeenCalled();
   });
 
   it('校閲がスキップされたら、失敗ではなくスキップとして理由つきで知らせる(指摘0件とは別)', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+    byStep((step) =>
       step === 'FACT_CHECK'
         ? { suggestions: [], skipped: true, skipReason: 'Brave Search APIキーが未設定です' }
-        : { suggestions: [], skipped: false }) as never);
+        : { suggestions: [], skipped: false });
     await controllerWith().runManual(makeDocument(ARTICLE) as never);
 
     expect(shownWarnings).toEqual([]);
@@ -447,16 +533,17 @@ describe('ProofreadController の中断・失敗・スキップ(issue #1224)', (
   });
 
   it('未ログインで手動実行すると、ログインを促すメッセージで失敗し、APIは呼ばれない', async () => {
-    (config.getAccessToken as jest.Mock).mockResolvedValue(undefined);
+    context.secretValues.clear();
     await expect(controllerWith().runManual(makeDocument(ARTICLE) as never)).rejects.toThrow(
       /ログインしていません.*Login/
     );
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
   });
 });
 
 describe('ProofreadController.scheduleCheck(自動実行)', () => {
-  beforeEach(() => jest.useFakeTimers());
+  // デバウンスの setTimeout だけを偽物にする。実サーバーとの通信を待てるよう、Date と setImmediate は実物のまま。
+  beforeEach(() => jest.useFakeTimers({ doNotFake: ['Date', 'setImmediate', 'clearImmediate', 'nextTick', 'queueMicrotask', 'performance'] }));
   afterEach(() => jest.useRealTimers());
 
   it('本文を編集してもレビューAPIは呼ばれない(proofreadEnabledを有効にしていても)', async () => {
@@ -466,26 +553,27 @@ describe('ProofreadController.scheduleCheck(自動実行)', () => {
     controller.scheduleCheck(makeDocument(ARTICLE) as never);
     await jest.advanceTimersByTimeAsync(60_000);
 
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
     expect(progressRuns).toHaveLength(0);
   });
 
   it('markdown以外は何もしない', async () => {
     controllerWith().scheduleCheck(makeDocument(ARTICLE, 'file:///a.txt', 'plaintext') as never);
     await jest.advanceTimersByTimeAsync(5_000);
-    expect(mocked.getPostStatuses).not.toHaveBeenCalled();
+    expect(statusRequests()).toEqual([]);
   });
 
   it('front matterの検証は編集の都度デバウンスして実行され、不正なstatusを診断とQuickFixで示す', async () => {
-    mocked.getPostStatuses.mockResolvedValue([{ value: 'publish' }] as never);
+    statusesHandler.mockResolvedValue(jsonReply([{ value: 'publish', label: '公開' }]));
     const controller = controllerWith();
     const document = makeDocument(ARTICLE);
     controller.scheduleCheck(document as never);
     controller.scheduleCheck(document as never); // 連続編集は1回にまとまる
-    expect(mocked.getPostStatuses).not.toHaveBeenCalled();
+    expect(statusRequests()).toEqual([]);
     await jest.advanceTimersByTimeAsync(500);
+    await waitFor(() => (diagnosticCollections[0]?.get('file:///a.md') ?? []).length > 0);
 
-    expect(mocked.getPostStatuses).toHaveBeenCalledTimes(1);
+    expect(statusRequests()).toHaveLength(1);
     const diagnostics = diagnosticCollections[0].get('file:///a.md') ?? [];
     expect(diagnostics.map((d) => d.code)).toContain('invalid-status');
 
@@ -496,13 +584,14 @@ describe('ProofreadController.scheduleCheck(自動実行)', () => {
   });
 
   it('過去日時のpublish_scheduled_atと存在しないカテゴリも診断とQuickFixで示す', async () => {
-    mocked.listExistingCategories.mockResolvedValue(['tech']);
-    (config.getActor as jest.Mock).mockResolvedValue({ id: 1 });
+    categoriesHandler.mockResolvedValue(jsonReply(['tech']));
+    await loginAs(context);
     const text = '---\ntitle: t\nstatus: draft\npublish_scheduled_at: 2000-01-01T00:00:00Z\ncategories: [news]\n---\n本文';
     const controller = controllerWith();
     const document = makeDocument(text);
     controller.scheduleCheck(document as never);
     await jest.advanceTimersByTimeAsync(500);
+    await waitFor(() => (diagnosticCollections[0]?.get('file:///a.md') ?? []).length >= 2);
 
     const diagnostics = diagnosticCollections[0].get('file:///a.md') ?? [];
     expect(diagnostics.map((d) => d.code).sort()).toEqual(['invalid-category', 'scheduled-past']);
@@ -515,19 +604,37 @@ describe('ProofreadController.scheduleCheck(自動実行)', () => {
   });
 
   it('未ログインならAPIを要するfront matter検証はスキップし、APIエラーでも診断処理は落ちない', async () => {
-    (config.getAccessToken as jest.Mock).mockResolvedValue(undefined);
+    context.secretValues.clear();
     controllerWith().scheduleCheck(makeDocument(ARTICLE) as never);
     await jest.advanceTimersByTimeAsync(500);
-    expect(mocked.getPostStatuses).not.toHaveBeenCalled();
+    expect(statusRequests()).toEqual([]);
 
-    (config.getAccessToken as jest.Mock).mockResolvedValue('token');
-    (config.getActor as jest.Mock).mockResolvedValue({ id: 1 });
-    mocked.getPostStatuses.mockRejectedValue(new Error('x'));
-    mocked.listExistingCategories.mockRejectedValue(new Error('y'));
+    await loginAs(context, null);
+    await loginAs(context);
+    statusesHandler.mockResolvedValue({ status: 403, body: 'x' });
+    categoriesHandler.mockResolvedValue({ status: 403, body: 'y' });
     const text = '---\ntitle: t\ncategories: [a]\n---\n本文';
     controllerWith().scheduleCheck(makeDocument(text, 'file:///b.md') as never);
     await jest.advanceTimersByTimeAsync(500);
-    expect(mocked.listExistingCategories).toHaveBeenCalled();
+    await waitFor(() => categoriesHandler.mock.calls.length > 0);
+    expect(categoriesHandler).toHaveBeenCalled();
+  });
+
+  it('キーが引用符つきで書かれていて行を特定できない場合は、診断を出さずに検証を続ける', async () => {
+    categoriesHandler.mockResolvedValue(jsonReply(['tech']));
+    await loginAs(context);
+    statusesHandler.mockResolvedValue(jsonReply([{ value: 'publish', label: '公開' }]));
+    const text =
+      '---\n"title": t\n"status": draft\n"publish_scheduled_at": 2000-01-01T00:00:00Z\n"categories": [news]\n---\n本文';
+    const document = makeDocument(text);
+    controllerWith().scheduleCheck(document as never);
+    await jest.advanceTimersByTimeAsync(500);
+    await waitFor(() => categoriesHandler.mock.calls.length > 0);
+    await waitFor(() => diagnosticCollections[0]?.has('file:///a.md') === true);
+
+    expect(statusRequests()).toHaveLength(1);
+    expect(categoriesHandler).toHaveBeenCalled();
+    expect(diagnosticCollections[0].get('file:///a.md')).toEqual([]);
   });
 
   it('提案の無い診断ソースや別ソースの診断にはCodeActionを返さない', () => {
@@ -544,7 +651,7 @@ describe('ProofreadController.scheduleCheck(自動実行)', () => {
     controller.scheduleCheck(document as never);
     await controller.runManual(document as never);
     await jest.advanceTimersByTimeAsync(1_000);
-    expect(mocked.getPostStatuses).toHaveBeenCalledTimes(1);
+    expect(statusRequests()).toHaveLength(1);
   });
 
   it('clearDocumentはfront matterの保留タイマーを取り消す', async () => {
@@ -553,44 +660,45 @@ describe('ProofreadController.scheduleCheck(自動実行)', () => {
     controller.scheduleCheck(document as never);
     controller.clearDocument(document as never);
     await jest.advanceTimersByTimeAsync(1_000);
-    expect(mocked.getPostStatuses).not.toHaveBeenCalled();
+    expect(statusRequests()).toEqual([]);
     controller.dispose();
   });
 });
 
 describe('ProofreadController と指摘チェックリスト(issue #1216)', () => {
   it('checklistStoreを渡した場合、レビュー結果を記事ファイルごとに記録する', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) => {
+    byStep((step) => {
       if (step === 'PROOFREADING') {
         return { suggestions: [{ stepKey: step, originalText: 'AはB', message: '誤り', suggestion: null, sources: [] }], skipped: false };
       }
       return { suggestions: [], skipped: false };
-    }) as never);
-    const store = new ReviewChecklistStore({} as never);
-    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+    });
+    const store = new ReviewChecklistStore(context);
     const document = makeDocument(ARTICLE);
 
     await new ProofreadController(context, store).runManual(document as never);
 
-    expect(recordReview).toHaveBeenCalledWith(document.uri.toString(), expect.any(Array), expect.any(String), []);
-    const findings = recordReview.mock.calls[0][1] as { suggestion: { originalText: string } }[];
+    const recorded = store.get(document.uri.toString());
+    expect(recorded?.bodyHash).toEqual(expect.any(String));
+    expect(recorded?.skippedSteps ?? []).toEqual([]);
+    const findings = recorded?.items ?? [];
     expect(findings).toHaveLength(1);
-    expect(findings[0].suggestion.originalText).toBe('AはB');
+    expect(findings[0].originalText).toBe('AはB');
   });
 
   it('スキップされたステップを、理由つきでrecordReviewへ渡す(issue #1545 AC1)', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
+    byStep((step) =>
       step === 'PROOFREADING'
         ? { suggestions: [], skipped: true, skipReason: '本文が短いため' }
-        : { suggestions: [], skipped: false }) as never);
-    const store = new ReviewChecklistStore({} as never);
-    const recordReview = jest.spyOn(store, 'recordReview').mockResolvedValue({ bodyHash: 'h', items: [] });
+        : { suggestions: [], skipped: false });
+    const store = new ReviewChecklistStore(context);
 
-    await new ProofreadController(context, store).runManual(makeDocument(ARTICLE) as never);
+    const document = makeDocument(ARTICLE);
+    await new ProofreadController(context, store).runManual(document as never);
 
-    const skipped = recordReview.mock.calls[0][3] as { step: { key: string }; reason: string }[];
+    const skipped = store.get(document.uri.toString())?.skippedSteps ?? [];
     expect(skipped).toHaveLength(1);
-    expect(skipped[0].step.key).toBe('PROOFREADING');
+    expect(skipped[0].stepKey).toBe('PROOFREADING');
     expect(skipped[0].reason).toBe('本文が短いため');
   });
 
@@ -604,61 +712,54 @@ describe('ProofreadController.reviewForPublish(issue #1217: Publish直前のレ�
     return { suggestions: [{ stepKey: step, originalText: 'AはB', message, suggestion: null, sources: [] }], skipped: false };
   }
 
+  /** 実物の ReviewChecklistStore を、メモリ上の workspaceState(実行基盤の代替)で動かす。 */
   function fakeStore(): ReviewChecklistStore {
-    const state = new Map<string, unknown>();
-    return new ReviewChecklistStore({
-      workspaceState: {
-        get: (key: string) => state.get(key),
-        update: async (key: string, value: unknown) => {
-          state.set(key, value);
-        },
-      },
-    } as never);
+    return new ReviewChecklistStore(context);
   }
 
   it('未レビューならレビューを実行し、未対応の指摘があればブロックして件数を返す', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
-      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false }) as never);
+    byStep((step) =>
+      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false });
     const controller = new ProofreadController(context, fakeStore());
 
     const outcome = await controller.reviewForPublish(makeDocument(ARTICLE) as never);
 
-    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(REVIEW_STEPS.length);
+    expect(requestedSteps()).toHaveLength(REVIEW_STEPS.length);
     expect(outcome).toEqual({ blocked: true, unresolvedCount: 1, reviewed: true });
   });
 
   it('本文が変わっていなければ2回目はレビューAPIを呼ばず、保持した結果を使う', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
-      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false }) as never);
+    byStep((step) =>
+      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false });
     const controller = new ProofreadController(context, fakeStore());
     const document = makeDocument(ARTICLE);
     await controller.reviewForPublish(document as never);
-    mocked.reviewStepSuggestions.mockClear();
+    server.recorded.length = 0;
 
     const outcome = await controller.reviewForPublish(document as never);
 
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
     expect(outcome).toEqual({ blocked: true, unresolvedCount: 1, reviewed: false });
   });
 
   it('front matterだけが変わっても再実行しない(判定は本文だけで行う)', async () => {
     const controller = new ProofreadController(context, fakeStore());
     await controller.reviewForPublish(makeDocument(ARTICLE) as never);
-    mocked.reviewStepSuggestions.mockClear();
+    server.recorded.length = 0;
 
     await controller.reviewForPublish(makeDocument(ARTICLE.replace('status: draft', 'status: publish')) as never);
 
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
   });
 
   it('本文が変わっていれば再実行する', async () => {
     const controller = new ProofreadController(context, fakeStore());
     await controller.reviewForPublish(makeDocument(ARTICLE) as never);
-    mocked.reviewStepSuggestions.mockClear();
+    server.recorded.length = 0;
 
     await controller.reviewForPublish(makeDocument(`${ARTICLE}追記です。`) as never);
 
-    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(REVIEW_STEPS.length);
+    expect(requestedSteps()).toHaveLength(REVIEW_STEPS.length);
   });
 
   it('実行中は進捗通知を出す', async () => {
@@ -670,7 +771,7 @@ describe('ProofreadController.reviewForPublish(issue #1217: Publish直前のレ�
   it('本文が空ならAPIを呼ばずブロックしない', async () => {
     const controller = new ProofreadController(context, fakeStore());
     const outcome = await controller.reviewForPublish(makeDocument('---\ntitle: t\n---\n') as never);
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
     expect(outcome.blocked).toBe(false);
   });
 
@@ -685,14 +786,18 @@ describe('ProofreadController.reviewForPublish(issue #1217: Publish直前のレ�
     const controller = new ProofreadController(context, store);
     const document = makeDocument(ARTICLE);
     let release: () => void = () => undefined;
-    mocked.reviewStepSuggestions.mockImplementationOnce(
-      () => new Promise((resolve) => { release = () => resolve({ suggestions: [], skipped: false } as never); }) as never
+    stepHandler.mockImplementationOnce(
+      () => new Promise<Reply>((resolve) => { release = () => resolve(jsonReply(NO_FINDINGS)); })
     );
-    const first = controller.reviewForPublish(document as never);
-    await new Promise((r) => setImmediate(r));
+    // 後続の実行が先行の要求を中断するので、先行の失敗は release() より前に起きる。早めに受け止める。
+    const first = controller.reviewForPublish(document as never).then(
+      () => undefined,
+      (error: Error) => error
+    );
+    await waitFor(() => requestedSteps().length === 1);
     await controller.runManual(document as never);
     release();
-    await expect(first).rejects.toThrow('レビュー結果');
+    expect((await first)?.message).toContain('レビュー結果');
   });
 });
 
@@ -701,26 +806,19 @@ describe('ProofreadController.reviewForPreview(issue #1226: プレビュー直�
     return { suggestions: [{ stepKey: step, originalText: 'AはB', message, suggestion: null, sources: [] }], skipped: false };
   }
 
+  /** 実物の ReviewChecklistStore を、メモリ上の workspaceState(実行基盤の代替)で動かす。 */
   function fakeStore(): ReviewChecklistStore {
-    const state = new Map<string, unknown>();
-    return new ReviewChecklistStore({
-      workspaceState: {
-        get: (key: string) => state.get(key),
-        update: async (key: string, value: unknown) => {
-          state.set(key, value);
-        },
-      },
-    } as never);
+    return new ReviewChecklistStore(context);
   }
 
   it('未レビューならレビューを実行し、未対応の件数を返す', async () => {
-    mocked.reviewStepSuggestions.mockImplementation((async (_k: string, _a: unknown, _p: number, step: string) =>
-      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false }) as never);
+    byStep((step) =>
+      step === 'PROOFREADING' ? suggestionFor(step, '誤り') : { suggestions: [], skipped: false });
     const controller = new ProofreadController(context, fakeStore());
 
     const outcome = await controller.reviewForPreview(makeDocument(ARTICLE) as never);
 
-    expect(mocked.reviewStepSuggestions).toHaveBeenCalledTimes(REVIEW_STEPS.length);
+    expect(requestedSteps()).toHaveLength(REVIEW_STEPS.length);
     expect(outcome).toEqual({ unresolvedCount: 1, reviewed: true, failed: false });
     expect(progressRuns.length).toBeGreaterThan(0);
   });
@@ -729,11 +827,11 @@ describe('ProofreadController.reviewForPreview(issue #1226: プレビュー直�
     const controller = new ProofreadController(context, fakeStore());
     const document = makeDocument(ARTICLE);
     await controller.reviewForPublish(document as never);
-    mocked.reviewStepSuggestions.mockClear();
+    server.recorded.length = 0;
 
     const outcome = await controller.reviewForPreview(document as never);
 
-    expect(mocked.reviewStepSuggestions).not.toHaveBeenCalled();
+    expect(requestedSteps()).toEqual([]);
     expect(outcome.reviewed).toBe(false);
   });
 

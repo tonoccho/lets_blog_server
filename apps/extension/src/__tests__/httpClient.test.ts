@@ -63,7 +63,10 @@ describe('httpRequest(fetch経路)', () => {
       options({ method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'hello' })
     );
 
-    expect(server.recorded).toEqual([{ path: '/echo?x=1', method: 'POST', body: 'hello' }]);
+    expect(server.recorded).toEqual([
+      expect.objectContaining({ path: '/echo?x=1', method: 'POST', body: 'hello' }),
+    ]);
+    expect(server.recorded[0].headers['content-type']).toBe('text/plain');
     expect(res.statusText).toBe('OK');
     expect(await res.text()).toBe('{"a":1}');
   });

@@ -10,22 +10,20 @@ import {
 } from '../__mocks__/vscode';
 import { ImageGenPanel } from '../imageGenPanel';
 
-jest.mock('../apiClient', () => ({
-  generateImage: jest.fn(),
-  generateImagePrompt: jest.fn(),
-  getImageGenerationOptions: jest.fn(),
-}));
-jest.mock('../config', () => ({
-  requireAccessToken: jest.fn(async () => 'token'),
-  getActor: jest.fn(async () => ({ id: 1, email: 'a@example.test', name: 'a' })),
-  getConfiguredAiProvider: jest.fn(() => 'OPENAI'),
-}));
-
+import { setConfiguration } from '../__mocks__/vscode';
 import * as api from '../apiClient';
+import { LocalHttpServer, jsonReply, routes } from './support/localHttpServer';
+import { createContext as createTestContext, loginAs } from './support/extensionContext';
+import { payloadOf, posted, send, waitFor } from './support/panelKit';
 
-const generateImageMock = api.generateImage as unknown as jest.Mock;
-const generateImagePromptMock = api.generateImagePrompt as unknown as jest.Mock;
-const getOptionsMock = api.getImageGenerationOptions as unknown as jest.Mock;
+// 外部通信(gateway の /api/ai/*)だけを実サーバーで受ける。config.ts・apiClient.ts は実物。
+let server: LocalHttpServer;
+let loggedInContext: vscode.ExtensionContext;
+
+/** POST /api/ai/image の応答(生成結果)を設定する。 */
+function serveImages(images: ReturnType<typeof result>[]): void {
+  server.respondWith(routes({ 'POST /api/ai/image': jsonReply({ images }) }));
+}
 
 /**
  * Generate Imageパネルが「batch sizeで生成した全枚数を扱い、選択された1枚を保存する」ことの検証
@@ -45,9 +43,6 @@ let baseDir: string;
 let extensionRoot: string;
 let documentText: string;
 
-function createContext(): vscode.ExtensionContext {
-  return { extensionUri: `file://${extensionRoot}` } as unknown as vscode.ExtensionContext;
-}
 
 function createEditor(): vscode.TextEditor {
   return {
@@ -61,22 +56,6 @@ function createEditor(): vscode.TextEditor {
   } as unknown as vscode.TextEditor;
 }
 
-/** Webview側のスクリプトがpostMessageした状況を再現し、非同期処理の完了まで待つ。 */
-async function send(message: unknown): Promise<void> {
-  lastCreatedWebviewPanel?.webview.postMessageToExtension(message);
-  await new Promise((resolve) => setImmediate(resolve));
-}
-
-function posted(): { command: string; payload: unknown }[] {
-  return (lastCreatedWebviewPanel?.webview.posted ?? []) as { command: string; payload: unknown }[];
-}
-
-function payloadOf(command: string): unknown {
-  const found = posted().filter((m) => m.command === command);
-  if (found.length === 0) throw new Error(`${command} が送られていません: ${JSON.stringify(posted())}`);
-  return found[found.length - 1].payload;
-}
-
 function assetFiles(): string[] {
   const dir = path.join(baseDir, 'assets');
   return fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
@@ -84,7 +63,7 @@ function assetFiles(): string[] {
 
 function open(prefill?: unknown): void {
   ImageGenPanel.createOrShow(
-    createContext(),
+    loggedInContext,
     createEditor(),
     baseDir,
     7,
@@ -96,23 +75,28 @@ beforeAll(() => {
   extensionRoot = path.resolve(__dirname, '..', '..');
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'letsblog-imagegen-'));
   documentText = '---\ntitle: テスト記事\n---\n\n本文\n';
-  generateImageMock.mockReset();
-  generateImagePromptMock.mockReset();
-  getOptionsMock.mockReset();
+  resetMocks();
+  api.clearResponseCache();
+  server = await LocalHttpServer.start();
+  setConfiguration('letsBlog.serverUrl', server.url);
+  setConfiguration('letsBlog.aiProvider', 'OPENAI');
+  loggedInContext = createTestContext(`file://${extensionRoot}`);
+  await loginAs(loggedInContext);
 });
 
-afterEach(() => {
+afterEach(async () => {
   lastCreatedWebviewPanel?.fireDispose();
   resetMocks();
   fs.rmSync(baseDir, { recursive: true, force: true });
+  await server.stop();
 });
 
 describe('ImageGenPanel', () => {
   it('生成完了ではファイル名の一覧だけをWebviewへ渡し、画像データは送らない', async () => {
-    generateImageMock.mockResolvedValue([
+    serveImages([
       result(1, 'a.png', IMAGE_A),
       result(2, 'b.png', IMAGE_B),
     ]);
@@ -125,7 +109,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('1枚だけ生成した場合も配列としてWebviewへ渡す', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'only.png', IMAGE_A)]);
+    serveImages([result(1, 'only.png', IMAGE_A)]);
     open();
 
     await send({ command: 'generate', params: { prompt: '犬', batchSize: 1 } });
@@ -139,7 +123,7 @@ describe('ImageGenPanel', () => {
    * パネルが実体を保持し、Webviewが必要になった1枚だけを取りに来る形へ改める。
    */
   it('requestImageで指定された1枚だけを返す', async () => {
-    generateImageMock.mockResolvedValue([
+    serveImages([
       result(1, 'a.png', IMAGE_A),
       result(2, 'b.jpg', IMAGE_B, 'image/jpeg'),
     ]);
@@ -165,7 +149,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('生成枚数の範囲外のrequestImageはエラーになる', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A)]);
+    serveImages([result(1, 'a.png', IMAGE_A)]);
     open();
     await send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } });
 
@@ -175,11 +159,10 @@ describe('ImageGenPanel', () => {
   });
 
   it('256枚を生成しても生成完了メッセージは数十KBに収まる', async () => {
-    // 1920×1080のPNGをbase64にすると1枚1MBを超える。それを256枚ぶん保持させる。
-    const oneMegabyte = 'A'.repeat(1_000_000);
-    generateImageMock.mockResolvedValue(
-      Array.from({ length: 256 }, (_, i) => result(i + 1, `image-${i}.png`, oneMegabyte))
-    );
+    // 実サーバーから 256 枚ぶんを実際に受け取るため、1 枚あたりは 100KB にする(メッセージの大きさが
+    // 枚数や画像の大きさに比例しないことの確認なので、1MB でなくても不変条件は同じ)。
+    const oneMegabyte = 'A'.repeat(100_000);
+    serveImages(Array.from({ length: 256 }, (_, i) => result(i + 1, `image-${i}.png`, oneMegabyte)));
     open();
 
     await send({ command: 'generate', params: { prompt: '猫', batchSize: 16, batchCount: 16 } });
@@ -190,7 +173,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('2枚目を選んでアイキャッチにすると2枚目のファイルが保存され、front matterがそれを指す', async () => {
-    generateImageMock.mockResolvedValue([
+    serveImages([
       result(1, 'a.png', IMAGE_A),
       result(2, 'b.jpg', IMAGE_B, 'image/jpeg'),
     ]);
@@ -210,7 +193,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('1枚目を選んでアセットにすると1枚目のファイルが保存され、Markdown参照が挿入される', async () => {
-    generateImageMock.mockResolvedValue([
+    serveImages([
       result(1, 'a.png', IMAGE_A),
       result(2, 'b.png', IMAGE_B),
     ]);
@@ -246,7 +229,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('生成枚数の範囲外を選んで保存しようとするとエラーになり、ファイルを作らない', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A)]);
+    serveImages([result(1, 'a.png', IMAGE_A)]);
     open();
     await send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } });
 
@@ -257,7 +240,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('既知でない拡張子のファイル名は.pngとして保存する', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'image.tiff', IMAGE_A, 'image/tiff')]);
+    serveImages([result(1, 'image.tiff', IMAGE_A, 'image/tiff')]);
     open();
     await send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } });
 
@@ -267,7 +250,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('プロンプト未生成のままアセット追加してもalt文言は空になる', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A)]);
+    serveImages([result(1, 'a.png', IMAGE_A)]);
     open();
     await send({ command: 'generate', params: { batchSize: 1 } });
 
@@ -278,23 +261,30 @@ describe('ImageGenPanel', () => {
   });
 
   it('loadOptionsは拡張側のAIプロバイダー設定を合成して返す', async () => {
-    getOptionsMock.mockResolvedValue({ checkpoints: ['x'], samplers: [], schedulers: [], loras: [] });
+    server.respondWith(
+      routes({ 'GET /api/ai/image-options': jsonReply({ checkpoints: ['x'], samplers: [], schedulers: [], loras: [] }) })
+    );
     open();
 
     await send({ command: 'loadOptions' });
 
-    expect(payloadOf('options')).toEqual({
-      checkpoints: ['x'],
-      samplers: [],
-      schedulers: [],
-      loras: [],
-      defaultAiProvider: 'OPENAI',
-    });
+    expect(server.recorded[0].path).toBe('/api/ai/image-options?projectId=7');
+    expect(payloadOf('options')).toEqual(
+      expect.objectContaining({
+        checkpoints: ['x'],
+        samplers: [],
+        schedulers: [],
+        loras: [],
+        defaultAiProvider: 'OPENAI',
+      })
+    );
     expect(posted().some((m) => m.command === 'prefill')).toBe(false);
   });
 
   it('Image Galleryから開いた場合はloadOptionsの後にprefillを送る', async () => {
-    getOptionsMock.mockResolvedValue({ checkpoints: [], samplers: [], schedulers: [], loras: [] });
+    server.respondWith(
+      routes({ 'GET /api/ai/image-options': jsonReply({ checkpoints: [], samplers: [], schedulers: [], loras: [] }) })
+    );
     open({ prompt: '再生成したい設定', batchSize: 2 });
 
     await send({ command: 'loadOptions' });
@@ -310,11 +300,14 @@ describe('ImageGenPanel', () => {
   });
 
   it('チャットからプロンプトを生成するとWebviewへ返す', async () => {
-    generateImagePromptMock.mockResolvedValue({ prompt: 'a cat on the beach' });
+    server.respondWith(
+      routes({ 'POST /api/projects/7/ai/generate-image-prompt': jsonReply({ prompt: 'a cat on the beach' }) })
+    );
     open();
 
     await send({ command: 'sendChat', history: [], message: '猫', provider: 'OLLAMA' });
 
+    expect(JSON.parse(server.recorded[0].body)).toEqual({ history: [], message: '猫', provider: 'OLLAMA' });
     expect(payloadOf('promptGenerated')).toEqual({ prompt: 'a cat on the beach' });
   });
 
@@ -323,20 +316,20 @@ describe('ImageGenPanel', () => {
    * 切り替えた後の挿入・保存先が前の記事のままになる不具合の検証。
    */
   it('記事Aで開いたあと閉じずに記事Bで再度開くと、アセット追加は記事Bへ行われる (issue #1063)', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A)]);
+    serveImages([result(1, 'a.png', IMAGE_A)]);
     const baseDirA = baseDir;
     const documentTextA = documentText;
     const baseDirB = fs.mkdtempSync(path.join(os.tmpdir(), 'letsblog-imagegen-b-'));
     const documentTextB = '---\ntitle: 記事B\n---\n\n本文B\n';
 
     ImageGenPanel.createOrShow(
-      createContext(),
+      loggedInContext,
       { document: { uri: 'file:///workspace/a.md', getText: () => documentTextA, positionAt: (o: number) => o, save: () => Promise.resolve(true) }, selection: { active: 0 } } as unknown as vscode.TextEditor,
       baseDirA,
       7
     );
     ImageGenPanel.createOrShow(
-      createContext(),
+      loggedInContext,
       { document: { uri: 'file:///workspace/b.md', getText: () => documentTextB, positionAt: (o: number) => o, save: () => Promise.resolve(true) }, selection: { active: 0 } } as unknown as vscode.TextEditor,
       baseDirB,
       8
@@ -356,7 +349,7 @@ describe('ImageGenPanel', () => {
   });
 
   it('再度開かずに連続して保存しても、同じ記事へ書き込まれ続ける(回帰確認)', async () => {
-    generateImageMock.mockResolvedValue([result(1, 'a.png', IMAGE_A), result(2, 'b.png', IMAGE_B)]);
+    serveImages([result(1, 'a.png', IMAGE_A), result(2, 'b.png', IMAGE_B)]);
     open();
     await send({ command: 'generate', params: { prompt: '猫', batchSize: 2 } });
 
@@ -372,22 +365,15 @@ describe('ImageGenPanel', () => {
   });
 
   it('cancelは進行中の生成を中断し、キャンセルとして通知する', async () => {
-    let abortSignal: AbortSignal | undefined;
-    generateImageMock.mockImplementation(
-      (_key: string, _actor: unknown, _projectId: number, _params: unknown, signal: AbortSignal) =>
-        new Promise((_resolve, reject) => {
-          abortSignal = signal;
-          signal.addEventListener('abort', () => reject(new (require('../errorHandler').CancelledError)('cancelled')));
-        })
-    );
+    // 要求を受けても応答を返さないサーバー(生成中)。
+    server.respondWith({ status: 200, hang: true });
     open();
-    void send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } });
-    await new Promise((resolve) => setImmediate(resolve));
+    void send({ command: 'generate', params: { prompt: '猫', batchSize: 1 } }, false);
+    await waitFor(() => server.recorded.length === 1);
 
     await send({ command: 'cancel' });
-    await new Promise((resolve) => setImmediate(resolve));
 
-    expect(abortSignal?.aborted).toBe(true);
+    expect(server.recorded).toHaveLength(1);
     expect(posted().some((m) => m.command === 'cancelled')).toBe(true);
   });
 });

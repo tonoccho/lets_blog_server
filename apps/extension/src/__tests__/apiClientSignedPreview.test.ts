@@ -1,33 +1,19 @@
 import { resetMocks, setConfiguration } from '../__mocks__/vscode';
 import * as apiClient from '../apiClient';
-import { httpRequest } from '../httpClient';
 import { ApiError } from '../errorHandler';
-
-jest.mock('../httpClient', () => ({ httpRequest: jest.fn() }));
-
-const mockedRequest = httpRequest as jest.MockedFunction<typeof httpRequest>;
+import { LocalHttpServer, jsonReply } from './support/localHttpServer';
 
 /** 署名付きプレビューURLの発行(issue #1562)。プラグインが使えないサイトの409は案内に変える。 */
 describe('createSignedPreviewUrl', () => {
-  const recorded: { url: string; method: string; body: unknown }[] = [];
+  let server: LocalHttpServer;
 
   function respondWith(payload: unknown, status = 200): void {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({
-        url,
-        method: options.method,
-        body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body,
-      });
-      return {
-        status,
-        ok: status >= 200 && status < 300,
-        statusText: 'ERR',
-        header: () => undefined,
-        text: async () => JSON.stringify(payload),
-        json: async () => payload,
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
-    });
+    server.respondWith(jsonReply(payload, status));
+  }
+
+  /** 受信した要求を、本文を JSON に戻した形で返す。 */
+  function requests(): { path: string; method: string; body: unknown }[] {
+    return server.recorded.map((r) => ({ path: r.path, method: r.method, body: JSON.parse(r.body) }));
   }
 
   const input = {
@@ -39,12 +25,15 @@ describe('createSignedPreviewUrl', () => {
     featuredImageDataUri: 'data:image/png;base64,AAAA',
   };
 
-  beforeEach(() => {
-    recorded.length = 0;
-    mockedRequest.mockReset();
+  beforeEach(async () => {
+    server = await LocalHttpServer.start();
     resetMocks();
-    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
+    setConfiguration('letsBlog.serverUrl', server.url);
     setConfiguration('letsBlog.allowInsecureTls', true);
+  });
+
+  afterEach(async () => {
+    await server.stop();
   });
 
   it('プロジェクトのsigned-url APIへ記事の内容を送り、URLと期限を返す', async () => {
@@ -52,10 +41,10 @@ describe('createSignedPreviewUrl', () => {
 
     const result = await apiClient.createSignedPreviewUrl('token', undefined, 7, input);
 
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0].method).toBe('POST');
-    expect(recorded[0].url).toBe('https://stack.test/api/projects/7/preview/signed-url');
-    expect(recorded[0].body).toEqual(input);
+    expect(requests()).toHaveLength(1);
+    expect(requests()[0].method).toBe('POST');
+    expect(requests()[0].path).toBe('/api/projects/7/preview/signed-url');
+    expect(requests()[0].body).toEqual(input);
     expect(result).toEqual({
       kind: 'ready',
       url: 'https://blog.example.com/?letsblog_preview=x',
@@ -69,7 +58,7 @@ describe('createSignedPreviewUrl', () => {
     respondWith({ url: 'https://blog.example.com/?t=2', expiresAt: 2 });
     const second = await apiClient.createSignedPreviewUrl('token', undefined, 7, input);
 
-    expect(recorded).toHaveLength(2);
+    expect(requests()).toHaveLength(2);
     expect(second).toMatchObject({ kind: 'ready', url: 'https://blog.example.com/?t=2' });
   });
 
@@ -98,15 +87,7 @@ describe('createSignedPreviewUrl', () => {
   });
 
   it('本文がJSONでない409はApiErrorで失敗する', async () => {
-    mockedRequest.mockImplementation(async () => ({
-      status: 409,
-      ok: false,
-      statusText: 'ERR',
-      header: () => undefined,
-      text: async () => 'letsblog プラグイン 要更新',
-      json: async () => ({}),
-      arrayBuffer: async () => new ArrayBuffer(0),
-    }));
+    server.respondWith({ status: 409, body: 'letsblog プラグイン 要更新' });
 
     await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
   });
@@ -118,6 +99,15 @@ describe('createSignedPreviewUrl', () => {
     await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
     respondWith(null, 409);
     await expect(apiClient.createSignedPreviewUrl('token', undefined, 7, input)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('コードがあってもmessage/errorが文字列でない409は、本文そのものを案内の文言にする', async () => {
+    const body = { details: { code: 'LETSBLOG_PLUGIN_NOT_INSTALLED' } };
+    respondWith(body, 409);
+
+    const result = await apiClient.createSignedPreviewUrl('token', undefined, 7, input);
+
+    expect(result).toMatchObject({ kind: 'pluginUnavailable', needsUpdate: false, message: JSON.stringify(body) });
   });
 
   it('プラグインと無関係な409はそのままApiErrorで失敗する', async () => {

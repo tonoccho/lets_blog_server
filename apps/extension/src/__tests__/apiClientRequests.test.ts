@@ -1,11 +1,35 @@
 import { setConfiguration, resetMocks } from '../__mocks__/vscode';
 import * as apiClient from '../apiClient';
-import { httpRequest } from '../httpClient';
 import { ApiError, CancelledError, NetworkError, ResponseValidationError, TimeoutError } from '../errorHandler';
+import { LocalHttpServer, RecordedRequest, jsonReply, unreachableUrl } from './support/localHttpServer';
 
-jest.mock('../httpClient', () => ({ httpRequest: jest.fn() }));
+/** 実サーバーが受けた要求を、テストが読みやすい形(url はパスだけ、本文は JSON に戻す)にする。 */
+function toRecorded(request: RecordedRequest, parseBody = true): { url: string; method: string; headers: Record<string, string>; body: unknown } {
+  return {
+    url: request.path,
+    method: request.method,
+    headers: request.headers,
+    body: parseBody ? tryParseJson(request.body) : request.body,
+  };
+}
 
-const mockedRequest = httpRequest as jest.MockedFunction<typeof httpRequest>;
+function tryParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/** 各 describe で実サーバーを立てて、apiClient の向き先に設定する。 */
+async function startServer(): Promise<LocalHttpServer> {
+  const server = await LocalHttpServer.start();
+  resetMocks();
+  apiClient.clearResponseCache();
+  setConfiguration('letsBlog.serverUrl', server.url);
+  setConfiguration('letsBlog.allowInsecureTls', true);
+  return server;
+}
 
 /**
  * 拡張がサーバーへ「何を」送るかの検証(issue #942 / AT-16 Layer 2)。
@@ -22,35 +46,31 @@ describe('apiClientが組み立てるリクエスト', () => {
     body: unknown;
   }
 
+  let server: LocalHttpServer;
+  let recorded: Recorded[];
+
   function respondWith(payload: unknown, status = 200, headers: Record<string, string> = {}): void {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({
-        url,
-        method: options.method,
-        headers: options.headers,
-        body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body,
-      });
-      return {
-        status,
-        ok: status >= 200 && status < 300,
-        statusText: 'OK',
-        header: (name: string) => headers[name],
-        text: async () => JSON.stringify(payload),
-        json: async () => payload,
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
+    server.respondWith((request) => {
+      recorded.push(toRecorded(request));
+      return jsonReply(payload, status, headers);
     });
   }
 
-  let recorded: Recorded[];
+  /** 本文を JSON に戻さず文字列のまま記録して返す(multipart 用)。 */
+  function respondRaw(payload: unknown): void {
+    server.respondWith((request) => {
+      recorded.push(toRecorded(request, false));
+      return jsonReply(payload);
+    });
+  }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     recorded = [];
-    mockedRequest.mockReset();
-    resetMocks();
-    apiClient.clearResponseCache();
-    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
-    setConfiguration('letsBlog.allowInsecureTls', true);
+    server = await startServer();
+  });
+
+  afterEach(async () => {
+    await server.stop();
   });
 
   it('レビューステップの指摘生成は、projectIdとステップキーをパスに、本文だけをボディに送る', async () => {
@@ -63,7 +83,7 @@ describe('apiClientが組み立てるリクエスト', () => {
 
     expect(recorded).toHaveLength(1);
     expect(recorded[0].method).toBe('POST');
-    expect(recorded[0].url).toBe('https://stack.test/api/projects/42/ai/review-steps/READER_PERSPECTIVE/suggestions');
+    expect(recorded[0].url).toBe('/api/projects/42/ai/review-steps/READER_PERSPECTIVE/suggestions');
     expect(recorded[0].body).toEqual({ text: '本文です' });
     expect(result.suggestions[0]).toMatchObject({ originalText: '誤', message: '直す', suggestion: null, sources: [] });
     expect(result.skipped).toBe(false);
@@ -89,7 +109,7 @@ describe('apiClientが組み立てるリクエスト', () => {
       subsectionHeadings: ['前提', '構成'],
     });
 
-    expect(recorded[0].url).toBe('https://stack.test/api/ai/section');
+    expect(recorded[0].url).toBe('/api/ai/section');
     expect(recorded[0].body).toEqual({
       mode: 'body',
       heading: '背景',
@@ -150,23 +170,7 @@ describe('apiClientが組み立てるリクエスト', () => {
   });
 
   it('公開はmultipart/form-dataで送り、front matter由来の項目をフィールドとして並べる', async () => {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({
-        url,
-        method: options.method,
-        headers: options.headers,
-        body: options.body instanceof Buffer ? options.body.toString('utf-8') : options.body,
-      });
-      return {
-        status: 200,
-        ok: true,
-        statusText: 'OK',
-        header: () => undefined,
-        text: async () => '',
-        json: async () => ({ wpPostId: '1', wpPostUrl: 'https://site/1', status: 'draft' }),
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
-    });
+    respondRaw({ wpPostId: '1', wpPostUrl: 'https://site/1', status: 'draft' });
 
     await apiClient.publishPost('token', {
       site: 'site',
@@ -181,7 +185,7 @@ describe('apiClientが組み立てるリクエスト', () => {
     });
 
     const body = String(recorded[0].body);
-    expect(recorded[0].headers['Content-Type']).toContain('multipart/form-data; boundary=');
+    expect(recorded[0].headers['content-type']).toContain('multipart/form-data; boundary=');
     for (const field of ['site', 'title', 'slug', 'status', 'categories', 'tags', 'markdown', 'publishScheduledAt']) {
       expect(body).toContain(`name="${field}"`);
     }
@@ -219,33 +223,30 @@ describe('apiClientが解釈するレスポンス', () => {
 
   let recorded: Recorded[];
 
+  let server: LocalHttpServer;
+
   function respondWith(payload: unknown, status = 200, textBody?: string): void {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({
-        url,
-        method: options.method,
-        headers: options.headers,
-        body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body,
-      });
-      return {
-        status,
-        ok: status >= 200 && status < 300,
-        statusText: 'Server Error',
-        header: () => undefined,
-        text: async () => (textBody !== undefined ? textBody : JSON.stringify(payload)),
-        json: async () => payload,
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
+    server.respondWith((request) => {
+      recorded.push(toRecorded(request));
+      return textBody !== undefined ? { status, body: textBody } : jsonReply(payload, status);
     });
   }
 
-  beforeEach(() => {
+  /** 本文を JSON に戻さず文字列のまま記録して返す(multipart 用)。 */
+  function respondRaw(payload: unknown): void {
+    server.respondWith((request) => {
+      recorded.push(toRecorded(request, false));
+      return jsonReply(payload);
+    });
+  }
+
+  beforeEach(async () => {
     recorded = [];
-    mockedRequest.mockReset();
-    resetMocks();
-    apiClient.clearResponseCache();
-    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
-    setConfiguration('letsBlog.allowInsecureTls', true);
+    server = await startServer();
+  });
+
+  afterEach(async () => {
+    await server.stop();
   });
 
   it('画像生成はbatch sizeで生成された全枚数を返す', async () => {
@@ -300,8 +301,8 @@ describe('apiClientが解釈するレスポンス', () => {
     await apiClient.getImageGenerationOptions('token');
 
     expect(recorded.map((r) => r.url)).toEqual([
-      'https://stack.test/api/ai/image-options?projectId=7',
-      'https://stack.test/api/ai/image-options',
+      '/api/ai/image-options?projectId=7',
+      '/api/ai/image-options',
     ]);
   });
 
@@ -342,7 +343,7 @@ describe('apiClientが解釈するレスポンス', () => {
 
     await apiClient.assignIssue('token', { id: 1, email: 'a@b', name: 'a' } as never, 7, 3);
 
-    expect(recorded[0].headers['Content-Type']).toBe('application/json');
+    expect(recorded[0].headers['content-type']).toBe('application/json');
   });
 
   it('AIプロバイダー未指定の依頼はproviderキー自体を送らない', async () => {
@@ -392,23 +393,7 @@ describe('apiClientが解釈するレスポンス', () => {
   });
 
   it('公開はwpPostIdとアイキャッチファイル名も同梱する', async () => {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({
-        url,
-        method: options.method,
-        headers: options.headers,
-        body: options.body instanceof Buffer ? options.body.toString('utf-8') : options.body,
-      });
-      return {
-        status: 200,
-        ok: true,
-        statusText: 'OK',
-        header: () => undefined,
-        text: async () => '',
-        json: async () => ({ wpPostId: '1', wpPostUrl: 'https://site/1', status: 'draft' }),
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
-    });
+    respondRaw({ wpPostId: '1', wpPostUrl: 'https://site/1', status: 'draft' });
 
     await apiClient.publishPost('token', {
       site: 'site',
@@ -432,25 +417,26 @@ describe('apiClientが解釈するレスポンス', () => {
     await expect(apiClient.listSites('token')).resolves.toEqual([]);
   });
 
-  it('既にキャンセル済みのシグナルを渡された場合もリクエスト自体は組み立てる', async () => {
+  // 旧テストは httpRequest をモックしていたためシグナルが無視され「要求は送られる」と書いていたが、
+  // 実際の fetch は中断済みのシグナルを渡されると送信前に拒否する。利用者の観点で正しい
+  // 「キャンセルとして失敗し、サーバーには何も届かない」を固定する。
+  it('既にキャンセル済みのシグナルを渡された場合はCancelledErrorになり、サーバーへは何も送らない', async () => {
     respondWith({ images: [{ id: 1, fileName: 'a.png', dataBase64: 'QUFB', mimeType: 'image/png' }] });
     const controller = new AbortController();
     controller.abort();
 
-    await apiClient.generateImage('token', undefined, 7, { prompt: '猫' }, controller.signal);
+    await expect(
+      apiClient.generateImage('token', undefined, 7, { prompt: '猫' }, controller.signal)
+    ).rejects.toBeInstanceOf(CancelledError);
 
-    expect(recorded).toHaveLength(1);
+    expect(recorded).toHaveLength(0);
   });
 
   it('送信中にキャンセルされた場合はCancelledErrorになる', async () => {
     const controller = new AbortController();
-    mockedRequest.mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          controller.signal.addEventListener('abort', () => reject(new Error('aborted')));
-          controller.abort();
-        })
-    );
+    // 応答を返さないサーバーへ送り、送信中(要求がサーバーに届いた後)に利用者がキャンセルした状況を作る。
+    server.respondWith({ status: 200, hang: true });
+    setTimeout(() => controller.abort(), 100);
 
     await expect(
       apiClient.generateImage('token', undefined, 7, { prompt: '猫' }, controller.signal)
@@ -463,18 +449,14 @@ describe('apiClientが解釈するレスポンス', () => {
   // (画像生成側の下限そのものは apiClientImageTimeout.test.ts が受け持つ)。
   it('タイムアウトした場合はTimeoutErrorになる', async () => {
     setConfiguration('letsBlog.requestTimeoutMs', 1);
-    mockedRequest.mockImplementation(
-      (_url, options) =>
-        new Promise((_resolve, reject) => {
-          options.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-        })
-    );
+    server.respondWith({ status: 200, hang: true });
 
     await expect(apiClient.listSites('token')).rejects.toBeInstanceOf(TimeoutError);
   });
 
   it('接続自体に失敗した場合はNetworkErrorになる', async () => {
-    mockedRequest.mockImplementation(() => Promise.reject(new Error('ECONNREFUSED')));
+    // 待ち受けていないポートへ向ける(接続拒否)。
+    setConfiguration('letsBlog.serverUrl', await unreachableUrl());
 
     await expect(apiClient.generateImage('token', undefined, 7, { prompt: '猫' })).rejects.toBeInstanceOf(
       NetworkError
@@ -485,7 +467,7 @@ describe('apiClientが解釈するレスポンス', () => {
     respondWith(undefined, 500, '');
 
     await expect(apiClient.generateImage('token', undefined, 7, { prompt: '猫' })).rejects.toMatchObject({
-      responseBody: 'Server Error',
+      responseBody: 'Internal Server Error',
     });
   });
 
@@ -508,7 +490,7 @@ describe('apiClientが解釈するレスポンス', () => {
 
     expect(recorded).toHaveLength(1);
     expect(recorded[0].method).toBe('POST');
-    expect(recorded[0].url).toBe('https://stack.test/api/projects/42/article-review/submissions');
+    expect(recorded[0].url).toBe('/api/projects/42/article-review/submissions');
     expect(recorded[0].body).toEqual({ headBranch: 'article/7-my-post', githubIssueNumber: 7, articleSlug: 'my-post' });
     expect(result).toEqual({ prNumber: 9, url: 'https://github.test/o/r/pull/9', created: true });
   });
@@ -525,30 +507,27 @@ describe('apiClientが解釈するレスポンス', () => {
 });
 
 describe('自分のレビュー一覧の取得(issue #1347)', () => {
+  let server: LocalHttpServer;
+
+  beforeEach(async () => {
+    server = await startServer();
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
   it('projectIdをパスに、GETで取得し、差し戻し情報を含む行を返す', async () => {
-    mockedRequest.mockReset();
-    resetMocks();
-    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
-    setConfiguration('letsBlog.allowInsecureTls', true);
     const payload = [
       { prNumber: 7, articleSlug: 'my-post', state: 'CHANGES_REQUESTED', submittedAt: '2026-10-01T00:00:00Z', rejectComment: '直す', rejectedAt: '2026-10-02T00:00:00Z' },
       { prNumber: 8, articleSlug: 'other', state: 'SUBMITTED', submittedAt: '2026-10-01T00:00:00Z', rejectComment: null, rejectedAt: null },
     ];
-    let url = '';
-    let method = '';
-    mockedRequest.mockImplementation(async (u, options) => {
-      url = u;
-      method = options.method;
-      return {
-        status: 200, ok: true, statusText: 'OK', header: () => undefined,
-        text: async () => JSON.stringify(payload), json: async () => payload, arrayBuffer: async () => new ArrayBuffer(0),
-      };
-    });
+    server.respondWith(jsonReply(payload));
 
     const result = await apiClient.listMyArticleReviews('token', undefined, 42);
 
-    expect(url).toBe('https://stack.test/api/projects/42/article-review/my-reviews');
-    expect(method).toBe('GET');
+    expect(server.recorded[0].path).toBe('/api/projects/42/article-review/my-reviews');
+    expect(server.recorded[0].method).toBe('GET');
     expect(result).toEqual(payload);
   });
 });
@@ -556,32 +535,24 @@ describe('自分のレビュー一覧の取得(issue #1347)', () => {
 describe('listCustomTagsのキャッシュ(issue #1467)', () => {
   const tag = { tagName: 'warn', description: null, tagFormat: 'BLOCK' };
   let calls: number;
+  let server: LocalHttpServer;
 
   function respondSequence(payloads: unknown[]): void {
-    mockedRequest.mockImplementation(async () => {
+    server.respondWith(() => {
       const payload = payloads[Math.min(calls, payloads.length - 1)];
       calls += 1;
-      return {
-        status: 200,
-        ok: true,
-        statusText: 'OK',
-        header: () => undefined,
-        text: async () => JSON.stringify(payload),
-        json: async () => payload,
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
+      return jsonReply(payload);
     });
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     calls = 0;
-    mockedRequest.mockReset();
-    resetMocks();
-    apiClient.clearResponseCache();
-    setConfiguration('letsBlog.serverUrl', 'https://stack.test');
-    setConfiguration('letsBlog.allowInsecureTls', true);
+    server = await startServer();
   });
 
+  afterEach(async () => {
+    await server.stop();
+  });
   it('空の生の結果はキャッシュせず、次回の呼び出しで再取得して新しいタグが見える', async () => {
     respondSequence([[], [tag]]);
 

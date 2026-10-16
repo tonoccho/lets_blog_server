@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
-import { lastCreatedWebviewPanel, openedExternalUrls, resetMocks } from '../__mocks__/vscode';
+import {
+  executedCommands,
+  lastCreatedWebviewPanel,
+  openedExternalUrls,
+  resetMocks,
+  shownErrors,
+} from '../__mocks__/vscode';
 import { PreviewMessage, PreviewPanel, SiteOption } from '../previewPanel';
 
 const fakeContext = { extensionUri: 'file:///ext' } as unknown as vscode.ExtensionContext;
@@ -193,5 +199,30 @@ describe('PreviewPanel 実サイトのプレビュー(issue #1562)', () => {
     });
 
     expect(lastCreatedWebviewPanel?.webview.html).toContain('value="" selected');
+  });
+});
+
+describe('PreviewPanel.openDevTools', () => {
+  afterEach(() => {
+    PreviewPanel.currentPanel = undefined;
+    resetMocks();
+  });
+
+  it('プレビューが開いていなければ、案内のエラーを出して開発者ツールは開かない', () => {
+    PreviewPanel.currentPanel = undefined;
+
+    PreviewPanel.openDevTools();
+
+    expect(shownErrors).toEqual(['プレビューを開いてから実行してください。']);
+    expect(executedCommands).toEqual([]);
+  });
+
+  it('プレビューが開いていれば、そのパネルを前面に出して開発者ツールを開く', () => {
+    PreviewPanel.showNoSite(fakeContext);
+
+    PreviewPanel.openDevTools();
+
+    expect(shownErrors).toEqual([]);
+    expect(executedCommands).toEqual([{ command: 'workbench.action.webview.openDeveloperTools', args: [] }]);
   });
 });

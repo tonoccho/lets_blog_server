@@ -5,8 +5,11 @@ import {
   ResponseValidationError,
   TimeoutError,
   describeError,
+  reportError,
+  withRetry,
 } from '../errorHandler';
-import { resetMocks } from '../__mocks__/vscode';
+import { logger } from '../logger';
+import { outputChannels, resetMocks, setErrorResponse, shownErrors } from '../__mocks__/vscode';
 
 beforeEach(() => {
   resetMocks();
@@ -156,5 +159,93 @@ describe('describeError: 401の案内が現行の認証方式に沿っている�
 
   it('実行可能な対処として「Let\'s Blog: Login」での再ログインを案内する', () => {
     expect(message()).toContain("Let's Blog: Login");
+  });
+});
+
+describe('describeError: 案内の無い状態コードと長い本文', () => {
+  it('案内の定義が無い状態コードでも、状態コードと本文は示す', () => {
+    const message = describeError(new ApiError('APIエラー (418)', 418, 'teapot', 'https://localhost/api/x'));
+
+    expect(message).toContain('APIエラー (418)');
+    expect(message).toContain('サーバーからの応答: teapot');
+  });
+
+  it('502の応答本文が500文字を超える場合は切り詰めて示す', () => {
+    const message = describeError(new ApiError('APIエラー (502)', 502, 'x'.repeat(600), 'https://localhost/api/ai/section'));
+
+    expect(message).toContain(`${'x'.repeat(500)}…`);
+    expect(message).not.toContain('x'.repeat(501));
+  });
+});
+
+describe('reportError', () => {
+  it('例外を対応策つきで通知し、スタックトレースはログにだけ送る', () => {
+    const lines: string[] = [];
+    logger.setSink({ appendLine: (line) => lines.push(line) });
+    const error = new Error('壊れた');
+
+    reportError('公開に失敗', error);
+
+    expect(shownErrors).toEqual(['公開に失敗: 壊れた']);
+    expect(lines.join('\n')).toContain('"stack"');
+    logger.setSink(undefined);
+  });
+
+  it('Error以外が投げられた場合も通知し、スタックは付けない', () => {
+    const lines: string[] = [];
+    logger.setSink({ appendLine: (line) => lines.push(line) });
+
+    reportError('公開に失敗', 'ただの文字列');
+
+    expect(shownErrors).toEqual(['公開に失敗: ただの文字列']);
+    expect(lines.join('\n')).not.toContain('stack');
+    logger.setSink(undefined);
+  });
+
+  it('「ログを表示」を選ぶと出力パネルを前面に出す', async () => {
+    logger.setSink(undefined);
+    setErrorResponse('ログを表示');
+
+    reportError('失敗', new Error('x'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(outputChannels.some((channel) => channel.shown === 1)).toBe(true);
+    logger.setSink(undefined);
+  });
+
+  it('通知を閉じただけなら出力パネルは出さない', async () => {
+    logger.setSink(undefined);
+    setErrorResponse(undefined);
+
+    reportError('失敗', new Error('x'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(outputChannels.every((channel) => channel.shown === 0)).toBe(true);
+    logger.setSink(undefined);
+  });
+});
+
+describe('withRetry: 既定の設定', () => {
+  it('オプションを渡さなくても、成功した結果をそのまま返す', async () => {
+    await expect(withRetry(async () => 42)).resolves.toBe(42);
+  });
+
+  it('ラベルを渡さない再試行でも、ログには既定のラベル「request」を使う', async () => {
+    const lines: string[] = [];
+    logger.setSink({ appendLine: (line) => lines.push(line) });
+    let calls = 0;
+
+    const result = await withRetry(
+      async () => {
+        calls += 1;
+        if (calls === 1) throw new NetworkError('切断', 'https://localhost', new Error('x'));
+        return 'ok';
+      },
+      { sleep: async () => undefined }
+    );
+
+    expect(result).toBe('ok');
+    expect(lines.join('\n')).toContain('request failed, retrying (1/3) in 500ms');
+    logger.setSink(undefined);
   });
 });
