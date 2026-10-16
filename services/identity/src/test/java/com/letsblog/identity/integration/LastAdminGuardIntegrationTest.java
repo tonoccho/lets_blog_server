@@ -3,7 +3,7 @@ package com.letsblog.identity.integration;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.User;
 import com.letsblog.identity.dto.UserUpdateRequest;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
+import com.letsblog.identity.testsupport.KeycloakFakeSupport;
 import com.letsblog.identity.repository.UserRepository;
 import com.letsblog.identity.service.ForbiddenException;
 import com.letsblog.identity.service.UserService;
@@ -49,7 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("identity-service: 最後のadminの保護(issue #1162)")
-class LastAdminGuardIntegrationTest {
+class LastAdminGuardIntegrationTest extends KeycloakFakeSupport {
 
     private static final String ADMIN_A_SUB = "sub-1162-admin-a";
     private static final String ADMIN_B_SUB = "sub-1162-admin-b";
@@ -67,8 +67,6 @@ class LastAdminGuardIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private KeycloakAdminClient keycloakAdminClient;
 
     /** テスト専用スキーマ(ADR-0006)上で、他テストが残した有効なadminを一時的に無効にした記録。 */
     private final List<Long> disabledOthers = new ArrayList<>();
@@ -77,6 +75,7 @@ class LastAdminGuardIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        keycloak.reset();
         cleanup();
         // 「有効なadminがちょうど2人」の状態を決定的にするため、他に有効なadminがいれば無効にしておく。
         for (User other : userRepository.findAll()) {

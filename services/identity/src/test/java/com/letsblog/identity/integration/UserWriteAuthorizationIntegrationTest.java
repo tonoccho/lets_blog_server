@@ -2,7 +2,7 @@ package com.letsblog.identity.integration;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.User;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
+import com.letsblog.identity.testsupport.KeycloakFakeSupport;
 import com.letsblog.identity.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,10 +18,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -37,15 +33,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>本クラスと隣接する残存経路(ロール割り当てによる自己昇格、自己無効化によるロックアウト)は
  * #798で塞いだ。{@code SelfPrivilegeEscalationIntegrationTest}を参照。
  *
- * <p>Keycloak Admin APIは外部境界のため{@link KeycloakAdminClient}を{@code @MockitoBean}で
- * 置き換える(ADR-0006のモック方針)。認可で弾かれる経路では、そもそもここへ到達しないことも
+ * <p>Keycloak Admin APIは外部境界のため、{@code KeycloakAdminClient}の実物を、Keycloakのサーバー側
+ * フェイク({@code SharedFakeKeycloak})へ向けて使う(issue #1826)。認可で弾かれる経路では、そもそもここへ到達しないことも
  * 併せて検証する(下流に副作用が及んでいないこと)。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("identity-service: ユーザー書き込みAPIの認可(issue #796)")
-class UserWriteAuthorizationIntegrationTest {
+class UserWriteAuthorizationIntegrationTest extends KeycloakFakeSupport {
 
     private static final String ADMIN_SUB = "sub-796-admin";
     private static final String USER_SUB = "sub-796-user";
@@ -59,14 +55,13 @@ class UserWriteAuthorizationIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private KeycloakAdminClient keycloakAdminClient;
 
     private Long adminId;
     private Long targetId;
 
     @BeforeEach
     void setUp() {
+        keycloak.reset();
         adminId = recreate(ADMIN_SUB, "admin");
         targetId = recreate(USER_SUB, "user");
         // adminはユーザーを作成できる() が作る行を消しておく(email/keycloak_subがunique制約のため)。
@@ -133,8 +128,7 @@ class UserWriteAuthorizationIntegrationTest {
     @Test
     @DisplayName("adminはユーザーを作成できる")
     void adminはユーザーを作成できる() throws Exception {
-        when(keycloakAdminClient.createUser(eq("created-by-admin@example.test"), any(), any(), anyBoolean()))
-                .thenReturn("sub-796-created");
+        keycloak.nextSub("sub-796-created");
         long before = userRepository.count();
 
         mockMvc.perform(request(HttpMethod.POST, "/api/users")

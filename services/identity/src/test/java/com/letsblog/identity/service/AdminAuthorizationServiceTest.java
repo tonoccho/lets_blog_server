@@ -1,67 +1,87 @@
 package com.letsblog.identity.service;
 
+import com.letsblog.identity.domain.User;
+import com.letsblog.identity.testsupport.IdentityWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * 認可。{@code CurrentActorService}は実物で、操作者は実際のJWTをSecurityContextへ置いて作る
+ * (DBのリポジトリだけが外部との通信としてMockitoで差し替わる)。
+ */
 class AdminAuthorizationServiceTest {
 
-    @Mock
-    private CurrentActorService currentActorService;
+    private IdentityWorld world;
+    private AdminAuthorizationService service;
 
-    private AdminAuthorizationService service() {
-        return new AdminAuthorizationService(currentActorService);
+    @BeforeEach
+    void setUp() {
+        world = new IdentityWorld();
+        service = world.adminAuthorizationService;
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    @Test
+    void requireAdmin_admin操作者は許可() {
+        world.actAs(1L, "admin");
+
+        assertDoesNotThrow(() -> service.requireAdmin());
+    }
+
+    @Test
+    void requireAdmin_操作者なしは拒否() {
+        ForbiddenException thrown = assertThrows(ForbiddenException.class, () -> service.requireAdmin());
+
+        assertEquals("この操作にはadmin権限が必要です", thrown.getMessage());
     }
 
     @Test
     void requireSelfOrAdmin_admin操作者は誰でも許可() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(true);
+        world.actAs(1L, "admin");
 
         assertDoesNotThrow(() -> service.requireSelfOrAdmin(99L));
     }
 
     @Test
     void requireSelfOrAdmin_本人は許可() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(false);
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        world.actAs(1L, "user");
 
         assertDoesNotThrow(() -> service.requireSelfOrAdmin(1L));
     }
 
     @Test
     void requireSelfOrAdmin_他人は拒否() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(false);
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        world.actAs(1L, "user");
 
         assertThrows(ForbiddenException.class, () -> service.requireSelfOrAdmin(2L));
+    }
+
+    @Test
+    void requireSelfOrAdmin_操作者を解決できなければ拒否() {
+        assertThrows(ForbiddenException.class, () -> service.requireSelfOrAdmin(1L));
     }
 
     // ---------------------------------------------- requireAdminAndNotSelf(#796で追加、#798で拡張)
 
     @Test
     void requireAdminAndNotSelf_adminが他人を対象にする場合は許可() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(true);
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        world.actAs(1L, "admin");
 
         assertDoesNotThrow(() -> service.requireAdminAndNotSelf(2L, "自分自身は対象にできません"));
     }
 
     @Test
     void requireAdminAndNotSelf_adminでも自分自身は拒否() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(true);
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
+        world.actAs(1L, "admin");
 
         ForbiddenException thrown = assertThrows(
                 ForbiddenException.class,
@@ -72,8 +92,7 @@ class AdminAuthorizationServiceTest {
 
     @Test
     void requireAdminAndNotSelf_非adminはadmin判定で先に拒否() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(false);
+        world.actAs(1L, "user");
 
         ForbiddenException thrown = assertThrows(
                 ForbiddenException.class,
@@ -82,18 +101,56 @@ class AdminAuthorizationServiceTest {
     }
 
     /**
-     * 操作者を解決できない場合({@code getCurrentActorId()}がnull)は自己判定をスキップする。
-     * この経路に到達するのは「admin判定は通ったが操作者IDが無い」という状態だが、
-     * {@code isAdmin()}自体が操作者の解決結果を見ているため実際には起こらない。
-     * 将来admin判定の実装が変わったときに、null が「自分自身ではない」と扱われる
-     * (＝fail-openにならない)ことを固定しておく。
+     * 操作者のロールはadminだが{@code users}行にIDが無い(解決結果のIDがnull)場合は、自己判定をスキップする。
+     * 将来admin判定の実装が変わったときに、nullが「自分自身ではない」と扱われる
+     * (=fail-openにならない形で固定される)ことを、実物の{@code CurrentActorService}で確かめる。
      */
     @Test
     void requireAdminAndNotSelf_操作者IDが解決できない場合は自己判定をスキップ() {
-        AdminAuthorizationService service = service();
-        when(currentActorService.isAdmin()).thenReturn(true);
-        when(currentActorService.getCurrentActorId()).thenReturn(null);
+        User idless = new User();
+        idless.setEmail("idless@example.com");
+        idless.setRole("admin");
+        idless.setEnabled(true);
+        world.actAsUser(idless);
 
         assertDoesNotThrow(() -> service.requireAdminAndNotSelf(1L, "自分自身は対象にできません"));
+    }
+
+    // ---------------------------------------------- requireNotSelfDemotion(#798)
+
+    @Test
+    void requireNotSelfDemotion_role未指定は何もしない() {
+        world.actAs(1L, "admin");
+
+        assertDoesNotThrow(() -> service.requireNotSelfDemotion(1L, null));
+    }
+
+    @Test
+    void requireNotSelfDemotion_adminのままなら自分自身でも許可() {
+        world.actAs(1L, "admin");
+
+        assertDoesNotThrow(() -> service.requireNotSelfDemotion(1L, "admin"));
+    }
+
+    @Test
+    void requireNotSelfDemotion_自分自身をadmin以外へ変えるのは拒否() {
+        world.actAs(1L, "admin");
+
+        ForbiddenException thrown =
+                assertThrows(ForbiddenException.class, () -> service.requireNotSelfDemotion(1L, "user"));
+        assertEquals("自分自身のadmin権限は外せません", thrown.getMessage());
+    }
+
+    @Test
+    void requireNotSelfDemotion_他人のroleを変えるのは許可() {
+        User actor = world.actAs(1L, "admin");
+
+        assertDoesNotThrow(() -> service.requireNotSelfDemotion(actor.getId() + 1, "user"));
+    }
+
+    @Test
+    void requireNotSelfDemotion_操作者を解決できない場合は拒否しない() {
+        // 認可そのもの(requireAdmin)は呼び出し元が別に行う。ここは「自分自身か」だけを見る。
+        assertDoesNotThrow(() -> service.requireNotSelfDemotion(1L, "user"));
     }
 }

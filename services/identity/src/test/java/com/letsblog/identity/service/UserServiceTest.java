@@ -12,15 +12,16 @@ import com.letsblog.identity.dto.UserProfileResponse;
 import com.letsblog.identity.dto.UserProfileUpdateRequest;
 import com.letsblog.identity.dto.UserResponse;
 import com.letsblog.identity.dto.UserUpdateRequest;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
 import com.letsblog.identity.keycloak.KeycloakUserSyncException;
-import com.letsblog.identity.messaging.DomainEventPublisher;
 import com.letsblog.identity.repository.RoleRepository;
 import com.letsblog.identity.repository.UserRepository;
+import com.letsblog.common.messaging.AuditLogMessage;
+import com.letsblog.common.messaging.UserDeactivatedEvent;
+import com.letsblog.identity.testsupport.FakeKeycloak;
+import com.letsblog.identity.testsupport.IdentityWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
@@ -31,40 +32,69 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * {@code UserService}の単体テスト。{@code KeycloakAdminClient}・{@code DomainEventPublisher}・
+ * {@code AuditLogService}・{@code UserMigrationPersister}・{@code CurrentActorService}はすべて実物で、
+ * 差し替えるのは外部との通信だけ(DBのリポジトリ=Mockito、MQの{@code RabbitTemplate}=Mockito、
+ * KeycloakのHTTP=サーバー側フェイク{@link FakeKeycloak})。Keycloakへ何が送られたかは
+ * {@link FakeKeycloak#ops()}で、監査ログとドメインイベントは{@code RabbitTemplate}へ渡された
+ * 実メッセージで確かめる。
+ */
 class UserServiceTest {
 
-    @Mock
+    private IdentityWorld world;
     private UserRepository userRepository;
-
-    @Mock
     private RoleRepository roleRepository;
+    private FakeKeycloak keycloak;
+    private CredentialCipher credentialCipher;
 
-    @Mock
-    private KeycloakAdminClient keycloakAdminClient;
+    @BeforeEach
+    void setUp() {
+        world = new IdentityWorld();
+        userRepository = world.userRepository;
+        roleRepository = world.roleRepository;
+        keycloak = world.keycloak;
+        credentialCipher = world.credentialCipher;
+        // 保存系は渡されたエンティティをそのまま返す(JPAの既定の振る舞い)。
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
 
-    @Mock
-    private DomainEventPublisher domainEventPublisher;
-
-    @Mock
-    private AuditLogService auditLogService;
-
-    @Mock
-    private UserMigrationPersister userMigrationPersister;
-
-    private final CredentialCipher credentialCipher = new CredentialCipher(
-            java.util.Base64.getEncoder().encodeToString(new byte[32]));
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private UserService service() {
-        return new UserService(
-                userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher,
-                auditLogService, userMigrationPersister);
+        return world.userService;
+    }
+
+    private void assertOp(String op) {
+        assertTrue(keycloak.ops().contains(op), "Keycloakへ送られた操作に " + op + " が無い: " + keycloak.ops());
+    }
+
+    private void assertNoOp(String prefix) {
+        assertTrue(keycloak.ops(prefix).isEmpty(),
+                "Keycloakへ " + prefix + " が送られている: " + keycloak.ops());
+    }
+
+    private AuditLogMessage assertAudit(String action, Long userId) {
+        List<AuditLogMessage> matched = world.auditMessages().stream()
+                .filter(m -> action.equals(m.action()) && userId.equals(m.resourceId())).toList();
+        assertEquals(1, matched.size(), "監査ログ " + action + " が1件ではない: " + world.auditMessages());
+        return matched.get(0);
+    }
+
+    private void assertNoAudit(String action) {
+        assertTrue(world.auditMessages().stream().noneMatch(m -> action.equals(m.action())),
+                "監査ログ " + action + " が記録されている");
     }
 
     @Test
@@ -97,7 +127,7 @@ class UserServiceTest {
         Role adminRole = new Role("ROLE_ADMIN", "管理者");
         when(userRepository.existsByEmail("admin@example.com")).thenReturn(false);
         when(roleRepository.findByRoleName("ROLE_ADMIN")).thenReturn(Optional.of(adminRole));
-        when(keycloakAdminClient.createUser("admin@example.com", null, null, false)).thenReturn("kc-sub-1");
+        keycloak.nextSub("kc-sub-1");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
             User u = invocation.getArgument(0);
             u.setId(1L);
@@ -117,8 +147,7 @@ class UserServiceTest {
         // issue #956: RBACのロールは Keycloak を呼ぶ前に解決するため、ここのスタブが要る。
         when(roleRepository.findByRoleName("ROLE_VIEWER"))
                 .thenReturn(Optional.of(new Role("ROLE_VIEWER", "閲覧者")));
-        when(keycloakAdminClient.createUser("new@example.com", null, null, false))
-                .thenThrow(new KeycloakUserSyncException("Keycloakが停止しています"));
+        keycloak.fail("POST", "/users", 503);
 
         assertThrows(KeycloakUserSyncException.class,
                 () -> service.create(new UserCreateRequest("new@example.com", "password123", "user")));
@@ -132,13 +161,13 @@ class UserServiceTest {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(roleRepository.findByRoleName("ROLE_VIEWER"))
                 .thenReturn(Optional.of(new Role("ROLE_VIEWER", "閲覧者")));
-        when(keycloakAdminClient.createUser("new@example.com", null, null, false)).thenReturn("kc-sub-2");
+        keycloak.nextSub("kc-sub-2");
         when(userRepository.save(any(User.class))).thenThrow(new RuntimeException("DB書き込み失敗"));
 
         assertThrows(RuntimeException.class,
                 () -> service.create(new UserCreateRequest("new@example.com", "password123", "user")));
 
-        verify(keycloakAdminClient).deleteUser("kc-sub-2");
+        assertOp("delete:kc-sub-2");
     }
 
     @Test
@@ -154,7 +183,7 @@ class UserServiceTest {
         assertTrue(thrown.getMessage().contains("ROLE_VIEWER"));
 
         // Keycloakを呼ぶ前に落ちるので、孤児アカウントの補償も要らない。
-        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+        assertNoOp("createUser:");
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -166,12 +195,12 @@ class UserServiceTest {
         when(userRepository.existsByEmail("admin955@example.com")).thenReturn(false);
         when(roleRepository.findByRoleName("ROLE_ADMIN"))
                 .thenReturn(Optional.of(new Role("ROLE_ADMIN", "管理者")));
-        when(keycloakAdminClient.createUser("admin955@example.com", null, null, false)).thenReturn("kc-sub-955-1");
+        keycloak.nextSub("kc-sub-955-1");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.create(new UserCreateRequest("admin955@example.com", "password123", "admin"));
 
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-1", "admin");
+        assertOp("grant:kc-sub-955-1:admin");
     }
 
     @Test
@@ -180,12 +209,12 @@ class UserServiceTest {
         when(userRepository.existsByEmail("user955@example.com")).thenReturn(false);
         when(roleRepository.findByRoleName("ROLE_VIEWER"))
                 .thenReturn(Optional.of(new Role("ROLE_VIEWER", "閲覧者")));
-        when(keycloakAdminClient.createUser("user955@example.com", null, null, false)).thenReturn("kc-sub-955-2");
+        keycloak.nextSub("kc-sub-955-2");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.create(new UserCreateRequest("user955@example.com", "password123", "user"));
 
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
+        assertNoOp("grant:");
     }
 
     @Test
@@ -194,16 +223,15 @@ class UserServiceTest {
         when(userRepository.existsByEmail("admin955@example.com")).thenReturn(false);
         when(roleRepository.findByRoleName("ROLE_ADMIN"))
                 .thenReturn(Optional.of(new Role("ROLE_ADMIN", "管理者")));
-        when(keycloakAdminClient.createUser("admin955@example.com", null, null, false)).thenReturn("kc-sub-955-3");
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("realmロールがありません"))
-                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-3", "admin");
+        keycloak.nextSub("kc-sub-955-3");
+        keycloak.fail("POST", "/users/kc-sub-955-3/role-mappings/realm", 503);
 
         assertThrows(KeycloakUserSyncException.class,
                 () -> service.create(new UserCreateRequest("admin955@example.com", "password123", "admin")));
 
         // ローカルDBだけがadminになる状態を作らない(#955の受入基準)。
         verify(userRepository, never()).save(any(User.class));
-        verify(keycloakAdminClient).deleteUser("kc-sub-955-3");
+        assertOp("delete:kc-sub-955-3");
     }
 
     @Test
@@ -213,14 +241,14 @@ class UserServiceTest {
         when(userRepository.existsByEmail("first@example.com")).thenReturn(false);
         when(roleRepository.findByRoleName("ROLE_ADMIN"))
                 .thenReturn(Optional.of(new Role("ROLE_ADMIN", "管理者")));
-        when(keycloakAdminClient.createUser("first@example.com", null, null, false)).thenReturn("kc-sub-955-4");
+        keycloak.nextSub("kc-sub-955-4");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserResponse response = service.setupInitialAdmin("first@example.com", "password123");
 
         assertEquals("admin", response.role());
-        verify(keycloakAdminClient).setPassword("kc-sub-955-4", "password123");
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-4", "admin");
+        assertOp("setPassword:kc-sub-955-4:password123");
+        assertOp("grant:kc-sub-955-4:admin");
     }
 
     @Test
@@ -228,15 +256,14 @@ class UserServiceTest {
         UserService service = service();
         when(userRepository.count()).thenReturn(0L);
         when(userRepository.existsByEmail("first@example.com")).thenReturn(false);
-        when(keycloakAdminClient.createUser("first@example.com", null, null, false)).thenReturn("kc-sub-955-5");
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
-                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-5", "admin");
+        keycloak.nextSub("kc-sub-955-5");
+        keycloak.fail("POST", "/users/kc-sub-955-5/role-mappings/realm", 503);
 
         assertThrows(KeycloakUserSyncException.class,
                 () -> service.setupInitialAdmin("first@example.com", "password123"));
 
         verify(userRepository, never()).save(any(User.class));
-        verify(keycloakAdminClient).deleteUser("kc-sub-955-5");
+        assertOp("delete:kc-sub-955-5");
     }
 
     /** issue #1137レビュー対応: role検証の異常系分岐(#642)のカバレッジを補う。 */
@@ -248,7 +275,7 @@ class UserServiceTest {
                 () -> service.create(new UserCreateRequest("bad-role@example.com", "password123", "superadmin")));
 
         assertTrue(thrown.getMessage().contains("admin"));
-        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+        assertNoOp("createUser:");
     }
 
     /** issue #1137レビュー対応: setupInitialAdmin の二重セットアップ拒否(L159/L179)のカバレッジを補う。 */
@@ -260,7 +287,7 @@ class UserServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> service.setupInitialAdmin("second@example.com", "password123"));
 
-        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+        assertNoOp("createUser:");
     }
 
     /** issue #1137レビュー対応: setupInitialAdmin のメール重複拒否(L182)のカバレッジを補う。 */
@@ -273,7 +300,7 @@ class UserServiceTest {
         assertThrows(EmailAlreadyExistsException.class,
                 () -> service.setupInitialAdmin("dup-first@example.com", "password123"));
 
-        verify(keycloakAdminClient, never()).createUser(any(), any(), any(), anyBoolean());
+        assertNoOp("createUser:");
     }
 
     /**
@@ -306,10 +333,12 @@ class UserServiceTest {
         UserResponse response = service.update(1L, new UserUpdateRequest("admin", null));
 
         assertEquals("admin", response.role());
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-6", "admin");
-        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        assertOp("grant:kc-sub-955-6:admin");
+        assertNoOp("revoke:");
         // issue #1137: role変更が監査ログを記録し、変更前後のroleを渡す。
-        verify(auditLogService).logUserRoleUpdated(1L, "user", "admin");
+        AuditLogMessage roleAudit = assertAudit("USER_ROLE_UPDATED", 1L);
+        assertTrue(roleAudit.changes().contains("\"from\":\"user\"") && roleAudit.changes().contains("\"to\":\"admin\""),
+                roleAudit.changes());
     }
 
     @Test
@@ -318,14 +347,15 @@ class UserServiceTest {
         User user = buildUser();
         user.setRole("admin");
         user.setKeycloakSub("kc-sub-955-7");
+        keycloak.alreadyAssigned("kc-sub-955-7", "admin");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         UserResponse response = service.update(1L, new UserUpdateRequest("user", null));
 
         assertEquals("user", response.role());
-        verify(keycloakAdminClient).revokeRealmRole("kc-sub-955-7", "admin");
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
+        assertOp("revoke:kc-sub-955-7:admin");
+        assertNoOp("grant:");
     }
 
     @Test
@@ -338,10 +368,10 @@ class UserServiceTest {
 
         service.update(1L, new UserUpdateRequest(null, "newpassword123"));
 
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
-        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        assertNoOp("grant:");
+        assertNoOp("revoke:");
         // issue #1137: role指定が無い更新(パスワードのみ等)は監査ログを記録しない。
-        verify(auditLogService, never()).logUserRoleUpdated(any(), any(), any());
+        assertNoAudit("USER_ROLE_UPDATED");
     }
 
     /**
@@ -360,7 +390,7 @@ class UserServiceTest {
 
         service.update(1L, new UserUpdateRequest("admin", null));
 
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-8b", "admin");
+        assertOp("grant:kc-sub-955-8b:admin");
     }
 
     @Test
@@ -373,7 +403,7 @@ class UserServiceTest {
         UserResponse response = service.update(1L, new UserUpdateRequest("admin", null));
 
         assertEquals("admin", response.role());
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
+        assertNoOp("grant:");
     }
 
     /** issue #1137レビュー対応: password が空文字の場合は更新しない分岐(L313)のカバレッジを補う。 */
@@ -405,8 +435,8 @@ class UserServiceTest {
         assertThrows(RuntimeException.class,
                 () -> service.update(1L, new UserUpdateRequest(null, "newpassword123")));
 
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
-        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        assertNoOp("grant:");
+        assertNoOp("revoke:");
     }
 
     @Test
@@ -415,8 +445,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-955-9");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
-                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-9", "admin");
+        keycloak.fail("POST", "/users/kc-sub-955-9/role-mappings/realm", 503);
 
         assertThrows(KeycloakUserSyncException.class,
                 () -> service.update(1L, new UserUpdateRequest("admin", null)));
@@ -426,7 +455,7 @@ class UserServiceTest {
         assertEquals("user", user.getRole());
         verify(userRepository, never()).saveAndFlush(any(User.class));
         // issue #1137: 保存まで到達していないので監査ログも記録しない。
-        verify(auditLogService, never()).logUserRoleUpdated(any(), any(), any());
+        assertNoAudit("USER_ROLE_UPDATED");
     }
 
     /**
@@ -459,8 +488,8 @@ class UserServiceTest {
 
         assertThrows(RuntimeException.class, () -> service.update(1L, new UserUpdateRequest("admin", null)));
 
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-10", "admin");
-        verify(keycloakAdminClient).revokeRealmRole("kc-sub-955-10", "admin");
+        assertOp("grant:kc-sub-955-10:admin");
+        assertOp("revoke:kc-sub-955-10:admin");
     }
 
     @Test
@@ -473,7 +502,7 @@ class UserServiceTest {
 
         service.reconcileKeycloakAdminRole(1L);
 
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-11", "admin");
+        assertOp("grant:kc-sub-955-11:admin");
     }
 
     @Test
@@ -481,11 +510,12 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         user.setKeycloakSub("kc-sub-955-12");
+        keycloak.alreadyAssigned("kc-sub-955-12", "admin");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         service.reconcileKeycloakAdminRole(1L);
 
-        verify(keycloakAdminClient).revokeRealmRole("kc-sub-955-12", "admin");
+        assertOp("revoke:kc-sub-955-12:admin");
     }
 
     @Test
@@ -495,8 +525,8 @@ class UserServiceTest {
 
         service.reconcileKeycloakAdminRole(1L);
 
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
-        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        assertNoOp("grant:");
+        assertNoOp("revoke:");
     }
 
     @Test
@@ -526,7 +556,7 @@ class UserServiceTest {
         assertEquals("山田太郎", response.displayName());
         assertEquals("user@example.com", response.email());
         verify(userRepository, never()).existsByEmail(any());
-        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+        assertNoOp("updateEmail:");
     }
 
     private UserProfileUpdateRequest emailRequest(String email) {
@@ -546,7 +576,7 @@ class UserServiceTest {
 
         assertEquals("new@example.com", response.email());
         assertEquals("new@example.com", user.getEmail());
-        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+        assertNoOp("updateEmail:");
     }
 
     @Test
@@ -560,7 +590,7 @@ class UserServiceTest {
 
         service.updateUserProfile(1L, emailRequest("new@example.com"));
 
-        verify(keycloakAdminClient).updateEmail("kc-sub-1", "new@example.com");
+        assertOp("updateEmail:kc-sub-1:new@example.com");
     }
 
     @Test
@@ -575,7 +605,7 @@ class UserServiceTest {
                 () -> service.updateUserProfile(1L, emailRequest("taken@example.com")));
 
         assertEquals("user@example.com", user.getEmail());
-        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+        assertNoOp("updateEmail:");
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -590,7 +620,7 @@ class UserServiceTest {
         service.updateUserProfile(1L, emailRequest("user@example.com"));
 
         verify(userRepository, never()).existsByEmail(any());
-        verify(keycloakAdminClient, never()).updateEmail(any(), any());
+        assertNoOp("updateEmail:");
     }
 
     @Test
@@ -623,7 +653,7 @@ class UserServiceTest {
 
         service.updateUserProfile(1L, request);
 
-        verify(keycloakAdminClient).updateProfile("kc-sub-profile-1", "太郎", "山田");
+        assertOp("updateProfile:kc-sub-profile-1:太郎:山田");
     }
 
     @Test
@@ -655,7 +685,7 @@ class UserServiceTest {
 
         service.delete(1L);
 
-        verify(keycloakAdminClient, never()).deleteUser(any());
+        assertNoOp("delete:");
     }
 
     @Test
@@ -667,7 +697,7 @@ class UserServiceTest {
 
         service.delete(1L);
 
-        verify(keycloakAdminClient).deleteUser("kc-sub-3");
+        assertOp("delete:kc-sub-3");
         verify(userRepository).deleteById(1L);
     }
 
@@ -680,7 +710,7 @@ class UserServiceTest {
 
         service.delete(1L);
 
-        verify(auditLogService).logUserDeleted(1L);
+        assertAudit("USER_DELETED", 1L);
     }
 
     @Test
@@ -689,8 +719,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-4");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
-                .when(keycloakAdminClient).deleteUser("kc-sub-4");
+        keycloak.fail("DELETE", "/users/kc-sub-4", 503);
 
         assertThrows(KeycloakUserSyncException.class, () -> service.delete(1L));
 
@@ -703,7 +732,7 @@ class UserServiceTest {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThrows(UserNotFoundException.class, () -> service.deactivate(99L));
-        verify(auditLogService, never()).logUserDeactivated(any());
+        assertNoAudit("USER_DEACTIVATED");
     }
 
     @Test
@@ -717,8 +746,11 @@ class UserServiceTest {
         UserResponse response = service.deactivate(1L);
 
         assertFalse(response.enabled());
-        verify(keycloakAdminClient).setEnabled("kc-sub-5", false);
-        verify(domainEventPublisher).publishUserDeactivated(1L, "kc-sub-5");
+        assertOp("setEnabled:kc-sub-5:false");
+        assertEquals(1, world.domainEvents().size());
+        UserDeactivatedEvent event = (UserDeactivatedEvent) world.domainEvents().get(0);
+        assertEquals(1L, event.userId());
+        assertEquals("kc-sub-5", event.keycloakSub());
     }
 
     /** issue #1137: ユーザー無効化が監査ログを記録する。 */
@@ -732,7 +764,7 @@ class UserServiceTest {
 
         service.deactivate(1L);
 
-        verify(auditLogService).logUserDeactivated(1L);
+        assertAudit("USER_DEACTIVATED", 1L);
     }
 
     @Test
@@ -744,8 +776,8 @@ class UserServiceTest {
 
         service.deactivate(1L);
 
-        verify(keycloakAdminClient, never()).setEnabled(any(), anyBoolean());
-        verify(auditLogService).logUserDeactivated(1L);
+        assertNoOp("setEnabled:");
+        assertAudit("USER_DEACTIVATED", 1L);
     }
 
     @Test
@@ -754,7 +786,7 @@ class UserServiceTest {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThrows(UserNotFoundException.class, () -> service.reactivate(99L));
-        verify(auditLogService, never()).logUserReactivated(any());
+        assertNoAudit("USER_REACTIVATED");
     }
 
     @Test
@@ -769,7 +801,7 @@ class UserServiceTest {
         UserResponse response = service.reactivate(1L);
 
         assertTrue(response.enabled());
-        verify(keycloakAdminClient).setEnabled("kc-sub-6", true);
+        assertOp("setEnabled:kc-sub-6:true");
     }
 
     /** issue #1137: ユーザー再有効化が監査ログを記録する。 */
@@ -784,7 +816,7 @@ class UserServiceTest {
 
         service.reactivate(1L);
 
-        verify(auditLogService).logUserReactivated(1L);
+        assertAudit("USER_REACTIVATED", 1L);
     }
 
     @Test
@@ -797,8 +829,8 @@ class UserServiceTest {
 
         service.reactivate(1L);
 
-        verify(keycloakAdminClient, never()).setEnabled(any(), anyBoolean());
-        verify(auditLogService).logUserReactivated(1L);
+        assertNoOp("setEnabled:");
+        assertAudit("USER_REACTIVATED", 1L);
     }
 
     @Test
@@ -806,17 +838,14 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-7");
-        // issue #964: migrateToKeycloakはsaveではなくsaveAndFlushを使うようになった。
-        // issue #964(レビュー対応): このsaveAndFlushはUserMigrationPersister(独立トランザクション)へ委譲される。
-        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+        keycloak.nextSub("kc-sub-7");
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
         assertEquals(List.of(1L), summary.migratedUserIds());
         assertTrue(summary.failedUserIds().isEmpty());
         assertEquals("kc-sub-7", user.getKeycloakSub());
-        verify(keycloakAdminClient).sendPasswordResetEmail("kc-sub-7");
+        assertOp("sendPasswordResetEmail:kc-sub-7");
     }
 
     /**
@@ -834,13 +863,12 @@ class UserServiceTest {
         alreadyMigrated.setEmail("already@example.com");
         alreadyMigrated.setKeycloakSub("kc-sub-already");
         when(userRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(notMigrated, alreadyMigrated));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-migrated");
-        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+        keycloak.nextSub("kc-sub-migrated");
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(List.of(1L, 2L));
 
         assertEquals(List.of(1L), summary.migratedUserIds());
-        verify(keycloakAdminClient, never()).createUser("already@example.com", null, null, true);
+        assertNoOp("createUser:already@example.com");
     }
 
     /**
@@ -876,14 +904,15 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-964-3");
-        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+        keycloak.nextSub("kc-sub-964-3");
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
         assertEquals(List.of(1L), summary.migratedUserIds());
-        verify(userMigrationPersister).saveAndFlush(user);
-        verify(userRepository, never()).saveAndFlush(any(User.class));
+        // 1ユーザー分のローカル保存は実物のUserMigrationPersister(REQUIRES_NEWの独立トランザクション)を
+        // 経由し、リポジトリのsaveAndFlushが1回だけ呼ばれる。トランザクション属性そのものは
+        // UserMigrationPersisterTestが検証する。
+        verify(userRepository, times(1)).saveAndFlush(user);
     }
 
     @Test
@@ -891,8 +920,7 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true))
-                .thenThrow(new KeycloakUserSyncException("Keycloakが停止しています"));
+        keycloak.fail("POST", "/users", 503);
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
@@ -906,13 +934,12 @@ class UserServiceTest {
         User user = buildUser();
         user.setRole("admin");
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-11");
-        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+        keycloak.nextSub("kc-sub-955-11");
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
         assertEquals(List.of(1L), summary.migratedUserIds());
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-11", "admin");
+        assertOp("grant:kc-sub-955-11:admin");
     }
 
     @Test
@@ -920,12 +947,11 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-12");
-        doNothing().when(userMigrationPersister).saveAndFlush(any(User.class));
+        keycloak.nextSub("kc-sub-955-12");
 
         service.migrateToKeycloak(null);
 
-        verify(keycloakAdminClient, never()).grantRealmRole(any(), any());
+        assertNoOp("grant:");
     }
 
     @Test
@@ -934,9 +960,8 @@ class UserServiceTest {
         User user = buildUser();
         user.setRole("admin");
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-955-13");
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
-                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-13", "admin");
+        keycloak.nextSub("kc-sub-955-13");
+        keycloak.fail("POST", "/users/kc-sub-955-13/role-mappings/realm", 503);
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
@@ -944,7 +969,7 @@ class UserServiceTest {
         assertTrue(summary.failedUserIds().containsKey(1L));
         // subを書き戻さないまま残るとKeycloak側が孤児になり、再実行が409で詰まる。
         assertNull(user.getKeycloakSub());
-        verify(keycloakAdminClient).deleteUser("kc-sub-955-13");
+        assertOp("delete:kc-sub-955-13");
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -959,16 +984,16 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-964-1");
-        org.mockito.Mockito.doThrow(new RuntimeException("DB書き込み失敗"))
-                .when(userMigrationPersister).saveAndFlush(user);
+        keycloak.nextSub("kc-sub-964-1");
+        doThrow(new RuntimeException("DB書き込み失敗"))
+                .when(userRepository).saveAndFlush(user);
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
         assertTrue(summary.migratedUserIds().isEmpty());
         assertTrue(summary.failedUserIds().containsKey(1L));
-        verify(keycloakAdminClient).deleteUser("kc-sub-964-1");
-        verify(keycloakAdminClient, never()).sendPasswordResetEmail(any());
+        assertOp("delete:kc-sub-964-1");
+        assertNoOp("sendPasswordResetEmail:");
     }
 
     /**
@@ -987,18 +1012,17 @@ class UserServiceTest {
         succeedingUser.setEnabled(true);
 
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(failingUser, succeedingUser));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-964-2a");
-        when(keycloakAdminClient.createUser("other@example.com", null, null, true)).thenReturn("kc-sub-964-2b");
-        org.mockito.Mockito.doThrow(new RuntimeException("DB書き込み失敗"))
-                .when(userMigrationPersister).saveAndFlush(failingUser);
-        doNothing().when(userMigrationPersister).saveAndFlush(succeedingUser);
+        keycloak.nextSub("kc-sub-964-2a");
+        keycloak.nextSub("kc-sub-964-2b");
+        doThrow(new RuntimeException("DB書き込み失敗"))
+                .when(userRepository).saveAndFlush(failingUser);
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
         assertTrue(summary.failedUserIds().containsKey(1L));
         assertEquals(List.of(2L), summary.migratedUserIds());
-        verify(keycloakAdminClient).deleteUser("kc-sub-964-2a");
-        verify(keycloakAdminClient).sendPasswordResetEmail("kc-sub-964-2b");
+        assertOp("delete:kc-sub-964-2a");
+        assertOp("sendPasswordResetEmail:kc-sub-964-2b");
     }
 
     /**
@@ -1019,9 +1043,8 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-966-1");
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("SMTPが停止しています"))
-                .when(keycloakAdminClient).sendPasswordResetEmail("kc-sub-966-1");
+        keycloak.nextSub("kc-sub-966-1");
+        keycloak.fail("PUT", "/users/kc-sub-966-1/execute-actions-email", 503);
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
@@ -1032,9 +1055,9 @@ class UserServiceTest {
         assertNull(user.getKeycloakSub());
         // 1回目はkeycloak_subを確定させる保存、2回目はメール送信失敗を受けてそれを
         // 取り消す保存(いずれもUserMigrationPersisterへ委譲される)。
-        verify(userMigrationPersister, org.mockito.Mockito.times(2)).saveAndFlush(user);
+        verify(userRepository, times(2)).saveAndFlush(user);
         // 直前に作成したKeycloakユーザーを孤児にしないよう削除する(create/updateと同じ補償)。
-        verify(keycloakAdminClient).deleteUser("kc-sub-966-1");
+        assertOp("delete:kc-sub-966-1");
     }
 
     /**
@@ -1056,19 +1079,18 @@ class UserServiceTest {
         UserService service = service();
         User user = buildUser();
         when(userRepository.findByKeycloakSubIsNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.createUser("user@example.com", null, null, true)).thenReturn("kc-sub-966-2");
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("SMTPが停止しています"))
-                .when(keycloakAdminClient).sendPasswordResetEmail("kc-sub-966-2");
+        keycloak.nextSub("kc-sub-966-2");
+        keycloak.fail("PUT", "/users/kc-sub-966-2/execute-actions-email", 503);
         // 1回目(sub確定)は成功、2回目(ロールバック)はDB障害等で失敗する想定。
-        org.mockito.Mockito.doNothing()
+        doReturn(user)
                 .doThrow(new RuntimeException("一時的なDB書き込み失敗"))
-                .when(userMigrationPersister).saveAndFlush(user);
+                .when(userRepository).saveAndFlush(user);
 
         MigrationSummaryResponse summary = service.migrateToKeycloak(null);
 
         assertTrue(summary.migratedUserIds().isEmpty());
         assertTrue(summary.failedUserIds().containsKey(1L));
-        verify(keycloakAdminClient).deleteUser("kc-sub-966-2");
+        assertOp("delete:kc-sub-966-2");
     }
 
     /**
@@ -1083,12 +1105,13 @@ class UserServiceTest {
         user.setRole("admin");
         user.setKeycloakSub("kc-sub-955-14");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-        org.mockito.Mockito.doThrow(new KeycloakUserSyncException("Keycloakが停止しています"))
-                .when(keycloakAdminClient).grantRealmRole("kc-sub-955-14", "admin");
+        keycloak.fail("POST", "/users/kc-sub-955-14/role-mappings/realm", 503);
 
         service.reconcileKeycloakAdminRole(1L);
 
-        verify(keycloakAdminClient).grantRealmRole("kc-sub-955-14", "admin");
+        // 付与は試みられ(Keycloakが503を返した)、例外にはならない。
+        assertOp("failed:POST:/users/kc-sub-955-14/role-mappings/realm");
+        assertNoOp("grant:");
     }
 
     @Test
@@ -1097,7 +1120,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-8");
         when(userRepository.findByKeycloakSubIsNotNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.exists("kc-sub-8")).thenReturn(false);
+        keycloak.userMissing("kc-sub-8");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ReconciliationSummaryResponse summary = service.reconcileWithKeycloak();
@@ -1121,7 +1144,7 @@ class UserServiceTest {
         ReconciliationSummaryResponse summary = service.reconcileWithKeycloak();
 
         assertTrue(summary.deactivatedUserIds().isEmpty());
-        verify(keycloakAdminClient, never()).exists(any());
+        assertNoOp("exists:");
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -1131,8 +1154,7 @@ class UserServiceTest {
         User user = buildUser();
         user.setKeycloakSub("kc-sub-9");
         when(userRepository.findByKeycloakSubIsNotNull()).thenReturn(List.of(user));
-        when(keycloakAdminClient.exists("kc-sub-9")).thenReturn(true);
-
+        
         ReconciliationSummaryResponse summary = service.reconcileWithKeycloak();
 
         assertTrue(summary.deactivatedUserIds().isEmpty());

@@ -1,7 +1,7 @@
 package com.letsblog.identity.integration;
 
 import com.letsblog.identity.domain.User;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
+import com.letsblog.identity.testsupport.KeycloakFakeSupport;
 import com.letsblog.identity.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -10,7 +10,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.io.IOException;
 import java.net.URI;
@@ -19,10 +18,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
 
 /**
  * issue #993: {@code POST /api/auth/setup}は公開エンドポイント(まだ誰もログインできない初回セットアップ
@@ -46,7 +41,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @DisplayName("identity-service: POST /api/auth/setupの不正ボディに対する応答(issue #993)")
-class AuthSetupIntegrationTest {
+class AuthSetupIntegrationTest extends KeycloakFakeSupport {
 
     @LocalServerPort
     private int port;
@@ -54,13 +49,12 @@ class AuthSetupIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
-    @MockitoBean
-    private KeycloakAdminClient keycloakAdminClient;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
     @BeforeEach
     void setUp() {
+        keycloak.reset();
         // 初回セットアップ導線のテストのため、既存ユーザーの有無を明示的に制御する
         // (UserWriteAuthorizationIntegrationTest等、他クラスが残した行の影響を受けないようにする)。
         userRepository.deleteAll();
@@ -94,8 +88,7 @@ class AuthSetupIntegrationTest {
     @Test
     @DisplayName("ユーザーが1人もいなければ、未認証のまま整形済みボディで初期管理者が作成される")
     void ユーザーがいなければ整形済みボディで管理者が作成される() throws Exception {
-        when(keycloakAdminClient.createUser(eq("new-admin@example.test"), any(), any(), anyBoolean()))
-                .thenReturn("sub-993-created");
+        keycloak.nextSub("sub-993-created");
 
         HttpResponse<String> response = post("{\"email\":\"new-admin@example.test\",\"password\":\"password123\"}");
 

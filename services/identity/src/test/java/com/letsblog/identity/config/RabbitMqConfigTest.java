@@ -3,6 +3,7 @@ package com.letsblog.identity.config;
 import com.letsblog.common.messaging.CorrelationIdListenerAdvice;
 import com.letsblog.common.messaging.EventExchanges;
 import org.aopalliance.aop.Advice;
+import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Queue;
@@ -54,7 +55,8 @@ class RabbitMqConfigTest {
 
     @Test
     void prependCorrelationAdviceは既存chainの先頭に相関ID_adviceを足す() {
-        Advice retry = mock(Advice.class);
+        // 実物のAdvice(何もせず通すだけのMethodInterceptor)。
+        Advice retry = (MethodInterceptor) invocation -> invocation.proceed();
 
         Advice[] combined = config.prependCorrelationAdvice(new Advice[] {retry});
 

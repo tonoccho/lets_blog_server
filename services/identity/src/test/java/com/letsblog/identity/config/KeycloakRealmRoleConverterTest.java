@@ -35,4 +35,30 @@ class KeycloakRealmRoleConverterTest {
 
         assertThat(converter.convert(jwt)).isEmpty();
     }
+
+    @Test
+    void realm_accessはあるがrolesが配列でなければ空のauthorityを返す() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "RS256")
+                .subject("sub-1")
+                .claim("realm_access", java.util.Map.of("roles", "admin"))
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+
+        assertThat(converter.convert(jwt)).isEmpty();
+    }
+
+    @Test
+    void realm_accessにrolesが無ければ空のauthorityを返す() {
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "RS256")
+                .subject("sub-1")
+                .claim("realm_access", java.util.Map.of("other", "x"))
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .build();
+
+        assertThat(converter.convert(jwt)).isEmpty();
+    }
 }

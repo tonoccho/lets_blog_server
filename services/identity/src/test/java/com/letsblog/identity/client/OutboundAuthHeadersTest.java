@@ -2,12 +2,9 @@ package com.letsblog.identity.client;
 
 import com.letsblog.common.auth.ServiceTokenClient;
 import com.letsblog.identity.service.ProjectNotFoundException;
-import com.sun.net.httpserver.HttpServer;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
+import com.letsblog.identity.testsupport.FakeHttpServer;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +18,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * issue #1324 レビュー指摘: 環境紐付け後の補填はRabbitリスナースレッドで動き、バインドされたHTTP
@@ -30,41 +25,38 @@ import static org.mockito.Mockito.when;
  * {@code HttpServletRequest}のプロキシからAuthorizationを読むため、そのスレッドでは
  * 「No thread-bound request found」になり、トークンも無く401になる。モックだけの単体テストでは
  * 見えないので、<b>本物の</b>クライアントをリクエストの無い素のスレッドで動かして固定する
- * (media-serviceのOutboundAuthHeadersTestと同じ方針)。
+ * (media-serviceのOutboundAuthHeadersTestと同じ方針)。サービス自身のトークンは、実物の
+ * {@code ServiceTokenClient}がKeycloakのトークンエンドポイント(サーバー側フェイク)から取る。
  */
 @DisplayName("identity-service: リクエストの無いスレッドでの内部ブリッジ認証(issue #1324)")
 class OutboundAuthHeadersTest {
 
-    private final ServiceTokenClient serviceTokenClient = mock(ServiceTokenClient.class);
-    private HttpServer server;
-    private final List<String> seenAuthorization = new CopyOnWriteArrayList<>();
-    private int status = 200;
-    private String responseBody = "{}";
+    private static final String TOKEN_PATH = "/realms/letsblog/protocol/openid-connect/token";
+
+    private FakeHttpServer server;
+    private ServiceTokenClient serviceTokenClient;
 
     @BeforeEach
-    void startServer() throws Exception {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/", exchange -> {
-            seenAuthorization.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
-            byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(status, status == 404 ? -1 : bytes.length);
-            if (status != 404) {
-                exchange.getResponseBody().write(bytes);
-            }
-            exchange.close();
-        });
-        server.start();
+    void startServer() {
+        server = new FakeHttpServer();
+        // サービス自身のトークン(Client Credentials)を返すKeycloakのトークンエンドポイント。
+        server.json("POST", TOKEN_PATH, "{\"access_token\":\"svc-token\",\"expires_in\":300}");
+        serviceTokenClient = new ServiceTokenClient(
+                RestClient.builder(), server.baseUrl() + TOKEN_PATH, "letsblog-services", "test-secret");
     }
 
     @AfterEach
     void clear() {
-        server.stop(0);
+        server.close();
         RequestContextHolder.resetRequestAttributes();
     }
 
-    private String baseUrl() {
-        return "http://127.0.0.1:" + server.getAddress().getPort();
+    /** 内部ブリッジへ届いた要求のAuthorization(トークンエンドポイントへの要求は除く)。 */
+    private List<String> seenAuthorization() {
+        return server.requests().stream()
+                .filter(r -> !TOKEN_PATH.equals(r.path()))
+                .map(r -> String.valueOf(r.header("Authorization")))
+                .toList();
     }
 
     private OutboundAuthHeaders noRequestAuth() {
@@ -88,24 +80,24 @@ class OutboundAuthHeadersTest {
         }
     }
 
+    private static final String SITE_JSON = "{\"id\":5,\"siteKey\":\"k\",\"name\":\"n\",\"baseUrl\":\"http://x\"}";
+
     @Test
     void リクエストの無いスレッドではサービス自身のトークンでサイトを照会する() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
-        responseBody = "{\"id\":5,\"siteKey\":\"k\",\"name\":\"n\",\"baseUrl\":\"http://x\"}";
-        ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), baseUrl(), noRequestAuth());
+        server.json("GET", "/api/internal/project/sites/5", SITE_JSON);
+        ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), server.baseUrl(), noRequestAuth());
         AtomicReference<Optional<ProjectServiceClient.SiteBridge>> result = new AtomicReference<>();
 
         onPlainThread(() -> result.set(client.getSite(5L)));
 
         assertEquals("k", result.get().orElseThrow().siteKey());
-        assertEquals(List.of("Bearer svc-token"), seenAuthorization);
+        assertEquals(List.of("Bearer svc-token"), seenAuthorization());
     }
 
     @Test
     void リクエストの無いスレッドでもサイトが無ければemptyになる() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
-        status = 404;
-        ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), baseUrl(), noRequestAuth());
+        server.status("GET", "/api/internal/project/sites/6", 404, "{}");
+        ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), server.baseUrl(), noRequestAuth());
         AtomicReference<Optional<ProjectServiceClient.SiteBridge>> result = new AtomicReference<>();
 
         onPlainThread(() -> result.set(client.getSite(6L)));
@@ -115,9 +107,8 @@ class OutboundAuthHeadersTest {
 
     @Test
     void リクエストの無いスレッドでもプロジェクトが無ければProjectNotFoundになる() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
-        status = 404;
-        ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), baseUrl(), noRequestAuth());
+        server.status("GET", "/api/internal/project/projects/6", 404, "{}");
+        ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), server.baseUrl(), noRequestAuth());
         AtomicReference<Throwable> seen = new AtomicReference<>();
 
         Thread t = new Thread(() -> {
@@ -136,9 +127,8 @@ class OutboundAuthHeadersTest {
 
     @Test
     void リクエストの無いスレッドではサービス自身のトークンで著者を作る() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
-        responseBody = "{\"cmsAuthorId\":\"42\"}";
-        PublishingServiceClient client = new PublishingServiceClient(RestClient.builder(), baseUrl(), noRequestAuth());
+        server.json("POST", "/api/internal/publishing/sites/k/authors", "{\"cmsAuthorId\":\"42\"}");
+        PublishingServiceClient client = new PublishingServiceClient(RestClient.builder(), server.baseUrl(), noRequestAuth());
         AtomicReference<String> result = new AtomicReference<>();
 
         onPlainThread(() -> result.set(client.provisionAuthor("k",
@@ -146,7 +136,7 @@ class OutboundAuthHeadersTest {
                         "a@example.com", "author", "A", "B", "AB", null, null, "ja")).cmsAuthorId()));
 
         assertEquals("42", result.get());
-        assertEquals(List.of("Bearer svc-token"), seenAuthorization);
+        assertEquals(List.of("Bearer svc-token"), seenAuthorization());
     }
 
     @Test
@@ -154,23 +144,25 @@ class OutboundAuthHeadersTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer user-token");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
-        responseBody = "{\"id\":5,\"siteKey\":\"k\",\"name\":\"n\",\"baseUrl\":\"http://x\"}";
+        server.json("GET", "/api/internal/project/sites/5", SITE_JSON);
 
-        new ProjectServiceClient(RestClient.builder(), baseUrl(),
+        new ProjectServiceClient(RestClient.builder(), server.baseUrl(),
                 new OutboundAuthHeaders(request, serviceTokenClient)).getSite(5L);
 
-        assertEquals(List.of("Bearer user-token"), seenAuthorization);
+        assertEquals(List.of("Bearer user-token"), seenAuthorization());
+        // ユーザーのBearerを転送するので、サービス自身のトークンは取りに行かない。
+        assertTrue(server.requests("POST", TOKEN_PATH).isEmpty());
     }
 
     @Test
     void リクエストがありAuthorizationが無ければヘッダーを付けない() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
-        responseBody = "{\"id\":5,\"siteKey\":\"k\",\"name\":\"n\",\"baseUrl\":\"http://x\"}";
+        server.json("GET", "/api/internal/project/sites/5", SITE_JSON);
 
-        new ProjectServiceClient(RestClient.builder(), baseUrl(),
+        new ProjectServiceClient(RestClient.builder(), server.baseUrl(),
                 new OutboundAuthHeaders(request, serviceTokenClient)).getSite(5L);
 
-        assertEquals(List.of("null"), seenAuthorization);
+        assertEquals(List.of("null"), seenAuthorization());
     }
 }

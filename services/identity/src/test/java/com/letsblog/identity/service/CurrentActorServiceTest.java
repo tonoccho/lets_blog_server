@@ -1,50 +1,39 @@
 package com.letsblog.identity.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.User;
 import com.letsblog.identity.repository.UserRepository;
-import jakarta.servlet.http.HttpServletRequest;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentMatchers;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.authentication.TestingAuthenticationToken;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * 操作者の解決。リクエストはSpring Testの{@link MockHttpServletRequest}(実物)、DBは
+ * Spring Dataのリポジトリ(外部との通信)だけをMockitoで差し替える。
+ */
 class CurrentActorServiceTest {
 
-    @Mock
-    private HttpServletRequest request;
+    private final UserRepository userRepository = mock(UserRepository.class);
 
-    @Mock
-    private UserRepository userRepository;
-
+    private MockHttpServletRequest request;
     private CurrentActorService service;
-
-    // request.setAttribute/getAttributeの簡易スタブ(モックのマップに退避する)。
-    private final Map<String, Object> requestAttributes = new HashMap<>();
 
     @BeforeEach
     void setUp() {
-        lenient().doAnswer(invocation -> {
-            requestAttributes.put(invocation.getArgument(0), invocation.getArgument(1));
-            return null;
-        }).when(request).setAttribute(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
-        lenient()
-                .when(request.getAttribute(org.mockito.ArgumentMatchers.anyString()))
-                .thenAnswer(invocation -> requestAttributes.get(invocation.getArgument(0, String.class)));
-
+        request = new MockHttpServletRequest();
         service = new CurrentActorService(request, userRepository);
     }
 
@@ -65,11 +54,13 @@ class CurrentActorServiceTest {
         User user = new User();
         user.setId(99L);
         user.setRole("admin");
+        user.setEnabled(true);
         when(userRepository.findByKeycloakSub("keycloak-sub-1")).thenReturn(Optional.of(user));
         SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("keycloak-sub-1"));
 
         assertThat(service.getCurrentActorId()).isEqualTo(99L);
         assertThat(service.getCurrentActorRole()).isEqualTo("admin");
+        assertThat(service.isAdmin()).isTrue();
     }
 
     @Test
@@ -79,6 +70,19 @@ class CurrentActorServiceTest {
 
         assertThat(service.getCurrentActorId()).isNull();
         assertThat(service.getCurrentActorRole()).isNull();
+        assertThat(service.isAdmin()).isFalse();
+    }
+
+    @Test
+    void 無効化されたユーザーは操作者として解決しない() {
+        User user = new User();
+        user.setId(5L);
+        user.setRole("admin");
+        user.setEnabled(false);
+        when(userRepository.findByKeycloakSub("disabled-sub")).thenReturn(Optional.of(user));
+        SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("disabled-sub"));
+
+        assertThat(service.getCurrentActorId()).isNull();
         assertThat(service.isAdmin()).isFalse();
     }
 
@@ -93,7 +97,15 @@ class CurrentActorServiceTest {
         assertThat(service.getCurrentActorId()).isNull();
         assertThat(service.getCurrentActorRole()).isNull();
         assertThat(service.isAdmin()).isFalse();
-        Mockito.verify(userRepository, Mockito.never()).findByKeycloakSub(org.mockito.ArgumentMatchers.any());
+        verify(userRepository, never()).findByKeycloakSub(ArgumentMatchers.any());
+    }
+
+    @Test
+    void JWTのsubクレームが空白の場合もユーザーを引かない() {
+        SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("   "));
+
+        assertThat(service.getCurrentActorId()).isNull();
+        verify(userRepository, never()).findByKeycloakSub(ArgumentMatchers.any());
     }
 
     @Test
@@ -101,6 +113,7 @@ class CurrentActorServiceTest {
         User user = new User();
         user.setId(1L);
         user.setRole("user");
+        user.setEnabled(true);
         when(userRepository.findByKeycloakSub("keycloak-sub-1")).thenReturn(Optional.of(user));
         SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("keycloak-sub-1"));
 
@@ -108,7 +121,66 @@ class CurrentActorServiceTest {
         service.getCurrentActorRole();
         service.isAdmin();
 
-        Mockito.verify(userRepository, Mockito.times(1)).findByKeycloakSub("keycloak-sub-1");
+        verify(userRepository, times(1)).findByKeycloakSub("keycloak-sub-1");
+    }
+
+    @Test
+    void 操作者なしの解決結果もリクエスト内で使い回す() {
+        service.getCurrentActorId();
+        service.getCurrentActorRole();
+
+        assertThat(request.getAttribute(CurrentActorService.class.getName() + ".jwtActor"))
+                .isEqualTo(Optional.empty());
+    }
+
+    @Test
+    void getCurrentActorKeycloakSubはJWTのsubを返す() {
+        SecurityContextHolder.getContext().setAuthentication(jwtAuthenticationToken("keycloak-sub-9"));
+
+        assertThat(service.getCurrentActorKeycloakSub()).isEqualTo("keycloak-sub-9");
+    }
+
+    @Test
+    void getCurrentActorKeycloakSubは認証が無ければnull() {
+        assertThat(service.getCurrentActorKeycloakSub()).isNull();
+    }
+
+    @Test
+    void getCurrentActorKeycloakSubはJWT以外の認証ならnull() {
+        SecurityContextHolder.getContext().setAuthentication(new TestingAuthenticationToken("user", "pw"));
+
+        assertThat(service.getCurrentActorKeycloakSub()).isNull();
+        assertThat(service.getCurrentActorId()).isNull();
+    }
+
+    @Test
+    void getRemoteIpはX_Forwarded_Forがあればそれを返す() {
+        request.addHeader("X-Forwarded-For", "203.0.113.5");
+        request.setRemoteAddr("10.0.0.1");
+
+        assertThat(service.getRemoteIp()).isEqualTo("203.0.113.5");
+    }
+
+    @Test
+    void getRemoteIpはX_Forwarded_Forが空白ならリモートアドレスを返す() {
+        request.addHeader("X-Forwarded-For", "  ");
+        request.setRemoteAddr("10.0.0.2");
+
+        assertThat(service.getRemoteIp()).isEqualTo("10.0.0.2");
+    }
+
+    @Test
+    void getRemoteIpはX_Forwarded_Forが無ければリモートアドレスを返す() {
+        request.setRemoteAddr("10.0.0.3");
+
+        assertThat(service.getRemoteIp()).isEqualTo("10.0.0.3");
+    }
+
+    @Test
+    void getUserAgentはヘッダーの値を返す() {
+        request.addHeader("User-Agent", "JUnit/5");
+
+        assertThat(service.getUserAgent()).isEqualTo("JUnit/5");
     }
 
     private JwtAuthenticationToken jwtAuthenticationToken(String subject) {

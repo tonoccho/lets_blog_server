@@ -4,7 +4,7 @@ import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.Permission;
 import com.letsblog.identity.domain.Role;
 import com.letsblog.identity.domain.User;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
+import com.letsblog.identity.testsupport.KeycloakFakeSupport;
 import com.letsblog.identity.repository.RoleRepository;
 import com.letsblog.identity.repository.UserRepository;
 import java.util.HashSet;
@@ -48,14 +48,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ロールと権限の組み合わせはこのテスト自身が明示的に組み立てる。かえって
  * 「どの権限を持つロールが特権とみなされるか」が読んで分かるので、この方が意図に合う。
  *
- * <p>Keycloak Admin APIは外部境界のため{@code @MockitoBean}で置き換える(ADR-0006)。
+ * <p>Keycloak Admin APIは外部境界のため、{@code KeycloakAdminClient}の実物をKeycloakのサーバー側フェイク
+ * ({@code SharedFakeKeycloak})へ向けて使う(issue #1826)。
  * 認可で弾かれる経路では下流に副作用が及んでいないことも併せて検証する。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("identity-service: 自己権限昇格・自己締め出しの防止(issue #798)")
-class SelfPrivilegeEscalationIntegrationTest {
+class SelfPrivilegeEscalationIntegrationTest extends KeycloakFakeSupport {
 
     private static final String ADMIN_SUB = "sub-798-admin";
     /** {@code users.role}は"user"だが、RBAC上は{@code ROLE_MANAGE}を持つ操作者。 */
@@ -78,8 +79,6 @@ class SelfPrivilegeEscalationIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private KeycloakAdminClient keycloakAdminClient;
 
     private Long adminId;
     private Long operatorId;
@@ -87,6 +86,7 @@ class SelfPrivilegeEscalationIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        keycloak.reset();
         // ロールより先にユーザーを消す。user_rolesがrolesを参照しているため、
         // 逆順にすると外部キー制約で落ちる。
         userRepository.findByKeycloakSub(ADMIN_SUB).ifPresent(userRepository::delete);

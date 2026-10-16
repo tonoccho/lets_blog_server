@@ -91,6 +91,9 @@ class AvatarImageProcessorOrientationParsingTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         writeSoi(out);
         writeEoi(out);
+        // while条件(offset+4<=length)を満たす長さまで続きを置く。置かないとEOIの判定に到達せずループに入らない。
+        out.write(0x00);
+        out.write(0x00);
         assertEquals(1, readJpegOrientation(out.toByteArray()));
     }
 
@@ -100,6 +103,9 @@ class AvatarImageProcessorOrientationParsingTest {
         writeSoi(out);
         out.write(0xFF);
         out.write(0xDA); // SOS
+        // while条件を満たす長さまで続きを置く(置かないとSOSの判定に到達しない)。
+        out.write(0x00);
+        out.write(0x00);
         assertEquals(1, readJpegOrientation(out.toByteArray()));
     }
 
@@ -294,6 +300,50 @@ class AvatarImageProcessorOrientationParsingTest {
         writeSoi(out);
         out.write(0x00); // 0xFFで始まらない不正なマーカー先頭
         out.write(0x00);
+        // while条件を満たす長さまで続きを置く(置かないと判定に到達しない)。
+        out.write(0x00);
+        out.write(0x00);
         assertEquals(1, readJpegOrientation(out.toByteArray()));
+    }
+
+    // ---- issue #1826: 分岐の網羅(マジックバイト・バイトオーダーマークの1バイトずつの不一致) ----
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2, 3, 4, 5})
+    void Exifマジックの任意の1バイトだけが崩れていてもnull(int corruptedIndex) throws ReflectiveOperationException {
+        byte[] bytes = new byte[] {'E', 'x', 'i', 'f', 0, 0, 'I', 'I', 42, 0, 8, 0, 0, 0};
+        bytes[corruptedIndex] = 0x7F;
+        assertNull(parseExifOrientation(bytes, 0, bytes.length));
+    }
+
+    @Test
+    void バイトオーダーマークがIで始まるが2文字目がIでなければMMとも判定されずnull() throws ReflectiveOperationException {
+        byte[] bytes = new byte[] {'E', 'x', 'i', 'f', 0, 0, 'I', 'X', 42, 0, 8, 0, 0, 0};
+        assertNull(parseExifOrientation(bytes, 0, bytes.length));
+    }
+
+    @Test
+    void バイトオーダーマークがMで始まるが2文字目がMでなければnull() throws ReflectiveOperationException {
+        byte[] bytes = new byte[] {'E', 'x', 'i', 'f', 0, 0, 'M', 'X', 0, 42, 0, 0, 0, 8};
+        assertNull(parseExifOrientation(bytes, 0, bytes.length));
+    }
+
+    @Test
+    void APP1のExifからOrientationが読めればそれを返す() throws ReflectiveOperationException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        writeSoi(out);
+        out.write(0xFF);
+        out.write(0xE1); // APP1
+        byte[] payload = new byte[] {
+            'E', 'x', 'i', 'f', 0, 0,
+            'I', 'I', 42, 0, 8, 0, 0, 0,
+            1, 0, // entryCount=1
+            0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0 // tag=0x0112 SHORT count=1 value=6
+        };
+        int segmentLength = payload.length + 2;
+        out.write((segmentLength >> 8) & 0xFF);
+        out.write(segmentLength & 0xFF);
+        out.writeBytes(payload);
+        assertEquals(6, readJpegOrientation(out.toByteArray()));
     }
 }

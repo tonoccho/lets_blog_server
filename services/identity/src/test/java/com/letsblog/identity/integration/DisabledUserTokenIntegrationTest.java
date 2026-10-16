@@ -2,7 +2,7 @@ package com.letsblog.identity.integration;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.identity.domain.User;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
+import com.letsblog.identity.testsupport.KeycloakFakeSupport;
 import com.letsblog.identity.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("identity-service: 無効化ユーザーの発行済みトークン(issue #816)")
-class DisabledUserTokenIntegrationTest {
+class DisabledUserTokenIntegrationTest extends KeycloakFakeSupport {
 
     private static final String ADMIN_SUB = "sub-816-admin";
     private static final String USER_SUB = "sub-816-user";
@@ -55,13 +55,12 @@ class DisabledUserTokenIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private KeycloakAdminClient keycloakAdminClient;
 
     private Long adminId;
 
     @BeforeEach
     void setUp() {
+        keycloak.reset();
         userRepository.findByKeycloakSub(ADMIN_SUB).ifPresent(userRepository::delete);
         userRepository.findByKeycloakSub(USER_SUB).ifPresent(userRepository::delete);
         adminId = create(ADMIN_SUB, "admin", true);

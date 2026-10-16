@@ -405,4 +405,276 @@ class KeycloakAdminClientTest {
         // 2回目のexists呼び出しでトークンを再取得していれば server.verify() が失敗する。
         server.verify();
     }
+
+    // ------------------------------------------------------------------ issue #1826: 分岐の網羅
+
+    private void expectAdmin(org.springframework.http.HttpMethod httpMethod, String path,
+            org.springframework.test.web.client.ResponseCreator response) {
+        server.expect(requestTo(ADMIN_BASE_URI + path)).andExpect(method(httpMethod)).andRespond(response);
+    }
+
+    private static org.springframework.test.web.client.ResponseCreator connectionRefused() {
+        return request -> {
+            throw new java.io.IOException("Connection refused");
+        };
+    }
+
+    @Test
+    void createUser_空白だけの姓名は送らない() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users"))
+                .andExpect(method(POST))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("firstName"))))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("lastName"))))
+                .andRespond(withStatus(HttpStatus.CREATED)
+                        .location(java.net.URI.create(ADMIN_BASE_URI + "/users/blank-names")));
+
+        assertEquals("blank-names", client.createUser("blank@example.com", "  ", "\t", false));
+        server.verify();
+    }
+
+    @Test
+    void createUser_姓名があれば送る() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users"))
+                .andExpect(content().string(containsString("\"firstName\":\"太郎\"")))
+                .andExpect(content().string(containsString("\"lastName\":\"山田\"")))
+                .andRespond(withStatus(HttpStatus.CREATED)
+                        .location(java.net.URI.create(ADMIN_BASE_URI + "/users/named")));
+
+        assertEquals("named", client.createUser("named@example.com", "太郎", "山田", false));
+    }
+
+    @Test
+    void createUser_Locationヘッダーが無ければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(POST, "/users", withStatus(HttpStatus.CREATED));
+
+        KeycloakUserSyncException e = assertThrows(KeycloakUserSyncException.class,
+                () -> client.createUser("nolocation@example.com", null, null, false));
+
+        org.hamcrest.MatcherAssert.assertThat(e.getMessage(), containsString("IDを取得できませんでした"));
+    }
+
+    @Test
+    void createUser_Locationヘッダーが空白なら例外になる() {
+        expectTokenRequest();
+        expectAdmin(POST, "/users", withStatus(HttpStatus.CREATED).header("Location", " "));
+
+        assertThrows(KeycloakUserSyncException.class,
+                () -> client.createUser("blanklocation@example.com", null, null, false));
+    }
+
+    @Test
+    void createUser_409は同一ユーザーが既に存在するメッセージになる() {
+        expectTokenRequest();
+        expectAdmin(POST, "/users", withStatus(HttpStatus.CONFLICT));
+
+        KeycloakUserSyncException e = assertThrows(KeycloakUserSyncException.class,
+                () -> client.createUser("dup@example.com", null, null, false));
+
+        org.hamcrest.MatcherAssert.assertThat(e.getMessage(), containsString("既に存在します"));
+    }
+
+    @Test
+    void createUser_401はサービスアカウントの権限を確認するメッセージになる() {
+        expectTokenRequest();
+        expectAdmin(POST, "/users", withStatus(HttpStatus.UNAUTHORIZED));
+
+        KeycloakUserSyncException e = assertThrows(KeycloakUserSyncException.class,
+                () -> client.createUser("unauth@example.com", null, null, false));
+
+        org.hamcrest.MatcherAssert.assertThat(e.getMessage(), containsString("manage-users"));
+    }
+
+    @Test
+    void updateProfile_姓名を送る() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-p"))
+                .andExpect(method(PUT))
+                .andExpect(content().string("{\"firstName\":\"太郎\",\"lastName\":\"山田\"}"))
+                .andRespond(withSuccess());
+
+        client.updateProfile("sub-p", "太郎", "山田");
+
+        server.verify();
+    }
+
+    @Test
+    void updateProfile_nullは空文字として送る() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-p"))
+                .andExpect(content().string("{\"firstName\":\"\",\"lastName\":\"\"}"))
+                .andRespond(withSuccess());
+
+        client.updateProfile("sub-p", null, null);
+
+        server.verify();
+    }
+
+    @Test
+    void setEnabled_trueで有効化リクエストを送る() {
+        expectTokenRequest();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-e"))
+                .andExpect(method(PUT))
+                .andExpect(content().string("{\"enabled\":true}"))
+                .andRespond(withSuccess());
+
+        client.setEnabled("sub-e", true);
+
+        server.verify();
+    }
+
+    @Test
+    void setEnabled_接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(PUT, "/users/sub-e", connectionRefused());
+
+        KeycloakUserSyncException e = assertThrows(KeycloakUserSyncException.class,
+                () -> client.setEnabled("sub-e", false));
+
+        org.hamcrest.MatcherAssert.assertThat(e.getMessage(), containsString("ユーザー無効化"));
+    }
+
+    @Test
+    void deleteUser_404以外のエラーは例外になる() {
+        expectTokenRequest();
+        expectAdmin(DELETE, "/users/sub-d", withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.deleteUser("sub-d"));
+    }
+
+    @Test
+    void deleteUser_接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(DELETE, "/users/sub-d", connectionRefused());
+
+        KeycloakUserSyncException e =
+                assertThrows(KeycloakUserSyncException.class, () -> client.deleteUser("sub-d"));
+
+        org.hamcrest.MatcherAssert.assertThat(e.getMessage(), containsString("停止している可能性"));
+    }
+
+    @Test
+    void sendPasswordResetEmail_失敗レスポンスは例外になる() {
+        expectTokenRequest();
+        expectAdmin(PUT, "/users/sub-m/execute-actions-email", withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.sendPasswordResetEmail("sub-m"));
+    }
+
+    @Test
+    void sendPasswordResetEmail_接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(PUT, "/users/sub-m/execute-actions-email", connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.sendPasswordResetEmail("sub-m"));
+    }
+
+    @Test
+    void setPassword_接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(PUT, "/users/sub-m/reset-password", connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.setPassword("sub-m", "pw"));
+    }
+
+    @Test
+    void exists_接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-x", connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.exists("sub-x"));
+    }
+
+    @Test
+    void grantRealmRole_一覧取得に接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-g" + ASSIGNED, connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-g", "admin"));
+    }
+
+    @Test
+    void grantRealmRole_付与のPOSTに接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-g" + ASSIGNED, withSuccess("[]", MediaType.APPLICATION_JSON));
+        expectAdmin(GET, "/users/sub-g" + AVAILABLE,
+                withSuccess("[{\"id\":\"r1\",\"name\":\"admin\"}]", MediaType.APPLICATION_JSON));
+        expectAdmin(POST, "/users/sub-g" + ASSIGNED, connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-g", "admin"));
+    }
+
+    @Test
+    void grantRealmRole_ユーザーが存在しない404は付与できないとして例外になる() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-g" + ASSIGNED, withStatus(HttpStatus.NOT_FOUND));
+        expectAdmin(GET, "/users/sub-g" + AVAILABLE, withStatus(HttpStatus.NOT_FOUND));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-g", "admin"));
+    }
+
+    @Test
+    void ロール一覧の応答が配列でなければ見つからない扱いにする() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-o" + ASSIGNED, withSuccess("{\"unexpected\":true}", MediaType.APPLICATION_JSON));
+        expectAdmin(GET, "/users/sub-o" + AVAILABLE, withSuccess("{\"unexpected\":true}", MediaType.APPLICATION_JSON));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-o", "admin"));
+    }
+
+    @Test
+    void ロール一覧の応答が空本文なら見つからない扱いにする() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-o" + ASSIGNED, withSuccess());
+        expectAdmin(GET, "/users/sub-o" + AVAILABLE, withSuccess());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-o", "admin"));
+    }
+
+    @Test
+    void ロール名が一致してもidが無い要素は選ばない() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-i" + ASSIGNED, withSuccess("[]", MediaType.APPLICATION_JSON));
+        expectAdmin(GET, "/users/sub-i" + AVAILABLE,
+                withSuccess("[{\"name\":\"admin\"},{\"id\":null,\"name\":\"admin\"}]", MediaType.APPLICATION_JSON));
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.grantRealmRole("sub-i", "admin"));
+    }
+
+    @Test
+    void ロール名が違う要素は選ばず_一致する要素のidを使う() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-i" + ASSIGNED, withSuccess("[]", MediaType.APPLICATION_JSON));
+        expectAdmin(GET, "/users/sub-i" + AVAILABLE, withSuccess(
+                "[{\"id\":\"a\",\"name\":\"viewer\"},{\"id\":\"b\",\"name\":\"admin\"}]",
+                MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/sub-i" + ASSIGNED))
+                .andExpect(method(POST))
+                .andExpect(content().string("[{\"id\":\"b\",\"name\":\"admin\"}]"))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        client.grantRealmRole("sub-i", "admin");
+
+        server.verify();
+    }
+
+    @Test
+    void revokeRealmRole_一覧取得に接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-r" + ASSIGNED, connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.revokeRealmRole("sub-r", "admin"));
+    }
+
+    @Test
+    void revokeRealmRole_DELETEに接続できなければ例外になる() {
+        expectTokenRequest();
+        expectAdmin(GET, "/users/sub-r" + ASSIGNED, withSuccess(
+                "[{\"id\":\"r1\",\"name\":\"admin\"}]", MediaType.APPLICATION_JSON));
+        expectAdmin(DELETE, "/users/sub-r" + ASSIGNED, connectionRefused());
+
+        assertThrows(KeycloakUserSyncException.class, () -> client.revokeRealmRole("sub-r", "admin"));
+    }
 }

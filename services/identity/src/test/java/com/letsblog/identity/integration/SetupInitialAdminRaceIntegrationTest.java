@@ -1,15 +1,15 @@
 package com.letsblog.identity.integration;
 
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
+import com.letsblog.identity.testsupport.KeycloakFakeSupport;
 import com.letsblog.identity.repository.UserRepository;
 import com.letsblog.identity.service.UserService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,17 +18,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * issue #1718: {@code POST /api/auth/setup}が同時に届いても、作られる初回管理者は高々1人。
@@ -41,7 +33,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest
 @ActiveProfiles("test")
 @DisplayName("identity-service: 初回管理者セットアップの同時実行(issue #1718)")
-class SetupInitialAdminRaceIntegrationTest {
+class SetupInitialAdminRaceIntegrationTest extends KeycloakFakeSupport {
 
     private static final int RACE_ROUNDS = 5;
     private static final int CONCURRENCY = 4;
@@ -52,19 +44,18 @@ class SetupInitialAdminRaceIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
-    @MockitoBean
-    private KeycloakAdminClient keycloakAdminClient;
-
-    private final AtomicInteger subSeq = new AtomicInteger();
 
     @BeforeEach
     void setUp() {
         userRepository.deleteAll();
-        reset(keycloakAdminClient);
-        when(keycloakAdminClient.createUser(anyString(), any(), any(), anyBoolean())).thenAnswer(inv -> {
-            Thread.sleep(150);
-            return "sub-1718-" + subSeq.incrementAndGet();
-        });
+        keycloak.reset();
+        // 競合を確実に重ねるため、Keycloakのユーザー作成を遅らせる。
+        keycloak.delayCreateUser(150);
+    }
+
+    @AfterEach
+    void tearDown() {
+        keycloak.reset();
     }
 
     @Test
@@ -72,19 +63,16 @@ class SetupInitialAdminRaceIntegrationTest {
     void 同時セットアップでも管理者は一人だけ() throws Exception {
         for (int round = 0; round < RACE_ROUNDS; round++) {
             userRepository.deleteAll();
-            reset(keycloakAdminClient);
-            when(keycloakAdminClient.createUser(anyString(), any(), any(), anyBoolean())).thenAnswer(inv -> {
-                Thread.sleep(150);
-                return "sub-1718-" + subSeq.incrementAndGet();
-            });
+            keycloak.reset();
+            keycloak.delayCreateUser(150);
 
             int succeeded = race(round);
 
             assertThat(succeeded).as("round %d: 成功したセットアップの数", round).isEqualTo(1);
             assertThat(userRepository.count()).as("round %d: users", round).isEqualTo(1);
             // 直列化がKeycloak呼び出しより前にあるので、負けた側はKeycloakを一切呼ばない。
-            verify(keycloakAdminClient, times(1)).createUser(anyString(), any(), any(), anyBoolean());
-            verify(keycloakAdminClient, never()).deleteUser(anyString());
+            assertThat(keycloak.ops("createUser:")).as("round %d: Keycloakのユーザー作成", round).hasSize(1);
+            assertThat(keycloak.ops("delete:")).as("round %d: Keycloakのユーザー削除", round).isEmpty();
         }
     }
 

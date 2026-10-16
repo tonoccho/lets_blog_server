@@ -1,55 +1,57 @@
 package com.letsblog.identity.service;
 
-import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.identity.domain.User;
 import com.letsblog.identity.dto.UserUpdateRequest;
-import com.letsblog.identity.keycloak.KeycloakAdminClient;
-import com.letsblog.identity.messaging.DomainEventPublisher;
-import com.letsblog.identity.repository.RoleRepository;
 import com.letsblog.identity.repository.UserRepository;
+import com.letsblog.identity.testsupport.FakeKeycloak;
+import com.letsblog.identity.testsupport.IdentityWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * issue #1162: 最後の有効なadminの保護の分岐単位の検証(モック)。実DBでの原子性(同時実行)は
+ * issue #1162: 最後の有効なadminの保護の分岐単位の検証。実DBでの原子性(同時実行)は
  * {@code LastAdminGuardIntegrationTest}が担う。
+ *
+ * <p>{@code UserService}・{@code KeycloakAdminClient}・{@code AuditLogService}・
+ * {@code DomainEventPublisher}は実物。DBのリポジトリ(Mockito)、KeycloakのHTTP({@link FakeKeycloak})だけが
+ * 外部との通信として差し替わる。「ロックを先に取ってからKeycloakを触る」順序は、ロック取得の瞬間に
+ * Keycloakへ何も送られていないことで確かめる。
  */
-@ExtendWith(MockitoExtension.class)
 class UserServiceLastAdminGuardTest {
 
-    @Mock
+    private IdentityWorld world;
     private UserRepository userRepository;
-    @Mock
-    private RoleRepository roleRepository;
-    @Mock
-    private KeycloakAdminClient keycloakAdminClient;
-    @Mock
-    private DomainEventPublisher domainEventPublisher;
-    @Mock
-    private AuditLogService auditLogService;
-    @Mock
-    private UserMigrationPersister userMigrationPersister;
+    private FakeKeycloak keycloak;
 
-    private final CredentialCipher credentialCipher = new CredentialCipher(
-            java.util.Base64.getEncoder().encodeToString(new byte[32]));
+    @BeforeEach
+    void setUp() {
+        world = new IdentityWorld();
+        userRepository = world.userRepository;
+        keycloak = world.keycloak;
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private UserService service() {
-        return new UserService(
-                userRepository, roleRepository, credentialCipher, keycloakAdminClient, domainEventPublisher,
-                auditLogService, userMigrationPersister);
+        return world.userService;
     }
 
     private User user(long id, String role) {
@@ -70,7 +72,7 @@ class UserServiceLastAdminGuardTest {
 
         assertThrows(ForbiddenException.class, () -> service().delete(1L));
 
-        verify(keycloakAdminClient, never()).deleteUser(any());
+        assertTrue(keycloak.ops().isEmpty(), keycloak.ops().toString());
         verify(userRepository, never()).deleteById(any());
     }
 
@@ -82,9 +84,9 @@ class UserServiceLastAdminGuardTest {
 
         assertThrows(ForbiddenException.class, () -> service().deactivate(1L));
 
-        verify(keycloakAdminClient, never()).setEnabled(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        assertTrue(keycloak.ops().isEmpty(), keycloak.ops().toString());
         verify(userRepository, never()).save(any());
-        verify(domainEventPublisher, never()).publishUserDeactivated(any(), any());
+        assertTrue(world.domainEvents().isEmpty());
     }
 
     @Test
@@ -92,14 +94,23 @@ class UserServiceLastAdminGuardTest {
         User target = user(1L, "admin");
         User other = user(2L, "admin");
         when(userRepository.findById(1L)).thenReturn(Optional.of(target));
-        when(userRepository.lockEnabledAdmins()).thenReturn(List.of(target, other));
+        AtomicReference<List<String>> opsAtLock = new AtomicReference<>();
+        when(userRepository.lockEnabledAdmins()).thenAnswer(invocation -> {
+            opsAtLock.set(keycloak.ops());
+            return List.of(target, other);
+        });
+        AtomicReference<List<String>> opsAtDeleteById = new AtomicReference<>();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            opsAtDeleteById.set(keycloak.ops());
+            return null;
+        }).when(userRepository).deleteById(1L);
 
         service().delete(1L);
 
-        InOrder order = inOrder(userRepository, keycloakAdminClient);
-        order.verify(userRepository).lockEnabledAdmins();
-        order.verify(keycloakAdminClient).deleteUser("kc-1");
-        order.verify(userRepository).deleteById(1L);
+        // ロック → Keycloakの削除 → ローカルの削除、の順。
+        assertEquals(List.of(), opsAtLock.get());
+        assertEquals(List.of("delete:kc-1"), opsAtDeleteById.get());
+        verify(userRepository).deleteById(1L);
     }
 
     @Test
@@ -108,11 +119,10 @@ class UserServiceLastAdminGuardTest {
         User other = user(2L, "admin");
         when(userRepository.findById(1L)).thenReturn(Optional.of(target));
         when(userRepository.lockEnabledAdmins()).thenReturn(List.of(target, other));
-        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service().deactivate(1L);
 
-        verify(keycloakAdminClient).setEnabled("kc-1", false);
+        assertEquals(List.of("setEnabled:kc-1:false"), keycloak.ops());
     }
 
     @Test
@@ -150,26 +160,35 @@ class UserServiceLastAdminGuardTest {
         ForbiddenException e = assertThrows(ForbiddenException.class,
                 () -> service().update(1L, new UserUpdateRequest("user", null)));
 
-        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("最後の管理者"));
-        verify(keycloakAdminClient, never()).revokeRealmRole(any(), any());
+        assertTrue(e.getMessage().contains("最後の管理者"));
+        assertTrue(keycloak.ops().isEmpty(), keycloak.ops().toString());
         verify(userRepository, never()).saveAndFlush(any());
-        verify(auditLogService, never()).logUserRoleUpdated(any(), any(), any());
+        assertTrue(world.auditMessages().isEmpty());
     }
 
     @Test
     void update_有効なadminが2人いれば降格でき_ロックを先に取ってからKeycloakを触る() {
         User target = user(1L, "admin");
         User other = user(2L, "admin");
+        keycloak.alreadyAssigned("kc-1", "admin");
         when(userRepository.findById(1L)).thenReturn(Optional.of(target));
-        when(userRepository.lockEnabledAdmins()).thenReturn(List.of(target, other));
-        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(i -> i.getArgument(0));
+        AtomicReference<List<String>> opsAtLock = new AtomicReference<>();
+        when(userRepository.lockEnabledAdmins()).thenAnswer(invocation -> {
+            opsAtLock.set(keycloak.ops());
+            return List.of(target, other);
+        });
+        AtomicReference<List<String>> opsAtSave = new AtomicReference<>();
+        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(invocation -> {
+            opsAtSave.set(keycloak.ops());
+            return invocation.getArgument(0);
+        });
 
         service().update(1L, new UserUpdateRequest("user", null));
 
-        InOrder order = inOrder(userRepository, keycloakAdminClient);
-        order.verify(userRepository).lockEnabledAdmins();
-        order.verify(keycloakAdminClient).revokeRealmRole(any(), any());
-        order.verify(userRepository).saveAndFlush(target);
+        // ロック → Keycloakのrealmロール剥奪 → ローカルの保存、の順。
+        assertEquals(List.of(), opsAtLock.get());
+        assertEquals(List.of("revoke:kc-1:admin"), opsAtSave.get());
+        verify(userRepository).saveAndFlush(target);
     }
 
     @Test
@@ -178,7 +197,6 @@ class UserServiceLastAdminGuardTest {
         User plain = user(2L, "user");
         when(userRepository.findById(1L)).thenReturn(Optional.of(admin));
         when(userRepository.findById(2L)).thenReturn(Optional.of(plain));
-        when(userRepository.saveAndFlush(any(User.class))).thenAnswer(i -> i.getArgument(0));
 
         service().update(1L, new UserUpdateRequest("admin", null));
         service().update(1L, new UserUpdateRequest(null, null));
