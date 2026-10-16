@@ -240,4 +240,49 @@ class CustomTagRenderServiceTest {
         assertTrue(content.contains("<!-- /lbs:tag -->"), content);
         assertTrue(!result.contains("[badge]"), result);
     }
+
+    // ---- issue #1821: 分岐 ----
+
+    @Test
+    void previewTemplate_内容が空白ならプレースホルダーを空に置き換える() {
+        assertEquals("<div></div>", service.previewTemplate("<div>{{content}}</div>", "   "));
+    }
+
+    @Test
+    void previewTemplate_1段落だけならpタグを外し_複数段落や見出しは外さない() {
+        assertEquals("<div>a</div>", service.previewTemplate("<div>{{content}}</div>", "a"));
+        assertTrue(service.previewTemplate("<div>{{content}}</div>", "a\n\nb").contains("<p>a</p>"));
+        assertEquals("<div><h1 id=\"見出し\">見出し</h1></div>", service.previewTemplate("<div>{{content}}</div>", "# 見出し"));
+        assertTrue(service.previewTemplate("<div>{{content}}</div>", "<p>x</p>\n\n<p>y</p>").contains("<p>x</p>"));
+    }
+
+    @Test
+    void render_中身が空のBLOCKタグはプレースホルダーを空にして展開する() {
+        when(customTagRepository.findByProjectIdIsNull())
+                .thenReturn(List.of(buildTag("note", CustomTagFormat.BLOCK, "<div>{{content}}</div>")));
+
+        String result = service.render("[note]\n[/note]");
+
+        assertTrue(result.contains("<div></div>"), result);
+        assertEquals("", marker(result).get("content").asText());
+    }
+
+    @Test
+    void render_同名のタグはプロジェクトのものとグローバルのどちらか一方だけが使われる() {
+        CustomTag project = buildTag("note", CustomTagFormat.BLOCK, "<p class=\"project\">{{content}}</p>");
+        CustomTag global = buildTag("note", CustomTagFormat.BLOCK, "<p class=\"global\">{{content}}</p>");
+        when(customTagRepository.findByProjectIdOrProjectIdIsNull(3L)).thenReturn(List.of(project, global));
+
+        String result = service.render("[note]\nx\n[/note]", 3L);
+
+        assertTrue(result.contains("class=\"project\""), result);
+        assertTrue(!result.contains("class=\"global\""), result);
+    }
+
+    @Test
+    void previewTemplate_pタグで始まっても最後がpタグでなければ外さない() {
+        String result = service.previewTemplate("<div>{{content}}</div>", "para\n\n<div>x</div>");
+
+        assertTrue(result.startsWith("<div><p>para</p>"), result);
+    }
 }

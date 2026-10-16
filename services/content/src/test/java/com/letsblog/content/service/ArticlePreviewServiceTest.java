@@ -1,216 +1,148 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.markdown.MarkdownRenderer;
+import com.letsblog.content.domain.CustomTagFormat;
+import com.letsblog.content.domain.ContentType;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.Base64;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
 /**
  * legacy-apiのArticlePreviewServiceTestのうち、content-serviceへ移設した記事本文レンダリング
  * (renderHtml)の振る舞いを引き継いだテスト(issue #576)。
+ *
+ * <p>issue #1821: カスタムタグ・ブログカード・Amazon・Recharts・PlantUML・目次・ラッパー・MarkdownRendererは
+ * すべて実物で、本物のパイプラインを通す。差し替えているのは、media-service・project-serviceのHTTP(フェイク)、
+ * リポジトリ(DB)、ブラウザ(外部プロセス)だけ。
  */
-@ExtendWith(MockitoExtension.class)
 class ArticlePreviewServiceTest {
 
-    @Mock
-    private CustomTagRenderService customTagRenderService;
+    private static final String ERROR_PREFIX = "<div role=\"alert\"";
 
-    @Mock
-    private BlogCardTagRenderService blogCardTagRenderService;
-
-    @Mock
-    private AmazonTagRenderService amazonTagRenderService;
-
-    @Mock
-    private RechartsTagRenderService rechartsTagRenderService;
-
-    @Mock
-    private PlantUmlEmbedService plantUmlEmbedService;
-
-    @Mock
-    private PlantUmlTagRenderService plantUmlTagRenderService;
-
-    @Mock
-    private TocStyleRenderService tocStyleRenderService;
-
-    @Mock
-    private RenderedContentWrapperService renderedContentWrapperService;
-
-    @Mock
-    private MarkdownRenderer markdownRenderer;
-
+    private ContentWorld world;
     private ArticlePreviewService service;
 
     @BeforeEach
     void setUp() {
-        service = new ArticlePreviewService(
-                customTagRenderService, blogCardTagRenderService, amazonTagRenderService, rechartsTagRenderService,
-                plantUmlEmbedService, plantUmlTagRenderService, tocStyleRenderService, renderedContentWrapperService,
-                markdownRenderer);
-        // renderHtml()は必ずrechartsTagRenderService/plantUmlTagRenderService/plantUmlEmbedServiceを
-        // 経由するため、それら自体を検証しないテストでは素通しにしておく
-        // (未スタブだとnullが返り、以降の呼び出しの引数が狂うため)。
-        lenient().when(rechartsTagRenderService.render(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(plantUmlTagRenderService.renderForPreview(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(plantUmlEmbedService.embedDiagramsForPreview(anyString()))
-                .thenAnswer(inv -> inv.getArgument(0));
+        world = new ContentWorld().actingAsAdmin(1L);
+        service = world.articlePreviewService;
+        world.settingsFor(1L, "acme");
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
-    void renderHtml_カスタムタグ展開後にMarkdownをHTML変換する() {
-        when(customTagRenderService.render("**bold**", 1L)).thenReturn("**bold** rendered");
-        when(blogCardTagRenderService.render("**bold** rendered", 1L)).thenReturn("**bold** rendered");
-        when(amazonTagRenderService.render("**bold** rendered", 1L, false)).thenReturn("**bold** rendered");
-        when(markdownRenderer.render("**bold** rendered")).thenReturn("<p><strong>bold</strong> rendered</p>");
-        when(tocStyleRenderService.applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L))
-                .thenReturn("<p><strong>bold</strong> rendered</p>");
-        when(renderedContentWrapperService.wrap("<p><strong>bold</strong> rendered</p>", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>");
+    void renderHtml_カスタムタグ展開後にMarkdownをHTML変換しラッパーで囲む() {
+        world.tag("note", "<div class=\"note\">{{content}}</div>", null, CustomTagFormat.BLOCK, 1L);
 
-        String html = service.renderHtml(1L, "**bold**");
+        String html = service.renderHtml(1L, "**bold**\n\n[note]\n注意\n[/note]");
 
-        assertEquals("<div class=\"lets-blog-rendered\"><p><strong>bold</strong> rendered</p></div>", html);
-        verify(customTagRenderService).render("**bold**", 1L);
-        verify(blogCardTagRenderService).render("**bold** rendered", 1L);
-        verify(amazonTagRenderService).render("**bold** rendered", 1L, false);
-        verify(markdownRenderer).render("**bold** rendered");
-        verify(tocStyleRenderService).applyHtmlTemplate("<p><strong>bold</strong> rendered</p>", 1L);
-        verify(renderedContentWrapperService).wrap("<p><strong>bold</strong> rendered</p>", 1L);
+        assertTrue(html.startsWith("<div class=\"lets-blog-rendered acme\"><p><strong>bold</strong></p>"), html);
+        assertTrue(html.contains("<div class=\"note\">注意</div>"), html);
+        assertTrue(html.endsWith("</div>"), html);
+    }
+
+    @Test
+    void renderHtml_ブログカードを展開しAmazonは本番サイト向けの実リンクにしない() {
+        String blog = "https://example.com/article";
+        String amazon = "https://amazon.co.jp/dp/xxx";
+        world.cached(blog, ContentType.BLOGCARD, Map.of("title", "記事", "url", blog), LocalDateTime.now());
+        world.cached(amazon, ContentType.AMAZON,
+                Map.of("productName", "商品", "productUrl", amazon, "price", "1000"), LocalDateTime.now());
+
+        String html = service.renderHtml(1L, "[blogcard " + blog + "]\n\n[amazon " + amazon + "]");
+
+        assertTrue(html.contains("lb-blogcard"), html);
+        assertTrue(html.contains("lb-amazon-card"), html);
+        // プレビューは特定サイトに紐付かないので、Amazonのリンクは非活性(aではなくdiv)
+        assertFalse(html.contains("<a class=\"lb-amazon-card\""), html);
     }
 
     @Test
     void renderHtml_rechartsタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(rechartsTagRenderService.render("markdown"))
-                .thenThrow(new InvalidRechartsTagException("type属性は必須です"));
+        String html = service.renderHtml(1L, "[recharts]\n| a | b |\n|---|---|\n| 1 | 2 |\n[/recharts]");
 
-        String html = service.renderHtml(1L, "markdown");
-
-        assertTrue(html.contains("type属性は必須です"));
-        verifyNoInteractions(plantUmlTagRenderService, plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
-                renderedContentWrapperService);
+        assertTrue(html.startsWith(ERROR_PREFIX), html);
+        assertTrue(html.contains("チャートのレンダリングエラー"), html);
+        assertTrue(html.contains("type属性は必須です"), html);
+        assertFalse(html.contains("lets-blog-rendered"), "中止したのでラッパーは付かない");
     }
 
     @Test
     void renderHtml_recharts展開後の内容がMarkdown変換される() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(rechartsTagRenderService.render("markdown")).thenReturn("markdown<div>chart</div>");
-        when(markdownRenderer.render("markdown<div>chart</div>")).thenReturn("<p>markdown</p><div>chart</div>");
-        when(tocStyleRenderService.applyHtmlTemplate("<p>markdown</p><div>chart</div>", 1L))
-                .thenReturn("<p>markdown</p><div>chart</div>");
-        when(renderedContentWrapperService.wrap("<p>markdown</p><div>chart</div>", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>");
+        String html = service.renderHtml(1L,
+                "[recharts type=\"bar\" xAxis=\"m\"]\n| m | v |\n|---|---|\n| a | 1 |\n[/recharts]");
 
-        String html = service.renderHtml(1L, "markdown");
-
-        assertEquals("<div class=\"lets-blog-rendered\"><p>markdown</p><div>chart</div></div>", html);
+        assertTrue(html.contains("<svg></svg>"), html);
+        assertTrue(html.startsWith("<div class=\"lets-blog-rendered acme\">"), html);
     }
 
     @Test
     void renderHtml_plantumlフェンスをdataURI画像へ差し替えてからMarkdown変換する() {
-        when(customTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
-                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(blogCardTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L))
-                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(amazonTagRenderService.render("```plantuml\n@startuml\n@enduml\n```", 1L, false))
-                .thenReturn("```plantuml\n@startuml\n@enduml\n```");
-        when(plantUmlEmbedService.embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```"))
-                .thenReturn("![diagram](data:image/png;base64,AAAA)");
-        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
+        String html = service.renderHtml(1L, "```plantuml\n@startuml\nA->B\n@enduml\n```");
 
-        String html = service.renderHtml(1L, "```plantuml\n@startuml\n@enduml\n```");
-
-        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
-        verify(plantUmlEmbedService).embedDiagramsForPreview("```plantuml\n@startuml\n@enduml\n```");
+        String base64 = Base64.getEncoder().encodeToString(new byte[] {1, 2, 3});
+        assertTrue(html.contains("<img src=\"data:image/png;base64," + base64 + "\" alt=\"diagram\""), html);
     }
 
     @Test
     void renderHtml_plantumlタグをdataURI画像へ差し替えてからMarkdown変換する() {
-        String markdown = "[plantuml]\nA->B\n[/plantuml]";
-        when(customTagRenderService.render(markdown, 1L)).thenReturn(markdown);
-        when(blogCardTagRenderService.render(markdown, 1L)).thenReturn(markdown);
-        when(amazonTagRenderService.render(markdown, 1L, false)).thenReturn(markdown);
-        when(plantUmlTagRenderService.renderForPreview(markdown))
-                .thenReturn("![diagram](data:image/png;base64,AAAA)");
-        when(markdownRenderer.render("![diagram](data:image/png;base64,AAAA)"))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(tocStyleRenderService.applyHtmlTemplate("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<img src=\"data:image/png;base64,AAAA\">");
-        when(renderedContentWrapperService.wrap("<img src=\"data:image/png;base64,AAAA\">", 1L))
-                .thenReturn("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>");
+        String html = service.renderHtml(1L, "[plantuml]\nA->B\n[/plantuml]");
 
-        String html = service.renderHtml(1L, markdown);
-
-        assertEquals("<div class=\"lets-blog-rendered\"><img src=\"data:image/png;base64,AAAA\"></div>", html);
-        verify(plantUmlTagRenderService).renderForPreview(markdown);
+        String base64 = Base64.getEncoder().encodeToString(new byte[] {1, 2, 3});
+        assertTrue(html.contains("<img src=\"data:image/png;base64," + base64 + "\" alt=\"diagram\""), html);
+        assertEquals(1, world.http.requests("POST", "/api/render/plantuml").size());
     }
 
     @Test
-    void renderHtml_plantumlタグが不正な場合はレンダリングを中止してエラーメッセージを返す() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(plantUmlTagRenderService.renderForPreview("markdown"))
-                .thenThrow(new InvalidPlantUmlTagException("PlantUML図のレンダリングに失敗しました"));
+    void renderHtml_PlantUMLサーバーに接続できない場合は同じエラー表示で中止する() {
+        world.http.status("POST", "/api/render/plantuml", 503, "{\"error\":\"down\"}");
 
-        String html = service.renderHtml(1L, "markdown");
+        String html = service.renderHtml(1L, "[plantuml]\nA->B\n[/plantuml]");
 
-        assertTrue(html.contains("PlantUML図のレンダリングに失敗しました"));
-        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
-                renderedContentWrapperService);
-    }
-
-    @Test
-    void renderHtml_PlantUMLサーバーに接続できない場合も同じエラー表示で中止する() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(plantUmlTagRenderService.renderForPreview("markdown"))
-                .thenThrow(new PlantUmlServerUnavailableException("PlantUMLサーバーに接続できません: x", null));
-
-        String html = service.renderHtml(1L, "markdown");
-
-        assertTrue(html.contains("PlantUMLサーバーに接続できません: x"));
-        assertTrue(html.contains("PlantUML図のレンダリングエラー"));
-        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
-                renderedContentWrapperService);
+        assertTrue(html.startsWith(ERROR_PREFIX), html);
+        assertTrue(html.contains("PlantUMLサーバーに接続できません"), html);
+        assertTrue(html.contains("PlantUML図のレンダリングエラー"), html);
+        assertFalse(html.contains("lets-blog-rendered"), html);
     }
 
     @Test
     void renderHtml_PlantUMLが図を拒否した場合もその文言で中止し接続できない旨は出さない() {
-        when(customTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(blogCardTagRenderService.render("markdown", 1L)).thenReturn("markdown");
-        when(amazonTagRenderService.render("markdown", 1L, false)).thenReturn("markdown");
-        when(plantUmlTagRenderService.renderForPreview("markdown"))
-                .thenThrow(new com.letsblog.content.render.PlantUmlRenderRejectedException(
-                        "PlantUML が図を描けませんでした: Syntax Error?"));
+        world.http.status("POST", "/api/render/plantuml", 400,
+                "{\"error\":\"PlantUML が図を描けませんでした: Syntax Error?\"}");
 
-        String html = service.renderHtml(1L, "markdown");
+        String html = service.renderHtml(1L, "[plantuml]\nbad\n[/plantuml]");
 
-        assertTrue(html.contains("PlantUML が図を描けませんでした: Syntax Error?"));
-        assertTrue(html.contains("PlantUML図のレンダリングエラー"));
-        assertFalse(html.contains("接続できません"));
-        verifyNoInteractions(plantUmlEmbedService, markdownRenderer, tocStyleRenderService,
-                renderedContentWrapperService);
+        assertTrue(html.contains("PlantUML が図を描けませんでした: Syntax Error?"), html);
+        assertTrue(html.contains("PlantUML図のレンダリングエラー"), html);
+        assertFalse(html.contains("接続できません"), html);
+    }
+
+    @Test
+    void renderHtml_目次はテンプレートを適用して目印を付ける() {
+        world.tagDesign("TOC", null, "<nav>{{toc}}</nav>");
+
+        String html = service.renderHtml(1L, "[toc]\n\n## 第一章\n\n本文");
+
+        assertTrue(html.contains("<nav><ul class=\"lb-toc-list\">"), html);
+        assertTrue(html.contains("<!-- lbs:embed "), html);
+    }
+
+    @Test
+    void renderHtml_projectIdが無ければ固定クラスだけのラッパーで囲む() {
+        String html = service.renderHtml(null, "本文");
+
+        assertEquals("<div class=\"lets-blog-rendered\"><p>本文</p>\n</div>", html);
     }
 }

@@ -1,31 +1,20 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.CustomTag;
+import com.letsblog.content.domain.CustomTagFormat;
 import com.letsblog.content.dto.CustomTagRequest;
 import com.letsblog.content.dto.CustomTagResponse;
-import com.letsblog.content.dto.TagDesignColors;
-import com.letsblog.content.repository.CustomTagRepository;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * issue #656: #641のレビューで、CustomTag*サービス群のうちCustomTagServiceが未テストのまま
@@ -35,54 +24,34 @@ import static org.mockito.Mockito.when;
  * (DB未保存のCSSに対しても同じ変換を行う公開メソッド、issue #335)経由で検証する。
  * previewCssはprivateなapplySelectorPrefix/prefixSelectorListの唯一のpublicな入口。
  */
-@ExtendWith(MockitoExtension.class)
 class CustomTagServiceTest {
 
     private static final Long PROJECT_ID = 42L;
     private static final String PREFIX = "myproj";
 
-    @Mock
-    private CustomTagRepository customTagRepository;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-    @Mock
-    private ProjectBridgeClient projectBridgeClient;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
-    private TocStyleRenderService tocStyleRenderService;
-    @Mock
-    private BlogCardTagRenderService blogCardTagRenderService;
-    @Mock
-    private AmazonTagRenderService amazonTagRenderService;
-    @Mock
-    private ProjectContentSettingsService projectContentSettingsService;
-
+    private ContentWorld world;
     private CustomTagService service;
 
     @BeforeEach
     void setUp() {
-        service = new CustomTagService(
-                customTagRepository,
-                adminAuthorizationService,
-                projectBridgeClient,
-                currentActorService,
-                tocStyleRenderService,
-                blogCardTagRenderService,
-                amazonTagRenderService,
-                projectContentSettingsService);
+        // issue #1821: 認可・CurrentActorService・ProjectBridgeClient・各タグの描画サービス・
+        // ProjectContentSettingsServiceは実物。identity-service/project-serviceはHTTPフェイク、リポジトリ(DB)はメモリ。
+        world = new ContentWorld().actingAsAdmin(1L);
+        service = world.customTagService;
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     private CustomTagRequest buildRequest(String tagName, Long projectId) {
         return new CustomTagRequest(tagName, "<div>{{content}}</div>", "desc", ".card{color:red;}", null, projectId);
     }
 
-    private CustomTag buildTag(Long id, String tagName, Long projectId) {
-        CustomTag tag = new CustomTag();
-        tag.setId(id);
-        tag.setTagName(tagName);
-        tag.setProjectId(projectId);
-        return tag;
+    /** DB(メモリ上のリポジトリ)に行を用意する。最初の行のidは1になる。 */
+    private CustomTag buildTag(String tagName, Long projectId) {
+        return world.tag(tagName, "<div>{{content}}</div>", null, CustomTagFormat.BLOCK, projectId);
     }
 
     // ------------------------------------------------------------------
@@ -91,74 +60,104 @@ class CustomTagServiceTest {
 
     @Test
     void create_タグ名が重複していなければ保存する() {
-        when(customTagRepository.findByTagNameAndProjectIdIsNull("note")).thenReturn(Optional.empty());
-        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
-            CustomTag tag = invocation.getArgument(0);
-            tag.setId(1L);
-            return tag;
-        });
-
         CustomTagResponse response = service.create(buildRequest("note", null));
 
         assertEquals(1L, response.id());
         assertEquals("note", response.tagName());
-        verify(adminAuthorizationService).requireAdmin();
+        assertEquals(CustomTagFormat.BLOCK, response.tagFormat());
+        assertEquals(1, world.savedTags.size());
+    }
+
+    @Test
+    void create_形式を指定すればその形式で保存しプロジェクトを引き継ぐ() {
+        CustomTagResponse response = service.create(
+                new CustomTagRequest("inline", "<b>{{content}}</b>", "d", null, CustomTagFormat.INLINE, PROJECT_ID));
+
+        assertEquals(CustomTagFormat.INLINE, response.tagFormat());
+        assertEquals(PROJECT_ID, response.projectId());
+    }
+
+    @Test
+    void create_同じタグ名でもプロジェクトが違えば保存できる() {
+        buildTag("note", null);
+
+        CustomTagResponse response = service.create(buildRequest("note", PROJECT_ID));
+
+        assertEquals(PROJECT_ID, response.projectId());
     }
 
     @Test
     void create_同じタグ名が既に存在する場合はIllegalArgumentException() {
-        when(customTagRepository.findByTagNameAndProjectIdIsNull("note"))
-                .thenReturn(Optional.of(buildTag(1L, "note", null)));
+        buildTag("note", null);
 
         assertThrows(IllegalArgumentException.class, () -> service.create(buildRequest("note", null)));
-        verify(customTagRepository, never()).save(any());
+        assertEquals(1, world.savedTags.size());
+    }
+
+    @Test
+    void create_プロジェクト内で同じタグ名が既に存在する場合はIllegalArgumentException() {
+        buildTag("note", PROJECT_ID);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(buildRequest("note", PROJECT_ID)));
     }
 
     @Test
     void create_admin権限が無ければForbiddenExceptionが伝播し保存されない() {
-        doThrow(new ForbiddenException("no admin")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
         assertThrows(ForbiddenException.class, () -> service.create(buildRequest("note", null)));
-        verify(customTagRepository, never()).save(any());
+        assertTrue(world.savedTags.isEmpty());
     }
 
     @Test
     void update_存在するタグを更新する() {
-        CustomTag existing = buildTag(1L, "old-name", null);
-        when(customTagRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(customTagRepository.findByTagNameAndProjectIdIsNull("note")).thenReturn(Optional.empty());
-        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        buildTag("old-name", null);
 
         CustomTagResponse response = service.update(1L, buildRequest("note", 999L));
 
         // projectIdの変更は無視される(既存タグのprojectIdのまま)
         assertEquals(null, response.projectId());
         assertEquals("note", response.tagName());
+        assertEquals("note", world.tags.get(1L).getTagName());
+    }
+
+    @Test
+    void update_形式を指定すれば更新し_プロジェクト固有のタグは同じプロジェクト内で重複を調べる() {
+        buildTag("old-name", PROJECT_ID);
+        buildTag("taken", PROJECT_ID);
+
+        CustomTagResponse response = service.update(1L,
+                new CustomTagRequest("note", "<i>{{content}}</i>", "d", null, CustomTagFormat.INLINE, null));
+
+        assertEquals(CustomTagFormat.INLINE, response.tagFormat());
+        assertThrows(IllegalArgumentException.class, () -> service.update(1L, buildRequest("taken", null)));
     }
 
     @Test
     void update_存在しないidはCustomTagNotFoundException() {
-        when(customTagRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThrows(CustomTagNotFoundException.class, () -> service.update(99L, buildRequest("note", null)));
     }
 
     @Test
+    void update_admin権限が無ければForbiddenException() {
+        buildTag("old-name", null);
+        world.actingAsUser(2L);
+
+        assertThrows(ForbiddenException.class, () -> service.update(1L, buildRequest("note", null)));
+        assertEquals("old-name", world.tags.get(1L).getTagName());
+    }
+
+    @Test
     void update_自分自身以外が同じタグ名を使っている場合はIllegalArgumentException() {
-        CustomTag existing = buildTag(1L, "old-name", null);
-        when(customTagRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(customTagRepository.findByTagNameAndProjectIdIsNull("note"))
-                .thenReturn(Optional.of(buildTag(2L, "note", null)));
+        buildTag("old-name", null);
+        buildTag("note", null);
 
         assertThrows(IllegalArgumentException.class, () -> service.update(1L, buildRequest("note", null)));
     }
 
     @Test
     void update_自分自身と同じidが同じタグ名でヒットしても許可される() {
-        CustomTag existing = buildTag(1L, "note", null);
-        when(customTagRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(customTagRepository.findByTagNameAndProjectIdIsNull("note")).thenReturn(Optional.of(existing));
-        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        buildTag("note", null);
 
         CustomTagResponse response = service.update(1L, buildRequest("note", null));
 
@@ -167,24 +166,34 @@ class CustomTagServiceTest {
 
     @Test
     void delete_存在するタグを削除する() {
-        when(customTagRepository.existsById(1L)).thenReturn(true);
+        buildTag("note", null);
 
         service.delete(1L);
 
-        verify(customTagRepository).deleteById(1L);
+        assertFalse(world.tags.containsKey(1L));
     }
 
     @Test
     void delete_存在しないidはCustomTagNotFoundException() {
-        when(customTagRepository.existsById(99L)).thenReturn(false);
+        buildTag("note", null);
 
         assertThrows(CustomTagNotFoundException.class, () -> service.delete(99L));
-        verify(customTagRepository, never()).deleteById(any());
+        assertTrue(world.tags.containsKey(1L));
+    }
+
+    @Test
+    void delete_admin権限が無ければForbiddenException() {
+        buildTag("note", null);
+        world.actingAsUser(2L);
+
+        assertThrows(ForbiddenException.class, () -> service.delete(1L));
+        assertTrue(world.tags.containsKey(1L));
     }
 
     @Test
     void list_projectId未指定ならグローバルタグのみ() {
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of(buildTag(1L, "g", null)));
+        buildTag("g", null);
+        buildTag("p", PROJECT_ID);
 
         List<CustomTagResponse> result = service.list(null);
 
@@ -194,8 +203,9 @@ class CustomTagServiceTest {
 
     @Test
     void list_projectId指定時はプロジェクト固有とグローバルの両方() {
-        when(customTagRepository.findByProjectIdOrProjectIdIsNull(PROJECT_ID))
-                .thenReturn(List.of(buildTag(1L, "g", null), buildTag(2L, "p", PROJECT_ID)));
+        buildTag("g", null);
+        buildTag("p", PROJECT_ID);
+        buildTag("other", 7L);
 
         List<CustomTagResponse> result = service.list(PROJECT_ID);
 
@@ -209,20 +219,19 @@ class CustomTagServiceTest {
      */
     @Test
     void list_projectId指定時はプロジェクトメンバー判定を行う() {
-        when(customTagRepository.findByProjectIdOrProjectIdIsNull(PROJECT_ID)).thenReturn(List.of());
+        world.actingAsUser(5L).projectMember(PROJECT_ID, 5L, true);
 
         service.list(PROJECT_ID);
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/42/members/5").size());
     }
 
     @Test
     void list_プロジェクトメンバーでなければForbiddenExceptionが伝播する() {
-        doThrow(new ForbiddenException("not a member"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+        buildTag("p", PROJECT_ID);
+        world.actingAsUser(5L).projectMember(PROJECT_ID, 5L, false);
 
         assertThrows(ForbiddenException.class, () -> service.list(PROJECT_ID));
-        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
     }
 
     /**
@@ -231,16 +240,17 @@ class CustomTagServiceTest {
      */
     @Test
     void list_projectId未指定ならプロジェクトメンバー判定を行わない() {
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of());
+        world.actingAsUser(5L);
 
         service.list(null);
 
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+        assertTrue(world.http.requests("GET", "/api/internal/identity/projects/.*").isEmpty());
     }
 
     @Test
     void listByProject_グローバルタグを含まずプロジェクト固有のみ() {
-        when(customTagRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(buildTag(2L, "p", PROJECT_ID)));
+        buildTag("g", null);
+        buildTag("p", PROJECT_ID);
 
         List<CustomTagResponse> result = service.listByProject(PROJECT_ID);
 
@@ -253,7 +263,7 @@ class CustomTagServiceTest {
     // ------------------------------------------------------------------
 
     private String previewWithPrefix(String css) {
-        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn(PREFIX);
+        world.settingsFor(PROJECT_ID, PREFIX);
         return service.previewCss(css, PROJECT_ID);
     }
 
@@ -408,25 +418,26 @@ class CustomTagServiceTest {
 
     @Test
     void previewCss_プレフィックス未解決nullの場合はCSSをそのまま返す() {
-        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn(null);
-
+        // 設定の行が無く、project-serviceもslugを持たない
         String css = ".card { color: red; }";
         assertEquals(css, service.previewCss(css, PROJECT_ID));
     }
 
     @Test
     void previewCss_プレフィックスが空白のみの場合はCSSをそのまま返す() {
-        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn("   ");
+        world.projectSlug(PROJECT_ID, "   ");
 
         String css = ".card { color: red; }";
         assertEquals(css, service.previewCss(css, PROJECT_ID));
     }
 
     @Test
-    void previewCss_resolveCssSelectorPrefixにprojectIdを渡して解決する() {
-        previewWithPrefix(".card { color: red; }");
+    void previewCss_設定が無ければproject_serviceのslugをプリフィックスにする() {
+        world.projectSlug(PROJECT_ID, "slug-x");
 
-        verify(projectContentSettingsService).resolveCssSelectorPrefix(PROJECT_ID);
+        assertEquals(".slug-x .card { color: red; }", service.previewCss(".card { color: red; }", PROJECT_ID));
+        assertEquals("Bearer token-1",
+                world.http.requests("GET", "/api/internal/project/projects/42").get(0).header("Authorization"));
     }
 
     /**
@@ -446,49 +457,111 @@ class CustomTagServiceTest {
         assertFalse(result.contains(".myproj .card[data-x=\"a, b\"]"));
     }
 
+    // ---- issue #1821: CSS走査の分岐 ----
+
+    @Test
+    void previewCss_セレクタの途中にあるコメントはセレクタの一部として扱う() {
+        assertEquals(".myproj .a /* c * d */ {color:red;}", previewWithPrefix(".a /* c * d */ {color:red;}"));
+    }
+
+    @Test
+    void previewCss_閉じていないコメントは最後までコメントとして残す() {
+        assertEquals(".a /* open *", previewWithPrefix(".a /* open *"));
+        assertEquals("/* open * ", previewWithPrefix("/* open * "));
+        assertEquals("/* a * b */", previewWithPrefix("/* a * b */"));
+        assertEquals("/* x *", previewWithPrefix("/* x *"));
+    }
+
+    @Test
+    void previewCss_文字列の最後が円記号でも走査を終える() {
+        assertEquals(".myproj .a::before {content: \"x\\", previewWithPrefix(".a::before {content: \"x\\"));
+    }
+
+    @Test
+    void previewCss_スラッシュだけの文字はコメントの開始とみなさない() {
+        assertEquals(".myproj .a {background: url(a/b.png);}/",
+                previewWithPrefix(".a {background: url(a/b.png);}/"));
+    }
+
+    @Test
+    void previewCss_宣言ブロックの中の入れ子の波括弧と空のセレクタにはプリフィックスを付けない() {
+        assertEquals("{ color: red; }", previewWithPrefix("{ color: red; }"));
+        assertEquals(".myproj .a { .b { color: red; } }", previewWithPrefix(".a { .b { color: red; } }"));
+        assertEquals(".myproj .a { @media (x) { color: red; } }",
+                previewWithPrefix(".a { @media (x) { color: red; } }"));
+    }
+
+    @Test
+    void previewCss_at_ruleの入れ子はメディアクエリの中だけセレクタとして扱い_keyframesの中は扱わない() {
+        assertEquals("@media print {@media screen {.myproj .a {color:red;}}}",
+                previewWithPrefix("@media print {@media screen {.a {color:red;}}}"));
+        assertEquals("@media print {@page {margin:0;}}", previewWithPrefix("@media print {@page {margin:0;}}"));
+        assertEquals("@media print {@keyframes k {from {opacity:0;}}.myproj .b {color:red;}}",
+                previewWithPrefix("@media print {@keyframes k {from {opacity:0;}}.b {color:red;}}"));
+    }
+
+    @Test
+    void previewCss_対応しない閉じ括弧があっても走査を続ける() {
+        assertEquals(".myproj .a {color:red;}}.myproj .b {color:blue;}",
+                previewWithPrefix(".a {color:red;}}.b {color:blue;}"));
+    }
+
+    @Test
+    void previewCss_空のセレクタがカンマで挟まれていれば取り除く() {
+        assertEquals(".myproj .a, .myproj .b {color:red;}", previewWithPrefix(".a,, .b, {color:red;}"));
+    }
+
     // ------------------------------------------------------------------
     // buildCssBundle / buildProjectCssBundle
     // ------------------------------------------------------------------
 
-    private void stubEmbedTagCss() {
-        when(projectBridgeClient.resolveTagDesign(eq(PROJECT_ID), any(), any()))
-                .thenReturn(new ProjectBridgeClient.TagDesignResponse("#fff", "#000", "#00f", null, null));
-        when(projectBridgeClient.toColors(any())).thenReturn(new TagDesignColors("#fff", "#000", "#00f", null));
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer token");
-        when(tocStyleRenderService.buildStyle(any())).thenReturn(".lb-toc{color:red;}");
-        when(blogCardTagRenderService.buildStyle(any())).thenReturn(".lb-blogcard{color:blue;}");
-        when(amazonTagRenderService.buildStyle(any())).thenReturn(".lb-amazon{color:green;}");
+    private void assertEmbedTagCssIncluded(String result) {
+        // 組み込みタグ([toc]/[blogcard]/[amazon])のデザインCSSが、プリフィックス付きで先頭に入る
+        assertTrue(result.contains("/* === toc (組み込みタグ) === */.myproj .lb-toc-list {list-style:disc;"), result);
+        assertTrue(result.contains("/* === blogcard (組み込みタグ) === */.myproj .lb-blogcard {"), result);
+        assertTrue(result.contains("/* === amazon (組み込みタグ) === */.myproj .lb-amazon-card {"), result);
+        assertTrue(result.indexOf("=== toc") < result.indexOf("=== blogcard")
+                && result.indexOf("=== blogcard") < result.indexOf("=== amazon"));
+        for (String type : new String[] {"TOC", "BLOGCARD", "AMAZON"}) {
+            var request = world.http.requests("GET", "/api/internal/project/tag-design/" + type).get(0);
+            assertEquals("projectId=42", request.query());
+            assertEquals("Bearer token-1", request.header("Authorization"));
+        }
     }
 
     @Test
     void buildCssBundle_projectId未指定ならグローバルタグのみで組み込みタグCSSは含まない() {
-        CustomTag tag = buildTag(1L, "note", null);
+        CustomTag tag = buildTag("note", null);
         tag.setCssContent(".note { color: red; }");
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of(tag));
 
         String result = service.buildCssBundle(null);
 
         assertTrue(result.contains(".note { color: red; }"));
         assertFalse(result.contains("lb-toc"));
-        verify(projectContentSettingsService, never()).resolveCssSelectorPrefix(any());
+        assertTrue(world.http.requests("GET", "/api/internal/project/.*").isEmpty());
     }
 
     @Test
     void buildCssBundle_projectId指定時は組み込みタグCSSとプロジェクト固有タグとグローバルタグを結合する() {
-        stubEmbedTagCss();
-        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn(PREFIX);
-        CustomTag globalTag = buildTag(1L, "g", null);
-        globalTag.setCssContent(".g { color: red; }");
-        CustomTag projectTag = buildTag(2L, "p", PROJECT_ID);
-        projectTag.setCssContent(".p { color: blue; }");
-        when(customTagRepository.findByProjectIdOrProjectIdIsNull(PROJECT_ID))
-                .thenReturn(List.of(globalTag, projectTag));
+        world.settingsFor(PROJECT_ID, PREFIX);
+        buildTag("g", null).setCssContent(".g { color: red; }");
+        buildTag("p", PROJECT_ID).setCssContent(".p { color: blue; }");
 
         String result = service.buildCssBundle(PROJECT_ID);
 
-        assertTrue(result.contains(".myproj .lb-toc {color:red;}"), "実際の出力: " + result);
+        assertEmbedTagCssIncluded(result);
         assertTrue(result.contains(".myproj .g { color: red; }"));
         assertTrue(result.contains(".myproj .p { color: blue; }"));
+    }
+
+    @Test
+    void buildCssBundle_デザインのcustomCssがあれば組み込みタグCSSとしてそれを使う() {
+        world.settingsFor(PROJECT_ID, PREFIX);
+        world.tagDesign("TOC", ".mine { color: red; }", null);
+
+        String result = service.buildCssBundle(PROJECT_ID);
+
+        assertTrue(result.contains("/* === toc (組み込みタグ) === */.myproj .mine { color: red; }"), result);
     }
 
     /**
@@ -496,59 +569,54 @@ class CustomTagServiceTest {
      */
     @Test
     void buildCssBundle_projectId指定時はプロジェクトメンバー判定を行う() {
-        stubEmbedTagCss();
-        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn(PREFIX);
-        when(customTagRepository.findByProjectIdOrProjectIdIsNull(PROJECT_ID)).thenReturn(List.of());
+        world.settingsFor(PROJECT_ID, PREFIX);
+        world.actingAsUser(5L).projectMember(PROJECT_ID, 5L, true);
 
         service.buildCssBundle(PROJECT_ID);
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/42/members/5").size());
     }
 
     @Test
     void buildCssBundle_プロジェクトメンバーでなければForbiddenExceptionが伝播する() {
-        doThrow(new ForbiddenException("not a member"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT_ID);
+        world.actingAsUser(5L).projectMember(PROJECT_ID, 5L, false);
 
         assertThrows(ForbiddenException.class, () -> service.buildCssBundle(PROJECT_ID));
-        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+        assertTrue(world.http.requests("GET", "/api/internal/project/tag-design/.*").isEmpty());
     }
 
     @Test
     void buildCssBundle_projectId未指定ならプロジェクトメンバー判定を行わない() {
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of());
+        world.actingAsUser(5L);
 
         service.buildCssBundle(null);
 
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+        assertTrue(world.http.requests("GET", "/api/internal/identity/projects/.*").isEmpty());
     }
 
     @Test
     void buildCssBundle_cssContentが空のタグは連結対象から除外される() {
-        CustomTag blank = buildTag(1L, "blank", null);
-        blank.setCssContent("   ");
-        CustomTag withCss = buildTag(2L, "note", null);
-        withCss.setCssContent(".note { color: red; }");
-        when(customTagRepository.findByProjectIdIsNull()).thenReturn(List.of(blank, withCss));
+        buildTag("blank", null).setCssContent("   ");
+        buildTag("nothing", null);
+        buildTag("note", null).setCssContent(".note { color: red; }");
 
         String result = service.buildCssBundle(null);
 
         assertFalse(result.contains("=== blank ==="));
+        assertFalse(result.contains("=== nothing ==="));
         assertTrue(result.contains("=== note ==="));
     }
 
     @Test
     void buildProjectCssBundle_グローバルタグを含まずプロジェクト固有タグと組み込みタグCSSのみ() {
-        stubEmbedTagCss();
-        when(projectContentSettingsService.resolveCssSelectorPrefix(PROJECT_ID)).thenReturn(PREFIX);
-        CustomTag projectTag = buildTag(2L, "p", PROJECT_ID);
-        projectTag.setCssContent(".p { color: blue; }");
-        when(customTagRepository.findByProjectId(PROJECT_ID)).thenReturn(List.of(projectTag));
+        world.settingsFor(PROJECT_ID, PREFIX);
+        buildTag("g", null).setCssContent(".g { color: red; }");
+        buildTag("p", PROJECT_ID).setCssContent(".p { color: blue; }");
 
         String result = service.buildProjectCssBundle(PROJECT_ID);
 
-        assertTrue(result.contains(".myproj .lb-toc {color:red;}"));
+        assertEmbedTagCssIncluded(result);
         assertTrue(result.contains(".myproj .p { color: blue; }"));
-        verify(customTagRepository, never()).findByProjectIdOrProjectIdIsNull(any());
+        assertFalse(result.contains(".g { color: red; }"));
     }
 }

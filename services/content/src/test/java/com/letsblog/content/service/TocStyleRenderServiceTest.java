@@ -1,44 +1,46 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.ProjectBridgeClient;
+import com.letsblog.content.dto.TagDesignColors;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * issue #760: プロジェクトに紐付いていないサイトへの公開では、finalize-htmlがprojectId=nullのまま
  * applyHtmlTemplateを呼ぶ。projectIdはそのままタグデザイン解決へ渡し(受け側のlegacy-api/
  * project-serviceが固定のデフォルト値を返す暫定対応、issue #763)、レンダリングは成功する必要がある。
  */
-@ExtendWith(MockitoExtension.class)
 class TocStyleRenderServiceTest {
 
     private static final String HTML_WITH_TOC =
             "<ul class=\"lb-toc-list\"><li><a href=\"#a\">A</a></li></ul>\n<h2 id=\"a\">A</h2>";
 
-    @Mock
-    private ProjectBridgeClient projectBridgeClient;
+    private static final String TAG_DESIGN_PATH = "/api/internal/project/tag-design/TOC";
 
-    @Mock
-    private CurrentActorService currentActorService;
+    private ContentWorld world;
+
+    @BeforeEach
+    void setUp() {
+        world = new ContentWorld().actingAsAdmin(1L);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private TocStyleRenderService service() {
-        return new TocStyleRenderService(projectBridgeClient, currentActorService);
+        return world.tocStyleRenderService;
     }
 
     private void stubTagDesign(String htmlTemplate) {
-        when(projectBridgeClient.resolveTagDesign(any(), anyString(), any())).thenReturn(
-                new ProjectBridgeClient.TagDesignResponse("#fff", "#000", "#f00", null, htmlTemplate));
+        world.tagDesign("TOC", null, htmlTemplate);
     }
 
     @Test
@@ -50,7 +52,8 @@ class TocStyleRenderServiceTest {
         // 目印(issue #1563)を除けば、投稿時点のHTMLは従来どおり
         assertEquals(HTML_WITH_TOC, result.replaceAll("<!-- /?lbs:embed[^>]*-->\\n", ""));
 
-        verify(projectBridgeClient).resolveTagDesign(isNull(), anyString(), any());
+        // projectIdはnullのままタグデザイン解決へ渡す(project-serviceが既定値を返す)
+        assertEquals("projectId=", world.http.requests("GET", TAG_DESIGN_PATH).get(0).query());
     }
 
     @Test
@@ -70,7 +73,8 @@ class TocStyleRenderServiceTest {
         String result = service().applyHtmlTemplate(HTML_WITH_TOC, 1L);
 
         assertTrue(result.contains("<div class=\"custom\">"));
-        verify(projectBridgeClient).resolveTagDesign(org.mockito.ArgumentMatchers.eq(1L), anyString(), any());
+        assertEquals("projectId=1", world.http.requests("GET", TAG_DESIGN_PATH).get(0).query());
+        assertEquals("Bearer token-1", world.http.requests("GET", TAG_DESIGN_PATH).get(0).header("Authorization"));
     }
 
     // ---- issue #1563: 見出しの構造を目印として残す ----
@@ -160,5 +164,57 @@ class TocStyleRenderServiceTest {
         assertEquals("第一章", items.get(0).get("text").asText());
         assertEquals("節 <1>", items.get(0).get("children").get(0).get("text").asText());
         assertEquals("第二章", items.get(1).get("text").asText());
+    }
+
+    // ---- issue #1821: 分岐 ----
+
+    @Test
+    void applyHtmlTemplate_htmlがnullや空ならタグデザインを問い合わせずそのまま返す() {
+        assertNull(service().applyHtmlTemplate(null, 1L));
+        assertEquals("", service().applyHtmlTemplate("", 1L));
+        assertTrue(world.http.requests("GET", TAG_DESIGN_PATH).isEmpty());
+    }
+
+    @Test
+    void applyHtmlTemplate_目次の閉じタグが無ければHTMLをそのまま返す() {
+        stubTagDesign("<div>{{toc}}</div>");
+        String unclosed = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">A</a></li>";
+        String openOnly = "<ul class=\"lb-toc-list\">";
+        String nestedUnclosed = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">A</a><ul><li>x</li></ul></li>";
+
+        assertEquals(unclosed, service().applyHtmlTemplate(unclosed, 1L));
+        assertEquals(openOnly, service().applyHtmlTemplate(openOnly, 1L));
+        assertEquals(nestedUnclosed, service().applyHtmlTemplate(nestedUnclosed, 1L));
+    }
+
+    @Test
+    void applyHtmlTemplate_入れ子のulの後ろに別のulがあっても対応する閉じタグで切る() {
+        stubTagDesign(null);
+        String html = "<ul class=\"lb-toc-list\"><li><a href=\"#a\">A</a><ul><li><a href=\"#b\">B</a></li></ul></li></ul>"
+                + "<ul><li>other</li></ul>";
+
+        String result = service().applyHtmlTemplate(html, 1L);
+
+        com.fasterxml.jackson.databind.JsonNode items = EmbedMarkerTestSupport.firstMarker(result).get("data").get("items");
+        assertEquals(1, items.size());
+        assertEquals("B", items.get(0).get("children").get(0).get("text").asText());
+        assertTrue(result.endsWith("<ul><li>other</li></ul>"));
+    }
+
+    @Test
+    void buildStyle_customCssがあればそれを丸ごと使う() {
+        assertEquals(".x{color:red}",
+                service().buildStyle(new TagDesignColors("#fff", "#000", "#f00", "  .x{color:red}  ")));
+    }
+
+    @Test
+    void buildStyle_customCssが無ければ色から組み立てる() {
+        String fromNull = service().buildStyle(new TagDesignColors("#111", "#222", "#333", null));
+        String fromBlank = service().buildStyle(new TagDesignColors("#111", "#222", "#333", "   "));
+
+        assertEquals(fromNull, fromBlank);
+        assertTrue(fromNull.contains("background:#111"));
+        assertTrue(fromNull.contains("color:#222"));
+        assertTrue(fromNull.contains("color:#333"));
     }
 }

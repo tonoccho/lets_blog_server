@@ -1,91 +1,93 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.ProjectBridgeClient;
 import com.letsblog.content.domain.ProjectContentSettings;
-import com.letsblog.content.repository.ProjectContentSettingsRepository;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * ProjectContentSettingsServiceの回帰テスト(issue #571、issue #576でcontent-serviceへ移管)。
  * project_content_settingsは初回書き込み時に遅延作成されることに加え、cssSelectorPrefix未設定時に
  * legacy-api側のプロジェクトslugへフォールバックする解決ロジック(旧ProjectService#resolveCssSelectorPrefix)
  * を検証する。
+ *
+ * <p>issue #1821: ProjectBridgeClient・CurrentActorService・LetsblogSyncNotifierは実物で、
+ * project-serviceの代わりにHTTPフェイクを向ける。リポジトリ(DB)だけが差し替え。
  */
-@ExtendWith(MockitoExtension.class)
 class ProjectContentSettingsServiceTest {
 
-    @Mock
-    private ProjectContentSettingsRepository repository;
+    private static final String SYNC_PATH = "/api/internal/project/letsblog-sync";
 
-    @Mock
-    private ProjectBridgeClient projectBridgeClient;
+    private ContentWorld world;
 
-    @Mock
-    private CurrentActorService currentActorService;
+    @BeforeEach
+    void setUp() {
+        world = new ContentWorld().actingAsAdmin(1L);
+    }
 
-    @Mock
-    private LetsblogSyncNotifier letsblogSyncNotifier;
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private ProjectContentSettingsService service() {
-        return new ProjectContentSettingsService(repository, projectBridgeClient, currentActorService, letsblogSyncNotifier);
+        return world.projectContentSettingsService;
     }
 
     @Test
     void updateCssSelectorPrefix_保存したらそのプロジェクトのサイトへの同期を依頼する() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
-        when(repository.save(any(ProjectContentSettings.class))).thenAnswer(inv -> inv.getArgument(0));
-
         service().updateCssSelectorPrefix(1L, "custom-prefix");
 
-        org.mockito.Mockito.verify(letsblogSyncNotifier).notifyProjectChanged(1L);
+        var requests = world.http.requests("POST", SYNC_PATH);
+        assertEquals(1, requests.size());
+        assertEquals(1, world.bodyOf(requests.get(0)).get("projectId").asInt());
     }
 
     @Test
     void getOrCreate_だけでは同期を依頼しない() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
-        when(repository.save(any(ProjectContentSettings.class))).thenAnswer(inv -> inv.getArgument(0));
-
         service().getOrCreate(1L);
 
-        verifyNoInteractions(letsblogSyncNotifier);
+        assertTrue(world.http.requests("POST", SYNC_PATH).isEmpty());
+    }
+
+    @Test
+    void getOrCreate_既存の行があればそれを返し新しい行を作らない() {
+        ProjectContentSettings existing = world.settingsFor(1L, "p");
+
+        assertSame(existing, service().getOrCreate(1L));
+        assertEquals(1, world.settings.size());
+    }
+
+    @Test
+    void findByProjectId_行が無ければ空() {
+        assertEquals(Optional.empty(), service().findByProjectId(1L));
     }
 
     @Test
     void getCssSelectorPrefix_未設定なら行が無くてもnullを返す() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
-
         assertNull(service().getCssSelectorPrefix(1L));
     }
 
     @Test
     void updateCssSelectorPrefix_新規行を作成して保存する() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
-        when(repository.save(any(ProjectContentSettings.class))).thenAnswer(inv -> inv.getArgument(0));
-
         ProjectContentSettings result = service().updateCssSelectorPrefix(1L, "custom-prefix");
 
         assertEquals(1L, result.getProjectId());
         assertEquals("custom-prefix", result.getCssSelectorPrefix());
+        assertSame(result, world.settings.get(1L));
     }
 
     @Test
     void updateCssSelectorPrefix_既存行を更新する() {
-        ProjectContentSettings existing = new ProjectContentSettings(1L);
-        existing.setCssSelectorPrefix("old-prefix");
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
-        when(repository.save(any(ProjectContentSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+        ProjectContentSettings existing = world.settingsFor(1L, "old-prefix");
 
         service().updateCssSelectorPrefix(1L, "new-prefix");
 
@@ -93,20 +95,26 @@ class ProjectContentSettingsServiceTest {
     }
 
     @Test
-    void resolveCssSelectorPrefix_設定済みならlegacy_apiへ問い合わせずその値を返す() {
-        ProjectContentSettings existing = new ProjectContentSettings(1L);
-        existing.setCssSelectorPrefix("custom-prefix");
-        when(repository.findByProjectId(1L)).thenReturn(Optional.of(existing));
+    void resolveCssSelectorPrefix_設定済みならproject_serviceへ問い合わせずその値を返す() {
+        world.settingsFor(1L, "custom-prefix");
 
         assertEquals("custom-prefix", service().resolveCssSelectorPrefix(1L));
-        verifyNoInteractions(projectBridgeClient);
+        assertTrue(world.http.requests("GET", "/api/internal/project/projects/.*").isEmpty());
     }
 
     @Test
-    void resolveCssSelectorPrefix_未設定時はlegacy_api経由でプロジェクトslugへフォールバックする() {
-        when(repository.findByProjectId(1L)).thenReturn(Optional.empty());
-        lenient().when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer token");
-        when(projectBridgeClient.resolveProjectSlug(1L, "Bearer token")).thenReturn("proj-a");
+    void resolveCssSelectorPrefix_未設定時はproject_service経由でプロジェクトslugへフォールバックする() {
+        world.projectSlug(1L, "proj-a");
+
+        assertEquals("proj-a", service().resolveCssSelectorPrefix(1L));
+        assertEquals("Bearer token-1",
+                world.http.requests("GET", "/api/internal/project/projects/1").get(0).header("Authorization"));
+    }
+
+    @Test
+    void resolveCssSelectorPrefix_設定が空白ならslugへフォールバックする() {
+        world.settingsFor(1L, "  ");
+        world.projectSlug(1L, "proj-a");
 
         assertEquals("proj-a", service().resolveCssSelectorPrefix(1L));
     }

@@ -122,4 +122,54 @@ class CustomTagValidationServiceTest {
     void sanitizeHtml_nullはそのまま空文字を返す() {
         assertEquals("", service.sanitizeHtml(null));
     }
+
+    // ---- issue #1821: 分岐 ----
+
+    @Test
+    void validate_HTMLがnullや空白の場合もerrorになりCSSは検査しない() {
+        ValidationResult nullHtml = service.validate(null, ".a { color: red; }");
+        ValidationResult blankHtml = service.validate("   ", ".a { color: red; }");
+
+        assertTrue(nullHtml.errors().stream().anyMatch(e -> "empty-html".equals(e.type())));
+        assertTrue(blankHtml.errors().stream().anyMatch(e -> "empty-html".equals(e.type())));
+    }
+
+    @Test
+    void validate_CSSがnullや空白なら検査しない() {
+        assertTrue(service.validate("<div>{{content}}</div>", null).isValid());
+        ValidationResult blank = service.validate("<div>{{content}}</div>", "  \n ");
+        assertTrue(blank.isValid());
+        assertTrue(blank.warnings().isEmpty());
+    }
+
+    @Test
+    void validate_コメント行と空行は検査せず_波括弧が揃っていれば警告も出ない() {
+        ValidationResult result = service.validate(
+                "<div>{{content}}</div>",
+                "/* コメント */\n// 行コメント\n\n.card {\ncolor: red;\n}");
+
+        assertTrue(result.isValid());
+        assertTrue(result.warnings().isEmpty());
+    }
+
+    @Test
+    void validate_波括弧が片方しか無いCSSは不完全の警告になる() {
+        ValidationResult onlyOpen = service.validate("<div>{{content}}</div>", ".card { color: red;");
+        ValidationResult onlyClose = service.validate("<div>{{content}}</div>", "color: red; }");
+        ValidationResult neither = service.validate("<div>{{content}}</div>", "color: red;");
+
+        for (ValidationResult result : new ValidationResult[] {onlyOpen, onlyClose, neither}) {
+            assertTrue(result.isValid());
+            assertTrue(result.warnings().stream().anyMatch(w -> "incomplete-css-rules".equals(w.type())));
+        }
+    }
+
+    @Test
+    void validate_ATルールとセレクタ付きの複数行ルールは許可される() {
+        ValidationResult result = service.validate(
+                "<div>{{content}}</div>", "@media (max-width: 600px) {\n.card {\ncolor: red;\n}\n}\n.a {\n}");
+
+        assertTrue(result.isValid());
+        assertTrue(result.errors().isEmpty());
+    }
 }

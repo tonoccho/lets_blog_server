@@ -1,85 +1,84 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.ProjectBridgeClient;
+import com.letsblog.content.testsupport.ContentWorld;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * タグ・CSS・プレフィックスの変更を project-service へ伝えて、サイトへの同期を依頼する(issue #1558)。
  * project-service は content-service から最新の内容を読み直すため、依頼はコミット後に出す。
+ *
+ * <p>issue #1821: ProjectBridgeClient・CurrentActorServiceは実物で、project-serviceの代わりにHTTPフェイクを向ける。
  */
-@ExtendWith(MockitoExtension.class)
 class LetsblogSyncNotifierTest {
 
-    @Mock
-    private ProjectBridgeClient projectBridgeClient;
-    @Mock
-    private CurrentActorService currentActorService;
+    private static final String SYNC_PATH = "/api/internal/project/letsblog-sync";
+
+    private ContentWorld world;
+
+    @BeforeEach
+    void setUp() {
+        world = new ContentWorld().actingAsAdmin(1L);
+    }
 
     @AfterEach
-    void clearSynchronization() {
+    void tearDown() {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.clearSynchronization();
         }
+        world.close();
     }
 
     private LetsblogSyncNotifier notifier() {
-        return new LetsblogSyncNotifier(projectBridgeClient, currentActorService);
+        return world.letsblogSyncNotifier;
     }
 
     @Test
     void プロジェクトの変更はそのプロジェクトのIDと呼び出し元のトークンで依頼する() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-
         notifier().notifyProjectChanged(7L);
 
-        verify(projectBridgeClient).requestLetsblogSync(7L, "Bearer t");
+        var requests = world.http.requests("POST", SYNC_PATH);
+        assertEquals(1, requests.size());
+        assertEquals("Bearer token-1", requests.get(0).header("Authorization"));
+        assertEquals(7, world.bodyOf(requests.get(0)).get("projectId").asInt());
     }
 
     @Test
     void グローバルの変更はプロジェクトIDなしで依頼する() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-
         notifier().notifyGlobalChanged();
 
-        verify(projectBridgeClient).requestLetsblogSync(isNull(), eq("Bearer t"));
+        var requests = world.http.requests("POST", SYNC_PATH);
+        assertEquals(1, requests.size());
+        assertTrue(world.bodyOf(requests.get(0)).get("projectId").isNull());
     }
 
     @Test
     void 依頼に失敗しても例外を投げない() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-        doThrow(new IllegalStateException("down")).when(projectBridgeClient).requestLetsblogSync(any(), anyString());
+        world.http.status("POST", SYNC_PATH, 503, "{\"error\":\"down\"}");
 
         notifier().notifyProjectChanged(7L);
 
-        verify(projectBridgeClient).requestLetsblogSync(7L, "Bearer t");
+        assertEquals(1, world.http.requests("POST", SYNC_PATH).size());
     }
 
     @Test
     void トランザクション中はコミットされるまで依頼しない() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
         TransactionSynchronizationManager.initSynchronization();
 
         notifier().notifyProjectChanged(7L);
 
-        verifyNoInteractions(projectBridgeClient);
+        assertTrue(world.http.requests("POST", SYNC_PATH).isEmpty());
         TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
-        verify(projectBridgeClient).requestLetsblogSync(7L, "Bearer t");
+        var requests = world.http.requests("POST", SYNC_PATH);
+        assertEquals(1, requests.size());
+        assertEquals("Bearer token-1", requests.get(0).header("Authorization"));
+        assertEquals(7, world.bodyOf(requests.get(0)).get("projectId").asInt());
     }
 
     @Test
@@ -90,6 +89,6 @@ class LetsblogSyncNotifierTest {
 
         TransactionSynchronizationManager.getSynchronizations()
                 .forEach(s -> s.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
-        verify(projectBridgeClient, never()).requestLetsblogSync(any(), any());
+        assertTrue(world.http.requests("POST", SYNC_PATH).isEmpty());
     }
 }

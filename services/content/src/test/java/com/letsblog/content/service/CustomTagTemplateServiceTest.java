@@ -5,57 +5,44 @@ import com.letsblog.content.domain.CustomTagFormat;
 import com.letsblog.content.domain.CustomTagTemplate;
 import com.letsblog.content.dto.ApplyCustomTagTemplateRequest;
 import com.letsblog.content.dto.CustomTagResponse;
-import com.letsblog.content.dto.ValidationResult;
-import com.letsblog.content.repository.CustomTagRepository;
 import com.letsblog.content.dto.CloneCustomTagTemplateRequest;
 import com.letsblog.content.dto.CustomTagTemplateRequest;
 import com.letsblog.content.dto.CustomTagTemplateResponse;
-import com.letsblog.content.repository.CustomTagTemplateRepository;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * issue #656: #641のレビューで、CustomTag*サービス群のうちCustomTagTemplateServiceが未テストの
  * まま残っていたことを受けて追加。主な責務(作成・公開/非公開・複製・一覧/検索/フィルタ)の主経路を検証する。
+ *
+ * <p>issue #1821: CurrentActorService・AdminAuthorizationService・CustomTagValidationServiceは実物。
+ * identity-serviceはHTTPフェイク、リポジトリ(DB)だけが差し替え(保存した行はメモリに持つ。
+ * JPQLの検索クエリはDBの仕事なので、リポジトリの戻り値を指定する)。
  */
-@ExtendWith(MockitoExtension.class)
 class CustomTagTemplateServiceTest {
 
-    @Mock
-    private CustomTagTemplateRepository customTagTemplateRepository;
-    @Mock
-    private CustomTagRepository customTagRepository;
-    @Mock
-    private CustomTagValidationService customTagValidationService;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-
+    private ContentWorld world;
     private CustomTagTemplateService service;
 
     @BeforeEach
     void setUp() {
-        service = new CustomTagTemplateService(
-                customTagTemplateRepository, customTagRepository, customTagValidationService,
-                currentActorService, adminAuthorizationService);
+        world = new ContentWorld().actingAsAdmin(7L);
+        service = world.customTagTemplateService;
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     private CustomTagTemplateRequest buildRequest() {
@@ -63,24 +50,13 @@ class CustomTagTemplateServiceTest {
                 "note-template", "desc", "alert", "<div>{{content}}</div>", ".note{color:red;}", null, null);
     }
 
-    private CustomTagTemplate buildTemplate(Long id) {
-        CustomTagTemplate template = new CustomTagTemplate();
-        template.setId(id);
-        template.setTemplateName("note-template");
-        template.setVersion(1);
-        template.setIsPublished(false);
-        return template;
+    /** DB(メモリ上のリポジトリ)に未公開のテンプレートを用意する。最初の行のidは1になる。 */
+    private CustomTagTemplate buildTemplate() {
+        return world.template("note-template", "<div>{{content}}</div>", ".note{color:red;}", false, null);
     }
 
     @Test
     void create_バージョン1未公開の新規テンプレートとして保存する() {
-        when(currentActorService.getCurrentActorId()).thenReturn(7L);
-        when(customTagTemplateRepository.save(any(CustomTagTemplate.class))).thenAnswer(invocation -> {
-            CustomTagTemplate saved = invocation.getArgument(0);
-            saved.setId(1L);
-            return saved;
-        });
-
         CustomTagTemplateResponse response = service.create(buildRequest());
 
         assertEquals(1L, response.id());
@@ -88,32 +64,38 @@ class CustomTagTemplateServiceTest {
         assertEquals(1, response.version());
         assertFalse(response.isPublished());
         assertEquals(7L, response.createdBy());
-        verify(adminAuthorizationService).requireAdmin();
+    }
+
+    @Test
+    void create_admin権限が無ければForbiddenExceptionで保存されない() {
+        world.actingAsUser(7L);
+
+        assertThrows(ForbiddenException.class, () -> service.create(buildRequest()));
+        assertTrue(world.savedTemplates.isEmpty());
     }
 
     @Test
     void update_存在するテンプレートを更新する() {
-        CustomTagTemplate existing = buildTemplate(1L);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(customTagTemplateRepository.save(any(CustomTagTemplate.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        buildTemplate();
+        CustomTagTemplateRequest request = new CustomTagTemplateRequest(
+                "renamed", "d2", "info", "<p>{{content}}</p>", ".p{}", null, null);
 
-        CustomTagTemplateResponse response = service.update(1L, buildRequest());
+        CustomTagTemplateResponse response = service.update(1L, request);
 
-        assertEquals("note-template", response.templateName());
+        assertEquals("renamed", response.templateName());
+        assertEquals("d2", response.description());
+        assertEquals("info", response.category());
+        assertEquals("<p>{{content}}</p>", world.templates.get(1L).getHtmlTemplate());
     }
 
     @Test
     void update_存在しないidはCustomTagTemplateNotFoundException() {
-        when(customTagTemplateRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThrows(CustomTagTemplateNotFoundException.class, () -> service.update(99L, buildRequest()));
     }
 
     @Test
     void publish_isPublishedをtrueにする() {
-        CustomTagTemplate existing = buildTemplate(1L);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(customTagTemplateRepository.save(any(CustomTagTemplate.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        buildTemplate();
 
         CustomTagTemplateResponse response = service.publish(1L);
 
@@ -122,17 +104,12 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void publish_存在しないidはCustomTagTemplateNotFoundException() {
-        when(customTagTemplateRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThrows(CustomTagTemplateNotFoundException.class, () -> service.publish(99L));
     }
 
     @Test
     void unpublish_isPublishedをfalseにする() {
-        CustomTagTemplate existing = buildTemplate(1L);
-        existing.setIsPublished(true);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(customTagTemplateRepository.save(any(CustomTagTemplate.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        buildTemplate().setIsPublished(true);
 
         CustomTagTemplateResponse response = service.unpublish(1L);
 
@@ -140,22 +117,19 @@ class CustomTagTemplateServiceTest {
     }
 
     @Test
+    void unpublish_存在しないidはCustomTagTemplateNotFoundException() {
+        assertThrows(CustomTagTemplateNotFoundException.class, () -> service.unpublish(99L));
+    }
+
+    @Test
     void clone_元テンプレートのHTML_CSSを引き継ぎバージョン1未公開の新規テンプレートを作る() {
-        CustomTagTemplate original = buildTemplate(1L);
-        original.setHtmlTemplate("<div>{{content}}</div>");
-        original.setCssContent(".note{color:red;}");
+        CustomTagTemplate original = buildTemplate();
         original.setDescription("元の説明");
         original.setCategory("alert");
         original.setProjectId(5L);
         original.setVersion(3);
         original.setIsPublished(true);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(original));
-        when(currentActorService.getCurrentActorId()).thenReturn(9L);
-        when(customTagTemplateRepository.save(any(CustomTagTemplate.class))).thenAnswer(invocation -> {
-            CustomTagTemplate saved = invocation.getArgument(0);
-            saved.setId(2L);
-            return saved;
-        });
+        world.actingAsAdmin(9L);
 
         CloneCustomTagTemplateRequest request = new CloneCustomTagTemplateRequest("cloned-template", null, null, null);
         CustomTagTemplateResponse response = service.clone(1L, request);
@@ -169,17 +143,17 @@ class CustomTagTemplateServiceTest {
         assertEquals(1, response.version());
         assertFalse(response.isPublished());
         assertEquals(9L, response.createdBy());
+        // 元のテンプレートは変わらず、custom_tagsの行も作らない
+        assertEquals(3, original.getVersion());
+        assertTrue(world.savedTags.isEmpty());
     }
 
     @Test
     void clone_リクエストで指定された値は元テンプレートより優先される() {
-        CustomTagTemplate original = buildTemplate(1L);
+        CustomTagTemplate original = buildTemplate();
         original.setDescription("元の説明");
         original.setCategory("alert");
         original.setProjectId(5L);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(original));
-        when(currentActorService.getCurrentActorId()).thenReturn(9L);
-        when(customTagTemplateRepository.save(any(CustomTagTemplate.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CloneCustomTagTemplateRequest request =
                 new CloneCustomTagTemplateRequest("cloned-template", "新しい説明", "info", 8L);
@@ -192,32 +166,30 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void clone_存在しないidはCustomTagTemplateNotFoundException() {
-        when(customTagTemplateRepository.findById(99L)).thenReturn(Optional.empty());
-
         CloneCustomTagTemplateRequest request = new CloneCustomTagTemplateRequest("cloned", null, null, null);
         assertThrows(CustomTagTemplateNotFoundException.class, () -> service.clone(99L, request));
     }
 
     @Test
     void delete_存在するテンプレートを削除する() {
-        when(customTagTemplateRepository.existsById(1L)).thenReturn(true);
+        buildTemplate();
 
         service.delete(1L);
 
-        verify(customTagTemplateRepository).deleteById(1L);
+        assertFalse(world.templates.containsKey(1L));
     }
 
     @Test
     void delete_存在しないidはCustomTagTemplateNotFoundException() {
-        when(customTagTemplateRepository.existsById(99L)).thenReturn(false);
+        buildTemplate();
 
         assertThrows(CustomTagTemplateNotFoundException.class, () -> service.delete(99L));
-        verify(customTagTemplateRepository, never()).deleteById(any());
+        assertTrue(world.templates.containsKey(1L));
     }
 
     @Test
     void getById_存在するテンプレートを返す() {
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(buildTemplate(1L)));
+        buildTemplate();
 
         CustomTagTemplateResponse response = service.getById(1L);
 
@@ -226,8 +198,6 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void getById_存在しないidはCustomTagTemplateNotFoundException() {
-        when(customTagTemplateRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThrows(CustomTagTemplateNotFoundException.class, () -> service.getById(99L));
     }
 
@@ -238,39 +208,31 @@ class CustomTagTemplateServiceTest {
      */
     @Test
     void getById_非公開かつprojectId指定時はプロジェクトメンバー判定を行う() {
-        CustomTagTemplate template = buildTemplate(1L);
-        template.setIsPublished(false);
-        template.setProjectId(5L);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        world.template("t", "<div></div>", null, false, 5L);
+        world.actingAsUser(3L).projectMember(5L, 3L, true);
 
         service.getById(1L);
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/5/members/3").size());
     }
 
     @Test
     void getById_非公開テンプレートで他プロジェクトのメンバーでなければForbiddenExceptionが伝播する() {
-        CustomTagTemplate template = buildTemplate(1L);
-        template.setIsPublished(false);
-        template.setProjectId(5L);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
-        doThrow(new ForbiddenException("not a member"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        world.template("t", "<div></div>", null, false, 5L);
+        world.actingAsUser(3L).projectMember(5L, 3L, false);
 
         assertThrows(ForbiddenException.class, () -> service.getById(1L));
     }
 
     @Test
     void getById_公開済みならプロジェクトメンバー判定を行わない() {
-        CustomTagTemplate template = buildTemplate(1L);
-        template.setIsPublished(true);
-        template.setProjectId(5L);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        world.template("t", "<div></div>", null, true, 5L);
+        world.actingAsUser(3L);
 
         CustomTagTemplateResponse response = service.getById(1L);
 
         assertTrue(response.isPublished());
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+        assertTrue(world.http.requests("GET", "/api/internal/identity/projects/.*").isEmpty());
     }
 
     /**
@@ -280,19 +242,18 @@ class CustomTagTemplateServiceTest {
      */
     @Test
     void getById_非公開でもprojectId未指定ならプロジェクトメンバー判定を行わない() {
-        CustomTagTemplate template = buildTemplate(1L);
-        template.setIsPublished(false);
-        template.setProjectId(null);
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(template));
+        buildTemplate();
+        world.actingAsUser(3L);
 
         service.getById(1L);
 
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+        assertTrue(world.http.requests("GET", "/api/internal/identity/projects/.*").isEmpty());
     }
 
     @Test
     void listPublished_projectId未指定ならグローバル公開テンプレートのみ() {
-        when(customTagTemplateRepository.findPublishedGlobalTemplates()).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.findPublishedGlobalTemplates()).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.listPublished(null);
 
@@ -301,8 +262,8 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void listPublished_projectId指定時はプロジェクト固有とグローバルの公開テンプレート() {
-        when(customTagTemplateRepository.findPublishedTemplatesByProject(5L))
-                .thenReturn(List.of(buildTemplate(1L), buildTemplate(2L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate(), buildTemplate());
+        when(world.customTagTemplateRepository.findPublishedTemplatesByProject(5L)).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.listPublished(5L);
 
@@ -311,7 +272,8 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void list_projectId未指定ならグローバルテンプレートのみ() {
-        when(customTagTemplateRepository.findGlobalTemplates()).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.findGlobalTemplates()).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.list(null);
 
@@ -320,7 +282,8 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void list_projectId指定時はプロジェクトの全テンプレート() {
-        when(customTagTemplateRepository.findAllTemplatesByProject(5L)).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.findAllTemplatesByProject(5L)).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.list(5L);
 
@@ -336,20 +299,18 @@ class CustomTagTemplateServiceTest {
      */
     @Test
     void list_projectId指定時はプロジェクトメンバー判定を行う() {
-        when(customTagTemplateRepository.findAllTemplatesByProject(5L)).thenReturn(List.of());
+        world.actingAsUser(3L).projectMember(5L, 3L, true);
 
         service.list(5L);
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/5/members/3").size());
     }
 
     @Test
     void list_プロジェクトメンバーでなければForbiddenExceptionが伝播する() {
-        doThrow(new ForbiddenException("not a member"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        world.actingAsUser(3L).projectMember(5L, 3L, false);
 
         assertThrows(ForbiddenException.class, () -> service.list(5L));
-        verify(customTagTemplateRepository, never()).findAllTemplatesByProject(any());
     }
 
     /**
@@ -358,16 +319,17 @@ class CustomTagTemplateServiceTest {
      */
     @Test
     void list_projectId未指定ならプロジェクトメンバー判定を行わない() {
-        when(customTagTemplateRepository.findGlobalTemplates()).thenReturn(List.of());
+        world.actingAsUser(3L);
 
         service.list(null);
 
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(any());
+        assertTrue(world.http.requests("GET", "/api/internal/identity/projects/.*").isEmpty());
     }
 
     @Test
     void searchByKeyword_projectId未指定ならグローバル検索() {
-        when(customTagTemplateRepository.searchByKeyword("note")).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.searchByKeyword("note")).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.searchByKeyword("note", null);
 
@@ -376,7 +338,8 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void searchByKeyword_projectId指定時はプロジェクトとグローバルで検索() {
-        when(customTagTemplateRepository.searchByKeywordAndProject("note", 5L)).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.searchByKeywordAndProject("note", 5L)).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.searchByKeyword("note", 5L);
 
@@ -385,7 +348,8 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void filterByCategory_projectId未指定ならグローバルフィルタ() {
-        when(customTagTemplateRepository.findByCategory("alert")).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.findByCategory("alert")).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.filterByCategory("alert", null);
 
@@ -394,7 +358,8 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void filterByCategory_projectId指定時はプロジェクトとグローバルでフィルタ() {
-        when(customTagTemplateRepository.findByCategoryAndProject("alert", 5L)).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.findByCategoryAndProject("alert", 5L)).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.filterByCategory("alert", 5L);
 
@@ -403,113 +368,110 @@ class CustomTagTemplateServiceTest {
 
     @Test
     void getMyTemplates_ログイン中ユーザーが作成したテンプレートのみ() {
-        when(currentActorService.getCurrentActorId()).thenReturn(7L);
-        when(customTagTemplateRepository.findByCreatedBy(7L)).thenReturn(List.of(buildTemplate(1L)));
+        List<CustomTagTemplate> rows = List.of(buildTemplate());
+        when(world.customTagTemplateRepository.findByCreatedBy(7L)).thenReturn(rows);
 
         List<CustomTagTemplateResponse> result = service.getMyTemplates();
 
         assertEquals(1, result.size());
+        // identity-serviceが解決した操作者のIDで検索している
+        assertEquals(1, world.http.requests("GET", "/api/identity/me").size());
     }
 
     // ---- issue #1131: テンプレートをプロジェクトの custom_tags 行として適用する(apply) ----
 
     private CustomTagTemplate applicableTemplate(boolean published, Long templateProjectId) {
-        CustomTagTemplate template = buildTemplate(1L);
-        template.setHtmlTemplate("<div class=\"note\">{{content}}</div>");
-        template.setCssContent(".note{color:red;}");
+        CustomTagTemplate template = world.template(
+                "note-template", "<div class=\"note\">{{content}}</div>", ".note{color:red;}", published,
+                templateProjectId);
         template.setDescription("注意書き");
-        template.setProjectId(templateProjectId);
-        template.setIsPublished(published);
         return template;
     }
 
     @Test
     void apply_テンプレートのHTML_CSSから対象プロジェクトのcustom_tags行を作る() {
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(true, null)));
-        when(customTagValidationService.validate(any(), any())).thenReturn(ValidationResult.valid());
-        when(customTagRepository.findByTagNameAndProjectId("note", 5L)).thenReturn(Optional.empty());
-        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> {
-            CustomTag saved = invocation.getArgument(0);
-            saved.setId(10L);
-            return saved;
-        });
+        applicableTemplate(true, null);
 
         CustomTagResponse response = service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note"));
 
-        assertEquals(10L, response.id());
+        assertEquals(1L, response.id());
         assertEquals("note", response.tagName());
         assertEquals(5L, response.projectId());
         assertEquals("<div class=\"note\">{{content}}</div>", response.htmlTemplate());
         assertEquals(".note{color:red;}", response.cssContent());
         assertEquals("注意書き", response.description());
         assertEquals(CustomTagFormat.BLOCK, response.tagFormat());
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
     }
 
     @Test
     void apply_同名タグが既にあれば上書きせずIllegalArgumentException() {
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(true, null)));
-        when(customTagValidationService.validate(any(), any())).thenReturn(ValidationResult.valid());
-        when(customTagRepository.findByTagNameAndProjectId("note", 5L)).thenReturn(Optional.of(new CustomTag()));
+        applicableTemplate(true, null);
+        CustomTag existing = world.tag("note", "<p></p>", null, CustomTagFormat.BLOCK, 5L);
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
 
         assertTrue(e.getMessage().contains("note"));
         assertTrue(e.getMessage().contains("既に登録されています"));
-        verify(customTagRepository, never()).save(any(CustomTag.class));
+        assertEquals(1, world.savedTags.size());
+        assertEquals("<p></p>", existing.getHtmlTemplate());
     }
 
     @Test
     void apply_存在しないテンプレートはCustomTagTemplateNotFoundException() {
-        when(customTagTemplateRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThrows(CustomTagTemplateNotFoundException.class,
                 () -> service.apply(99L, new ApplyCustomTagTemplateRequest(5L, "note")));
-        verify(customTagRepository, never()).save(any(CustomTag.class));
+        assertTrue(world.savedTags.isEmpty());
     }
 
     @Test
     void apply_対象プロジェクトのメンバーでなければForbiddenで何も作らない() {
-        doThrow(new ForbiddenException("no")).when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+        applicableTemplate(true, null);
+        world.actingAsUser(3L).projectMember(5L, 3L, false);
 
         assertThrows(ForbiddenException.class,
                 () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
-        verify(customTagRepository, never()).save(any(CustomTag.class));
+        assertTrue(world.savedTags.isEmpty());
     }
 
     @Test
     void apply_他プロジェクトの未公開テンプレートはそのプロジェクトのメンバーでなければ適用できない() {
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(false, 8L)));
-        doNothing().when(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
-        doThrow(new ForbiddenException("no")).when(adminAuthorizationService).requireProjectMemberOrAdmin(8L);
+        applicableTemplate(false, 8L);
+        world.actingAsUser(3L).projectMember(5L, 3L, true).projectMember(8L, 3L, false);
 
         assertThrows(ForbiddenException.class,
                 () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
-        verify(customTagRepository, never()).save(any(CustomTag.class));
+        assertTrue(world.savedTags.isEmpty());
+    }
+
+    @Test
+    void apply_他プロジェクトの未公開テンプレートでも両方のメンバーなら適用できる() {
+        applicableTemplate(false, 8L);
+        world.actingAsUser(3L).projectMember(5L, 3L, true).projectMember(8L, 3L, true);
+
+        CustomTagResponse response = service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note"));
+
+        assertEquals(5L, response.projectId());
     }
 
     @Test
     void apply_未公開でもグローバルテンプレートならテンプレート側のメンバー判定は行わない() {
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(false, null)));
-        when(customTagValidationService.validate(any(), any())).thenReturn(ValidationResult.valid());
-        when(customTagRepository.findByTagNameAndProjectId("note", 5L)).thenReturn(Optional.empty());
-        when(customTagRepository.save(any(CustomTag.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        applicableTemplate(false, null);
+        world.actingAsUser(3L).projectMember(5L, 3L, true);
 
         service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note"));
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
-        verify(adminAuthorizationService, never()).requireProjectMemberOrAdmin(8L);
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/.*").size());
     }
 
     @Test
     void apply_HTMLがセキュリティ検証に通らなければInvalidCustomTagContentExceptionで何も作らない() {
-        when(customTagTemplateRepository.findById(1L)).thenReturn(Optional.of(applicableTemplate(true, null)));
-        when(customTagValidationService.validate(any(), any())).thenReturn(
-                ValidationResult.invalid(List.of(com.letsblog.content.dto.ValidationError.of("E", "bad", "ERROR")), List.of()));
+        world.template("bad", "<div>{{content}}<script>alert(1)</script></div>", null, true, null);
 
-        assertThrows(InvalidCustomTagContentException.class,
+        InvalidCustomTagContentException e = assertThrows(InvalidCustomTagContentException.class,
                 () -> service.apply(1L, new ApplyCustomTagTemplateRequest(5L, "note")));
-        verify(customTagRepository, never()).save(any(CustomTag.class));
+
+        assertTrue(e.getMessage().contains("セキュリティ要件を満たしていません"));
+        assertTrue(world.savedTags.isEmpty());
     }
 }

@@ -1,50 +1,58 @@
 package com.letsblog.content.service;
 
-import com.letsblog.content.client.AiServiceException;
-import com.letsblog.content.render.MediaRenderClient;
 import com.letsblog.content.render.PlantUmlRenderRejectedException;
+import com.letsblog.content.testsupport.ContentWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
 /**
  * legacy-apiのPlantUmlTagRenderServiceTestのうち、content-serviceへ移設したプレビュー向け
  * (renderForPreview、CMS認証情報を必要としない)の振る舞いを引き継いだテスト(issue #576)。
+ *
+ * <p>issue #1821: MediaRenderClientは実物で、media-serviceの代わりにHTTPフェイクを向ける。
  */
-@ExtendWith(MockitoExtension.class)
 class PlantUmlTagRenderServiceTest {
 
-    @Mock
-    private MediaRenderClient mediaRenderClient;
+    private static final String RENDER_PATH = "/api/render/plantuml";
 
+    private ContentWorld world;
     private PlantUmlTagRenderService service;
 
     @BeforeEach
     void setUp() {
-        service = new PlantUmlTagRenderService(mediaRenderClient);
+        world = new ContentWorld().actingAsAdmin(1L);
+        service = world.plantUmlTagRenderService;
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
+    private String sentSource() {
+        return world.bodyOf(world.http.requests("POST", RENDER_PATH).get(0)).get("source").asText();
     }
 
     @Test
     void renderForPreview_タグが無ければ何もしない() {
         assertEquals("普通の本文です。", service.renderForPreview("普通の本文です。"));
-        verifyNoInteractions(mediaRenderClient);
+        assertTrue(world.http.requests("POST", RENDER_PATH).isEmpty());
+    }
+
+    @Test
+    void renderForPreview_nullや空の本文はそのまま返す() {
+        assertNull(service.renderForPreview(null));
+        assertEquals("", service.renderForPreview(""));
     }
 
     @Test
     void renderForPreview_PNGをdata_URIとして埋め込む() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1, 2, 3});
-
         String result = service.renderForPreview("本文\n[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]\n続き");
 
         assertTrue(result.contains("![diagram](data:image/png;base64,"));
@@ -53,26 +61,21 @@ class PlantUmlTagRenderServiceTest {
 
     @Test
     void renderForPreview_startumlが無い場合は自動的に補う() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
-
         service.renderForPreview("[plantuml]\nA->B\n[/plantuml]");
 
-        verify(mediaRenderClient).renderPlantUml(eq("@startuml\nA->B\n@enduml"));
+        assertEquals("@startuml\nA->B\n@enduml", sentSource());
     }
 
     @Test
     void renderForPreview_既にstartumlがある場合は二重に包まない() {
-        when(mediaRenderClient.renderPlantUml(anyString())).thenReturn(new byte[]{1});
-
         service.renderForPreview("[plantuml]\n@startuml\nA->B\n@enduml\n[/plantuml]");
 
-        verify(mediaRenderClient).renderPlantUml(eq("@startuml\nA->B\n@enduml"));
+        assertEquals("@startuml\nA->B\n@enduml", sentSource());
     }
 
     @Test
     void renderForPreview_media呼び出し失敗時はPlantUmlServerUnavailableExceptionを投げる() {
-        when(mediaRenderClient.renderPlantUml(anyString()))
-                .thenThrow(new AiServiceException("PlantUMLサーバーに接続できません", null));
+        world.http.status("POST", RENDER_PATH, 503, "{\"error\":\"down\"}");
 
         PlantUmlServerUnavailableException e = assertThrows(PlantUmlServerUnavailableException.class,
                 () -> service.renderForPreview("[plantuml]\nA->B\n[/plantuml]"));
@@ -81,13 +84,12 @@ class PlantUmlTagRenderServiceTest {
 
     @Test
     void renderForPreview_PlantUMLの拒否は接続不能に変えずそのまま伝える() {
-        PlantUmlRenderRejectedException rejected =
-                new PlantUmlRenderRejectedException("PlantUML が図を描けませんでした: Syntax Error?");
-        when(mediaRenderClient.renderPlantUml(anyString())).thenThrow(rejected);
+        world.http.status("POST", RENDER_PATH, 400,
+                "{\"error\":\"PlantUML が図を描けませんでした: Syntax Error?\"}");
 
         PlantUmlRenderRejectedException e = assertThrows(PlantUmlRenderRejectedException.class,
                 () -> service.renderForPreview("[plantuml]\nA->B\n[/plantuml]"));
 
-        assertEquals(rejected, e);
+        assertTrue(e.getMessage().contains("Syntax Error?"));
     }
 }
