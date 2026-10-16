@@ -23,9 +23,6 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * gateway側のupload-endpointバケット判定({@link RateLimitWebFilter})と、
@@ -121,8 +118,7 @@ class RateLimitUploadBucketSyncTest {
         properties.setApiGlobal(new RateLimitProperties.Bucket(1000, Duration.ofMinutes(1)));
         properties.setApiInternal(new RateLimitProperties.Bucket(1000, Duration.ofMinutes(1)));
         RateLimitWebFilter filter = new RateLimitWebFilter(properties);
-        WebFilterChain chain = mock(WebFilterChain.class);
-        when(chain.filter(any())).thenReturn(Mono.empty());
+        WebFilterChain chain = ex -> Mono.empty();
 
         StepVerifier.create(filter.filter(exchangeFor("/api/media/upload"), chain)).verifyComplete();
 

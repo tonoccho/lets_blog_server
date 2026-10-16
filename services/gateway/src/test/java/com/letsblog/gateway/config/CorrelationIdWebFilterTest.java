@@ -1,6 +1,15 @@
 package com.letsblog.gateway.config;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.server.WebFilterChain;
@@ -10,6 +19,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +31,94 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CorrelationIdWebFilterTest {
 
     private final CorrelationIdWebFilter filter = new CorrelationIdWebFilter();
+
+    private Logger accessLogger;
+    private ListAppender<ILoggingEvent> appender;
+
+    @BeforeEach
+    void attachLogAppender() {
+        accessLogger = (Logger) LoggerFactory.getLogger(CorrelationIdWebFilter.class);
+        appender = new ListAppender<>();
+        appender.start();
+        accessLogger.addAppender(appender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        accessLogger.detachAppender(appender);
+    }
+
+    private List<String> accessLogs() {
+        return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+    }
+
+    @Test
+    void 通常のパスはアクセスログを出す() {
+        ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/sites").build());
+
+        StepVerifier.create(filter.filter(exchange, ex -> Mono.empty())).verifyComplete();
+
+        assertEquals(1, accessLogs().size());
+        String line = accessLogs().get(0);
+        assertTrue(line.contains("method=GET path=/api/sites status=null"), line);
+        assertTrue(line.contains("correlation_id="
+                + exchange.getResponse().getHeaders().getFirst(CorrelationIdWebFilter.CORRELATION_ID_HEADER)), line);
+    }
+
+    @Test
+    void 応答状態が決まっていればアクセスログに状態コードを出す() {
+        ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/sites").build());
+
+        StepVerifier.create(filter.filter(exchange, ex -> {
+            ex.getResponse().setRawStatusCode(204);
+            return Mono.empty();
+        })).verifyComplete();
+
+        assertTrue(accessLogs().get(0).contains("status=204"), accessLogs().get(0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator/health", "/api/jobs/1/stream", "/stream"})
+    void ヘルスチェックとストリームのパスはアクセスログを出さない(String path) {
+        ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get(path).build());
+
+        StepVerifier.create(filter.filter(exchange, ex -> Mono.empty())).verifyComplete();
+
+        assertTrue(accessLogs().isEmpty(), accessLogs().toString());
+        assertNotNull(exchange.getResponse().getHeaders().getFirst(CorrelationIdWebFilter.CORRELATION_ID_HEADER));
+    }
+
+    @Test
+    void ストリームでなくても部分一致だけではログを省略しない() {
+        ServerWebExchange exchange =
+                MockServerWebExchange.from(MockServerHttpRequest.get("/api/streams/actuator").build());
+
+        StepVerifier.create(filter.filter(exchange, ex -> Mono.empty())).verifyComplete();
+
+        assertEquals(1, accessLogs().size());
+    }
+
+    @Test
+    void メソッドが取得できない要求はUNKNOWNとしてログに出す() {
+        ServerWebExchange base = MockServerWebExchange.from(MockServerHttpRequest.get("/api/sites").build());
+        ServerHttpRequest noMethod = new ServerHttpRequestDecorator(base.getRequest()) {
+            @Override
+            public HttpMethod getMethod() {
+                return null;
+            }
+
+            @Override
+            public ServerHttpRequest.Builder mutate() {
+                // 既定のmutate()はこのdecoratorを元に組み立て、メソッドnullを拒否する。委譲先から組み立てる。
+                return getDelegate().mutate();
+            }
+        };
+        ServerWebExchange exchange = base.mutate().request(noMethod).build();
+
+        StepVerifier.create(filter.filter(exchange, ex -> Mono.empty())).verifyComplete();
+
+        assertTrue(accessLogs().get(0).contains("method=UNKNOWN"), accessLogs().get(0));
+    }
 
     @Test
     void ヘッダが無ければ新しい相関IDを生成し下流リクエストとレスポンスの両方に設定する() {

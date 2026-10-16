@@ -17,16 +17,13 @@ import reactor.test.StepVerifier;
 
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 旧legacy-apiのRateLimitInterceptorTestが検証していたバケット分類ロジックの移設先(#560)。
@@ -41,6 +38,8 @@ class RateLimitWebFilterTest {
 
     private RateLimitWebFilter filter;
     private WebFilterChain chain;
+    /** chainを通過(=許可)したexchange。後段に実際に渡ったかを観測する。 */
+    private final List<ServerWebExchange> passed = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -53,8 +52,14 @@ class RateLimitWebFilterTest {
         properties.setUploadEndpoint(new RateLimitProperties.Bucket(2, Duration.ofMinutes(1)));
 
         filter = new RateLimitWebFilter(properties);
-        chain = mock(WebFilterChain.class);
-        when(chain.filter(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        chain = recordingChain(passed);
+    }
+
+    private static WebFilterChain recordingChain(List<ServerWebExchange> sink) {
+        return ex -> {
+            sink.add(ex);
+            return Mono.empty();
+        };
     }
 
     /** X-Forwarded-Forもトークンも無い = lbs-net内部からの直接呼び出し(BFF相当)。 */
@@ -86,7 +91,7 @@ class RateLimitWebFilterTest {
 
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 
-        verify(chain, times(1)).filter(exchange);
+        assertEquals(List.of(exchange), passed);
     }
 
     @Test
@@ -167,7 +172,7 @@ class RateLimitWebFilterTest {
 
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 
-        verify(chain, times(1)).filter(exchange);
+        assertEquals(List.of(exchange), passed);
     }
 
     /**
@@ -231,8 +236,7 @@ class RateLimitWebFilterTest {
             RateLimitProperties properties = new RateLimitProperties();
             properties.setUploadEndpoint(new RateLimitProperties.Bucket(2, Duration.ofMinutes(1)));
             RateLimitWebFilter isolatedFilter = new RateLimitWebFilter(properties);
-            WebFilterChain isolatedChain = mock(WebFilterChain.class);
-            when(isolatedChain.filter(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+            WebFilterChain isolatedChain = recordingChain(new ArrayList<>());
 
             // upload-endpointの上限(2)を使い切っても、対象パスは影響を受けないこと
             StepVerifier.create(isolatedFilter.filter(exchangeFor("/api/ai/image"), isolatedChain)).verifyComplete();
@@ -326,7 +330,7 @@ class RateLimitWebFilterTest {
 
         StepVerifier.create(filter.filter(exchange, chain)).verifyComplete();
 
-        verify(chain, times(1)).filter(exchange);
+        assertEquals(List.of(exchange), passed);
     }
 
     @Test
@@ -623,6 +627,6 @@ class RateLimitWebFilterTest {
         ServerWebExchange accepted = externalExchangeFor("/api/projects", "203.0.113.50");
         StepVerifier.create(shortWindowFilter.filter(accepted, chain)).verifyComplete();
         assertNotEquals(HttpStatus.TOO_MANY_REQUESTS, accepted.getResponse().getStatusCode());
-        verify(chain, times(2)).filter(org.mockito.ArgumentMatchers.any());
+        assertEquals(2, passed.size());
     }
 }
