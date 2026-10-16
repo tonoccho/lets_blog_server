@@ -1,15 +1,18 @@
 package com.letsblog.publishing.integration;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.publishing.service.AdminAuthorizationService;
-import com.letsblog.publishing.service.BulkManagementService;
-import com.letsblog.publishing.service.CurrentActorService;
-import com.letsblog.publishing.service.PostPublishService;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.SpringWorld;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -22,7 +25,6 @@ import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * publishing-serviceが、multipartの上限を超えるアップロードに対して<b>413 Payload Too Large</b>と
@@ -40,6 +42,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
  * {@code GlobalExceptionHandler#handleIllegalState}が一律409 CONFLICTへ写像していた。
  * 利用者には「対象リソースの状態が競合しています」と表示され、真因(サイズ超過)と正反対の
  * 案内になっていた。
+ *
+ * <p>issue #1816で書き直し: PostPublishService・BulkManagementService・AdminAuthorizationService・
+ * CurrentActorServiceは実物のBeanを使い、外部との通信(HTTPは{@code FakeHttpServer}、SSHは{@code FakeWordPress}、
+ * MQは{@code RabbitTemplate}、Keycloakの鍵取得を伴う{@code JwtDecoder})だけを差し替える。
+ * 「サービスに届かない」ことは、どの外部にも一切触れていないことで確かめる。
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -48,11 +55,24 @@ import static org.mockito.Mockito.verifyNoInteractions;
                 "spring.servlet.multipart.max-request-size=128KB"
         })
 @ActiveProfiles("test")
+@Import(SpringWorld.SshBoundary.class)
 @DisplayName("publishing-service: multipart上限超過は413を返す(issue #1061)")
 class MultipartOversizeIntegrationTest {
 
     private static final long MAX_FILE_SIZE_BYTES = 64L * 1024;
     private static final long MAX_REQUEST_SIZE_BYTES = 128L * 1024;
+
+    private static final PublishingWorld WORLD = SpringWorld.start();
+
+    @DynamicPropertySource
+    static void externalServices(DynamicPropertyRegistry registry) {
+        SpringWorld.register(registry, WORLD);
+    }
+
+    @AfterAll
+    static void closeWorld() {
+        WORLD.close();
+    }
 
     @LocalServerPort
     private int port;
@@ -60,17 +80,9 @@ class MultipartOversizeIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
+    /** MQ(RabbitMQ)との通信そのもの。テスト環境にブローカーは無いので差し替える。 */
     @MockitoBean
-    private PostPublishService postPublishService;
-
-    @MockitoBean
-    private BulkManagementService bulkManagementService;
-
-    @MockitoBean
-    private AdminAuthorizationService adminAuthorizationService;
-
-    @MockitoBean
-    private CurrentActorService currentActorService;
+    private RabbitTemplate rabbitTemplate;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
@@ -92,7 +104,7 @@ class MultipartOversizeIntegrationTest {
         assertThat(response.body())
                 .contains(String.valueOf(MAX_FILE_SIZE_BYTES))
                 .contains(String.valueOf(MAX_REQUEST_SIZE_BYTES));
-        verifyNoInteractions(bulkManagementService);
+        assertNothingReachedExternalSystems();
     }
 
     @Test
@@ -112,7 +124,7 @@ class MultipartOversizeIntegrationTest {
         assertThat(response.body())
                 .contains(String.valueOf(MAX_FILE_SIZE_BYTES))
                 .contains(String.valueOf(MAX_REQUEST_SIZE_BYTES));
-        verifyNoInteractions(postPublishService);
+        assertNothingReachedExternalSystems();
     }
 
     /**
@@ -136,7 +148,18 @@ class MultipartOversizeIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(413);
         assertThat(response.body()).contains(String.valueOf(MAX_FILE_SIZE_BYTES));
-        verifyNoInteractions(bulkManagementService);
+        assertNothingReachedExternalSystems();
+    }
+
+    /** 上限超過のリクエストはコントローラへ届かないので、どの外部(HTTP・SSH・MQ)にも触れない。 */
+    private static void assertNothingReachedExternalSystems() {
+        assertThat(WORLD.project.requests()).isEmpty();
+        assertThat(WORLD.identity.requests()).isEmpty();
+        assertThat(WORLD.content.requests()).isEmpty();
+        assertThat(WORLD.media.requests()).isEmpty();
+        assertThat(WORLD.agent.requests()).isEmpty();
+        assertThat(WORLD.ai.requests()).isEmpty();
+        assertThat(WORLD.ssh.commands).isEmpty();
     }
 
     private HttpResponse<String> post(String path, MultipartBodyBuilder body) throws IOException, InterruptedException {

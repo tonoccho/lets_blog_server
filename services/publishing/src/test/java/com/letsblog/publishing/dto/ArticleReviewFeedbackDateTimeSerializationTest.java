@@ -1,24 +1,20 @@
 package com.letsblog.publishing.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.letsblog.publishing.client.ProjectServiceClient;
-import com.letsblog.publishing.client.ProjectServiceClient.GithubAccess;
 import com.letsblog.publishing.domain.ArticleReview;
 import com.letsblog.publishing.domain.ArticleReviewState;
-import com.letsblog.publishing.github.GithubIssueComment;
-import com.letsblog.publishing.github.GithubPullRequestClient;
 import com.letsblog.publishing.repository.ArticleReviewRepository;
 import com.letsblog.publishing.service.ArticleReviewFeedbackService;
+import com.letsblog.publishing.testsupport.GithubStubs;
+import com.letsblog.publishing.testsupport.PublishingWorld;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -27,20 +23,34 @@ import tools.jackson.databind.json.JsonMapper;
  * issue #1611: 差し戻し・自分宛レビュー一覧の応答日時(submittedAt / rejectedAt)が、
  * UTC の Z 終端 RFC 3339 で出力されること。#1540 と同じく DB / エンティティは UTC 壁時計の
  * LocalDateTime のまま。文字列形式は画面から観測できないためサービスレベルのシリアライズテストで表す。
+ *
+ * <p>issue #1816で書き直し: GithubPullRequestClient・ProjectServiceClientは実物を使い、GitHubとproject-serviceへの
+ * HTTP({@code FakeHttpServer})だけを差し替える。{@link ArticleReviewRepository}はDBアクセスそのものなのでMockito。
  */
 class ArticleReviewFeedbackDateTimeSerializationTest {
 
-    private static final GithubAccess ACCESS = new GithubAccess("t", "octo", "blog");
     private static final long PROJECT_ID = 7L;
     private static final long ACTOR_ID = 3L;
     private static final int PR = 201;
 
     private final JsonMapper mapper = JsonMapper.builder().build();
     private final ArticleReviewRepository repository = mock(ArticleReviewRepository.class);
-    private final GithubPullRequestClient githubClient = mock(GithubPullRequestClient.class);
-    private final ProjectServiceClient projectServiceClient = mock(ProjectServiceClient.class);
-    private final ArticleReviewFeedbackService service =
-            new ArticleReviewFeedbackService(repository, githubClient, projectServiceClient);
+    private PublishingWorld world;
+    private ArticleReviewFeedbackService service;
+
+    @BeforeEach
+    void setUp() {
+        world = new PublishingWorld();
+        world.stubGithubAccess(PROJECT_ID, "t", "octo", "blog");
+        world.asUser("Bearer user-token");
+        service = new ArticleReviewFeedbackService(repository, world.githubPullRequestClient,
+                world.projectServiceClient);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private static ArticleReview review(ArticleReviewState state, LocalDateTime submittedAt, LocalDateTime rejectedAt) {
         ArticleReview review = new ArticleReview();
@@ -57,8 +67,7 @@ class ArticleReviewFeedbackDateTimeSerializationTest {
     private JsonNode myReviewsRow(ArticleReview review) {
         when(repository.findByProjectIdAndSubmittedByUserIdOrderBySubmittedAtDesc(PROJECT_ID, ACTOR_ID))
                 .thenReturn(List.of(review));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, ACTOR_ID)).thenReturn(ACCESS);
-        when(githubClient.findIssueComment(any(), anyLong())).thenReturn(Optional.empty());
+        // 差し戻しコメント(5001)はGitHubに無い(404)。
         return mapper.valueToTree(service.myReviews(PROJECT_ID, ACTOR_ID)).get(0);
     }
 
@@ -97,9 +106,7 @@ class ArticleReviewFeedbackDateTimeSerializationTest {
         inReview.setGithubPrNumber(PR);
         inReview.setState(ArticleReviewState.IN_REVIEW);
         when(repository.findByProjectIdAndGithubPrNumber(PROJECT_ID, PR)).thenReturn(Optional.of(inReview));
-        when(projectServiceClient.resolveGithubAccess(PROJECT_ID, 9L)).thenReturn(ACCESS);
-        when(githubClient.createIssueComment(any(), anyInt(), anyString()))
-                .thenReturn(new GithubIssueComment(5001L, "x"));
+        GithubStubs.createIssueComment(world.github, "octo", "blog", PR, 5001L);
 
         JsonNode json = mapper.valueToTree(service.reject(PROJECT_ID, 9L, "a@b", PR, "直して"));
 

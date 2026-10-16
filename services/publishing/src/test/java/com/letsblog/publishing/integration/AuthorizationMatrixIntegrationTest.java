@@ -3,7 +3,6 @@ package com.letsblog.publishing.integration;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.publishing.client.IdentityClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,6 +34,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * {@code authenticated()}で、残りは{@code permitAll()}だった。legacy-api時代には
  * {@code anyRequest().authenticated()}で401だった{@code /api/posts/publish}等が未認証で
  * 到達できる後退が残っていた(issue #705と同型)。本クラスはその再発を防ぐ。
+ *
+ * <p>issue #1816で書き直し: 自前の{@code IdentityClient}のモックは外した(認証ゲートの検証には要らない)。
+ * 外部との通信である{@code JwtDecoder}(Keycloakの鍵取得を伴う)だけをモックのまま残す。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -47,9 +49,6 @@ class AuthorizationMatrixIntegrationTest {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
 
     /**
      * publishing-serviceがgateway経由で外部へ公開している全エンドポイント

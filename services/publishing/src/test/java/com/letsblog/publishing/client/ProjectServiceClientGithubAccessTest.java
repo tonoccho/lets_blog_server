@@ -21,6 +21,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.publishing.testsupport.FakeHttpServer;
 
 /**
  * {@link ProjectServiceClient#resolveGithubAccess}の単体テスト(issue #1337)。project-serviceの既存ブリッジ
@@ -30,9 +31,11 @@ import com.letsblog.common.auth.ServiceTokenClient;
 class ProjectServiceClientGithubAccessTest {
 
     private HttpServer server;
+    private final FakeHttpServer tokenServer = new FakeHttpServer();
 
     @AfterEach
     void tearDown() {
+        tokenServer.close();
         RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
@@ -157,7 +160,13 @@ class ProjectServiceClientGithubAccessTest {
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
         return new ProjectServiceClient(
                 RestClient.builder(), "http://localhost:" + server.getAddress().getPort(),
-                new OutboundAuthHeaders(servletRequest, org.mockito.Mockito.mock(ServiceTokenClient.class)));
+                new OutboundAuthHeaders(servletRequest, serviceTokenClient()));
+    }
+
+    /** 実物のServiceTokenClient。トークンのエンドポイント(外部との通信)だけをサーバー側のフェイクで模す。 */
+    private ServiceTokenClient serviceTokenClient() {
+        tokenServer.json("POST", ".*", "{\"access_token\":\"svc-token\",\"expires_in\":300}");
+        return new ServiceTokenClient(RestClient.builder(), tokenServer.baseUrl(), "publishing", "secret");
     }
 
     private static HttpServer start(HttpHandler handler) throws IOException {

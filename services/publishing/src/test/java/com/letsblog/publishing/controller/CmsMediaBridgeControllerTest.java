@@ -1,138 +1,149 @@
 package com.letsblog.publishing.controller;
 
-import com.letsblog.publishing.cms.CmsAdapter;
-import com.letsblog.publishing.cms.CmsAdapterFactory;
-import com.letsblog.publishing.cms.CmsCredentials;
-import com.letsblog.publishing.cms.CmsMediaReferenceScan;
-import com.letsblog.publishing.cms.CmsMediaSummary;
-import com.letsblog.publishing.cms.CmsType;
 import com.letsblog.publishing.cms.MediaUploadResult;
-import com.letsblog.publishing.domain.Project;
-import com.letsblog.publishing.domain.Site;
 import com.letsblog.publishing.dto.MediaGcScanBridgeResponse;
 import com.letsblog.publishing.service.ProjectNotFoundException;
-import com.letsblog.publishing.service.ProjectService;
-import com.letsblog.publishing.service.SiteService;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import com.letsblog.publishing.testsupport.PublishingWorld.SiteSpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * CmsMediaBridgeControllerの回帰テスト(issue #573 stage3でlegacy-api向けに作成、issue #709で
  * publishing-serviceへ移管、Epic #551 C6-3)。media-serviceから移設されたMediaController/
  * MediaGarbageCollectionServiceのProject/Site解決ロジック(環境未設定時の例外を含む)が、
  * このブリッジコントローラへ正しく引き継がれていることを検証する。
+ *
+ * <p>issue #1816で書き直し: ProjectService・SiteService・CmsAdapterFactory・CmsAdapterは実物を使い、
+ * 外部との通信(project-serviceへのHTTPは{@code FakeHttpServer}、WordPressへのSSHは{@code FakeWordPress})
+ * だけを差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 class CmsMediaBridgeControllerTest {
 
-    @Mock
-    private ProjectService projectService;
-    @Mock
-    private SiteService siteService;
-    @Mock
-    private CmsAdapterFactory cmsAdapterFactory;
-    @Mock
-    private CmsAdapter cmsAdapter;
+    private static final SiteSpec LOCAL = SiteSpec.ssh(10L, "local-site", "ssh.example.com", "/var/www/html");
+    private static final SiteSpec TEST = SiteSpec.ssh(11L, "test-site", "test.example.com", "/var/www/html");
+    private static final SiteSpec PROD = SiteSpec.ssh(12L, "prod-site", "prod.example.com", "/var/www/html");
 
+    private PublishingWorld world;
     private CmsMediaBridgeController controller;
+
+    /** `wp eval`(メディア参照のスキャン)の応答。FakeWordPressはPHPを実行できないので、WordPressの出力を直接返す。 */
+    private static final String SCAN_OUTPUT = "{\"posts\":[{\"id\":\"3\",\"postType\":\"post\",\"status\":\"publish\","
+            + "\"content\":\"本文\",\"thumbnailId\":\"5\"}],\"settings\":{\"site_icon\":\"9\"}}";
 
     @BeforeEach
     void setUp() {
-        controller = new CmsMediaBridgeController(projectService, siteService, cmsAdapterFactory);
+        world = new PublishingWorld();
+        world.ssh.whenOk("eval", SCAN_OUTPUT);
+        controller = new CmsMediaBridgeController(world.projectService, world.siteService, world.cmsAdapterFactory);
     }
 
-    private Project buildProject(Long localSiteId) {
-        Project project = new Project();
-        project.setId(1L);
-        project.setName("テスト");
-        project.setSlug("test");
-        project.setLocalSiteId(localSiteId);
-        return project;
-    }
-
-    private Site buildSite(Long id, String siteKey) {
-        Site site = new Site();
-        site.setId(id);
-        site.setSiteKey(siteKey);
-        site.setCmsType(CmsType.WORDPRESS);
-        return site;
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void uploadMedia_CmsAdapter経由でアップロードする() throws Exception {
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://example.com", "user", "SSH");
-        when(siteService.getCredentials("my-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        when(cmsAdapter.uploadMedia(credentials, "photo.jpg", "image/jpeg", "data".getBytes()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/media/1.jpg"));
+        world.stubCredentials("my-site", PublishingWorld.sshCredentialsMap());
 
         MockMultipartFile file = new MockMultipartFile("file", "photo.jpg", "image/jpeg", "data".getBytes());
         MediaUploadResult result = controller.uploadMedia("my-site", file);
 
-        assertEquals("1", result.id());
-        assertEquals("https://example.com/media/1.jpg", result.url());
+        assertEquals(1, world.ssh.media.size(), "WordPressへ1件アップロードされる");
+        assertEquals(world.ssh.media.keySet().iterator().next(), result.id());
+        assertTrue(result.url().endsWith("photo.jpg"), result.url());
+        assertEquals("data", new String(world.ssh.media.values().iterator().next().bytes));
+    }
+
+    @Test
+    void siteProjectId_サイトが属するプロジェクトのIDを返す() {
+        world.withMainSite().bindProject(1L, 7L, null, null, 1L);
+
+        assertEquals(7L, controller.siteProjectId("main").projectId());
+    }
+
+    @Test
+    void siteProjectId_どの環境にも紐付いていなければnull() {
+        world.withMainSite();
+
+        assertNull(controller.siteProjectId("main").projectId());
     }
 
     @Test
     void scanMedia_プロジェクトのサイト情報からCMSデータを取得する() {
-        Project project = buildProject(10L);
-        Site site = buildSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(site));
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
-        List<CmsMediaSummary> media = List.of(new CmsMediaSummary("1", "url", "title", "image/jpeg", "2024-01-01"));
-        CmsMediaReferenceScan refs = new CmsMediaReferenceScan(List.of(), Map.of());
-        when(cmsAdapter.listMedia(credentials)).thenReturn(media);
-        when(cmsAdapter.scanMediaReferences(credentials)).thenReturn(refs);
+        world.bindEnvironments(1L, "test", LOCAL, TEST, PROD);
+        world.ssh.site("ssh.example.com", "/var/www/html").addMedia("5", "https://local.test/a.jpg", "x".getBytes());
 
         MediaGcScanBridgeResponse response = controller.scanMedia(1L, "local");
 
-        assertEquals(media, response.media());
-        assertEquals(refs, response.refs());
+        assertEquals(1, response.media().size());
+        assertEquals("5", response.media().get(0).id());
+        assertEquals("3", response.refs().posts().get(0).id());
+        assertEquals("5", response.refs().posts().get(0).thumbnailId());
+        assertEquals("9", response.refs().settingsMediaIds().get("site_icon"));
+    }
+
+    @Test
+    void scanMedia_環境ごとに対応するサイトのメディアを読む() {
+        world.bindEnvironments(1L, "test", LOCAL, TEST, PROD);
+        world.ssh.site("test.example.com", "/var/www/html").addMedia("6", "https://test/b.jpg", "x".getBytes());
+        world.ssh.site("prod.example.com", "/var/www/html").addMedia("7", "https://prod/c.jpg", "x".getBytes());
+
+        assertEquals("6", controller.scanMedia(1L, "test").media().get(0).id());
+        assertEquals("7", controller.scanMedia(1L, "production").media().get(0).id());
+        assertTrue(controller.scanMedia(1L, "local").media().isEmpty(), "ローカルのサイトにはメディアが無い");
+    }
+
+    @Test
+    void scanMedia_不正な環境名はIllegalArgumentException() {
+        world.bindEnvironments(1L, "test", LOCAL, TEST, PROD);
+
+        IllegalArgumentException e =
+                assertThrows(IllegalArgumentException.class, () -> controller.scanMedia(1L, "staging"));
+
+        assertTrue(e.getMessage().contains("staging"), e.getMessage());
     }
 
     @Test
     void scanMedia_環境にサイトが未設定なら例外() {
-        Project project = buildProject(null);
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
+        world.bindEnvironments(1L, "test", null, TEST, PROD);
+        world.bindProject(11L, 1L, null, 11L, 12L);
+
+        assertThrows(IllegalArgumentException.class, () -> controller.scanMedia(1L, "local"));
+    }
+
+    @Test
+    void scanMedia_環境のサイトがproject_serviceに無ければ例外() {
+        world.bindEnvironments(1L, "test", LOCAL, TEST, PROD);
+        world.project.status("GET", "/api/internal/project/sites/10", 404, "{}");
 
         assertThrows(IllegalArgumentException.class, () -> controller.scanMedia(1L, "local"));
     }
 
     @Test
     void scanMedia_存在しないプロジェクトはProjectNotFoundException() {
-        when(projectService.getProjectEntity(99L)).thenThrow(new ProjectNotFoundException("id 99 のプロジェクトは登録されていません"));
-
         assertThrows(ProjectNotFoundException.class, () -> controller.scanMedia(99L, "local"));
     }
 
     @Test
     void deleteMedia_CmsAdapter経由で削除し204を返す() {
-        Project project = buildProject(10L);
-        Site site = buildSite(10L, "local-site");
-        when(projectService.getProjectEntity(1L)).thenReturn(project);
-        when(siteService.getById(10L)).thenReturn(Optional.of(site));
-        CmsCredentials credentials = new CmsCredentials.WordPressCredentials("https://local.test", "admin", "SSH");
-        when(siteService.getCredentials("local-site")).thenReturn(credentials);
-        when(cmsAdapterFactory.resolve(CmsType.WORDPRESS)).thenReturn(cmsAdapter);
+        world.bindEnvironments(1L, "test", LOCAL, TEST, PROD);
+        world.ssh.site("ssh.example.com", "/var/www/html").addMedia("42", "https://local.test/a.jpg", "x".getBytes());
 
         ResponseEntity<Void> response = controller.deleteMedia(1L, "42", "local");
 
         assertEquals(204, response.getStatusCode().value());
+        assertFalse(world.ssh.site("ssh.example.com", "/var/www/html").media.containsKey("42"),
+                "WordPressからメディアが消える");
     }
 }

@@ -3,41 +3,48 @@ package com.letsblog.publishing.controller;
 import com.letsblog.publishing.dto.AuthorProvisioningBridgeRequest;
 import com.letsblog.publishing.dto.AuthorProvisioningBridgeResponse;
 import com.letsblog.publishing.service.AuthorProvisioningService;
+import com.letsblog.publishing.testsupport.PublishingWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@ExtendWith(MockitoExtension.class)
+/**
+ * issue #1816で書き直し: AuthorProvisioningServiceは実物を使い、project-serviceへのHTTP
+ * ({@code FakeHttpServer})とWordPressへのSSH({@code FakeWordPress})だけを差し替える。
+ */
 class AuthorProvisioningInternalControllerTest {
 
-    @Mock
-    private AuthorProvisioningService authorProvisioningService;
+    private PublishingWorld world;
+    private AuthorProvisioningInternalController controller;
 
-    private AuthorProvisioningInternalController controller() {
-        return new AuthorProvisioningInternalController(authorProvisioningService);
+    @BeforeEach
+    void setUp() {
+        world = new PublishingWorld();
+        world.stubCredentials("main", PublishingWorld.sshCredentialsMap());
+        controller = new AuthorProvisioningInternalController(
+                new AuthorProvisioningService(world.projectServiceClient, world.cmsAdapterFactory));
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
     }
 
     @Test
     void provisionAuthor_サービスへ委譲し結果を返す() {
-        when(authorProvisioningService.provisionAuthor(eq("main"), any())).thenReturn("9");
+        world.ssh.whenOk("echo ok", "ok").whenOk("core version", "6.4.2")
+                .whenOk("user list", "[]").whenOk("user create", "9").whenOk("user update", "");
         AuthorProvisioningBridgeRequest request = new AuthorProvisioningBridgeRequest(
                 "member@example.com", "editor", "太郎", "山田", "山田太郎", null, null, null);
 
-        AuthorProvisioningBridgeResponse response = controller().provisionAuthor("main", request);
+        AuthorProvisioningBridgeResponse response = controller.provisionAuthor("main", request);
 
         assertEquals("9", response.cmsAuthorId());
-        ArgumentCaptor<com.letsblog.publishing.cms.AuthorProvisioningRequest> captor =
-                ArgumentCaptor.forClass(com.letsblog.publishing.cms.AuthorProvisioningRequest.class);
-        verify(authorProvisioningService).provisionAuthor(eq("main"), captor.capture());
-        assertEquals("member@example.com", captor.getValue().email());
-        assertEquals("editor", captor.getValue().wpRole());
+        assertTrue(world.ssh.ran("user create"), world.ssh.commands.toString());
+        assertTrue(world.ssh.ran("editor"), "wpRoleがWordPressへ渡る: " + world.ssh.commands);
+        assertTrue(world.ssh.ran("member@example.com"), "emailがWordPressへ渡る: " + world.ssh.commands);
     }
 }

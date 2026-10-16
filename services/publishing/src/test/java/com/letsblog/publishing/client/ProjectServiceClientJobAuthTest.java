@@ -1,6 +1,7 @@
 package com.letsblog.publishing.client;
 
 import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.publishing.testsupport.FakeHttpServer;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -18,8 +19,6 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * 一括インストールジョブ(issue #1702)の{@code @Async}スレッドにはバインドされたHTTPリクエストが無く、
@@ -36,12 +35,16 @@ class ProjectServiceClientJobAuthTest {
             "{\"id\":10,\"siteKey\":\"k\",\"name\":\"n\",\"baseUrl\":\"https://e.example\","
                     + "\"cmsType\":\"WORDPRESS\",\"managedWordpress\":false,\"wpSlug\":null}";
 
-    private final ServiceTokenClient serviceTokenClient = mock(ServiceTokenClient.class);
+    /** サービス間トークンのエンドポイント(外部との通信)をサーバー側のフェイクで模し、ServiceTokenClientは実物を使う。 */
+    private final FakeHttpServer tokenServer = new FakeHttpServer();
+    private ServiceTokenClient serviceTokenClient;
     private final List<String> seenAuthorization = new CopyOnWriteArrayList<>();
     private HttpServer server;
 
     @BeforeEach
     void startServer() throws Exception {
+        tokenServer.json("POST", ".*", "{\"access_token\":\"svc-token\",\"expires_in\":300}");
+        serviceTokenClient = new ServiceTokenClient(RestClient.builder(), tokenServer.baseUrl(), "publishing", "secret");
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             seenAuthorization.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
@@ -57,6 +60,7 @@ class ProjectServiceClientJobAuthTest {
 
     @AfterEach
     void tearDown() {
+        tokenServer.close();
         server.stop(0);
         RequestContextHolder.resetRequestAttributes();
     }
@@ -86,7 +90,6 @@ class ProjectServiceClientJobAuthTest {
     @Test
     @DisplayName("リクエストの無いスレッドでは、サービス自身のトークンでプロジェクトとサイトを引く")
     void usesServiceTokenOutsideRequest() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
         ProjectServiceClient client = client(new MockHttpServletRequest());
         AtomicReference<Long> siteId = new AtomicReference<>();
 
@@ -97,6 +100,7 @@ class ProjectServiceClientJobAuthTest {
 
         assertEquals(10L, siteId.get());
         assertEquals(List.of("Bearer svc-token", "Bearer svc-token"), seenAuthorization);
+        assertEquals(1, tokenServer.requests("POST", ".*").size(), "トークンは取得して使い回す");
     }
 
     @Test

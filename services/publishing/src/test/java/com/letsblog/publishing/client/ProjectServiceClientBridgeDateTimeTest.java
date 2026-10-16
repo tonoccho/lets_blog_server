@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.publishing.testsupport.FakeHttpServer;
 
 /**
  * issue #1541: project-service の内部ブリッジ応答の日時が Z 終端 RFC 3339 になっても、
@@ -22,9 +23,11 @@ import com.letsblog.common.auth.ServiceTokenClient;
 class ProjectServiceClientBridgeDateTimeTest {
 
     private HttpServer server;
+    private final FakeHttpServer tokenServer = new FakeHttpServer();
 
     @AfterEach
     void tearDown() {
+        tokenServer.close();
         RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
@@ -35,7 +38,7 @@ class ProjectServiceClientBridgeDateTimeTest {
         MockHttpServletRequest servletRequest = new MockHttpServletRequest();
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
         return new ProjectServiceClient(RestClient.builder(), baseUrl(),
-                new OutboundAuthHeaders(servletRequest, org.mockito.Mockito.mock(ServiceTokenClient.class)));
+                new OutboundAuthHeaders(servletRequest, serviceTokenClient()));
     }
 
     @Test
@@ -54,6 +57,12 @@ class ProjectServiceClientBridgeDateTimeTest {
     void getProject_はZ付きの日時を含む応答を読める() throws IOException {
         server = start("{\"id\":7,\"name\":\"P\",\"slug\":\"p\",\"masterEnvironment\":\"test\",\"localSiteId\":1,\"testSiteId\":2,\"productionSiteId\":3,\"githubRepository\":null,\"createdAt\":\"2026-09-08T20:03:35Z\",\"updatedAt\":\"2026-09-09T01:02:03Z\"}");
         assertThat(client().getProject(7L).productionSiteId()).isEqualTo(3L);
+    }
+
+    /** 実物のServiceTokenClient。トークンのエンドポイント(外部との通信)だけをサーバー側のフェイクで模す。 */
+    private ServiceTokenClient serviceTokenClient() {
+        tokenServer.json("POST", ".*", "{\"access_token\":\"svc-token\",\"expires_in\":300}");
+        return new ServiceTokenClient(RestClient.builder(), tokenServer.baseUrl(), "publishing", "secret");
     }
 
     private HttpServer start(String body) throws IOException {

@@ -206,6 +206,8 @@ public final class FakeWordPress extends FakeSshCommandExecutor {
 
     private final Map<String, java.util.function.Consumer<SshConnectionParams>> hooks = new LinkedHashMap<>();
     private volatile RuntimeException putFileFailure;
+    /** {@link #files}に無いパスをダウンロードしたときに返すバイト列(リモートで作られる一時ファイルのパスは毎回違うため)。 */
+    public volatile byte[] downloadFallback;
 
     private void runHooks(SshConnectionParams params, String command) {
         hooks.forEach((needle, hook) -> {
@@ -262,7 +264,8 @@ public final class FakeWordPress extends FakeSshCommandExecutor {
     @Override
     public synchronized byte[] getFile(SshConnectionParams params, String remotePath) {
         connect(params);
-        return files.get(remotePath);
+        byte[] found = files.get(remotePath);
+        return found != null ? found : downloadFallback;
     }
 
     @Override
