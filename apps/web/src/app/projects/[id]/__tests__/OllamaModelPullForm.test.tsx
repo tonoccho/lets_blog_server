@@ -1,21 +1,37 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { OllamaModelPullForm } from "../OllamaModelPullForm";
-import { fetchGenerationJobAction, pullOllamaModelAction } from "../actions";
 import { MAX_CONSECUTIVE_POLL_FAILURES } from "../useGenerationJobPolling";
 import type { GenerationJobDetail } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { answer, bodies, calledRequests, failWith, installBackend } from "./projectCoreRuntime";
 
 /**
  * issue #1675: Ollama の接続セクションに置くモデルのインストール(pull)フォーム。
  * 開始はジョブを作ってすぐ返り、進捗はジョブのポーリング(useGenerationJobPolling / jobProgress)で表示する。
  * 完了(done)も失敗(failed。理由つき)も画面に出し、実行中のモデルの二重開始は新しく始めず実行中として表示する。
  */
-jest.mock("../actions", () => ({
-  pullOllamaModelAction: jest.fn(),
-  fetchGenerationJobAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
-const pullMock = pullOllamaModelAction as jest.MockedFunction<typeof pullOllamaModelAction>;
-const fetchJobMock = fetchGenerationJobAction as jest.MockedFunction<typeof fetchGenerationJobAction>;
+const PULL = "POST /api/projects/3/ai-models/ollama/pull";
+const JOB = "GET /api/generation-jobs/:id";
+
+// gateway の向こうのバックエンドの代役。解決値は 200 の JSON、`Response` はそのまま、`Error` の拒否は 500 の応答になる。
+const pullMock = jest.fn();
+const fetchJobMock = jest.fn();
+
+let fetchSpy: jest.Mock;
 
 const INPUT = "インストールするOllamaモデル名";
 
@@ -32,15 +48,27 @@ function job(overrides: Partial<GenerationJobDetail> = {}): GenerationJobDetail 
   };
 }
 
+const waitForBodies = async () => {
+  await waitFor(() => expect(calledRequests(fetchSpy)).toContain("POST /api/projects/3/ai-models/ollama/pull"));
+  return bodies(fetchSpy, PULL);
+};
+
 function submit(model: string) {
   fireEvent.change(screen.getByLabelText(INPUT), { target: { value: model } });
   fireEvent.click(screen.getByRole("button", { name: "インストール" }));
 }
 
 beforeEach(() => {
+  resetServerRuntime(ADMIN_SESSION);
   pullMock.mockReset();
   fetchJobMock.mockReset();
+  fetchSpy = installBackend({
+    [PULL]: answer(() => pullMock()),
+    [JOB]: answer(() => fetchJobMock()),
+  });
 });
+
+const jobRequests = () => calledRequests(fetchSpy).filter((r) => r.startsWith("GET /api/generation-jobs/"));
 
 describe("OllamaModelPullForm", () => {
   it("フォームはJS無効時のGETフォールバックでモデル名がURLへ漏れないよう method=post を持つ", () => {
@@ -60,7 +88,7 @@ describe("OllamaModelPullForm", () => {
 
     submit("  qwen2.5:7b-instruct ");
 
-    expect(pullMock).toHaveBeenCalledWith(3, "qwen2.5:7b-instruct");
+    expect(await waitForBodies()).toEqual([{ model: "qwen2.5:7b-instruct" }]);
     expect(await screen.findByText(/downloading 40%/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /インストール中/ })).toBeDisabled();
     expect(await screen.findByText("「qwen2.5:7b-instruct」のインストールが完了しました。", {}, { timeout: 5000 })).toBeInTheDocument();
@@ -117,13 +145,13 @@ describe("OllamaModelPullForm", () => {
   });
 
   it("開始の要求が失敗したらエラーを表示し、ポーリングしない", async () => {
-    pullMock.mockResolvedValue({ error: "APIエラー (403): この操作にはadmin権限が必要です" });
+    pullMock.mockResolvedValue(failWith(403, "この操作にはadmin権限が必要です")());
     render(<OllamaModelPullForm projectId={3} />);
 
     submit("llama3");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("APIエラー (403): この操作にはadmin権限が必要です");
-    expect(fetchJobMock).not.toHaveBeenCalled();
+    expect(jobRequests()).toEqual([]);
     expect(screen.getByRole("button", { name: "インストール" })).toBeEnabled();
   });
 
@@ -138,7 +166,7 @@ describe("OllamaModelPullForm", () => {
 
     expect(await screen.findByText("同じモデルのインストールがすでに実行中です。その進捗を表示します。")).toBeInTheDocument();
     expect(await screen.findByText(/downloading 10%/)).toBeInTheDocument();
-    expect(fetchJobMock).toHaveBeenCalledWith(29);
+    expect(jobRequests()).toContain("GET /api/generation-jobs/29");
   });
 
   it("空や不正な文字を含むモデル名は送らずにエラーを表示する", () => {
@@ -149,7 +177,7 @@ describe("OllamaModelPullForm", () => {
 
     submit("bad name;rm");
     expect(screen.getByRole("alert")).toHaveTextContent("モデル名の形式が不正です");
-    expect(pullMock).not.toHaveBeenCalled();
+    expect(bodies(fetchSpy, PULL)).toEqual([]);
   });
 
   describe("進捗の取得失敗(#1716)", () => {
@@ -185,7 +213,7 @@ describe("OllamaModelPullForm", () => {
 
       expect(screen.getByRole("button", { name: "インストール" })).toBeEnabled();
       expect(screen.getByLabelText(INPUT)).toBeEnabled();
-      expect(screen.getByRole("alert")).toHaveTextContent(/進捗を確認できませんでした.*503 Service Unavailable/);
+      expect(screen.getByRole("alert")).toHaveTextContent(/進捗を確認できませんでした.*APIエラー \(500\): 503 Service Unavailable/);
     });
   });
 });

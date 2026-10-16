@@ -5,7 +5,7 @@
  * 応答は `installFetchByPath` のルート(`"<METHOD> <パス>"`)で返し、送られた本文は `sent()` / `bodies()` で読む。
  */
 import { calledRequests, installFetchByPath } from "@/lib/__tests__/testUtils/webAdminRuntime";
-import { jsonResponse, textResponse, type FetchRoutes } from "@/lib/__tests__/testUtils/serverRuntime";
+import { jsonResponse, textResponse, type FetchHandler, type FetchRoutes } from "@/lib/__tests__/testUtils/serverRuntime";
 
 export { calledRequests, jsonResponse, textResponse };
 
@@ -48,4 +48,25 @@ export function form(values: Record<string, string>): FormData {
   const data = new FormData();
   for (const [key, value] of Object.entries(values)) data.set(key, value);
   return data;
+}
+
+/** `Response` かどうか(`answer` が、組み立て済みの応答をそのまま返すために見分ける)。 */
+const isResponse = (value: unknown): value is Response =>
+  typeof value === "object" && value !== null && "ok" in value && "status" in value && "text" in value;
+
+/**
+ * gateway の向こうのバックエンドの代役(#1837)。`backend` の解決値を 200 の JSON にし、`Response` を返せばそのまま返し、
+ * `Error` の拒否は 500 の応答(本文は例外の文言)、`Error` でない値の拒否は fetch 自体の失敗にする。`backend` は `jest.fn()` でよい。自前の TypeScript モジュールの差し替えではない。
+ */
+export function answer(backend: (...params: string[]) => unknown): FetchHandler {
+  return async (_url, _init, params) => {
+    try {
+      const result = await backend(...params);
+      return isResponse(result) ? result : jsonResponse(result);
+    } catch (err) {
+      // `Error` は gateway が 500 を返した状態、`Error` でない値は通信そのものがその値で失敗した状態(fetch の拒否)にする。
+      if (!(err instanceof Error)) throw err;
+      return textResponse(err.message, 500);
+    }
+  };
 }

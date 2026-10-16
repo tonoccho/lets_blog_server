@@ -1,16 +1,21 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { ProjectAssetGenerationPanel } from '../ProjectAssetGenerationPanel'
-import * as actions from '../actions'
+import { backend, installAssetPanelBackend } from './assetPanelRuntime'
 
-jest.mock('../actions', () => ({
-  fetchGeneratedImagesAction: jest.fn(),
-  fetchImageGenerationOptionsAction: jest.fn(),
-  generateImagePromptAction: jest.fn(),
-  requestProjectImageJobAction: jest.fn(),
-  fetchImageJobResultAction: jest.fn(),
-  uploadProjectAssetImageAction: jest.fn(),
-  uploadGeneratedImageAction: jest.fn(),
+// 自前の `../actions`・`@/lib/apiClient`・`@/lib/session` は差し替えず、Next.js の実行基盤と外部との通信(`fetch`)だけを代替する(#1837)。
+// `backend.*` は gateway の向こうのバックエンドの代役(`./assetPanelRuntime`)。
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }))
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
 
 const OPTIONS = {
   checkpoints: ['model.safetensors'],
@@ -62,16 +67,18 @@ function generate() {
 }
 
 function lastRequest(): Record<string, unknown> {
-  const calls = (actions.requestProjectImageJobAction as jest.Mock).mock.calls
-  return calls[calls.length - 1][1]
+  const calls = backend.imageJob.mock.calls
+  return calls[calls.length - 1][0]
 }
+
+let fetchSpy: jest.Mock
 
 describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
-    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue(GALLERY)
-    ;(actions.requestProjectImageJobAction as jest.Mock).mockResolvedValue({ jobId: 5, status: 'running' })
+    fetchSpy = installAssetPanelBackend()
+    ;backend.imageOptions.mockResolvedValue(OPTIONS)
+    ;backend.gallery.mockResolvedValue(GALLERY)
+    ;backend.imageJob.mockResolvedValue({ id: 5, status: 'running' })
   })
 
   it('参照画像を選ばなければ、生成要求に参照画像もdenoiseも含めない(従来のtxt2img)', async () => {
@@ -80,7 +87,7 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
 
     generate()
 
-    await waitFor(() => expect(actions.requestProjectImageJobAction).toHaveBeenCalled())
+    await waitFor(() => expect(backend.imageJob).toHaveBeenCalled())
     const body = lastRequest()
     expect(body.referenceImageId).toBeUndefined()
     expect(body.denoise).toBeUndefined()
@@ -106,10 +113,9 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
     fillPrompt()
     generate()
 
-    await waitFor(() => expect(actions.requestProjectImageJobAction).toHaveBeenCalled())
-    expect(actions.requestProjectImageJobAction).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({ referenceImageId: 12, denoise: 0.6 })
+    await waitFor(() => expect(backend.imageJob).toHaveBeenCalled())
+    expect(backend.imageJob).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 1, referenceImageId: 12, denoise: 0.6 })
     )
   })
 
@@ -122,7 +128,7 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
     fillPrompt()
     generate()
 
-    await waitFor(() => expect(actions.requestProjectImageJobAction).toHaveBeenCalled())
+    await waitFor(() => expect(backend.imageJob).toHaveBeenCalled())
     expect(lastRequest().denoise).toBe(0.3)
   })
 
@@ -135,7 +141,7 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
     fillPrompt()
     generate()
 
-    await waitFor(() => expect(actions.requestProjectImageJobAction).toHaveBeenCalled())
+    await waitFor(() => expect(backend.imageJob).toHaveBeenCalled())
     expect(lastRequest().denoise).toBe(0.6)
   })
 
@@ -151,7 +157,7 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
     await waitFor(() => {
       expect(screen.getByText('denoiseは0〜1の範囲で指定してください。')).toBeInTheDocument()
     })
-    expect(actions.requestProjectImageJobAction).not.toHaveBeenCalled()
+    expect(backend.imageJob).not.toHaveBeenCalled()
   })
 
   it('解除すると選択が消え、以後の生成要求に参照画像は載らない', async () => {
@@ -164,13 +170,13 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
     expect(within(referenceSection()).queryByText(/選択中の参照画像/)).not.toBeInTheDocument()
     fillPrompt()
     generate()
-    await waitFor(() => expect(actions.requestProjectImageJobAction).toHaveBeenCalled())
+    await waitFor(() => expect(backend.imageJob).toHaveBeenCalled())
     expect(lastRequest().referenceImageId).toBeUndefined()
     expect(lastRequest().denoise).toBeUndefined()
   })
 
   it('このプロジェクトに参照できる画像が無ければ、その旨を示す', async () => {
-    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([summary(99, 2)])
+    ;backend.gallery.mockResolvedValue([summary(99, 2)])
     await openPanel()
     await openReferencePicker()
 
@@ -187,12 +193,12 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
   })
 
   it('ギャラリーの取得に失敗したらエラーを表示する', async () => {
-    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockRejectedValue(new Error('取得に失敗しました'))
+    ;backend.gallery.mockRejectedValue(new Error('取得に失敗しました'))
     await openPanel()
     fireEvent.click(within(referenceSection()).getByRole('button', { name: '参照画像を選ぶ' }))
 
     await waitFor(() => {
-      expect(screen.getByText('取得に失敗しました')).toBeInTheDocument()
+      expect(screen.getByText('APIエラー (500): 取得に失敗しました')).toBeInTheDocument()
     })
   })
 
@@ -202,11 +208,11 @@ describe('ProjectAssetGenerationPanel 参照画像(img2img、issue #1601)', () =
     fireEvent.click(within(referenceSection()).getByRole('button', { name: '閉じる' }))
     fireEvent.click(within(referenceSection()).getByRole('button', { name: '参照画像を選ぶ' }))
 
-    expect(actions.fetchGeneratedImagesAction).toHaveBeenCalledTimes(1)
+    expect(backend.gallery).toHaveBeenCalledTimes(1)
   })
 
   it('プロンプトを持たないアップロード画像も参照画像に選べる', async () => {
-    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([{ ...summary(21, 1), prompt: null }])
+    ;backend.gallery.mockResolvedValue([{ ...summary(21, 1), prompt: null }])
     await openPanel()
     await openReferencePicker()
 

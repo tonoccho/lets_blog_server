@@ -1,20 +1,43 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { LlmModelPanel } from "../LlmModelPanel";
-import { fetchLlmModelsAction, selectLlmModelAction } from "../actions";
 import type { LlmModelListResponse } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { answer, bodies, calledRequests, failWith, installBackend } from "./projectCoreRuntime";
 
 /**
  * issue #1051: フォームの<form>にmethod="post"を明示した(JS無効時のネイティブGET
  * フォールバックでモデル名がURLへ漏れるのを防ぐ)。それ以外の挙動は変えていないため、
  * このテストは変更点(method="post")の確認と、保存成功/失敗の主要な分岐を最小限で押さえる。
  */
-jest.mock("../actions", () => ({
-  fetchLlmModelsAction: jest.fn(),
-  selectLlmModelAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
-const fetchMock = fetchLlmModelsAction as jest.MockedFunction<typeof fetchLlmModelsAction>;
-const selectMock = selectLlmModelAction as jest.MockedFunction<typeof selectLlmModelAction>;
+const LIST = "GET /api/projects/1/ai-models/llm/models";
+const SELECT = "PUT /api/projects/1/ai-models/llm/models/selection";
+
+// gateway の向こうのバックエンドの代役。解決値は 200 の JSON、`Response` はそのまま、`Error` の拒否は 500 の応答になる。
+const fetchMock = jest.fn();
+const selectMock = jest.fn();
+
+let fetchSpy: jest.Mock;
+
+function installLlmBackend() {
+  resetServerRuntime(ADMIN_SESSION);
+  fetchMock.mockReset();
+  selectMock.mockReset();
+  fetchSpy = installBackend({ [LIST]: answer(() => fetchMock()), [SELECT]: answer(() => selectMock()) });
+}
 
 function initialData(overrides: Partial<LlmModelListResponse> = {}): LlmModelListResponse {
   return {
@@ -25,10 +48,7 @@ function initialData(overrides: Partial<LlmModelListResponse> = {}): LlmModelLis
 }
 
 describe("LlmModelPanel", () => {
-  beforeEach(() => {
-    fetchMock.mockReset();
-    selectMock.mockReset();
-  });
+  beforeEach(installLlmBackend);
 
   it("フォームはmethod=\"post\"を持つ", () => {
     const { container } = render(<LlmModelPanel projectId={1} initialData={initialData()} />);
@@ -94,23 +114,23 @@ describe("LlmModelPanel", () => {
 
     fireEvent.submit(container.querySelector("form") as HTMLFormElement);
 
-    expect(selectMock).not.toHaveBeenCalled();
+    expect(bodies(fetchSpy, SELECT)).toEqual([]);
   });
 
   it("保存に失敗するとエラーを表示する", async () => {
-    selectMock.mockResolvedValue({ error: "モデル名が不正です" });
+    selectMock.mockResolvedValue(failWith(400, "モデル名が不正です")());
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(screen.getByText("モデル名が不正です")).toBeInTheDocument();
+      expect(screen.getByText("APIエラー (400): モデル名が不正です")).toBeInTheDocument();
     });
   });
 
   it("保存に成功すると成功メッセージを表示し、一覧を再取得する", async () => {
-    selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue({ data: initialData({ selected: "gpt-4o" }) });
+    selectMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue(initialData({ selected: "gpt-4o" }));
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -118,12 +138,12 @@ describe("LlmModelPanel", () => {
     await waitFor(() => {
       expect(screen.getByText("保存しました。")).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith(1);
+    expect(calledRequests(fetchSpy)).toContain(LIST);
   });
 
   it("保存後の一覧の再取得に失敗すると、失敗の理由を表示する(issue #1715)", async () => {
-    selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue({ error: "再取得の失敗" });
+    selectMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue(failWith(502, "再取得の失敗")());
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -132,19 +152,37 @@ describe("LlmModelPanel", () => {
   });
 
   it("ドロップダウンで選んだモデルを保存する(issue #1674)", async () => {
-    selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue({ data: initialData({ selected: "gpt-4o" }) });
+    selectMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue(initialData({ selected: "gpt-4o" }));
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.change(screen.getByLabelText("LLMのモデル"), { target: { value: "gpt-4o" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    await waitFor(() => expect(selectMock).toHaveBeenCalledWith(1, "gpt-4o"));
+    await waitFor(() => expect(bodies(fetchSpy, SELECT)).toEqual([{ modelName: "gpt-4o" }]));
+  });
+
+  it("保存に成功すると onSaved を呼び、失敗したときは呼ばない(issue #1644)", async () => {
+    const onSaved = jest.fn();
+    selectMock.mockResolvedValue(failWith(400, "不正")());
+    const { unmount } = render(<LlmModelPanel projectId={1} initialData={initialData()} onSaved={onSaved} />);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await screen.findByText("APIエラー (400): 不正");
+    expect(onSaved).not.toHaveBeenCalled();
+    unmount();
+
+    selectMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue(initialData());
+    render(<LlmModelPanel projectId={1} initialData={initialData()} onSaved={onSaved} />);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await screen.findByText("保存しました。");
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
   it("保存後の再取得でfallbackが分かれば、その旨を表示する", async () => {
-    selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue({ data: initialData({ fallback: true }) });
+    selectMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue(initialData({ fallback: true }));
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -156,16 +194,15 @@ describe("LlmModelPanel", () => {
 /** issue #1414(#1413の横展開): マウント前は押せない(LlmModelPanel.mountGate.test.tsx)。マウント後は押せて保存できる。 */
 describe("LlmModelPanel(マウント後、issue #1414)", () => {
   it("マウント後は保存ボタンが有効で、押すと保存アクションを呼ぶ", async () => {
-    selectMock.mockReset();
-    fetchMock.mockReset();
-    selectMock.mockResolvedValue({});
-    fetchMock.mockResolvedValue({ data: initialData() });
+    installLlmBackend();
+    selectMock.mockResolvedValue(initialData());
+    fetchMock.mockResolvedValue(initialData());
     render(<LlmModelPanel projectId={1} initialData={initialData()} />);
 
     const button = screen.getByRole("button", { name: "保存" });
     expect(button).toBeEnabled();
     fireEvent.click(button);
 
-    await waitFor(() => expect(selectMock).toHaveBeenCalledWith(1, "gpt-4o-mini"));
+    await waitFor(() => expect(bodies(fetchSpy, SELECT)).toEqual([{ modelName: "gpt-4o-mini" }]));
   });
 });

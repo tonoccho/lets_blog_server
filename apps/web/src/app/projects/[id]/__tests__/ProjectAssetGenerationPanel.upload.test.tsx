@@ -1,16 +1,22 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ProjectAssetGenerationPanel } from '../ProjectAssetGenerationPanel'
-import * as actions from '../actions'
+import { backend, installAssetPanelBackend } from './assetPanelRuntime'
+import { calledRequests, failWith } from './projectCoreRuntime'
 
-jest.mock('../actions', () => ({
-  fetchGeneratedImagesAction: jest.fn(),
-  fetchImageGenerationOptionsAction: jest.fn(),
-  generateImagePromptAction: jest.fn(),
-  requestProjectImageJobAction: jest.fn(),
-  fetchImageJobResultAction: jest.fn(),
-  uploadProjectAssetImageAction: jest.fn(),
-  uploadGeneratedImageAction: jest.fn(),
+// 自前の `../actions`・`@/lib/apiClient`・`@/lib/session` は差し替えず、Next.js の実行基盤と外部との通信(`fetch`)だけを代替する(#1837)。
+// `backend.*` は gateway の向こうのバックエンドの代役(`./assetPanelRuntime`)。
+jest.mock('server-only', () => ({}))
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule)
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule)
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule)
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule)
+jest.mock('next/navigation', () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`)
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }))
+jest.mock('next/cache', () => ({ revalidatePath: jest.fn() }))
 
 const OPTIONS = {
   checkpoints: ['model.safetensors'],
@@ -41,11 +47,13 @@ function fileOfSize(name: string, type: string, size: number): File {
   return file
 }
 
+let fetchSpy: jest.Mock
+
 describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
-    ;(actions.fetchImageGenerationOptionsAction as jest.Mock).mockResolvedValue(OPTIONS)
-    ;(actions.fetchGeneratedImagesAction as jest.Mock).mockResolvedValue([])
+    fetchSpy = installAssetPanelBackend()
+    ;backend.imageOptions.mockResolvedValue(OPTIONS)
+    ;backend.gallery.mockResolvedValue([])
   })
 
   it('JPEG/PNGだけを選べるファイル入力があり、ファイルを選ぶまで登録ボタンは押せない', async () => {
@@ -57,7 +65,7 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
   })
 
   it('JPEGを選んで登録すると、projectIdとファイルを渡して成功を表示する', async () => {
-    ;(actions.uploadGeneratedImageAction as jest.Mock).mockResolvedValue({ imageId: 31 })
+    ;backend.imageUpload.mockResolvedValue({ id: 31 })
     await openPanel()
 
     chooseFile(new File([new Uint8Array([1, 2])], 'photo.jpg', { type: 'image/jpeg' }))
@@ -69,10 +77,10 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
     const success = screen.getByText(/画像ギャラリーに登録しました/)
     expect(success.textContent).toContain('元の解像度のまま')
     expect(success.textContent).not.toContain('1920x1080')
-    const [projectId, formData] = (actions.uploadGeneratedImageAction as jest.Mock).mock.calls[0]
-    expect(projectId).toBe(5)
-    expect((formData as FormData).get('file')).toBeInstanceOf(File)
-    expect(((formData as FormData).get('file') as File).name).toBe('photo.jpg')
+    expect(calledRequests(fetchSpy)).toContain('POST /api/generated-images/upload?projectId=5')
+    const sent = backend.imageUpload.mock.calls[0][0]
+    expect(sent).toBeInstanceOf(File)
+    expect((sent as File).name).toBe('photo.jpg')
   })
 
   it('アップロード欄の説明に1920x1080の文言は無く、元の解像度のまま登録される旨が示される', async () => {
@@ -85,13 +93,13 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
   })
 
   it('PNGも受け付ける', async () => {
-    ;(actions.uploadGeneratedImageAction as jest.Mock).mockResolvedValue({ imageId: 32 })
+    ;backend.imageUpload.mockResolvedValue({ id: 32 })
     await openPanel()
 
     chooseFile(new File([new Uint8Array([1])], 'a.png', { type: 'image/png' }))
     fireEvent.click(screen.getByRole('button', { name: 'ギャラリーへ登録' }))
 
-    await waitFor(() => expect(actions.uploadGeneratedImageAction).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(backend.imageUpload).toHaveBeenCalledTimes(1))
   })
 
   it('対応形式外(GIF)を選ぶとエラーを表示し、サーバーへは送らない', async () => {
@@ -101,7 +109,7 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
 
     expect(screen.getByText('対応していない画像形式です。JPEGまたはPNGを選択してください。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'ギャラリーへ登録' })).toBeDisabled()
-    expect(actions.uploadGeneratedImageAction).not.toHaveBeenCalled()
+    expect(backend.imageUpload).not.toHaveBeenCalled()
   })
 
   it('20MBを超えるファイルを選ぶとエラーを表示し、サーバーへは送らない', async () => {
@@ -132,7 +140,7 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
   })
 
   it('サーバーが拒否したら、その理由を表示する', async () => {
-    ;(actions.uploadGeneratedImageAction as jest.Mock).mockResolvedValue({ error: 'APIエラー (403): 権限がありません' })
+    ;backend.imageUpload.mockResolvedValue(failWith(403, '権限がありません')())
     await openPanel()
 
     chooseFile(new File([new Uint8Array([1])], 'a.png', { type: 'image/png' }))
@@ -144,20 +152,37 @@ describe('ProjectAssetGenerationPanel 画像のアップロード(issue #1599)',
   })
 
   it('登録に成功したら、開いているギャラリー一覧を取得し直し、UPLOADの画像に「アップロード画像」と表示する', async () => {
-    ;(actions.uploadGeneratedImageAction as jest.Mock).mockResolvedValue({ imageId: 31 })
-    ;(actions.fetchGeneratedImagesAction as jest.Mock)
+    ;backend.imageUpload.mockResolvedValue({ id: 31 })
+    ;backend.gallery
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         { id: 31, projectId: 5, prompt: null, checkpoint: null, createdAt: '2026-10-04T00:00:00Z', tags: [], provider: 'UPLOAD', folderId: null },
       ])
     await openPanel()
     fireEvent.click(screen.getAllByText('開く')[0])
-    await waitFor(() => expect(actions.fetchGeneratedImagesAction).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(backend.gallery).toHaveBeenCalledTimes(1))
 
     chooseFile(new File([new Uint8Array([1])], 'a.png', { type: 'image/png' }))
     fireEvent.click(screen.getByRole('button', { name: 'ギャラリーへ登録' }))
 
-    await waitFor(() => expect(actions.fetchGeneratedImagesAction).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(backend.gallery).toHaveBeenCalledTimes(2))
     expect(await screen.findByAltText('アップロード画像')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['Error', new Error('一覧を取得できません'), 'APIエラー (500): 一覧を取得できません'],
+    ['Errorでない値', '一覧が使えません', '一覧が使えません'],
+  ])('登録には成功したが、開いているギャラリー一覧の取得し直しが%sで失敗したら、その理由を表示する', async (_name, rejection, text) => {
+    backend.imageUpload.mockResolvedValue({ id: 31 })
+    backend.gallery.mockReset().mockResolvedValueOnce([]).mockRejectedValueOnce(rejection)
+    await openPanel()
+    fireEvent.click(screen.getAllByText('開く')[0])
+    await waitFor(() => expect(backend.gallery).toHaveBeenCalledTimes(1))
+
+    chooseFile(new File([new Uint8Array([1])], 'a.png', { type: 'image/png' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ギャラリーへ登録' }))
+
+    expect(await screen.findByText(text)).toBeInTheDocument()
+    expect(backend.gallery).toHaveBeenCalledTimes(2)
   })
 })

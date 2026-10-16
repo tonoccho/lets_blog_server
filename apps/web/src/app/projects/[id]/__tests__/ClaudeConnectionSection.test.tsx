@@ -1,22 +1,37 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ClaudeConnectionSection } from "../ClaudeConnectionSection";
-import { clearClaudeApiKeyAction, fetchAiConnectionsAction, setClaudeApiKeyAction } from "../actions";
 import type { AiConnection } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { answer, bodies, calledRequests, failWith, installBackend, noContent } from "./projectCoreRuntime";
 
 /**
  * issue #1507: AI・アセットタブ(LLMタブ)の Claude 接続情報セクション。
  * ai-connections の CLAUDE 行から状態と設定の出所を表示し、Anthropicコンソールへのリンクと
  * APIキー入力フォームで接続・解除できる。キーの値は画面に出さない。
  */
-jest.mock("../actions", () => ({
-  fetchAiConnectionsAction: jest.fn(),
-  setClaudeApiKeyAction: jest.fn(),
-  clearClaudeApiKeyAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
-const fetchMock = fetchAiConnectionsAction as jest.MockedFunction<typeof fetchAiConnectionsAction>;
-const setMock = setClaudeApiKeyAction as jest.MockedFunction<typeof setClaudeApiKeyAction>;
-const clearMock = clearClaudeApiKeyAction as jest.MockedFunction<typeof clearClaudeApiKeyAction>;
+const CONNECTIONS = "GET /api/projects/3/ai-connections";
+const KEY = "/api/projects/3/api-keys/claude-api-key";
+
+// gateway の向こうのバックエンドの代役。解決値は 200 の JSON、`Response` はそのまま、`Error` の拒否は 500 の応答になる。
+const connectionsMock = jest.fn();
+const setMock = jest.fn();
+const clearMock = jest.fn();
+
+let fetchSpy: jest.Mock;
 
 function rows(claude: Partial<AiConnection> = {}): AiConnection[] {
   return [
@@ -36,9 +51,15 @@ function rows(claude: Partial<AiConnection> = {}): AiConnection[] {
 const connected = { source: "PROJECT", status: "NORMAL", detail: null, configured: true } as const;
 
 beforeEach(() => {
-  fetchMock.mockReset().mockResolvedValue(rows());
-  setMock.mockReset().mockResolvedValue({});
-  clearMock.mockReset().mockResolvedValue({});
+  resetServerRuntime(ADMIN_SESSION);
+  connectionsMock.mockReset().mockResolvedValue(rows());
+  setMock.mockReset().mockResolvedValue(noContent());
+  clearMock.mockReset().mockResolvedValue(noContent());
+  fetchSpy = installBackend({
+    [CONNECTIONS]: answer(() => connectionsMock()),
+    [`PUT ${KEY}`]: answer(() => setMock()),
+    [`DELETE ${KEY}`]: answer(() => clearMock()),
+  });
 });
 
 describe("ClaudeConnectionSection の表示", () => {
@@ -48,12 +69,12 @@ describe("ClaudeConnectionSection の表示", () => {
     expect(screen.getByText("Claudeの接続情報")).toBeInTheDocument();
     expect(await screen.findByText("未接続")).toBeInTheDocument();
     expect(screen.getByText("未設定")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(3);
+    expect(calledRequests(fetchSpy)).toContain(CONNECTIONS);
     expect(screen.queryByRole("button", { name: "接続を解除" })).not.toBeInTheDocument();
   });
 
   it("プロジェクトのキーがあれば「接続済み」と出所「プロジェクト設定」を表示し、解除ボタンを出す", async () => {
-    fetchMock.mockResolvedValue(rows(connected));
+    connectionsMock.mockResolvedValue(rows(connected));
     render(<ClaudeConnectionSection projectId={3} />);
 
     expect(await screen.findByText("接続済み")).toBeInTheDocument();
@@ -62,7 +83,7 @@ describe("ClaudeConnectionSection の表示", () => {
   });
 
   it("システム全体のキーは存在しないので、DATABASEの行が返っても「システム設定」とは表示せず未設定・未接続として扱う(issue #1568)", async () => {
-    fetchMock.mockResolvedValue(rows({ source: "DATABASE", status: "NORMAL", detail: null, configured: true }));
+    connectionsMock.mockResolvedValue(rows({ source: "DATABASE", status: "NORMAL", detail: null, configured: true }));
     render(<ClaudeConnectionSection projectId={3} />);
 
     expect(await screen.findByText("未接続")).toBeInTheDocument();
@@ -80,7 +101,7 @@ describe("ClaudeConnectionSection の表示", () => {
   });
 
   it("CLAUDE行が無い応答では「未接続」のまま表示する", async () => {
-    fetchMock.mockResolvedValue([]);
+    connectionsMock.mockResolvedValue([]);
     render(<ClaudeConnectionSection projectId={3} />);
 
     expect(await screen.findByText("未接続")).toBeInTheDocument();
@@ -88,14 +109,14 @@ describe("ClaudeConnectionSection の表示", () => {
   });
 
   it("取得に失敗したらエラーを表示する(握り潰さない)", async () => {
-    fetchMock.mockRejectedValue(new Error("boom"));
+    connectionsMock.mockRejectedValue(new Error("boom"));
     render(<ClaudeConnectionSection projectId={3} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("接続状態の取得に失敗しました: boom");
+    expect(await screen.findByRole("alert")).toHaveTextContent("接続状態の取得に失敗しました: APIエラー (500): boom");
   });
 
   it("Error以外の例外も文字列として表示する", async () => {
-    fetchMock.mockRejectedValue("plain");
+    connectionsMock.mockRejectedValue("plain");
     render(<ClaudeConnectionSection projectId={3} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("plain");
@@ -127,14 +148,14 @@ describe("ClaudeConnectionSection の接続・解除", () => {
   it("キーを入力して接続すると保存し、表示が接続済み・プロジェクト設定に変わり、キーの値は画面に残らない", async () => {
     render(<ClaudeConnectionSection projectId={3} />);
     await screen.findByText("未接続");
-    fetchMock.mockResolvedValue(rows(connected));
+    connectionsMock.mockResolvedValue(rows(connected));
 
     fireEvent.change(screen.getByLabelText("Anthropic APIキー"), { target: { value: "  sk-secret  " } });
     fireEvent.click(screen.getByRole("button", { name: "接続" }));
 
     expect(await screen.findByText("接続済み")).toBeInTheDocument();
     expect(screen.getByText("プロジェクト設定")).toBeInTheDocument();
-    expect(setMock).toHaveBeenCalledWith(3, "sk-secret");
+    expect(bodies(fetchSpy, `PUT ${KEY}`)).toEqual([{ apiKey: "sk-secret" }]);
     expect(screen.getByLabelText("Anthropic APIキー")).toHaveValue("");
     expect(document.body.innerHTML).not.toContain("sk-secret");
   });
@@ -149,12 +170,12 @@ describe("ClaudeConnectionSection の接続・解除", () => {
     fireEvent.change(screen.getByLabelText("Anthropic APIキー"), { target: { value: "   " } });
     fireEvent.click(screen.getByRole("button", { name: "接続" }));
 
-    expect(setMock).not.toHaveBeenCalled();
+    expect(bodies(fetchSpy, `PUT ${KEY}`)).toEqual([]);
     expect(screen.getByText("未接続")).toBeInTheDocument();
   });
 
   it("保存に失敗したらエラー内容を表示し、入力値を残し、状態は変えない", async () => {
-    setMock.mockResolvedValue({ error: "APIエラー (400): bad" });
+    setMock.mockResolvedValue(failWith(400, "bad")());
     render(<ClaudeConnectionSection projectId={3} />);
     await screen.findByText("未接続");
 
@@ -167,23 +188,23 @@ describe("ClaudeConnectionSection の接続・解除", () => {
   });
 
   it("接続を解除すると削除し、表示が未接続・未設定に戻る(システム設定へは戻らない)", async () => {
-    fetchMock.mockResolvedValue(rows(connected));
+    connectionsMock.mockResolvedValue(rows(connected));
     render(<ClaudeConnectionSection projectId={3} />);
     await screen.findByText("プロジェクト設定");
-    fetchMock.mockResolvedValue(rows());
+    connectionsMock.mockResolvedValue(rows());
 
     fireEvent.click(screen.getByRole("button", { name: "接続を解除" }));
 
     expect(await screen.findByText("未接続")).toBeInTheDocument();
     expect(screen.getByText("未設定")).toBeInTheDocument();
     expect(screen.queryByText("システム設定")).not.toBeInTheDocument();
-    expect(clearMock).toHaveBeenCalledWith(3);
+    expect(calledRequests(fetchSpy)).toContain(`DELETE ${KEY}`);
     expect(screen.queryByRole("button", { name: "接続を解除" })).not.toBeInTheDocument();
   });
 
   it("解除に失敗したらエラーを表示し、解除ボタンは残る", async () => {
-    fetchMock.mockResolvedValue(rows(connected));
-    clearMock.mockResolvedValue({ error: "APIエラー (500): x" });
+    connectionsMock.mockResolvedValue(rows(connected));
+    clearMock.mockResolvedValue(failWith(500, "x")());
     render(<ClaudeConnectionSection projectId={3} />);
     await screen.findByText("プロジェクト設定");
 
@@ -196,11 +217,70 @@ describe("ClaudeConnectionSection の接続・解除", () => {
   it("保存後の状態の再取得に失敗したらエラーを表示する", async () => {
     render(<ClaudeConnectionSection projectId={3} />);
     await screen.findByText("未接続");
-    fetchMock.mockRejectedValue(new Error("later"));
+    connectionsMock.mockRejectedValue(new Error("later"));
 
     fireEvent.change(screen.getByLabelText("Anthropic APIキー"), { target: { value: "sk-x" } });
     fireEvent.click(screen.getByRole("button", { name: "接続" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("later");
+  });
+});
+
+describe("ClaudeConnectionSection の再取得とアンマウント", () => {
+  /** 応答を保留して、あとから返せる状態にする。 */
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => {};
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  it("保存後の再取得で CLAUDE の行が無い応答なら、未接続・未設定に戻る", async () => {
+    connectionsMock.mockResolvedValue(rows(connected));
+    render(<ClaudeConnectionSection projectId={3} />);
+    await screen.findByText("接続済み");
+    connectionsMock.mockResolvedValue([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "接続を解除" }));
+
+    expect(await screen.findByText("接続を解除しました。")).toBeInTheDocument();
+    expect(screen.getByText("未接続")).toBeInTheDocument();
+    expect(screen.getByText("未設定")).toBeInTheDocument();
+  });
+
+  it("保存後の再取得が Error でない値で失敗しても、その文字列を表示する", async () => {
+    render(<ClaudeConnectionSection projectId={3} />);
+    await screen.findByText("未接続");
+    connectionsMock.mockRejectedValue("plain-later");
+
+    fireEvent.change(screen.getByLabelText("Anthropic APIキー"), { target: { value: "sk-x" } });
+    fireEvent.click(screen.getByRole("button", { name: "接続" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("接続状態の取得に失敗しました: plain-later");
+  });
+
+  it("状態の取得が終わる前にアンマウントされたら、あとから応答が返っても何も描かない", async () => {
+    const pending = deferred<AiConnection[]>();
+    connectionsMock.mockReturnValue(pending.promise);
+    const { container, unmount } = render(<ClaudeConnectionSection projectId={3} />);
+    await waitFor(() => expect(calledRequests(fetchSpy)).toContain(CONNECTIONS));
+
+    unmount();
+    pending.resolve(rows());
+    await Promise.resolve();
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("状態の取得に失敗する前にアンマウントされたら、あとからエラーが返っても何も描かない", async () => {
+    const pending = deferred<Response>();
+    connectionsMock.mockReturnValue(pending.promise);
+    const { container, unmount } = render(<ClaudeConnectionSection projectId={3} />);
+    await waitFor(() => expect(calledRequests(fetchSpy)).toContain(CONNECTIONS));
+
+    unmount();
+    pending.resolve(failWith(500, "boom")());
+    await Promise.resolve();
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

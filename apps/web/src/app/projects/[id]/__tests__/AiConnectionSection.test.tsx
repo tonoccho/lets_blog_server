@@ -1,28 +1,41 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AiConnectionSection } from "../AiConnectionSection";
-import {
-  fetchAiConnectionsAction,
-  fetchProjectConnectionsAction,
-  updateProjectConnectionAction,
-} from "../actions";
 import type { AiConnection, ProjectConnectionsResponse } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { answer, bodies, calledRequests, failWith, installBackend } from "./projectCoreRuntime";
 
 /**
  * issue #1504: AI・アセットタブの Ollama / ComfyUI 接続情報セクション。
  * 接続先URL・設定の出所・利用可否(不可なら理由)を表示し、プロジェクト単位の接続先を保存できる。
  * 取得は表示時にクライアント側で行い(疎通確認は遅いので接続先URLとは別に取得する)、失敗は握り潰さない。
+ *
+ * 自前の `../actions`・`@/lib/apiClient`・`@/lib/session` は差し替えず、Next.js の実行基盤と外部との通信(`fetch`)だけを代替する(#1837)。
+ * `fetchConnectionsMock` などの `jest.fn()` は gateway の向こうのバックエンドの代役で、自前モジュールの差し替えではない。
  */
-jest.mock("../actions", () => ({
-  fetchAiConnectionsAction: jest.fn(),
-  fetchProjectConnectionsAction: jest.fn(),
-  updateProjectConnectionAction: jest.fn(),
-  pullOllamaModelAction: jest.fn(),
-  fetchGenerationJobAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
-const fetchConnectionsMock = fetchAiConnectionsAction as jest.MockedFunction<typeof fetchAiConnectionsAction>;
-const fetchProjectMock = fetchProjectConnectionsAction as jest.MockedFunction<typeof fetchProjectConnectionsAction>;
-const updateMock = updateProjectConnectionAction as jest.MockedFunction<typeof updateProjectConnectionAction>;
+const CONNECTIONS = "GET /api/projects/3/ai-connections";
+const PROJECT_CONNECTIONS = "GET /api/projects/3/ai-models/connections";
+const UPDATE_CONNECTIONS = "PUT /api/projects/3/ai-models/connections";
+
+// gateway の向こうのバックエンドの代役。解決値は 200 の JSON、`Response` はそのまま、`Error` の拒否は 500 の応答になる。
+const fetchConnectionsMock = jest.fn();
+const fetchProjectMock = jest.fn();
+const updateMock = jest.fn();
+
+let fetchMock: jest.Mock;
 
 function project(overrides: Partial<ProjectConnectionsResponse> = {}): ProjectConnectionsResponse {
   return {
@@ -57,10 +70,21 @@ function connections(overrides: Partial<AiConnection>[] = []): AiConnection[] {
 }
 
 beforeEach(() => {
+  resetServerRuntime(ADMIN_SESSION);
   fetchConnectionsMock.mockReset().mockResolvedValue(connections());
   fetchProjectMock.mockReset().mockResolvedValue(project());
   updateMock.mockReset();
+  fetchMock = installBackend({
+    [CONNECTIONS]: answer(() => fetchConnectionsMock()),
+    [PROJECT_CONNECTIONS]: answer(() => fetchProjectMock()),
+    [UPDATE_CONNECTIONS]: answer(() => updateMock()),
+    "GET /api/projects/4/ai-connections": answer(() => fetchConnectionsMock()),
+    "GET /api/projects/4/ai-models/connections": answer(() => fetchProjectMock()),
+    "PUT /api/projects/4/ai-models/connections": answer(() => updateMock()),
+  });
 });
+
+const connectionRequests = () => calledRequests(fetchMock).filter((r) => r === CONNECTIONS);
 
 describe("AiConnectionSection の表示", () => {
   it("接続先の説明に環境変数は出てこない(接続先はプロジェクト設定かシステム設定の2つだけで決まる、issue #1567)", async () => {
@@ -99,8 +123,7 @@ describe("AiConnectionSection の表示", () => {
     expect(screen.getByText("システム設定")).toBeInTheDocument();
     expect(screen.queryByText("環境変数既定")).not.toBeInTheDocument();
     expect(await screen.findByText("利用可能")).toBeInTheDocument();
-    expect(fetchProjectMock).toHaveBeenCalledWith(3);
-    expect(fetchConnectionsMock).toHaveBeenCalledWith(3);
+    expect(calledRequests(fetchMock)).toEqual(expect.arrayContaining([PROJECT_CONNECTIONS, CONNECTIONS]));
   });
 
   it("ComfyUIの接続先URL・設定の出所(システム設定)・利用可否を表示する", async () => {
@@ -187,14 +210,14 @@ describe("AiConnectionSection の表示", () => {
   });
 
   it("接続先の取得に失敗したときは空表示にせずエラーを表示する", async () => {
-    fetchProjectMock.mockRejectedValue(new Error("APIエラー (500): boom"));
+    fetchProjectMock.mockResolvedValue(failWith(500, "boom")());
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("接続先の取得に失敗しました: APIエラー (500): boom");
   });
 
   it("利用可否の取得に失敗したときは握り潰さずエラーを表示する(文字列の例外でも)", async () => {
-    fetchConnectionsMock.mockRejectedValue("timeout");
+    fetchConnectionsMock.mockRejectedValue("timeout"); // fetch 自体が文字列で失敗する
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
 
     expect(await screen.findByText("利用可否の確認に失敗しました: timeout")).toBeInTheDocument();
@@ -223,7 +246,7 @@ describe("AiConnectionSection の保存", () => {
     const saved = project({
       ollama: { overrideBaseUrl: "http://new:1/v1", baseUrl: "http://new:1/v1", source: "PROJECT" },
     });
-    updateMock.mockResolvedValue({ data: saved });
+    updateMock.mockResolvedValue(saved);
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
     const input = await screen.findByLabelText("Ollamaの接続先URL(このプロジェクトで上書き)");
     await screen.findByText("利用可能");
@@ -232,29 +255,31 @@ describe("AiConnectionSection の保存", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(await screen.findByText("保存しました。")).toBeInTheDocument();
-    expect(updateMock).toHaveBeenCalledWith(3, "OLLAMA", "http://new:1/v1");
+    expect(bodies(fetchMock, UPDATE_CONNECTIONS)).toEqual([{ ollamaBaseUrl: "http://new:1/v1" }]);
     expect(screen.getByText("プロジェクト設定")).toBeInTheDocument();
     expect(screen.getByText("http://new:1/v1", { selector: "dd" })).toBeInTheDocument();
     expect(input).toHaveValue("http://new:1/v1");
-    expect(fetchConnectionsMock).toHaveBeenCalledTimes(2);
+    expect(connectionRequests()).toHaveLength(2);
   });
 
   it("ComfyUIの保存はCOMFYUIとして送る", async () => {
-    updateMock.mockResolvedValue({ data: project() });
+    updateMock.mockResolvedValue(project());
     render(<AiConnectionSection projectId={4} provider="COMFYUI" />);
     const input = await screen.findByLabelText("ComfyUIの接続先URL(このプロジェクトで上書き)");
 
     fireEvent.change(input, { target: { value: "http://c:1" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(4, "COMFYUI", "http://c:1"));
+    await waitFor(() =>
+      expect(bodies(fetchMock, "PUT /api/projects/4/ai-models/connections")).toEqual([{ comfyuiBaseUrl: "http://c:1" }])
+    );
   });
 
   it("空で保存すると上書きが解除され、表示が既定値の解決結果と出所に戻る", async () => {
     fetchProjectMock.mockResolvedValue(
       project({ ollama: { overrideBaseUrl: "http://mine:1/v1", baseUrl: "http://mine:1/v1", source: "PROJECT" } })
     );
-    updateMock.mockResolvedValue({ data: project() });
+    updateMock.mockResolvedValue(project());
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
     const input = await screen.findByLabelText("Ollamaの接続先URL(このプロジェクトで上書き)");
     await waitFor(() => expect(input).toHaveValue("http://mine:1/v1"));
@@ -262,14 +287,14 @@ describe("AiConnectionSection の保存", () => {
     fireEvent.change(input, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(3, "OLLAMA", ""));
+    await waitFor(() => expect(bodies(fetchMock, UPDATE_CONNECTIONS)).toEqual([{ ollamaBaseUrl: "" }]));
     expect(await screen.findByText("システム設定")).toBeInTheDocument();
     expect(screen.getByText("http://ollama.default:11434/v1")).toBeInTheDocument();
     expect(input).toHaveValue("");
   });
 
   it("保存に失敗したときはエラー内容を表示し、入力したURLを入力欄に残す", async () => {
-    updateMock.mockResolvedValue({ error: "APIエラー (400): 接続先URLの形式が不正です" });
+    updateMock.mockResolvedValue(failWith(400, "接続先URLの形式が不正です")());
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
     const input = await screen.findByLabelText("Ollamaの接続先URL(このプロジェクトで上書き)");
 
@@ -282,7 +307,7 @@ describe("AiConnectionSection の保存", () => {
   });
 
   it("保存は成功したが利用可否の再確認に失敗したときも、失敗を表示する", async () => {
-    updateMock.mockResolvedValue({ data: project() });
+    updateMock.mockResolvedValue(project());
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
     const input = await screen.findByLabelText("Ollamaの接続先URL(このプロジェクトで上書き)");
     await screen.findByText("利用可能");
@@ -291,11 +316,11 @@ describe("AiConnectionSection の保存", () => {
     fireEvent.change(input, { target: { value: "http://x:1" } });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(await screen.findByText("利用可否の確認に失敗しました: down")).toBeInTheDocument();
+    expect(await screen.findByText("利用可否の確認に失敗しました: APIエラー (500): down")).toBeInTheDocument();
   });
 
   it("保存中はボタンを無効にして二重送信を防ぐ", async () => {
-    let resolve: (v: { data: ProjectConnectionsResponse }) => void = () => {};
+    let resolve: (v: ProjectConnectionsResponse) => void = () => {};
     updateMock.mockReturnValue(new Promise((r) => (resolve = r)));
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
     await screen.findByLabelText("Ollamaの接続先URL(このプロジェクトで上書き)");
@@ -303,12 +328,12 @@ describe("AiConnectionSection の保存", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(await screen.findByRole("button", { name: "保存中…" })).toBeDisabled();
-    resolve({ data: project() });
+    resolve(project());
     expect(await screen.findByRole("button", { name: "保存" })).toBeEnabled();
   });
 
   it("保存の応答に該当プロバイダーの値が無いときは入力欄を空にする", async () => {
-    updateMock.mockResolvedValue({ data: {} });
+    updateMock.mockResolvedValue({});
     render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
     const input = await screen.findByLabelText("Ollamaの接続先URL(このプロジェクトで上書き)");
 
@@ -317,5 +342,53 @@ describe("AiConnectionSection の保存", () => {
 
     await screen.findByText("保存しました。");
     expect(input).toHaveValue("");
+  });
+});
+
+describe("AiConnectionSection のアンマウント", () => {
+  /** 応答を保留して、あとから返せる状態にする。 */
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => {};
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  it("接続先の取得が終わる前にアンマウントされたら、あとから応答が返っても何も描かない", async () => {
+    const pending = deferred<ProjectConnectionsResponse>();
+    fetchProjectMock.mockReturnValue(pending.promise);
+    const { container, unmount } = render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
+    await waitFor(() => expect(calledRequests(fetchMock)).toContain(PROJECT_CONNECTIONS));
+
+    unmount();
+    pending.resolve(project());
+    await Promise.resolve();
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("接続先の取得に失敗する前にアンマウントされたら、あとからエラーが返っても何も描かない", async () => {
+    const pending = deferred<Response>();
+    fetchProjectMock.mockReturnValue(pending.promise);
+    const { container, unmount } = render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
+    await waitFor(() => expect(calledRequests(fetchMock)).toContain(PROJECT_CONNECTIONS));
+
+    unmount();
+    pending.resolve(failWith(500, "boom")());
+    await Promise.resolve();
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("利用可否の確認が終わる前にアンマウントされたら、あとから結果が返っても何も描かない", async () => {
+    const pending = deferred<AiConnection[]>();
+    fetchConnectionsMock.mockReturnValue(pending.promise);
+    const { container, unmount } = render(<AiConnectionSection projectId={3} provider="OLLAMA" />);
+    await waitFor(() => expect(connectionRequests()).toHaveLength(1));
+
+    unmount();
+    pending.resolve(connections());
+    await Promise.resolve();
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

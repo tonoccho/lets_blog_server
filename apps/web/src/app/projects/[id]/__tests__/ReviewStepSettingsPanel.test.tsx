@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ReviewStepSettingsPanel } from "../ReviewStepSettingsPanel";
-import { updateReviewStepSettingAction } from "../actions";
 import type { ReviewStepSettingsResponse } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION, USER_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { answer, bodies, failWith, installBackend } from "./projectCoreRuntime";
 
 /**
  * issue #1212: レビューステップ別(#1210)のLLM設定(#1211のAPI)を、プロジェクト詳細画面の
@@ -19,11 +21,28 @@ import type { ReviewStepSettingsResponse } from "@/lib/apiClient";
  * - 保存が失敗するとエラーメッセージが表示される
  * - 保存が失敗すると、その行の表示は保存前の値のままになる
  */
-jest.mock("../actions", () => ({
-  updateReviewStepSettingAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
-const updateMock = updateReviewStepSettingAction as jest.MockedFunction<typeof updateReviewStepSettingAction>;
+const STEP = (key: string) => `PUT /api/projects/1/ai-models/llm/review-steps/${key}`;
+
+// gateway の向こうのバックエンドの代役。解決値は 200 の JSON、`Response` はそのまま、`Error` の拒否は 500 の応答になる。
+const updateMock = jest.fn();
+
+let fetchSpy: jest.Mock;
+
+/** 送られた更新(ステップのキーごと)の本文。 */
+const sent = (key: string) => bodies(fetchSpy, STEP(key));
 
 function initialData(overrides: Partial<ReviewStepSettingsResponse> = {}): ReviewStepSettingsResponse {
   return {
@@ -51,7 +70,13 @@ function rowFor(label: string) {
 
 describe("ReviewStepSettingsPanel", () => {
   beforeEach(() => {
+    resetServerRuntime(ADMIN_SESSION);
     updateMock.mockReset();
+    fetchSpy = installBackend(
+      Object.fromEntries(
+        ["JAPANESE", "PROOFREADING", "FACT_CHECK", "READER_PERSPECTIVE", "STYLE"].map((key) => [STEP(key), answer(() => updateMock())])
+      )
+    );
   });
 
   it("5つのレビューステップの行が、#1211のAPIが返す順序(日本語チェック→校正チェック→校閲→読者視点でのチェック→文体チェック)で表示される", () => {
@@ -73,7 +98,7 @@ describe("ReviewStepSettingsPanel", () => {
   });
 
   it("providerを選んで保存すると、表示が保存済みの値へ更新される", async () => {
-    updateMock.mockResolvedValue({});
+    updateMock.mockResolvedValue(initialData());
     render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
 
     const row = rowFor("日本語チェック");
@@ -83,14 +108,14 @@ describe("ReviewStepSettingsPanel", () => {
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "OPENAI", "");
+      expect(sent("JAPANESE")).toEqual([{ provider: "OPENAI", model: null }]);
     });
     const providerSelect = within(row).getByLabelText("日本語チェックのプロバイダー") as HTMLSelectElement;
     expect(providerSelect.selectedOptions[0].textContent).toBe("OpenAI (ChatGPT)");
   });
 
   it("modelを選んで保存すると、表示が保存済みの値へ更新される", async () => {
-    updateMock.mockResolvedValue({});
+    updateMock.mockResolvedValue(initialData());
     render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
 
     const row = rowFor("校正チェック");
@@ -100,14 +125,14 @@ describe("ReviewStepSettingsPanel", () => {
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith(1, "PROOFREADING", "", "gpt-4o");
+      expect(sent("PROOFREADING")).toEqual([{ provider: null, model: "gpt-4o" }]);
     });
     const modelSelect = within(row).getByLabelText("校正チェックのモデル") as HTMLSelectElement;
     expect(modelSelect.selectedOptions[0].textContent).toBe("gpt-4o");
   });
 
   it("設定済みのステップのproviderを空へ戻して保存すると、「(プロジェクト既定を使用)」表示になる", async () => {
-    updateMock.mockResolvedValue({});
+    updateMock.mockResolvedValue(initialData());
     render(
       <ReviewStepSettingsPanel
         projectId={1}
@@ -122,7 +147,7 @@ describe("ReviewStepSettingsPanel", () => {
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "", "gpt-4o");
+      expect(sent("JAPANESE")).toEqual([{ provider: null, model: "gpt-4o" }]);
     });
     const providerSelect = within(row).getByLabelText("日本語チェックのプロバイダー") as HTMLSelectElement;
     expect(providerSelect.selectedOptions[0].textContent).toBe("(プロジェクト既定を使用)");
@@ -131,7 +156,7 @@ describe("ReviewStepSettingsPanel", () => {
   });
 
   it("設定済みのステップのmodelを空へ戻して保存すると、「(プロジェクト既定を使用)」表示になる", async () => {
-    updateMock.mockResolvedValue({});
+    updateMock.mockResolvedValue(initialData());
     render(
       <ReviewStepSettingsPanel
         projectId={1}
@@ -146,26 +171,26 @@ describe("ReviewStepSettingsPanel", () => {
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith(1, "PROOFREADING", "CLAUDE", "");
+      expect(sent("PROOFREADING")).toEqual([{ provider: "CLAUDE", model: null }]);
     });
     const modelSelect = within(row).getByLabelText("校正チェックのモデル") as HTMLSelectElement;
     expect(modelSelect.selectedOptions[0].textContent).toBe("(プロジェクト既定を使用)");
   });
 
   it("保存に失敗すると、エラーメッセージが表示される", async () => {
-    updateMock.mockResolvedValue({ error: "保存に失敗しました" });
+    updateMock.mockResolvedValue(failWith(500, "保存に失敗しました")());
     render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
 
     const row = rowFor("校閲");
     fireEvent.change(within(row).getByLabelText("校閲のプロバイダー"), { target: { value: "CLAUDE" } });
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
-    const alert = await within(row).findByText("保存に失敗しました");
+    const alert = await within(row).findByText("APIエラー (500): 保存に失敗しました");
     expect(alert).toHaveClass("text-red-600");
   });
 
   it("保存に失敗すると、その行の表示は保存前の値のままになる", async () => {
-    updateMock.mockResolvedValue({ error: "保存に失敗しました" });
+    updateMock.mockResolvedValue(failWith(500, "保存に失敗しました")());
     render(
       <ReviewStepSettingsPanel
         projectId={1}
@@ -180,7 +205,7 @@ describe("ReviewStepSettingsPanel", () => {
     fireEvent.change(within(row).getByLabelText("校閲のモデル"), { target: { value: "gpt-4o" } });
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
-    await within(row).findByText("保存に失敗しました");
+    await within(row).findByText("APIエラー (500): 保存に失敗しました");
     const providerSelect = within(row).getByLabelText("校閲のプロバイダー") as HTMLSelectElement;
     const modelSelect = within(row).getByLabelText("校閲のモデル") as HTMLSelectElement;
     expect(providerSelect.selectedOptions[0].textContent).toBe("Ollama");
@@ -188,7 +213,8 @@ describe("ReviewStepSettingsPanel", () => {
   });
 
   it("保存の通信自体が例外で失敗しても、エラーメッセージを表示して保存前の値へ戻す", async () => {
-    updateMock.mockRejectedValue(new Error("network"));
+    // 管理者でなくなった(セッション切れ)状態では Server Action が例外(リダイレクト)で終わる。
+    resetServerRuntime(USER_SESSION);
     render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
 
     const row = rowFor("文体チェック");
@@ -196,25 +222,26 @@ describe("ReviewStepSettingsPanel", () => {
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
 
     await within(row).findByText("保存に失敗しました");
+    expect(sent("STYLE")).toEqual([]);
     const providerSelect = within(row).getByLabelText("文体チェックのプロバイダー") as HTMLSelectElement;
     expect(providerSelect.selectedOptions[0].textContent).toBe("(プロジェクト既定を使用)");
     expect(within(row).getByRole("button", { name: "保存" })).toBeEnabled();
   });
 
   it("失敗後に再度保存して成功すると、エラーメッセージが消える", async () => {
-    updateMock.mockResolvedValueOnce({ error: "保存に失敗しました" });
-    updateMock.mockResolvedValueOnce({});
+    updateMock.mockResolvedValueOnce(failWith(500, "保存に失敗しました")());
+    updateMock.mockResolvedValueOnce(initialData());
     render(<ReviewStepSettingsPanel projectId={1} initialData={initialData()} />);
 
     const row = rowFor("日本語チェック");
     fireEvent.change(within(row).getByLabelText("日本語チェックのプロバイダー"), { target: { value: "OPENAI" } });
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
-    await within(row).findByText("保存に失敗しました");
+    await within(row).findByText("APIエラー (500): 保存に失敗しました");
 
     fireEvent.change(within(row).getByLabelText("日本語チェックのプロバイダー"), { target: { value: "OPENAI" } });
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
     await waitFor(() => {
-      expect(within(row).queryByText("保存に失敗しました")).not.toBeInTheDocument();
+      expect(within(row).queryByText("APIエラー (500): 保存に失敗しました")).not.toBeInTheDocument();
     });
   });
 
@@ -276,7 +303,7 @@ describe("ReviewStepSettingsPanel", () => {
   });
 
   it("providerを切り替えて新providerの候補に無いモデルが選択中だった場合、modelは未設定へクリアされ、保存で旧モデルが送られない", async () => {
-    updateMock.mockResolvedValue({});
+    updateMock.mockResolvedValue(initialData());
     render(
       <ReviewStepSettingsPanel
         projectId={1}
@@ -288,12 +315,12 @@ describe("ReviewStepSettingsPanel", () => {
     expect((within(row).getByLabelText("日本語チェックのモデル") as HTMLSelectElement).value).toBe("");
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
     await waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "OLLAMA", "");
+      expect(sent("JAPANESE")).toEqual([{ provider: "OLLAMA", model: null }]);
     });
   });
 
   it("providerを切り替えても、選択中のモデルが新providerの候補にも在るならmodelは保持される", async () => {
-    updateMock.mockResolvedValue({});
+    updateMock.mockResolvedValue(initialData());
     render(
       <ReviewStepSettingsPanel
         projectId={1}
@@ -305,7 +332,7 @@ describe("ReviewStepSettingsPanel", () => {
     expect((within(row).getByLabelText("日本語チェックのモデル") as HTMLSelectElement).value).toBe("gpt-4o");
     fireEvent.click(within(row).getByRole("button", { name: "保存" }));
     await waitFor(() => {
-      expect(updateMock).toHaveBeenCalledWith(1, "JAPANESE", "CLAUDE", "gpt-4o");
+      expect(sent("JAPANESE")).toEqual([{ provider: "CLAUDE", model: "gpt-4o" }]);
     });
   });
 

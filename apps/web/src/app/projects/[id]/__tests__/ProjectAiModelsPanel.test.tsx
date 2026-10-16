@@ -1,18 +1,6 @@
 import { StrictMode } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ProjectAiModelsPanel } from "../ProjectAiModelsPanel";
-import {
-  fetchLlmModelsAction,
-  fetchLlmProviderAction,
-  selectLlmProviderAction,
-  selectLlmModelAction,
-  fetchReviewStepSettingsAction,
-  fetchImageProviderAction,
-  selectImageProviderAction,
-  fetchComfyUiCheckpointsAction,
-  fetchAiConnectionsAction,
-  fetchProjectConnectionsAction,
-} from "../actions";
 import type {
   LlmModelListResponse,
   LlmProviderListResponse,
@@ -20,49 +8,75 @@ import type {
   ImageProviderListResponse,
   ComfyUiCheckpointListResponse,
 } from "@/lib/apiClient";
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { answer, bodies, calledRequests, failWith, installBackend } from "./projectCoreRuntime";
 
 /**
  * issue #1212: LLMタブに、レビューステップ別設定(ReviewStepSettingsPanel、#1211のAPI)を
  * 追加で読み込み・表示する。既存の LlmProviderPanel / LlmModelPanel の表示・操作は
  * 変えないため、このテストはその2つが引き続き描画されることも確認する。
  */
-jest.mock("../actions", () => ({
-  fetchLlmModelsAction: jest.fn(),
-  selectLlmModelAction: jest.fn(),
-  fetchLlmProviderAction: jest.fn(),
-  selectLlmProviderAction: jest.fn(),
-  fetchReviewStepSettingsAction: jest.fn(),
-  updateReviewStepSettingAction: jest.fn(),
-  fetchImageProviderAction: jest.fn(),
-  selectImageProviderAction: jest.fn(),
-  fetchComfyUiCheckpointsAction: jest.fn(),
-  fetchAiConnectionsAction: jest.fn(),
-  fetchProjectConnectionsAction: jest.fn(),
-  updateProjectConnectionAction: jest.fn(),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh: jest.fn(), push: jest.fn() }),
 }));
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
 
-jest.mock("../projectPluginRegistrationActions", () => ({
-  fetchProjectPluginRegistrationsAction: jest.fn().mockResolvedValue({ data: [] }),
-  saveProjectPluginRegistrationAction: jest.fn(),
-  deleteProjectPluginRegistrationAction: jest.fn(),
-  activateProjectPluginRegistrationAction: jest.fn(),
-  clearProjectPluginRegistrationCredentialAction: jest.fn(),
-}));
+const BASE = "/api/projects/1/ai-models";
+const ROUTE = {
+  llmModels: `GET ${BASE}/llm/models`,
+  llmModelSelect: `PUT ${BASE}/llm/models/selection`,
+  llmProvider: `GET ${BASE}/llm/provider`,
+  llmProviderSelect: `PUT ${BASE}/llm/provider/selection`,
+  reviewSteps: `GET ${BASE}/llm/review-steps`,
+  imageProvider: `GET ${BASE}/image/provider`,
+  imageProviderSelect: `PUT ${BASE}/image/provider/selection`,
+  checkpoints: `GET ${BASE}/comfyui/checkpoints`,
+  aiConnections: "GET /api/projects/1/ai-connections",
+  connections: `GET ${BASE}/connections`,
+  pluginRegistrations: "GET /api/projects/1/plugin-registrations",
+};
 
-const fetchLlmModelsMock = fetchLlmModelsAction as jest.MockedFunction<typeof fetchLlmModelsAction>;
-const fetchLlmProviderMock = fetchLlmProviderAction as jest.MockedFunction<typeof fetchLlmProviderAction>;
-const fetchReviewStepSettingsMock = fetchReviewStepSettingsAction as jest.MockedFunction<
-  typeof fetchReviewStepSettingsAction
->;
-const fetchImageProviderMock = fetchImageProviderAction as jest.MockedFunction<typeof fetchImageProviderAction>;
-const fetchComfyUiCheckpointsMock = fetchComfyUiCheckpointsAction as jest.MockedFunction<
-  typeof fetchComfyUiCheckpointsAction
->;
+// gateway の向こうのバックエンドの代役(#1837)。解決値は 200 の JSON、`Response` はそのまま、`Error` の拒否は 500 の応答になる。
+// 自前の `../actions`・`../projectPluginRegistrationActions`・`@/lib/apiClient` は差し替えず、外部との通信(`fetch`)だけを代替する。
+const fetchLlmModelsMock = jest.fn();
+const selectLlmModelMock = jest.fn();
+const fetchLlmProviderMock = jest.fn();
+const selectLlmProviderMock = jest.fn();
+const fetchReviewStepSettingsMock = jest.fn();
+const fetchImageProviderMock = jest.fn();
+const selectImageProviderMock = jest.fn();
+const fetchComfyUiCheckpointsMock = jest.fn();
+const fetchAiConnectionsMock = jest.fn();
+const fetchProjectConnectionsMock = jest.fn();
 
-const fetchAiConnectionsMock = fetchAiConnectionsAction as jest.MockedFunction<typeof fetchAiConnectionsAction>;
-const fetchProjectConnectionsMock = fetchProjectConnectionsAction as jest.MockedFunction<
-  typeof fetchProjectConnectionsAction
->;
+let fetchSpy: jest.Mock;
+
+/** 各テストの `beforeEach` から呼ぶ。実際の HTTP の経路ごとに、上の代役を割り当てる。 */
+function installAiModelsBackend() {
+  resetServerRuntime(ADMIN_SESSION);
+  fetchSpy = installBackend({
+    [ROUTE.llmModels]: answer(() => fetchLlmModelsMock(1)),
+    [ROUTE.llmModelSelect]: answer(() => selectLlmModelMock(1)),
+    [ROUTE.llmProvider]: answer(() => fetchLlmProviderMock(1)),
+    [ROUTE.llmProviderSelect]: answer(() => selectLlmProviderMock(1)),
+    [ROUTE.reviewSteps]: answer(() => fetchReviewStepSettingsMock(1)),
+    [ROUTE.imageProvider]: answer(() => fetchImageProviderMock(1)),
+    [ROUTE.imageProviderSelect]: answer(() => selectImageProviderMock(1)),
+    [ROUTE.checkpoints]: answer(() => fetchComfyUiCheckpointsMock(1)),
+    [ROUTE.aiConnections]: answer(() => fetchAiConnectionsMock(1)),
+    [ROUTE.connections]: answer(() => fetchProjectConnectionsMock(1)),
+    [ROUTE.pluginRegistrations]: answer(() => []),
+  });
+}
 
 function llmModelData(): LlmModelListResponse {
   return { selected: "gpt-4o-mini", availableModels: ["gpt-4o-mini", "gpt-4o"] };
@@ -100,11 +114,12 @@ function comfyuiData(): ComfyUiCheckpointListResponse {
 
 describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
   beforeEach(() => {
-    fetchLlmModelsMock.mockReset().mockResolvedValue({ data: llmModelData() });
-    fetchLlmProviderMock.mockReset().mockResolvedValue({ data: llmProviderData() });
-    fetchReviewStepSettingsMock.mockReset().mockResolvedValue({ data: reviewStepData() });
-    fetchImageProviderMock.mockReset().mockResolvedValue({ data: imageProviderData() });
-    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue({ data: comfyuiData() });
+    installAiModelsBackend();
+    fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
+    fetchImageProviderMock.mockReset().mockResolvedValue(imageProviderData());
+    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
     fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
     fetchProjectConnectionsMock.mockReset().mockResolvedValue({
       ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
@@ -184,11 +199,12 @@ describe("ProjectAiModelsPanel のLLMタブ(issue #1212)", () => {
 
 describe("ProjectAiModelsPanel には接続情報セクションを置かない(issue #1669: 設定タブへ移した)", () => {
   beforeEach(() => {
-    fetchLlmModelsMock.mockReset().mockResolvedValue({ data: llmModelData() });
-    fetchLlmProviderMock.mockReset().mockResolvedValue({ data: llmProviderData() });
-    fetchReviewStepSettingsMock.mockReset().mockResolvedValue({ data: reviewStepData() });
-    fetchImageProviderMock.mockReset().mockResolvedValue({ data: imageProviderData() });
-    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue({ data: comfyuiData() });
+    installAiModelsBackend();
+    fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
+    fetchImageProviderMock.mockReset().mockResolvedValue(imageProviderData());
+    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
     fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
     fetchProjectConnectionsMock.mockReset().mockResolvedValue({
       ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
@@ -207,20 +223,20 @@ describe("ProjectAiModelsPanel には接続情報セクションを置かない(
     fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
     await screen.findByText("選択中のチェックポイント:", { exact: false });
     expect(screen.queryByText("ComfyUIの接続情報")).not.toBeInTheDocument();
-    expect(fetchAiConnectionsMock).not.toHaveBeenCalled();
-    expect(fetchProjectConnectionsMock).not.toHaveBeenCalled();
+    expect(calledRequests(fetchSpy).filter((r) => r === ROUTE.aiConnections || r === ROUTE.connections)).toEqual([]);
   });
 });
 
 /** issue #1644: プロバイダーを切り替えると、再読み込みなしで切り替え先のモデル(選択中・入力欄・候補)へ変わる。 */
 describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", () => {
-  const selectProviderMock = selectLlmProviderAction as jest.MockedFunction<typeof selectLlmProviderAction>;
+  const selectProviderMock = selectLlmProviderMock;
 
   beforeEach(() => {
-    fetchLlmModelsMock.mockReset().mockResolvedValue({ data: llmModelData() });
-    fetchLlmProviderMock.mockReset().mockResolvedValue({ data: llmProviderData() });
-    selectProviderMock.mockReset().mockResolvedValue({});
-    fetchReviewStepSettingsMock.mockReset().mockResolvedValue({ data: reviewStepData() });
+    installAiModelsBackend();
+    fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    selectProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
     fetchAiConnectionsMock.mockReset().mockResolvedValue([]);
     fetchProjectConnectionsMock.mockReset().mockResolvedValue({
       ollama: { overrideBaseUrl: null, baseUrl: "http://ollama.default:11434/v1", source: "DATABASE" },
@@ -234,10 +250,8 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
     fetchLlmModelsMock.mockResolvedValue({
-      data: {
-        selected: "claude-3-5-haiku-20241022",
-        availableModels: ["claude-3-5-haiku-20241022", "claude-opus"],
-      },
+      selected: "claude-3-5-haiku-20241022",
+      availableModels: ["claude-3-5-haiku-20241022", "claude-opus"],
     });
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), {
       target: { value: "CLAUDE" },
@@ -252,7 +266,7 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
 
   it("プロバイダーの保存に失敗したときはモデルを再取得しない", async () => {
     const { fireEvent } = await import("@testing-library/react");
-    selectProviderMock.mockResolvedValue({ error: "失敗" });
+    selectProviderMock.mockResolvedValue(failWith(500, "失敗")());
     render(<ProjectAiModelsPanel projectId={1} />);
     await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
     fetchLlmModelsMock.mockClear();
@@ -261,32 +275,32 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
       target: { value: "CLAUDE" },
     });
 
-    await screen.findByText("失敗");
+    await screen.findByText("APIエラー (500): 失敗");
     expect(fetchLlmModelsMock).not.toHaveBeenCalled();
   });
 
   it("プロバイダー切り替え後のモデル再取得の最中に保存したモデルは、遅れて届いた古い取得結果で上書きされない", async () => {
     const { fireEvent, act } = await import("@testing-library/react");
-    const selectModelMock = selectLlmModelAction as jest.MockedFunction<typeof selectLlmModelAction>;
-    selectModelMock.mockReset().mockResolvedValue({});
+    const selectModelMock = selectLlmModelMock;
+    selectModelMock.mockReset().mockResolvedValue(llmModelData());
     render(<ProjectAiModelsPanel projectId={1} />);
     await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
-    let resolveStale!: (v: { data: LlmModelListResponse }) => void;
+    let resolveStale!: (v: LlmModelListResponse) => void;
     fetchLlmModelsMock.mockReset();
     fetchLlmModelsMock.mockImplementationOnce(() => new Promise((r) => (resolveStale = r)));
-    fetchLlmModelsMock.mockResolvedValue({ data: { selected: "gpt-4o", availableModels: ["gpt-4o-mini", "gpt-4o"] } });
+    fetchLlmModelsMock.mockResolvedValue({ selected: "gpt-4o", availableModels: ["gpt-4o-mini", "gpt-4o"] });
 
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
     await waitFor(() => expect(resolveStale).toBeDefined());
 
     fireEvent.change(screen.getByLabelText("LLMのモデル"), { target: { value: "gpt-4o" } });
     fireEvent.submit(screen.getByLabelText("LLMのモデル").closest("form")!);
-    await waitFor(() => expect(selectModelMock).toHaveBeenCalledWith(1, "gpt-4o"));
+    await waitFor(() => expect(bodies(fetchSpy, ROUTE.llmModelSelect)).toEqual([{ modelName: "gpt-4o" }]));
     await waitFor(() => expect(screen.getByText("選択中のモデル:")).toHaveTextContent(/選択中のモデル: gpt-4o$/));
 
     await act(async () => {
-      resolveStale({ data: { selected: "gpt-4o-mini", availableModels: ["gpt-4o-mini", "gpt-4o"] } });
+      resolveStale({ selected: "gpt-4o-mini", availableModels: ["gpt-4o-mini", "gpt-4o"] });
     });
 
     expect(screen.getByText("選択中のモデル:")).toHaveTextContent(/選択中のモデル: gpt-4o$/);
@@ -298,7 +312,7 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     render(<ProjectAiModelsPanel projectId={1} />);
     await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
-    let resolveRefetch!: (v: { data: LlmModelListResponse }) => void;
+    let resolveRefetch!: (v: LlmModelListResponse) => void;
     fetchLlmModelsMock.mockReset();
     fetchLlmModelsMock.mockImplementationOnce(() => new Promise((r) => (resolveRefetch = r)));
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
@@ -306,7 +320,7 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
     expect(screen.queryByText("保存しました。")).not.toBeInTheDocument();
 
     await act(async () => {
-      resolveRefetch({ data: llmModelData() });
+      resolveRefetch(llmModelData());
     });
     expect(await screen.findByText("保存しました。")).toBeInTheDocument();
   });
@@ -314,15 +328,14 @@ describe("ProjectAiModelsPanel のプロバイダー切り替え(issue #1644)", 
 
 /** issue #1715: タブのデータ取得が失敗したら「読み込み中…」のまま止めず、失敗の理由を表示する。 */
 describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
-  const selectImageProviderMock = selectImageProviderAction as jest.MockedFunction<typeof selectImageProviderAction>;
-
-  beforeEach(() => {
-    fetchLlmModelsMock.mockReset().mockResolvedValue({ data: llmModelData() });
-    fetchLlmProviderMock.mockReset().mockResolvedValue({ data: llmProviderData() });
-    fetchReviewStepSettingsMock.mockReset().mockResolvedValue({ data: reviewStepData() });
-    fetchImageProviderMock.mockReset().mockResolvedValue({ data: { availableProviders: ["COMFYUI", "CHATGPT"], selected: null } });
-    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue({ data: comfyuiData() });
-    selectImageProviderMock.mockReset().mockResolvedValue({});
+    beforeEach(() => {
+    installAiModelsBackend();
+    fetchLlmModelsMock.mockReset().mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
+    fetchReviewStepSettingsMock.mockReset().mockResolvedValue(reviewStepData());
+    fetchImageProviderMock.mockReset().mockResolvedValue({ availableProviders: ["COMFYUI", "CHATGPT"], selected: null });
+    fetchComfyUiCheckpointsMock.mockReset().mockResolvedValue(comfyuiData());
+    selectImageProviderMock.mockReset().mockResolvedValue({ availableProviders: ["COMFYUI", "CHATGPT"], selected: "CHATGPT" });
   });
 
   async function openImageTab() {
@@ -334,7 +347,7 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
   }
 
   it("チェックポイント一覧の取得に失敗すると、読み込み中を消して失敗の理由を表示する", async () => {
-    fetchComfyUiCheckpointsMock.mockResolvedValue({ error: "ComfyUIに接続できません(connection refused)" });
+    fetchComfyUiCheckpointsMock.mockResolvedValue(failWith(500, "ComfyUIに接続できません(connection refused)")());
     await openImageTab();
 
     expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
@@ -342,19 +355,19 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
   });
 
   it("チェックポイント一覧の取得に失敗しても、画像生成AIの切り替え欄は表示され、ChatGPTへの切り替えを保存できる", async () => {
-    fetchComfyUiCheckpointsMock.mockResolvedValue({ error: "タイムアウト" });
+    fetchComfyUiCheckpointsMock.mockResolvedValue(failWith(500, "タイムアウト")());
     const fireEvent = await openImageTab();
 
     const select = await screen.findByLabelText("画像生成AI(このプロジェクトの既定)");
-    fetchImageProviderMock.mockResolvedValue({ data: { availableProviders: ["COMFYUI", "CHATGPT"], selected: "CHATGPT" } });
+    fetchImageProviderMock.mockResolvedValue({ availableProviders: ["COMFYUI", "CHATGPT"], selected: "CHATGPT" });
     fireEvent.change(select, { target: { value: "CHATGPT" } });
 
-    await waitFor(() => expect(selectImageProviderMock).toHaveBeenCalledWith(1, "CHATGPT"));
+    await waitFor(() => expect(bodies(fetchSpy, ROUTE.imageProviderSelect)).toEqual([{ provider: "CHATGPT" }]));
     expect(await screen.findByText("保存しました。")).toBeInTheDocument();
   });
 
   it("画像生成AIの取得に失敗しても、チェックポイント一覧は表示され、失敗の理由も表示される", async () => {
-    fetchImageProviderMock.mockResolvedValue({ error: "画像生成AIの取得に失敗" });
+    fetchImageProviderMock.mockResolvedValue(failWith(500, "画像生成AIの取得に失敗")());
     await openImageTab();
 
     expect(await screen.findByText("選択中のチェックポイント:", { exact: false })).toBeInTheDocument();
@@ -363,7 +376,7 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
   });
 
   it("取得に失敗した後で画像生成タブを押し直すと再取得し、成功すれば通常の表示になる", async () => {
-    fetchComfyUiCheckpointsMock.mockResolvedValueOnce({ error: "一時的な失敗" });
+    fetchComfyUiCheckpointsMock.mockResolvedValueOnce(failWith(500, "一時的な失敗")());
     const fireEvent = await openImageTab();
     await screen.findByText(/一時的な失敗/);
 
@@ -386,7 +399,7 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
   });
 
   it("LLMタブの初回取得に失敗すると、読み込み中を出さず失敗の理由を表示する", async () => {
-    fetchLlmModelsMock.mockResolvedValue({ error: "LLMモデル一覧の取得に失敗(HTTP 503)" });
+    fetchLlmModelsMock.mockResolvedValue(failWith(500, "LLMモデル一覧の取得に失敗(HTTP 503)")());
     render(<ProjectAiModelsPanel projectId={1} />);
 
     expect(await screen.findByText(/HTTP 503/)).toBeInTheDocument();
@@ -394,7 +407,7 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
   });
 
   it("LLMタブの一部だけ取得に失敗しても、取得できたパネルは表示される", async () => {
-    fetchReviewStepSettingsMock.mockResolvedValue({ error: "レビュー設定の取得に失敗" });
+    fetchReviewStepSettingsMock.mockResolvedValue(failWith(500, "レビュー設定の取得に失敗")());
     render(<ProjectAiModelsPanel projectId={1} />);
 
     expect(await screen.findByText(/レビュー設定の取得に失敗/)).toBeInTheDocument();
@@ -404,20 +417,20 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
 
   it("LLMタブのタブ切り替え時の取得に失敗すると失敗の理由を表示し、押し直すと再取得して通常の表示になる", async () => {
     const { fireEvent } = await import("@testing-library/react");
-    fetchLlmModelsMock.mockResolvedValue({ error: "初回の失敗" });
-    fetchLlmProviderMock.mockResolvedValue({ error: "初回の失敗" });
-    fetchReviewStepSettingsMock.mockResolvedValue({ error: "初回の失敗" });
+    fetchLlmModelsMock.mockResolvedValue(failWith(500, "初回の失敗")());
+    fetchLlmProviderMock.mockResolvedValue(failWith(500, "初回の失敗")());
+    fetchReviewStepSettingsMock.mockResolvedValue(failWith(500, "初回の失敗")());
     render(<ProjectAiModelsPanel projectId={1} />);
     await screen.findAllByText(/初回の失敗/);
 
-    fetchLlmModelsMock.mockResolvedValue({ error: "切り替え時の失敗" });
+    fetchLlmModelsMock.mockResolvedValue(failWith(500, "切り替え時の失敗")());
     fireEvent.click(screen.getByRole("button", { name: "LLM" }));
     expect(await screen.findByText(/切り替え時の失敗/)).toBeInTheDocument();
     expect(screen.queryByText("読み込み中…")).not.toBeInTheDocument();
 
-    fetchLlmModelsMock.mockResolvedValue({ data: llmModelData() });
-    fetchLlmProviderMock.mockResolvedValue({ data: llmProviderData() });
-    fetchReviewStepSettingsMock.mockResolvedValue({ data: reviewStepData() });
+    fetchLlmModelsMock.mockResolvedValue(llmModelData());
+    fetchLlmProviderMock.mockResolvedValue(llmProviderData());
+    fetchReviewStepSettingsMock.mockResolvedValue(reviewStepData());
     fireEvent.click(screen.getByRole("button", { name: "LLM" }));
 
     expect(await screen.findByText("選択中のモデル:")).toBeInTheDocument();
@@ -426,15 +439,58 @@ describe("ProjectAiModelsPanel の取得失敗(issue #1715)", () => {
 
   it("プロバイダー切り替え後のモデル再取得に失敗しても、古い結果を捨てずエラーを表示する", async () => {
     const { fireEvent } = await import("@testing-library/react");
-    (selectLlmProviderAction as jest.MockedFunction<typeof selectLlmProviderAction>).mockReset().mockResolvedValue({});
+    selectLlmProviderMock.mockReset().mockResolvedValue(llmProviderData());
     render(<ProjectAiModelsPanel projectId={1} />);
     await waitFor(() => expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini"));
 
-    fetchLlmModelsMock.mockResolvedValue({ error: "再取得の失敗" });
+    fetchLlmModelsMock.mockResolvedValue(failWith(500, "再取得の失敗")());
     fireEvent.change(screen.getByLabelText("AIプロバイダー(このプロジェクトの既定)"), { target: { value: "CLAUDE" } });
 
     expect(await screen.findByText(/再取得の失敗/)).toBeInTheDocument();
     expect(screen.getByLabelText("LLMのモデル")).toHaveValue("gpt-4o-mini");
+  });
+
+  it("LLMタブの一部だけ取得に失敗した後で押し直すと、取得できていない分だけ再取得する", async () => {
+    fetchLlmModelsMock.mockResolvedValueOnce(failWith(500, "モデル一覧だけ失敗")());
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await screen.findByText(/モデル一覧だけ失敗/);
+    expect(await screen.findByText("レビューステップ別のAIモデル設定")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "LLM" }));
+
+    expect(await screen.findByText("選択中のモデル:")).toBeInTheDocument();
+    expect(screen.queryByText(/モデル一覧だけ失敗/)).not.toBeInTheDocument();
+    expect(fetchLlmModelsMock).toHaveBeenCalledTimes(2);
+    expect(fetchLlmProviderMock).toHaveBeenCalledTimes(1);
+    expect(fetchReviewStepSettingsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("LLMのモデルは取得できたがプロバイダーの取得に失敗した後で押し直すと、プロバイダーだけ再取得する", async () => {
+    fetchLlmProviderMock.mockResolvedValueOnce(failWith(500, "プロバイダーだけ失敗")());
+    render(<ProjectAiModelsPanel projectId={1} />);
+    await screen.findByText(/プロバイダーだけ失敗/);
+    expect(await screen.findByText("選択中のモデル:")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "LLM" }));
+
+    expect(await screen.findByLabelText("AIプロバイダー(このプロジェクトの既定)")).toBeInTheDocument();
+    expect(screen.queryByText(/プロバイダーだけ失敗/)).not.toBeInTheDocument();
+    expect(fetchLlmModelsMock).toHaveBeenCalledTimes(1);
+    expect(fetchLlmProviderMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("画像生成タブの一部だけ取得に失敗した後で押し直すと、取得できていない分だけ再取得する", async () => {
+    fetchImageProviderMock.mockResolvedValueOnce(failWith(500, "画像生成AIだけ失敗")());
+    const fireEvent = await openImageTab();
+    await screen.findByText(/画像生成AIだけ失敗/);
+    expect(await screen.findByText("選択中のチェックポイント:", { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "画像生成" }));
+
+    expect(await screen.findByLabelText("画像生成AI(このプロジェクトの既定)")).toBeInTheDocument();
+    expect(screen.queryByText(/画像生成AIだけ失敗/)).not.toBeInTheDocument();
+    expect(fetchImageProviderMock).toHaveBeenCalledTimes(2);
+    expect(fetchComfyUiCheckpointsMock).toHaveBeenCalledTimes(1);
   });
 
   it("「接続先の上書き」タブ(issue #1808)を開くと、プロジェクト単位の上書きの欄が出る", async () => {
