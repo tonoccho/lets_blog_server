@@ -1,35 +1,29 @@
-import { render, screen } from "@testing-library/react";
-import ProjectGoogleAnalyticsSettingsPage from "../page";
-import {
-  getProject,
-  getProjectGoogleAnalyticsStatus,
-  listProjectGoogleAnalyticsProperties,
-} from "@/lib/apiClient";
-import { notFound } from "next/navigation";
-
+/**
+ * @jest-environment node
+ */
 /**
  * issue #1231: GA設定ページ(サーバーコンポーネント)。連携済みのときだけプロパティ一覧を取得し、
  * 取得に失敗しても画面全体は落とさず理由を出す。
  */
-jest.mock("@/lib/apiClient", () => ({
-  getProject: jest.fn(),
-  getProjectGoogleAnalyticsStatus: jest.fn(),
-  listProjectGoogleAnalyticsProperties: jest.fn(),
-}));
-jest.mock("@/lib/session", () => ({ requireAdminSession: jest.fn() }));
+// 自前の @/lib/session・@/lib/apiClient・Breadcrumb・ProjectGoogleAnalyticsSettingsForm は差し替えない。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1835)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 jest.mock("next/navigation", () => ({
-  notFound: jest.fn(() => {
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
-  }),
-}));
-jest.mock("@/components/Breadcrumb", () => ({ Breadcrumb: () => null }));
-const formProps = jest.fn();
-jest.mock("../../../ProjectGoogleAnalyticsSettingsForm", () => ({
-  ProjectGoogleAnalyticsSettingsForm: (props: unknown) => {
-    formProps(props);
-    return <div data-testid="ga-form" />;
   },
 }));
+import { renderToStaticMarkup } from "react-dom/server";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import ProjectGoogleAnalyticsSettingsPage from "../page";
 
 const status = {
   configured: false,
@@ -39,70 +33,92 @@ const status = {
   connected: false,
 };
 
+let getProject: () => Response;
+let getStatus: () => Response;
+let listProperties: () => Response;
+let propertyRequests: number;
+
 async function renderPage(searchParams: { connected?: string; error?: string } = {}) {
-  const ui = await ProjectGoogleAnalyticsSettingsPage({
-    params: Promise.resolve({ id: "5" }),
-    searchParams: Promise.resolve(searchParams),
-  });
-  render(ui);
+  return renderToStaticMarkup(
+    await ProjectGoogleAnalyticsSettingsPage({
+      params: Promise.resolve({ id: "5" }),
+      searchParams: Promise.resolve(searchParams),
+    })
+  );
 }
 
 describe("ProjectGoogleAnalyticsSettingsPage", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    (getProject as jest.Mock).mockResolvedValue({ id: 5, name: "テストプロジェクト" });
-    (getProjectGoogleAnalyticsStatus as jest.Mock).mockResolvedValue(status);
+    propertyRequests = 0;
+    resetServerRuntime(ADMIN_SESSION);
+    getProject = () => jsonResponse({ id: 5, name: "テストプロジェクト" });
+    getStatus = () => jsonResponse(status);
+    listProperties = () => jsonResponse([]);
+    installFetch({
+      "GET /api/projects/:id": () => getProject(),
+      "GET /api/projects/:id/api-keys/google-analytics": () => getStatus(),
+      "GET /api/projects/:id/api-keys/google-analytics/properties": () => {
+        propertyRequests += 1;
+        return listProperties();
+      },
+    });
   });
 
   it("未連携ならプロパティ一覧を取得せず、状態をフォームへ渡す", async () => {
-    await renderPage();
+    const html = await renderPage();
 
-    expect(screen.getByText("テストプロジェクト — Google Analytics設定")).toBeInTheDocument();
-    expect(listProjectGoogleAnalyticsProperties).not.toHaveBeenCalled();
-    expect(formProps).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 5, connected: false, clientId: "cid", hasClientSecret: true, properties: [] })
-    );
+    expect(html).toContain("テストプロジェクト — Google Analytics設定");
+    expect(propertyRequests).toBe(0);
+    expect(html).toContain('value="cid"');
+    expect(html).toContain("設定済み(変更する場合のみ入力)");
+    expect(html).not.toContain("GA4プロパティの選択");
   });
 
   it("連携済みならプロパティ一覧を取得してフォームへ渡す", async () => {
-    (getProjectGoogleAnalyticsStatus as jest.Mock).mockResolvedValue({ ...status, connected: true });
-    const properties = [{ propertyId: "1", displayName: "A", accountDisplayName: "Acc" }];
-    (listProjectGoogleAnalyticsProperties as jest.Mock).mockResolvedValue(properties);
+    getStatus = () => jsonResponse({ ...status, connected: true });
+    listProperties = () => jsonResponse([{ propertyId: "1", displayName: "A", accountDisplayName: "Acc" }]);
 
-    await renderPage({ connected: "1" });
+    const html = await renderPage({ connected: "1" });
 
-    expect(formProps).toHaveBeenCalledWith(
-      expect.objectContaining({ connected: true, properties, connectedBanner: true })
-    );
+    expect(propertyRequests).toBe(1);
+    expect(html).toContain("GA4プロパティの選択");
+    expect(html).toContain("A (1 / Acc)");
+    expect(html).toContain("Googleアカウントとの連携が完了しました。");
   });
 
-  it("プロパティ一覧の取得に失敗したら理由をフォームへ渡す(Errorでない例外も文字列化する)", async () => {
-    (getProjectGoogleAnalyticsStatus as jest.Mock).mockResolvedValue({ ...status, connected: true });
-    (listProjectGoogleAnalyticsProperties as jest.Mock).mockRejectedValueOnce(new Error("拒否されました"));
-    await renderPage({ error: "access_denied" });
-    expect(formProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ properties: [], propertiesError: "拒否されました", errorBanner: "access_denied" })
-    );
+  it("プロパティ一覧の取得に失敗したら理由をフォームへ渡す(取得失敗の応答も、通信そのものの失敗も文字列にする)", async () => {
+    getStatus = () => jsonResponse({ ...status, connected: true });
+    listProperties = () => textResponse("拒否されました", 403);
+    const first = await renderPage({ error: "access_denied" });
+    expect(first).toContain("プロパティ一覧を取得できませんでした: APIエラー (403): 拒否されました");
+    expect(first).toContain("連携に失敗しました: access_denied");
 
-    (listProjectGoogleAnalyticsProperties as jest.Mock).mockRejectedValueOnce("失敗");
-    await renderPage();
-    expect(formProps).toHaveBeenLastCalledWith(expect.objectContaining({ propertiesError: "失敗" }));
+    const inner = global.fetch as jest.Mock;
+    global.fetch = jest.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith("/properties")) throw "失敗";
+      return inner(input, init);
+    }) as unknown as typeof fetch;
+    expect(await renderPage()).toContain("プロパティ一覧を取得できませんでした: 失敗");
   });
 
   it("状態を取得できなければ未設定として扱う", async () => {
-    (getProjectGoogleAnalyticsStatus as jest.Mock).mockRejectedValue(new Error("down"));
+    getStatus = () => textResponse("down", 503);
 
-    await renderPage();
+    const html = await renderPage();
 
-    expect(formProps).toHaveBeenCalledWith(
-      expect.objectContaining({ connected: false, propertyId: null, clientId: null, hasClientSecret: false })
-    );
+    expect(html).not.toContain('value="cid"');
+    expect(html).toContain("未設定</span>");
+    expect(html).not.toContain("GA4プロパティの選択");
   });
 
   it("プロジェクトが無ければ404", async () => {
-    (getProject as jest.Mock).mockRejectedValue(new Error("not found"));
+    getProject = () => textResponse("not found", 404);
 
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
-    expect(notFound).toHaveBeenCalled();
+  });
+
+  it("管理者でなければ / へ戻す", async () => {
+    resetServerRuntime({ user: { id: "u-1", role: "user" } });
+    await expect(renderPage()).rejects.toThrow("NEXT_REDIRECT:/");
   });
 });

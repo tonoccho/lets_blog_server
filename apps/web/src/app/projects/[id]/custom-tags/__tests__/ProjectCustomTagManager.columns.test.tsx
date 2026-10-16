@@ -1,24 +1,39 @@
 import { render, screen } from "@testing-library/react";
+import { useSession } from "next-auth/react";
 import type { CustomTag } from "@/lib/apiClient";
+import { installFetch, jsonResponse, resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
 import { ProjectCustomTagManager } from "../ProjectCustomTagManager";
 
-jest.mock("@/app/custom-tags/CustomTagGenerationForm", () => ({
-  CustomTagGenerationForm: () => <div>GENERATION_FORM</div>,
+/**
+ * 自前のモジュール(CssSelectorPrefixForm・CustomTagGenerationForm・CustomTagGenerationResult・CustomTagManager・
+ * Server Action・@/lib/session・@/lib/apiClient)は差し替えない。差し替えるのは Next.js の実行基盤・`next-auth/react`
+ * (ブラウザのセッション取得)と外部との通信(fetch)だけ(#1835)。
+ */
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
-jest.mock("@/app/custom-tags/CustomTagGenerationResult", () => ({
-  CustomTagGenerationResult: () => <div>GENERATION_RESULT</div>,
-}));
-jest.mock("@/app/custom-tags/CustomTagManager", () => ({
-  SAMPLE_CONTENT: "",
-  TemplateEditor: () => <div>TEMPLATE_EDITOR</div>,
-  buildPreviewSrcDoc: () => "",
-  fetchPreview: jest.fn().mockResolvedValue({ html: "", css: "" }),
-}));
-jest.mock("../CssSelectorPrefixForm", () => ({ CssSelectorPrefixForm: () => <div>PREFIX_FORM</div> }));
-jest.mock("../actions", () => ({
-  upsertProjectCustomTagAction: jest.fn(),
-  deleteProjectCustomTagAction: jest.fn(),
-}));
+jest.mock("next-auth/react");
+
+beforeEach(() => {
+  resetServerRuntime(ADMIN_SESSION);
+  (useSession as jest.Mock).mockReturnValue({
+    data: { user: { email: "a@example.com", role: "admin" }, expires: "2099-01-01" },
+    status: "authenticated",
+    update: jest.fn(),
+  });
+  installFetch({
+    "POST /projects/7/custom-tags/preview": () => jsonResponse({ html: "", css: "" }),
+  });
+});
 
 const base = { projectId: 7, projectName: "案件", projectSlug: "slug", cssSelectorPrefix: null };
 

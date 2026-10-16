@@ -1,31 +1,29 @@
-import { render, screen } from "@testing-library/react";
-import ProjectAdSenseSettingsPage from "../page";
-import { getProject, getProjectAdSenseStatus, listProjectAdSenseAccounts } from "@/lib/apiClient";
-import { notFound } from "next/navigation";
-
+/**
+ * @jest-environment node
+ */
 /**
  * issue #1232: AdSense設定ページ(サーバーコンポーネント)。連携済みのときだけアカウント一覧を取得し、
  * 取得に失敗しても画面全体は落とさず理由をフォームへ渡す(手入力で復旧できる)。
  */
-jest.mock("@/lib/apiClient", () => ({
-  getProject: jest.fn(),
-  getProjectAdSenseStatus: jest.fn(),
-  listProjectAdSenseAccounts: jest.fn(),
-}));
-jest.mock("@/lib/session", () => ({ requireAdminSession: jest.fn() }));
+// 自前の @/lib/session・@/lib/apiClient・Breadcrumb・ProjectAdSenseSettingsForm は差し替えない。
+// 差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1835)。
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 jest.mock("next/navigation", () => ({
-  notFound: jest.fn(() => {
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
-  }),
-}));
-jest.mock("@/components/Breadcrumb", () => ({ Breadcrumb: () => null }));
-const formProps = jest.fn();
-jest.mock("../../../ProjectAdSenseSettingsForm", () => ({
-  ProjectAdSenseSettingsForm: (props: unknown) => {
-    formProps(props);
-    return <div data-testid="adsense-form" />;
   },
 }));
+import { renderToStaticMarkup } from "react-dom/server";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import ProjectAdSenseSettingsPage from "../page";
 
 const status = {
   configured: false,
@@ -35,83 +33,98 @@ const status = {
   connected: false,
 };
 
+let getProject: () => Response;
+let getStatus: () => Response;
+let listAccounts: () => Response;
+let accountRequests: number;
+
 async function renderPage(searchParams: { connected?: string; error?: string } = {}) {
-  const ui = await ProjectAdSenseSettingsPage({
-    params: Promise.resolve({ id: "5" }),
-    searchParams: Promise.resolve(searchParams),
-  });
-  render(ui);
+  return renderToStaticMarkup(
+    await ProjectAdSenseSettingsPage({
+      params: Promise.resolve({ id: "5" }),
+      searchParams: Promise.resolve(searchParams),
+    })
+  );
 }
 
 describe("ProjectAdSenseSettingsPage", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    (getProject as jest.Mock).mockResolvedValue({ id: 5, name: "テストプロジェクト" });
-    (getProjectAdSenseStatus as jest.Mock).mockResolvedValue(status);
+    accountRequests = 0;
+    resetServerRuntime(ADMIN_SESSION);
+    getProject = () => jsonResponse({ id: 5, name: "テストプロジェクト" });
+    getStatus = () => jsonResponse(status);
+    listAccounts = () => jsonResponse([]);
+    installFetch({
+      "GET /api/projects/:id": () => getProject(),
+      "GET /api/projects/:id/api-keys/adsense": () => getStatus(),
+      "GET /api/projects/:id/api-keys/adsense/accounts": () => {
+        accountRequests += 1;
+        return listAccounts();
+      },
+    });
   });
 
   it("未連携ならアカウント一覧を取得せず、状態をフォームへ渡す", async () => {
-    await renderPage();
+    const html = await renderPage();
 
-    expect(screen.getByText("テストプロジェクト — Google AdSense設定")).toBeInTheDocument();
-    expect(listProjectAdSenseAccounts).not.toHaveBeenCalled();
-    expect(formProps).toHaveBeenCalledWith(
-      expect.objectContaining({
-        projectId: 5,
-        connected: false,
-        configured: false,
-        clientId: "cid",
-        hasClientSecret: true,
-        accounts: [],
-      })
-    );
+    expect(html).toContain("テストプロジェクト — Google AdSense設定");
+    expect(accountRequests).toBe(0);
+    expect(html).toContain("未設定");
+    expect(html).toContain('value="cid"');
+    expect(html).toContain("設定済み(変更する場合のみ入力)");
+    expect(html).not.toContain("AdSenseアカウントの選択");
   });
 
   it("連携済みならアカウント一覧を取得してフォームへ渡す", async () => {
-    (getProjectAdSenseStatus as jest.Mock).mockResolvedValue({ ...status, connected: true });
-    const accounts = [{ accountId: "pub-1", displayName: "A" }];
-    (listProjectAdSenseAccounts as jest.Mock).mockResolvedValue(accounts);
+    getStatus = () => jsonResponse({ ...status, connected: true });
+    listAccounts = () => jsonResponse([{ accountId: "pub-1", displayName: "A" }]);
 
-    await renderPage({ connected: "1" });
+    const html = await renderPage({ connected: "1" });
 
-    expect(formProps).toHaveBeenCalledWith(
-      expect.objectContaining({ connected: true, accounts, connectedBanner: true })
-    );
+    expect(accountRequests).toBe(1);
+    expect(html).toContain("AdSenseアカウントの選択");
+    expect(html).toContain("A (pub-1)");
+    expect(html).toContain("Googleアカウントとの連携が完了しました。");
   });
 
-  it("アカウント一覧の取得に失敗したら理由をフォームへ渡す(Errorでない例外も文字列化する)", async () => {
-    (getProjectAdSenseStatus as jest.Mock).mockResolvedValue({ ...status, connected: true });
-    (listProjectAdSenseAccounts as jest.Mock).mockRejectedValueOnce(new Error("拒否されました"));
-    await renderPage({ error: "access_denied" });
-    expect(formProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({ accounts: [], accountsError: "拒否されました", errorBanner: "access_denied" })
-    );
+  it("アカウント一覧の取得に失敗したら理由をフォームへ渡す(取得失敗の応答も、通信そのものの失敗も文字列にする)", async () => {
+    getStatus = () => jsonResponse({ ...status, connected: true });
+    listAccounts = () => textResponse("拒否されました", 403);
+    const first = await renderPage({ error: "access_denied" });
+    expect(first).toContain("アカウント一覧を取得できませんでした: APIエラー (403): 拒否されました");
+    expect(first).toContain("連携に失敗しました: access_denied");
 
-    (listProjectAdSenseAccounts as jest.Mock).mockRejectedValueOnce("失敗");
-    await renderPage();
-    expect(formProps).toHaveBeenLastCalledWith(expect.objectContaining({ accountsError: "失敗" }));
+    installFetch({
+      "GET /api/projects/:id": () => getProject(),
+      "GET /api/projects/:id/api-keys/adsense": () => getStatus(),
+    });
+    const fetchWithStringFailure = global.fetch as jest.Mock;
+    global.fetch = jest.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith("/adsense/accounts")) throw "失敗";
+      return fetchWithStringFailure(input, init);
+    }) as unknown as typeof fetch;
+    expect(await renderPage()).toContain("アカウント一覧を取得できませんでした: 失敗");
   });
 
   it("状態を取得できなければ未設定として扱う", async () => {
-    (getProjectAdSenseStatus as jest.Mock).mockRejectedValue(new Error("down"));
+    getStatus = () => textResponse("down", 503);
 
-    await renderPage();
+    const html = await renderPage();
 
-    expect(formProps).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connected: false,
-        configured: false,
-        accountId: null,
-        clientId: null,
-        hasClientSecret: false,
-      })
-    );
+    expect(html).toContain("未設定");
+    expect(html).not.toContain('value="cid"');
+    expect(html).toContain("未設定</span>");
+    expect(html).not.toContain("AdSenseアカウントの選択");
   });
 
   it("プロジェクトが無ければ404", async () => {
-    (getProject as jest.Mock).mockRejectedValue(new Error("not found"));
+    getProject = () => textResponse("not found", 404);
 
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
-    expect(notFound).toHaveBeenCalled();
+  });
+
+  it("管理者でなければ / へ戻す", async () => {
+    resetServerRuntime({ user: { id: "u-1", role: "user" } });
+    await expect(renderPage()).rejects.toThrow("NEXT_REDIRECT:/");
   });
 });

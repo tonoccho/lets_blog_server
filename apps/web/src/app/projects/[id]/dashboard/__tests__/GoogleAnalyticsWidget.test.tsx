@@ -89,4 +89,24 @@ describe("GoogleAnalyticsWidget", () => {
 
     expect(screen.getByTestId("ga-channel-breakdown")).toBeInTheDocument();
   });
+
+  it("数値が取れていない(null)ときは、各指標を「-」で表示し、期間は出さない", () => {
+    render(
+      <GoogleAnalyticsWidget
+        report={{
+          eligible: true,
+          sessions: null,
+          activeUsers: null,
+          pageViews: null,
+          periodLabel: null,
+          errorMessage: null,
+          dailyDataPoints: [],
+          channelBreakdown: [],
+        }}
+      />
+    );
+
+    expect(screen.getAllByText("-")).toHaveLength(3);
+    expect(screen.getByText("セッション数")).toBeInTheDocument();
+  });
 });

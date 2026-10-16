@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { hydrateRoot } from "react-dom/client";
 import { TagDesignSettingsPanel } from "../TagDesignSettingsPanel";
-import { generateTagDesignAction, saveTagDesignSettingAction } from "../actions";
 import type { TagDesignPreset, TagDesignSetting } from "@/lib/apiClient";
 
 /**
@@ -23,10 +22,64 @@ import type { TagDesignPreset, TagDesignSetting } from "@/lib/apiClient";
  * ブラウザは無効化されたフォーム部品にキー入力を配送しないため、そもそも競合の入力口
  * 自体が物理的に存在しなくなる。
  */
-jest.mock("../actions", () => ({
-  saveTagDesignSettingAction: jest.fn(),
-  generateTagDesignAction: jest.fn(),
+
+/**
+ * 自前の Server Action(../actions)・@/lib/session・@/lib/apiClient は差し替えない。差し替えるのは
+ * Next.js の実行基盤と外部との通信(fetch)だけ(#1835)。保存と生成の要求は、gateway の向こう側(content-service)の
+ * 代役が受け取った URL と本文で確かめる。
+ */
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
+
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+
+interface Recorded {
+  path: string;
+  body: Record<string, string | undefined>;
+}
+const saved: Recorded[] = [];
+const generated: Recorded[] = [];
+let save: () => Response | Promise<Response> = () => jsonResponse({});
+let generate: () => Response | Promise<Response> = () => jsonResponse({ id: 1, type: "tag_design_generation", status: "running" });
+
+const record = (into: Recorded[], url: string, init: RequestInit) =>
+  into.push({ path: new URL(url).pathname, body: JSON.parse(String(init.body)) });
+
+beforeEach(() => {
+  saved.length = 0;
+  generated.length = 0;
+  resetServerRuntime(ADMIN_SESSION);
+  save = () => jsonResponse({});
+  generate = () => jsonResponse({ id: 1, type: "tag_design_generation", status: "running" });
+  installFetch({
+    "PUT /api/projects/:id/tag-design-settings/:type": (url, init) => {
+      record(saved, url, init);
+      return save();
+    },
+    "PUT /api/tag-design-settings/:type": (url, init) => {
+      record(saved, url, init);
+      return save();
+    },
+    "POST /api/projects/:id/tag-design-settings/:type/generate/jobs": (url, init) => {
+      record(generated, url, init);
+      return generate();
+    },
+    "POST /api/tag-design-settings/:type/generate/jobs": (url, init) => {
+      record(generated, url, init);
+      return generate();
+    },
+  });
+});
 
 const presets: TagDesignPreset[] = [
   {
@@ -351,12 +404,8 @@ describe("TagDesignEditor のタグ種別切り替えとプリセット・色", 
 });
 
 describe("AIでデザインを生成するフォーム", () => {
-  beforeEach(() => {
-    (generateTagDesignAction as jest.Mock).mockReset();
-  });
-
   it("生成に失敗するとエラーメッセージを表示する", async () => {
-    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ error: "生成に失敗しました。" });
+    generate = () => textResponse("生成に失敗しました。", 502);
 
     render(
       <TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={buildMultiTagSettings()} />
@@ -369,11 +418,11 @@ describe("AIでデザインを生成するフォーム", () => {
       fireEvent.click(screen.getByRole("button", { name: "生成" }));
     });
 
-    expect(screen.getByText("生成に失敗しました。")).toBeInTheDocument();
+    expect(screen.getByText("APIエラー (502): 生成に失敗しました。")).toBeInTheDocument();
   });
 
   it("生成の要求が受理されたら、保存済みとは言わず処理キューに追加された旨を示し、プロンプト欄を空にする(issue #1409)", async () => {
-    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ jobId: 23, status: "running" });
+    generate = () => jsonResponse({ id: 23, type: "tag_design_generation", status: "running" });
 
     render(
       <TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={buildMultiTagSettings()} />
@@ -386,7 +435,7 @@ describe("AIでデザインを生成するフォーム", () => {
       fireEvent.click(screen.getByRole("button", { name: "生成" }));
     });
 
-    expect(generateTagDesignAction).toHaveBeenCalledWith(1, "TOC", "緑にして");
+    expect(generated).toEqual([{ path: "/api/projects/1/tag-design-settings/TOC/generate/jobs", body: { prompt: "緑にして" } }]);
     const notice = screen.getByTestId("tag-design-queued");
     expect(notice).toHaveAttribute("data-job-id", "23");
     expect(notice).toHaveTextContent("処理キューに追加されました");
@@ -399,7 +448,7 @@ describe("AIでデザインを生成するフォーム", () => {
   });
 
   it("グローバル(projectId null)でも同じく projectId null のまま要求する(issue #1409)", async () => {
-    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ jobId: 24, status: "running" });
+    generate = () => jsonResponse({ id: 24, type: "tag_design_generation", status: "running" });
 
     render(
       <TagDesignSettingsPanel projectId={null} presets={twoPresets} settings={buildMultiTagSettings()} />
@@ -410,11 +459,11 @@ describe("AIでデザインを生成するフォーム", () => {
       fireEvent.click(screen.getByRole("button", { name: "生成" }));
     });
 
-    expect(generateTagDesignAction).toHaveBeenCalledWith(null, "TOC", "p");
+    expect(generated).toEqual([{ path: "/api/tag-design-settings/TOC/generate/jobs", body: { prompt: "p" } }]);
   });
 
   it("ジョブが満杯で failed として返ったら、待ち行列が満杯である旨を表示する(issue #1409)", async () => {
-    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({ jobId: 25, status: "failed" });
+    generate = () => jsonResponse({ id: 25, type: "tag_design_generation", status: "failed" });
 
     render(
       <TagDesignSettingsPanel projectId={1} presets={twoPresets} settings={buildMultiTagSettings()} />
@@ -439,10 +488,6 @@ describe("処理キューの「結果を見る」から開いた生成結果と�
     cssContent: ".generated{color:green;}",
   };
 
-  beforeEach(() => {
-    (saveTagDesignSettingAction as jest.Mock).mockReset();
-  });
-
   function renderWithResult(result = jobResult, projectId: number | null = 1) {
     return render(
       <TagDesignSettingsPanel
@@ -466,7 +511,7 @@ describe("処理キューの「結果を見る」から開いた生成結果と�
     expect(block).toHaveTextContent("<div>generated</div>");
     // 保存するまで編集欄は変わらない
     expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).not.toContain("generated");
-    expect(saveTagDesignSettingAction).not.toHaveBeenCalled();
+    expect(saved).toEqual([]);
   });
 
   it("別のタグ種別の編集画面に切り替えると、そのタグ種別の結果ではないので表示しない", () => {
@@ -480,17 +525,15 @@ describe("処理キューの「結果を見る」から開いた生成結果と�
   });
 
   it("「保存」は現在のプリセット・色に生成したCSS/HTMLを添えて既存の保存アクションへ渡し、編集欄へも反映する", async () => {
-    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ success: true });
     renderWithResult();
 
     await act(async () => {
       fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
     });
 
-    const [, formData] = (saveTagDesignSettingAction as jest.Mock).mock.calls[0] as [unknown, FormData];
-    expect(Object.fromEntries(formData.entries())).toEqual({
-      projectId: "1",
-      tagType: "BLOGCARD",
+    expect(saved).toHaveLength(1);
+    expect(saved[0].path).toBe("/api/projects/1/tag-design-settings/BLOGCARD");
+    expect(saved[0].body).toEqual({
       presetId: "default",
       backgroundColor: "#ffffff",
       textColor: "#111111",
@@ -507,32 +550,28 @@ describe("処理キューの「結果を見る」から開いた生成結果と�
   });
 
   it("グローバル(projectId null)の結果は projectId を空にして保存する", async () => {
-    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ success: true });
     renderWithResult(jobResult, null);
 
     await act(async () => {
       fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
     });
 
-    const [, formData] = (saveTagDesignSettingAction as jest.Mock).mock.calls[0] as [unknown, FormData];
-    expect(formData.get("projectId")).toBe("");
+    expect(saved[0].path).toBe("/api/tag-design-settings/BLOGCARD");
   });
 
   it("HTMLテンプレートが空の結果(構造変更なし)は、現在のHTMLテンプレートを保つ", async () => {
-    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ success: true });
     renderWithResult({ ...jobResult, htmlTemplate: "" });
 
     await act(async () => {
       fireEvent.click(within(screen.getByTestId("tag-design-generated")).getByRole("button", { name: "保存" }));
     });
 
-    const [, formData] = (saveTagDesignSettingAction as jest.Mock).mock.calls[0] as [unknown, FormData];
-    expect(formData.get("htmlTemplate")).toBe("<div>{{title}}</div>");
-    expect(formData.get("customCss")).toBe(".generated{color:green;}");
+    expect(saved[0].body.htmlTemplate).toBe("<div>{{title}}</div>");
+    expect(saved[0].body.customCss).toBe(".generated{color:green;}");
   });
 
   it("保存に失敗したら理由を表示し、結果を残して再試行できる", async () => {
-    (saveTagDesignSettingAction as jest.Mock).mockResolvedValue({ error: "APIエラー (403): 権限がありません" });
+    save = () => textResponse("権限がありません", 403);
     renderWithResult();
 
     await act(async () => {
@@ -550,7 +589,7 @@ describe("処理キューの「結果を見る」から開いた生成結果と�
     fireEvent.click(screen.getByRole("button", { name: "この結果を適用" }));
 
     expect((screen.getByRole("textbox", { name: /^CSS/ }) as HTMLTextAreaElement).value).toBe(".generated{color:green;}");
-    expect(saveTagDesignSettingAction).not.toHaveBeenCalled();
+    expect(saved).toEqual([]);
     expect(screen.queryByTestId("tag-design-generated")).not.toBeInTheDocument();
   });
 
@@ -603,11 +642,6 @@ describe("プレビューの自動更新(300msデバウンス)", () => {
 });
 
 describe("TagDesignSettingsPanel / TagDesignEditor の残りの分岐(#1144の機会に合わせて押さえる)", () => {
-  beforeEach(() => {
-    (generateTagDesignAction as jest.Mock).mockReset();
-    (saveTagDesignSettingAction as jest.Mock).mockReset();
-  });
-
   it("HTMLテンプレートに未知のプレースホルダがあっても空文字に置き換わる(置換不能キーのフォールバック)", () => {
     const settings: TagDesignSetting[] = [
       {
@@ -644,7 +678,7 @@ describe("TagDesignSettingsPanel / TagDesignEditor の残りの分岐(#1144の�
   });
 
   it("AI生成がエラーでもデータでもない結果を返した場合、生成結果は表示されない(dataの??nullフォールバック)", async () => {
-    (generateTagDesignAction as jest.Mock).mockResolvedValueOnce({});
+    generate = () => jsonResponse({});
 
     render(<TagDesignSettingsPanel projectId={1} presets={presets} settings={buildMultiTagSettings()} />);
 
@@ -666,13 +700,11 @@ describe("TagDesignSettingsPanel / TagDesignEditor の残りの分岐(#1144の�
   });
 
   it("保存中はボタンが「保存中…」表示になる", async () => {
-    let resolveSave: (value: { success: boolean }) => void = () => {};
-    (saveTagDesignSettingAction as jest.Mock).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveSave = resolve;
-        })
-    );
+    let resolveSave: (value: Response) => void = () => {};
+    save = () =>
+      new Promise<Response>((resolve) => {
+        resolveSave = resolve;
+      });
 
     render(<TagDesignSettingsPanel projectId={1} presets={presets} settings={buildSettings()} />);
 
@@ -681,7 +713,7 @@ describe("TagDesignSettingsPanel / TagDesignEditor の残りの分岐(#1144の�
     expect(await screen.findByRole("button", { name: "保存中…" })).toBeInTheDocument();
 
     await act(async () => {
-      resolveSave({ success: true });
+      resolveSave(jsonResponse({}));
     });
   });
 

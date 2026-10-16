@@ -89,4 +89,24 @@ describe("AdSenseWidget", () => {
 
     expect(screen.getByTestId("adsense-platform-breakdown")).toBeInTheDocument();
   });
+
+  it("数値が取れていない(null)ときは、各指標を「-」で表示し、期間は出さない", () => {
+    render(
+      <AdSenseWidget
+        report={{
+          eligible: true,
+          estimatedEarnings: null,
+          clicks: null,
+          impressions: null,
+          periodLabel: null,
+          errorMessage: null,
+          dailyDataPoints: [],
+          platformBreakdown: [],
+        }}
+      />
+    );
+
+    expect(screen.getAllByText("-")).toHaveLength(3);
+    expect(screen.getByText("推定収益")).toBeInTheDocument();
+  });
 });

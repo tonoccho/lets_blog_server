@@ -74,21 +74,48 @@ describe("ProjectsTable", () => {
     expect(screen.getByText("登録済みプロジェクトはありません")).toBeInTheDocument();
   });
 
-  it("列見出しクリックで並び替え、もう一度押すと昇順/降順が切り替わる", () => {
-    render(
-      <ProjectsTable
-        projects={[project({ id: 1, name: "B" }), project({ id: 2, name: "A" })]}
-        timezone={null}
-      />
-    );
+  const names = () => screen.getAllByRole("link", { name: /^[ABC]$/ }).map((a) => a.textContent);
+  const rows = [
+    project({ id: 1, name: "B", createdAt: "2026-08-02T00:00:00Z" }),
+    project({ id: 2, name: "C", createdAt: "2026-08-01T00:00:00Z" }),
+    project({ id: 3, name: "A", createdAt: "2026-08-03T00:00:00Z" }),
+  ];
+
+  it("列見出しクリックで名前順に並び替え、もう一度押すと昇順/降順が切り替わる", () => {
+    render(<ProjectsTable projects={rows} timezone={null} />);
+    expect(names()).toEqual(["B", "C", "A"]);
 
     const nameHeader = screen.getByText("名前").closest("th") as HTMLElement;
     fireEvent.click(nameHeader);
+    expect(names()).toEqual(["A", "B", "C"]);
+    expect(nameHeader).toHaveTextContent("名前 ↑");
+
     fireEvent.click(nameHeader);
+    expect(names()).toEqual(["C", "B", "A"]);
+    expect(nameHeader).toHaveTextContent("名前 ↓");
 
+    fireEvent.click(nameHeader);
+    expect(names()).toEqual(["A", "B", "C"]);
+  });
+
+  it("作成日の見出しで作成日順に並び替え、別の列へ切り替えると昇順に戻り、元の列の矢印は消える", () => {
+    render(<ProjectsTable projects={rows} timezone={null} />);
+    const nameHeader = screen.getByText("名前").closest("th") as HTMLElement;
     const createdAtHeader = screen.getByText("作成日").closest("th") as HTMLElement;
-    fireEvent.click(createdAtHeader);
 
-    expect(screen.getAllByRole("link", { name: /^[AB]$/ }).length).toBe(2);
+    fireEvent.click(nameHeader);
+    fireEvent.click(nameHeader);
+    fireEvent.click(createdAtHeader);
+    expect(names()).toEqual(["C", "B", "A"]);
+    expect(createdAtHeader).toHaveTextContent("作成日 ↑");
+    expect(nameHeader).not.toHaveTextContent("↓");
+
+    fireEvent.click(createdAtHeader);
+    expect(names()).toEqual(["A", "B", "C"]);
+  });
+
+  it("作成日は渡されたタイムゾーンで整形して表示する", () => {
+    render(<ProjectsTable projects={[project({ createdAt: "2026-08-01T20:00:00Z" })]} timezone="Asia/Tokyo" />);
+    expect(screen.getByText("2026/8/2 5:00:00")).toBeInTheDocument();
   });
 });

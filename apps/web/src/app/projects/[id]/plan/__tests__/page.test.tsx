@@ -3,90 +3,94 @@
  */
 
 /**
- * issue #1366(親issue #1261 分割B-2): `plan/page.tsx` は `getViewerTimeZone()` を
- * 呼んでおらず、`ArticlePlanWorkspace` へタイムゾーンを渡す経路が無かった。
- * `admin/ssh-keys/__tests__/page.test.tsx`(issue #1362)と同じ手法(対象ページを
- * 非同期関数として直接呼び、依存モジュールを丸ごとモックする)で、`getViewerTimeZone()`の
- * 値がそのまま`ArticlePlanWorkspace`へ渡ることを検査する。
- *
- * `ArticlePlanWorkspace`は実際にはレンダリングしない(`() => null`にモック)。ページを
- * 直接呼んだ戻り値は`React.createElement`が作るプレーンなオブジェクト(JSX)なので、
- * `.props`を読めば渡された値をそのまま検査できる。
+ * issue #1366(親issue #1261 分割B-2): `/projects/[id]/plan` が閲覧者のタイムゾーンを壁打ち一覧へ渡し、
+ * セッションの作成日がそのタイムゾーンで表示されることを、描画結果で確かめる。
+ * あわせて、`?issue=` で開いたときの Issue のタイトル・構成案・紐付くセッションの受け渡しも確かめる。
+ * 自前のモジュールは差し替えない。差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1835)。
  */
-
-const requireAdminSession = jest.fn();
-const getViewerTimeZone = jest.fn();
-jest.mock('@/lib/session', () => ({
-  requireAdminSession: (...a: unknown[]) => requireAdminSession(...a),
-  getViewerTimeZone: (...a: unknown[]) => getViewerTimeZone(...a),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  notFound: () => {
+    throw new Error("NEXT_NOT_FOUND");
+  },
 }));
+import { renderToStaticMarkup } from "react-dom/server";
+import { jsonResponse, resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
+import { installPlanBackend, PROJECT, type PlanBackend } from "./planBackend";
+import ArticlePlanPage from "../page";
 
-const getProject = jest.fn();
-const listArticlePlanSessions = jest.fn();
-const listArticlePlanIssues = jest.fn();
-const getArticlePlanSessionByIssue = jest.fn();
-const getArticlePlanIssueDescription = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  getProject: (...a: unknown[]) => getProject(...a),
-  listArticlePlanSessions: (...a: unknown[]) => listArticlePlanSessions(...a),
-  listArticlePlanIssues: (...a: unknown[]) => listArticlePlanIssues(...a),
-  getArticlePlanSessionByIssue: (...a: unknown[]) => getArticlePlanSessionByIssue(...a),
-  getArticlePlanIssueDescription: (...a: unknown[]) => getArticlePlanIssueDescription(...a),
-}));
+let backend: PlanBackend;
 
-jest.mock('../ArticlePlanWorkspace', () => ({ ArticlePlanWorkspace: () => null }));
-jest.mock('../ArticlePlanIssueList', () => ({ ArticlePlanIssueList: () => null }));
+const render = async (issue?: string) =>
+  renderToStaticMarkup(await ArticlePlanPage({ params: Promise.resolve({ id: "7" }), searchParams: Promise.resolve({ issue }) }));
 
-import ArticlePlanPage from '../page';
-import { ArticlePlanWorkspace } from '../ArticlePlanWorkspace';
+beforeEach(() => {
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installPlanBackend();
+  backend.project = () => jsonResponse({ ...PROJECT, githubRepository: null });
+  backend.sessions = () =>
+    jsonResponse([{ id: 1, title: "企画テーマ", githubIssueNumber: null, createdAt: "2026-09-08T20:03:35Z", updatedAt: "2026-09-08T20:03:35Z" }]);
+});
 
-interface ReactElementLike {
-  type: unknown;
-  props: Record<string, unknown>;
-}
+describe("/projects/[id]/plan のタイムゾーン受け渡し(issue #1366)", () => {
+  it("個人設定TZが設定されているとき、そのTZの日付でセッションの作成日を表示する(UTC の 9/8 20:03 は東京の 9/9)", async () => {
+    backend.profile = () => jsonResponse({ id: 1, timezone: "Asia/Tokyo" });
+    const html = await render();
+    expect(html).toContain("20260909-企画テーマ");
+  });
 
-/** ページが返すJSXツリーから`ArticlePlanWorkspace`要素を探す(直下の子として描画される)。 */
-function findWorkspaceElement(pageResult: ReactElementLike): ReactElementLike {
-  const children = pageResult.props.children as ReactElementLike[];
-  const workspace = children.find((child) => child?.type === ArticlePlanWorkspace);
-  if (!workspace) {
-    throw new Error('ArticlePlanWorkspace要素が見つかりません');
-  }
-  return workspace;
-}
+  it("個人設定TZが未設定(null)のとき、マウント前の固定文字列を出す", async () => {
+    const html = await render();
+    expect(html).toContain(`${TIMEZONE_PENDING_PLACEHOLDER}-企画テーマ`);
+  });
+});
 
-describe('/projects/[id]/plan のタイムゾーン受け渡し(issue #1366)', () => {
+describe("/projects/[id]/plan?issue= (Issue を指定して開く)", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    requireAdminSession.mockResolvedValue({ user: { role: 'admin' } });
-    getProject.mockResolvedValue({ id: 1, name: 'テストプロジェクト', githubRepository: null });
-    listArticlePlanSessions.mockResolvedValue([]);
-    listArticlePlanIssues.mockResolvedValue([]);
-    getArticlePlanSessionByIssue.mockResolvedValue(null);
-    getArticlePlanIssueDescription.mockResolvedValue(null);
+    backend.project = () => jsonResponse(PROJECT);
+    backend.issues = () =>
+      jsonResponse([
+        { number: 3, title: "対象のIssue", htmlUrl: "https://github.com/o/r/issues/3", state: "open" },
+        { number: 4, title: "別のIssue", htmlUrl: "https://github.com/o/r/issues/4", state: "open" },
+      ]);
+    backend.sessionByIssue = () =>
+      jsonResponse({
+        id: 9,
+        title: "壁打ち",
+        githubIssueNumber: 3,
+        history: [{ role: "user", content: "最初の発言" }],
+        createdAt: "2026-09-08T20:03:35Z",
+        updatedAt: "2026-09-08T20:03:35Z",
+      });
+    backend.issueDescription = () => jsonResponse({ body: "## 既存の構成案" });
   });
 
-  it('個人設定TZが設定されているとき、そのままArticlePlanWorkspaceへ渡す', async () => {
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
-
-    const result = (await ArticlePlanPage({
-      params: Promise.resolve({ id: '1' }),
-      searchParams: Promise.resolve({}),
-    })) as unknown as ReactElementLike;
-
-    const workspace = findWorkspaceElement(result);
-    expect(workspace.props.timezone).toBe('Asia/Tokyo');
+  it("Issue のタイトル・紐付くセッションの履歴・既存の構成案を、壁打ちの画面へ渡す", async () => {
+    const html = await render("3");
+    expect(html).toContain("Issue #3: 対象のIssue");
+    expect(html).toContain("最初の発言");
+    expect(html).toContain("## 既存の構成案");
+    expect(backend.requests).toContain("GET by-issue/3");
+    expect(backend.requests).toContain("GET description/3");
   });
 
-  it('個人設定TZが未設定(null)のとき、nullのままArticlePlanWorkspaceへ渡す', async () => {
-    getViewerTimeZone.mockResolvedValue(null);
+  it("一覧に無い Issue 番号ならタイトルは出さず、番号だけを示す", async () => {
+    const html = await render("99");
+    expect(html).toContain("Issue #99");
+    expect(html).not.toContain("Issue #99:");
+  });
 
-    const result = (await ArticlePlanPage({
-      params: Promise.resolve({ id: '1' }),
-      searchParams: Promise.resolve({}),
-    })) as unknown as ReactElementLike;
-
-    const workspace = findWorkspaceElement(result);
-    expect(workspace.props.timezone).toBeNull();
+  it("Issue の指定が無ければ、Issue 単位の取得をしない", async () => {
+    await render();
+    expect(backend.requests.filter((r) => r.includes("by-issue") || r.includes("description"))).toEqual([]);
   });
 });

@@ -1,10 +1,22 @@
 import { render, screen, within } from '@testing-library/react';
 import type { AiConnection } from '@/lib/apiClient';
 
-const listAiConnections = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  listAiConnections: (...a: unknown[]) => listAiConnections(...a),
-}));
+/**
+ * 自前の @/lib/apiClient・@/lib/session は差し替えない。差し替えるのは Next.js の実行基盤と
+ * 外部との通信(fetch)だけ(#1835)。
+ */
+jest.mock('server-only', () => ({}));
+jest.mock('next/server', () => require('@/lib/__tests__/testUtils/serverRuntime').nextServerModule);
+jest.mock('next/headers', () => require('@/lib/__tests__/testUtils/serverRuntime').nextHeadersModule);
+jest.mock('next-auth/jwt', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthJwtModule);
+jest.mock('next-auth', () => require('@/lib/__tests__/testUtils/serverRuntime').nextAuthModule);
+
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from '@/lib/__tests__/testUtils/serverRuntime';
+import { ADMIN_SESSION } from '@/lib/__tests__/testUtils/webAdminRuntime';
+
+/** project-service(AI 接続状況)の代役。呼ばれたプロジェクトIDを記録する。 */
+const requestedProjects: string[] = [];
+let listAiConnections: () => Response = () => jsonResponse([]);
 
 import { AiConnectionWidget, AiConnectionWidgetFallback, AiConnectionWidgetView } from '../AiConnectionWidget';
 
@@ -106,22 +118,30 @@ describe('AiConnectionWidgetView(issue #1501 / #1672)', () => {
 describe('AiConnectionWidget(取得)', () => {
   let errorSpy: jest.SpyInstance;
   beforeEach(() => {
-    listAiConnections.mockReset();
+    requestedProjects.length = 0;
+    resetServerRuntime(ADMIN_SESSION);
+    listAiConnections = () => jsonResponse([]);
+    installFetch({
+      'GET /api/projects/:id/ai-connections': (_u, _i, [id]) => {
+        requestedProjects.push(id);
+        return listAiConnections();
+      },
+    });
     errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
   });
   afterEach(() => errorSpy.mockRestore());
 
   it('listAiConnections(projectId)の結果を描く', async () => {
-    listAiConnections.mockResolvedValue(all());
+    listAiConnections = () => jsonResponse(all());
 
     render(await AiConnectionWidget({ projectId: 7 }));
 
-    expect(listAiConnections).toHaveBeenCalledWith(7);
+    expect(requestedProjects).toEqual(['7']);
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
   });
 
   it('取得に失敗したら記録し、失敗表示を出す', async () => {
-    listAiConnections.mockRejectedValue(new Error('down'));
+    listAiConnections = () => textResponse('down', 503);
 
     render(await AiConnectionWidget({ projectId: 7 }));
 

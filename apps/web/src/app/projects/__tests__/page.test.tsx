@@ -3,97 +3,86 @@
  */
 
 /**
- * issue #1364(親issue #1261 分割C): `/projects` の作成日セルをクライアント部品
- * `ViewerDateTime` へ切り出した。ページが `getViewerTimeZone()` の値をそのまま
- * `personalTimeZone` として、各行の `project.createdAt` を `iso` としてそのまま渡すことを、
- * `apps/web/src/app/users/__tests__/page.test.tsx`(issue #1364)と同じ手法で検査する。
- *
- * ページを直接呼ぶだけ(実際にはレンダリングしない)なので、`ViewerDateTime`本体を
- * importしたりモックしたりする必要は無い(理由は`users/__tests__/page.test.tsx`の
- * 先頭コメント参照)。
+ * issue #1364(親issue #1261 分割C): `/projects` の作成日セルはクライアント部品 `ViewerDateTime` で描く。
+ * ページが閲覧者の個人設定タイムゾーン(identity-service の `/api/identity/me`)と、各行の `createdAt` を
+ * そのまま渡して、表示が個人設定のタイムゾーンで整形されることを、描画結果で確かめる。
+ * 自前のモジュールは差し替えない。差し替えるのは Next.js の実行基盤と外部との通信(fetch)だけ(#1835)。
  */
-
-const requireAdminSession = jest.fn();
-const getViewerTimeZone = jest.fn();
-jest.mock('@/lib/session', () => ({
-  requireAdminSession: (...a: unknown[]) => requireAdminSession(...a),
-  getViewerTimeZone: (...a: unknown[]) => getViewerTimeZone(...a),
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
 }));
 
-const listProjects = jest.fn();
-jest.mock('@/lib/apiClient', () => ({
-  listProjects: (...a: unknown[]) => listProjects(...a),
-}));
-
-jest.mock('../ProjectForm', () => ({ ProjectForm: () => null }));
-jest.mock('../ProjectsTable', () => ({ ProjectsTable: () => null }));
-
-import ProjectsPage from '../page';
-
-interface ReactElementLike {
-  type: unknown;
-  props: Record<string, unknown>;
-}
-
-/** ページが返すJSXツリーから、`type`関数の名前が`name`と一致する要素を再帰的にすべて集める。 */
-function collectElementsByTypeName(node: unknown, name: string, results: ReactElementLike[] = []): ReactElementLike[] {
-  if (node == null || typeof node !== 'object') {
-    return results;
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      collectElementsByTypeName(child, name, results);
-    }
-    return results;
-  }
-  const element = node as ReactElementLike;
-  if (typeof element.type === 'function' && (element.type as { name: string }).name === name) {
-    results.push(element);
-  }
-  if (element.props && 'children' in element.props) {
-    collectElementsByTypeName(element.props.children, name, results);
-  }
-  return results;
-}
+import { renderToStaticMarkup } from "react-dom/server";
+import { installFetch, jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { TIMEZONE_PENDING_PLACEHOLDER } from "@/lib/formatDate";
+import ProjectsPage from "../page";
 
 function project(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     id: 1,
-    name: 'テストプロジェクト',
-    slug: 'test-project',
+    name: "テストプロジェクト",
+    slug: "test-project",
     localSite: null,
     testSite: null,
     productionSite: null,
-    createdAt: '2026-09-08T20:03:35',
+    createdAt: "2026-09-08T20:03:35Z",
     ...overrides,
   };
 }
 
-describe('/projects の作成日セルとTZ受け渡し(issue #1364)', () => {
+describe("/projects の作成日セルとTZ受け渡し(issue #1364)", () => {
+  let profile: () => Response;
   beforeEach(() => {
-    jest.clearAllMocks();
-    requireAdminSession.mockResolvedValue({ user: { role: 'admin' } });
+    resetServerRuntime(ADMIN_SESSION);
+    profile = () => jsonResponse({ id: 1, timezone: "Asia/Tokyo" });
+    installFetch({
+      "GET /api/projects": () => jsonResponse([project()]),
+      "GET /api/identity/me": () => profile(),
+    });
   });
 
-  it('一覧取得に成功したとき、各プロジェクトのcreatedAtと個人設定TZをそのままViewerDateTimeへ渡す', async () => {
-    const projects = [project({ id: 1, createdAt: '2026-09-08T20:03:35' })];
-    listProjects.mockResolvedValue(projects);
-    getViewerTimeZone.mockResolvedValue('Asia/Tokyo');
-
-    const result = (await ProjectsPage()) as unknown as ReactElementLike;
-
-    const elements = collectElementsByTypeName(result, 'ViewerDateTime');
-    expect(elements).toHaveLength(1);
-    expect(elements[0].props.iso).toBe(projects[0].createdAt);
-    expect(elements[0].props.personalTimeZone).toBe('Asia/Tokyo');
+  it("個人設定のタイムゾーンがあれば、その時刻で作成日を表示する(UTC の 20:03 は東京の翌 05:03)", async () => {
+    const html = renderToStaticMarkup(await ProjectsPage());
+    expect(html).toContain("2026/9/9 5:03:35");
+    expect(html).not.toContain(TIMEZONE_PENDING_PLACEHOLDER);
   });
 
-  it('一覧取得に失敗したとき、catch(() => [])で空配列にフォールバックしViewerDateTimeを描画しない', async () => {
-    listProjects.mockRejectedValue(new Error('一覧取得に失敗しました(テスト用)'));
-    getViewerTimeZone.mockResolvedValue(null);
+  it("個人設定のタイムゾーンが無ければ、マウント前の固定文字列を出す", async () => {
+    profile = () => jsonResponse({ id: 1, timezone: null });
+    const html = renderToStaticMarkup(await ProjectsPage());
+    expect(html).toContain(TIMEZONE_PENDING_PLACEHOLDER);
+  });
 
-    const result = (await ProjectsPage()) as unknown as ReactElementLike;
+  it("プロフィールを取得できなくても、一覧は描画する(タイムゾーンは未設定扱い)", async () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    profile = () => textResponse("Service Unavailable", 503);
+    const html = renderToStaticMarkup(await ProjectsPage());
+    expect(html).toContain("テストプロジェクト");
+    expect(html).toContain(TIMEZONE_PENDING_PLACEHOLDER);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 
-    expect(collectElementsByTypeName(result, 'ViewerDateTime')).toHaveLength(0);
+  it("環境が紐付いたプロジェクトでは、紐付いた環境のバッジに色が付く", async () => {
+    installFetch({
+      "GET /api/projects": () =>
+        jsonResponse([project({ localSite: { id: 1 }, testSite: { id: 2 }, productionSite: { id: 3 } }), project({ id: 2 })]),
+      "GET /api/identity/me": () => jsonResponse({ id: 1, timezone: "UTC" }),
+    });
+    const html = renderToStaticMarkup(await ProjectsPage());
+    expect(html).toContain("bg-blue-100");
+    expect(html).toContain("bg-amber-100");
+    expect(html).toContain("bg-green-100");
+    expect(html).toContain('href="/projects/1/plan"');
+    expect(html).toContain('href="/projects/2/tags"');
   });
 });

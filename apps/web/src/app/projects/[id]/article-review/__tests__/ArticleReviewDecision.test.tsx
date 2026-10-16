@@ -2,15 +2,35 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ArticleReviewDecision } from "../ArticleReviewDecision";
 
-const approveArticleReviewAction = jest.fn();
-const rejectArticleReviewAction = jest.fn();
-jest.mock("../actions", () => ({
-  approveArticleReviewAction: (...args: unknown[]) => approveArticleReviewAction(...args),
-  rejectArticleReviewAction: (...args: unknown[]) => rejectArticleReviewAction(...args),
-}));
-
+/**
+ * 自前の Server Action(../actions)・@/lib/session・@/lib/apiClient は差し替えない。差し替えるのは
+ * Next.js の実行基盤(`next/navigation` の `useRouter`)と外部との通信(fetch)だけ(#1835)。
+ */
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
 const refresh = jest.fn();
-jest.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh }),
+}));
+import { jsonResponse, resetServerRuntime, textResponse } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { installReviewBackend, type ReviewBackend } from "./articleReviewBackend";
+
+const APPROVE = "POST /api/projects/7/article-review/pull-requests/201/approve";
+const REJECT = "POST /api/projects/7/article-review/pull-requests/201/reject";
+let backend: ReviewBackend;
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  resetServerRuntime(ADMIN_SESSION);
+  backend = installReviewBackend();
+});
 
 function renderDecision(onSucceeded = jest.fn()) {
   render(<ArticleReviewDecision projectId={7} prNumber={201} onSucceeded={onSucceeded} />);
@@ -18,7 +38,6 @@ function renderDecision(onSucceeded = jest.fn()) {
 }
 
 describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
-  beforeEach(() => jest.clearAllMocks());
 
   it("「レビュー完了」を押しただけではAPIを呼ばず、確認(front matterのstatusに従う旨・マージとブランチ削除)を出す", async () => {
     renderDecision();
@@ -29,7 +48,7 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
     expect(confirm).toHaveTextContent("本番環境へ登録し、Pull Request をマージしてブランチを削除します");
     expect(confirm).toHaveTextContent("front matter");
     expect(confirm).toHaveTextContent("status");
-    expect(approveArticleReviewAction).not.toHaveBeenCalled();
+    expect(backend.requests).toEqual([]);
   });
 
   it("確認で取りやめるとAPIは呼ばれず、確認は閉じて元の操作に戻る", async () => {
@@ -38,20 +57,19 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
     await userEvent.click(screen.getByRole("button", { name: "取りやめる" }));
 
-    expect(approveArticleReviewAction).not.toHaveBeenCalled();
+    expect(backend.requests).toEqual([]);
     expect(screen.queryByRole("group", { name: "レビュー完了の確認" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "レビュー完了" })).toBeEnabled();
   });
 
   it("確認で実行を選ぶとプロジェクトとPR番号でActionを呼び、本番の投稿URLを新しいタブで開くリンクで出し、一覧を取り直す", async () => {
-    approveArticleReviewAction.mockResolvedValue({ productionPostUrl: "https://prod.example/a/", branchDeleted: true });
     const onSucceeded = renderDecision();
 
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
     await userEvent.click(screen.getByRole("button", { name: "実行する" }));
 
     const link = await screen.findByRole("link", { name: /https:\/\/prod\.example\/a\// });
-    expect(approveArticleReviewAction).toHaveBeenCalledWith(7, 201);
+    expect(backend.requests).toEqual([APPROVE]);
     expect(link).toHaveAttribute("href", "https://prod.example/a/");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
@@ -65,7 +83,7 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
   });
 
   it("ブランチの削除に失敗(branchDeleted=false)しても成功として扱い、削除失敗を補足する", async () => {
-    approveArticleReviewAction.mockResolvedValue({ productionPostUrl: "https://prod.example/a/", branchDeleted: false });
+    backend.approve = () => jsonResponse({ productionPostUrl: "https://prod.example/a/", branchDeleted: false });
     renderDecision();
 
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
@@ -77,8 +95,8 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
   });
 
   it("処理中は進行中の表示になりボタンは押せず、APIは1回しか呼ばれない", async () => {
-    let resolve: (v: { productionPostUrl: string; branchDeleted: boolean }) => void = () => {};
-    approveArticleReviewAction.mockReturnValue(new Promise((r) => (resolve = r)));
+    let resolve: (v: Response) => void = () => {};
+    backend.approve = () => new Promise<Response>((r) => (resolve = r));
     renderDecision();
 
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
@@ -86,14 +104,14 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
 
     expect(await screen.findByRole("button", { name: /本番環境へ登録しています/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "記事差し戻し" })).toBeDisabled();
-    expect(approveArticleReviewAction).toHaveBeenCalledTimes(1);
+    expect(backend.requests).toEqual([APPROVE]);
 
-    resolve({ productionPostUrl: "https://prod.example/a/", branchDeleted: true });
+    resolve(jsonResponse({ productionPostUrl: "https://prod.example/a/", branchDeleted: true }));
     await screen.findByRole("link");
   });
 
   it("失敗したらサーバの理由を表示し、本番の投稿URLも完了の表示も出さず、一覧は取り直さない。再度の操作もできる", async () => {
-    approveArticleReviewAction.mockResolvedValue({ error: "APIエラー (409): レビュー中ではありません" });
+    backend.approve = () => textResponse("レビュー中ではありません", 409);
     const onSucceeded = renderDecision();
 
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
@@ -108,14 +126,13 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
   });
 
   it("失敗の後にやり直して成功すると、エラー表示は消える", async () => {
-    approveArticleReviewAction
-      .mockResolvedValueOnce({ error: "APIエラー (409): x" })
-      .mockResolvedValueOnce({ productionPostUrl: "https://prod.example/b/", branchDeleted: true });
+    backend.approve = () => textResponse("x", 409);
     renderDecision();
 
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
     await userEvent.click(screen.getByRole("button", { name: "実行する" }));
     await screen.findByRole("alert");
+    backend.approve = () => jsonResponse({ productionPostUrl: "https://prod.example/b/", branchDeleted: true });
     await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
     await userEvent.click(screen.getByRole("button", { name: "実行する" }));
 
@@ -125,17 +142,16 @@ describe("ArticleReviewDecision: レビュー完了(issue #1346)", () => {
 });
 
 describe("ArticleReviewDecision: 記事差し戻し(issue #1346)", () => {
-  beforeEach(() => jest.clearAllMocks());
 
   it("指摘事項を入力して「記事差し戻し」を押すと指摘事項つきでActionを呼び、差し戻したことを表示して一覧を取り直す", async () => {
-    rejectArticleReviewAction.mockResolvedValue({ rejected: true });
     const onSucceeded = renderDecision();
 
     await userEvent.type(screen.getByRole("textbox", { name: "指摘事項" }), "見出しの階層を直してください");
     await userEvent.click(screen.getByRole("button", { name: "記事差し戻し" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("記事を差し戻しました");
-    expect(rejectArticleReviewAction).toHaveBeenCalledWith(7, 201, "見出しの階層を直してください");
+    expect(backend.requests).toEqual([REJECT]);
+    expect(backend.rejectBodies).toEqual([{ comment: "見出しの階層を直してください" }]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(onSucceeded).toHaveBeenCalledTimes(1);
@@ -152,12 +168,11 @@ describe("ArticleReviewDecision: 記事差し戻し(issue #1346)", () => {
     await userEvent.click(screen.getByRole("button", { name: "記事差し戻し" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("指摘事項を入力してください");
-    expect(rejectArticleReviewAction).not.toHaveBeenCalled();
+    expect(backend.requests).toEqual([]);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("入力が必要な旨の表示は、入力し直して成功すると消える", async () => {
-    rejectArticleReviewAction.mockResolvedValue({ rejected: true });
     renderDecision();
 
     await userEvent.click(screen.getByRole("button", { name: "記事差し戻し" }));
@@ -170,7 +185,7 @@ describe("ArticleReviewDecision: 記事差し戻し(issue #1346)", () => {
   });
 
   it("失敗したらサーバの理由を表示し、差し戻したことは表示せず、入力した指摘事項は残る", async () => {
-    rejectArticleReviewAction.mockResolvedValue({ error: "APIエラー (409): レビュー中ではありません" });
+    backend.reject = () => textResponse("レビュー中ではありません", 409);
     const onSucceeded = renderDecision();
 
     await userEvent.type(screen.getByRole("textbox", { name: "指摘事項" }), "直して");
@@ -184,8 +199,8 @@ describe("ArticleReviewDecision: 記事差し戻し(issue #1346)", () => {
   });
 
   it("処理中は差し戻しもレビュー完了も押せず、Actionは1回しか呼ばれない", async () => {
-    let resolve: (v: { rejected: boolean }) => void = () => {};
-    rejectArticleReviewAction.mockReturnValue(new Promise((r) => (resolve = r)));
+    let resolve: (v: Response) => void = () => {};
+    backend.reject = () => new Promise<Response>((r) => (resolve = r));
     renderDecision();
 
     await userEvent.type(screen.getByRole("textbox", { name: "指摘事項" }), "直して");
@@ -193,9 +208,43 @@ describe("ArticleReviewDecision: 記事差し戻し(issue #1346)", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: /差し戻しています/ })).toBeDisabled());
     expect(screen.getByRole("button", { name: "レビュー完了" })).toBeDisabled();
-    expect(rejectArticleReviewAction).toHaveBeenCalledTimes(1);
+    expect(backend.requests).toEqual([REJECT]);
 
-    resolve({ rejected: true });
+    resolve(jsonResponse({}));
     await screen.findByRole("status");
+  });
+});
+
+describe("ArticleReviewDecision: サーバの応答が想定の形でないとき", () => {
+  it("レビュー完了の応答に本番の投稿URLが無ければ、その旨を出し、完了としては扱わない", async () => {
+    backend.approve = () => jsonResponse({});
+    const onSucceeded = renderDecision();
+
+    await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
+    await userEvent.click(screen.getByRole("button", { name: "実行する" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("本番の投稿 URL が返りませんでした");
+    expect(onSucceeded).not.toHaveBeenCalled();
+  });
+
+  it("レビュー完了の応答に branchDeleted が無ければ、ブランチは削除できたものとして扱う", async () => {
+    backend.approve = () => jsonResponse({ productionPostUrl: "https://prod.example/a/" });
+    renderDecision();
+
+    await userEvent.click(screen.getByRole("button", { name: "レビュー完了" }));
+    await userEvent.click(screen.getByRole("button", { name: "実行する" }));
+
+    expect(await screen.findByRole("status")).not.toHaveTextContent("ブランチの削除に失敗");
+  });
+
+  it("差し戻しがサーバに拒否されたときは、成功としては扱わない", async () => {
+    backend.reject = () => textResponse("", 409);
+    const onSucceeded = renderDecision();
+
+    await userEvent.type(screen.getByRole("textbox", { name: "指摘事項" }), "直して");
+    await userEvent.click(screen.getByRole("button", { name: "記事差し戻し" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("APIエラー (409)");
+    expect(onSucceeded).not.toHaveBeenCalled();
   });
 });

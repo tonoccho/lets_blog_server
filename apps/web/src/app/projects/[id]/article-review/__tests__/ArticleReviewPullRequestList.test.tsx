@@ -2,13 +2,30 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ArticleReviewPullRequestList } from "../ArticleReviewPullRequestList";
 
-const approveArticleReviewAction = jest.fn();
-jest.mock("../actions", () => ({
-  startArticleReviewAction: jest.fn(),
-  approveArticleReviewAction: (...args: unknown[]) => approveArticleReviewAction(...args),
-  rejectArticleReviewAction: jest.fn(),
+/**
+ * 自前の Server Action・各行の部品・ViewerDateTime は差し替えない。差し替えるのは
+ * Next.js の実行基盤(`next/navigation` の `useRouter`)と外部との通信(fetch)だけ(#1835)。
+ */
+jest.mock("server-only", () => ({}));
+jest.mock("next/server", () => require("@/lib/__tests__/testUtils/serverRuntime").nextServerModule);
+jest.mock("next/headers", () => require("@/lib/__tests__/testUtils/serverRuntime").nextHeadersModule);
+jest.mock("next-auth/jwt", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthJwtModule);
+jest.mock("next-auth", () => require("@/lib/__tests__/testUtils/serverRuntime").nextAuthModule);
+const refresh = jest.fn();
+jest.mock("next/navigation", () => ({
+  redirect: (path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  },
+  useRouter: () => ({ refresh }),
 }));
-jest.mock("next/navigation", () => ({ useRouter: () => ({ refresh: jest.fn() }) }));
+import { resetServerRuntime } from "@/lib/__tests__/testUtils/serverRuntime";
+import { ADMIN_SESSION } from "@/lib/__tests__/testUtils/webAdminRuntime";
+import { installReviewBackend } from "./articleReviewBackend";
+
+beforeEach(() => {
+  resetServerRuntime(ADMIN_SESSION);
+  installReviewBackend();
+});
 
 const pullRequests = [
   {
@@ -81,7 +98,6 @@ describe("ArticleReviewPullRequestList(issue #1340)", () => {
   });
 
   it("レビュー完了後に一覧からPRが消えても(取り直し)、その行は成功の結果つきで残る(issue #1346)", async () => {
-    approveArticleReviewAction.mockResolvedValue({ productionPostUrl: "https://prod.example/a/", branchDeleted: true });
     const { rerender } = render(
       <ArticleReviewPullRequestList projectId={7} pullRequests={pullRequests} timezone="Asia/Tokyo" />
     );

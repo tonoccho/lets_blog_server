@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { ArticlePlanChat } from '../ArticlePlanChat'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { ArticlePlanChat, safeUrlTransform } from '../ArticlePlanChat'
 
 /**
  * 送信中(disabled)入力欄の配色(issue #1121)。
@@ -151,5 +151,103 @@ describe('ArticlePlanChat の Markdown 描画 (issue #1566)', () => {
     ])
     const labels = Array.from(container.querySelectorAll('strong')).map((e) => e.textContent)
     expect(labels).toEqual(['あなた:', 'AI:'])
+  })
+})
+
+describe('ArticlePlanChat の送信と表示', () => {
+  const setup = (over: Partial<React.ComponentProps<typeof ArticlePlanChat>> = {}) => {
+    const onSend = jest.fn().mockResolvedValue(undefined)
+    render(<ArticlePlanChat history={[]} onSend={onSend} isLoading={false} {...over} />)
+    return { onSend, input: screen.getByPlaceholderText('質問や企画案を入力...') as HTMLInputElement }
+  }
+
+  it('履歴が無いときは、チャットを始める案内を出す', () => {
+    setup()
+    expect(screen.getByText(/チャットを始めましょう/)).toBeInTheDocument()
+  })
+
+  it('入力して「送信」を押すと、前後の空白を除いた内容で送信し、入力欄を空にする', async () => {
+    const { onSend, input } = setup()
+    fireEvent.change(input, { target: { value: '  こんにちは  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '送信' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('こんにちは'))
+    expect(input.value).toBe('')
+  })
+
+  it('Enter キーでも送信できる', async () => {
+    const { onSend, input } = setup()
+    fireEvent.change(input, { target: { value: 'やあ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('やあ'))
+  })
+
+  it('空(空白だけ)のまま Enter を押しても、送信しない。Enter 以外のキーでも送信しない', () => {
+    const { onSend, input } = setup()
+    fireEvent.change(input, { target: { value: '   ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(input, { target: { value: 'あ' } })
+    fireEvent.keyDown(input, { key: 'a' })
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('入力が空のあいだは送信ボタンを押せない', () => {
+    const { input } = setup()
+    expect(screen.getByRole('button', { name: '送信' })).toBeDisabled()
+    expect(input).toBeEnabled()
+  })
+
+  it('送信中は「送信中…」を出し、Enter を押しても送らない', () => {
+    const onSend = jest.fn()
+    render(<ArticlePlanChat history={[]} onSend={onSend} isLoading={true} />)
+    const input = screen.getByPlaceholderText('質問や企画案を入力...')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByRole('button', { name: '送信中…' })).toBeDisabled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('Issue を指定して開いているときは、番号(とタイトル)を示す', () => {
+    const first = render(<ArticlePlanChat history={[]} onSend={jest.fn()} isLoading={false} issueNumber={3} issueTitle="対象" />)
+    expect(screen.getByText('Issue #3: 対象')).toBeInTheDocument()
+    first.unmount()
+    render(<ArticlePlanChat history={[]} onSend={jest.fn()} isLoading={false} issueNumber={3} />)
+    expect(screen.getByText('Issue #3')).toBeInTheDocument()
+  })
+
+  it('エラーがあれば表示する', () => {
+    render(<ArticlePlanChat history={[]} onSend={jest.fn()} isLoading={false} error="送れませんでした" />)
+    expect(screen.getByText('送れませんでした')).toBeInTheDocument()
+  })
+
+  it('Markdown の見出し(h1〜h6)・引用・区切り線を、それぞれの要素として描画する', () => {
+    const { container } = render(
+      <ArticlePlanChat
+        history={[{ role: 'assistant', content: '# 1\n\n## 2\n\n### 3\n\n#### 4\n\n##### 5\n\n###### 6\n\n> 引用\n\n---\n\n本文' }]}
+        onSend={jest.fn()}
+        isLoading={false}
+      />
+    )
+    for (const level of [1, 2, 3, 4, 5, 6]) {
+      expect(screen.getByRole('heading', { level, name: String(level) })).toBeInTheDocument()
+    }
+    expect(container.querySelector('blockquote')?.textContent).toContain('引用')
+    expect(container.querySelector('hr')).not.toBeNull()
+  })
+})
+
+describe('safeUrlTransform', () => {
+  it.each([
+    ['https://example.com/a', 'https://example.com/a'],
+    ['  /projects/1  ', '/projects/1'],
+    ['#anchor', '#anchor'],
+    ['../up', '../up'],
+    ['?q=1', '?q=1'],
+    ['mailto:a@example.com', 'mailto:a@example.com'],
+    ['tel:+81', 'tel:+81'],
+    ['plain-relative', 'plain-relative'],
+    ['javascript:alert(1)', ''],
+    ['data:text/html,x', ''],
+    ['ftp://example.com', ''],
+  ])('%j は %j になる', (input, expected) => {
+    expect(safeUrlTransform(input)).toBe(expected)
   })
 })
