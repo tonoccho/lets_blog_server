@@ -1,63 +1,72 @@
 package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobBridgeException;
 import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.project.dto.SyncEnvironmentRequest;
-import java.time.LocalDateTime;
+import com.letsblog.project.repository.ProjectRepository;
+import com.letsblog.project.testsupport.AsyncProxies;
+import com.letsblog.project.testsupport.ProjectWorld;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.task.TaskRejectedException;
+import org.mockito.Mockito;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
-/** 環境間同期ジョブの受理側(issue #1697)。ManagedSiteProvisioningJobStarterTest と同型。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * 環境間同期ジョブの受理側(issue #1697)。ManagedSiteProvisioningJobStarterTest と同型。
+ *
+ * <p>issue #1817: ランナー・同期サービス・トラッカー・GenerationJobClient・CurrentActorService は実物。ランナーは
+ * Springの実際のAOPプロキシ(@Async)で包み、Executorを差し替えて「実行を後に回す」「満杯で拒否する」を再現する。
+ */
 @DisplayName("project-service: 環境間同期ジョブの受理(issue #1697)")
 class ProjectEnvironmentSyncJobStarterTest {
 
     private static final SyncEnvironmentRequest REQUEST =
             new SyncEnvironmentRequest("test", "local", List.of("db", "media"));
-    private static final ActorSnapshot ACTOR =
-            new ActorSnapshot(5L, "sub-5", "a@example.com", "203.0.113.9", "ua", "Bearer abc", true);
-    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 9, 1, 2, 3);
 
-    @Mock
-    private GenerationJobClient generationJobClient;
-    @Mock
-    private ProjectEnvironmentSyncJobRunner runner;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
+    private final ProjectWorld world = new ProjectWorld();
+    private final ProjectRepository projectRepository = Mockito.mock(ProjectRepository.class);
+    private final List<Runnable> deferred = new ArrayList<>();
     private JobHeartbeatTracker tracker;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private ProjectEnvironmentSyncJobRunner realRunner;
     private ProjectEnvironmentSyncJobStarter starter;
 
     @BeforeEach
     void setUp() {
-        // 本物の tracker と同じく、終端の書き込みはその場で実行する。
-        org.mockito.Mockito.lenient().doAnswer(inv -> {
-            inv.<Runnable>getArgument(1).run();
-            return null;
-        }).when(tracker).complete(any(), any());
-        starter = new ProjectEnvironmentSyncJobStarter(generationJobClient, runner, currentActorService, objectMapper, tracker);
+        tracker = new JobHeartbeatTracker(world.generationJobClient, world.objectMapper);
+        ProjectEnvironmentSyncService syncService = new ProjectEnvironmentSyncService(projectRepository,
+                world.siteRepository, world.siteService, world.wordPressSyncClient, world.cmsBridgeClient,
+                world.identityBridgeClient, world.currentActorService);
+        realRunner = new ProjectEnvironmentSyncJobRunner(
+                syncService, world.currentActorService, world.generationJobClient, world.objectMapper, tracker);
+        starterWith(deferred::add);
+        world.actingAs(5L, "admin", "a@example.com").signedInAs("sub-5");
+        world.request.addHeader("X-Forwarded-For", "203.0.113.9");
+        world.request.addHeader("User-Agent", "ua");
+    }
+
+    private void starterWith(java.util.concurrent.Executor executor) {
+        ProjectEnvironmentSyncJobRunner asyncRunner = AsyncProxies.async(realRunner, "environmentSyncExecutor", executor);
+        starter = new ProjectEnvironmentSyncJobStarter(
+                world.generationJobClient, asyncRunner, world.currentActorService, world.objectMapper, tracker);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     @Test
@@ -69,86 +78,98 @@ class ProjectEnvironmentSyncJobStarterTest {
     @Test
     @DisplayName("リクエストスレッドで操作者を取り、ユーザーのBearerでジョブを作り、同じ操作者をランナーへ渡す")
     void startsJobWithActorResolvedInRequestThread() throws Exception {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        GenerationJobSummary job = new GenerationJobSummary(21L, "environment_sync", "running", NOW, NOW);
-        when(generationJobClient.create(eq("environment_sync"), any(), eq("Bearer abc"))).thenReturn(job);
+        world.jobCreated(21L, "environment_sync");
+        AtomicReference<String> actorSeenByRunner = new AtomicReference<>();
+        // ランナーの実行(後で流す)の中で、同じ操作者が引けること。
+        when(projectRepository.findById(3L)).thenAnswer(inv -> {
+            actorSeenByRunner.set(world.currentActorService.getCurrentActorId() + "/"
+                    + world.currentActorService.getCurrentActorKeycloakSub() + "/"
+                    + world.currentActorService.getRemoteIp() + "/" + world.currentActorService.getUserAgent());
+            return Optional.empty();
+        });
 
         GenerationJobSummary result = starter.start(3L, REQUEST);
 
-        assertSame(job, result);
-        verify(runner).run(21L, 3L, REQUEST, ACTOR);
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).create(eq("environment_sync"), payload.capture(), eq("Bearer abc"));
-        JsonNode json = objectMapper.readTree(payload.getValue());
+        assertEquals(21L, result.id());
+        assertEquals("running", result.status());
+        var create = world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0);
+        assertEquals("Bearer token-5", create.header("Authorization"));
+        JsonNode body = world.bodyOf(create);
+        assertEquals("environment_sync", body.get("type").asText());
+        JsonNode json = world.objectMapper.readTree(body.get("requestPayload").asText());
         // キューUIが結果の遷移先(プロジェクトの設定タブ)を決めるのに projectId を読む。
         assertEquals(3L, json.get("projectId").asLong());
         assertEquals("test", json.get("from").asText());
         assertEquals("local", json.get("to").asText());
         assertEquals("db", json.get("targets").get(0).asText());
         assertEquals("media", json.get("targets").get(1).asText());
+        assertEquals(1, deferred.size(), "ランナーは受理のスレッドでは動かさず、Executorへ渡す");
+        deferred.forEach(Runnable::run);
+        assertEquals("5/sub-5/203.0.113.9/ua", actorSeenByRunner.get());
     }
 
     @Test
     @DisplayName("実行枠と待ち行列が満杯なら、ジョブを queue_full の failed にして返す")
-    void queueFull() throws Exception {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(22L, "environment_sync", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any(), any());
+    void queueFull() {
+        world.jobCreated(22L, "environment_sync");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
+        try {
+            starterWith(saturated);
 
-        GenerationJobSummary result = starter.start(3L, REQUEST);
+            GenerationJobSummary result = starter.start(3L, REQUEST);
 
-        assertEquals("failed", result.status());
-        assertEquals(22L, result.id());
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(22L), eq("failed"), payload.capture());
-        JsonNode json = objectMapper.readTree(payload.getValue());
-        assertEquals("queue_full", json.get("errorType").asText());
-        assertFalse(json.get("error").asText().isBlank());
+            assertEquals("failed", result.status());
+            assertEquals(22L, result.id());
+            var failed = world.jobUpdates(22L, "failed");
+            assertEquals(1, failed.size());
+            assertEquals("queue_full", failed.get(0).payload().get("errorType").asText());
+            assertFalse(failed.get(0).payload().get("error").asText().isBlank());
+        } finally {
+            release.countDown();
+            saturated.shutdown();
+        }
     }
 
     @Test
     @DisplayName("ジョブを作れなければ(ai-service 不達)ランナーを起動せず例外を伝える")
     void createFailurePropagates() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenThrow(new com.letsblog.common.client.GenerationJobBridgeException("down", null));
+        world.fail("POST", "/api/internal/ai/generation-jobs", 500);
 
-        assertThrows(com.letsblog.common.client.GenerationJobBridgeException.class, () -> starter.start(3L, REQUEST));
+        assertThrows(GenerationJobBridgeException.class, () -> starter.start(3L, REQUEST));
 
-        verify(runner, never()).run(any(), any(), any(), any());
+        assertTrue(deferred.isEmpty());
     }
 
     @Test
     @DisplayName("ランナーへ渡す前に追跡を始める(順番待ちの間もハートビートが打たれる。#1724)")
     void tracksBeforeRunning() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(31L, "x", "running", NOW, NOW));
+        world.jobCreated(31L, "environment_sync");
 
-        start();
+        starter.start(3L, REQUEST);
 
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(tracker, runner);
-        order.verify(tracker).track(31L);
-        order.verify(runner).run(eq(31L), any(), any(), any());
+        assertTrue(tracker.isTracked(31L), "ランナーが動き出す前(順番待ち)でも追跡されている");
+        assertEquals(1, deferred.size());
+        tracker.heartbeat();
+        assertEquals("queued", world.jobUpdates(31L, "running").get(0).payload().get("phase").asText());
     }
 
     @Test
     @DisplayName("満杯で拒否されたら failed の書き込みを tracker 経由で行い、追跡を外す(#1724)")
     void queueFullCompletesThroughTracker() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(32L, "x", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any(), any());
+        world.jobCreated(32L, "environment_sync");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
+        try {
+            starterWith(saturated);
 
-        start();
+            starter.start(3L, REQUEST);
 
-        verify(tracker).track(32L);
-        verify(tracker).complete(eq(32L), any());
-        verify(generationJobClient).updateStatus(eq(32L), eq("failed"), any());
-    }
-
-    private void start() {
-        starter.start(3L, REQUEST);
+            assertFalse(tracker.isTracked(32L));
+            assertEquals(1, world.jobUpdates(32L, "failed").size());
+        } finally {
+            release.countDown();
+            saturated.shutdown();
+        }
     }
 }

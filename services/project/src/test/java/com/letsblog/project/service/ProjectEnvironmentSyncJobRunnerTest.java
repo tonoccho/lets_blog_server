@@ -4,43 +4,40 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.slf4j.LoggerFactory;
-import java.util.stream.Collectors;
-
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.project.client.BearerScope;
-import com.letsblog.project.client.IdentityClient;
+import com.letsblog.project.domain.Project;
 import com.letsblog.project.dto.SyncEnvironmentRequest;
+import com.letsblog.project.repository.ProjectRepository;
+import com.letsblog.project.testsupport.FakeHttpServer;
+import com.letsblog.project.testsupport.ProjectWorld;
+import com.letsblog.project.testsupport.ProjectWorld.JobUpdate;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.mock.web.MockHttpServletRequest;
+import org.slf4j.LoggerFactory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 /**
  * 環境間同期ジョブの実行本体(issue #1697)。{@code @Async}はSpringプロキシ経由でしか効かないため、
  * メソッドを同期的に呼んで検証する(ManagedSiteProvisioningJobRunnerTest と同じ)。
+ *
+ * <p>issue #1817: ProjectEnvironmentSyncService・各クライアント・GenerationJobClient・CurrentActorService は実物。
+ * DB(ProjectRepository・SiteRepository)とHTTPの向こう(ai-service・provision-agent・identity-service)だけを差し替える。
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("project-service: 環境間同期ジョブランナー(issue #1697)")
@@ -50,73 +47,95 @@ class ProjectEnvironmentSyncJobRunnerTest {
             new SyncEnvironmentRequest("test", "local", List.of("db"));
     private static final ActorSnapshot ACTOR =
             new ActorSnapshot(5L, "sub-5", "a@example.com", "203.0.113.9", "ua", "Bearer abc", true);
+    private static final String RECONCILE = "/api/internal/identity/project-users/3/sites/20/reconcile-roles";
 
     @Mock
-    private ProjectEnvironmentSyncService syncService;
-    @Mock
-    private GenerationJobClient generationJobClient;
+    private ProjectRepository projectRepository;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private final CurrentActorService currentActorService =
-            new CurrentActorService(new MockHttpServletRequest(), mock(IdentityClient.class));
+    private final ProjectWorld world = new ProjectWorld();
     private JobHeartbeatTracker tracker;
     private ProjectEnvironmentSyncJobRunner runner;
 
     @BeforeEach
     void setUp() {
-        tracker = new JobHeartbeatTracker(generationJobClient, objectMapper);
+        tracker = new JobHeartbeatTracker(world.generationJobClient, world.objectMapper);
+        ProjectEnvironmentSyncService syncService = new ProjectEnvironmentSyncService(projectRepository,
+                world.siteRepository, world.siteService, world.wordPressSyncClient, world.cmsBridgeClient,
+                world.identityBridgeClient, world.currentActorService);
         runner = new ProjectEnvironmentSyncJobRunner(
-                syncService, currentActorService, generationJobClient, objectMapper, tracker);
+                syncService, world.currentActorService, world.generationJobClient, world.objectMapper, tracker);
+        world.http.on("POST", "/sync", FakeHttpServer.Response.empty(200));
+        world.http.on("POST", RECONCILE, FakeHttpServer.Response.empty(200));
+        Project project = new Project();
+        project.setId(3L);
+        project.setTestSiteId(10L);
+        project.setLocalSiteId(20L);
+        lenient().when(projectRepository.findById(3L)).thenReturn(Optional.of(project));
+        world.addManagedSite(10L, "from-slug", "wp_from");
+        world.addManagedSite(20L, "to-slug", "wp_to");
     }
 
-    private JsonNode lastPayload(String status) throws Exception {
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(21L), eq(status), payload.capture());
-        return objectMapper.readTree(payload.getValue());
+    @AfterEach
+    void close() {
+        BearerScope.call(null, () -> null);
+        world.close();
+    }
+
+    private JsonNode lastPayload(String status) {
+        List<JobUpdate> updates = world.jobUpdates(21L, status);
+        assertEquals(1, updates.size());
+        return updates.get(0).payload();
     }
 
     @Test
     @DisplayName("ジョブの完了で同期が実行され、syncing を running で通知してから done にする")
-    void success() throws Exception {
-        doAnswer(invocation -> {
-            // ジョブのスレッドでも操作者(監査ログの参照先)が引ける。5分で切れる利用者のBearerは持ち込まない(#1723)。
-            assertEquals(5L, currentActorService.getCurrentActorId());
-            assertEquals("a@example.com", currentActorService.getCurrentActorEmail());
-            assertNull(currentActorService.getAuthorizationHeader());
-            assertNull(BearerScope.current());
-            return null;
-        }).when(syncService).sync(3L, "test", "local", List.of("db"));
+    void success() {
+        AtomicReference<String> seen = new AtomicReference<>();
+        // ジョブのスレッドでも操作者(監査ログの参照先)が引ける。5分で切れる利用者のBearerは持ち込まない(#1723)。
+        when(projectRepository.findById(3L)).thenAnswer(inv -> {
+            seen.set(world.currentActorService.getCurrentActorId() + "/" + world.currentActorService.getCurrentActorEmail()
+                    + "/" + world.currentActorService.getAuthorizationHeader() + "/" + BearerScope.current());
+            Project project = new Project();
+            project.setId(3L);
+            project.setTestSiteId(10L);
+            project.setLocalSiteId(20L);
+            return Optional.of(project);
+        });
 
         runner.run(21L, 3L, REQUEST, ACTOR);
 
-        verify(syncService).sync(3L, "test", "local", List.of("db"));
-        InOrder order = inOrder(generationJobClient);
-        ArgumentCaptor<String> running = ArgumentCaptor.forClass(String.class);
-        order.verify(generationJobClient).updateStatus(eq(21L), eq("running"), running.capture());
-        assertEquals("syncing", objectMapper.readTree(running.getValue()).get("phase").asText());
-        ArgumentCaptor<String> done = ArgumentCaptor.forClass(String.class);
-        order.verify(generationJobClient).updateStatus(eq(21L), eq("done"), done.capture());
-        JsonNode result = objectMapper.readTree(done.getValue());
+        assertEquals("5/a@example.com/null/null", seen.get());
+        assertEquals(1, world.http.requests("POST", "/sync").size());
+        assertEquals(List.of("running", "done"), world.jobUpdates(21L).stream().map(JobUpdate::status).toList());
+        assertEquals("syncing", world.jobUpdates(21L).get(0).payload().get("phase").asText());
+        JsonNode result = lastPayload("done");
         assertEquals("done", result.get("phase").asText());
         assertEquals(3L, result.get("projectId").asLong());
         assertEquals("test", result.get("from").asText());
         assertEquals("local", result.get("to").asText());
+        assertEquals("db", result.get("targets").get(0).asText());
+        // ロール再整合も、利用者のBearerではなくサービス自身のトークンで依頼する。
+        assertEquals("Bearer " + ProjectWorld.SERVICE_TOKEN, world.http.requests("POST", RECONCILE).get(0).header("Authorization"));
     }
 
     @Test
     @DisplayName("同期中のハートビートは syncing の段階を保って running を書く(#1724)")
-    void heartbeatKeepsSyncingPhase() throws Exception {
+    void heartbeatKeepsSyncingPhase() {
         tracker.track(21L);
-        doAnswer(invocation -> {
+        when(projectRepository.findById(3L)).thenAnswer(inv -> {
             tracker.heartbeat();
-            return null;
-        }).when(syncService).sync(any(), any(), any(), any());
+            Project project = new Project();
+            project.setId(3L);
+            project.setTestSiteId(10L);
+            project.setLocalSiteId(20L);
+            return Optional.of(project);
+        });
 
         runner.run(21L, 3L, REQUEST, ACTOR);
 
-        ArgumentCaptor<String> running = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient, org.mockito.Mockito.times(2)).updateStatus(eq(21L), eq("running"), running.capture());
-        assertEquals("syncing", objectMapper.readTree(running.getAllValues().get(1)).get("phase").asText());
+        List<JobUpdate> running = world.jobUpdates(21L, "running");
+        assertEquals(2, running.size());
+        assertEquals("syncing", running.get(1).payload().get("phase").asText());
     }
 
     @Test
@@ -129,21 +148,21 @@ class ProjectEnvironmentSyncJobRunnerTest {
 
         assertFalse(tracker.isTracked(21L));
         // running は syncing の1回だけ(ハートビートの running は無い)
-        verify(generationJobClient, org.mockito.Mockito.times(1)).updateStatus(eq(21L), eq("running"), any());
+        assertEquals(1, world.jobUpdates(21L, "running").size());
     }
 
     @Test
     @DisplayName("failed を書いた後も追跡が外れ、ハートビートが running に戻さない(#1724)")
     void noHeartbeatAfterFailed() {
         tracker.track(21L);
-        doThrow(new IllegalStateException("x")).when(syncService).sync(any(), any(), any(), any());
+        when(projectRepository.findById(3L)).thenThrow(new IllegalStateException("x"));
 
         runner.run(21L, 3L, REQUEST, ACTOR);
         tracker.heartbeat();
 
         assertFalse(tracker.isTracked(21L));
-        verify(generationJobClient, org.mockito.Mockito.times(1)).updateStatus(eq(21L), eq("running"), any());
-        verify(generationJobClient).updateStatus(eq(21L), eq("failed"), any());
+        assertEquals(1, world.jobUpdates(21L, "running").size());
+        assertEquals(1, world.jobUpdates(21L, "failed").size());
     }
 
     @Test
@@ -151,29 +170,27 @@ class ProjectEnvironmentSyncJobRunnerTest {
     void unboundAfterRun() {
         runner.run(21L, 3L, REQUEST, ACTOR);
 
-        assertNull(currentActorService.getCurrentActorKeycloakSub());
+        assertNull(world.currentActorService.getCurrentActorKeycloakSub());
         assertNull(BearerScope.current());
     }
 
     @Test
     @DisplayName("同期の失敗は sync_failed の failed で、原因が読める")
-    void syncFailed() throws Exception {
-        doThrow(new ProvisioningException("環境同期に失敗しました: wp-cli", null))
-                .when(syncService).sync(any(), any(), any(), any());
+    void syncFailed() {
+        world.http.status("POST", "/sync", 500, "wp-cli");
 
         runner.run(21L, 3L, REQUEST, ACTOR);
 
         JsonNode result = lastPayload("failed");
         assertEquals("sync_failed", result.get("errorType").asText());
         assertTrue(result.get("error").asText().contains("wp-cli"));
-        verify(generationJobClient, never()).updateStatus(eq(21L), eq("done"), any());
+        assertTrue(world.jobUpdates(21L, "done").isEmpty());
     }
 
     @Test
     @DisplayName("プロジェクトが無い(ProjectNotFoundException)は project_not_found の failed")
-    void projectNotFound() throws Exception {
-        doThrow(new ProjectNotFoundException("id 3 のプロジェクトは登録されていません"))
-                .when(syncService).sync(any(), any(), any(), any());
+    void projectNotFound() {
+        when(projectRepository.findById(3L)).thenReturn(Optional.empty());
 
         runner.run(21L, 3L, REQUEST, ACTOR);
 
@@ -182,20 +199,20 @@ class ProjectEnvironmentSyncJobRunnerTest {
 
     @Test
     @DisplayName("環境の指定不正(IllegalArgumentException)・サイト未登録は invalid_request の failed")
-    void invalidRequest() throws Exception {
-        doThrow(new IllegalArgumentException("本番環境は同期先に指定できません"))
-                .when(syncService).sync(any(), any(), any(), any());
-
-        runner.run(21L, 3L, REQUEST, ACTOR);
+    void invalidRequest() {
+        runner.run(21L, 3L, new SyncEnvironmentRequest("test", "production", List.of("db")), ACTOR);
 
         assertEquals("invalid_request", lastPayload("failed").get("errorType").asText());
     }
 
     @Test
     @DisplayName("サイトが無い(SiteNotFoundException)も invalid_request")
-    void siteNotFound() throws Exception {
-        doThrow(new SiteNotFoundException("id 9 のサイトは登録されていません"))
-                .when(syncService).sync(any(), any(), any(), any());
+    void siteNotFound() {
+        Project project = new Project();
+        project.setId(3L);
+        project.setTestSiteId(99L);
+        project.setLocalSiteId(20L);
+        when(projectRepository.findById(3L)).thenReturn(Optional.of(project));
 
         runner.run(21L, 3L, REQUEST, ACTOR);
 
@@ -204,8 +221,8 @@ class ProjectEnvironmentSyncJobRunnerTest {
 
     @Test
     @DisplayName("想定外の例外は unexpected_error の failed(メッセージが無くても読める文言になる)")
-    void unexpected() throws Exception {
-        doThrow(new IllegalStateException()).when(syncService).sync(any(), any(), any(), any());
+    void unexpected() {
+        when(projectRepository.findById(3L)).thenThrow(new IllegalStateException());
 
         runner.run(21L, 3L, REQUEST, ACTOR);
 
@@ -218,10 +235,10 @@ class ProjectEnvironmentSyncJobRunnerTest {
     @DisplayName("リクエストの無いスレッドでも、取り置いた利用者のBearerはサービス間呼び出し用に束縛しない(#1723)")
     void userBearerNotBoundOnJobThread() throws Exception {
         AtomicReference<String> seen = new AtomicReference<>();
-        doAnswer(invocation -> {
-            seen.set(String.valueOf(BearerScope.current()) + "/" + currentActorService.getAuthorizationHeader());
-            return null;
-        }).when(syncService).sync(any(), any(), any(), any());
+        when(projectRepository.findById(3L)).thenAnswer(inv -> {
+            seen.set(BearerScope.current() + "/" + world.currentActorService.getAuthorizationHeader());
+            return Optional.empty();
+        });
 
         Thread t = new Thread(() -> runner.run(21L, 3L, REQUEST, ACTOR));
         t.start();
@@ -255,27 +272,25 @@ class ProjectEnvironmentSyncJobRunnerTest {
                 .collect(Collectors.toList());
     }
 
-    @org.junit.jupiter.api.Test
-    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
+    @Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() {
+        List<ILoggingEvent> lines = completionLines(() -> runner.run(21L, 3L, REQUEST, ACTOR));
 
-        List<ILoggingEvent> lines = completionLines(() -> { runner.run(21L, 3L, REQUEST, ACTOR); });
-
-        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
-        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
-        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+        assertEquals(1, lines.size(), lines.toString());
+        assertEquals(Level.INFO, lines.get(0).getLevel());
+        assertTrue(lines.get(0).getFormattedMessage()
                 .matches("job completed: kind=environment_sync job_id=21 duration_ms=\\d+ outcome=success"),
                 lines.get(0).getFormattedMessage());
     }
 
-    @org.junit.jupiter.api.Test
-    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
-        doThrow(new ProvisioningException("同期失敗", null))
-                .when(syncService).sync(any(), any(), any(), any());
-        List<ILoggingEvent> lines = completionLines(() -> { runner.run(21L, 3L, REQUEST, ACTOR); });
+    @Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() {
+        world.fail("POST", "/sync", 500);
+        List<ILoggingEvent> lines = completionLines(() -> runner.run(21L, 3L, REQUEST, ACTOR));
 
-        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
-        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
-        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+        assertEquals(1, lines.size(), lines.toString());
+        assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        assertTrue(lines.get(0).getFormattedMessage()
                 .matches("job completed: kind=environment_sync job_id=21 duration_ms=\\d+ outcome=ProvisioningException"),
                 lines.get(0).getFormattedMessage());
     }

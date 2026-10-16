@@ -2,23 +2,20 @@ package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.project.client.AnalyticsBridgeClient;
 import com.letsblog.project.client.AnalyticsBridgeClient.GoogleAnalyticsCredentials;
-import com.letsblog.project.cms.LetsblogPluginStatus;
 import com.letsblog.project.cms.LetsblogPluginStatus.State;
 import com.letsblog.project.domain.Project;
 import com.letsblog.project.domain.ProjectPvRule;
 import com.letsblog.project.domain.ProjectPvSyncState;
-import com.letsblog.project.domain.Site;
 import com.letsblog.project.dto.PvRulesView;
 import com.letsblog.project.repository.ProjectPvRuleRepository;
 import com.letsblog.project.repository.ProjectPvSyncStateRepository;
 import com.letsblog.project.repository.ProjectRepository;
-import com.letsblog.project.repository.SiteRepository;
+import com.letsblog.project.testsupport.ProjectWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -37,10 +34,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -63,28 +56,23 @@ class PvRuleServiceTest {
     @Mock
     private ProjectRepository projectRepository;
     @Mock
-    private SiteRepository siteRepository;
-    @Mock
-    private SiteService siteService;
-    @Mock
-    private AnalyticsBridgeClient analyticsBridgeClient;
-    @Mock
     private ProjectPvRuleRepository ruleRepository;
     @Mock
     private ProjectPvSyncStateRepository syncRepository;
-    @Mock
-    private CurrentActorService currentActorService;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    // 自前のクラス(SiteService・AnalyticsBridgeClient・CurrentActorService)は実物で、HTTPはフェイクが答える(issue #1817)。
+    private final ProjectWorld world = new ProjectWorld();
+    private final ObjectMapper mapper = world.objectMapper;
     private final List<ProjectPvRule> stored = new ArrayList<>();
     private ProjectPvSyncState savedState;
     private PvRuleService service;
 
     @BeforeEach
     void setUp() {
-        service = new PvRuleService(projectRepository, siteRepository, siteService, analyticsBridgeClient,
-                ruleRepository, syncRepository, currentActorService, mapper, Clock.fixed(NOW, ZoneOffset.UTC));
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
+        service = new PvRuleService(projectRepository, world.siteRepository, world.siteService,
+                world.analyticsBridgeClient, ruleRepository, syncRepository, world.currentActorService, mapper,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        world.request.addHeader("Authorization", "Bearer t");
         when(ruleRepository.findByProjectIdOrderByIdAsc(7L)).thenAnswer(i -> List.copyOf(stored));
         when(ruleRepository.save(any(ProjectPvRule.class))).thenAnswer(i -> {
             ProjectPvRule rule = i.getArgument(0);
@@ -99,6 +87,11 @@ class PvRuleServiceTest {
         when(syncRepository.findById(7L)).thenAnswer(i -> Optional.ofNullable(savedState));
     }
 
+    @AfterEach
+    void close() {
+        world.close();
+    }
+
     private void project(Long productionSiteId) {
         Project project = new Project();
         project.setId(7L);
@@ -108,12 +101,11 @@ class PvRuleServiceTest {
 
     private void productionSiteReady() {
         project(3L);
-        Site site = new Site();
-        site.setId(3L);
-        when(siteRepository.findById(3L)).thenReturn(Optional.of(site));
-        when(siteService.getLetsblogPluginStatus(3L)).thenReturn(new LetsblogPluginStatus(State.INSTALLED, "1", 1));
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-status"), isNull(), isNull()))
-                .thenReturn("{\"configured\":true,\"state\":\"接続済み\",\"property_id\":\"987654321\"}");
+        world.addSite(3L, "本番サイト");
+        world.pluginState(State.INSTALLED);
+        world.letsblogSns("pv-config-set", null, "{}");
+        world.letsblogSns("pv-status", null, "{\"configured\":true,\"state\":\"接続済み\",\"property_id\":\"987654321\"}");
+        world.letsblogSns("pv-rules-set", null, "{}");
     }
 
     private void rule(long id, String period, int threshold) {
@@ -139,7 +131,7 @@ class PvRuleServiceTest {
         project(3L);
         rule(1L, "daily", 100);
         rule(2L, "total", 5000);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
 
         PvRulesView view = service.view(7L);
 
@@ -158,7 +150,7 @@ class PvRuleServiceTest {
     @Test
     void view_GA未連携ならルールを追加できず理由を返す() {
         project(3L);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(UNLINKED);
+        world.analytics(UNLINKED);
 
         PvRulesView view = service.view(7L);
 
@@ -170,8 +162,7 @@ class PvRuleServiceTest {
     @Test
     void view_GAの連携状態を取れなければ追加できず_その旨を理由に返し例外にしない() {
         project(3L);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t"))
-                .thenThrow(new IdentityServiceUnavailableException("analytics down", null));
+        world.analyticsDown("analytics down");
 
         PvRulesView view = service.view(7L);
 
@@ -183,7 +174,7 @@ class PvRuleServiceTest {
     @Test
     void view_記録済みの送信状態を返す() {
         project(3L);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         ProjectPvSyncState state = new ProjectPvSyncState();
         state.setProjectId(7L);
         state.setState("FAILED");
@@ -201,7 +192,7 @@ class PvRuleServiceTest {
     @Test
     void view_送信時刻が記録されていない状態でも例外にせずatはnull() {
         project(3L);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         ProjectPvSyncState state = new ProjectPvSyncState();
         state.setProjectId(7L);
         state.setState("SENT");
@@ -218,7 +209,7 @@ class PvRuleServiceTest {
     @Test
     void addRule_保存して_GA認証情報とルール全件を本番サイトへ送り_送信済みにする() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         rule(1L, "daily", 100);
 
         PvRulesView view = service.addRule(7L, "total", 5000);
@@ -230,18 +221,18 @@ class PvRuleServiceTest {
         assertNull(view.send().error());
         assertEquals("2026-10-05T00:00:00Z", view.send().at());
 
-        ArgumentCaptor<String> config = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> rules = ArgumentCaptor.forClass(String.class);
-        var order = inOrder(siteService);
-        order.verify(siteService).runLetsblogSns(eq(3L), eq("pv-config-set"), isNull(), config.capture());
-        order.verify(siteService).runLetsblogSns(eq(3L), eq("pv-status"), isNull(), isNull());
-        order.verify(siteService).runLetsblogSns(eq(3L), eq("pv-rules-set"), isNull(), rules.capture());
-        JsonNode configJson = parse(config.getValue());
+        List<String> commands = world.bodiesOf("POST", "/api/internal/project/cms/letsblog-sns").stream()
+                .map(b -> b.path("command").asText()).toList();
+        assertEquals(List.of("pv-config-set", "pv-status", "pv-rules-set"), commands);
+        String config = world.snsRequests("pv-config-set").get(0).path("stdin").asText();
+        String rules = world.snsRequests("pv-rules-set").get(0).path("stdin").asText();
+        assertEquals("Bearer t", world.http.requests("GET", ".*google-analytics/credentials").get(0).header("Authorization"));
+        JsonNode configJson = parse(config);
         assertEquals("987654321", configJson.get("property_id").asText());
         assertEquals("cid.apps", configJson.get("client_id").asText());
         assertEquals("csecret", configJson.get("client_secret").asText());
         assertEquals("rtoken", configJson.get("refresh_token").asText());
-        JsonNode rulesJson = parse(rules.getValue());
+        JsonNode rulesJson = parse(rules);
         assertEquals(2, rulesJson.size());
         assertEquals("r1", rulesJson.get(0).get("id").asText());
         assertEquals("daily", rulesJson.get(0).get("period").asText());
@@ -253,20 +244,19 @@ class PvRuleServiceTest {
     @Test
     void addRule_GA未連携なら保存も送信もせず理由つきで拒否する() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(UNLINKED);
+        world.analytics(UNLINKED);
 
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> service.addRule(7L, "daily", 100));
 
         assertTrue(e.getMessage().contains("GA"));
         verify(ruleRepository, never()).save(any());
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.http.requests("POST", "/api/internal/project/cms/letsblog-sns").isEmpty());
     }
 
     @Test
     void addRule_GAの連携状態を取れなければ保存せず拒否する() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t"))
-                .thenThrow(new IdentityServiceUnavailableException("analytics down", null));
+        world.analyticsDown("analytics down");
 
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> service.addRule(7L, "daily", 100));
 
@@ -302,24 +292,22 @@ class PvRuleServiceTest {
     @Test
     void addRule_本番サイトへ送れなくてもルールは保存され_送信失敗として記録する() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-config-set"), isNull(), any()))
-                .thenThrow(new IllegalStateException("接続失敗"));
+        world.analytics(LINKED);
+        world.letsblogSnsFails("pv-config-set", null, "接続失敗");
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
         assertEquals(1, view.rules().size());
         assertEquals("FAILED", view.send().state());
         assertTrue(view.send().error().contains("接続失敗"));
-        verify(siteService, never()).runLetsblogSns(eq(3L), eq("pv-rules-set"), any(), any());
+        assertTrue(world.snsRequests("pv-rules-set").isEmpty());
     }
 
     @Test
     void addRule_送信失敗の理由に認証情報は含めない() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-config-set"), isNull(), any()))
-                .thenThrow(new IllegalStateException("接続失敗"));
+        world.analytics(LINKED);
+        world.letsblogSnsFails("pv-config-set", null, "接続失敗");
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
@@ -330,23 +318,21 @@ class PvRuleServiceTest {
     @Test
     void addRule_プラグインが接続済みにならなければ送信失敗にしルールは送らない() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-status"), isNull(), isNull()))
-                .thenReturn("{\"configured\":true,\"state\":\"要再設定\"}");
+        world.analytics(LINKED);
+        world.letsblogSns("pv-status", null, "{\"configured\":true,\"state\":\"要再設定\"}");
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
         assertEquals("FAILED", view.send().state());
         assertTrue(view.send().error().contains("接続済み"));
-        verify(siteService, never()).runLetsblogSns(eq(3L), eq("pv-rules-set"), any(), any());
+        assertTrue(world.snsRequests("pv-rules-set").isEmpty());
     }
 
     @Test
     void addRule_プラグインが未設定と答えても送信失敗にする() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-status"), isNull(), isNull()))
-                .thenReturn("{\"configured\":false,\"state\":\"接続済み\"}");
+        world.analytics(LINKED);
+        world.letsblogSns("pv-status", null, "{\"configured\":false,\"state\":\"接続済み\"}");
 
         assertEquals("FAILED", service.addRule(7L, "daily", 100).send().state());
     }
@@ -354,9 +340,8 @@ class PvRuleServiceTest {
     @Test
     void addRule_ルール送信が失敗したら送信失敗にする() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-rules-set"), isNull(), any()))
-                .thenThrow(new IllegalStateException("rules 失敗"));
+        world.analytics(LINKED);
+        world.letsblogSnsFails("pv-rules-set", null, "rules 失敗");
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
@@ -367,8 +352,8 @@ class PvRuleServiceTest {
     @Test
     void addRule_プラグインの状態出力を解釈できなければ送信失敗にする() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-status"), isNull(), isNull())).thenReturn("garbage");
+        world.analytics(LINKED);
+        world.letsblogSns("pv-status", null, "garbage");
 
         assertEquals("FAILED", service.addRule(7L, "daily", 100).send().state());
     }
@@ -376,21 +361,20 @@ class PvRuleServiceTest {
     @Test
     void addRule_本番サイトが無ければ送信失敗として理由を記録する() {
         project(null);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
         assertEquals(1, view.rules().size());
         assertEquals("FAILED", view.send().state());
         assertTrue(view.send().error().contains("本番サイト"));
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.http.requests("POST", "/api/internal/project/cms/letsblog-sns").isEmpty());
     }
 
     @Test
     void addRule_本番サイトの行が無くても送信失敗として記録する() {
         project(3L);
-        when(siteRepository.findById(3L)).thenReturn(Optional.empty());
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
 
         assertTrue(service.addRule(7L, "daily", 100).send().error().contains("本番サイト"));
     }
@@ -398,21 +382,21 @@ class PvRuleServiceTest {
     @Test
     void addRule_プラグインが未導入なら送信失敗として記録する() {
         productionSiteReady();
-        when(siteService.getLetsblogPluginStatus(3L)).thenReturn(new LetsblogPluginStatus(State.NOT_INSTALLED, null, null));
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.pluginState(State.NOT_INSTALLED);
+        world.analytics(LINKED);
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
         assertEquals("FAILED", view.send().state());
         assertTrue(view.send().error().contains("未導入"));
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.http.requests("POST", "/api/internal/project/cms/letsblog-sns").isEmpty());
     }
 
     @Test
     void addRule_プラグインが要更新なら送信失敗として記録する() {
         productionSiteReady();
-        when(siteService.getLetsblogPluginStatus(3L)).thenReturn(new LetsblogPluginStatus(State.NEEDS_UPDATE, "1", 0));
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.pluginState(State.NEEDS_UPDATE);
+        world.analytics(LINKED);
 
         assertTrue(service.addRule(7L, "daily", 100).send().error().contains("要更新"));
     }
@@ -420,8 +404,8 @@ class PvRuleServiceTest {
     @Test
     void addRule_プラグインの状態を取れなければ届かない旨を送信失敗として記録する() {
         productionSiteReady();
-        when(siteService.getLetsblogPluginStatus(3L)).thenThrow(new IllegalStateException("接続失敗"));
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.cmsBridgeDown("接続失敗");
+        world.analytics(LINKED);
 
         PvRulesView view = service.addRule(7L, "daily", 100);
 
@@ -434,7 +418,7 @@ class PvRuleServiceTest {
     @Test
     void deleteRule_ルールを消して_残りのルール全件を本番サイトへ送る() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         rule(1L, "daily", 100);
         rule(2L, "total", 5000);
         ProjectPvRule second = stored.get(1);
@@ -446,9 +430,8 @@ class PvRuleServiceTest {
         assertEquals(1, view.rules().size());
         assertEquals("r2", view.rules().get(0).id());
         assertEquals("SENT", view.send().state());
-        ArgumentCaptor<String> rules = ArgumentCaptor.forClass(String.class);
-        verify(siteService).runLetsblogSns(eq(3L), eq("pv-rules-set"), isNull(), rules.capture());
-        JsonNode json = parse(rules.getValue());
+        assertEquals(1, world.snsRequests("pv-rules-set").size());
+        JsonNode json = parse(world.snsRequests("pv-rules-set").get(0).path("stdin").asText());
         assertEquals(1, json.size());
         assertEquals("r2", json.get(0).get("id").asText());
         assertEquals(second.getThreshold(), json.get(0).get("threshold").asInt());
@@ -457,14 +440,14 @@ class PvRuleServiceTest {
     @Test
     void deleteRule_最後のルールを消すと空の配列を送る() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         rule(1L, "daily", 100);
         when(ruleRepository.findByIdAndProjectId(1L, 7L)).thenReturn(Optional.of(stored.get(0)));
         org.mockito.Mockito.doAnswer(i -> stored.remove(i.getArgument(0))).when(ruleRepository).delete(any(ProjectPvRule.class));
 
         service.deleteRule(7L, "r1");
 
-        verify(siteService).runLetsblogSns(3L, "pv-rules-set", null, "[]");
+        assertEquals("[]", world.snsRequests("pv-rules-set").get(0).path("stdin").asText());
     }
 
     @Test
@@ -489,7 +472,7 @@ class PvRuleServiceTest {
     @Test
     void deleteRule_GAが未連携でも削除はでき_送信失敗として記録する() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(UNLINKED);
+        world.analytics(UNLINKED);
         rule(1L, "daily", 100);
         when(ruleRepository.findByIdAndProjectId(1L, 7L)).thenReturn(Optional.of(stored.get(0)));
         org.mockito.Mockito.doAnswer(i -> stored.remove(i.getArgument(0))).when(ruleRepository).delete(any(ProjectPvRule.class));
@@ -506,7 +489,7 @@ class PvRuleServiceTest {
     @Test
     void resend_ルール全件とGA認証情報を送り直して送信済みにする() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         rule(1L, "daily", 100);
         ProjectPvSyncState failed = new ProjectPvSyncState();
         failed.setProjectId(7L);
@@ -518,16 +501,15 @@ class PvRuleServiceTest {
 
         assertEquals("SENT", view.send().state());
         assertNull(view.send().error());
-        verify(siteService).runLetsblogSns(eq(3L), eq("pv-config-set"), isNull(), any());
-        verify(siteService).runLetsblogSns(eq(3L), eq("pv-rules-set"), isNull(), any());
+        assertEquals(1, world.snsRequests("pv-config-set").size());
+        assertEquals(1, world.snsRequests("pv-rules-set").size());
     }
 
     @Test
     void resend_まだ届かなければ送信失敗のまま理由を返す() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
-        when(siteService.runLetsblogSns(eq(3L), eq("pv-config-set"), isNull(), any()))
-                .thenThrow(new IllegalStateException("まだ届かない"));
+        world.analytics(LINKED);
+        world.letsblogSnsFails("pv-config-set", null, "まだ届かない");
 
         PvRulesView view = service.resend(7L);
 
@@ -538,8 +520,7 @@ class PvRuleServiceTest {
     @Test
     void resend_GAの認証情報を取れなければ送信失敗として記録する() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t"))
-                .thenThrow(new IdentityServiceUnavailableException("analytics down", null));
+        world.analyticsDown("analytics down");
 
         PvRulesView view = service.resend(7L);
 
@@ -557,12 +538,12 @@ class PvRuleServiceTest {
     @Test
     void GA連携の完了で_ルールが無くてもGA認証情報を送り_設定済みにする() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
 
         service.onGoogleAnalyticsConnected(7L);
 
-        verify(siteService).runLetsblogSns(eq(3L), eq("pv-config-set"), isNull(), any());
-        verify(siteService).runLetsblogSns(3L, "pv-rules-set", null, "[]");
+        assertEquals(1, world.snsRequests("pv-config-set").size());
+        assertEquals("[]", world.snsRequests("pv-rules-set").get(0).path("stdin").asText());
         assertEquals("SENT", savedState.getState());
         assertEquals(7L, savedState.getProjectId());
     }
@@ -570,7 +551,7 @@ class PvRuleServiceTest {
     @Test
     void GA連携の完了で送れなくても例外にせず_送信失敗として記録する() {
         project(null);
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
 
         service.onGoogleAnalyticsConnected(7L);
 
@@ -587,7 +568,7 @@ class PvRuleServiceTest {
     @Test
     void 送信結果は同じプロジェクトの既存の状態を更新して記録する() {
         productionSiteReady();
-        when(analyticsBridgeClient.googleAnalyticsCredentials(7L, "Bearer t")).thenReturn(LINKED);
+        world.analytics(LINKED);
         ProjectPvSyncState existing = new ProjectPvSyncState();
         existing.setProjectId(7L);
         existing.setState("FAILED");

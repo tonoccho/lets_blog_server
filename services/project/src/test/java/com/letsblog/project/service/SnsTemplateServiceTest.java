@@ -2,21 +2,19 @@ package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.project.cms.LetsblogPluginStatus;
 import com.letsblog.project.cms.LetsblogPluginStatus.State;
 import com.letsblog.project.domain.Project;
 import com.letsblog.project.domain.ProjectSnsTemplate;
-import com.letsblog.project.domain.Site;
 import com.letsblog.project.dto.SnsTemplatesView;
 import com.letsblog.project.repository.ProjectRepository;
 import com.letsblog.project.repository.ProjectSnsTemplateRepository;
-import com.letsblog.project.repository.SiteRepository;
+import com.letsblog.project.testsupport.ProjectWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
@@ -51,25 +49,28 @@ class SnsTemplateServiceTest {
     @Mock
     private ProjectRepository projectRepository;
     @Mock
-    private SiteRepository siteRepository;
-    @Mock
-    private SiteService siteService;
-    @Mock
     private ProjectSnsTemplateRepository repository;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    // 自前のクラス(SiteService・CmsProvisioningBridgeClient)は実物で、CMSブリッジはフェイクHTTPが答える(issue #1817)。
+    private final ProjectWorld world = new ProjectWorld();
+    private final ObjectMapper mapper = world.objectMapper;
     private ProjectSnsTemplate stored;
     private SnsTemplateService service;
 
     @BeforeEach
     void setUp() {
-        service = new SnsTemplateService(projectRepository, siteRepository, siteService, repository, mapper,
+        service = new SnsTemplateService(projectRepository, world.siteRepository, world.siteService, repository, mapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(repository.findById(7L)).thenAnswer(i -> Optional.ofNullable(stored));
         when(repository.save(any(ProjectSnsTemplate.class))).thenAnswer(i -> {
             stored = i.getArgument(0);
             return stored;
         });
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     private void project(Long productionSiteId) {
@@ -81,16 +82,14 @@ class SnsTemplateServiceTest {
 
     private void productionSiteReady() {
         project(3L);
-        Site site = new Site();
-        site.setId(3L);
-        when(siteRepository.findById(3L)).thenReturn(Optional.of(site));
-        when(siteService.getLetsblogPluginStatus(3L)).thenReturn(new LetsblogPluginStatus(State.INSTALLED, "1", 1));
+        world.addSite(3L, "本番サイト");
+        world.pluginState(State.INSTALLED);
+        world.letsblogSns("templates-set", null, "{}");
     }
 
     private JsonNode sentPayload() throws Exception {
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(siteService).runLetsblogSns(eq(3L), eq("templates-set"), isNull(), payload.capture());
-        return mapper.readTree(payload.getValue());
+        assertEquals(1, world.snsRequests("templates-set").size());
+        return mapper.readTree(world.snsRequests("templates-set").get(0).path("stdin").asText());
     }
 
     // ---- view ----
@@ -200,6 +199,16 @@ class SnsTemplateServiceTest {
     }
 
     @Test
+    void save_PV達成時がnullなら空として扱う() {
+        productionSiteReady();
+
+        SnsTemplatesView view = service.save(7L, "a", null);
+
+        assertEquals("", view.pvTemplate());
+        assertEquals("", stored.getPvTemplate());
+    }
+
+    @Test
     void save_上限の1000文字ちょうどは保存できる() {
         productionSiteReady();
 
@@ -218,7 +227,7 @@ class SnsTemplateServiceTest {
 
         assertTrue(e.getMessage().contains("1000"));
         verify(repository, never()).save(any());
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.snsRequests("templates-set").isEmpty());
     }
 
     @Test
@@ -244,7 +253,7 @@ class SnsTemplateServiceTest {
         assertTrue(period.getMessage().contains("{period}"));
         assertTrue(threshold.getMessage().contains("{threshold}"));
         verify(repository, never()).save(any());
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.snsRequests("templates-set").isEmpty());
     }
 
     @Test
@@ -263,13 +272,12 @@ class SnsTemplateServiceTest {
         assertEquals("a", view.publishTemplate());
         assertEquals("FAILED", view.send().state());
         assertTrue(view.send().error().contains("本番サイト"));
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.snsRequests("templates-set").isEmpty());
     }
 
     @Test
     void save_本番サイトの登録が見つからなければ送信失敗にする() {
         project(3L);
-        when(siteRepository.findById(3L)).thenReturn(Optional.empty());
 
         SnsTemplatesView view = service.save(7L, "a", "b");
 
@@ -280,7 +288,7 @@ class SnsTemplateServiceTest {
     @Test
     void save_本番サイトに届かなければ送信失敗にする() {
         productionSiteReady();
-        when(siteService.getLetsblogPluginStatus(3L)).thenThrow(new IllegalStateException("接続失敗"));
+        world.cmsBridgeDown("接続失敗");
 
         SnsTemplatesView view = service.save(7L, "a", "b");
 
@@ -292,19 +300,19 @@ class SnsTemplateServiceTest {
     @Test
     void save_プラグインが未導入なら送信失敗にする() {
         productionSiteReady();
-        when(siteService.getLetsblogPluginStatus(3L)).thenReturn(new LetsblogPluginStatus(State.NOT_INSTALLED, null, null));
+        world.pluginState(State.NOT_INSTALLED);
 
         SnsTemplatesView view = service.save(7L, "a", "b");
 
         assertEquals("FAILED", view.send().state());
         assertTrue(view.send().error().contains("未導入"));
-        verify(siteService, never()).runLetsblogSns(anyLong(), any(), any(), any());
+        assertTrue(world.snsRequests("templates-set").isEmpty());
     }
 
     @Test
     void save_プラグインが要更新なら送信失敗にする() {
         productionSiteReady();
-        when(siteService.getLetsblogPluginStatus(3L)).thenReturn(new LetsblogPluginStatus(State.NEEDS_UPDATE, "0", 0));
+        world.pluginState(State.NEEDS_UPDATE);
 
         SnsTemplatesView view = service.save(7L, "a", "b");
 
@@ -315,8 +323,7 @@ class SnsTemplateServiceTest {
     @Test
     void save_wp_cliの実行に失敗したら保存は残し_理由つきの送信失敗にする() {
         productionSiteReady();
-        when(siteService.runLetsblogSns(eq(3L), eq("templates-set"), isNull(), any()))
-                .thenThrow(new IllegalStateException("templates は未対応です"));
+        world.letsblogSnsFails("templates-set", null, "templates は未対応です");
 
         SnsTemplatesView view = service.save(7L, "a", "b");
 

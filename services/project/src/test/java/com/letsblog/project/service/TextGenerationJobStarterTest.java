@@ -1,59 +1,68 @@
 package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.common.client.GenerationJobBridgeException;
-import com.letsblog.common.client.GenerationJobClient;
 import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.project.domain.EmbedTagType;
 import com.letsblog.project.domain.StaticContentType;
-import java.time.LocalDateTime;
+import com.letsblog.project.repository.StaticContentRepository;
+import com.letsblog.project.repository.TagDesignSettingRepository;
+import com.letsblog.project.testsupport.AsyncProxies;
+import com.letsblog.project.testsupport.ProjectWorld;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.task.TaskRejectedException;
+import org.mockito.Mockito;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** 静的コンテンツ・タグデザイン生成ジョブの受理側(issue #1409)。ManagedSiteProvisioningJobStarter相当。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * テキスト生成(静的コンテンツ・タグデザイン)ジョブの受理側(issue #1409)。
+ *
+ * <p>issue #1817: ランナー・StaticContentGenerationService・GenerationJobClient・CurrentActorService は実物。
+ * ランナーはSpringの実際のAOPプロキシ(@Async)で包み、Executorを差し替えて「実行を後に回す」「満杯で拒否する」を
+ * 再現する。DB(リポジトリ)とHTTPの向こう(ai-service)だけを差し替える。
+ */
 @DisplayName("project-service: テキスト生成ジョブの受理(issue #1409)")
 class TextGenerationJobStarterTest {
 
-    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 6, 1, 2, 3);
-
-    @Mock
-    private GenerationJobClient generationJobClient;
-    @Mock
-    private TextGenerationJobRunner runner;
-    @Mock
-    private StaticContentGenerationService staticContentGenerationService;
-    @Mock
-    private CurrentActorService currentActorService;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ProjectWorld world = new ProjectWorld();
+    private final StaticContentRepository staticContentRepository = Mockito.mock(StaticContentRepository.class);
+    private final TagDesignSettingRepository tagDesignSettingRepository = Mockito.mock(TagDesignSettingRepository.class);
+    private final List<Runnable> deferred = new ArrayList<>();
+    private TextGenerationJobRunner realRunner;
+    private StaticContentGenerationService staticContent;
     private TextGenerationJobStarter starter;
 
     @BeforeEach
     void setUp() {
+        staticContent = new StaticContentGenerationService(
+                world.siteRepository, world.siteService, world.wordPressAgentPluginsClient, world.cmsBridgeClient,
+                world.aiGenerationClient, staticContentRepository);
+        realRunner = new TextGenerationJobRunner(staticContent, new TagDesignGenerationService(world.aiGenerationClient),
+                new TagDesignSettingService(tagDesignSettingRepository), world.generationJobClient, world.objectMapper);
+        starterWith(deferred::add);
+        world.actingAs(5L, "admin", "a@example.com");
+    }
+
+    private void starterWith(java.util.concurrent.Executor executor) {
+        TextGenerationJobRunner asyncRunner = AsyncProxies.async(realRunner, "textGenerationExecutor", executor);
         starter = new TextGenerationJobStarter(
-                generationJobClient, runner, staticContentGenerationService, currentActorService, objectMapper);
+                world.generationJobClient, asyncRunner, staticContent, world.currentActorService, world.objectMapper);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     @Test
@@ -66,102 +75,113 @@ class TextGenerationJobStarterTest {
     @Test
     @DisplayName("静的コンテンツ: サイトの存在を確かめ、ユーザーのBearerでジョブを作り、同じBearerでランナーを起動する")
     void startsStaticContentJob() throws Exception {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer abc");
-        GenerationJobSummary job = new GenerationJobSummary(11L, "static_content_generation", "running", NOW, NOW);
-        when(generationJobClient.create(eq("static_content_generation"), any(), eq("Bearer abc"))).thenReturn(job);
+        when(world.siteRepository.existsById(5L)).thenReturn(true);
+        world.jobCreated(11L, "static_content_generation");
 
         GenerationJobSummary result = starter.startStaticContent(5L, StaticContentType.PRIVACY_POLICY);
 
-        assertSame(job, result);
-        InOrder order = inOrder(staticContentGenerationService, generationJobClient, runner);
-        order.verify(staticContentGenerationService).requireSite(5L);
-        order.verify(generationJobClient).create(eq("static_content_generation"), any(), eq("Bearer abc"));
-        order.verify(runner).runStaticContent(11L, 5L, StaticContentType.PRIVACY_POLICY, "Bearer abc");
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).create(eq("static_content_generation"), payload.capture(), eq("Bearer abc"));
-        JsonNode json = objectMapper.readTree(payload.getValue());
+        assertEquals(11L, result.id());
+        assertEquals("running", result.status());
+        var create = world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0);
+        assertEquals("Bearer token-5", create.header("Authorization"));
+        JsonNode body = world.bodyOf(create);
+        assertEquals("static_content_generation", body.get("type").asText());
+        JsonNode json = world.objectMapper.readTree(body.get("requestPayload").asText());
         assertEquals(5L, json.get("siteId").asLong());
         assertEquals("PRIVACY_POLICY", json.get("contentType").asText());
+        assertEquals(1, deferred.size(), "ランナーは受理のスレッドでは動かさず、Executorへ渡す");
     }
 
     @Test
     @DisplayName("静的コンテンツ: サイトが無ければジョブを作らず例外を伝える")
     void staticContentSiteMissing() {
-        doThrow(new SiteNotFoundException("無い")).when(staticContentGenerationService).requireSite(5L);
-
         assertThrows(SiteNotFoundException.class,
                 () -> starter.startStaticContent(5L, StaticContentType.PRIVACY_POLICY));
 
-        verify(generationJobClient, never()).create(any(), any(), any());
+        assertTrue(world.http.requests("POST", "/api/internal/ai/generation-jobs").isEmpty());
     }
 
     @Test
     @DisplayName("タグデザイン(プロジェクト個別): プロジェクト・種別・プロンプトをジョブの要求に残して起動する")
     void startsTagDesignJobForProject() throws Exception {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer abc");
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(12L, "tag_design_generation", "running", NOW, NOW));
+        world.jobCreated(12L, "tag_design_generation");
 
         GenerationJobSummary result = starter.startTagDesign(3L, EmbedTagType.TOC, "淡いグレー");
 
         assertEquals(12L, result.id());
-        verify(runner).runTagDesign(12L, 3L, EmbedTagType.TOC, "淡いグレー");
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).create(eq("tag_design_generation"), payload.capture(), eq("Bearer abc"));
-        JsonNode json = objectMapper.readTree(payload.getValue());
+        assertEquals(1, deferred.size());
+        var create = world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0);
+        assertEquals("Bearer token-5", create.header("Authorization"));
+        JsonNode json = world.objectMapper.readTree(world.bodyOf(create).get("requestPayload").asText());
         assertEquals(3L, json.get("projectId").asLong());
         assertEquals("TOC", json.get("tagType").asText());
         assertEquals("淡いグレー", json.get("prompt").asText());
+        // 取り置いたランナーを実際に流すと、このジョブIDへ結果が書かれる。
+        world.aiReplies("```css\n.a{}\n```");
+        deferred.forEach(Runnable::run);
+        assertEquals(1, world.jobUpdates(12L, "done").size());
     }
 
     @Test
     @DisplayName("タグデザイン(グローバル): projectId は null で残る")
     void startsTagDesignJobForGlobal() throws Exception {
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(13L, "tag_design_generation", "running", NOW, NOW));
+        world.jobCreated(13L, "tag_design_generation");
 
         starter.startTagDesign(null, EmbedTagType.BLOGCARD, "p");
 
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).create(eq("tag_design_generation"), payload.capture(), any());
-        assertTrue(objectMapper.readTree(payload.getValue()).get("projectId").isNull());
-        verify(runner).runTagDesign(13L, null, EmbedTagType.BLOGCARD, "p");
+        var create = world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0);
+        JsonNode json = world.objectMapper.readTree(world.bodyOf(create).get("requestPayload").asText());
+        assertTrue(json.get("projectId").isNull());
+        assertEquals(1, deferred.size());
     }
 
     @Test
     @DisplayName("実行枠と待ち行列が満杯なら、ジョブを queue_full の failed にして返す")
-    void queueFull() throws Exception {
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(14L, "tag_design_generation", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).runTagDesign(any(), any(), any(), any());
+    void queueFull() {
+        world.jobCreated(14L, "tag_design_generation");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
+        try {
+            starterWith(saturated);
 
-        GenerationJobSummary result = starter.startTagDesign(3L, EmbedTagType.TOC, "p");
+            GenerationJobSummary result = starter.startTagDesign(3L, EmbedTagType.TOC, "p");
 
-        assertEquals("failed", result.status());
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(14L), eq("failed"), payload.capture());
-        JsonNode json = objectMapper.readTree(payload.getValue());
-        assertEquals("queue_full", json.get("errorType").asText());
-        assertFalse(json.get("error").asText().isBlank());
+            assertEquals("failed", result.status());
+            var failed = world.jobUpdates(14L, "failed");
+            assertEquals(1, failed.size());
+            assertEquals("queue_full", failed.get(0).payload().get("errorType").asText());
+            assertFalse(failed.get(0).payload().get("error").asText().isBlank());
+        } finally {
+            release.countDown();
+            saturated.shutdown();
+        }
     }
 
     @Test
     @DisplayName("静的コンテンツでも満杯なら queue_full の failed")
     void queueFullForStaticContent() {
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(15L, "static_content_generation", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).runStaticContent(any(), any(), any(), any());
+        when(world.siteRepository.existsById(5L)).thenReturn(true);
+        world.jobCreated(15L, "static_content_generation");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
+        try {
+            starterWith(saturated);
 
-        assertEquals("failed", starter.startStaticContent(5L, StaticContentType.OPERATOR_INFO).status());
+            assertEquals("failed", starter.startStaticContent(5L, StaticContentType.OPERATOR_INFO).status());
+            assertEquals("queue_full", world.jobUpdates(15L, "failed").get(0).payload().get("errorType").asText());
+        } finally {
+            release.countDown();
+            saturated.shutdown();
+        }
     }
 
     @Test
     @DisplayName("ジョブを作れなければ(ai-service 不達)ランナーを起動せず例外を伝える")
     void createFailurePropagates() {
-        when(generationJobClient.create(any(), any(), any())).thenThrow(new GenerationJobBridgeException("down", null));
+        world.fail("POST", "/api/internal/ai/generation-jobs", 500);
 
         assertThrows(GenerationJobBridgeException.class, () -> starter.startTagDesign(3L, EmbedTagType.TOC, "p"));
 
-        verify(runner, never()).runTagDesign(any(), any(), any(), any());
+        assertTrue(deferred.isEmpty());
     }
 }

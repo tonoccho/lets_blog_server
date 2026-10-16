@@ -1,254 +1,245 @@
 package com.letsblog.project.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.project.client.LinkedinApiClient;
-import com.letsblog.project.client.LinkedinApiClient.AccessToken;
-import com.letsblog.project.client.LinkedinApiClient.Profile;
-import com.letsblog.project.client.LinkedinApiException;
 import com.letsblog.project.dto.XConnectResult;
 import com.letsblog.project.dto.XConnectionView;
 import com.letsblog.project.dto.XTestResult;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
+import com.letsblog.project.testsupport.SnsFixture;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
 /**
- * プロジェクトの LinkedIn アカウント接続(issue #1581。Epic #1572)。X(#1574)と同じく、本番サイトのプラグインへは
+ * プロジェクトの LinkedIn アカウント接続(issue #1579。Epic #1572)。X(#1574)と同じく、本番サイトのプラグインへは
  * wp-cli(`sns config set` を標準入力の JSON で)だけで送り、アプリはトークンを保存しない・API で返さない。
- * LinkedIn のトークンは更新しないので、プラグインへ送るのはアクセストークン・メンバーID・有効期限だけ(Client Secret は送らない)。
+ * LinkedIn は更新にクライアントの秘密が要らないので、プラグインへ送るのは長期トークンとユーザーIDだけ。
+ *
+ * <p>issue #1817: SnsXService・SiteService・LinkedinApiClient・XAuthorizationStore・CurrentActorService は実物。
+ * LinkedIn の API と CMS ブリッジの代わりにフェイクHTTPサーバーが応答する。
  */
-@ExtendWith(MockitoExtension.class)
 class SnsLinkedinServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-10-04T00:00:00Z");
+    private static final String CALLBACK = "https://l/cb";
 
-    @Mock
-    private SnsXService snsXService;
-    @Mock
-    private SiteService siteService;
-    @Mock
-    private LinkedinApiClient linkedinApiClient;
-    @Mock
-    private XAuthorizationStore store;
-    @Mock
-    private CurrentActorService currentActorService;
-
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final SnsFixture fx = new SnsFixture();
     private SnsLinkedinService service;
 
     @BeforeEach
     void setUp() {
-        service = new SnsLinkedinService(snsXService, siteService, linkedinApiClient, store, currentActorService,
-                mapper, Clock.fixed(NOW, ZoneOffset.UTC));
+        LinkedinApiClient linkedinApiClient = new LinkedinApiClient(fx.world.http.baseUrl(),
+                fx.world.http.baseUrl() + "/oauth/v2/accessToken", "https://linkedin.example/authorize");
+        service = new SnsLinkedinService(fx.snsXService, fx.world.siteService, linkedinApiClient, fx.store,
+                fx.world.currentActorService, fx.world.objectMapper, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    private XAuthorizationStore.Pending pending() {
-        return new XAuthorizationStore.Pending(
-                "7.abc", 7L, 3L, "sub-1", "app-id", "app-secret", "https://l/cb", "verifier", NOW.plusSeconds(600));
+    @AfterEach
+    void close() {
+        fx.close();
     }
 
-    private void pendingFor(XAuthorizationStore.Pending pending) {
-        when(store.take("7.abc")).thenReturn(Optional.of(pending));
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("sub-1");
+    private String started() {
+        fx.connectableSite();
+        fx.world.signedInAs("sub-1");
+        return SnsFixture.queryParam(service.startAuthorization(7L, "app-id", "app-secret", CALLBACK), "state");
+    }
+
+    private void linkedinAnswers() {
+        fx.world.http.json("POST", "/oauth/v2/accessToken", "{\"access_token\":\"ACCESS-TOKEN\",\"expires_in\":5184000}");
+        fx.world.http.json("GET", "/v2/userinfo", "{\"sub\":\"sub-abc\",\"name\":\"Let's Blog\"}");
+    }
+
+    private boolean sentToSite() {
+        return !fx.world.snsRequests("config-set").isEmpty();
     }
 
     // ---- view / test(状態の読み取りとテスト投稿は X と共通の処理に LinkedIn を指定して任せる) ----
 
     @Test
     void view_LinkedInの接続状態を返す() {
-        XConnectionView view = new XConnectionView(true, null, "本番サイト", null, null);
-        when(snsXService.view(7L, "linkedin")).thenReturn(view);
+        fx.connectableSite();
+        fx.world.letsblogSns("status", "linkedin", "{\"linkedin\":{\"status\":\"接続済み\",\"account_name\":\"th\"}}");
+        fx.world.letsblogSns("log", "linkedin", "[]");
 
-        assertSame(view, service.view(7L));
+        XConnectionView view = service.view(7L);
+
+        assertTrue(view.connectable());
+        assertEquals(XConnectionView.State.CONNECTED, view.status().state());
+        assertEquals("th", view.status().accountName());
     }
 
     @Test
     void test_LinkedInへのテスト投稿を依頼する() {
-        XTestResult result = new XTestResult(true, null);
-        when(snsXService.test(7L, "linkedin")).thenReturn(result);
+        fx.connectableSite();
+        fx.world.letsblogSns("test", "linkedin", "{}");
 
-        assertSame(result, service.test(7L));
+        XTestResult result = service.test(7L);
+
+        assertTrue(result.success());
+        assertEquals("linkedin", fx.world.snsRequests("test").get(0).path("sns").asText());
     }
 
     // ---- startAuthorization ----
 
     @Test
     void startAuthorization_クライアントの情報かリダイレクト先が空なら拒否する() {
-        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, " ", "s", "https://l/cb"));
-        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, "c", "", "https://l/cb"));
+        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, " ", "s", CALLBACK));
+        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, "c", "", CALLBACK));
         assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, "c", "s", null));
-        verifyNoInteractions(store);
+        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, null, "s", CALLBACK));
+        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, "c", null, CALLBACK));
+        assertThrows(IllegalArgumentException.class, () -> service.startAuthorization(7L, "c", "s", " "));
+        assertTrue(fx.world.http.requests().isEmpty());
     }
 
     @Test
     void startAuthorization_接続できないサイトでは理由つきで拒否し認可を始めない() {
-        when(snsXService.requireConnectableSiteId(7L)).thenThrow(new IllegalStateException("本番サイトが設定されていません"));
+        fx.projectWithProductionSite(null);
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.startAuthorization(7L, "app-id", "app-secret", "https://l/cb"));
+                () -> service.startAuthorization(7L, "app-id", "app-secret", CALLBACK));
 
         assertTrue(e.getMessage().contains("本番サイト"));
-        verifyNoInteractions(store);
+        assertEquals(0, fx.store.size());
     }
 
     @Test
     void startAuthorization_認可を保存してLinkedInの認可URLを返す() {
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("sub-1");
-        when(store.create(7L, 3L, "sub-1", "app-id", "app-secret", "https://l/cb")).thenReturn(pending());
-        when(linkedinApiClient.authorizeUrl("app-id", "https://l/cb", "7.abc"))
-                .thenReturn("https://threads.example/authorize?state=7.abc");
+        fx.connectableSite();
+        fx.world.signedInAs("sub-1");
 
-        assertEquals("https://threads.example/authorize?state=7.abc",
-                service.startAuthorization(7L, "app-id", "app-secret", "https://l/cb"));
+        String url = service.startAuthorization(7L, "app-id", "app-secret", CALLBACK);
+
+        assertTrue(url.startsWith("https://linkedin.example/authorize?"), url);
+        assertTrue(url.contains("client_id=app-id"));
+        XAuthorizationStore.Pending pending = fx.store.take(SnsFixture.queryParam(url, "state")).orElseThrow();
+        assertEquals(7L, pending.projectId());
+        assertEquals(3L, pending.siteId());
+        assertEquals("sub-1", pending.actorSub());
+        assertEquals("app-secret", pending.clientSecret());
     }
 
     // ---- completeAuthorization ----
 
-    private void exchanges() {
-        when(linkedinApiClient.exchangeCode("app-id", "app-secret", "the-code", "https://l/cb"))
-                .thenReturn(new AccessToken("ACCESS-TOKEN", 5184000L));
-        when(linkedinApiClient.fetchProfile("ACCESS-TOKEN")).thenReturn(new Profile("sub-abc", "Let's Blog"));
-    }
-
     @Test
     void completeAuthorization_アクセストークンを本番サイトへ標準入力で送りアカウント名だけを返す() throws Exception {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        exchanges();
-        when(siteService.runLetsblogSns(eq(3L), eq("config-set"), eq("linkedin"), anyString()))
-                .thenReturn("{\"sns\":\"linkedin\",\"status\":\"接続済み\"}");
+        String state = started();
+        linkedinAnswers();
+        fx.world.letsblogSns("config-set", "linkedin", "{\"sns\":\"linkedin\",\"status\":\"接続済み\"}");
 
-        XConnectResult result = service.completeAuthorization(7L, "7.abc", "the-code");
+        XConnectResult result = service.completeAuthorization(7L, state, "the-code");
 
         assertEquals(7L, result.projectId());
         assertEquals("Let's Blog", result.accountName());
-        ArgumentCaptor<String> stdin = ArgumentCaptor.forClass(String.class);
-        verify(siteService).runLetsblogSns(eq(3L), eq("config-set"), eq("linkedin"), stdin.capture());
-        JsonNode sent = mapper.readTree(stdin.getValue());
+        assertTrue(fx.world.http.requests("POST", "/oauth/v2/accessToken").get(0).bodyText().contains("code=the-code"));
+        assertEquals("Bearer ACCESS-TOKEN", fx.world.http.requests("GET", "/v2/userinfo").get(0).header("Authorization"));
+        JsonNode command = fx.world.snsRequests("config-set").get(0);
+        String stdin = command.path("stdin").asText();
+        JsonNode sent = fx.world.objectMapper.readTree(stdin);
         assertEquals("linkedin", sent.path("sns").asText());
         assertEquals("ACCESS-TOKEN", sent.path("access_token").asText());
         assertEquals("sub-abc", sent.path("member_id").asText());
         assertEquals(NOW.getEpochSecond() + 5184000L, sent.path("expires_at").asLong());
         assertEquals("Let's Blog", sent.path("account_name").asText());
         // トークンを更新しないので、Client Secret はプラグインへ送らない。
-        assertFalse(stdin.getValue().contains("app-secret"));
-        String json = mapper.writeValueAsString(result);
+        assertFalse(stdin.contains("app-secret"));
+        String json = fx.world.objectMapper.writeValueAsString(result);
         assertFalse(json.contains("ACCESS-TOKEN"));
         assertFalse(json.contains("app-secret"));
     }
 
     @Test
     void completeAuthorization_知らないstateや期限切れは拒否する() {
-        when(store.take("7.abc")).thenReturn(Optional.empty());
+        fx.world.signedInAs("sub-1");
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> service.completeAuthorization(7L, "7.abc", "code"));
 
         assertTrue(e.getMessage().contains("もう一度"));
-        verifyNoInteractions(linkedinApiClient);
+        assertTrue(fx.world.http.requests().isEmpty());
     }
 
     @Test
     void completeAuthorization_別のプロジェクトのstateは拒否する() {
-        pendingFor(pending());
+        String state = started();
+        int before = fx.world.http.requests().size();
 
-        assertThrows(IllegalArgumentException.class, () -> service.completeAuthorization(8L, "7.abc", "code"));
-        verifyNoInteractions(linkedinApiClient);
+        assertThrows(IllegalArgumentException.class, () -> service.completeAuthorization(8L, state, "code"));
+        assertEquals(before, fx.world.http.requests().size());
     }
 
     @Test
     void completeAuthorization_認可を始めた本人以外は拒否する() {
-        when(store.take("7.abc")).thenReturn(Optional.of(pending()));
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("someone-else");
+        String state = started();
+        fx.world.signedInAs("someone-else");
 
-        assertThrows(IllegalArgumentException.class, () -> service.completeAuthorization(7L, "7.abc", "code"));
-        verifyNoInteractions(linkedinApiClient);
+        assertThrows(IllegalArgumentException.class, () -> service.completeAuthorization(7L, state, "code"));
+        assertTrue(fx.world.http.requests("POST", "/oauth/v2/accessToken").isEmpty());
     }
 
     @Test
     void completeAuthorization_認可を始めた本人が不明なstateは拒否する() {
-        XAuthorizationStore.Pending noActor = new XAuthorizationStore.Pending(
-                "7.abc", 7L, 3L, null, "app-id", "app-secret", "https://l/cb", "verifier", NOW.plusSeconds(600));
-        pendingFor(noActor);
+        fx.connectableSite();
+        fx.world.signedInAs(null);
+        String state = SnsFixture.queryParam(service.startAuthorization(7L, "app-id", "app-secret", CALLBACK), "state");
 
-        assertThrows(IllegalArgumentException.class, () -> service.completeAuthorization(7L, "7.abc", "code"));
+        assertThrows(IllegalArgumentException.class, () -> service.completeAuthorization(7L, state, "code"));
     }
 
     @Test
     void completeAuthorization_その間に接続できなくなっていたら拒否する() {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenThrow(new IllegalStateException("本番サイトが設定されていません"));
+        String state = started();
+        fx.projectWithProductionSite(null);
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.completeAuthorization(7L, "7.abc", "code"));
+                () -> service.completeAuthorization(7L, state, "code"));
 
         assertTrue(e.getMessage().contains("本番サイト"));
-        verifyNoInteractions(linkedinApiClient);
+        assertTrue(fx.world.http.requests("POST", "/oauth/v2/accessToken").isEmpty());
     }
 
     @Test
     void completeAuthorization_トークン交換が失敗したら接続失敗として返す() {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        when(linkedinApiClient.exchangeCode(anyString(), anyString(), anyString(), anyString()))
-                .thenThrow(new LinkedinApiException("LinkedIn のトークン交換に失敗しました(HTTP 400)"));
+        String state = started();
+        fx.world.http.status("POST", "/oauth/v2/accessToken", 400, "{\"error_description\":\"bad code\"}");
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.completeAuthorization(7L, "7.abc", "code"));
+                () -> service.completeAuthorization(7L, state, "code"));
 
         assertTrue(e.getMessage().contains("HTTP 400"));
-        verify(siteService, never()).runLetsblogSns(any(), anyString(), any(), any());
+        assertFalse(sentToSite());
     }
 
     @Test
     void completeAuthorization_メンバーの情報を取れなければ接続失敗として返し送らない() {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        when(linkedinApiClient.exchangeCode(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(new AccessToken("ACCESS-TOKEN", 5184000L));
-        when(linkedinApiClient.fetchProfile("ACCESS-TOKEN"))
-                .thenThrow(new LinkedinApiException("LinkedIn の自分の情報の取得に失敗しました(HTTP 401)"));
+        String state = started();
+        linkedinAnswers();
+        fx.world.http.status("GET", "/v2/userinfo", 401, "{\"message\":\"expired\"}");
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.completeAuthorization(7L, "7.abc", "code"));
+                () -> service.completeAuthorization(7L, state, "code"));
 
         assertTrue(e.getMessage().contains("HTTP 401"));
-        verify(siteService, never()).runLetsblogSns(any(), anyString(), any(), any());
+        assertFalse(sentToSite());
     }
 
     @Test
     void completeAuthorization_サイトへ送れなければ接続失敗として返し_トークンを含めない() {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        exchanges();
-        when(siteService.runLetsblogSns(eq(3L), eq("config-set"), eq("linkedin"), anyString()))
-                .thenThrow(new IllegalStateException("エージェントへの接続に失敗しました"));
+        String state = started();
+        linkedinAnswers();
+        fx.world.letsblogSnsFails("config-set", "linkedin", "エージェントへの接続に失敗しました");
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.completeAuthorization(7L, "7.abc", "the-code"));
+                () -> service.completeAuthorization(7L, state, "the-code"));
 
         assertTrue(e.getMessage().contains("接続失敗"));
         assertFalse(e.getMessage().contains("ACCESS-TOKEN"));
@@ -256,27 +247,24 @@ class SnsLinkedinServiceTest {
 
     @Test
     void completeAuthorization_サイトが接続済みと答えなければ接続失敗として返す() {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        exchanges();
-        when(siteService.runLetsblogSns(eq(3L), eq("config-set"), eq("linkedin"), anyString()))
-                .thenReturn("{\"sns\":\"threads\",\"status\":\"要再接続\"}");
+        String state = started();
+        linkedinAnswers();
+        fx.world.letsblogSns("config-set", "linkedin", "{\"sns\":\"linkedin\",\"status\":\"要再接続\"}");
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.completeAuthorization(7L, "7.abc", "the-code"));
+                () -> service.completeAuthorization(7L, state, "the-code"));
 
         assertTrue(e.getMessage().contains("接続失敗"));
     }
 
     @Test
     void completeAuthorization_サイトの出力を解釈できなければ接続失敗として返す() {
-        pendingFor(pending());
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        exchanges();
-        when(siteService.runLetsblogSns(eq(3L), eq("config-set"), eq("linkedin"), anyString())).thenReturn("garbage");
+        String state = started();
+        linkedinAnswers();
+        fx.world.letsblogSns("config-set", "linkedin", "garbage");
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.completeAuthorization(7L, "7.abc", "the-code"));
+                () -> service.completeAuthorization(7L, state, "the-code"));
 
         assertTrue(e.getMessage().contains("接続失敗"));
     }
@@ -285,29 +273,41 @@ class SnsLinkedinServiceTest {
 
     @Test
     void disconnect_本番サイトのプラグインからLinkedInの設定だけを消す() {
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
+        fx.connectableSite();
+        fx.world.letsblogSns("config-clear", "linkedin", "{}");
 
         service.disconnect(7L);
 
-        verify(siteService).runLetsblogSns(3L, "config-clear", "linkedin", null);
+        assertEquals(1, fx.world.snsRequests("config-clear").size());
+        assertEquals("linkedin", fx.world.snsRequests("config-clear").get(0).path("sns").asText());
     }
 
     @Test
     void disconnect_接続できないサイトでは理由つきで拒否する() {
-        when(snsXService.requireConnectableSiteId(7L)).thenThrow(new IllegalStateException("本番サイトが設定されていません"));
+        fx.projectWithProductionSite(null);
 
         assertThrows(IllegalStateException.class, () -> service.disconnect(7L));
-        verifyNoInteractions(siteService);
+        assertTrue(fx.world.snsRequests("config-clear").isEmpty());
     }
 
     @Test
     void disconnect_サイトの設定を消せなければ失敗として返す() {
-        when(snsXService.requireConnectableSiteId(7L)).thenReturn(3L);
-        when(siteService.runLetsblogSns(3L, "config-clear", "linkedin", null))
-                .thenThrow(new IllegalStateException("届かない"));
+        fx.connectableSite();
+        fx.world.letsblogSnsFails("config-clear", "linkedin", "届かない");
 
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> service.disconnect(7L));
 
         assertTrue(e.getMessage().contains("届かない"));
+    }
+
+    @Test
+    void 公開コンストラクタはシステム時計で組み立てられる() {
+        SnsLinkedinService real = new SnsLinkedinService(fx.snsXService, fx.world.siteService,
+                new LinkedinApiClient(fx.world.http.baseUrl(),
+                        fx.world.http.baseUrl() + "/oauth/v2/accessToken", "https://linkedin.example/authorize"), fx.store,
+                fx.world.currentActorService, fx.world.objectMapper);
+        fx.projectWithProductionSite(null);
+
+        assertThrows(IllegalStateException.class, () -> real.disconnect(7L));
     }
 }

@@ -5,7 +5,15 @@ import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.project.cms.CmsType;
 import com.letsblog.project.cms.ConnectionCheckResult;
 import com.letsblog.project.cms.WpCliInstallResult;
-import com.letsblog.project.client.CmsProvisioningBridgeClient;
+import com.letsblog.project.cms.LetsblogPluginStatus;
+import com.letsblog.project.cms.LetsblogSnsResult;
+import com.letsblog.project.cms.LetsblogSyncResult;
+import com.letsblog.project.cms.ProvisioningResult;
+import com.letsblog.project.testsupport.FakeHttpServer;
+import com.letsblog.project.testsupport.ProjectWorld;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import com.letsblog.project.domain.Site;
 import com.letsblog.project.domain.SshKeyPair;
 import com.letsblog.project.dto.SiteConnectionCheckResult;
@@ -15,6 +23,7 @@ import com.letsblog.project.dto.SiteUpdateRequest;
 import com.letsblog.project.repository.SiteRepository;
 import com.letsblog.project.repository.SshKeyPairRepository;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -51,33 +60,52 @@ class SiteServiceTest {
     @Mock
     private SiteRepository siteRepository;
     @Mock
-    private CmsProvisioningBridgeClient bridgeClient;
-    @Mock
-    private ProvisioningService provisioningService;
-    @Mock
     private SshKeyPairRepository sshKeyPairRepository;
-    @Mock
-    private CurrentActorService currentActorService;
+
+    // 自前のクラス(CmsProvisioningBridgeClient・ProvisioningService・CurrentActorService)は実物で、
+    // publishing-service と identity-service の向こうはフェイクHTTPサーバーが演じる(issue #1817)。
+    private final ProjectWorld world = new ProjectWorld();
+    private static final String CMS = "/api/internal/project/cms/";
+
+    @BeforeEach
+    void defaultBridge() {
+        world.respond("POST", CMS + "provision", new ProvisioningResult("cat-1", null, "tag-1", null, "author-1", null));
+        world.respond("POST", CMS + "test-connection", new ConnectionCheckResult(true, null, null, null));
+    }
+
+    @AfterEach
+    void closeWorld() {
+        world.close();
+    }
+
+    /** CMSブリッジ(publishing-service)への呼び出しだけを数える。 */
+    private List<FakeHttpServer.Request> cmsCalls() {
+        return world.http.requests().stream().filter(r -> r.path().startsWith(CMS)).toList();
+    }
+
+    private void bridgeConnectionFails(String reason) {
+        world.respond("POST", CMS + "test-connection", ConnectionCheckResult.failure(reason));
+    }
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
             Base64.getEncoder().encodeToString(new byte[32]));
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private SiteService service() {
-        return new SiteService(siteRepository, credentialCipher, objectMapper, bridgeClient, provisioningService,
-                sshKeyPairRepository, currentActorService, transactionOperations);
+        return new SiteService(siteRepository, credentialCipher, objectMapper, world.cmsBridgeClient,
+                world.provisioningService, sshKeyPairRepository, world.currentActorService, transactionOperations);
     }
 
     /** トランザクション内かどうかを記録する(#1628)。 */
-    private final boolean[] inTransaction = {false};
+    private final AtomicBoolean inTransaction = new AtomicBoolean(false);
     private final TransactionOperations transactionOperations = new TransactionOperations() {
         @Override
         public <T> T execute(TransactionCallback<T> action) {
-            inTransaction[0] = true;
+            inTransaction.set(true);
             try {
                 return action.doInTransaction(null);
             } finally {
-                inTransaction[0] = false;
+                inTransaction.set(false);
             }
         }
     };
@@ -95,18 +123,19 @@ class SiteServiceTest {
     @Test
     void register_リモート呼び出しの間はトランザクションを持たず保存だけをトランザクション内で行う() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
-        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
+        world.actingAs(5L, "user", "actor@example.com");
         boolean[] seenInTx = new boolean[3];
-        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com"))).thenAnswer(inv -> {
-            seenInTx[0] = inTransaction[0];
-            return new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null);
+        world.http.on("POST", CMS + "provision", req -> {
+            seenInTx[0] = inTransaction.get();
+            return FakeHttpServer.Response.ok(world.toJson(
+                    new ProvisioningResult("cat-1", null, "tag-1", null, "author-1", null)));
         });
-        when(bridgeClient.testConnection(eq("WORDPRESS"), any())).thenAnswer(inv -> {
-            seenInTx[1] = inTransaction[0];
-            return new ConnectionCheckResult(true, null, null, null);
+        world.http.on("POST", CMS + "test-connection", req -> {
+            seenInTx[1] = inTransaction.get();
+            return FakeHttpServer.Response.ok(world.toJson(new ConnectionCheckResult(true, null, null, null)));
         });
         when(siteRepository.save(any())).thenAnswer(inv -> {
-            seenInTx[2] = inTransaction[0];
+            seenInTx[2] = inTransaction.get();
             return inv.getArgument(0);
         });
 
@@ -121,11 +150,7 @@ class SiteServiceTest {
     @Test
     void register_成功時にプロビジョニングと疎通確認を行い暗号化して保存する() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
-        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
-        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com")))
-                .thenReturn(new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null));
-        when(bridgeClient.testConnection(eq("WORDPRESS"), any()))
-                .thenReturn(new ConnectionCheckResult(true, null, null, null));
+        world.actingAs(5L, "user", "actor@example.com");
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
@@ -138,20 +163,19 @@ class SiteServiceTest {
         ArgumentCaptor<Site> captor = ArgumentCaptor.forClass(Site.class);
         verify(siteRepository).save(captor.capture());
         assertTrue(captor.getValue().getCredentialsEncrypted().length > 0);
+        assertEquals("actor@example.com",
+                world.bodiesOf("POST", CMS + "provision").get(0).get("actorEmail").asText());
+        assertEquals(1, world.http.requests("POST", CMS + "test-connection").size());
     }
 
     @Test
     void register_sshKeyPairId参照は解決した秘密鍵PEMをブリッジへ送る() {
         when(siteRepository.existsBySiteKey("ssh-site")).thenReturn(false);
-        when(currentActorService.getCurrentActorEmail()).thenReturn(null);
         SshKeyPair keyPair = new SshKeyPair("deploy-key", "comment", "ssh-ed25519 AAAA...",
                 credentialCipher.encrypt("PRIVATE-PEM"));
         when(sshKeyPairRepository.existsById(1L)).thenReturn(true);
         when(sshKeyPairRepository.findById(1L)).thenReturn(Optional.of(keyPair));
-        when(provisioningService.provisionSite(anyString(), any(), any()))
-                .thenReturn(new ProvisioningService.Result(null, null, null, null, null, null));
-        when(bridgeClient.testConnection(anyString(), any()))
-                .thenReturn(ConnectionCheckResult.failure("接続失敗"));
+        bridgeConnectionFails("接続失敗");
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SiteRegisterRequest request = new SiteRegisterRequest("Name", "ssh-site", CmsType.WORDPRESS,
@@ -160,9 +184,10 @@ class SiteServiceTest {
 
         service().register(request);
 
-        ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(bridgeClient).testConnection(eq("WORDPRESS"), captor.capture());
-        assertEquals("PRIVATE-PEM", captor.getValue().get("sshPrivateKeyPem"));
+        assertEquals("PRIVATE-PEM", world.bodiesOf("POST", CMS + "test-connection").get(0)
+                .get("credentials").get("sshPrivateKeyPem").asText());
+        assertEquals("PRIVATE-PEM", world.bodiesOf("POST", CMS + "provision").get(0)
+                .get("credentials").get("sshPrivateKeyPem").asText());
     }
 
     @Test
@@ -193,11 +218,7 @@ class SiteServiceTest {
     @Test
     void register_AGENTはappPasswordなしで登録できる_issue1565() {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
-        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
-        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com")))
-                .thenReturn(new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null));
-        when(bridgeClient.testConnection(eq("WORDPRESS"), any()))
-                .thenReturn(new ConnectionCheckResult(true, null, null, null));
+        world.actingAs(5L, "user", "actor@example.com");
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         SiteResponse response = service().register(new SiteRegisterRequest("Name", "my-site", CmsType.WORDPRESS,
@@ -227,7 +248,7 @@ class SiteServiceTest {
         }
 
         verify(siteRepository, never()).save(any());
-        verifyNoInteractions(provisioningService, bridgeClient);
+        assertTrue(cmsCalls().isEmpty());
     }
 
     @Test
@@ -255,11 +276,7 @@ class SiteServiceTest {
 
     private Site registerAndCaptureSite(String adminPath) {
         when(siteRepository.existsBySiteKey("my-site")).thenReturn(false);
-        when(currentActorService.getCurrentActorEmail()).thenReturn("actor@example.com");
-        when(provisioningService.provisionSite(eq("WORDPRESS"), any(), eq("actor@example.com")))
-                .thenReturn(new ProvisioningService.Result("cat-1", null, "tag-1", null, "author-1", null));
-        when(bridgeClient.testConnection(eq("WORDPRESS"), any()))
-                .thenReturn(new ConnectionCheckResult(true, null, null, null));
+        world.actingAs(5L, "user", "actor@example.com");
         when(siteRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service().register(registerRequestWithAdminPath(adminPath));
@@ -293,7 +310,7 @@ class SiteServiceTest {
         }
 
         verify(siteRepository, never()).save(any());
-        verifyNoInteractions(provisioningService, bridgeClient);
+        assertTrue(cmsCalls().isEmpty());
     }
 
     @Test
@@ -541,7 +558,7 @@ class SiteServiceTest {
         assertThrows(RuntimeException.class, () -> service().update(1L,
                 new SiteUpdateRequest(null, Map.of("baseUrl", "https://x.example.com"), "//evil")));
 
-        verify(bridgeClient, never()).testConnection(anyString(), any());
+        assertTrue(cmsCalls().isEmpty());
         verify(siteRepository, never()).save(any());
     }
 
@@ -553,7 +570,7 @@ class SiteServiceTest {
         site.setCredentialsEncrypted(credentialCipher.encrypt(
                 "{\"baseUrl\":\"https://x.example.com\",\"transport\":\"SSH\"}"));
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
-        when(bridgeClient.installWpCli(eq("WORDPRESS"), any())).thenReturn(new WpCliInstallResult("インストール完了"));
+        world.respond("POST", CMS + "install-wp-cli", new WpCliInstallResult("インストール完了"));
 
         WpCliInstallResult result = service().installWpCli(1L);
 
@@ -569,7 +586,7 @@ class SiteServiceTest {
         site.setCredentialsEncrypted(credentialCipher.encrypt(
                 "{\"baseUrl\":\"https://x.example.com\",\"transport\":\"AGENT\"}"));
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site));
-        when(bridgeClient.testConnection(anyString(), any())).thenReturn(ConnectionCheckResult.failure("接続失敗"));
+        bridgeConnectionFails("接続失敗");
 
         SiteConnectionCheckResult result = service().checkConnection(1L);
 
@@ -595,7 +612,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
         com.letsblog.project.cms.LetsblogPluginStatus status = new com.letsblog.project.cms.LetsblogPluginStatus(
                 com.letsblog.project.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
-        when(bridgeClient.letsblogPluginStatus(eq("WORDPRESS"), any())).thenReturn(status);
+        world.respond("POST", CMS + "letsblog-plugin-status", status);
 
         assertEquals(status, service().getLetsblogPluginStatus(1L));
     }
@@ -612,7 +629,7 @@ class SiteServiceTest {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
         com.letsblog.project.cms.LetsblogPluginStatus status = new com.letsblog.project.cms.LetsblogPluginStatus(
                 com.letsblog.project.cms.LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
-        when(bridgeClient.installLetsblogPlugin(eq("WORDPRESS"), any())).thenReturn(status);
+        world.respond("POST", CMS + "install-letsblog-plugin", status);
 
         assertEquals(status, service().installLetsblogPlugin(1L));
     }
@@ -622,7 +639,7 @@ class SiteServiceTest {
         when(siteRepository.findById(9L)).thenReturn(Optional.empty());
 
         assertThrows(SiteNotFoundException.class, () -> service().installLetsblogPlugin(9L));
-        verify(bridgeClient, never()).installLetsblogPlugin(anyString(), any());
+        assertTrue(cmsCalls().isEmpty());
     }
 
     // ---- issue #1558: letsblogプラグインへの同期 ----
@@ -630,10 +647,12 @@ class SiteServiceTest {
     @Test
     void syncLetsblogPlugin_内容とハッシュをブリッジへ渡し保存されたハッシュを返す() {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
-        when(bridgeClient.syncLetsblogPlugin(eq("WORDPRESS"), any(), eq("{\"a\":1}"), eq("h1")))
-                .thenReturn(new com.letsblog.project.cms.LetsblogSyncResult("h1"));
+        world.respond("POST", CMS + "sync-letsblog-plugin", new com.letsblog.project.cms.LetsblogSyncResult("h1"));
 
         assertEquals("h1", service().syncLetsblogPlugin(1L, "{\"a\":1}", "h1"));
+        var sent = world.bodiesOf("POST", CMS + "sync-letsblog-plugin").get(0);
+        assertEquals("{\"a\":1}", sent.get("payload").asText());
+        assertEquals("h1", sent.get("hash").asText());
     }
 
     @Test
@@ -648,10 +667,10 @@ class SiteServiceTest {
     @Test
     void runLetsblogSns_コマンドと標準入力をブリッジへ渡し標準出力を返す() {
         when(siteRepository.findById(1L)).thenReturn(Optional.of(agentSite()));
-        when(bridgeClient.letsblogSns(eq("WORDPRESS"), any(), eq("config-set"), eq("x"), eq("{\"a\":1}")))
-                .thenReturn(new com.letsblog.project.cms.LetsblogSnsResult("{\"status\":\"接続済み\"}"));
+        world.letsblogSns("config-set", "x", "{\"status\":\"接続済み\"}");
 
         assertEquals("{\"status\":\"接続済み\"}", service().runLetsblogSns(1L, "config-set", "x", "{\"a\":1}"));
+        assertEquals("{\"a\":1}", world.snsRequests("config-set").get(0).get("stdin").asText());
     }
 
     @Test
@@ -659,6 +678,6 @@ class SiteServiceTest {
         when(siteRepository.findById(9L)).thenReturn(Optional.empty());
 
         assertThrows(SiteNotFoundException.class, () -> service().runLetsblogSns(9L, "status", "x", null));
-        verify(bridgeClient, never()).letsblogSns(anyString(), any(), anyString(), any(), any());
+        assertTrue(cmsCalls().isEmpty());
     }
 }

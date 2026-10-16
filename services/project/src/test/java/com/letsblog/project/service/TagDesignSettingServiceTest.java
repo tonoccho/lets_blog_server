@@ -276,4 +276,17 @@ class TagDesignSettingServiceTest {
 
         assertThrows(IllegalArgumentException.class, () -> service.save(PROJECT_ID, EmbedTagType.TOC, request));
     }
+
+    @Test
+    void getOverview_projectIdがnullならグローバル既定行の一覧から返す() {
+        TagDesignSetting global = saved(EmbedTagType.TOC, "dark", "#111", "#eee", "#f00");
+        global.setProjectId(null);
+        when(repository.findByProjectIdIsNull()).thenReturn(java.util.List.of(global));
+
+        TagDesignSettingsOverviewResponse overview = service.getOverview(null);
+
+        org.junit.jupiter.api.Assertions.assertEquals("dark",
+                overview.settings().stream().filter(x -> x.tagType() == EmbedTagType.TOC).findFirst().orElseThrow().presetId());
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).findByProjectId(any());
+    }
 }

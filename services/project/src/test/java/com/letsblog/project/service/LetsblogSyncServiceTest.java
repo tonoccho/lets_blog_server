@@ -1,16 +1,17 @@
 package com.letsblog.project.service;
 
-import com.letsblog.project.cms.CmsType;
 import com.letsblog.project.cms.LetsblogPluginStatus;
+import com.letsblog.project.cms.LetsblogSyncResult;
 import com.letsblog.project.client.BearerScope;
-import com.letsblog.project.client.ContentBridgeClient;
 import com.letsblog.project.client.ContentBridgeClient.SyncPayload;
 import com.letsblog.project.domain.LetsblogSyncStatus;
 import com.letsblog.project.domain.Project;
 import com.letsblog.project.domain.Site;
 import com.letsblog.project.dto.LetsblogSyncState;
 import com.letsblog.project.repository.ProjectRepository;
-import com.letsblog.project.repository.SiteRepository;
+import com.letsblog.project.testsupport.FakeHttpServer;
+import com.letsblog.project.testsupport.ProjectWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,13 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -48,18 +43,14 @@ import static org.mockito.Mockito.when;
 class LetsblogSyncServiceTest {
 
     private static final SyncPayload PAYLOAD = new SyncPayload("{\"cssBundle\":\".a{}\"}", "h1");
+    private static final String CMS = "/api/internal/project/cms/";
+    private static final String CONTENT = "/api/internal/content/projects/\\d+/letsblog-sync-payload";
 
-    @Mock
-    private SiteService siteService;
-    @Mock
-    private SiteRepository siteRepository;
     @Mock
     private ProjectRepository projectRepository;
-    @Mock
-    private ContentBridgeClient contentBridgeClient;
-    @Mock
-    private CurrentActorService currentActorService;
 
+    // 自前のクラス(SiteService・ContentBridgeClient・CurrentActorService)は実物で、HTTPはフェイクが答える(issue #1817)。
+    private final ProjectWorld world = new ProjectWorld();
     private final List<Runnable> queued = new ArrayList<>();
     private final Executor queueingExecutor = queued::add;
     private final Map<Long, Site> sites = new HashMap<>();
@@ -70,23 +61,26 @@ class LetsblogSyncServiceTest {
     @BeforeEach
     void setUp() {
         service = new LetsblogSyncService(
-                siteService, siteRepository, projectRepository, contentBridgeClient, currentActorService,
-                queueingExecutor);
-        lenient().when(siteRepository.findById(anyLong()))
-                .thenAnswer(inv -> Optional.ofNullable(sites.get(inv.<Long>getArgument(0))));
-        lenient().when(siteRepository.save(any(Site.class))).thenAnswer(inv -> {
+                world.siteService, world.siteRepository, projectRepository, world.contentBridgeClient,
+                world.currentActorService, queueingExecutor);
+        lenient().when(world.siteRepository.save(any(Site.class))).thenAnswer(inv -> {
             saved.add(inv.getArgument(0));
             return inv.getArgument(0);
         });
-        lenient().when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer t");
-        lenient().when(contentBridgeClient.fetchSyncPayload(anyLong(), anyString())).thenReturn(PAYLOAD);
+        world.request.addHeader("Authorization", "Bearer t");
+        world.respond("GET", CONTENT, PAYLOAD);
+        world.respond("POST", CMS + "sync-letsblog-plugin", new LetsblogSyncResult("h1"));
+        world.pluginState(LetsblogPluginStatus.State.INSTALLED);
+    }
+
+    @AfterEach
+    void close() {
+        BearerScope.call(null, () -> null);
+        world.close();
     }
 
     private Site site(Long id) {
-        Site site = new Site();
-        site.setId(id);
-        site.setSiteKey("site-" + id);
-        site.setCmsType(CmsType.WORDPRESS);
+        Site site = world.addSite(id, "site-" + id);
         sites.put(id, site);
         return site;
     }
@@ -100,14 +94,18 @@ class LetsblogSyncServiceTest {
         return project;
     }
 
-    private LetsblogPluginStatus installed() {
-        return new LetsblogPluginStatus(LetsblogPluginStatus.State.INSTALLED, "1.0.0", 1);
-    }
-
     private void drain() {
         List<Runnable> copy = new ArrayList<>(queued);
         queued.clear();
         copy.forEach(Runnable::run);
+    }
+
+    private int syncRequests() {
+        return world.http.requests("POST", CMS + "sync-letsblog-plugin").size();
+    }
+
+    private int contentFetches() {
+        return world.http.requests("GET", CONTENT).size();
     }
 
     // ---- AC1: プロジェクトのすべてのサイトへ送り、ハッシュが一致する ----
@@ -116,15 +114,17 @@ class LetsblogSyncServiceTest {
     void プロジェクトのすべてのサイトへ送り同期済みとハッシュを記録する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, 2L, 3L)));
         site(1L); site(2L); site(3L);
-        when(siteService.getLetsblogPluginStatus(anyLong())).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(anyLong(), eq(PAYLOAD.payload()), eq("h1"))).thenReturn("h1");
 
         service.syncProject(5L, "Bearer t");
 
-        verify(contentBridgeClient, times(1)).fetchSyncPayload(5L, "Bearer t");
-        verify(siteService).syncLetsblogPlugin(1L, PAYLOAD.payload(), "h1");
-        verify(siteService).syncLetsblogPlugin(2L, PAYLOAD.payload(), "h1");
-        verify(siteService).syncLetsblogPlugin(3L, PAYLOAD.payload(), "h1");
+        assertEquals(1, contentFetches());
+        assertEquals("Bearer t", world.http.requests("GET", CONTENT).get(0).header("Authorization"));
+        var sent = world.bodiesOf("POST", CMS + "sync-letsblog-plugin");
+        assertEquals(3, sent.size());
+        for (var body : sent) {
+            assertEquals(PAYLOAD.payload(), body.get("payload").asText());
+            assertEquals("h1", body.get("hash").asText());
+        }
         assertEquals(3, saved.size());
         for (Site s : saved) {
             assertEquals(LetsblogSyncStatus.SYNCED, s.getLetsblogSyncStatus());
@@ -138,12 +138,10 @@ class LetsblogSyncServiceTest {
     void 未設定のスロットと重複と存在しないサイトは無視する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, 1L, 99L)));
         site(1L);
-        when(siteService.getLetsblogPluginStatus(1L)).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(1L, PAYLOAD.payload(), "h1")).thenReturn("h1");
 
         service.syncProject(5L, "Bearer t");
 
-        verify(siteService, times(1)).syncLetsblogPlugin(anyLong(), anyString(), anyString());
+        assertEquals(1, syncRequests());
         assertEquals(1, saved.size());
     }
 
@@ -153,7 +151,7 @@ class LetsblogSyncServiceTest {
 
         service.syncProject(5L, "Bearer t");
 
-        verify(contentBridgeClient, never()).fetchSyncPayload(anyLong(), anyString());
+        assertEquals(0, contentFetches());
     }
 
     @Test
@@ -162,26 +160,21 @@ class LetsblogSyncServiceTest {
 
         service.syncProject(5L, "Bearer t");
 
-        verify(contentBridgeClient, never()).fetchSyncPayload(anyLong(), anyString());
+        assertEquals(0, contentFetches());
     }
 
     @Test
     void 送信中は呼び出し元のトークンがブリッジ呼び出しに使われる() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         site(1L);
-        List<String> seen = new ArrayList<>();
-        when(siteService.getLetsblogPluginStatus(1L)).thenAnswer(inv -> {
-            seen.add(BearerScope.current());
-            return installed();
-        });
-        when(siteService.syncLetsblogPlugin(anyLong(), anyString(), anyString())).thenAnswer(inv -> {
-            seen.add(BearerScope.current());
-            return "h1";
-        });
 
         service.syncProject(5L, "Bearer scoped");
 
-        assertEquals(List.of("Bearer scoped", "Bearer scoped"), seen);
+        // 状態の取得と送信、どちらのブリッジ呼び出しにも、取り置いたトークンが使われる。
+        assertEquals("Bearer scoped",
+                world.http.requests("POST", CMS + "letsblog-plugin-status").get(0).header("Authorization"));
+        assertEquals("Bearer scoped",
+                world.http.requests("POST", CMS + "sync-letsblog-plugin").get(0).header("Authorization"));
         assertNull(BearerScope.current());
     }
 
@@ -193,15 +186,14 @@ class LetsblogSyncServiceTest {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         when(projectRepository.findById(6L)).thenReturn(Optional.of(project(6L, 2L, null, null)));
         site(1L); site(2L);
-        when(siteService.getLetsblogPluginStatus(anyLong())).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(anyLong(), anyString(), anyString())).thenReturn("h1");
 
         service.syncAll("Bearer t");
 
-        verify(siteService).syncLetsblogPlugin(1L, PAYLOAD.payload(), "h1");
-        verify(siteService).syncLetsblogPlugin(2L, PAYLOAD.payload(), "h1");
-        verify(contentBridgeClient).fetchSyncPayload(5L, "Bearer t");
-        verify(contentBridgeClient).fetchSyncPayload(6L, "Bearer t");
+        assertEquals(2, syncRequests());
+        assertEquals(1, world.http.requests("GET", "/api/internal/content/projects/5/letsblog-sync-payload").size());
+        assertEquals(1, world.http.requests("GET", "/api/internal/content/projects/6/letsblog-sync-payload").size());
+        assertEquals(LetsblogSyncStatus.SYNCED, sites.get(1L).getLetsblogSyncStatus());
+        assertEquals(LetsblogSyncStatus.SYNCED, sites.get(2L).getLetsblogSyncStatus());
     }
 
     @Test
@@ -210,12 +202,10 @@ class LetsblogSyncServiceTest {
         when(projectRepository.findById(6L)).thenReturn(Optional.of(project(6L, 2L, null, null)));
         when(projectRepository.findById(5L)).thenThrow(new IllegalStateException("db down"));
         site(2L);
-        when(siteService.getLetsblogPluginStatus(2L)).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(2L, PAYLOAD.payload(), "h1")).thenReturn("h1");
 
         service.syncAll("Bearer t");
 
-        verify(siteService).syncLetsblogPlugin(2L, PAYLOAD.payload(), "h1");
+        assertEquals(LetsblogSyncStatus.SYNCED, sites.get(2L).getLetsblogSyncStatus());
     }
 
     // ---- AC5: 未導入・要更新のサイトへは送らない ----
@@ -224,11 +214,11 @@ class LetsblogSyncServiceTest {
     void 未導入のサイトへは送らず見送りとして記録する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         site(1L);
-        when(siteService.getLetsblogPluginStatus(1L)).thenReturn(new LetsblogPluginStatus(LetsblogPluginStatus.State.NOT_INSTALLED, null, null));
+        world.pluginState(LetsblogPluginStatus.State.NOT_INSTALLED);
 
         service.syncProject(5L, "Bearer t");
 
-        verify(siteService, never()).syncLetsblogPlugin(anyLong(), anyString(), anyString());
+        assertEquals(0, syncRequests());
         assertEquals(LetsblogSyncStatus.SKIPPED, saved.get(0).getLetsblogSyncStatus());
         assertTrue(saved.get(0).getLetsblogSyncError().contains("未導入"));
         assertNull(saved.get(0).getLetsblogSyncHash());
@@ -238,12 +228,11 @@ class LetsblogSyncServiceTest {
     void 要更新のサイトへは送らず見送りとして記録する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         site(1L);
-        when(siteService.getLetsblogPluginStatus(1L))
-                .thenReturn(new LetsblogPluginStatus(LetsblogPluginStatus.State.NEEDS_UPDATE, "0.9.0", 0));
+        world.pluginState(LetsblogPluginStatus.State.NEEDS_UPDATE);
 
         service.syncProject(5L, "Bearer t");
 
-        verify(siteService, never()).syncLetsblogPlugin(anyLong(), anyString(), anyString());
+        assertEquals(0, syncRequests());
         assertEquals(LetsblogSyncStatus.SKIPPED, saved.get(0).getLetsblogSyncStatus());
         assertTrue(saved.get(0).getLetsblogSyncError().contains("要更新"));
     }
@@ -254,11 +243,11 @@ class LetsblogSyncServiceTest {
     void 状態を取得できなければ失敗として記録し送らない() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         site(1L);
-        when(siteService.getLetsblogPluginStatus(1L)).thenThrow(new IllegalStateException("接続できません"));
+        world.http.status("POST", CMS + "letsblog-plugin-status", 500, "{\"error\":\"接続できません\"}");
 
         service.syncProject(5L, "Bearer t");
 
-        verify(siteService, never()).syncLetsblogPlugin(anyLong(), anyString(), anyString());
+        assertEquals(0, syncRequests());
         assertEquals(LetsblogSyncStatus.FAILED, saved.get(0).getLetsblogSyncStatus());
         assertTrue(saved.get(0).getLetsblogSyncError().contains("接続できません"));
     }
@@ -267,10 +256,10 @@ class LetsblogSyncServiceTest {
     void 送信に失敗したら失敗として記録し他のサイトの送信は続ける() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, 2L, null)));
         site(1L); site(2L);
-        when(siteService.getLetsblogPluginStatus(anyLong())).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(eq(1L), anyString(), anyString()))
-                .thenThrow(new IllegalStateException("wp-cliが失敗しました"));
-        when(siteService.syncLetsblogPlugin(eq(2L), anyString(), anyString())).thenReturn("h1");
+        // サイト1のブリッジ呼び出し(認証情報のbaseUrlで見分ける)だけが失敗する。
+        world.http.on("POST", CMS + "sync-letsblog-plugin", req -> world.bodyOf(req).path("credentials")
+                .path("baseUrl").asText().contains("site1.")
+                ? FakeHttpServer.Response.json(500, "{\"error\":\"wp-cliが失敗しました\"}") : null);
 
         service.syncProject(5L, "Bearer t");
 
@@ -283,8 +272,7 @@ class LetsblogSyncServiceTest {
     void 保存されたハッシュが期待と違えば失敗として記録する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         site(1L);
-        when(siteService.getLetsblogPluginStatus(1L)).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(1L, PAYLOAD.payload(), "h1")).thenReturn("other");
+        world.respond("POST", CMS + "sync-letsblog-plugin", new LetsblogSyncResult("other"));
 
         service.syncProject(5L, "Bearer t");
 
@@ -296,11 +284,11 @@ class LetsblogSyncServiceTest {
     void 同期内容を取得できなければすべてのサイトを失敗として記録する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, 2L, null)));
         site(1L); site(2L);
-        when(contentBridgeClient.fetchSyncPayload(5L, "Bearer t")).thenThrow(new IllegalStateException("content down"));
+        world.http.status("GET", CONTENT, 500, "content down");
 
         service.syncProject(5L, "Bearer t");
 
-        verify(siteService, never()).syncLetsblogPlugin(anyLong(), anyString(), anyString());
+        assertEquals(0, syncRequests());
         assertEquals(LetsblogSyncStatus.FAILED, sites.get(1L).getLetsblogSyncStatus());
         assertEquals(LetsblogSyncStatus.FAILED, sites.get(2L).getLetsblogSyncStatus());
         assertTrue(sites.get(1L).getLetsblogSyncError().contains("content down"));
@@ -313,8 +301,6 @@ class LetsblogSyncServiceTest {
         failed.setLetsblogSyncError("接続できません");
         when(projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(1L, 1L, 1L))
                 .thenReturn(Optional.of(project(5L, 1L, null, null)));
-        when(siteService.getLetsblogPluginStatus(1L)).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(1L, PAYLOAD.payload(), "h1")).thenReturn("h1");
 
         LetsblogSyncState state = service.syncSiteNow(1L);
 
@@ -322,6 +308,7 @@ class LetsblogSyncServiceTest {
         assertNull(state.error());
         assertEquals("h1", state.hash());
         assertNotNull(state.syncedAt());
+        assertEquals("Bearer t", world.http.requests("GET", CONTENT).get(0).header("Authorization"));
     }
 
     @Test
@@ -333,7 +320,7 @@ class LetsblogSyncServiceTest {
         LetsblogSyncState state = service.syncSiteNow(1L);
 
         assertEquals(LetsblogSyncStatus.SKIPPED, state.status());
-        verify(contentBridgeClient, never()).fetchSyncPayload(anyLong(), anyString());
+        assertEquals(0, contentFetches());
     }
 
     @Test
@@ -346,7 +333,7 @@ class LetsblogSyncServiceTest {
         site(1L);
         when(projectRepository.findByLocalSiteIdOrTestSiteIdOrProductionSiteId(1L, 1L, 1L))
                 .thenReturn(Optional.of(project(5L, 1L, null, null)));
-        when(contentBridgeClient.fetchSyncPayload(5L, "Bearer t")).thenThrow(new IllegalStateException("content down"));
+        world.http.status("GET", CONTENT, 500, "content down");
 
         assertEquals(LetsblogSyncStatus.FAILED, service.syncSiteNow(1L).status());
     }
@@ -381,26 +368,28 @@ class LetsblogSyncServiceTest {
     void プロジェクトの依頼はその場では実行せず呼び出し元のトークンを取り置いて後で実行する() {
         when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
         site(1L);
-        when(siteService.getLetsblogPluginStatus(1L)).thenReturn(installed());
-        when(siteService.syncLetsblogPlugin(1L, PAYLOAD.payload(), "h1")).thenReturn("h1");
 
         service.requestProjectSync(5L);
 
-        verify(contentBridgeClient, never()).fetchSyncPayload(anyLong(), anyString());
+        assertEquals(0, contentFetches());
         assertEquals(1, queued.size());
         drain();
-        verify(contentBridgeClient).fetchSyncPayload(5L, "Bearer t");
+        assertEquals(1, contentFetches());
+        assertEquals("Bearer t", world.http.requests("GET", CONTENT).get(0).header("Authorization"));
     }
 
     @Test
     void すべてのプロジェクトの依頼も後で実行する() {
-        when(projectRepository.findAll()).thenReturn(List.of());
+        when(projectRepository.findAll()).thenReturn(List.of(project(5L, 1L, null, null)));
+        when(projectRepository.findById(5L)).thenReturn(Optional.of(project(5L, 1L, null, null)));
+        site(1L);
 
         service.requestAllSync();
 
-        verify(projectRepository, never()).findAll();
+        assertEquals(0, contentFetches());
         drain();
-        verify(projectRepository).findAll();
+        assertEquals(1, contentFetches());
+        assertEquals(LetsblogSyncStatus.SYNCED, sites.get(1L).getLetsblogSyncStatus());
     }
 
     @Test
@@ -410,6 +399,6 @@ class LetsblogSyncServiceTest {
         service.requestProjectSync(5L);
         drain();
 
-        verify(contentBridgeClient, never()).fetchSyncPayload(anyLong(), anyString());
+        assertEquals(0, contentFetches());
     }
 }

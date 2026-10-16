@@ -4,44 +4,38 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.slf4j.LoggerFactory;
-import java.util.List;
-import java.util.stream.Collectors;
-
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.project.client.BearerScope;
+import com.letsblog.project.domain.Site;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
-import com.letsblog.project.dto.SiteResponse;
-import com.letsblog.project.client.IdentityClient;
-import java.time.Instant;
-import java.util.function.Consumer;
+import com.letsblog.project.testsupport.FakeHttpServer;
+import com.letsblog.project.testsupport.ProjectWorld;
+import com.letsblog.project.testsupport.ProjectWorld.JobUpdate;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.mock.web.MockHttpServletRequest;
+import org.slf4j.LoggerFactory;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.inOrder;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
  * サイト自動構築ジョブの実行本体(issue #1479)。{@code @Async}はSpringプロキシ経由でしか効かないため、
  * メソッドを同期的に呼んで検証する(ImageGenerationJobRunnerTestと同じ)。
+ *
+ * <p>issue #1817: WordPressSiteProvisioningService・SiteService・GenerationJobClient・CurrentActorService は
+ * 実物。DB(SiteRepository)とHTTPの向こう(ai-service・provision-agent・publishing-service)だけを差し替える。
  */
-@ExtendWith(MockitoExtension.class)
 @DisplayName("project-service: サイト自動構築ジョブランナー(issue #1479)")
 class ManagedSiteProvisioningJobRunnerTest {
 
@@ -50,128 +44,138 @@ class ManagedSiteProvisioningJobRunnerTest {
     private static final ActorSnapshot ACTOR =
             new ActorSnapshot(5L, "sub-5", "a@example.com", "203.0.113.9", "ua", "Bearer abc", true);
 
-    @Mock
-    private WordPressSiteProvisioningService provisioningService;
-    @Mock
-    private GenerationJobClient generationJobClient;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    // 実物を使い、ジョブのスレッドでは操作者がスナップショットから引かれることを確かめる。
-    private final CurrentActorService currentActorService =
-            new CurrentActorService(new MockHttpServletRequest(), mock(IdentityClient.class));
+    private final ProjectWorld world = new ProjectWorld();
     private JobHeartbeatTracker tracker;
     private ManagedSiteProvisioningJobRunner runner;
 
     @BeforeEach
     void setUp() {
-        tracker = new JobHeartbeatTracker(generationJobClient, objectMapper);
-        runner = new ManagedSiteProvisioningJobRunner(
-                provisioningService, currentActorService, generationJobClient, objectMapper, tracker);
+        tracker = new JobHeartbeatTracker(world.generationJobClient, world.objectMapper);
+        WordPressSiteProvisioningService provisioningService = new WordPressSiteProvisioningService(
+                world.wordPressProvisioningClient, world.wordPressSyncClient, world.siteService,
+                world.siteRepository, world.domainEventPublisher);
+        runner = new ManagedSiteProvisioningJobRunner(provisioningService, world.currentActorService,
+                world.generationJobClient, world.objectMapper, tracker);
+        world.registrationSucceeds();
+        world.respond("POST", "/provision", Map.of("url", "https://localhost/sites/my-site", "adminUser", "admin"));
+        world.http.on("POST", "/deprovision", FakeHttpServer.Response.empty(200));
+        world.http.on("POST", "/sync", FakeHttpServer.Response.empty(200));
     }
 
-    private static SiteResponse site() {
-        return new SiteResponse(7L, "Name", "my-site", null, "https://localhost/sites/my-site",
-                Instant.now(), Instant.now(), "SUCCESS", true, false, null);
+    @AfterEach
+    void close() {
+        world.close();
     }
 
-    private JsonNode lastPayload(String status) throws Exception {
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(11L), eq(status), payload.capture());
-        return objectMapper.readTree(payload.getValue());
+    private Site registeredSite() {
+        Site site = new Site();
+        site.setId(7L);
+        site.setName("Name");
+        site.setSiteKey("my-site");
+        site.setBaseUrl("https://localhost/sites/my-site");
+        when(world.siteRepository.findBySiteKey("my-site")).thenReturn(Optional.of(site));
+        return site;
+    }
+
+    private JsonNode lastPayload(String status) {
+        List<JobUpdate> updates = world.jobUpdates(11L, status);
+        assertEquals(1, updates.size());
+        return updates.get(0).payload();
     }
 
     @Test
     @DisplayName("成功すると provisioning → registering の進捗を running で通知し、done の結果にサイトIDを載せる")
-    @SuppressWarnings("unchecked")
-    void success() throws Exception {
-        when(provisioningService.createManagedSiteForJob(eq(REQUEST), any())).thenAnswer(invocation -> {
-            // ジョブのスレッドでも操作者(監査ログ・著者解決の参照先)が引ける。
-            assertEquals(5L, currentActorService.getCurrentActorId());
-            assertEquals("sub-5", currentActorService.getCurrentActorKeycloakSub());
-            Consumer<String> listener = invocation.getArgument(1, Consumer.class);
-            listener.accept("provisioning");
-            listener.accept("registering");
-            return site();
+    void success() {
+        registeredSite();
+        // ジョブのスレッドでも操作者(監査ログ・著者解決の参照先)が引ける。
+        AtomicReference<String> sub = new AtomicReference<>();
+        when(world.siteRepository.existsBySiteKey(anyString())).thenAnswer(inv -> {
+            sub.set(world.currentActorService.getCurrentActorKeycloakSub() + "/" + world.currentActorService.getCurrentActorId());
+            return false;
         });
 
         runner.run(11L, REQUEST, ACTOR);
 
-        InOrder order = inOrder(generationJobClient);
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        order.verify(generationJobClient, org.mockito.Mockito.times(2))
-                .updateStatus(eq(11L), eq("running"), payload.capture());
-        assertEquals("provisioning", objectMapper.readTree(payload.getAllValues().get(0)).get("phase").asText());
-        assertEquals("registering", objectMapper.readTree(payload.getAllValues().get(1)).get("phase").asText());
-        ArgumentCaptor<String> done = ArgumentCaptor.forClass(String.class);
-        order.verify(generationJobClient).updateStatus(eq(11L), eq("done"), done.capture());
-        JsonNode result = objectMapper.readTree(done.getValue());
+        assertEquals("sub-5/5", sub.get());
+        List<JobUpdate> running = world.jobUpdates(11L, "running");
+        assertEquals("provisioning", running.get(0).payload().get("phase").asText());
+        assertEquals("registering", running.get(1).payload().get("phase").asText());
+        assertEquals(2, running.size());
+        assertEquals(List.of("running", "running", "done"),
+                world.jobUpdates(11L).stream().map(JobUpdate::status).toList());
+        JsonNode result = lastPayload("done");
         assertEquals("done", result.get("phase").asText());
         assertEquals(7L, result.get("siteId").asLong());
         assertEquals("my-site", result.get("siteKey").asText());
-        assertFalse(done.getValue().contains("pw\""));
+        assertFalse(world.jobUpdates(11L).toString().contains("pw\""));
+        // サイト登録の著者は、スナップショットの操作者のメールになる。
+        assertEquals("a@example.com",
+                world.bodiesOf("POST", "/api/internal/project/cms/provision").get(0).get("actorEmail").asText());
     }
 
     @Test
     @DisplayName("段階の通知はハートビートが保つ最新の段階にもなる(#1724)")
-    @SuppressWarnings("unchecked")
-    void heartbeatKeepsLatestPhase() throws Exception {
+    void heartbeatKeepsLatestPhase() {
         tracker.track(11L);
-        when(provisioningService.createManagedSiteForJob(eq(REQUEST), any())).thenAnswer(invocation -> {
-            invocation.getArgument(1, Consumer.class).accept("registering");
+        registeredSite();
+        // 登録の段階(registering)にいるあいだにハートビートが打たれる。
+        when(world.siteRepository.findBySiteKey("my-site")).thenAnswer(inv -> {
             tracker.heartbeat();
-            return site();
+            Site site = new Site();
+            site.setId(7L);
+            site.setSiteKey("my-site");
+            return Optional.of(site);
         });
 
         runner.run(11L, REQUEST, ACTOR);
 
-        ArgumentCaptor<String> running = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient, org.mockito.Mockito.times(2)).updateStatus(eq(11L), eq("running"), running.capture());
-        assertEquals("registering", objectMapper.readTree(running.getAllValues().get(1)).get("phase").asText());
+        List<JobUpdate> running = world.jobUpdates(11L, "running");
+        assertEquals(3, running.size());
+        assertEquals("registering", running.get(2).payload().get("phase").asText());
     }
 
     @Test
     @DisplayName("done を書いた後は追跡が外れ、ハートビートが running に戻さない(#1724)")
     void noHeartbeatAfterDone() {
         tracker.track(11L);
-        when(provisioningService.createManagedSiteForJob(any(), any())).thenReturn(site());
+        registeredSite();
 
         runner.run(11L, REQUEST, ACTOR);
+        int before = world.jobUpdates(11L).size();
         tracker.heartbeat();
 
         assertFalse(tracker.isTracked(11L));
-        verify(generationJobClient, never()).updateStatus(eq(11L), eq("running"), any());
-        verify(generationJobClient).updateStatus(eq(11L), eq("done"), any());
+        assertEquals(before, world.jobUpdates(11L).size());
+        assertEquals(1, world.jobUpdates(11L, "done").size());
     }
 
     @Test
     @DisplayName("failed を書いた後も追跡が外れ、ハートビートが running に戻さない(#1724)")
     void noHeartbeatAfterFailed() {
         tracker.track(11L);
-        when(provisioningService.createManagedSiteForJob(any(), any())).thenThrow(new IllegalStateException("x"));
+        when(world.siteRepository.existsBySiteKey(anyString())).thenThrow(new IllegalStateException("x"));
 
         runner.run(11L, REQUEST, ACTOR);
         tracker.heartbeat();
 
         assertFalse(tracker.isTracked(11L));
-        verify(generationJobClient, never()).updateStatus(eq(11L), eq("running"), any());
-        verify(generationJobClient).updateStatus(eq(11L), eq("failed"), any());
+        assertEquals(List.of("failed"), world.jobUpdates(11L).stream().map(JobUpdate::status).toList());
     }
 
     @Test
     @DisplayName("操作者の束縛は終わったら外れる")
     void actorUnboundAfterRun() {
-        when(provisioningService.createManagedSiteForJob(any(), any())).thenReturn(site());
+        registeredSite();
 
         runner.run(11L, REQUEST, ACTOR);
 
-        org.junit.jupiter.api.Assertions.assertNull(currentActorService.getCurrentActorKeycloakSub());
+        assertNull(world.currentActorService.getCurrentActorKeycloakSub());
     }
 
     @Test
     @DisplayName("siteKey 重複は duplicate_site_key の failed")
-    void duplicate() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any()))
-                .thenThrow(new DuplicateSiteKeyException("siteKey 'my-site' は既に登録されています"));
+    void duplicate() {
+        when(world.siteRepository.existsBySiteKey("my-site")).thenReturn(true);
 
         runner.run(11L, REQUEST, ACTOR);
 
@@ -182,9 +186,8 @@ class ManagedSiteProvisioningJobRunnerTest {
 
     @Test
     @DisplayName("実体が既にある(409)は already_provisioned の failed")
-    void alreadyProvisioned() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any()))
-                .thenThrow(new SiteAlreadyProvisionedException("既に構築済みです", null));
+    void alreadyProvisioned() {
+        world.fail("POST", "/provision", 409);
 
         runner.run(11L, REQUEST, ACTOR);
 
@@ -193,44 +196,44 @@ class ManagedSiteProvisioningJobRunnerTest {
 
     @Test
     @DisplayName("構築失敗は provisioning_failed の failed で、原因が読める")
-    void provisioningFailed() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any()))
-                .thenThrow(new ProvisioningException("WordPress自動構築に失敗しました: wp-cli", null));
+    void provisioningFailed() {
+        world.http.status("POST", "/provision", 500, "wp-cli");
 
         runner.run(11L, REQUEST, ACTOR);
 
         JsonNode result = lastPayload("failed");
         assertEquals("provisioning_failed", result.get("errorType").asText());
         assertTrue(result.get("error").asText().contains("wp-cli"));
-        verify(generationJobClient, never()).updateStatus(eq(11L), eq("done"), any());
+        assertTrue(world.jobUpdates(11L, "done").isEmpty());
     }
 
     @Test
     @DisplayName("テンプレート不正(IllegalArgumentException)・未登録は invalid_request の failed")
-    void invalidRequest() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any()))
-                .thenThrow(new IllegalArgumentException("テンプレートには自動構築サイトのみ指定できます"));
+    void invalidRequest() {
+        registeredSite();
+        world.addSite(3L, "テンプレート");
 
-        runner.run(11L, REQUEST, ACTOR);
+        runner.run(11L, new CreateManagedWordPressSiteRequest(
+                "Name", "my-site", "Title", "admin", "admin@example.com", "pw", "ja", 3L), ACTOR);
 
-        assertEquals("invalid_request", lastPayload("failed").get("errorType").asText());
+        JsonNode result = lastPayload("failed");
+        assertEquals("invalid_request", result.get("errorType").asText());
+        assertTrue(result.get("error").asText().contains("自動構築サイト"));
     }
 
     @Test
     @DisplayName("テンプレートサイトが無い(SiteNotFoundException)も invalid_request")
-    void templateNotFound() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any()))
-                .thenThrow(new SiteNotFoundException("id 3 のテンプレートサイトは登録されていません"));
-
-        runner.run(11L, REQUEST, ACTOR);
+    void templateNotFound() {
+        runner.run(11L, new CreateManagedWordPressSiteRequest(
+                "Name", "my-site", "Title", "admin", "admin@example.com", "pw", "ja", 3L), ACTOR);
 
         assertEquals("invalid_request", lastPayload("failed").get("errorType").asText());
     }
 
     @Test
     @DisplayName("想定外の例外は unexpected_error の failed(メッセージが無くても読める文言になる)")
-    void unexpected() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any())).thenThrow(new IllegalStateException());
+    void unexpected() {
+        when(world.siteRepository.existsBySiteKey(anyString())).thenThrow(new IllegalStateException());
 
         runner.run(11L, REQUEST, ACTOR);
 
@@ -242,11 +245,12 @@ class ManagedSiteProvisioningJobRunnerTest {
     @Test
     @DisplayName("ジョブのスレッドでは、取り置いた利用者のBearerをサービス間呼び出し用に束縛しない。操作者は引ける(#1723)")
     void userBearerNotBoundOnJobThread() throws Exception {
-        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
-        when(provisioningService.createManagedSiteForJob(any(), any())).thenAnswer(invocation -> {
-            seen.set(com.letsblog.project.client.BearerScope.current() + "/"
-                    + currentActorService.getAuthorizationHeader() + "/" + currentActorService.getCurrentActorEmail());
-            return site();
+        registeredSite();
+        AtomicReference<String> seen = new AtomicReference<>();
+        when(world.siteRepository.existsBySiteKey(anyString())).thenAnswer(inv -> {
+            seen.set(BearerScope.current() + "/" + world.currentActorService.getAuthorizationHeader() + "/"
+                    + world.currentActorService.getCurrentActorEmail());
+            return false;
         });
 
         Thread t = new Thread(() -> runner.run(11L, REQUEST, ACTOR));
@@ -254,7 +258,10 @@ class ManagedSiteProvisioningJobRunnerTest {
         t.join();
 
         assertEquals("null/null/a@example.com", seen.get());
-        org.junit.jupiter.api.Assertions.assertNull(com.letsblog.project.client.BearerScope.current());
+        assertNull(BearerScope.current());
+        // 利用者のBearerではなく、サービス自身のトークンで publishing-service を呼ぶ。
+        assertEquals("Bearer " + ProjectWorld.SERVICE_TOKEN,
+                world.http.requests("POST", "/api/internal/project/cms/provision").get(0).header("Authorization"));
     }
 
     /** ジョブ1件の完了行(issue #1731)だけを集める。 */
@@ -273,27 +280,26 @@ class ManagedSiteProvisioningJobRunnerTest {
                 .collect(Collectors.toList());
     }
 
-    @org.junit.jupiter.api.Test
-    void 完了行_成功はINFOでkey_valueの1行を出す() throws Exception {
-        when(provisioningService.createManagedSiteForJob(eq(REQUEST), any())).thenReturn(site());
-        List<ILoggingEvent> lines = completionLines(() -> { runner.run(11L, REQUEST, ACTOR); });
+    @Test
+    void 完了行_成功はINFOでkey_valueの1行を出す() {
+        registeredSite();
+        List<ILoggingEvent> lines = completionLines(() -> runner.run(11L, REQUEST, ACTOR));
 
-        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
-        org.junit.jupiter.api.Assertions.assertEquals(Level.INFO, lines.get(0).getLevel());
-        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+        assertEquals(1, lines.size(), lines.toString());
+        assertEquals(Level.INFO, lines.get(0).getLevel());
+        assertTrue(lines.get(0).getFormattedMessage()
                 .matches("job completed: kind=site_provisioning job_id=11 duration_ms=\\d+ outcome=success"),
                 lines.get(0).getFormattedMessage());
     }
 
-    @org.junit.jupiter.api.Test
-    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() throws Exception {
-        when(provisioningService.createManagedSiteForJob(any(), any()))
-                .thenThrow(new ProvisioningException("構築失敗", null));
-        List<ILoggingEvent> lines = completionLines(() -> { runner.run(11L, REQUEST, ACTOR); });
+    @Test
+    void 完了行_失敗はWARN以上で例外クラス名をoutcomeに出す() {
+        world.fail("POST", "/provision", 500);
+        List<ILoggingEvent> lines = completionLines(() -> runner.run(11L, REQUEST, ACTOR));
 
-        org.junit.jupiter.api.Assertions.assertEquals(1, lines.size(), lines.toString());
-        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
-        org.junit.jupiter.api.Assertions.assertTrue(lines.get(0).getFormattedMessage()
+        assertEquals(1, lines.size(), lines.toString());
+        assertTrue(lines.get(0).getLevel().isGreaterOrEqual(Level.WARN));
+        assertTrue(lines.get(0).getFormattedMessage()
                 .matches("job completed: kind=site_provisioning job_id=11 duration_ms=\\d+ outcome=ProvisioningException"),
                 lines.get(0).getFormattedMessage());
     }

@@ -5,64 +5,71 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
+import com.letsblog.common.client.GenerationJobBridgeException;
 import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.project.dto.CreateManagedWordPressSiteRequest;
-import java.time.LocalDateTime;
+import com.letsblog.project.testsupport.AsyncProxies;
+import com.letsblog.project.testsupport.ProjectWorld;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.task.TaskRejectedException;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
-/** サイト自動構築ジョブの受理側(issue #1479)。ImageGenerationJobStarterTest相当。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * サイト自動構築ジョブの受理側(issue #1479)。ジョブを作って即座に返し、実行は{@code @Async}のランナーへ渡す。
+ *
+ * <p>issue #1817: ランナー・トラッカー・GenerationJobClient・CurrentActorService は実物。ランナーはSpringの実際のAOP
+ * プロキシ(@Async)で包み、Executorを差し替えて「実行を後に回す」「満杯で拒否する」を再現する。HTTPの向こう
+ * (ai-service)はフェイクHTTPサーバーが演じる。
+ */
 @DisplayName("project-service: サイト自動構築ジョブの受理(issue #1479)")
 class ManagedSiteProvisioningJobStarterTest {
 
     private static final CreateManagedWordPressSiteRequest REQUEST = new CreateManagedWordPressSiteRequest(
-            "Name", "my-site", "Title", "admin", "admin@example.com", "S3cret-pw", "ja", 4L);
-    private static final ActorSnapshot ACTOR =
-            new ActorSnapshot(5L, "sub-5", "a@example.com", "203.0.113.9", "ua", "Bearer abc", true);
-    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 5, 1, 2, 3);
+            "Name", "my-site", "Title", "admin", "S3cret-admin@example.com", "S3cret-pw", "ja", 4L);
 
-    @Mock
-    private GenerationJobClient generationJobClient;
-    @Mock
-    private ManagedSiteProvisioningJobRunner runner;
-    @Mock
-    private CurrentActorService currentActorService;
-    @Mock
+    private final ProjectWorld world = new ProjectWorld();
+    private final List<Runnable> deferred = new ArrayList<>();
     private JobHeartbeatTracker tracker;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private ManagedSiteProvisioningJobRunner realRunner;
     private ManagedSiteProvisioningJobStarter starter;
 
     @BeforeEach
     void setUp() {
-        // 本物の tracker と同じく、終端の書き込みはその場で実行する。
-        org.mockito.Mockito.lenient().doAnswer(inv -> {
-            inv.<Runnable>getArgument(1).run();
-            return null;
-        }).when(tracker).complete(any(), any());
-        starter = new ManagedSiteProvisioningJobStarter(generationJobClient, runner, currentActorService, objectMapper, tracker);
+        tracker = new JobHeartbeatTracker(world.generationJobClient, world.objectMapper);
+        WordPressSiteProvisioningService provisioningService = new WordPressSiteProvisioningService(
+                world.wordPressProvisioningClient, world.wordPressSyncClient, world.siteService,
+                world.siteRepository, world.domainEventPublisher);
+        realRunner = new ManagedSiteProvisioningJobRunner(provisioningService, world.currentActorService,
+                world.generationJobClient, world.objectMapper, tracker);
+        starterWith(deferred::add);
+        world.actingAs(5L, "admin", "a@example.com").signedInAs("sub-5");
+        world.request.addHeader("X-Forwarded-For", "203.0.113.9");
+        world.request.addHeader("User-Agent", "ua");
+    }
+
+    private void starterWith(java.util.concurrent.Executor executor) {
+        ManagedSiteProvisioningJobRunner asyncRunner = AsyncProxies.async(realRunner, "siteProvisioningExecutor", executor);
+        starter = new ManagedSiteProvisioningJobStarter(
+                world.generationJobClient, asyncRunner, world.currentActorService, world.objectMapper, tracker);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     @Test
@@ -74,112 +81,125 @@ class ManagedSiteProvisioningJobStarterTest {
     @Test
     @DisplayName("リクエストスレッドで操作者を取り、ユーザーのBearerでジョブを作り、同じ操作者をランナーへ渡す")
     void startsJobWithActorResolvedInRequestThread() throws Exception {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        GenerationJobSummary job = new GenerationJobSummary(11L, "site_provisioning", "running", NOW, NOW);
-        when(generationJobClient.create(eq("site_provisioning"), any(), eq("Bearer abc"))).thenReturn(job);
+        world.jobCreated(11L, "site_provisioning");
+        AtomicReference<String> actorSeenByRunner = new AtomicReference<>();
+        // ランナーの実行(後で流す)の中で、同じ操作者が引けること。
+        org.mockito.Mockito.when(world.siteRepository.existsBySiteKey(anyString())).thenAnswer(inv -> {
+            actorSeenByRunner.set(world.currentActorService.getCurrentActorId() + "/"
+                    + world.currentActorService.getCurrentActorKeycloakSub() + "/"
+                    + world.currentActorService.getRemoteIp() + "/" + world.currentActorService.getUserAgent());
+            throw new IllegalStateException("stop");
+        });
 
         GenerationJobSummary result = starter.start(REQUEST);
 
-        assertSame(job, result);
-        verify(runner).run(11L, REQUEST, ACTOR);
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).create(eq("site_provisioning"), payload.capture(), eq("Bearer abc"));
-        JsonNode json = objectMapper.readTree(payload.getValue());
-        assertEquals("my-site", json.get("siteKey").asText());
-        assertEquals("Name", json.get("name").asText());
-        assertEquals(4L, json.get("templateSiteId").asLong());
+        assertEquals(11L, result.id());
+        assertEquals("running", result.status());
+        var create = world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0);
+        assertEquals("Bearer token-5", create.header("Authorization"));
+        JsonNode json = world.bodyOf(create);
+        assertEquals("site_provisioning", json.get("type").asText());
+        JsonNode payload = world.objectMapper.readTree(json.get("requestPayload").asText());
+        assertEquals("my-site", payload.get("siteKey").asText());
+        assertEquals("Name", payload.get("name").asText());
+        assertEquals(4L, payload.get("templateSiteId").asLong());
         // 管理者パスワードとメールはジョブの要求内容(誰でも読める)へ残さない。
-        assertFalse(payload.getValue().contains("S3cret-pw"));
-        assertFalse(json.has("adminPassword"));
-        assertFalse(json.has("adminEmail"));
+        assertFalse(json.get("requestPayload").asText().contains("S3cret-pw"));
+        assertFalse(payload.has("adminPassword"));
+        assertFalse(payload.has("adminEmail"));
+        assertEquals(1, deferred.size(), "ランナーは受理のスレッドでは動かさず、Executorへ渡す");
+        deferred.forEach(Runnable::run);
+        assertEquals("5/sub-5/203.0.113.9/ua", actorSeenByRunner.get());
     }
 
     @Test
     @DisplayName("実行枠と待ち行列が満杯なら、ジョブを queue_full の failed にして返す")
-    void queueFull() throws Exception {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(12L, "site_provisioning", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any());
+    void queueFull() {
+        world.jobCreated(12L, "site_provisioning");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
+        try {
+            starterWith(saturated);
 
-        GenerationJobSummary result = starter.start(REQUEST);
+            GenerationJobSummary result = starter.start(REQUEST);
 
-        assertEquals("failed", result.status());
-        assertEquals(12L, result.id());
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(12L), eq("failed"), payload.capture());
-        JsonNode json = objectMapper.readTree(payload.getValue());
-        assertEquals("queue_full", json.get("errorType").asText());
-        assertFalse(json.get("error").asText().isBlank());
+            assertEquals("failed", result.status());
+            assertEquals(12L, result.id());
+            var failed = world.jobUpdates(12L, "failed");
+            assertEquals(1, failed.size());
+            assertEquals("queue_full", failed.get(0).payload().get("errorType").asText());
+            assertFalse(failed.get(0).payload().get("error").asText().isBlank());
+        } finally {
+            release.countDown();
+            saturated.shutdown();
+        }
     }
 
     @Test
     @DisplayName("ジョブを作れなければ(ai-service 不達)ランナーを起動せず例外を伝える")
     void createFailurePropagates() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenThrow(new com.letsblog.common.client.GenerationJobBridgeException("down", null));
+        world.fail("POST", "/api/internal/ai/generation-jobs", 500);
 
-        assertThrows(com.letsblog.common.client.GenerationJobBridgeException.class, () -> starter.start(REQUEST));
+        assertThrows(GenerationJobBridgeException.class, () -> starter.start(REQUEST));
 
-        verify(runner, never()).run(any(), any(), any());
+        assertTrue(deferred.isEmpty());
+        assertFalse(tracker.isTracked(0L));
     }
 
     @Test
     @DisplayName("ランナーへ渡す前に追跡を始める(順番待ちの間もハートビートが打たれる。#1724)")
     void tracksBeforeRunning() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(31L, "x", "running", NOW, NOW));
+        world.jobCreated(31L, "site_provisioning");
 
-        start();
+        starter.start(REQUEST);
 
-        org.mockito.InOrder order = org.mockito.Mockito.inOrder(tracker, runner);
-        order.verify(tracker).track(31L);
-        order.verify(runner).run(eq(31L), any(), any());
+        assertTrue(tracker.isTracked(31L), "ランナーが動き出す前(順番待ち)でも追跡されている");
+        assertEquals(1, deferred.size());
+        tracker.heartbeat();
+        assertEquals("queued", world.jobUpdates(31L, "running").get(0).payload().get("phase").asText());
     }
 
     @Test
     @DisplayName("満杯で拒否されたら failed の書き込みを tracker 経由で行い、追跡を外す(#1724)")
     void queueFullCompletesThroughTracker() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(32L, "x", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any());
+        world.jobCreated(32L, "site_provisioning");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
+        try {
+            starterWith(saturated);
 
-        start();
+            starter.start(REQUEST);
 
-        verify(tracker).track(32L);
-        verify(tracker).complete(eq(32L), any());
-        verify(generationJobClient).updateStatus(eq(32L), eq("failed"), any());
+            assertFalse(tracker.isTracked(32L));
+            assertEquals(1, world.jobUpdates(32L, "failed").size());
+        } finally {
+            release.countDown();
+            saturated.shutdown();
+        }
     }
 
     @Test
     @DisplayName("満杯で拒否されたら、ジョブIDと queue_full を含む WARN を1行出す(#1768)")
     void queueFullLogsWarn() {
-        when(currentActorService.snapshot()).thenReturn(ACTOR);
-        when(generationJobClient.create(any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(41L, "site_provisioning", "running", NOW, NOW));
-        doThrow(new TaskRejectedException("full")).when(runner).run(any(), any(), any());
-
+        world.jobCreated(41L, "site_provisioning");
+        CountDownLatch release = new CountDownLatch(1);
+        ThreadPoolTaskExecutor saturated = AsyncProxies.saturated(release);
         Logger logger = (Logger) LoggerFactory.getLogger(ManagedSiteProvisioningJobStarter.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
-            start();
+            starterWith(saturated);
+            starter.start(REQUEST);
         } finally {
             logger.detachAppender(appender);
+            release.countDown();
+            saturated.shutdown();
         }
 
-        java.util.List<ILoggingEvent> warns = appender.list.stream()
-                .filter(e -> e.getLevel() == Level.WARN).toList();
+        List<ILoggingEvent> warns = appender.list.stream().filter(e -> e.getLevel() == Level.WARN).toList();
         assertEquals(1, warns.size());
         assertTrue(warns.get(0).getFormattedMessage().contains("41"));
         assertTrue(warns.get(0).getFormattedMessage().contains("queue_full"));
-    }
-
-    private void start() {
-        starter.start(REQUEST);
     }
 }

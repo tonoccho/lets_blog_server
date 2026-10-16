@@ -1,8 +1,6 @@
 package com.letsblog.project.service;
 
-import com.letsblog.project.client.ActorProfile;
-import com.letsblog.project.client.IdentityClient;
-import java.util.Optional;
+import com.letsblog.project.testsupport.ProjectWorld;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,8 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * 操作者の引き継ぎ(issue #1479)。{@code @Async}のスレッドには{@code SecurityContextHolder}も
@@ -27,13 +23,15 @@ import static org.mockito.Mockito.when;
 @DisplayName("CurrentActorService: 操作者の引き継ぎ(issue #1479)")
 class CurrentActorServiceSnapshotTest {
 
-    private final MockHttpServletRequest request = new MockHttpServletRequest();
-    private final IdentityClient identityClient = mock(IdentityClient.class);
-    private final CurrentActorService service = new CurrentActorService(request, identityClient);
+    // issue #1817: IdentityClient は実物で、identity-service(/api/identity/me)はフェイクHTTPサーバーが演じる。
+    private final ProjectWorld world = new ProjectWorld();
+    private final MockHttpServletRequest request = world.request;
+    private final CurrentActorService service = world.currentActorService;
 
     @AfterEach
     void clear() {
         SecurityContextHolder.clearContext();
+        world.close();
     }
 
     private void signIn(String subject) {
@@ -45,15 +43,13 @@ class CurrentActorServiceSnapshotTest {
     @DisplayName("snapshot はリクエストの操作者・IP・UA・Authorization を写し取る")
     void snapshotCapturesRequestActor() {
         signIn("sub-1");
-        request.addHeader("Authorization", "Bearer abc");
+        world.actingAs(5L, "admin", "a@example.com");
         request.addHeader("X-Forwarded-For", "203.0.113.9");
         request.addHeader("User-Agent", "at-agent");
-        when(identityClient.lookupProfile("Bearer abc"))
-                .thenReturn(Optional.of(new ActorProfile(5L, "admin", "a@example.com")));
 
         ActorSnapshot snapshot = service.snapshot();
 
-        assertEquals(new ActorSnapshot(5L, "sub-1", "a@example.com", "203.0.113.9", "at-agent", "Bearer abc", true),
+        assertEquals(new ActorSnapshot(5L, "sub-1", "a@example.com", "203.0.113.9", "at-agent", "Bearer token-5", true),
                 snapshot);
     }
 
@@ -72,7 +68,7 @@ class CurrentActorServiceSnapshotTest {
     @DisplayName("runAs の中では snapshot の値を返し、リクエストにもセキュリティコンテキストにも触れない")
     void runAsServesSnapshotWithoutRequest() {
         HttpServletRequestThatMustNotBeUsed forbidden = new HttpServletRequestThatMustNotBeUsed();
-        CurrentActorService bound = new CurrentActorService(forbidden, identityClient);
+        CurrentActorService bound = new CurrentActorService(forbidden, world.identityClient);
         ActorSnapshot snapshot = new ActorSnapshot(9L, "sub-9", "n@example.com", "198.51.100.1", "ua", "Bearer z", true);
 
         String result = bound.runAs(snapshot, () -> {
