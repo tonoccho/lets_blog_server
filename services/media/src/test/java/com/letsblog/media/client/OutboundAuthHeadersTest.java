@@ -1,6 +1,7 @@
 package com.letsblog.media.client;
 
 import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.media.testsupport.ServiceTokenFixtures;
 import com.letsblog.media.service.ProjectNotFoundException;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.concurrent.atomic.AtomicReference;
@@ -20,8 +21,6 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * 内部ブリッジ呼び出しの認証(issue #1405 QA指摘)。
@@ -35,7 +34,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("media-service: リクエストの無いスレッドでの内部ブリッジ認証(issue #1405)")
 class OutboundAuthHeadersTest {
 
-    private final ServiceTokenClient serviceTokenClient = mock(ServiceTokenClient.class);
+    private ServiceTokenClient serviceTokenClient;
     private HttpServer server;
     private final List<String> seenAuthorization = new CopyOnWriteArrayList<>();
     private int status = 200;
@@ -45,6 +44,9 @@ class OutboundAuthHeadersTest {
     void startServer() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
+            if (ServiceTokenFixtures.handleTokenRequest(exchange)) {
+                return;
+            }
             seenAuthorization.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
             byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -55,6 +57,7 @@ class OutboundAuthHeadersTest {
             exchange.close();
         });
         server.start();
+        serviceTokenClient = ServiceTokenFixtures.client(baseUrl());
     }
 
     @AfterEach
@@ -90,7 +93,6 @@ class OutboundAuthHeadersTest {
 
     @Test
     void リクエストの無いスレッドではサービス自身のトークンでプロジェクトを確認する() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
         responseBody = "{\"id\":5,\"name\":\"n\",\"slug\":\"s\"}";
         ProjectServiceClient client = projectClient(new OutboundAuthHeaders(new MockHttpServletRequest(), serviceTokenClient));
 
@@ -101,7 +103,6 @@ class OutboundAuthHeadersTest {
 
     @Test
     void リクエストの無いスレッドでも存在しないプロジェクトはProjectNotFoundになる() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
         status = 404;
         ProjectServiceClient client = projectClient(new OutboundAuthHeaders(new MockHttpServletRequest(), serviceTokenClient));
         AtomicReference<Throwable> seen = new AtomicReference<>();
@@ -134,7 +135,6 @@ class OutboundAuthHeadersTest {
 
     @Test
     void AiGenerationClientもリクエストの無いスレッドでサービス自身のトークンを使う() throws Exception {
-        when(serviceTokenClient.getAccessToken()).thenReturn("svc-token");
         responseBody = "{\"result\":\"ok\"}";
         AiGenerationClient client = new AiGenerationClient(
                 RestClient.builder(), baseUrl(), new OutboundAuthHeaders(new MockHttpServletRequest(), serviceTokenClient),

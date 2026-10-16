@@ -117,6 +117,25 @@ class RenderBodySizeLimitFilterTest {
     }
 
     @Test
+    void 一バイトずつ読んで上限以内なら末尾の_1まで数え間違えずに読める() throws Exception {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        int[] total = new int[1];
+        int[] last = new int[1];
+        FilterChain chain = (req, res) -> {
+            int b;
+            while ((b = req.getInputStream().read()) != -1) {
+                total[0]++;
+            }
+            last[0] = b;
+        };
+
+        filter.doFilter(chunked(post("/api/render/plantuml", 100)), response, chain);
+
+        assertThat(total[0]).isEqualTo(100);
+        assertThat(last[0]).isEqualTo(-1);
+    }
+
+    @Test
     void 読み取り済みの上限超過後はIOExceptionとして扱える() {
         assertThat(new RequestBodyTooLargeException(100)).isInstanceOf(IOException.class);
     }

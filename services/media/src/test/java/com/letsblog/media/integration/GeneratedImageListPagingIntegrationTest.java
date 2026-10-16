@@ -1,21 +1,18 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -23,7 +20,6 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -37,13 +33,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>並び順はcreatedAt降順・同時刻はid降順。tag指定時は絞り込んだ後の一覧にページングを適用する。
  * limit省略時は従来どおり全件を返す。limitの上限は100で、超過は切り詰めずに400とする
  * (切り詰めると「返った件数がlimit未満=終端」という呼び出し側の判定が誤るため)。
- * 外部境界(identity-service)は{@code @MockitoBean}で置き換える(ADR-0006)。
+ * 外部境界(identity-service)はフェイクHTTPサーバー({@code ServiceStubs}、issue #1820)が演じ、JWTの検証だけ{@code @MockitoBean}の{@code JwtDecoder}で置き換える。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: 生成画像一覧のlimit/offsetページング(issue #1472)")
-class GeneratedImageListPagingIntegrationTest {
+class GeneratedImageListPagingIntegrationTest extends ServiceStubbedIntegrationTest {
 
     private static final String PATH = "/api/generated-images";
 
@@ -56,12 +49,6 @@ class GeneratedImageListPagingIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
     /** 新しい順(createdAt降順)に並べたときのid。 */
     private List<Long> newestFirstIds;
 
@@ -69,8 +56,7 @@ class GeneratedImageListPagingIntegrationTest {
     void setUp() {
         repository.deleteAll();
         org.mockito.Mockito.when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "admin"));
-        org.mockito.Mockito.when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
         // index 0 が最も新しい。tagsは index 0,2,4 に "Sky"、index 1 に "other"。
         newestFirstIds = new ArrayList<>();
         LocalDateTime base = LocalDateTime.of(2026, 1, 1, 12, 0, 0);

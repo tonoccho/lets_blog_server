@@ -1,29 +1,18 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import java.util.Optional;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
-import com.letsblog.media.service.MediaGarbageCollectionService;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -35,30 +24,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 非adminで403・adminで403にならない)を、{@link
  * com.letsblog.media.controller.ProjectMediaGarbageCollectionController#scan}で検証する。
  *
- * <p>identity-serviceは外部境界のため{@link IdentityClient}を{@code @MockitoBean}で置き換える
- * (ADR-0006のモック方針)。認可通過後に呼ばれる{@link MediaGarbageCollectionService}は、legacy-api側の
- * CMSブリッジへ実際にHTTP接続する実装のため、認可判定そのものとは無関係な結合を避ける目的で
- * 併せてモックする。
+ * <p>issue #1820: identity-service・publishing-serviceは外部境界として、フェイクHTTPサーバー({@code ServiceStubs})が演じる。
+ * 実物の{@code IdentityClient}・{@code MediaGarbageCollectionService}・{@code CmsBridgeClient}がHTTPで通信する。
+ * JWTの検証(Keycloakの鍵取得)だけは{@code @MockitoBean}の{@code JwtDecoder}で置き換える。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: AdminAuthorizationServiceの認可マトリクス統合テスト(issue #644)")
-class AdminAuthorizationIntegrationTest {
+class AdminAuthorizationIntegrationTest extends ServiceStubbedIntegrationTest {
 
     private static final String SCAN_PATH = "/api/projects/7/media-garbage-collection/scan?environment=local";
 
     @Autowired
     private MockMvc mockMvc;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private MediaGarbageCollectionService mediaGarbageCollectionService;
 
     @Test
     @DisplayName("Authorizationヘッダーなしは401(issue #772でSecurityConfigの認証ゲートを復元したため、"
@@ -80,34 +56,31 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("有効なJWTでもadmin以外は403")
     void admin以外は403() throws Exception {
         when(jwtDecoder.decode("user-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
-        when(identityClient.lookupProfile("Bearer user-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(10L, "user")));
+        ServiceStubs.profile("Bearer user-jwt", 10L, "user");
 
         mockMvc.perform(get(SCAN_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt"))
                 .andExpect(status().isForbidden());
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer user-jwt");
+        // 呼び出し先が変わってもstubが黙って空振りしないよう、フェイクHTTPサーバーが記録した呼び出しで確かめる(#906 / #583 で実際に起きた)。
+        assertThat(ServiceStubs.profileLookups("Bearer user-jwt")).isEqualTo(1);
     }
 
     @Test
     @DisplayName("adminなら403にならない")
     void adminは403にならない() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
-        when(mediaGarbageCollectionService.scan(eq(7L), anyString(), anyString()))
-                .thenReturn(new MediaGarbageCollectionScanResponse("local", List.of(), 0, 0, 0));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
+        // 認可を通った先のGCサービスは実物で、publishing-serviceのスキャン結果(メディア0件)をフェイクが返す。
+        ServiceStubs.HTTP.json("GET", "/api/internal/publishing/projects/7/media-scan",
+                "{\"media\":[],\"refs\":{\"posts\":[],\"settingsMediaIds\":{}}}");
 
         mockMvc.perform(get(SCAN_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt"))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(403));
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer admin-jwt");
+        // 呼び出し先が変わってもstubが黙って空振りしないよう、フェイクHTTPサーバーが記録した呼び出しで確かめる(#906 / #583 で実際に起きた)。
+        assertThat(ServiceStubs.profileLookups("Bearer admin-jwt")).isEqualTo(1);
     }
 
     /**
@@ -123,11 +96,11 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("無効化ユーザー(identityが401/403 → 操作者なし)は403。502にはしない")
     void 操作者を解決できない場合は403() throws Exception {
         when(jwtDecoder.decode("disabled-jwt")).thenReturn(JwtTestFixtures.jwt("sub-disabled", "user"));
-        when(identityClient.lookupProfile("Bearer disabled-jwt")).thenReturn(Optional.empty());
+        ServiceStubs.profileRejected("Bearer disabled-jwt");
 
         mockMvc.perform(get(SCAN_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer disabled-jwt"))
                 .andExpect(status().isForbidden());
 
-        verify(identityClient).lookupProfile("Bearer disabled-jwt");
+        assertThat(ServiceStubs.profileLookups("Bearer disabled-jwt")).isEqualTo(1);
     }
 }

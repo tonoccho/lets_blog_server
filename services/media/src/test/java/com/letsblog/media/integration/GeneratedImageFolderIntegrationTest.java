@@ -1,30 +1,26 @@
 package com.letsblog.media.integration;
 
 import com.jayway.jsonpath.JsonPath;
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -39,13 +35,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * issue #1493: 生成画像の入れ子フォルダ(作成・親の変更・画像の所属・フォルダ絞り込み・認可)と、
  * issue #1494: フォルダの改名・削除(削除の影響範囲・画像の未分類化)を、
  * 実DB(lbs_media_test)と実コントローラ経由で検証する。循環防止は再帰CTEに依存するため実DBが要る。
- * 外部境界(identity-service)は{@code @MockitoBean}で置き換える(ADR-0006)。
+ * 外部境界(identity-service)はフェイクHTTPサーバー({@code ServiceStubs}、issue #1820)が演じ、JWTの検証だけ{@code @MockitoBean}の{@code JwtDecoder}で置き換える。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: 生成画像の入れ子フォルダ(issue #1493)")
-class GeneratedImageFolderIntegrationTest {
+class GeneratedImageFolderIntegrationTest extends ServiceStubbedIntegrationTest {
 
     private static final String FOLDERS = "/api/generated-images/folders";
     private static final String IMAGES = "/api/generated-images";
@@ -59,21 +52,15 @@ class GeneratedImageFolderIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
     @BeforeEach
     void setUp() {
         cleanUp();
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt")).thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
         when(jwtDecoder.decode("user-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
-        when(identityClient.lookupProfile("Bearer user-jwt")).thenReturn(Optional.of(new ActorProfile(10L, "user")));
+        ServiceStubs.profile("Bearer user-jwt", 10L, "user");
         when(jwtDecoder.decode("disabled-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "user"));
-        when(identityClient.lookupProfile("Bearer disabled-jwt")).thenReturn(Optional.empty());
+        ServiceStubs.profileRejected("Bearer disabled-jwt");
     }
 
     @AfterEach

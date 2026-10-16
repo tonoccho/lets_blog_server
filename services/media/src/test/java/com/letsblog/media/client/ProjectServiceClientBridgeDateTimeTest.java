@@ -1,10 +1,10 @@
 package com.letsblog.media.client;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
+import com.letsblog.media.testsupport.ServiceTokenFixtures;
 import com.sun.net.httpserver.HttpServer;
+import org.springframework.mock.web.MockHttpServletRequest;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -31,8 +31,8 @@ class ProjectServiceClientBridgeDateTimeTest {
     @Test
     void requireProjectExists_はZ付きの日時を含む応答を読める() throws IOException {
         server = start("{\"id\":7,\"name\":\"P\",\"slug\":\"p\",\"masterEnvironment\":\"test\",\"localSiteId\":1,\"testSiteId\":2,\"productionSiteId\":3,\"githubRepository\":null,\"createdAt\":\"2026-09-08T20:03:35Z\",\"updatedAt\":\"2026-09-09T01:02:03Z\"}");
-        OutboundAuthHeaders auth = mock(OutboundAuthHeaders.class);
-        when(auth.current()).thenReturn(headers -> { });
+        OutboundAuthHeaders auth =
+                new OutboundAuthHeaders(new MockHttpServletRequest(), ServiceTokenFixtures.client(baseUrl()));
         ProjectServiceClient client = new ProjectServiceClient(RestClient.builder(), baseUrl(), auth);
 
         assertThatCode(() -> client.requireProjectExists(7L)).doesNotThrowAnyException();
@@ -41,6 +41,9 @@ class ProjectServiceClientBridgeDateTimeTest {
     private HttpServer start(String body) throws IOException {
         HttpServer s = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         s.createContext("/", exchange -> {
+            if (ServiceTokenFixtures.handleTokenRequest(exchange)) {
+                return;
+            }
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);

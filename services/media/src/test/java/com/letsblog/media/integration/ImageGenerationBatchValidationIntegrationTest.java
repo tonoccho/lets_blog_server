@@ -1,30 +1,21 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.media.ai.ChatGptImageClient;
-import com.letsblog.media.ai.ComfyUiClient;
-import com.letsblog.media.ai.ImageProvider;
-import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.media.service.GeneratedImageCreationService;
-import com.letsblog.media.service.ImageModelService;
+import com.letsblog.media.domain.ProjectImageSettings;
+import com.letsblog.media.repository.GeneratedImageRepository;
+import com.letsblog.media.repository.ProjectImageSettingsRepository;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,54 +33,63 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * (プロバイダはプロジェクト設定から実行時に決まる)。上限超過が400になり、
  * メッセージにプロバイダ名と上限を含むことをここで確かめる。
  *
- * <p>外部境界(identity-service・ComfyUI・OpenAI・generation_jobs)は
- * {@code @MockitoBean}で置き換える(ADR-0006)。
+ * <p>issue #1820: 外部境界(identity-service・platform-service・ai-service・ComfyUI・OpenAI)はフェイクHTTPサーバー
+ * ({@code ServiceStubs})が演じ、実物のクライアント・サービスが通信する。生成が始まらないことは、フェイクが
+ * ComfyUI・OpenAI・{@code generation_jobs}への要求を1件も受けていないことと、{@code generated_images}の行が
+ * 増えていないことで確かめる。プロバイダの選択は実DBの{@code project_image_settings}で用意する。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: batchSize/batchCountの上限とHTTPステータス(issue #1102)")
-class ImageGenerationBatchValidationIntegrationTest {
+class ImageGenerationBatchValidationIntegrationTest extends ServiceStubbedIntegrationTest {
 
     private static final String PATH = "/api/ai/image";
+    private static final long CHATGPT_PROJECT_ID = 110201L;
 
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private GeneratedImageRepository generatedImageRepository;
+    @Autowired
+    private ProjectImageSettingsRepository projectImageSettingsRepository;
 
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
+    private long imagesBefore;
 
-    @MockitoBean
-    private IdentityClient identityClient;
+    @BeforeEach
+    void setUpStubs() {
+        imagesBefore = generatedImageRepository.count();
+        ServiceStubs.HTTP.json("GET", "/api/internal/platform/image-generation-config",
+                "{\"comfyUiBaseUrl\":\"" + ServiceStubs.HTTP.baseUrl() + "\"}");
+        ServiceStubs.HTTP.json("POST", "/api/internal/ai/generation-jobs",
+                "{\"id\":1,\"type\":\"comfyui_image\",\"status\":\"running\"}");
+        ServiceStubs.HTTP.json("GET", "/api/internal/project/projects/" + CHATGPT_PROJECT_ID,
+                "{\"id\":" + CHATGPT_PROJECT_ID + ",\"name\":\"p\",\"slug\":\"p\"}");
+    }
 
-    @MockitoBean
-    private ImageModelService imageModelService;
-
-    @MockitoBean
-    private ComfyUiClient comfyUiClient;
-
-    @MockitoBean
-    private ChatGptImageClient chatGptImageClient;
-
-    @MockitoBean
-    private GeneratedImageCreationService generatedImageCreationService;
-
-    @MockitoBean
-    private GenerationJobClient generationJobClient;
+    @AfterEach
+    void cleanUp() {
+        projectImageSettingsRepository.findByProjectId(CHATGPT_PROJECT_ID)
+                .ifPresent(projectImageSettingsRepository::delete);
+    }
 
     private org.springframework.test.web.servlet.ResultActions postImage(String body) throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "admin"));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
         return mockMvc.perform(post(PATH)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
     }
 
+    private void useChatGptFor(long projectId) {
+        ProjectImageSettings settings = new ProjectImageSettings(projectId);
+        settings.setImageProvider("CHATGPT");
+        projectImageSettingsRepository.save(settings);
+    }
+
     private void assertGenerationNeverStarted() {
-        verify(comfyUiClient, never()).generateImage(any());
-        verify(chatGptImageClient, never()).generateImage(any());
-        verify(generatedImageCreationService, never()).create(any());
-        verify(generationJobClient, never()).create(anyString(), anyString(), any());
+        assertThat(ServiceStubs.HTTP.requests("POST", "/prompt")).isEmpty();
+        assertThat(ServiceStubs.HTTP.requests("POST", "/images/(generations|edits)")).isEmpty();
+        assertThat(ServiceStubs.HTTP.requests("POST", "/api/internal/ai/generation-jobs")).isEmpty();
+        assertThat(generatedImageRepository.count()).isEqualTo(imagesBefore);
     }
 
     @Test
@@ -103,11 +103,6 @@ class ImageGenerationBatchValidationIntegrationTest {
     @Test
     @DisplayName("batchSize=16は上限内なので400にならない")
     void batchSize16は400にならない() throws Exception {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
-        when(comfyUiClient.generateImage(any())).thenReturn(java.util.List.of());
-        when(generationJobClient.create(anyString(), anyString(), any()))
-                .thenReturn(new com.letsblog.common.client.GenerationJobSummary(1L, "comfyui_image", "running", null, null));
-
         postImage("{\"prompt\":\"a cat\",\"batchSize\":16}")
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(400));
     }
@@ -131,11 +126,6 @@ class ImageGenerationBatchValidationIntegrationTest {
     @Test
     @DisplayName("batchSize=16・batchCount=16は合計上限が無いので400にならない")
     void batchSize16かつbatchCount16は400にならない() throws Exception {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
-        when(comfyUiClient.generateImage(any())).thenReturn(java.util.List.of());
-        when(generationJobClient.create(anyString(), anyString(), any()))
-                .thenReturn(new com.letsblog.common.client.GenerationJobSummary(1L, "comfyui_image", "running", null, null));
-
         postImage("{\"prompt\":\"a cat\",\"batchSize\":16,\"batchCount\":16}")
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isNotEqualTo(400));
     }
@@ -143,9 +133,9 @@ class ImageGenerationBatchValidationIntegrationTest {
     @Test
     @DisplayName("CHATGPTでbatchSize=11は400で、メッセージにプロバイダ名と上限10を含む")
     void chatgptでbatchSize11は400() throws Exception {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        useChatGptFor(CHATGPT_PROJECT_ID);
 
-        String body = postImage("{\"prompt\":\"a cat\",\"batchSize\":11}")
+        String body = postImage("{\"prompt\":\"a cat\",\"projectId\":" + CHATGPT_PROJECT_ID + ",\"batchSize\":11}")
                 .andExpect(status().isBadRequest())
                 .andReturn().getResponse().getContentAsString();
 

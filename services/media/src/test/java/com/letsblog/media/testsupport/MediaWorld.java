@@ -23,6 +23,7 @@ import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.domain.GeneratedImageSequence;
 import com.letsblog.media.domain.ProjectImageSettings;
 import com.letsblog.media.messaging.DomainEventPublisher;
+import com.letsblog.media.repository.GeneratedImageFolderRepository;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.repository.GeneratedImageSequenceRepository;
 import com.letsblog.media.repository.ProjectImageSettingsRepository;
@@ -30,6 +31,7 @@ import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.AuditLogService;
 import com.letsblog.media.service.ComfyUiModelService;
 import com.letsblog.media.service.CurrentActorService;
+import com.letsblog.media.service.GeneratedImageFolderService;
 import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.GeneratedImageEditService;
 import com.letsblog.media.service.GeneratedImageUploadService;
@@ -117,6 +119,8 @@ public final class MediaWorld implements AutoCloseable {
             Mockito.mock(ProjectImageSettingsRepository.class);
     public final GeneratedImageSequenceRepository generatedImageSequenceRepository =
             Mockito.mock(GeneratedImageSequenceRepository.class);
+    public final GeneratedImageFolderRepository generatedImageFolderRepository =
+            Mockito.mock(GeneratedImageFolderRepository.class);
     /** MQ。 */
     public final RabbitTemplate rabbitTemplate = Mockito.mock(RabbitTemplate.class);
 
@@ -143,6 +147,8 @@ public final class MediaWorld implements AutoCloseable {
     public final ChatGptImageClient chatGptImageClient;
     public final DomainEventPublisher domainEventPublisher = new DomainEventPublisher(rabbitTemplate);
     public final AuditLogService auditLogService = new AuditLogService(rabbitTemplate);
+    public final GeneratedImageFolderService folderService =
+            new GeneratedImageFolderService(generatedImageFolderRepository, generatedImageRepository);
     public final GeneratedImageSequenceService sequenceService =
             new GeneratedImageSequenceService(generatedImageSequenceRepository);
     public final GeneratedImageStorageService storageService;

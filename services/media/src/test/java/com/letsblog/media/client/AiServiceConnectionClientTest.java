@@ -1,5 +1,6 @@
 package com.letsblog.media.client;
 
+import com.letsblog.media.testsupport.ServiceTokenFixtures;
 import com.letsblog.common.auth.ServiceTokenClient;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -66,10 +67,10 @@ class AiServiceConnectionClientTest {
     void setUp() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/internal/ai/projects/", this::respond);
+        server.createContext(ServiceTokenFixtures.TOKEN_PATH, ServiceTokenFixtures::handleTokenRequest);
         server.start();
         String baseUri = "http://127.0.0.1:" + server.getAddress().getPort();
-        ServiceTokenClient tokens = org.mockito.Mockito.mock(ServiceTokenClient.class);
-        org.mockito.Mockito.when(tokens.getAccessToken()).thenReturn("svc-token");
+        ServiceTokenClient tokens = ServiceTokenFixtures.client(baseUri);
         clock = new MutableClock();
         client = new AiServiceConnectionClient(RestClient.builder(), baseUri, tokens, clock);
     }
@@ -146,9 +147,7 @@ class AiServiceConnectionClientTest {
 
     @Test
     void サービストークンを取得できない場合も例外にする() {
-        ServiceTokenClient broken = org.mockito.Mockito.mock(ServiceTokenClient.class);
-        org.mockito.Mockito.when(broken.getAccessToken())
-                .thenThrow(new com.letsblog.common.auth.ServiceTokenUnavailableException("down", null));
+        ServiceTokenClient broken = ServiceTokenFixtures.unreachable();
         AiServiceConnectionClient c = new AiServiceConnectionClient(
                 RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort(), broken, clock);
 
@@ -202,9 +201,7 @@ class AiServiceConnectionClientTest {
 
     @Test
     void キー取得でサービストークンを得られない場合も例外にする() {
-        ServiceTokenClient broken = org.mockito.Mockito.mock(ServiceTokenClient.class);
-        org.mockito.Mockito.when(broken.getAccessToken())
-                .thenThrow(new com.letsblog.common.auth.ServiceTokenUnavailableException("down", null));
+        ServiceTokenClient broken = ServiceTokenFixtures.unreachable();
         AiServiceConnectionClient c = new AiServiceConnectionClient(
                 RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort(), broken, clock);
 

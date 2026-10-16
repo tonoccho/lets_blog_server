@@ -1,24 +1,18 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.media.client.IdentityBridgeClient;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import com.letsblog.media.testsupport.UploadImageFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.util.FileSystemUtils;
@@ -30,7 +24,6 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,11 +38,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * issue #1599: 画像アップロード({@code POST /api/generated-images/upload})を、実DBと実コントローラ経由で検証する。
  * prompt NULL許可のマイグレーション、元の解像度のままの登録、メタ情報除去、拒否時に何も残らないこと、認可を確かめる。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: 画像アップロード(issue #1599)")
-class GeneratedImageUploadIntegrationTest {
+class GeneratedImageUploadIntegrationTest extends ServiceStubbedIntegrationTest {
 
     private static final long PROJECT_ID = 159901L;
     private static final long OTHER_PROJECT_ID = 159902L;
@@ -61,26 +51,15 @@ class GeneratedImageUploadIntegrationTest {
     @Value("${app.generated-images-storage-path}")
     private String storagePath;
 
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-    @MockitoBean
-    private IdentityClient identityClient;
-    @MockitoBean
-    private IdentityBridgeClient identityBridgeClient;
-
     @BeforeEach
     void setUp() throws Exception {
         cleanUp();
         org.mockito.Mockito.when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "admin"));
-        org.mockito.Mockito.when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
         org.mockito.Mockito.when(jwtDecoder.decode("member-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "user"));
-        org.mockito.Mockito.when(identityClient.lookupProfile("Bearer member-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(2L, "user")));
-        org.mockito.Mockito.when(identityBridgeClient.isProjectMember(PROJECT_ID, 2L, "Bearer member-jwt"))
-                .thenReturn(true);
-        org.mockito.Mockito.when(identityBridgeClient.isProjectMember(OTHER_PROJECT_ID, 2L, "Bearer member-jwt"))
-                .thenReturn(false);
+        ServiceStubs.profile("Bearer member-jwt", 2L, "user");
+        ServiceStubs.member(PROJECT_ID, 2L, true);
+        ServiceStubs.member(OTHER_PROJECT_ID, 2L, false);
     }
 
     @AfterEach

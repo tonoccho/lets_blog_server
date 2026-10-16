@@ -1,22 +1,18 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.media.service.MediaGarbageCollectionService;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -40,25 +36,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>ロール単位の認可(プロジェクトメンバー/adminの403)は{@link AdminAuthorizationIntegrationTest}が
  * 担当し、ここでは重複させない。
  *
- * <p>identity-service等の外部境界は{@code @MockitoBean}で置き換える(ADR-0006のモック方針)。
+ * <p>JWTの検証(Keycloakの鍵取得)だけを{@code @MockitoBean}の{@code JwtDecoder}で置き換える。外部サービスの接続先はフェイクHTTPサーバー(issue #1820)。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: 認証ゲートの認可マトリクス統合テスト(issue #772)")
-class AuthorizationMatrixIntegrationTest {
+class AuthorizationMatrixIntegrationTest extends ServiceStubbedIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private MediaGarbageCollectionService mediaGarbageCollectionService;
 
     /**
      * media-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code media}ルート:

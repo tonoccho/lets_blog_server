@@ -1,7 +1,5 @@
 package com.letsblog.media.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.dto.BulkDeleteGeneratedImagesRequest;
 import com.letsblog.media.dto.CreateGeneratedImageRequest;
@@ -9,34 +7,29 @@ import com.letsblog.media.dto.GeneratedImageBulkDeleteResponse;
 import com.letsblog.media.dto.GeneratedImageDetailResponse;
 import com.letsblog.media.dto.GeneratedImageSummaryResponse;
 import com.letsblog.media.dto.UpdateGeneratedImageTagsRequest;
-import com.letsblog.media.messaging.DomainEventPublisher;
+import com.letsblog.media.repository.GeneratedImageFolderRepository;
 import com.letsblog.media.repository.GeneratedImageRepository;
+import com.letsblog.media.testsupport.MediaWorld;
 import com.letsblog.media.dto.UpdateGeneratedImageFolderRequest;
-import com.letsblog.media.service.AdminAuthorizationService;
-import com.letsblog.media.service.GeneratedImageFolderService;
 import com.letsblog.media.service.InvalidFilterParameterException;
-import com.letsblog.media.service.GeneratedImageCreationService;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.GeneratedImageNotFoundException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,29 +38,34 @@ import static org.mockito.Mockito.when;
  * GeneratedImageControllerの回帰テスト(issue #281)。タグのJSONパース/シリアライズ、
  * tagクエリパラメータによる絞り込み、タグ更新エンドポイントを検証する。
  */
-@ExtendWith(MockitoExtension.class)
 class GeneratedImageControllerTest {
 
-    @Mock
-    private GeneratedImageRepository generatedImageRepository;
-    @Mock
-    private GeneratedImageStorageService generatedImageStorageService;
-    @Mock
-    private DomainEventPublisher domainEventPublisher;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-    @Mock
-    private GeneratedImageCreationService generatedImageCreationService;
-    @Mock
-    private GeneratedImageFolderService generatedImageFolderService;
+    /**
+     * 認可・画像の保存・フォルダ・MQ発行は実物で、外部との通信(DBのリポジトリ・RabbitTemplate・identity-serviceへの
+     * HTTP)だけを差し替える(issue #1820)。
+     */
+    private final MediaWorld world = new MediaWorld();
+    private final GeneratedImageRepository generatedImageRepository = world.generatedImageRepository;
+    private final GeneratedImageFolderRepository folderRepository = world.generatedImageFolderRepository;
 
     private GeneratedImageController controller;
 
     @BeforeEach
     void setUp() {
+        world.actingAsAdmin(1L);
         controller = new GeneratedImageController(
-                generatedImageRepository, generatedImageStorageService, new ObjectMapper(), domainEventPublisher,
-                adminAuthorizationService, generatedImageCreationService, generatedImageFolderService);
+                generatedImageRepository, world.storageService, world.objectMapper, world.domainEventPublisher,
+                world.adminAuthorizationService, world.creationService, world.folderService);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
+    }
+
+    private void memberOf(long projectId, long userId, boolean member) {
+        world.http.json("GET", "/api/internal/identity/projects/" + projectId + "/members/" + userId,
+                String.valueOf(member));
     }
 
     private GeneratedImage buildImage(Long id, String prompt, String tagsJson) {
@@ -114,7 +112,25 @@ class GeneratedImageControllerTest {
         List<GeneratedImageSummaryResponse> result = controller.list(5L, null, null, null, null, null, null);
 
         assertEquals(1, result.size());
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(5L);
+    }
+
+    @Test
+    void list_projectId指定時にメンバーでなければ拒否し画像を引かない() {
+        world.actingAsUser(10L);
+        memberOf(5L, 10L, false);
+
+        assertThrows(ForbiddenException.class, () -> controller.list(5L, null, null, null, null, null, null));
+
+        verifyNoInteractions(generatedImageRepository);
+    }
+
+    @Test
+    void list_projectId未指定はadmin限定() {
+        world.actingAsUser(10L);
+
+        assertThrows(ForbiddenException.class, () -> controller.list(null, null, null, null, null, null, null));
+
+        verifyNoInteractions(generatedImageRepository);
     }
 
     @Test
@@ -285,37 +301,50 @@ class GeneratedImageControllerTest {
                 1L, "a cat", "blurry", 20, 7.0, "euler", "normal", 123L, 512, 512, 1, 0,
                 "checkpoint.safetensors", null, null, "image/png", "COMFYUI", "[\"猫\"]", imageData);
 
-        GeneratedImage saved = buildImage(42L, "a cat", "[\"猫\"]");
-        saved.setProvider("COMFYUI");
-        when(generatedImageCreationService.create(request)).thenReturn(saved);
-
         GeneratedImageDetailResponse response = controller.create(request);
 
-        assertEquals(42L, response.id());
         assertEquals("a cat", response.prompt());
         assertEquals("COMFYUI", response.provider());
         assertEquals(List.of("猫"), response.tags());
+        // 実物の保存サービスがファイルを書き、DB行(リポジトリ)へ保存し、image.generatedイベントをMQへ発行する。
+        assertEquals(1, world.storedFileCount());
+        assertEquals(1, world.savedImages.size());
+        assertEquals(response.id(), world.savedImages.get(0).getId());
+        assertEquals(1, world.publishedMessages().size());
+    }
 
-        // ファイル保存が始まる前にプロジェクトメンバー判定を通していること(issue #830)。
-        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(1L);
-        verify(generatedImageCreationService).create(request);
+    @Test
+    void create_プロジェクトのメンバーでなければファイルを保存しない() {
+        world.actingAsUser(10L);
+        memberOf(1L, 10L, false);
+        CreateGeneratedImageRequest request = new CreateGeneratedImageRequest(
+                1L, "a cat", null, 20, 7.0, "euler", "normal", 123L, 512, 512, 1, 0,
+                "checkpoint.safetensors", null, null, "image/png", "COMFYUI", null, new byte[] {1});
+
+        assertThrows(ForbiddenException.class, () -> controller.create(request));
+
+        assertEquals(0, world.storedFileCount());
+        assertTrue(world.savedImages.isEmpty());
     }
 
     // ---- 一括削除(issue #1492) ----
 
-    private void stubFound(GeneratedImage... images) {
-        for (GeneratedImage image : images) {
-            when(generatedImageRepository.findById(image.getId())).thenReturn(Optional.of(image));
-        }
+    /** DBにある行として登録し、そのファイルを(実物の保存サービスで)保存先へ書く。 */
+    private GeneratedImage stored(long id, Long projectId) {
+        return world.existingImage(id, projectId, new byte[] {(byte) id}, "image/png");
+    }
+
+    private boolean fileExists(GeneratedImage image) {
+        return java.nio.file.Files.exists(world.storageDir.resolve(image.getFilePath()));
     }
 
     @Test
     void bulkDelete_全件を認可してから実体とDB行を削除し件数を返す() {
-        GeneratedImage a = buildImage(1L, "a", null);
-        a.setProjectId(5L);
-        GeneratedImage b = buildImage(2L, "b", null);
-        b.setProjectId(6L);
-        stubFound(a, b);
+        world.actingAsUser(10L);
+        memberOf(5L, 10L, true);
+        memberOf(6L, 10L, true);
+        GeneratedImage a = stored(1L, 5L);
+        GeneratedImage b = stored(2L, 6L);
 
         GeneratedImageBulkDeleteResponse result =
                 controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 2L)));
@@ -324,10 +353,8 @@ class GeneratedImageControllerTest {
         assertEquals(0, result.failedCount());
         assertEquals(List.of(1L, 2L), result.deletedIds());
         assertTrue(result.failures().isEmpty());
-        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(5L);
-        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(6L);
-        verify(generatedImageStorageService).delete("path/1.png");
-        verify(generatedImageStorageService).delete("path/2.png");
+        assertFalse(fileExists(a));
+        assertFalse(fileExists(b));
         verify(generatedImageRepository).delete(a);
         verify(generatedImageRepository).delete(b);
     }
@@ -335,43 +362,41 @@ class GeneratedImageControllerTest {
     /** 権限の無い id が1つでもあれば、権限のある画像も含めて1件も削除しない(ファイル削除は取り消せない)。 */
     @Test
     void bulkDelete_権限の無いidが含まれると何も削除せずForbiddenになる() {
-        GeneratedImage allowed = buildImage(1L, "a", null);
-        allowed.setProjectId(5L);
-        GeneratedImage denied = buildImage(2L, "b", null);
-        denied.setProjectId(6L);
-        stubFound(allowed, denied);
-        // 権限のある画像側の判定は通る(厳格スタブのため、呼ばれる引数ごとに宣言する)。
-        doNothing().when(adminAuthorizationService).requireProjectMemberOrAdminForResource(5L);
-        doThrow(new ForbiddenException("not a member"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(6L);
+        world.actingAsUser(10L);
+        memberOf(5L, 10L, true);
+        memberOf(6L, 10L, false);
+        GeneratedImage allowed = stored(1L, 5L);
+        GeneratedImage denied = stored(2L, 6L);
 
         assertThrows(ForbiddenException.class,
                 () -> controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 2L))));
 
-        verifyNoInteractions(generatedImageStorageService);
+        assertTrue(fileExists(allowed));
+        assertTrue(fileExists(denied));
         verify(generatedImageRepository, never()).delete(any(GeneratedImage.class));
     }
 
     @Test
     void bulkDelete_存在しないidが含まれると何も削除せず404になる() {
-        GeneratedImage a = buildImage(1L, "a", null);
-        stubFound(a);
+        GeneratedImage a = stored(1L, 5L);
         when(generatedImageRepository.findById(9L)).thenReturn(Optional.empty());
 
         assertThrows(GeneratedImageNotFoundException.class,
                 () -> controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 9L))));
 
-        verifyNoInteractions(generatedImageStorageService);
+        assertTrue(fileExists(a));
         verify(generatedImageRepository, never()).delete(any(GeneratedImage.class));
     }
 
-    /** 個別に失敗した画像は failures に載り、残りの削除は続行される(DB行は失敗した画像では消さない)。 */
+    /**
+     * 個別に失敗した画像は failures に載り、残りの削除は続行される(DB行は失敗した画像では消さない)。
+     * 実物の保存サービスの削除が失敗する状態は、画像の{@code filePath}が中身のあるディレクトリを指す場合で作る。
+     */
     @Test
     void bulkDelete_個別の削除失敗はfailuresに載り残りは続行する() {
-        GeneratedImage a = buildImage(1L, "a", null);
-        GeneratedImage b = buildImage(2L, "b", null);
-        stubFound(a, b);
-        doThrow(new RuntimeException("disk error")).when(generatedImageStorageService).delete("path/1.png");
+        GeneratedImage a = stored(1L, 5L);
+        a.setFilePath("5");
+        GeneratedImage b = stored(2L, 5L);
 
         GeneratedImageBulkDeleteResponse result =
                 controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 2L)));
@@ -379,28 +404,17 @@ class GeneratedImageControllerTest {
         assertEquals(1, result.deletedCount());
         assertEquals(1, result.failedCount());
         assertEquals(List.of(2L), result.deletedIds());
-        assertEquals("disk error", result.failures().get("1"));
+        assertTrue(result.failures().get("1").contains("生成画像の削除に失敗しました"), result.failures().get("1"));
+        assertFalse(fileExists(b));
         verify(generatedImageRepository, never()).delete(a);
         verify(generatedImageRepository).delete(b);
     }
 
-    @Test
-    void bulkDelete_重複したidは1回だけ処理する() {
-        GeneratedImage a = buildImage(1L, "a", null);
-        stubFound(a);
-
-        GeneratedImageBulkDeleteResponse result =
-                controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 1L)));
-
-        assertEquals(1, result.deletedCount());
-        verify(generatedImageStorageService).delete("path/1.png");
-    }
-
+    /** 例外のメッセージがnullでも失敗として記録する(filePathがnullの行は、保存サービスがNullPointerExceptionで落ちる)。 */
     @Test
     void bulkDelete_例外メッセージがnullでも失敗として記録する() {
-        GeneratedImage a = buildImage(1L, "a", null);
-        stubFound(a);
-        doThrow(new RuntimeException()).when(generatedImageStorageService).delete("path/1.png");
+        GeneratedImage a = stored(1L, 5L);
+        a.setFilePath(null);
 
         GeneratedImageBulkDeleteResponse result =
                 controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L)));
@@ -408,6 +422,19 @@ class GeneratedImageControllerTest {
         assertEquals(0, result.deletedCount());
         assertEquals(1, result.failedCount());
         assertEquals("null", result.failures().get("1"));
+        verify(generatedImageRepository, never()).delete(a);
+    }
+
+    @Test
+    void bulkDelete_重複したidは1回だけ処理する() {
+        GeneratedImage a = stored(1L, 5L);
+
+        GeneratedImageBulkDeleteResponse result =
+                controller.bulkDelete(new BulkDeleteGeneratedImagesRequest(List.of(1L, 1L)));
+
+        assertEquals(1, result.deletedCount());
+        assertFalse(fileExists(a));
+        verify(generatedImageRepository, times(1)).delete(a);
     }
 
     // ---- issue #1493: フォルダ ----
@@ -420,7 +447,7 @@ class GeneratedImageControllerTest {
 
     @Test
     void list_folderId指定時はそのフォルダと子孫の画像だけ返す() {
-        when(generatedImageFolderService.descendantIdsIncludingSelf(1L)).thenReturn(java.util.Set.of(1L, 2L));
+        when(folderRepository.findSelfAndDescendantIds(1L)).thenReturn(List.of(1L, 2L));
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 inFolder(10L, 1L), inFolder(11L, 2L), inFolder(12L, 3L), inFolder(13L, null)));
 
@@ -457,7 +484,7 @@ class GeneratedImageControllerTest {
 
     @Test
     void list_フォルダ絞り込みはDBでページングせず絞った後に切る() {
-        when(generatedImageFolderService.descendantIdsIncludingSelf(1L)).thenReturn(java.util.Set.of(1L));
+        when(folderRepository.findSelfAndDescendantIds(1L)).thenReturn(List.of(1L));
         when(generatedImageRepository.findAllByOrderByCreatedAtDescIdDesc()).thenReturn(List.of(
                 inFolder(10L, 2L), inFolder(11L, 1L), inFolder(12L, 1L), inFolder(13L, 1L)));
 
@@ -468,25 +495,37 @@ class GeneratedImageControllerTest {
 
     @Test
     void updateFolder_adminでなければ画像を読まずに拒否する() {
-        doThrow(new ForbiddenException("admin")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(10L);
 
         assertThrows(ForbiddenException.class,
                 () -> controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(2L)));
 
-        verifyNoInteractions(generatedImageRepository, generatedImageFolderService);
+        verifyNoInteractions(generatedImageRepository, folderRepository);
     }
 
     @Test
     void updateFolder_フォルダを設定して保存する() {
         GeneratedImage image = buildImage(1L, "a", null);
         when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+        when(folderRepository.existsById(2L)).thenReturn(true);
         when(generatedImageRepository.save(any(GeneratedImage.class))).thenAnswer(inv -> inv.getArgument(0));
 
         GeneratedImageDetailResponse result = controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(2L));
 
-        verify(adminAuthorizationService).requireAdmin();
-        verify(generatedImageFolderService).requireExists(2L);
+        verify(folderRepository).existsById(2L);
         assertEquals(2L, result.folderId());
+    }
+
+    @Test
+    void updateFolder_存在しないフォルダは拒否し画像を変更しない() {
+        GeneratedImage image = buildImage(1L, "a", null);
+        when(generatedImageRepository.findById(1L)).thenReturn(Optional.of(image));
+        when(folderRepository.existsById(2L)).thenReturn(false);
+
+        assertThrows(com.letsblog.media.service.GeneratedImageFolderNotFoundException.class,
+                () -> controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(2L)));
+
+        assertNull(image.getFolderId());
     }
 
     @Test
@@ -498,7 +537,7 @@ class GeneratedImageControllerTest {
         GeneratedImageDetailResponse result = controller.updateFolder(1L, new UpdateGeneratedImageFolderRequest(null));
 
         assertNull(result.folderId());
-        verifyNoInteractions(generatedImageFolderService);
+        verifyNoInteractions(folderRepository);
     }
 
     @Test

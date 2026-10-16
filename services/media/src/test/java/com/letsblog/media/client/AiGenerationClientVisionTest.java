@@ -1,6 +1,6 @@
 package com.letsblog.media.client;
 
-import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.media.testsupport.ServiceTokenFixtures;
 import com.letsblog.media.ai.AiServiceException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -12,7 +12,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.client.RestClient;
 
@@ -39,11 +38,10 @@ class AiGenerationClientVisionTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", this::respond);
         server.start();
-        ServiceTokenClient tokens = Mockito.mock(ServiceTokenClient.class);
-        Mockito.when(tokens.getAccessToken()).thenReturn("svc-token");
         client = new AiGenerationClient(
                 RestClient.builder(), "http://127.0.0.1:" + server.getAddress().getPort(),
-                new OutboundAuthHeaders(new MockHttpServletRequest(), tokens),
+                new OutboundAuthHeaders(new MockHttpServletRequest(),
+                        ServiceTokenFixtures.client("http://127.0.0.1:" + server.getAddress().getPort())),
                 CircuitBreakerRegistry.ofDefaults());
     }
 
@@ -53,6 +51,9 @@ class AiGenerationClientVisionTest {
     }
 
     private void respond(HttpExchange exchange) throws IOException {
+        if (ServiceTokenFixtures.handleTokenRequest(exchange)) {
+            return;
+        }
         path.set(exchange.getRequestURI().getPath());
         body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);

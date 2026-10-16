@@ -1,24 +1,18 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import java.util.Optional;
 import java.util.stream.Stream;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
@@ -31,20 +25,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 直接書く方式は別PCでは効かない)。管理者として認証済みでも、4つのAPIは404になる。
  * 一覧と選択(GET .../checkpoints と PUT .../checkpoints/selection)は残る。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: チェックポイントの導入・削除APIは無い(issue #1746)")
-class CheckpointInstallRemovedIntegrationTest {
+class CheckpointInstallRemovedIntegrationTest extends ServiceStubbedIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
 
     static Stream<Arguments> removedEndpoints() {
         return Stream.of(
@@ -59,8 +44,7 @@ class CheckpointInstallRemovedIntegrationTest {
     @DisplayName("管理者でも404")
     void 導入と削除のAPIは管理者でも404(HttpMethod method, String path) throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-admin", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
 
         mockMvc.perform(request(method, path)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt")
@@ -74,8 +58,7 @@ class CheckpointInstallRemovedIntegrationTest {
     @DisplayName("選択のAPIは残っている(404ではない)")
     void 選択のAPIは残る() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-admin", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
 
         mockMvc.perform(request(HttpMethod.PUT, "/api/projects/1/ai-models/comfyui/checkpoints/selection")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt")

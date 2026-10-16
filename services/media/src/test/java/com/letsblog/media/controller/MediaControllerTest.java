@@ -1,73 +1,89 @@
 package com.letsblog.media.controller;
 
-import com.letsblog.media.client.CmsBridgeClient;
-import com.letsblog.media.client.MediaUploadResult;
-import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.ForbiddenException;
 import com.letsblog.media.service.ImageResizeService;
-import jakarta.servlet.http.HttpServletRequest;
+import com.letsblog.media.testsupport.FakeHttpServer;
+import com.letsblog.media.testsupport.MediaWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockMultipartFile;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * legacy-apiから移設(issue #573 stage3)。/api/media/upload がアップロード前にEXIF等のメタ情報を
  * 削除すること(issue #432、ImageResizeServiceのロジック自体は変更していない)と、
  * Bearerトークンをlegacy-apiのCMSブリッジへ転送することを検証する。
  */
-@ExtendWith(MockitoExtension.class)
 class MediaControllerTest {
 
-    @Mock
-    private CmsBridgeClient cmsBridgeClient;
-    @Mock
-    private HttpServletRequest request;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    private static final String SITE_PROJECT_PATH = "/api/internal/publishing/sites/[^/]+/project-id";
+    private static final String UPLOAD_PATH = "/api/internal/publishing/sites/[^/]+/media";
+
+    /**
+     * {@code CmsBridgeClient}・{@code AdminAuthorizationService}・{@code CurrentActorService}は実物で、
+     * publishing-service・identity-serviceの応答をフェイクHTTPサーバーが演じる(issue #1820)。
+     */
+    private final MediaWorld world = new MediaWorld();
 
     private final ImageResizeService imageResizeService = new ImageResizeService();
 
+    @BeforeEach
+    void setUp() {
+        world.http.json("GET", SITE_PROJECT_PATH, "{\"projectId\":7}");
+        world.http.json("POST", UPLOAD_PATH, "{\"id\":\"1\",\"url\":\"https://example.com/media/1.jpg\"}");
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
+    }
+
     private MediaController controller() {
-        return new MediaController(cmsBridgeClient, imageResizeService, request, adminAuthorizationService);
+        return new MediaController(
+                world.cmsBridgeClient, imageResizeService, world.request, world.adminAuthorizationService);
     }
 
     @Test
     void upload_JPEGのExifメタ情報を削除してからアップロードしBearerトークンを転送する() throws Exception {
-        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
-        when(cmsBridgeClient.uploadMedia(any(), anyString(), anyString(), any(), any()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/media/1.jpg"));
+        world.actingAsAdmin(1L);
 
         byte[] withExif = insertExifApp1(renderJpeg(100, 80));
         MockMultipartFile file = new MockMultipartFile("file", "photo.jpg", "image/jpeg", withExif);
 
         controller().upload("my-site", file);
 
-        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
-        verify(cmsBridgeClient).uploadMedia(
-                org.mockito.ArgumentMatchers.eq("my-site"), anyString(), anyString(), bytesCaptor.capture(),
-                org.mockito.ArgumentMatchers.eq("Bearer token-abc"));
-        assertFalse(containsApp1Marker(bytesCaptor.getValue()), "CMSへ送信されるバイト列からAPP1(Exif)セグメントが削除されていること");
+        FakeHttpServer.Request uploaded = world.http.requests("POST", UPLOAD_PATH).get(0);
+        assertEquals("/api/internal/publishing/sites/my-site/media", uploaded.path());
+        assertEquals("Bearer token-1", uploaded.header("Authorization"));
+        assertTrue(containsJpeg(uploaded.body()), "CMSへ送信される本文にJPEGが含まれること");
+        assertFalse(containsApp1Marker(uploaded.body()), "CMSへ送信されるバイト列からAPP1(Exif)セグメントが削除されていること");
     }
 
-    private boolean containsApp1Marker(byte[] jpeg) {
-        for (int i = 0; i + 1 < jpeg.length; i++) {
+    private boolean containsJpeg(byte[] body) {
+        return jpegStart(body) >= 0;
+    }
+
+    private int jpegStart(byte[] body) {
+        for (int i = 0; i + 1 < body.length; i++) {
+            if ((body[i] & 0xFF) == 0xFF && (body[i + 1] & 0xFF) == 0xD8) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private boolean containsApp1Marker(byte[] body) {
+        byte[] jpeg = body;
+        for (int i = Math.max(jpegStart(body), 0); i + 1 < jpeg.length; i++) {
             if ((jpeg[i] & 0xFF) == 0xFF && (jpeg[i + 1] & 0xFF) == 0xE1) {
                 return true;
             }
@@ -137,42 +153,39 @@ class MediaControllerTest {
 
     @Test
     void upload_サイトが属するプロジェクトのIDで認可判定を行う() throws Exception {
-        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
-        when(cmsBridgeClient.resolveProjectIdBySiteKey("main", "Bearer token-abc")).thenReturn(7L);
-        when(cmsBridgeClient.uploadMedia(any(), anyString(), anyString(), any(), any()))
-                .thenReturn(new MediaUploadResult("1", "https://example.com/media/1.jpg"));
+        world.actingAsUser(10L);
+        world.http.json("GET", "/api/internal/identity/projects/7/members/10", "true");
 
         controller().upload("main", new MockMultipartFile(
                 "file", "a.jpg", "image/jpeg", renderJpeg(10, 10)));
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+        assertEquals(1, world.http.requests("GET", "/api/internal/identity/projects/7/members/10").size());
+        assertEquals(1, world.http.requests("POST", UPLOAD_PATH).size());
     }
 
     @Test
     void upload_プロジェクトメンバーでなければCMSへ書き込まない() {
         // CMSのメディアライブラリへ直接書き込むので、誰でも通してはいけない(issue #830)。
-        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
-        when(cmsBridgeClient.resolveProjectIdBySiteKey("main", "Bearer token-abc")).thenReturn(7L);
-        doThrow(new ForbiddenException("メンバーではありません"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+        world.actingAsUser(10L);
+        world.http.json("GET", "/api/internal/identity/projects/7/members/10", "false");
 
         assertThrows(ForbiddenException.class, () -> controller().upload("main", new MockMultipartFile(
                 "file", "a.jpg", "image/jpeg", new byte[] {1, 2, 3})));
 
-        verify(cmsBridgeClient, never()).uploadMedia(any(), anyString(), anyString(), any(), any());
+        assertTrue(world.http.requests("POST", UPLOAD_PATH).isEmpty());
     }
 
     // ---- issue #1717 ----
 
     @Test
     void upload_画素数が上限を超える画像は断り_CMSへアップロードしない() {
-        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer token-abc");
+        world.actingAsAdmin(1L);
 
         assertThrows(com.letsblog.media.service.InvalidImageUploadException.class,
                 () -> controller().upload("main", new MockMultipartFile(
                         "file", "bomb.png", "image/png",
                         com.letsblog.media.testsupport.UploadImageFixtures.pngHeaderOnly(30000, 30000))));
 
-        verify(cmsBridgeClient, never()).uploadMedia(any(), anyString(), anyString(), any(), any());
+        assertTrue(world.http.requests("POST", UPLOAD_PATH).isEmpty());
     }
 }

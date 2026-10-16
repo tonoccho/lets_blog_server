@@ -1,84 +1,98 @@
 package com.letsblog.media.controller;
 
-import com.letsblog.common.client.GenerationJobSummary;
+import com.letsblog.common.messaging.AuditLogMessage;
+import com.letsblog.media.client.CmsMediaReferenceScan;
+import com.letsblog.media.client.CmsMediaSummary;
+import com.letsblog.media.client.MediaGcScanResult;
 import com.letsblog.media.dto.GenerationJobResponse;
 import com.letsblog.media.dto.MediaGarbageCollectionDeleteRequest;
 import com.letsblog.media.dto.MediaGarbageCollectionScanResponse;
-import com.letsblog.media.service.AdminAuthorizationService;
-import com.letsblog.media.service.CurrentActorService;
 import com.letsblog.media.service.ForbiddenException;
-import com.letsblog.media.service.MediaGarbageCollectionService;
+import com.letsblog.media.testsupport.MediaWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * legacy-apiから移設(issue #573 stage3)。requireAdmin()チェック、CurrentActorServiceから
  * 取得したactorId/actorKeycloakSub/Bearerトークンが正しくMediaGarbageCollectionServiceへ
  * 渡されることを検証する。
+ *
+ * <p>issue #1820: GCサービス・認可・現在の操作者は実物で、publishing-service・ai-service・identity-serviceを
+ * フェイクHTTPサーバーが演じる。
  */
-@ExtendWith(MockitoExtension.class)
 class ProjectMediaGarbageCollectionControllerTest {
 
-    @Mock
-    private MediaGarbageCollectionService mediaGarbageCollectionService;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-    @Mock
-    private CurrentActorService currentActorService;
+    private static final String SCAN_PATH = "/api/internal/publishing/projects/1/media-scan";
+
+    private final MediaWorld world = new MediaWorld();
 
     private ProjectMediaGarbageCollectionController controller;
 
     @BeforeEach
     void setUp() {
+        world.actingAsAdmin(1L).signedInAs("keycloak-sub-1");
         controller = new ProjectMediaGarbageCollectionController(
-                mediaGarbageCollectionService, adminAuthorizationService, currentActorService);
+                world.gcService, world.adminAuthorizationService, world.currentActorService);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     @Test
     void scan_requireAdminを呼びBearerトークンを転送する() {
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer token-1");
-        MediaGarbageCollectionScanResponse expected =
-                new MediaGarbageCollectionScanResponse("local", List.of(), 0, 0, 0);
-        when(mediaGarbageCollectionService.scan(1L, "local", "Bearer token-1")).thenReturn(expected);
+        world.publishingScan(new MediaGcScanResult(
+                List.of(new CmsMediaSummary("10", "https://x/10.jpg", "t", "image/jpeg", "2026-01-01T00:00:00Z")),
+                new CmsMediaReferenceScan(List.of(), Map.of())));
 
         MediaGarbageCollectionScanResponse response = controller.scan(1L, "local");
 
-        assertEquals(expected, response);
-        verify(adminAuthorizationService).requireAdmin();
+        assertEquals("local", response.environment());
+        assertEquals(1, response.totalMediaCount());
+        assertEquals(1, response.unreferencedMediaCount());
+        assertEquals("Bearer token-1", world.http.requests("GET", SCAN_PATH).get(0).header("Authorization"));
     }
 
     @Test
     void scan_admin以外は403() {
-        doThrow(new ForbiddenException("admin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(10L);
 
         assertThrows(ForbiddenException.class, () -> controller.scan(1L, "local"));
+
+        assertTrue(world.http.requests("GET", SCAN_PATH).isEmpty());
     }
 
     @Test
-    void delete_actorIdとactorKeycloakSubとBearerトークンを転送する() {
-        when(currentActorService.getCurrentActorId()).thenReturn(9L);
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer token-2");
-        GenerationJobSummary job = new GenerationJobSummary(
-                5L, "media_garbage_collection_delete", "running", LocalDateTime.now(), LocalDateTime.now());
-        when(mediaGarbageCollectionService.startDelete(1L, "local", List.of("10"), 9L, "keycloak-sub-1", "Bearer token-2"))
-                .thenReturn(job);
+    void delete_actorIdとBearerトークンを転送しジョブを返す() {
+        GenerationJobResponse response = controller.delete(
+                1L, "local", new MediaGarbageCollectionDeleteRequest(List.of("10")));
 
-        GenerationJobResponse response = controller.delete(1L, "local", new MediaGarbageCollectionDeleteRequest(List.of("10")));
+        assertEquals(9L, response.id());
+        assertEquals("Bearer token-1", world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0)
+                .header("Authorization"));
+        assertEquals(1, world.http.requests("DELETE", "/api/internal/publishing/projects/1/media/10").size());
+        // 操作者(JWTのsubとidentity-serviceのid)は監査ログのメッセージへ渡る。
+        AuditLogMessage audit = (AuditLogMessage) world.publishedMessages().get(0);
+        assertEquals(1L, audit.userId());
+        assertEquals("keycloak-sub-1", audit.actorKeycloakSub());
+    }
 
-        assertEquals(5L, response.id());
-        verify(adminAuthorizationService).requireAdmin();
+    @Test
+    void delete_admin以外は403でジョブを作らない() {
+        world.actingAsUser(10L);
+
+        assertThrows(ForbiddenException.class, () -> controller.delete(
+                1L, "local", new MediaGarbageCollectionDeleteRequest(List.of("10"))));
+
+        assertTrue(world.http.requests("POST", "/api/internal/ai/generation-jobs").isEmpty());
     }
 }

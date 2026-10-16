@@ -2,33 +2,25 @@ package com.letsblog.media.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.common.client.GenerationJobSummary;
-import com.letsblog.media.ai.GeneratedImageStorageService;
 import com.letsblog.media.controller.DiagramController;
 import com.letsblog.media.controller.GeneratedImageController;
 import com.letsblog.media.controller.ImageGenerationController;
 import com.letsblog.media.controller.ProjectMediaGarbageCollectionController;
 import com.letsblog.media.domain.Diagram;
 import com.letsblog.media.domain.GeneratedImage;
-import com.letsblog.media.messaging.DomainEventPublisher;
+import com.letsblog.media.testsupport.MediaWorld;
 import com.letsblog.media.repository.DiagramRepository;
 import com.letsblog.media.repository.GeneratedImageRepository;
-import com.letsblog.media.service.AdminAuthorizationService;
-import com.letsblog.media.service.CurrentActorService;
-import com.letsblog.media.service.GeneratedImageCreationService;
-import com.letsblog.media.service.GeneratedImageFolderService;
 import com.letsblog.media.service.ImageGenerationJobStarter;
-import com.letsblog.media.service.ImageGenerationService;
-import com.letsblog.media.service.MediaGarbageCollectionService;
+import com.letsblog.media.testsupport.AsyncProxies;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import tools.jackson.databind.JsonNode;
@@ -51,6 +43,19 @@ class ResponseDateTimeSerializationTest {
     private static final String UPDATED_Z = "2026-09-09T01:02:03Z";
 
     private final JsonMapper mapper = JsonMapper.builder().build();
+
+    /** 認可・保存・各サービスは実物。DB(リポジトリ)・MQ・各サービスへのHTTPだけを差し替える(issue #1820)。 */
+    private final MediaWorld world = new MediaWorld();
+
+    @BeforeEach
+    void actAsAdmin() {
+        world.actingAsAdmin(1L);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
+    }
 
     private JsonNode json(Object value) {
         return mapper.valueToTree(value);
@@ -80,14 +85,13 @@ class ResponseDateTimeSerializationTest {
     }
 
     private DiagramController diagramController(DiagramRepository repository) {
-        return new DiagramController(repository, mock(AdminAuthorizationService.class));
+        return new DiagramController(repository, world.adminAuthorizationService);
     }
 
     private GeneratedImageController imageController(GeneratedImageRepository repository) {
         return new GeneratedImageController(
-                repository, mock(GeneratedImageStorageService.class), new ObjectMapper(),
-                mock(DomainEventPublisher.class), mock(AdminAuthorizationService.class),
-                mock(GeneratedImageCreationService.class), mock(GeneratedImageFolderService.class));
+                repository, world.storageService, world.objectMapper, world.domainEventPublisher,
+                world.adminAuthorizationService, world.creationService, world.folderService);
     }
 
     @Test
@@ -145,11 +149,14 @@ class ResponseDateTimeSerializationTest {
 
     @Test
     void 画像生成ジョブ受理の応答はZ終端のRFC3339で返る() {
-        ImageGenerationJobStarter starter = mock(ImageGenerationJobStarter.class);
-        when(starter.start(any(), any()))
-                .thenReturn(new GenerationJobSummary(7L, "image_generation", "running", CREATED, UPDATED));
+        world.http.json("POST", "/api/internal/ai/generation-jobs",
+                "{\"id\":7,\"type\":\"image_generation\",\"status\":\"running\","
+                        + "\"createdAt\":\"2026-09-08T20:03:35\",\"updatedAt\":\"2026-09-09T01:02:03\"}");
+        ImageGenerationJobStarter starter = new ImageGenerationJobStarter(
+                world.imageGenerationService, AsyncProxies.async(world.jobRunner, "imageGenerationExecutor", task -> { }),
+                world.generationJobClient, world.objectMapper, world.tracker);
         ImageGenerationController controller = new ImageGenerationController(
-                mock(ImageGenerationService.class), mock(AdminAuthorizationService.class), starter);
+                world.imageGenerationService, world.adminAuthorizationService, starter);
 
         ResponseEntity<?> response = controller.imageJob(
                 AiImageRequest.withDefaults("a cat"), "Bearer t");
@@ -162,12 +169,11 @@ class ResponseDateTimeSerializationTest {
 
     @Test
     void 未使用メディア削除ジョブの応答はZ終端のRFC3339で返る() {
-        MediaGarbageCollectionService service = mock(MediaGarbageCollectionService.class);
-        CurrentActorService actor = mock(CurrentActorService.class);
-        when(service.startDelete(any(), any(), any(), any(), any(), any()))
-                .thenReturn(new GenerationJobSummary(5L, "media_garbage_collection_delete", "running", CREATED, null));
-        ProjectMediaGarbageCollectionController controller =
-                new ProjectMediaGarbageCollectionController(service, mock(AdminAuthorizationService.class), actor);
+        world.http.json("POST", "/api/internal/ai/generation-jobs",
+                "{\"id\":5,\"type\":\"media_garbage_collection_delete\",\"status\":\"running\","
+                        + "\"createdAt\":\"2026-09-08T20:03:35\",\"updatedAt\":null}");
+        ProjectMediaGarbageCollectionController controller = new ProjectMediaGarbageCollectionController(
+                world.gcService, world.adminAuthorizationService, world.currentActorService);
 
         Object response = controller.delete(1L, "local", new MediaGarbageCollectionDeleteRequest(List.of("10")));
 

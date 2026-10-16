@@ -135,6 +135,12 @@ public final class FakeHttpServer implements AutoCloseable {
         return on(method, pathRegex, request -> responses[Math.min(index.getAndIncrement(), responses.length - 1)]);
     }
 
+    /** 登録した応答と、記録した要求をすべて消す(JVMで共有するサーバーをテストごとに初期化する用)。 */
+    public void reset() {
+        routes.clear();
+        requests.clear();
+    }
+
     public String baseUrl() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }

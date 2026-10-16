@@ -77,6 +77,10 @@ class ComfyUiClientToolsTokenTest {
     }
 
     private ComfyUiClient client(boolean systemTarget, ToolsTokenProvider tools) {
+        return client(systemTarget, tools, null);
+    }
+
+    private ComfyUiClient client(boolean systemTarget, ToolsTokenProvider tools, String sniHost) {
         ImageGenerationConfigProvider config = new ImageGenerationConfigProvider() {
             @Override
             public String comfyUiBaseUrl(Long projectId) {
@@ -85,7 +89,7 @@ class ComfyUiClientToolsTokenTest {
 
             @Override
             public GuardedTarget comfyUiTarget(Long projectId) {
-                return new GuardedTarget(url, null);
+                return new GuardedTarget(url, sniHost);
             }
 
             @Override
@@ -110,6 +114,26 @@ class ComfyUiClientToolsTokenTest {
         return new ComfyUiGenerationParams(
                 "a cat", "blurry", 20, 7.0, "euler", "normal", 1L, 512, 512, 1,
                 "checkpoint.safetensors", null, null);
+    }
+
+    @Test
+    @DisplayName("元がホスト名の接続先(SNI固定の専用クライアント)でも、システム設定の接続先にはトークンが付く")
+    void SNI固定の専用クライアントにもトークンが付く() {
+        List<String> names =
+                client(true, ToolsTokenProvider.fromSupplier(() -> "tok-1"), "comfy.example").listCheckpoints(null);
+
+        assertThat(names).containsExactly("a.safetensors");
+        assertThat(authorizations).isNotEmpty().allMatch("Bearer tok-1"::equals);
+    }
+
+    @Test
+    @DisplayName("元がホスト名の接続先でも、トークンを付けない設定ならAuthorizationは付かない")
+    void SNI固定の専用クライアントはトークンなしの設定なら付けない() {
+        List<String> names =
+                client(false, ToolsTokenProvider.fromSupplier(() -> "tok-1"), "comfy.example").listCheckpoints(null);
+
+        assertThat(names).containsExactly("a.safetensors");
+        assertThat(authorizations).isNotEmpty().allMatch("(none)"::equals);
     }
 
     @Test

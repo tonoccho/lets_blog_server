@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.letsblog.media.ai.AiServiceException;
-import com.letsblog.common.auth.ServiceTokenClient;
+import com.letsblog.media.testsupport.ServiceTokenFixtures;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -14,7 +14,6 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.client.RestClient;
 
@@ -35,9 +34,8 @@ class AiGenerationClientCircuitBreakerIsolationTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", this::respond);
         server.start();
-        ServiceTokenClient tokens = Mockito.mock(ServiceTokenClient.class);
-        Mockito.when(tokens.getAccessToken()).thenReturn("svc-token");
-        auth = new OutboundAuthHeaders(new MockHttpServletRequest(), tokens);
+        auth = new OutboundAuthHeaders(new MockHttpServletRequest(),
+                ServiceTokenFixtures.client("http://127.0.0.1:" + server.getAddress().getPort()));
     }
 
     @AfterEach
@@ -46,6 +44,9 @@ class AiGenerationClientCircuitBreakerIsolationTest {
     }
 
     private void respond(HttpExchange exchange) throws IOException {
+        if (ServiceTokenFixtures.handleTokenRequest(exchange)) {
+            return;
+        }
         exchange.getRequestBody().readAllBytes();
         byte[] bytes = "{\"result\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");

@@ -6,9 +6,10 @@ import com.letsblog.media.dto.DiagramDetailResponse;
 import com.letsblog.media.dto.DiagramSummaryResponse;
 import com.letsblog.media.dto.UpdateDiagramRequest;
 import com.letsblog.media.repository.DiagramRepository;
-import com.letsblog.media.service.AdminAuthorizationService;
 import com.letsblog.media.service.DiagramNotFoundException;
 import com.letsblog.media.service.ForbiddenException;
+import com.letsblog.media.testsupport.MediaWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,7 +23,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -37,14 +37,23 @@ class DiagramControllerTest {
     @Mock
     private DiagramRepository diagramRepository;
 
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    /**
+     * 認可は実物の{@code AdminAuthorizationService}・{@code CurrentActorService}・{@code IdentityBridgeClient}で、
+     * identity-serviceの応答をフェイクHTTPサーバーが演じる(issue #1820)。
+     */
+    private final MediaWorld world = new MediaWorld();
 
     private DiagramController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new DiagramController(diagramRepository, adminAuthorizationService);
+        world.actingAsAdmin(1L);
+        controller = new DiagramController(diagramRepository, world.adminAuthorizationService);
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     private Diagram buildDiagram(Long id, Long projectId, String name) {
@@ -128,6 +137,16 @@ class DiagramControllerTest {
     }
 
     @Test
+    void create_名前がnullでもデフォルト名を補完する() {
+        when(diagramRepository.save(any(Diagram.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        DiagramDetailResponse result = controller.create(
+                new CreateDiagramRequest(10L, null, "<mxGraphModel/>", "<svg></svg>"));
+
+        assertEquals("無題のダイアグラム", result.name());
+    }
+
+    @Test
     void update_上書き保存でxml_svgが更新される() {
         Diagram diagram = buildDiagram(1L, 10L, "旧タイトル");
         when(diagramRepository.findById(1L)).thenReturn(Optional.of(diagram));
@@ -180,19 +199,43 @@ class DiagramControllerTest {
 
     // ---- issue #830: プロジェクト単位の認可 ----
 
-    @Test
-    void list_projectId未指定は全プロジェクト分を返すのでadmin限定() {
-        controller.list(null);
-
-        verify(adminAuthorizationService).requireAdmin();
+    private void memberOf(long projectId, long userId, boolean member) {
+        world.http.json("GET", "/api/internal/identity/projects/" + projectId + "/members/" + userId,
+                String.valueOf(member));
     }
 
     @Test
-    void list_projectId指定時はそのプロジェクトのメンバー判定を通す() {
-        controller.list(7L);
+    void list_projectId未指定は全プロジェクト分を返すのでadmin限定() {
+        world.actingAsUser(10L);
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
-        verify(adminAuthorizationService, never()).requireAdmin();
+        assertThrows(ForbiddenException.class, () -> controller.list(null));
+
+        verifyNoInteractions(diagramRepository);
+    }
+
+    @Test
+    void list_projectId未指定でもadminなら通る() {
+        assertEquals(0, controller.list(null).size());
+    }
+
+    @Test
+    void list_projectId指定時はそのプロジェクトのメンバーならadminでなくても通る() {
+        world.actingAsUser(10L);
+        memberOf(7L, 10L, true);
+        when(diagramRepository.findAllByProjectIdOrderByCreatedAtDesc(7L))
+                .thenReturn(List.of(buildDiagram(1L, 7L, "図")));
+
+        assertEquals(1, controller.list(7L).size());
+    }
+
+    @Test
+    void list_projectId指定時にメンバーでもadminでもなければ拒否する() {
+        world.actingAsUser(10L);
+        memberOf(7L, 10L, false);
+
+        assertThrows(ForbiddenException.class, () -> controller.list(7L));
+
+        verifyNoInteractions(diagramRepository);
     }
 
     @Test
@@ -201,8 +244,8 @@ class DiagramControllerTest {
         diagram.setId(1L);
         diagram.setProjectId(7L);
         when(diagramRepository.findById(1L)).thenReturn(Optional.of(diagram));
-        doThrow(new ForbiddenException("メンバーではありません"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+        world.actingAsUser(10L);
+        memberOf(7L, 10L, false);
 
         assertThrows(ForbiddenException.class, () -> controller.get(1L));
     }
@@ -213,8 +256,8 @@ class DiagramControllerTest {
         diagram.setId(1L);
         diagram.setProjectId(7L);
         when(diagramRepository.findById(1L)).thenReturn(Optional.of(diagram));
-        doThrow(new ForbiddenException("メンバーではありません"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+        world.actingAsUser(10L);
+        memberOf(7L, 10L, false);
 
         assertThrows(ForbiddenException.class, () -> controller.delete(1L));
 
@@ -223,11 +266,21 @@ class DiagramControllerTest {
 
     @Test
     void create_指定プロジェクトのメンバーでなければ保存しない() {
-        doThrow(new ForbiddenException("メンバーではありません"))
-                .when(adminAuthorizationService).requireProjectMemberOrAdminForResource(7L);
+        world.actingAsUser(10L);
+        memberOf(7L, 10L, false);
 
         assertThrows(ForbiddenException.class,
                 () -> controller.create(new CreateDiagramRequest(7L, "名前", "<xml/>", "<svg/>")));
+
+        verify(diagramRepository, never()).save(any());
+    }
+
+    @Test
+    void create_プロジェクト未指定はadmin限定() {
+        world.actingAsUser(10L);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.create(new CreateDiagramRequest(null, "名前", "<xml/>", "<svg/>")));
 
         verify(diagramRepository, never()).save(any());
     }

@@ -47,6 +47,9 @@ dependencies {
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation testFixtures(project(':packages:lbs-common'))
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // #1820: CmsBridgeClient#uploadMedia(MultipartBodyBuilder)を実物で通すためのテスト専用の依存。本番の実行時クラスパスには
+    // 無く、実環境では NoClassDefFoundError になる(#1859)。#1859 で本番側を直したらこの行を外す。
+    testRuntimeOnly 'org.reactivestreams:reactive-streams:1.0.4'
 }
 
 tasks.named('test') {

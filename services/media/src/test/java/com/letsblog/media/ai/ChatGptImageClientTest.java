@@ -101,6 +101,21 @@ class ChatGptImageClientTest {
         assertTrue(submittedJson().path("prompt").asText().equals("a cat"));
     }
 
+    @Test
+    void widthとheightのどちらかがnullならsizeはautoにする() throws Exception {
+        expectGeneration();
+        expectGeneration();
+
+        client.generateImage(new ComfyUiGenerationParams(
+                "a cat", null, 20, 7.0, "euler", "normal", null, null, 1024, 1, null, null, null));
+        client.generateImage(new ComfyUiGenerationParams(
+                "a cat", null, 20, 7.0, "euler", "normal", null, 1024, null, 1, null, null, null));
+
+        // expectGenerationは2回分の本文を同じバッファへ連結するため、"size"が2回とも"auto"であることを数える。
+        String all = submittedBody.toString();
+        assertEquals(2, all.split("\"size\":\"auto\"", -1).length - 1, all);
+    }
+
     private static ComfyUiGenerationParams paramsFor(Long projectId) {
         return new ComfyUiGenerationParams(
                 "a cat", null, 20, 7.0, "euler", "normal", null, 1024, 1024, 1, null, null, null, projectId);

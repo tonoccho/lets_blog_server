@@ -1,28 +1,22 @@
 package com.letsblog.media.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.repository.GeneratedImageRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.media.testsupport.ServiceStubbedIntegrationTest;
+import com.letsblog.media.testsupport.ServiceStubs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -33,11 +27,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 実DBと実コントローラ経由で検証する。UPLOADは{@code provider='UPLOAD'}、AIは{@code UPLOAD}以外。
  * タグ・フォルダ・projectId・limit/offsetとはANDで効き、絞り込んだ後にページングする。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("media-service: 生成画像一覧の種別(source)絞り込み(issue #1647)")
-class GeneratedImageListSourceFilterIntegrationTest {
+class GeneratedImageListSourceFilterIntegrationTest extends ServiceStubbedIntegrationTest {
 
     private static final String PATH = "/api/generated-images";
 
@@ -50,12 +41,6 @@ class GeneratedImageListSourceFilterIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
     private Long upload1;
     private Long comfy;
     private Long upload2;
@@ -65,8 +50,7 @@ class GeneratedImageListSourceFilterIntegrationTest {
     void setUp() {
         repository.deleteAll();
         org.mockito.Mockito.when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "admin"));
-        org.mockito.Mockito.when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        ServiceStubs.profile("Bearer admin-jwt", 1L, "admin");
         LocalDateTime base = LocalDateTime.of(2026, 1, 1, 12, 0, 0);
         // 新しい順: upload1, comfy, upload2, chatgpt
         upload1 = insert("UPLOAD", "[\"Sky\"]", 7L, base);
