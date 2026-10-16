@@ -230,4 +230,14 @@ class RequestDurationLoggingFilterTest {
 
         assertEquals(0, DbQueryRecorder.end().queries());
     }
+
+    @Test
+    void 相関IDが空白だけならハイフンを出す() throws Exception {
+        MDC.put(CorrelationIdFilter.MDC_KEY, "   ");
+
+        run(filter(1000), "GET", "/api/posts", chainTakingMillis(1, 200));
+
+        assertTrue(appender.list.get(0).getFormattedMessage().contains("correlation_id=- "),
+                appender.list.get(0).getFormattedMessage());
+    }
 }

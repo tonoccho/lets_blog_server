@@ -38,4 +38,14 @@ class CorrelationIdMessagePostProcessorTest {
 
         assertNull(result.getMessageProperties().getHeader(CorrelationIdFilter.CORRELATION_ID_HEADER));
     }
+
+    @Test
+    void MDCの相関IDが空白だけならヘッダを設定しない() {
+        MDC.put(CorrelationIdFilter.MDC_KEY, "  ");
+        Message message = new Message(new byte[0], new MessageProperties());
+
+        Message result = postProcessor.postProcessMessage(message);
+
+        assertNull(result.getMessageProperties().getHeader(CorrelationIdFilter.CORRELATION_ID_HEADER));
+    }
 }

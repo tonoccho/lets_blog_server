@@ -303,4 +303,20 @@ class ConnectionDestinationGuardTest {
         assertThat(DestinationAddressRules.isDeniedAddress(InetAddress.getByName("0.0.1.0").getAddress())).isFalse();
         assertThat(DestinationAddressRules.isDeniedAddress(InetAddress.getByName("0.1.0.0").getAddress())).isFalse();
     }
+
+    @Test
+    void urlWithAnEmptyAuthorityIsRejected() throws Exception {
+        assertThatThrownBy(() -> guard(false).check("Ollama", "http:///path"))
+                .isInstanceOf(ForbiddenDestinationException.class)
+                .hasMessageContaining("解釈できない");
+    }
+
+    @Test
+    void trailingDotOnAHostNameIsStrippedBeforeResolving() throws Exception {
+        dns.put("lan.example", List.of("192.168.1.60"));
+
+        assertThat(guard(false).check("Ollama", "http://lan.example.:11434").baseUrl())
+                .isEqualTo("http://192.168.1.60:11434");
+        assertThat(resolved).containsExactly("lan.example");
+    }
 }

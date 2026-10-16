@@ -203,4 +203,12 @@ class ExternalCallLoggingInterceptorTest {
 
         assertTrue(onlyEvent().getFormattedMessage().contains("path=/ "), onlyEvent().getFormattedMessage());
     }
+
+    @Test
+    void パスを持たない不透明なURIでもパスは_スラッシュ_として出す() throws Exception {
+        interceptor(5000).intercept(request("GET", "mailto:ops@example.com"), new byte[0],
+                executionTaking(1, HttpStatus.OK));
+
+        assertTrue(onlyEvent().getFormattedMessage().contains("path=/ "), onlyEvent().getFormattedMessage());
+    }
 }

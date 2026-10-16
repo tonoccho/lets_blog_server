@@ -157,4 +157,26 @@ class ServiceTokenClientTest {
         assertEquals("token-recovered", recovered);
         server.verify();
     }
+
+    @Test
+    void getAccessToken_本文が空の応答は不正として例外になる() {
+        server.expect(requestTo(TOKEN_URI)).andRespond(withSuccess("", MediaType.APPLICATION_JSON));
+        ServiceTokenClient client = newClient();
+
+        ServiceTokenUnavailableException exception =
+                assertThrows(ServiceTokenUnavailableException.class, client::getAccessToken);
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("不正"));
+    }
+
+    @Test
+    void getAccessToken_access_tokenを含まない応答は不正として例外になる() {
+        server.expect(requestTo(TOKEN_URI)).andRespond(withSuccess("{\"expires_in\":60}", MediaType.APPLICATION_JSON));
+        ServiceTokenClient client = newClient();
+
+        ServiceTokenUnavailableException exception =
+                assertThrows(ServiceTokenUnavailableException.class, client::getAccessToken);
+
+        org.hamcrest.MatcherAssert.assertThat(exception.getMessage(), containsString("不正"));
+    }
 }

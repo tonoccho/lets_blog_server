@@ -114,4 +114,73 @@ class SchemaMigrationJobTest {
         assertEquals(3, result.rowsCopied(), "既に入っている1件を除いた残り3件だけコピーする");
         assertEquals(4, countRows());
     }
+
+    @Test
+    void 状態表に完了以外の行があれば実行する() throws SQLException {
+        try (Connection c = targetDataSource.getConnection(); Statement s = c.createStatement()) {
+            s.execute("CREATE TABLE _migration_state (job_name VARCHAR(255) NOT NULL PRIMARY KEY, "
+                    + "status VARCHAR(20) NOT NULL, rows_copied BIGINT NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL)");
+            s.execute("INSERT INTO _migration_state VALUES ('half-done', 'RUNNING', 1, CURRENT_TIMESTAMP)");
+        }
+
+        MigrationResult result = job.run("half-done", copyFromSource(List.of("a", "b")), 10);
+
+        assertFalse(result.alreadyCompleted());
+        assertEquals(2, result.rowsCopied());
+    }
+
+    @Test
+    void 進捗ログの間隔を超える件数をコピーしても完了する() {
+        AtomicInteger calls = new AtomicInteger();
+        MigrationBatchStep bigBatches = (conn, batchSize) -> calls.incrementAndGet() <= 2 ? 5000 : 0;
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SchemaMigrationJob.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        MigrationResult result;
+        try {
+            result = job.run("big", bigBatches, 5000);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertEquals(10_000, result.rowsCopied());
+        assertEquals(3, calls.get());
+        assertEquals(2, appender.list.stream()
+                .filter(e -> e.getFormattedMessage().contains("件コピー済み")).count(), "5000件ごとに進捗ログ");
+    }
+
+    /** DBへの接続口(DataSource)だけを差し替える。getConnectionの結果を呼び出し側が決める。 */
+    private static DataSource dataSourceWhoseConnection(java.util.concurrent.Callable<Connection> connection) {
+        return (DataSource) java.lang.reflect.Proxy.newProxyInstance(
+                SchemaMigrationJobTest.class.getClassLoader(), new Class<?>[] {DataSource.class},
+                (proxy, method, args) -> {
+                    if (!"getConnection".equals(method.getName())) {
+                        throw new UnsupportedOperationException(method.getName());
+                    }
+                    return connection.call();
+                });
+    }
+
+    @Test
+    void 接続を取得できなければMigrationExceptionにする() {
+        DataSource broken = dataSourceWhoseConnection(() -> {
+            throw new SQLException("connection refused");
+        });
+
+        MigrationException e = org.junit.jupiter.api.Assertions.assertThrows(MigrationException.class,
+                () -> new SchemaMigrationJob(broken).run("x", (c, n) -> 0));
+        assertEquals("移行ジョブ[x]の実行に失敗しました", e.getMessage());
+    }
+
+    @Test
+    void DataSourceがnullの接続を返すとNullPointerExceptionになる() {
+        DataSource returnsNull = dataSourceWhoseConnection(() -> null);
+
+        org.junit.jupiter.api.Assertions.assertThrows(NullPointerException.class,
+                () -> new SchemaMigrationJob(returnsNull).run("x", (c, n) -> 0));
+    }
 }
