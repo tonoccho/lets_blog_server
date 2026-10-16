@@ -8,6 +8,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.http.HttpMethod.POST;
@@ -94,5 +95,136 @@ class KeycloakAdminClientTest {
                 .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
 
         assertThrows(KeycloakAdminException.class, () -> client.clearCaches());
+    }
+
+    // ---- setPassword / findUserIdByEmail(issue #693。issue #1825で分岐を網羅) ----
+
+    private static final String USERS_QUERY = ADMIN_BASE_URI + "/users?email=a@example.com&exact=true";
+
+    private void expectLookup(org.springframework.test.web.client.ResponseCreator response) {
+        expectToken();
+        server.expect(requestTo(USERS_QUERY)).andExpect(header("Authorization", "Bearer tok")).andRespond(response);
+    }
+
+    private void expectReset(org.springframework.test.web.client.ResponseCreator response) {
+        expectToken();
+        server.expect(requestTo(ADMIN_BASE_URI + "/users/kc-1/reset-password"))
+                .andExpect(method(org.springframework.http.HttpMethod.PUT))
+                .andExpect(header("Authorization", "Bearer tok"))
+                .andExpect(content().string(containsString("\"temporary\":false")))
+                .andRespond(response);
+    }
+
+    @Test
+    void setPassword_即時設定のリクエストを送る() {
+        expectReset(withStatus(HttpStatus.NO_CONTENT));
+
+        client.setPassword("kc-1", "new-password-123");
+
+        server.verify();
+    }
+
+    @Test
+    void setPassword_認可エラーは権限の確認を促すメッセージにする() {
+        expectReset(withStatus(HttpStatus.FORBIDDEN));
+
+        KeycloakAdminException ex = assertThrows(KeycloakAdminException.class, () -> client.setPassword("kc-1", "x"));
+
+        assertTrue(ex.getMessage().contains("manage-users"), ex.getMessage());
+    }
+
+    @Test
+    void setPassword_401も同じ認可エラーのメッセージにする() {
+        expectReset(withStatus(HttpStatus.UNAUTHORIZED));
+
+        KeycloakAdminException ex = assertThrows(KeycloakAdminException.class, () -> client.setPassword("kc-1", "x"));
+
+        assertTrue(ex.getMessage().contains("manage-users"), ex.getMessage());
+    }
+
+    @Test
+    void setPassword_409は重複のメッセージにする() {
+        expectReset(withStatus(HttpStatus.CONFLICT));
+
+        KeycloakAdminException ex = assertThrows(KeycloakAdminException.class, () -> client.setPassword("kc-1", "x"));
+
+        assertTrue(ex.getMessage().contains("既に存在"), ex.getMessage());
+    }
+
+    @Test
+    void setPassword_その他のエラーはステータスと本文を含める() {
+        expectReset(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).body("kaboom"));
+
+        KeycloakAdminException ex = assertThrows(KeycloakAdminException.class, () -> client.setPassword("kc-1", "x"));
+
+        assertTrue(ex.getMessage().contains("500") && ex.getMessage().contains("kaboom"), ex.getMessage());
+    }
+
+    @Test
+    void setPassword_Keycloakに到達できなければ停止の可能性を伝える() {
+        server.expect(requestTo(TOKEN_URI)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        KeycloakAdminException ex = assertThrows(KeycloakAdminException.class, () -> client.setPassword("kc-1", "x"));
+
+        assertTrue(ex.getMessage().contains("停止している可能性"), ex.getMessage());
+    }
+
+    @Test
+    void findUserIdByEmail_最初の一致のidを返す() {
+        expectLookup(withSuccess("[{\"id\":\"kc-1\"},{\"id\":\"kc-2\"}]", MediaType.APPLICATION_JSON));
+
+        assertEquals(java.util.Optional.of("kc-1"), client.findUserIdByEmail("a@example.com"));
+    }
+
+    @Test
+    void findUserIdByEmail_空の配列は該当なし() {
+        expectLookup(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        assertEquals(java.util.Optional.empty(), client.findUserIdByEmail("a@example.com"));
+    }
+
+    @Test
+    void findUserIdByEmail_配列でない応答は該当なし() {
+        expectLookup(withSuccess("{\"id\":\"kc-1\"}", MediaType.APPLICATION_JSON));
+
+        assertEquals(java.util.Optional.empty(), client.findUserIdByEmail("a@example.com"));
+    }
+
+    @Test
+    void findUserIdByEmail_本文が空なら該当なし() {
+        expectLookup(withSuccess());
+
+        assertEquals(java.util.Optional.empty(), client.findUserIdByEmail("a@example.com"));
+    }
+
+    @Test
+    void findUserIdByEmail_idが無い要素は該当なし() {
+        expectLookup(withSuccess("[{\"username\":\"a\"}]", MediaType.APPLICATION_JSON));
+
+        assertEquals(java.util.Optional.empty(), client.findUserIdByEmail("a@example.com"));
+    }
+
+    @Test
+    void findUserIdByEmail_404は該当なし() {
+        expectLookup(withStatus(HttpStatus.NOT_FOUND));
+
+        assertEquals(java.util.Optional.empty(), client.findUserIdByEmail("a@example.com"));
+    }
+
+    @Test
+    void findUserIdByEmail_404以外のエラーは例外にする() {
+        expectLookup(withStatus(HttpStatus.FORBIDDEN));
+
+        KeycloakAdminException ex =
+                assertThrows(KeycloakAdminException.class, () -> client.findUserIdByEmail("a@example.com"));
+
+        assertTrue(ex.getMessage().contains("manage-users"), ex.getMessage());
+    }
+
+    @Test
+    void findUserIdByEmail_Keycloakに到達できなければ例外にする() {
+        server.expect(requestTo(TOKEN_URI)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        assertThrows(KeycloakAdminException.class, () -> client.findUserIdByEmail("a@example.com"));
     }
 }

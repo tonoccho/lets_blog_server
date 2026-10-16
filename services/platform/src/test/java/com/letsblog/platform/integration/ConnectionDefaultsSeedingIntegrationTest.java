@@ -1,6 +1,5 @@
 package com.letsblog.platform.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.platform.repository.SystemSettingRepository;
 import com.letsblog.platform.service.ConnectionDefaultsSeeder;
@@ -25,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @SpringBootTest
 @ActiveProfiles("test")
 @DisplayName("platform-service: Ollama / ComfyUI接続先の起動時既定値投入(issue #1567)")
-class ConnectionDefaultsSeedingIntegrationTest {
+class ConnectionDefaultsSeedingIntegrationTest extends IdentityFakeIntegrationTestBase {
 
     @Autowired
     private ConnectionDefaultsSeeder seeder;
@@ -36,9 +35,6 @@ class ConnectionDefaultsSeedingIntegrationTest {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-    @MockitoBean
-    private IdentityClient identityClient;
-
     private String stored(String key) {
         return repository.findById(key).map(s -> cipher.decrypt(s.getSettingValueEncrypted())).orElse(null);
     }

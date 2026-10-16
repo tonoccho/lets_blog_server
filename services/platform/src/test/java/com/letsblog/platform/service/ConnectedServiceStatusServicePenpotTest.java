@@ -1,17 +1,14 @@
 package com.letsblog.platform.service;
 
-import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.platform.service.SystemSettingService.BraveSearchApiKeyStatus;
-import com.letsblog.platform.service.SystemSettingService.SettingSource;
+import com.letsblog.platform.testsupport.FakeHttpServer;
+import com.letsblog.platform.testsupport.StatusFixture;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.client.RestClient;
+import org.mockito.Mockito;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -22,60 +19,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 連携サービスの状況のPenpot行(issue #1774)。接続先はDB(AppSettingService)で解決し、未設定は警告、
  * 到達できればNORMAL、できなければERRORと理由。他の行の判定は変えない。
+ *
+ * <p>issue #1825: 設定サービス・Penpotのチェッカー・gateway/RabbitMQ管理APIの判定はすべて実物で、
+ * HTTPはサーバー側のフェイク、DB(DataSource/Connection)だけがMockitoの差し替え。
  */
-@ExtendWith(MockitoExtension.class)
 class ConnectedServiceStatusServicePenpotTest {
 
-    @Mock
-    private DataSource dataSource;
-    @Mock
-    private Connection connection;
-    @Mock
-    private SystemSettingService systemSettingService;
-    @Mock
-    private AppSettingService appSettingService;
-    @Mock
-    private LetsBlogServiceStatusService letsBlogServiceStatusService;
-    @Mock
-    private RabbitMqQueueStatusService rabbitMqQueueStatusService;
-    @Mock
-    private PenpotReachabilityChecker penpotChecker;
-    @Mock
-    private GitLabReachabilityChecker gitlabChecker;
+    private static final String PENPOT = "http://penpot.lan:9001";
 
+    private StatusFixture fixture;
     private ConnectedServiceStatusService service;
 
     @BeforeEach
     void setUp() throws Exception {
-        lenient().when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of());
-        lenient().when(letsBlogServiceStatusService.targetUrl()).thenReturn("http://gateway:8080/actuator/health");
-        lenient().when(rabbitMqQueueStatusService.check()).thenReturn(
-                new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
-        lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
-        lenient().when(appSettingService.getComfyUiBaseUrl()).thenReturn("");
-        lenient().when(dataSource.getConnection()).thenReturn(connection);
-        lenient().when(connection.isValid(3)).thenReturn(true);
-        lenient().when(systemSettingService.getBraveSearchApiKeyStatusInternal())
-                .thenReturn(new BraveSearchApiKeyStatus(true, SettingSource.DATABASE));
+        fixture = new StatusFixture();
+        DataSource dataSource = Mockito.mock(DataSource.class);
+        Connection connection = Mockito.mock(Connection.class);
+        Mockito.when(dataSource.getConnection()).thenReturn(connection);
+        Mockito.when(connection.isValid(3)).thenReturn(true);
+        fixture.braveKey(true);
+        service = StatusServices.create(fixture, dataSource);
+    }
 
-        service = new ConnectedServiceStatusService(
-                dataSource,
-                baseUrl -> RestClient.builder().baseUrl(baseUrl),
-                RestClient.builder().baseUrl("http://plantuml.invalid"), "http://plantuml.invalid",
-                RestClient.builder().baseUrl("http://wordpress.invalid"), "http://wordpress.invalid",
-                systemSettingService, appSettingService,
-                letsBlogServiceStatusService, rabbitMqQueueStatusService,
-                baseUrl -> RestClient.builder().baseUrl(baseUrl),
-                penpotChecker, gitlabChecker);
+    @AfterEach
+    void tearDown() {
+        fixture.close();
     }
 
     private ConnectedServiceStatusDetailResponse penpotRow() {
@@ -85,63 +57,61 @@ class ConnectedServiceStatusServicePenpotTest {
 
     @Test
     void 未設定なら接続を試みず未設定と分かる警告になる() {
-        when(appSettingService.getPenpotBaseUrl()).thenReturn("");
-
         ConnectedServiceStatusDetailResponse row = penpotRow();
 
         assertEquals("Penpot", row.name());
         assertEquals(Status.WARNING, row.status());
         assertEquals("未設定(システム設定で設定してください)", row.errorMessage());
         assertNull(row.targetUrl());
-        verify(penpotChecker, never()).check(anyString());
-    }
-
-    @Test
-    void 接続先がnullでも未設定の警告になる() {
-        when(appSettingService.getPenpotBaseUrl()).thenReturn(null);
-
-        assertEquals(Status.WARNING, penpotRow().status());
+        assertTrue(fixture.http.requests("GET", "/penpot").isEmpty());
     }
 
     @Test
     void 到達できればNORMAL() {
-        when(appSettingService.getPenpotBaseUrl()).thenReturn("http://penpot.lan:9001");
-        when(penpotChecker.check("http://penpot.lan:9001")).thenReturn(new PenpotReachabilityChecker.Result(
-                Status.NORMAL, 200, null, "http://penpot.lan:9001/"));
+        fixture.setting("penpot_base_url", PENPOT);
 
         ConnectedServiceStatusDetailResponse row = penpotRow();
 
         assertEquals(Status.NORMAL, row.status());
         assertEquals(200, row.httpStatus());
         assertNull(row.errorMessage());
-        assertEquals("http://penpot.lan:9001/", row.targetUrl());
+        assertEquals(PENPOT + "/", row.targetUrl());
+        assertEquals(1, fixture.http.requests("GET", "/penpot").size());
     }
 
     @Test
     void 到達できなければERRORで理由が出る() {
-        when(appSettingService.getPenpotBaseUrl()).thenReturn("http://penpot.lan:9001");
-        when(penpotChecker.check("http://penpot.lan:9001")).thenReturn(new PenpotReachabilityChecker.Result(
-                Status.ERROR, null, "Penpot に到達できません: timed out", "http://penpot.lan:9001/"));
+        // ループバックは接続先の検査で拒否されるので、接続せずにERRORと理由になる。
+        fixture.setting("penpot_base_url", "http://127.0.0.1:9001");
 
         ConnectedServiceStatusDetailResponse row = penpotRow();
 
         assertEquals(Status.ERROR, row.status());
-        assertEquals("Penpot に到達できません: timed out", row.errorMessage());
+        assertEquals("http://127.0.0.1:9001/", row.targetUrl());
+        assertFalse(row.errorMessage().isBlank());
+        assertTrue(fixture.http.requests("GET", "/penpot").isEmpty());
     }
 
     @Test
     void 簡易な一覧にもPenpotの行が含まれ他の行の判定はPenpotの結果に左右されない() {
-        when(appSettingService.getPenpotBaseUrl()).thenReturn("http://penpot.lan:9001");
-        when(penpotChecker.check("http://penpot.lan:9001")).thenReturn(new PenpotReachabilityChecker.Result(
-                Status.ERROR, null, "Penpot に到達できません: x", "http://penpot.lan:9001/"));
+        fixture.setting("penpot_base_url", "http://127.0.0.1:9001");
+        fixture.http.on("GET", "/penpot", FakeHttpServer.Response.json(503, "{}"));
 
         List<ConnectedServiceStatusResponse> rows = service.checkAll();
 
         assertTrue(rows.stream().anyMatch(r -> r.id().equals("penpot") && r.status() == Status.ERROR));
-        String others = rows.stream().filter(r -> !r.id().equals("penpot"))
+        String others = rows.stream().filter(r -> !r.id().equals("penpot") && !r.id().endsWith("Service"))
                 .map(r -> r.id() + "=" + r.status()).collect(Collectors.joining(","));
         assertEquals("database=NORMAL,llm=NORMAL,comfyui=WARNING,plantuml=ERROR,"
                 + "wordpress-provisioning=ERROR,gitlab=WARNING,brave-search=NORMAL,rabbitmq-queues=NORMAL", others);
         assertFalse(others.contains("penpot"));
+    }
+
+    @Test
+    void Penpotが5xxを返せばWARNINGになる() {
+        fixture.setting("penpot_base_url", PENPOT);
+        fixture.http.on("GET", "/penpot", FakeHttpServer.Response.json(503, "{}"));
+
+        assertEquals(Status.WARNING, penpotRow().status());
     }
 }

@@ -1,9 +1,9 @@
 package com.letsblog.platform.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import java.util.Optional;
-import com.letsblog.common.client.IdentityClient;
+import com.letsblog.platform.testsupport.SharedIdentityFake;
+import java.util.List;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,7 +17,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -31,14 +31,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * (admin限定操作)・#getBraveSearchApiKeyStatus(認証済みユーザーであれば可、issue #693の
  * レビュー指摘で追加)で検証する。
  *
- * <p>identity-serviceは外部境界のため、{@link IdentityClient}を{@code @MockitoBean}で置き換える
- * (ADR-0006のモック方針)。
+ * <p>identity-serviceは外部境界のため、サーバー側のフェイク({@link SharedIdentityFake})へHTTPで問い合わせる
+ * (issue #1825。IdentityClient・CurrentActorServiceは実物)。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("platform-service: AdminAuthorizationServiceの認可マトリクス統合テスト(issue #693)")
-class AdminAuthorizationIntegrationTest {
+class AdminAuthorizationIntegrationTest extends IdentityFakeIntegrationTestBase {
 
     private static final String SET_KEY_PATH = "/api/system-settings/brave-search-api-key";
     private static final String REQUEST_BODY = "{\"apiKey\":\"new-key\"}";
@@ -49,8 +49,10 @@ class AdminAuthorizationIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private IdentityClient identityClient;
+    @BeforeEach
+    void resetIdentity() {
+        SharedIdentityFake.reset();
+    }
 
     @Test
     @DisplayName("Authorizationヘッダーなしは401(issue #705でSecurityConfigの認証ゲートを復元したため、"
@@ -76,8 +78,7 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("有効なJWTでも非adminなら403")
     void 非adminは403() throws Exception {
         when(jwtDecoder.decode("user-jwt")).thenReturn(JwtTestFixtures.jwt("sub-1", "user"));
-        when(identityClient.lookupProfile("Bearer user-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(10L, "user")));
+        SharedIdentityFake.profile("Bearer user-jwt", 10L, "user");
 
         mockMvc.perform(put(SET_KEY_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt")
@@ -86,17 +87,15 @@ class AdminAuthorizationIntegrationTest {
                 .andExpect(status().isForbidden());
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer user-jwt");
+        // identity-serviceのHTTPフェイクが実際にその問い合わせを受けたことで確かめる(スタブの空振りが起きない)。
+        assertEquals(List.of("Bearer user-jwt"), SharedIdentityFake.lookups());
     }
 
     @Test
     @DisplayName("adminなら403にならない")
     void adminは403にならない() throws Exception {
         when(jwtDecoder.decode("admin-jwt")).thenReturn(JwtTestFixtures.jwt("sub-2", "admin"));
-        when(identityClient.lookupProfile("Bearer admin-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(1L, "admin")));
+        SharedIdentityFake.profile("Bearer admin-jwt", 1L, "admin");
 
         mockMvc.perform(put(SET_KEY_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer admin-jwt")
@@ -105,9 +104,8 @@ class AdminAuthorizationIntegrationTest {
                 .andExpect(status().isNoContent());
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer admin-jwt");
+        // identity-serviceのHTTPフェイクが実際にその問い合わせを受けたことで確かめる(スタブの空振りが起きない)。
+        assertEquals(List.of("Bearer admin-jwt"), SharedIdentityFake.lookups());
     }
 
     @Test
@@ -122,21 +120,19 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("GET(状態取得)は有効なJWTさえあればadminでなくても200(admin限定はPUT/DELETEのみ)")
     void get_非adminでも認証済みなら200() throws Exception {
         when(jwtDecoder.decode("user-jwt")).thenReturn(JwtTestFixtures.jwt("sub-3", "user"));
-        when(identityClient.lookupProfile("Bearer user-jwt"))
-                .thenReturn(Optional.of(new ActorProfile(11L, "user")));
+        SharedIdentityFake.profile("Bearer user-jwt", 11L, "user");
 
         mockMvc.perform(get(SET_KEY_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer user-jwt"))
                 .andExpect(status().isOk());
 
         // 操作者解決が実際に lookupProfile を通っていることを確かめる(issue #916)。
-        // @MockitoBean は未使用スタブを報告しないため、呼び出し先が変わっても
-        // when(...) が黙って空振りする。#906 / #583 で実際に起きた。
-        verify(identityClient).lookupProfile("Bearer user-jwt");
+        // identity-serviceのHTTPフェイクが実際にその問い合わせを受けたことで確かめる(スタブの空振りが起きない)。
+        assertEquals(List.of("Bearer user-jwt"), SharedIdentityFake.lookups());
     }
 
     /**
      * 無効化されたユーザー(issue #816)は、identity-service が 401/403 を返すため
-     * {@code IdentityClient#lookupProfile} が {@link Optional#empty()} を返す。
+     * {@code IdentityClient#lookupProfile} が Optional.empty() を返す。
      * これは<b>認証・認可の結果</b>であって障害ではないので(issue #829)、502 ではなく
      * 「操作者なし」として認可で拒否されること(403)を確かめる。
      *
@@ -147,7 +143,7 @@ class AdminAuthorizationIntegrationTest {
     @DisplayName("無効化ユーザー(identityが401/403 → 操作者なし)は403。502にはしない")
     void 操作者を解決できない場合は403() throws Exception {
         when(jwtDecoder.decode("disabled-jwt")).thenReturn(JwtTestFixtures.jwt("sub-disabled", "user"));
-        when(identityClient.lookupProfile("Bearer disabled-jwt")).thenReturn(Optional.empty());
+        SharedIdentityFake.reject("Bearer disabled-jwt", 403);
 
         mockMvc.perform(put(SET_KEY_PATH)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer disabled-jwt")
@@ -155,6 +151,6 @@ class AdminAuthorizationIntegrationTest {
                         .content(REQUEST_BODY))
                 .andExpect(status().isForbidden());
 
-        verify(identityClient).lookupProfile("Bearer disabled-jwt");
+        assertEquals(List.of("Bearer disabled-jwt"), SharedIdentityFake.lookups());
     }
 }

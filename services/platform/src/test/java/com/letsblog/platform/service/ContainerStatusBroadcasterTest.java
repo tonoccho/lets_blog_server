@@ -1,63 +1,81 @@
 package com.letsblog.platform.service;
 
-import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
-import com.letsblog.platform.dto.ContainerStatusResponse;
+import com.letsblog.platform.testsupport.FakeHttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.List;
-
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * legacy-apiから移設(issue #695、C10-3)。ContainerStatusBroadcasterの回帰テスト(元は issue #280)。
  * ConnectedServiceStatusBroadcasterTestと同じhubパターンを検証する。
+ *
+ * <p>issue #1825: ContainerStatusServiceは実物で、docker-socket-proxy(HTTP)だけをサーバー側のフェイクで模す。
+ * 「何回チェックしたか」は、フェイクが受けた{@code /containers/json}の要求数で数える。
  */
-@ExtendWith(MockitoExtension.class)
 class ContainerStatusBroadcasterTest {
 
-    @Mock
-    private ContainerStatusService containerStatusService;
+    private FakeHttpServer docker;
+    private ContainerStatusBroadcaster broadcaster;
 
-    private final List<ContainerStatusResponse> sampleContainers =
-            List.of(new ContainerStatusResponse("api", "api", Status.NORMAL, "running", "Up 2 hours"));
+    @BeforeEach
+    void setUp() {
+        docker = new FakeHttpServer();
+        docker.json("GET", "/containers/json",
+                "[{\"Names\":[\"/lbs-api\"],\"State\":\"running\",\"Status\":\"Up 2 hours\"}]");
+        broadcaster = new ContainerStatusBroadcaster(
+                new ContainerStatusService(RestClient.builder().baseUrl(docker.baseUrl()), ""));
+    }
+
+    @AfterEach
+    void tearDown() {
+        docker.close();
+    }
+
+    private int checks() {
+        return docker.requests("GET", "/containers/json").size();
+    }
 
     @Test
     void subscribe_接続直後に現在の状態を送る() {
-        when(containerStatusService.listAll()).thenReturn(sampleContainers);
-        ContainerStatusBroadcaster broadcaster = new ContainerStatusBroadcaster(containerStatusService);
-
         SseEmitter emitter = broadcaster.subscribe();
 
         assertNotNull(emitter);
-        verify(containerStatusService, times(1)).listAll();
+        assertEquals(1, checks());
     }
 
     @Test
     void broadcast_購読者がいなければチェックをスキップする() {
-        ContainerStatusBroadcaster broadcaster = new ContainerStatusBroadcaster(containerStatusService);
-
         broadcaster.broadcast();
 
-        verify(containerStatusService, times(0)).listAll();
+        assertEquals(0, checks());
     }
 
     @Test
     void broadcast_購読者がいれば全員分チェックして配信する() {
-        when(containerStatusService.listAll()).thenReturn(sampleContainers);
-        ContainerStatusBroadcaster broadcaster = new ContainerStatusBroadcaster(containerStatusService);
         broadcaster.subscribe();
         broadcaster.subscribe();
 
         broadcaster.broadcast();
 
-        // subscribe()の初回送信2回 + broadcast()の1回分(全購読者へ1回のlistAll)で計3回
-        verify(containerStatusService, times(3)).listAll();
+        // subscribe()の初回送信2回 + broadcast()の1回分(全購読者へ1回のチェック)で計3回
+        assertEquals(3, checks());
+    }
+
+    @Test
+    void 配信できなくなった購読者は除去され_次からはチェックをスキップする() {
+        SseEmitter emitter = broadcaster.subscribe();
+        emitter.complete();
+
+        // 完了済みのemitterへの送信はIllegalStateExceptionになり、購読者から外される。
+        broadcaster.broadcast();
+        assertEquals(2, checks());
+
+        broadcaster.broadcast();
+        assertEquals(2, checks());
     }
 }

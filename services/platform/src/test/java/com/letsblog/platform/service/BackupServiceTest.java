@@ -1,29 +1,30 @@
 package com.letsblog.platform.service;
 
-import org.slf4j.MDC;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.platform.config.BackupProperties;
-import com.letsblog.platform.keycloak.KeycloakAdminClient;
-import com.letsblog.platform.keycloak.KeycloakAdminException;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
-import org.junit.jupiter.api.io.TempDir;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import org.mockito.Mock;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.common.messaging.AuditLogMessage;
+import com.letsblog.platform.config.BackupProperties;
+import com.letsblog.platform.keycloak.KeycloakAdminClient;
+import com.letsblog.platform.testsupport.FakeBin;
+import com.letsblog.platform.testsupport.FakeHttpServer;
+import com.letsblog.platform.testsupport.KeycloakFakes;
+import com.letsblog.platform.testsupport.PlatformWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,42 +50,34 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
  * BackupService unit tests covering authorization, validation, and archive structure
  * (legacy-apiのBackupServiceTestと同じ観点を、全MySQLスキーマ+Keycloak PostgreSQL対応後の
  * アーカイブ構成に対して踏襲する。issue #694)。
- * Process-level tests (mysqldump/mysql/pg_dump/pg_restore execution)は対象としない
- * (実DBに接続する結合テストの領域。ADR-0006参照)。
+ *
+ * <p>issue #1825: 自前のクラス(AdminAuthorizationService / AuditLogService / CurrentActorService /
+ * KeycloakAdminClient / BackupService自身)はモックもスパイもしない。差し替える外部との通信は次だけ。
+ * <ul>
+ *   <li>外部プロセス(mysqldump / mysql / pg_dump / pg_restore): {@code src/test/fake-bin}の代役の実行ファイルを
+ *       PATHの先頭に置く。{@code BackupService#runProcess}は実物のまま{@code ProcessBuilder}で起動する({@link FakeBin})。</li>
+ *   <li>HTTP(identity-service・Keycloak): サーバー側のフェイク({@code FakeHttpServer})。</li>
+ *   <li>MQ: {@code RabbitTemplate}のMockito mock(実物の{@code AuditLogService}へ渡す)。</li>
+ * </ul>
  */
-@ExtendWith(MockitoExtension.class)
 class BackupServiceTest {
 
     private static final String ENCRYPTION_KEY = "test-encryption-key";
     private static final List<String> MYSQL_SCHEMAS = List.of("lbs_identity", "lbs_media", "lets_blog");
     private static final String POSTGRES_DATABASE = "keycloak";
 
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
-
-    @Mock
-    private AuditLogService auditLogService;
-
-    @Mock
-    private CurrentActorService currentActorService;
-
-    @Mock
+    private PlatformWorld world;
     private KeycloakAdminClient keycloakAdminClient;
-
     private BackupService service;
 
     @TempDir
@@ -92,9 +85,19 @@ class BackupServiceTest {
 
     @BeforeEach
     void setUp() {
+        FakeBin.reset();
+        world = new PlatformWorld().actingAsAdmin(1L);
+        keycloakAdminClient = KeycloakFakes.client(world.http);
         service = new BackupService(buildDefaultProperties(), generatedImagesDir.toString(), ENCRYPTION_KEY,
-                adminAuthorizationService, new ObjectMapper(), auditLogService, currentActorService, keycloakAdminClient);
+                world.adminAuthorizationService, new ObjectMapper(), world.auditLogService, world.currentActorService,
+                keycloakAdminClient);
     }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
+
 
     private BackupProperties buildDefaultProperties() {
         BackupProperties properties = new BackupProperties();
@@ -289,11 +292,10 @@ class BackupServiceTest {
         @Test
         @DisplayName("createBackup requires admin privileges")
         void requiresAdminPrivileges() {
-            doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                    .when(adminAuthorizationService).requireAdmin();
+            world.actingAsUser(2L);
 
             assertThrows(ForbiddenException.class, () -> service.createBackup());
-            verify(adminAuthorizationService).requireAdmin();
+            assertTrue(FakeBin.calls().isEmpty(), "権限が無ければ外部プロセスを起動しない");
         }
     }
 
@@ -304,23 +306,19 @@ class BackupServiceTest {
         @Test
         @DisplayName("restoreBackup requires admin privileges")
         void requiresAdminPrivileges() {
-            doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                    .when(adminAuthorizationService).requireAdmin();
+            world.actingAsUser(2L);
 
             assertThrows(ForbiddenException.class,
                     () -> service.restoreBackup(new ByteArrayInputStream(new byte[0]), true, false));
-            verify(adminAuthorizationService).requireAdmin();
         }
 
         @Test
         @DisplayName("restoreBackup validates admin authorization first")
         void validatesAuthorizationBeforeConfirmCheck() {
-            doThrow(new ForbiddenException("admin required"))
-                    .when(adminAuthorizationService).requireAdmin();
+            world.actingAsUser(2L);
 
             assertThrows(ForbiddenException.class,
                     () -> service.restoreBackup(new ByteArrayInputStream(new byte[0]), false, false));
-            verify(adminAuthorizationService).requireAdmin();
         }
     }
 
@@ -335,16 +333,44 @@ class BackupServiceTest {
                     () -> service.restoreBackup(new ByteArrayInputStream(new byte[0]), false, false));
 
             assertThat(exception.getMessage(), containsString("confirm=true"));
-            verify(adminAuthorizationService).requireAdmin();
+            assertThat(exception.getMessage(), containsString("破壊的操作"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Restore archive validation")
+    class RestoreArchiveValidationTests {
+
+        @Test
+        @DisplayName("an archive with no MySQL/PostgreSQL dump is rejected")
+        void rejectsArchiveWithoutDumps() throws Exception {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("generated-images/a.png"));
+                zip.write(new byte[]{1});
+                zip.closeEntry();
+            }
+
+            BackupException ex = assertThrows(BackupException.class,
+                    () -> service.restoreBackup(new ByteArrayInputStream(out.toByteArray()), true, false));
+
+            assertThat(ex.getMessage(), containsString("ダンプが含まれていません"));
         }
 
         @Test
-        @DisplayName("restoreBackup checks confirm flag after admin authorization")
-        void checksConfirmAfterAuthorization() {
-            IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                    () -> service.restoreBackup(new ByteArrayInputStream(new byte[0]), false, false));
+        @DisplayName("a broken ZIP stream is reported as an archive read failure")
+        void brokenArchiveIsReported() {
+            java.io.InputStream broken = new java.io.InputStream() {
+                @Override
+                public int read() throws IOException {
+                    throw new IOException("connection reset while uploading");
+                }
+            };
 
-            assertThat(exception.getMessage(), containsString("破壊的操作"));
+            BackupException ex = assertThrows(BackupException.class,
+                    () -> service.restoreBackup(broken, true, false));
+
+            assertThat(ex.getMessage(), containsString("読み込みに失敗"));
         }
     }
 
@@ -361,6 +387,17 @@ class BackupServiceTest {
                     () -> service.restoreBackup(new ByteArrayInputStream(archive), true, false));
 
             assertThat(exception.getMessage(), containsString("APP_ENCRYPTION_KEY"));
+            assertTrue(FakeBin.invocations("mysql").isEmpty(), "鍵が違えば何も復元しない");
+        }
+
+        @Test
+        @DisplayName("restore proceeds on key mismatch when the operator acknowledges it")
+        void proceedsOnKeyMismatchWhenAcknowledged() throws Exception {
+            byte[] archive = buildArchive(sha256Hex("different-key"));
+
+            service.restoreBackup(new ByteArrayInputStream(archive), true, true);
+
+            assertEquals(MYSQL_SCHEMAS.size(), FakeBin.invocations("mysql").size());
         }
 
         @Test
@@ -368,7 +405,6 @@ class BackupServiceTest {
         void requiresConfirmationBeforeKeyCheck() throws Exception {
             byte[] archive = buildArchive(sha256Hex("different-key"));
 
-            // First, without confirmation, should fail on confirm check
             IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                     () -> service.restoreBackup(new ByteArrayInputStream(archive), false, false));
 
@@ -377,103 +413,140 @@ class BackupServiceTest {
     }
 
     @Nested
-    @DisplayName("Backup Archive Structure")
+    @DisplayName("Backup Archive Structure (createBackup against the stand-in dump commands)")
     class BackupArchiveStructureTests {
+
+        private java.util.Map<String, byte[]> entriesOf(byte[] archive) throws IOException {
+            java.util.Map<String, byte[]> entries = new java.util.LinkedHashMap<>();
+            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    entries.put(entry.getName(), zip.readAllBytes());
+                }
+            }
+            return entries;
+        }
 
         @Test
         @DisplayName("archive contains a metadata.json entry and one sql dump entry per configured schema")
         void archiveContainsRequiredEntries() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
+            java.util.Map<String, byte[]> entries = entriesOf(service.createBackup());
 
-            java.util.Set<String> mysqlEntries = new java.util.HashSet<>();
-            boolean hasMetadata = false;
-            boolean hasPostgresDump = false;
-
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if ("metadata.json".equals(entry.getName())) {
-                        hasMetadata = true;
-                    }
-                    if (entry.getName().startsWith("mysql/") && entry.getName().endsWith(".sql")) {
-                        mysqlEntries.add(entry.getName());
-                    }
-                    if (entry.getName().startsWith("postgres/") && entry.getName().endsWith(".dump")) {
-                        hasPostgresDump = true;
-                    }
-                }
-            }
-
-            assertTrue(hasMetadata, "metadata.json entry missing");
-            assertTrue(hasPostgresDump, "postgres dump entry missing");
+            assertTrue(entries.containsKey("metadata.json"), "metadata.json entry missing");
+            assertTrue(entries.containsKey("postgres/" + POSTGRES_DATABASE + ".dump"), "postgres dump entry missing");
             for (String schema : MYSQL_SCHEMAS) {
-                assertTrue(mysqlEntries.contains("mysql/" + schema + ".sql"), "mysql/" + schema + ".sql missing");
+                assertEquals("-- mysqldump " + schema + "\n",
+                        new String(entries.get("mysql/" + schema + ".sql"), StandardCharsets.UTF_8));
             }
         }
 
         @Test
-        @DisplayName("archive includes generated images when present")
+        @DisplayName("archive includes generated images when present, and not when the directory is absent")
         void archiveIncludesGeneratedImages() throws Exception {
-            byte[] archive = buildArchiveWithImages();
+            Files.createDirectories(generatedImagesDir.resolve("subdir"));
+            Files.write(generatedImagesDir.resolve("test-image.jpg"), new byte[]{(byte) 0xFF, (byte) 0xD8});
+            Files.write(generatedImagesDir.resolve("subdir/another.png"), new byte[]{(byte) 0x89, 0x50});
 
-            boolean hasTestImage = false;
-            boolean hasSubdirImage = false;
+            java.util.Map<String, byte[]> entries = entriesOf(service.createBackup());
 
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if ("generated-images/test-image.jpg".equals(entry.getName())) hasTestImage = true;
-                    if ("generated-images/subdir/another.png".equals(entry.getName())) hasSubdirImage = true;
-                }
-            }
+            assertTrue(entries.containsKey("generated-images/test-image.jpg"), "test-image.jpg missing");
+            assertTrue(entries.containsKey("generated-images/subdir/another.png"), "subdir/another.png missing");
 
-            assertTrue(hasTestImage, "test-image.jpg missing");
-            assertTrue(hasSubdirImage, "subdir/another.png missing");
+            BackupService absent = new BackupService(buildDefaultProperties(),
+                    generatedImagesDir.resolve("no-such-dir").toString(), ENCRYPTION_KEY,
+                    world.adminAuthorizationService, new ObjectMapper(), world.auditLogService,
+                    world.currentActorService, keycloakAdminClient);
+            assertTrue(entriesOf(absent.createBackup()).keySet().stream()
+                    .noneMatch(name -> name.startsWith("generated-images/")));
         }
 
         @Test
-        @DisplayName("metadata contains encryptionKeyHash, createdAt, mysqlSchemas and postgresDatabases")
+        @DisplayName("metadata contains encryptionKeyHash, createdAt, mysqlSchemas, postgresDatabases and client versions")
         void metadataContainsRequiredFields() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
-            ObjectMapper mapper = new ObjectMapper();
+            FakeBin.version("pg_dump", "pg_dump (PostgreSQL) 15.4");
+            FakeBin.version("mysqldump", "mysqldump  Ver 8.0.36 for Linux on x86_64");
 
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if ("metadata.json".equals(entry.getName())) {
-                        byte[] content = zip.readAllBytes();
-                        BackupService.BackupMetadata metadata =
-                                mapper.readValue(content, BackupService.BackupMetadata.class);
-                        assertThat("encryptionKeyHash", metadata.encryptionKeyHash(), notNullValue());
-                        assertThat("createdAt", metadata.createdAt(), notNullValue());
-                        assertEquals(MYSQL_SCHEMAS, metadata.mysqlSchemas());
-                        assertEquals(List.of(POSTGRES_DATABASE), metadata.postgresDatabases());
-                    }
-                }
-            }
+            byte[] metadataJson = entriesOf(service.createBackup()).get("metadata.json");
+            BackupService.BackupMetadata metadata =
+                    new ObjectMapper().readValue(metadataJson, BackupService.BackupMetadata.class);
+
+            assertEquals(sha256Hex(ENCRYPTION_KEY), metadata.encryptionKeyHash());
+            assertThat("createdAt", metadata.createdAt(), notNullValue());
+            assertEquals(MYSQL_SCHEMAS, metadata.mysqlSchemas());
+            assertEquals(List.of(POSTGRES_DATABASE), metadata.postgresDatabases());
+            assertEquals("pg_dump (PostgreSQL) 15.4", metadata.pgDumpVersion());
+            assertEquals("mysqldump  Ver 8.0.36 for Linux on x86_64", metadata.mysqldumpVersion());
+        }
+
+        @Test
+        @DisplayName("a failing dump command fails the whole backup with the command's stderr")
+        void failingDumpFailsBackup() {
+            FakeBin.fail("mysqldump", "mysqldump: Got error: 1045: Access denied");
+
+            BackupException ex = assertThrows(BackupException.class, () -> service.createBackup());
+
+            assertThat(ex.getMessage(), containsString("Access denied"));
+        }
+
+        @Test
+        @DisplayName("an image file that cannot be read fails the whole backup as BackupException")
+        void unreadableImageFailsBackup() throws Exception {
+            // 通常ファイルとして列挙されるが、読もうとするとI/Oエラーになるファイル(/proc/self/mem は先頭を読めない)を
+            // 生成画像のディレクトリに置く。権限に頼らないので、rootで実行しても同じ結果になる。
+            Files.createSymbolicLink(generatedImagesDir.resolve("unreadable.png"), Path.of("/proc/self/mem"));
+
+            BackupException ex = assertThrows(BackupException.class, () -> service.createBackup());
+
+            assertThat(ex.getMessage(), containsString("バックアップアーカイブの作成に失敗"));
         }
     }
 
     @Nested
-    @DisplayName("Backup Verification")
-    class BackupVerificationTests {
+    @DisplayName("Dump and restore commands")
+    class CommandTests {
 
         @Test
-        @DisplayName("archive size is non-zero")
-        void archiveSizeIsNonZero() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
+        @DisplayName("mysqldump is run per schema with the backup user, and pg_dump excludes public.jgroups_ping "
+                + "(issue #1142) while still targeting the configured database and format")
+        void dumpCommands() {
+            service.createBackup();
 
-            assertThat("Archive should not be empty", archive.length, greaterThan(0));
+            List<List<String>> mysqldumps = FakeBin.invocations("mysqldump");
+            assertEquals(MYSQL_SCHEMAS.size(), mysqldumps.size());
+            assertThat(mysqldumps.get(0), hasItem("--user=lbs_backup"));
+            assertThat(mysqldumps.get(0), hasItem("--no-tablespaces"));
+            assertEquals("lbs_identity", mysqldumps.get(0).get(mysqldumps.get(0).size() - 1));
+
+            List<String> pgDump = FakeBin.invocations("pg_dump").get(0);
+            assertThat(pgDump, hasItem("--exclude-table=public.jgroups_ping"));
+            assertThat(pgDump, hasItem(POSTGRES_DATABASE));
+            assertThat(pgDump, hasItem("--format=custom"));
+            assertThat(pgDump, not(hasItem("jgroups_ping")));
         }
 
         @Test
-        @DisplayName("archive is valid ZIP format")
-        void archiveIsValidZipFormat() throws Exception {
-            byte[] archive = buildArchive(sha256Hex(ENCRYPTION_KEY));
+        @DisplayName("restore feeds each dump to mysql / pg_restore on stdin and clears the Keycloak caches")
+        void restoreCommands() throws Exception {
+            service.restoreBackup(new ByteArrayInputStream(buildArchive(sha256Hex(ENCRYPTION_KEY))), true, false);
 
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                assertThat("Archive should contain entries", zip.getNextEntry(), notNullValue());
-            }
+            assertEquals(MYSQL_SCHEMAS.size(), FakeBin.invocations("mysql").size());
+            assertEquals(List.of("SELECT 1;", "SELECT 1;", "SELECT 1;"), FakeBin.stdins("mysql"));
+            List<String> pgRestore = FakeBin.invocations("pg_restore").get(0);
+            assertThat(pgRestore, hasItem("--clean"));
+            assertThat(pgRestore, hasItem("--dbname=" + POSTGRES_DATABASE));
+            assertEquals(1, FakeBin.stdins("pg_restore").size());
+            assertEquals(1, world.http.requests("POST", "/admin/clear-user-cache").size());
+        }
+
+        @Test
+        @DisplayName("a failing restore command fails the restore")
+        void failingRestoreCommand() throws Exception {
+            FakeBin.fail("mysql", "ERROR 1045 (28000): Access denied");
+
+            BackupException ex = assertThrows(BackupException.class, () -> service.restoreBackup(
+                    new ByteArrayInputStream(buildArchive(sha256Hex(ENCRYPTION_KEY))), true, false));
+
+            assertThat(ex.getMessage(), containsString("Access denied"));
         }
     }
 
@@ -508,60 +581,7 @@ class BackupServiceTest {
             // reachable host, which would make the intent of this assertion (no invocation) clear too.
             service.restoreBackup(new ByteArrayInputStream(archive), true, false);
 
-            verify(adminAuthorizationService).requireAdmin();
-        }
-    }
-
-    @Nested
-    @DisplayName("PostgreSQL dump excludes the volatile jgroups_ping table (issue #1142)")
-    class PostgresDumpJgroupsPingExclusionTests {
-
-        /**
-         * jgroups_pingはKeycloakのJGroups/Infinispanクラスタ構成員検出用の一時テーブルで、
-         * Keycloakが稼働中は継続的に書き込む。pg_restore --cleanは対象テーブルをDROPして
-         * CREATE TABLE(制約なし)し、データ投入後にPRIMARY KEY制約を追加する2段構成のため、
-         * この間の一瞬の間隙にKeycloak自身の書き込みが入ると、ダンプ内の行と重複して
-         * duplicate keyエラーになる(issue #1142の再現条件)。address列は再起動すれば
-         * Keycloakが自然に再構築する一時的なクラスタ状態のため、バックアップ/リストアの
-         * 対象から丸ごと除外する(pg_dump --exclude-table)ことで、この間隙自体を無くす。
-         * pg_restore --clean --if-existsは元々対象に無いテーブルへは何もしないため、
-         * リストア側の変更は不要。
-         */
-        private BackupProperties.Postgres postgresProperties() {
-            BackupProperties.Postgres postgres = new BackupProperties.Postgres();
-            postgres.setHost("localhost");
-            postgres.setPort("5432");
-            postgres.setUser("keycloak");
-            postgres.setPassword("secret");
-            postgres.setDatabase(POSTGRES_DATABASE);
-            return postgres;
-        }
-
-        @SuppressWarnings("unchecked")
-        private List<String> invokeBuildPgDumpCommand(BackupProperties.Postgres postgres) throws Exception {
-            Method method = BackupService.class.getDeclaredMethod("buildPgDumpCommand",
-                    BackupProperties.Postgres.class);
-            method.setAccessible(true);
-            return (List<String>) method.invoke(null, postgres);
-        }
-
-        @Test
-        @DisplayName("pg_dump command excludes public.jgroups_ping to avoid the restore-time "
-                + "duplicate key race against Keycloak's own concurrent writes")
-        void pgDumpCommandExcludesJgroupsPing() throws Exception {
-            List<String> command = invokeBuildPgDumpCommand(postgresProperties());
-
-            assertThat(command, hasItem("--exclude-table=public.jgroups_ping"));
-        }
-
-        @Test
-        @DisplayName("pg_dump command still targets the configured database and format")
-        void pgDumpCommandStillTargetsConfiguredDatabase() throws Exception {
-            List<String> command = invokeBuildPgDumpCommand(postgresProperties());
-
-            assertThat(command, hasItem(POSTGRES_DATABASE));
-            assertThat(command, hasItem("--format=custom"));
-            assertThat(command, not(hasItem("jgroups_ping")));
+            assertTrue(FakeBin.calls().isEmpty(), "外部プロセスは一度も起動されない");
         }
     }
 
@@ -694,70 +714,60 @@ class BackupServiceTest {
         @Test
         @DisplayName("AC1/AC5: DB_BACKUP_DOWNLOADEDを1件だけ記録し、changesはZIP内容を含まない要約(スキーマ/サイズ/作成日時)")
         void recordsSummaryWithoutArchiveContent() throws Exception {
-            BackupService spied = spy(service);
-            doReturn("v").when(spied).queryClientVersion(anyString());
             byte[] dump = new byte[200_000];
             java.util.Arrays.fill(dump, (byte) 'Z');
-            doReturn(dump).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
-            org.mockito.Mockito.when(currentActorService.getCurrentActorId()).thenReturn(9L);
-            org.mockito.Mockito.when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("sub-9");
-            org.mockito.Mockito.when(currentActorService.getRemoteIp()).thenReturn("10.0.0.1");
-            org.mockito.Mockito.when(currentActorService.getUserAgent()).thenReturn("ua");
+            FakeBin.output("mysqldump", new String(dump, StandardCharsets.UTF_8));
+            world.signedInAs("sub-9");
+            world.request.setRemoteAddr("10.0.0.1");
+            world.request.addHeader("User-Agent", "ua");
 
-            byte[] archive = spied.createBackup();
+            byte[] archive = service.createBackup();
 
-            org.mockito.ArgumentCaptor<String> changes = org.mockito.ArgumentCaptor.forClass(String.class);
-            verify(auditLogService, org.mockito.Mockito.times(1)).log(eq(9L), eq("sub-9"),
-                    eq(com.letsblog.platform.domain.AuditLogAction.DB_BACKUP_DOWNLOADED), eq("DATABASE"),
-                    eq((Long) null), changes.capture(), eq("10.0.0.1"), eq("ua"));
-            com.fasterxml.jackson.databind.JsonNode node = new ObjectMapper().readTree(changes.getValue());
+            ArgumentCaptor<Object> message = ArgumentCaptor.forClass(Object.class);
+            verify(world.rabbitTemplate, times(1)).convertAndSend(anyString(), anyString(), message.capture());
+            AuditLogMessage audit = (AuditLogMessage) message.getValue();
+            assertEquals(1L, audit.userId());
+            assertEquals("sub-9", audit.actorKeycloakSub());
+            assertEquals("DB_BACKUP_DOWNLOADED", audit.action());
+            assertEquals("DATABASE", audit.resourceType());
+            assertEquals("10.0.0.1", audit.remoteIp());
+            assertEquals("ua", audit.userAgent());
+            com.fasterxml.jackson.databind.JsonNode node = new ObjectMapper().readTree(audit.changes());
             assertEquals(MYSQL_SCHEMAS.size(), node.get("mysqlSchemas").size());
             assertEquals("lbs_identity", node.get("mysqlSchemas").get(0).asText());
             assertEquals(POSTGRES_DATABASE, node.get("postgresDatabase").asText());
             assertEquals(archive.length, node.get("sizeBytes").asLong());
             assertThat(node.get("createdAt").asText(), notNullValue());
-            assertTrue(changes.getValue().length() < 1_000, "summary must be small");
-            assertFalse(changes.getValue().contains("Z".repeat(50)));
-            assertFalse(changes.getValue().contains("UEsD"));
+            assertTrue(audit.changes().length() < 1_000, "summary must be small");
+            assertFalse(audit.changes().contains("Z".repeat(50)));
+            assertFalse(audit.changes().contains("UEsD"));
         }
 
         @Test
         @DisplayName("監査ログの記録に失敗してもバックアップは返す")
         void auditFailureDoesNotBreakBackup() {
-            BackupService spied = spy(service);
-            doReturn("v").when(spied).queryClientVersion(anyString());
-            doReturn(new byte[]{1}).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
-            org.mockito.Mockito.when(currentActorService.getCurrentActorId())
-                    .thenThrow(new IllegalStateException("no actor"));
+            doThrow(new IllegalStateException("mq down")).when(world.rabbitTemplate)
+                    .convertAndSend(anyString(), anyString(), any(Object.class));
 
-            byte[] archive = spied.createBackup();
+            byte[] archive = service.createBackup();
 
             assertThat(archive.length, greaterThan(0));
-            verify(auditLogService, never()).log(any(), any(), any(), anyString(), any(), any(), any(), any());
         }
 
         @Test
         @DisplayName("管理者でなければバックアップも監査ログも作らない")
         void nonAdminRecordsNothing() {
-            doThrow(new ForbiddenException("no")).when(adminAuthorizationService).requireAdmin();
+            world.actingAsUser(2L);
 
             assertThrows(ForbiddenException.class, () -> service.createBackup());
 
-            verify(auditLogService, never()).log(any(), any(), any(), anyString(), any(), any(), any(), any());
+            verify(world.rabbitTemplate, never()).convertAndSend(anyString(), anyString(), any(Object.class));
         }
     }
 
     @Nested
     @DisplayName("Keycloak cache invalidation after restore (issue #1590)")
     class KeycloakCacheInvalidationTests {
-
-        private BackupService spied;
-
-        @BeforeEach
-        void spyService() {
-            spied = spy(service);
-            doReturn(new byte[0]).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
-        }
 
         private byte[] archive(boolean withPostgres) throws IOException {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -782,31 +792,33 @@ class BackupServiceTest {
         @Test
         @DisplayName("clears Keycloak caches after the PostgreSQL restore, so stale users are not served")
         void clearsCachesAfterPostgresRestore() throws Exception {
-            spied.restoreBackup(new ByteArrayInputStream(archive(true)), true, true);
+            service.restoreBackup(new ByteArrayInputStream(archive(true)), true, true);
 
-            InOrder order = inOrder(spied, keycloakAdminClient);
-            order.verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
-            order.verify(keycloakAdminClient).clearCaches();
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
+            assertEquals(List.of("/admin/clear-user-cache", "/admin/clear-realm-cache", "/admin/clear-keys-cache"),
+                    world.http.requests("POST", "/admin/clear-.*").stream()
+                            .map(FakeHttpServer.Request::path).toList());
         }
 
         @Test
         @DisplayName("does not touch Keycloak when the archive has no PostgreSQL dump")
         void skipsWhenNoPostgresDump() throws Exception {
-            spied.restoreBackup(new ByteArrayInputStream(archive(false)), true, true);
+            service.restoreBackup(new ByteArrayInputStream(archive(false)), true, true);
 
-            verify(keycloakAdminClient, never()).clearCaches();
+            assertTrue(world.http.requests("POST", "/admin/clear-.*").isEmpty());
+            assertTrue(world.http.requests("POST", "/token").isEmpty());
         }
 
         @Test
         @DisplayName("a cache-invalidation failure is logged as an error and does not fail the completed restore")
         void cacheInvalidationFailureDoesNotFailRestore() throws Exception {
-            doThrow(new KeycloakAdminException("boom")).when(keycloakAdminClient).clearCaches();
+            world.http.status("POST", "/admin/clear-user-cache", 500, "{}");
             Logger logger = (Logger) LoggerFactory.getLogger(BackupService.class);
             ListAppender<ILoggingEvent> appender = new ListAppender<>();
             appender.start();
             logger.addAppender(appender);
             try {
-                spied.restoreBackup(new ByteArrayInputStream(archive(true)), true, true);
+                service.restoreBackup(new ByteArrayInputStream(archive(true)), true, true);
             } finally {
                 logger.detachAppender(appender);
             }
@@ -819,13 +831,6 @@ class BackupServiceTest {
     @Nested
     @DisplayName("Client version metadata and restore compatibility check (issue #1204)")
     class ClientVersionMetadataTests {
-
-        private BackupService spied;
-
-        @BeforeEach
-        void spyService() {
-            spied = spy(service);
-        }
 
         private byte[] archiveWithMetadataJson(String metadataJson) throws IOException {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -864,41 +869,17 @@ class BackupServiceTest {
             ((Logger) LoggerFactory.getLogger(BackupService.class)).detachAppender(appender);
         }
 
-        private void stubRestoreProcesses() {
-            doReturn(new byte[0]).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
-        }
-
-        @Test
-        @DisplayName("createBackup records the pg_dump and mysqldump versions in metadata.json")
-        void createBackupRecordsClientVersions() throws Exception {
-            doReturn("pg_dump (PostgreSQL) 15.4").when(spied).queryClientVersion("pg_dump");
-            doReturn("mysqldump  Ver 8.0.36 for Linux on x86_64").when(spied).queryClientVersion("mysqldump");
-            doReturn(new byte[]{1}).when(spied).runProcess(anyList(), anyString(), anyString(), any(), anyString());
-
-            byte[] archive = spied.createBackup();
-
-            BackupService.BackupMetadata metadata = null;
-            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
-                ZipEntry entry;
-                while ((entry = zip.getNextEntry()) != null) {
-                    if ("metadata.json".equals(entry.getName())) {
-                        metadata = new ObjectMapper().readValue(zip.readAllBytes(),
-                                BackupService.BackupMetadata.class);
-                    }
-                }
-            }
-            assertThat(metadata, notNullValue());
-            assertEquals("pg_dump (PostgreSQL) 15.4", metadata.pgDumpVersion());
-            assertEquals("mysqldump  Ver 8.0.36 for Linux on x86_64", metadata.mysqldumpVersion());
+        private boolean versionQueried(String binary) {
+            return FakeBin.calls().stream().anyMatch(c -> c.equals(List.of(binary, "--version")));
         }
 
         @Test
         @DisplayName("queryClientVersion runs '<binary> --version' and returns the trimmed output")
         void queryClientVersionTrimsOutput() {
-            doReturn("pg_dump (PostgreSQL) 15.4\n".getBytes(StandardCharsets.UTF_8)).when(spied)
-                    .runProcess(eq(List.of("pg_dump", "--version")), anyString(), anyString(), any(), anyString());
+            FakeBin.version("pg_dump", "pg_dump (PostgreSQL) 15.4");
 
-            assertEquals("pg_dump (PostgreSQL) 15.4", spied.queryClientVersion("pg_dump"));
+            assertEquals("pg_dump (PostgreSQL) 15.4", service.queryClientVersion("pg_dump"));
+            assertEquals(List.of(List.of("pg_dump", "--version")), FakeBin.calls());
         }
 
         @Test
@@ -917,113 +898,109 @@ class BackupServiceTest {
         @Test
         @DisplayName("restore rejects an archive made by a newer pg_dump than pg_restore, before starting any restore process")
         void rejectsArchiveNewerThanPgRestore() throws Exception {
-            doReturn("pg_restore (PostgreSQL) 15.4").when(spied).queryClientVersion("pg_restore");
+            FakeBin.version("pg_restore", "pg_restore (PostgreSQL) 15.4");
             byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 18.0");
 
             BackupException ex = assertThrows(BackupException.class,
-                    () -> spied.restoreBackup(new ByteArrayInputStream(archive), true, false));
+                    () -> service.restoreBackup(new ByteArrayInputStream(archive), true, false));
 
             assertThat(ex.getMessage(), containsString("pg_dump (PostgreSQL) 18.0"));
             assertThat(ex.getMessage(), containsString("pg_restore (PostgreSQL) 15.4"));
-            verify(spied, never()).runProcess(anyList(), anyString(), anyString(), any(), anyString());
+            assertTrue(FakeBin.invocations("pg_restore").isEmpty());
+            assertTrue(FakeBin.invocations("mysql").isEmpty());
         }
 
         @Test
         @DisplayName("restore proceeds when the archive's pg_dump major equals pg_restore's")
         void acceptsEqualMajor() throws Exception {
-            doReturn("pg_restore (PostgreSQL) 15.6").when(spied).queryClientVersion("pg_restore");
-            stubRestoreProcesses();
+            FakeBin.version("pg_restore", "pg_restore (PostgreSQL) 15.6");
             byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 15.4");
 
-            spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+            service.restoreBackup(new ByteArrayInputStream(archive), true, false);
 
-            verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
         }
 
         @Test
         @DisplayName("restore proceeds when the archive was made by an older pg_dump")
         void acceptsOlderMajor() throws Exception {
-            doReturn("pg_restore (PostgreSQL) 15.6").when(spied).queryClientVersion("pg_restore");
-            stubRestoreProcesses();
+            FakeBin.version("pg_restore", "pg_restore (PostgreSQL) 15.6");
             byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 13.2");
 
-            spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+            service.restoreBackup(new ByteArrayInputStream(archive), true, false);
 
-            verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
         }
 
         @Test
         @DisplayName("legacy archive whose metadata has no version warns that the client version is unknown, and restores")
         void legacyMetadataWarnsAndProceeds() throws Exception {
-            stubRestoreProcesses();
             String legacy = "{\"encryptionKeyHash\":\"" + sha256Hex(ENCRYPTION_KEY) + "\",\"createdAt\":\"t\","
                     + "\"mysqlSchemas\":[\"lbs_identity\"],\"postgresDatabases\":[\"keycloak\"]}";
             byte[] archive = archiveWithMetadataJson(legacy);
             ListAppender<ILoggingEvent> appender = captureLogs();
             try {
-                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+                service.restoreBackup(new ByteArrayInputStream(archive), true, false);
             } finally {
                 detach(appender);
             }
 
             assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
                     && e.getFormattedMessage().contains("判別できません")));
-            verify(spied, never()).queryClientVersion(anyString());
-            verify(spied).runProcess(anyList(), eq("PGPASSWORD"), anyString(), any(), eq("pg_restore"));
+            assertFalse(versionQueried("pg_restore"));
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
         }
 
         @Test
         @DisplayName("archive without metadata.json warns that the client version is unknown, and restores")
         void missingMetadataWarnsAndProceeds() throws Exception {
-            stubRestoreProcesses();
             byte[] archive = archiveWithMetadataJson(null);
             ListAppender<ILoggingEvent> appender = captureLogs();
             try {
-                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+                service.restoreBackup(new ByteArrayInputStream(archive), true, false);
             } finally {
                 detach(appender);
             }
 
             assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
                     && e.getFormattedMessage().contains("判別できません")));
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
         }
 
         @Test
         @DisplayName("an unparsable recorded pg_dump version is treated as undeterminable: warn and restore")
         void unparsableRecordedVersionWarnsAndProceeds() throws Exception {
-            stubRestoreProcesses();
             byte[] archive = archiveWithPgDumpVersion("garbage");
             ListAppender<ILoggingEvent> appender = captureLogs();
             try {
-                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+                service.restoreBackup(new ByteArrayInputStream(archive), true, false);
             } finally {
                 detach(appender);
             }
             assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
                     && e.getFormattedMessage().contains("判別できません")));
-            verify(spied, never()).queryClientVersion(anyString());
+            assertFalse(versionQueried("pg_restore"));
         }
 
         @Test
         @DisplayName("an unparsable current pg_restore version is treated as undeterminable: warn and restore")
         void unparsableCurrentVersionWarnsAndProceeds() throws Exception {
-            doReturn("garbage").when(spied).queryClientVersion("pg_restore");
-            stubRestoreProcesses();
+            FakeBin.version("pg_restore", "garbage");
             byte[] archive = archiveWithPgDumpVersion("pg_dump (PostgreSQL) 18.0");
             ListAppender<ILoggingEvent> appender = captureLogs();
             try {
-                spied.restoreBackup(new ByteArrayInputStream(archive), true, false);
+                service.restoreBackup(new ByteArrayInputStream(archive), true, false);
             } finally {
                 detach(appender);
             }
             assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
                     && e.getFormattedMessage().contains("判別できません")));
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
         }
 
         @Test
         @DisplayName("an archive with a recorded version but no postgres dump does not query pg_restore")
         void noPostgresDumpSkipsComparison() throws Exception {
-            stubRestoreProcesses();
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ZipOutputStream zip = new ZipOutputStream(out)) {
                 zip.putNextEntry(new ZipEntry("metadata.json"));
@@ -1036,9 +1013,9 @@ class BackupServiceTest {
                 zip.closeEntry();
             }
 
-            spied.restoreBackup(new ByteArrayInputStream(out.toByteArray()), true, false);
+            service.restoreBackup(new ByteArrayInputStream(out.toByteArray()), true, false);
 
-            verify(spied, never()).queryClientVersion(anyString());
+            assertFalse(versionQueried("pg_restore"));
         }
     }
 
@@ -1063,5 +1040,59 @@ class BackupServiceTest {
         }
 
         org.junit.jupiter.api.Assertions.assertEquals("cid-backup", seen.get());
+    }
+
+    @Nested
+    @DisplayName("Restore archive entry classification (issue #1825)")
+    class RestoreEntryClassificationTests {
+
+        private byte[] archiveOf(String... entryNames) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                for (String name : entryNames) {
+                    zip.putNextEntry(new ZipEntry(name));
+                    if (!name.endsWith("/")) {
+                        zip.write(("content-of-" + name).getBytes(StandardCharsets.UTF_8));
+                    }
+                    zip.closeEntry();
+                }
+            }
+            return out.toByteArray();
+        }
+
+        @Test
+        @DisplayName("PostgreSQLのダンプだけのアーカイブも復元できる(MySQLのダンプが無くてもよい)")
+        void postgresOnlyArchiveIsRestored() throws Exception {
+            service.restoreBackup(new ByteArrayInputStream(archiveOf("postgres/keycloak.dump")), true, false);
+
+            assertEquals(1, FakeBin.invocations("pg_restore").size());
+            assertTrue(FakeBin.invocations("mysql").isEmpty());
+        }
+
+        @Test
+        @DisplayName("接頭辞だけ・接尾辞だけが合うエントリ、ディレクトリのエントリ、無関係なエントリはダンプとして扱わない")
+        void unrelatedEntriesAreIgnored() throws Exception {
+            byte[] archive = archiveOf(
+                    "mysql/README.txt", "postgres/notes.txt", "other-mysql/x.sql", "other-postgres/x.dump",
+                    "generated-images/subdir/", "stray.txt", "lbs_identity.sql",
+                    "mysql/lbs_identity.sql");
+
+            service.restoreBackup(new ByteArrayInputStream(archive), true, false);
+
+            // ダンプとして扱われたのは mysql/lbs_identity.sql だけ。
+            assertEquals(List.of("content-of-mysql/lbs_identity.sql"), FakeBin.stdins("mysql"));
+            assertTrue(FakeBin.invocations("pg_restore").isEmpty());
+            assertFalse(Files.exists(generatedImagesDir.resolve("subdir/")) && Files.isRegularFile(generatedImagesDir.resolve("subdir")));
+        }
+
+        @Test
+        @DisplayName("実行ファイルを起動できなければ、実行失敗のBackupExceptionにする(割り込み状態は立てない)")
+        void unlaunchableCommandIsReported() {
+            BackupException ex = assertThrows(BackupException.class, () -> service.runProcess(
+                    List.of("/nonexistent/lbs-no-such-binary"), "X", "y", null, "missing-binary"));
+
+            assertThat(ex.getMessage(), containsString("missing-binaryの実行に失敗しました"));
+            assertFalse(Thread.currentThread().isInterrupted());
+        }
     }
 }

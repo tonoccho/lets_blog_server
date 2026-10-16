@@ -1,161 +1,195 @@
 package com.letsblog.platform.service;
 
-import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.platform.domain.SystemSetting;
 import com.letsblog.platform.repository.SystemSettingRepository;
+import com.letsblog.platform.testsupport.InMemoryRepositories;
+import com.letsblog.platform.testsupport.PlatformWorld;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Optional;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SystemSettingServiceの回帰テスト。DB設定/環境変数フォールバックの優先順位と、
  * admin権限ゲートを中心に検証する。legacy-api版から移設(issue #693)。
+ *
+ * <p>issue #1825: AdminAuthorizationService・CurrentActorServiceは実物にし、identity-serviceはHTTPのフェイクで模す。
+ * DB(Spring Dataのリポジトリ)だけがMockitoの差し替え。
  */
-@ExtendWith(MockitoExtension.class)
 class SystemSettingServiceTest {
 
-    @Mock
+    private PlatformWorld world;
+    private Map<String, SystemSetting> store;
     private SystemSettingRepository repository;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
 
-    private final CredentialCipher credentialCipher = new CredentialCipher(
-            java.util.Base64.getEncoder().encodeToString(new byte[32]));
+    @BeforeEach
+    void setUp() {
+        world = new PlatformWorld();
+        store = new HashMap<>();
+        repository = InMemoryRepositories.systemSettings(store);
+    }
+
+    @AfterEach
+    void tearDown() {
+        world.close();
+    }
 
     private SystemSettingService buildService(String envDefault) {
-        return new SystemSettingService(repository, credentialCipher, adminAuthorizationService, envDefault);
+        return new SystemSettingService(repository, world.credentialCipher, world.adminAuthorizationService, envDefault);
+    }
+
+    private void putDbKey(String plain) {
+        store.put(SystemSettingService.BRAVE_SEARCH_API_KEY, new SystemSetting(
+                SystemSettingService.BRAVE_SEARCH_API_KEY, world.credentialCipher.encrypt(plain)));
     }
 
     @Test
     void getBraveSearchApiKey_DB設定があればそれを優先する() {
-        SystemSettingService service = buildService("env-key");
-        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY))
-                .thenReturn(Optional.of(new SystemSetting(
-                        SystemSettingService.BRAVE_SEARCH_API_KEY, credentialCipher.encrypt("db-key"))));
+        putDbKey("db-key");
 
-        assertEquals("db-key", service.getBraveSearchApiKey());
+        assertEquals("db-key", buildService("env-key").getBraveSearchApiKey());
     }
 
     @Test
     void getBraveSearchApiKey_DB未設定なら環境変数値にフォールバックする() {
-        SystemSettingService service = buildService("env-key");
-        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+        assertEquals("env-key", buildService("env-key").getBraveSearchApiKey());
+    }
 
-        assertEquals("env-key", service.getBraveSearchApiKey());
+    @Test
+    void getBraveSearchApiKey_DBの値が空白なら環境変数値にフォールバックする() {
+        putDbKey("  ");
+
+        assertEquals("env-key", buildService("env-key").getBraveSearchApiKey());
     }
 
     @Test
     void getBraveSearchApiKeyStatus_DB設定時はDATABASEを返す() {
-        SystemSettingService service = buildService("env-key");
-        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY))
-                .thenReturn(Optional.of(new SystemSetting(
-                        SystemSettingService.BRAVE_SEARCH_API_KEY, credentialCipher.encrypt("db-key"))));
+        putDbKey("db-key");
+        world.actingAsUser(1L);
 
-        SystemSettingService.BraveSearchApiKeyStatus status = service.getBraveSearchApiKeyStatus();
+        SystemSettingService.BraveSearchApiKeyStatus status = buildService("env-key").getBraveSearchApiKeyStatus();
 
-        assertEquals(true, status.configured());
+        assertTrue(status.configured());
         assertEquals(SystemSettingService.SettingSource.DATABASE, status.source());
     }
 
     @Test
     void getBraveSearchApiKeyStatus_DB未設定だが環境変数ありならENVIRONMENTを返す() {
-        SystemSettingService service = buildService("env-key");
-        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+        world.actingAsUser(1L);
 
-        SystemSettingService.BraveSearchApiKeyStatus status = service.getBraveSearchApiKeyStatus();
+        SystemSettingService.BraveSearchApiKeyStatus status = buildService("env-key").getBraveSearchApiKeyStatus();
 
-        assertEquals(true, status.configured());
+        assertTrue(status.configured());
         assertEquals(SystemSettingService.SettingSource.ENVIRONMENT, status.source());
     }
 
     @Test
     void getBraveSearchApiKeyStatus_どちらもなければNONEを返す() {
-        SystemSettingService service = buildService("");
-        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+        world.actingAsUser(1L);
 
-        SystemSettingService.BraveSearchApiKeyStatus status = service.getBraveSearchApiKeyStatus();
+        SystemSettingService.BraveSearchApiKeyStatus status = buildService("").getBraveSearchApiKeyStatus();
 
-        assertEquals(false, status.configured());
+        assertFalse(status.configured());
         assertEquals(SystemSettingService.SettingSource.NONE, status.source());
     }
 
     @Test
-    void getBraveSearchApiKeyStatus_未認証ならForbidden() {
-        SystemSettingService service = buildService("env-key");
-        doThrow(new ForbiddenException("ログインが必要です"))
-                .when(adminAuthorizationService).requireAuthenticated();
+    void getBraveSearchApiKeyStatus_DBの値が空白で環境変数が空白ならNONEを返す() {
+        putDbKey("  ");
+        world.actingAsUser(1L);
 
-        assertThrows(ForbiddenException.class, service::getBraveSearchApiKeyStatus);
-        verify(repository, org.mockito.Mockito.never()).findById(org.mockito.ArgumentMatchers.any());
+        assertEquals(SystemSettingService.SettingSource.NONE, buildService("  ").getBraveSearchApiKeyStatus().source());
+    }
+
+    @Test
+    void getBraveSearchApiKeyStatus_環境変数がnullならNONEを返す() {
+        world.actingAsUser(1L);
+
+        assertEquals(SystemSettingService.SettingSource.NONE, buildService(null).getBraveSearchApiKeyStatus().source());
+    }
+
+    @Test
+    void getBraveSearchApiKeyStatus_未認証ならForbidden() {
+        world.anonymous();
+
+        assertThrows(ForbiddenException.class, () -> buildService("env-key").getBraveSearchApiKeyStatus());
     }
 
     @Test
     void getBraveSearchApiKeyStatusInternal_認可チェックなしで取得できる() {
-        SystemSettingService service = buildService("env-key");
-        when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+        world.anonymous();
 
-        SystemSettingService.BraveSearchApiKeyStatus status = service.getBraveSearchApiKeyStatusInternal();
+        SystemSettingService.BraveSearchApiKeyStatus status = buildService("env-key").getBraveSearchApiKeyStatusInternal();
 
-        assertEquals(true, status.configured());
+        assertTrue(status.configured());
         assertEquals(SystemSettingService.SettingSource.ENVIRONMENT, status.source());
-        verify(adminAuthorizationService, org.mockito.Mockito.never()).requireAuthenticated();
+        assertTrue(world.http.requests().isEmpty());
     }
 
     @Test
     void setBraveSearchApiKey_admin権限がなければForbidden() {
-        SystemSettingService service = buildService("");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
-        assertThrows(ForbiddenException.class, () -> service.setBraveSearchApiKey("new-key"));
+        assertThrows(ForbiddenException.class, () -> buildService("").setBraveSearchApiKey("new-key"));
+        assertTrue(store.isEmpty());
     }
 
     @Test
-    void setBraveSearchApiKey_空文字は例外() {
+    void setBraveSearchApiKey_空文字とnullは例外() {
+        world.actingAsAdmin(1L);
         SystemSettingService service = buildService("");
 
         assertThrows(IllegalArgumentException.class, () -> service.setBraveSearchApiKey(""));
-        verify(repository, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
+        assertThrows(IllegalArgumentException.class, () -> service.setBraveSearchApiKey("  "));
+        assertThrows(IllegalArgumentException.class, () -> service.setBraveSearchApiKey(null));
+        assertTrue(store.isEmpty());
     }
 
     @Test
     void setBraveSearchApiKey_暗号化して保存する() {
-        SystemSettingService service = buildService("");
-        lenient().when(repository.findById(SystemSettingService.BRAVE_SEARCH_API_KEY)).thenReturn(Optional.empty());
+        world.actingAsAdmin(1L);
 
-        service.setBraveSearchApiKey("new-key");
+        buildService("").setBraveSearchApiKey("new-key");
 
-        ArgumentCaptor<SystemSetting> captor = ArgumentCaptor.forClass(SystemSetting.class);
-        verify(repository).save(captor.capture());
-        assertEquals("new-key", credentialCipher.decrypt(captor.getValue().getSettingValueEncrypted()));
+        assertEquals("new-key", world.credentialCipher.decrypt(
+                store.get(SystemSettingService.BRAVE_SEARCH_API_KEY).getSettingValueEncrypted()));
+    }
+
+    @Test
+    void setBraveSearchApiKey_既存の行は上書きする() {
+        putDbKey("old-key");
+        SystemSetting existing = store.get(SystemSettingService.BRAVE_SEARCH_API_KEY);
+        world.actingAsAdmin(1L);
+
+        buildService("").setBraveSearchApiKey("new-key");
+
+        assertEquals(1, store.size());
+        assertEquals("new-key", world.credentialCipher.decrypt(existing.getSettingValueEncrypted()));
     }
 
     @Test
     void clearBraveSearchApiKey_admin権限がなければForbidden() {
-        SystemSettingService service = buildService("");
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireAdmin();
+        putDbKey("db-key");
+        world.actingAsUser(2L);
 
-        assertThrows(ForbiddenException.class, service::clearBraveSearchApiKey);
+        assertThrows(ForbiddenException.class, () -> buildService("").clearBraveSearchApiKey());
+        assertEquals(1, store.size());
     }
 
     @Test
     void clearBraveSearchApiKey_リポジトリから削除する() {
-        SystemSettingService service = buildService("");
+        putDbKey("db-key");
+        world.actingAsAdmin(1L);
 
-        service.clearBraveSearchApiKey();
+        buildService("").clearBraveSearchApiKey();
 
-        verify(repository).deleteById(SystemSettingService.BRAVE_SEARCH_API_KEY);
+        assertTrue(store.isEmpty());
     }
 }

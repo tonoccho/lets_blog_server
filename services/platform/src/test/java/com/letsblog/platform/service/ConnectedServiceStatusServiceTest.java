@@ -1,13 +1,11 @@
 package com.letsblog.platform.service;
 
 import org.slf4j.MDC;
-import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.render.PlantUmlEncoder;
-import com.letsblog.platform.service.SystemSettingService.BraveSearchApiKeyStatus;
-import com.letsblog.platform.service.SystemSettingService.SettingSource;
+import com.letsblog.platform.testsupport.StatusFixture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,7 +27,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,20 +57,10 @@ class ConnectedServiceStatusServiceTest {
 
     @Mock
     private DataSource dataSource;
-    @Mock
-    private SystemSettingService systemSettingService;
-    @Mock
-    private AppSettingService appSettingService;
+    /** 設定サービス・gateway・RabbitMQ管理APIは実物(HTTPはフェイク、DBはメモリ上のリポジトリ)。issue #1825 */
+    private StatusFixture fixture;
     @Mock
     private Connection connection;
-
-    // issue #589 で追加した2つのチェックは、このテストの関心(外部依存の疎通判定)の外なので
-    // モックで固定する。それぞれの判定ロジックは専用のテストで検証する。
-    @Mock
-    private LetsBlogServiceStatusService letsBlogServiceStatusService;
-
-    @Mock
-    private RabbitMqQueueStatusService rabbitMqQueueStatusService;
 
     private MockRestServiceServer comfyUiServer;
     private MockRestServiceServer plantUmlServer;
@@ -99,10 +86,10 @@ class ConnectedServiceStatusServiceTest {
                 baseUrl -> comfyUiBuilder,
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
-                systemSettingService,
-                appSettingService,
-                letsBlogServiceStatusService,
-                rabbitMqQueueStatusService,
+                fixture.systemSettingService,
+                fixture.appSettingService,
+                fixture.letsBlogServiceStatusService,
+                fixture.rabbitMqQueueStatusService,
                 baseUrl -> {
                     ollamaFactoryBaseUrls.add(baseUrl);
                     return ollamaBuilder;
@@ -111,16 +98,16 @@ class ConnectedServiceStatusServiceTest {
 
     @BeforeEach
     void setUp() {
-        // #589 の2チェックは既定で「正常」に固定し、既存の検証(外部依存の疎通判定)へ影響させない。
-        lenient().when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of());
-        lenient().when(letsBlogServiceStatusService.targetUrl()).thenReturn("http://gateway:8080/actuator/health");
-        lenient().when(rabbitMqQueueStatusService.check())
-                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
-        // LLMチェックの既定はOPENAI。個々のテストで上書きする。
-        lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        fixture = new StatusFixture();
+        // LLMチェックの既定はOPENAI(環境変数の既定)。個々のテストで上書きする。
         // ComfyUIの接続先はDB(AppSettingService)で解決される(issue #1567)。
-        lenient().when(appSettingService.getComfyUiBaseUrl()).thenReturn(COMFYUI_URL);
+        fixture.setting("comfyui_base_url", COMFYUI_URL);
         service = buildService();
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        fixture.close();
     }
 
     private void respondSuccessToAll() {
@@ -131,8 +118,7 @@ class ConnectedServiceStatusServiceTest {
     }
 
     private void mockBraveSearchConfigured(boolean configured) {
-        when(systemSettingService.getBraveSearchApiKeyStatusInternal()).thenReturn(
-                new BraveSearchApiKeyStatus(configured, configured ? SettingSource.DATABASE : SettingSource.NONE));
+        fixture.braveKey(configured);
     }
 
     @Test
@@ -170,7 +156,7 @@ class ConnectedServiceStatusServiceTest {
     // 第三者の有料APIなので実リクエストは送らず、システム側のキー有無で警告も出さない。
     @Test
     void checkAll_LLM_provider_OPENAIはシステム側にキーが無くても警告にしない() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        fixture.llmProvider("OPENAI");
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
@@ -183,7 +169,7 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAll_LLM_provider_CLAUDEはシステム側にキーが無くても警告にしない() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.CLAUDE);
+        fixture.llmProvider("CLAUDE");
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
         respondSuccessToAll();
@@ -196,8 +182,8 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAll_LLM_provider_OLLAMAで疎通確認できればAPIキーに関わらずNORMALを返す() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", OLLAMA_URL);
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
         ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps")).andRespond(withSuccess());
         when(dataSource.getConnection()).thenReturn(connection);
@@ -212,8 +198,8 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAll_LLM_provider_OLLAMAで疎通不可であればAPIキーに関わらずERRORを返す() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", OLLAMA_URL);
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(request -> {
             throw new java.io.IOException("connection refused");
         });
@@ -362,9 +348,7 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_RabbitMqキューが滞留していればWARNINGを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        when(rabbitMqQueueStatusService.check())
-                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(
-                        false, true, "キューが滞留しています", "http://rabbitmq:15672/api/queues"));
+        fixture.rabbitQueues("[{\"name\":\"content.post-published.queue\",\"messages\":150}]");
         respondSuccessToAll();
         mockBraveSearchConfigured(true);
 
@@ -377,9 +361,7 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_RabbitMq疎通確認自体が失敗すればERRORを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        when(rabbitMqQueueStatusService.check())
-                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(
-                        false, false, "接続できません", "http://rabbitmq:15672/api/queues"));
+        fixture.rabbitQueues("[{\"name\":\"content.post-published.queue.dlq\",\"messages\":3}]");
         respondSuccessToAll();
         mockBraveSearchConfigured(true);
 
@@ -392,30 +374,26 @@ class ConnectedServiceStatusServiceTest {
     void checkAll_LetsBlog内部サービスが停止していればERRORを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of(
-                new LetsBlogServiceStatusService.ServiceHealth(
-                        "media-service", "media-service", false, "画像アップロード不可", "接続できません")));
+        fixture.gatewayDown("mediaService");
         respondSuccessToAll();
         mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
-        assertEquals(Status.ERROR, toMapById(statuses).get("media-service"));
+        assertEquals(Status.ERROR, toMapById(statuses).get("mediaService"));
     }
 
     @Test
     void checkAll_LetsBlog内部サービスが正常であればNORMALを返す() throws SQLException {
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.isValid(3)).thenReturn(true);
-        when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of(
-                new LetsBlogServiceStatusService.ServiceHealth(
-                        "media-service", "media-service", true, null, null)));
+        fixture.gatewayAllUp();
         respondSuccessToAll();
         mockBraveSearchConfigured(true);
 
         List<ConnectedServiceStatusResponse> statuses = service.checkAll();
 
-        assertEquals(Status.NORMAL, toMapById(statuses).get("media-service"));
+        assertEquals(Status.NORMAL, toMapById(statuses).get("mediaService"));
     }
 
     @Test
@@ -627,8 +605,8 @@ class ConnectedServiceStatusServiceTest {
     }
 
     private void ollamaWithPsBody(String configuredBaseUrl, String psBody) throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(configuredBaseUrl);
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", configuredBaseUrl);
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
         ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps"))
                 .andRespond(withSuccess(psBody, MediaType.APPLICATION_JSON));
@@ -700,8 +678,8 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAllDetailed_Ollamaのps取得が5xxなら演算デバイスはnullで状態はNORMALのまま() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", OLLAMA_URL);
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
         ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps")).andRespond(withServerError());
         respondToAllExceptComfyUi();
@@ -715,8 +693,8 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAllDetailed_Ollamaのps取得で接続エラーでも演算デバイスはnullで状態はNORMALのまま() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", OLLAMA_URL);
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(withSuccess());
         ollamaServer.expect(requestTo(OLLAMA_URL + "/api/ps")).andRespond(request -> {
             throw new java.io.IOException("connection refused");
@@ -732,8 +710,8 @@ class ConnectedServiceStatusServiceTest {
 
     @Test
     void checkAllDetailed_Ollamaが疎通不可ならpsを呼ばず演算デバイスはnullで従来どおりERROR() throws SQLException {
-        when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", OLLAMA_URL);
         // /api/ps の期待は置かない。呼べばMockRestServiceServerが失敗する。
         ollamaServer.expect(requestTo(OLLAMA_URL + "/models")).andRespond(request -> {
             throw new java.io.IOException("connection refused");
@@ -795,8 +773,8 @@ class ConnectedServiceStatusServiceTest {
                 },
                 RestClient.builder().baseUrl(PLANTUML_URL), PLANTUML_URL,
                 RestClient.builder().baseUrl(WORDPRESS_URL), WORDPRESS_URL,
-                systemSettingService, appSettingService,
-                letsBlogServiceStatusService, rabbitMqQueueStatusService,
+                fixture.systemSettingService, fixture.appSettingService,
+                fixture.letsBlogServiceStatusService, fixture.rabbitMqQueueStatusService,
                 baseUrl -> RestClient.builder().baseUrl(OLLAMA_URL));
         MDC.put("correlationId", "cid-status");
         try {
@@ -806,5 +784,89 @@ class ConnectedServiceStatusServiceTest {
         }
 
         assertEquals(java.util.Set.of("cid-status"), seen);
+    }
+
+    // ---- issue #1825: 分岐の網羅 ----
+
+    @Test
+    void checkAll_DB接続の検証がfalseならERRORを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(false);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        List<ConnectedServiceStatusResponse> statuses = service.checkAll();
+
+        assertEquals(Status.ERROR, toMapById(statuses).get("database"));
+    }
+
+    @Test
+    void checkAllDetailed_DB接続の検証がfalseなら理由を出す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(false);
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        var database = service.checkAllDetailed().stream().filter(d -> d.id().equals("database")).findFirst().orElseThrow();
+
+        assertEquals("接続の検証に失敗しました", database.errorMessage());
+    }
+
+    @Test
+    void checkAll_PlantUMLが空の本文を返せばWARNINGを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH)).andRespond(withSuccess());
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        mockBraveSearchConfigured(true);
+
+        var plantUml = service.checkAllDetailed().stream().filter(d -> d.id().equals("plantuml")).findFirst().orElseThrow();
+
+        assertEquals(Status.WARNING, plantUml.status());
+        assertEquals("PNGデータが空です", plantUml.errorMessage());
+    }
+
+    @Test
+    void checkAllDetailed_Ollamaのapi_psの本文が空や空白なら演算デバイスは不明のまま状態はNORMAL() throws SQLException {
+        for (String psBody : new String[] {"", "   "}) {
+            setUp();
+            ollamaWithPsBody(psBody);
+            when(dataSource.getConnection()).thenReturn(connection);
+            when(connection.isValid(3)).thenReturn(true);
+            mockBraveSearchConfigured(true);
+
+            var llm = service.checkAllDetailed().stream().filter(d -> d.id().equals("llm")).findFirst().orElseThrow();
+
+            assertEquals(Status.NORMAL, llm.status(), "psBody=[" + psBody + "]");
+            assertNull(llm.computeDevice(), "psBody=[" + psBody + "]");
+        }
+    }
+
+    @Test
+    void checkAllDetailed_DBの検証も接続のcloseも失敗したら検証の失敗理由を出す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenThrow(new SQLException("validation failed"));
+        org.mockito.Mockito.doThrow(new SQLException("close failed")).when(connection).close();
+        respondSuccessToAll();
+        mockBraveSearchConfigured(true);
+
+        var database = service.checkAllDetailed().stream().filter(d -> d.id().equals("database")).findFirst().orElseThrow();
+
+        assertEquals(Status.ERROR, database.status());
+        assertEquals("validation failed", database.errorMessage());
+    }
+
+    @Test
+    void checkAll_PlantUMLがPNGの型で空の本文を返してもWARNINGを返す() throws SQLException {
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.isValid(3)).thenReturn(true);
+        comfyUiServer.expect(requestTo(COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
+        plantUmlServer.expect(requestTo(PLANTUML_URL + PLANTUML_HEALTHCHECK_PATH))
+                .andRespond(withSuccess(new byte[0], MediaType.IMAGE_PNG));
+        wordpressServer.expect(requestTo(WORDPRESS_URL + "/health")).andRespond(withSuccess());
+        mockBraveSearchConfigured(true);
+
+        assertEquals(Status.WARNING, toMapById(service.checkAll()).get("plantuml"));
     }
 }

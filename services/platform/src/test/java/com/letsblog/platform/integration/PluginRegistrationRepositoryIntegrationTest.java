@@ -1,6 +1,5 @@
 package com.letsblog.platform.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.platform.domain.PluginKind;
 import com.letsblog.platform.domain.PluginRegistration;
 import com.letsblog.platform.repository.PluginRegistrationRepository;
@@ -23,16 +22,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 @DisplayName("platform-service: プラグインの登録の保存(issue #1807)")
-class PluginRegistrationRepositoryIntegrationTest {
+class PluginRegistrationRepositoryIntegrationTest extends IdentityFakeIntegrationTestBase {
 
     @Autowired
     private PluginRegistrationRepository repository;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-    @MockitoBean
-    private IdentityClient identityClient;
-
     @AfterEach
     void cleanUp() {
         repository.deleteAll();

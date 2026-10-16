@@ -8,6 +8,7 @@ import com.letsblog.platform.domain.PluginRegistration;
 import com.letsblog.platform.repository.PluginRegistrationRepository;
 import com.letsblog.platform.service.PluginRegistrationService.RegistrationView;
 import com.letsblog.platform.service.PluginRegistrationService.ResolvedRegistration;
+import com.letsblog.platform.testsupport.PlatformWorld;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -42,8 +42,14 @@ class PluginRegistrationServiceTest {
     private PluginRegistrationRepository repository;
     @Mock
     private ProjectPluginRegistrationRepository projectRepository;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    /** identity-serviceはHTTPのフェイクで模し、AdminAuthorizationServiceは実物を通す(issue #1825)。既定はadmin。 */
+    private final PlatformWorld world = new PlatformWorld().actingAsAdmin(1L);
+    private final AdminAuthorizationService adminAuthorizationService = world.adminAuthorizationService;
+
+    @org.junit.jupiter.api.AfterEach
+    void closeWorld() {
+        world.close();
+    }
 
     private final CredentialCipher cipher = new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32]));
     private PluginRegistrationService service;
@@ -83,13 +89,13 @@ class PluginRegistrationServiceTest {
     void 追加は管理者を要求し_dockerネットワーク内のlbxを保存できる() {
         RegistrationView view = service.create("LLM", " 社内のOllama ", "http://lbx-ollama:11434/v1", null);
 
-        verify(adminAuthorizationService).requireAdmin();
+        assertEquals(1, world.http.requests("GET", "/api/identity/me").size());
         assertEquals(new RegistrationView(1L, "LLM", "社内のOllama", "http://lbx-ollama:11434/v1", false, null), view);
     }
 
     @Test
     void 管理者でなければ何も保存しない() {
-        doThrow(new ForbiddenException("admin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
         assertThrows(ForbiddenException.class, () -> service.create("LLM", "a", "http://lbx-ollama:1", null));
         assertThrows(ForbiddenException.class, () -> service.list());
@@ -247,7 +253,7 @@ class PluginRegistrationServiceTest {
         ResolvedRegistration resolved = service.resolve("LLM", null);
 
         assertEquals(new ResolvedRegistration(true, 7L, "社内", "http://lbx-ollama:11434/v1", "SYSTEM", null, null), resolved);
-        verifyNoInteractions(adminAuthorizationService);
+        assertTrue(world.http.requests().isEmpty());
     }
 
     @Test

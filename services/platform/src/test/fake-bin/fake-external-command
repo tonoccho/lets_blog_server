@@ -1,0 +1,77 @@
+#!/bin/sh
+# 外部プロセス(mysqldump / mysql / pg_dump / pg_restore)の代役(issue #1825)。
+#
+# BackupService は ProcessBuilder でこれらの実行ファイルを起動する。テストでは Gradle が
+# この fake-bin ディレクトリを PATH の先頭に置くので、BackupService の実物(runProcess を含む)が、
+# 実際のプロセス起動のまま、本物の DB ではなくこのスクリプトと話す。モックは使わない。
+#
+# 振る舞いは FAKE_BIN_CONTROL ディレクトリ(Gradle が設定。テストが FakeBin 経由で書き換える)で決まる。
+#   <name>.version  --version の出力(無ければ既定)
+#   <name>.fail     あれば、中身を標準エラーに出して終了コード 1
+#   <name>.out      ダンプ系の標準出力(無ければ "-- <name> <最後の引数>")
+#   npx.sleep       npx がかける秒数(小数可)。npx.nooutput があれば --out のファイルを書かない
+#   (npm / npx は VSCode 拡張のビルド用。npm ci / npm run compile は何もしない)
+#   calls.log       呼び出しの記録(1 行 1 回、タブ区切りで コマンド名と引数)
+#   <name>.stdin.<n> 標準入力を受けた呼び出しの標準入力(n は呼び出し番号)
+name=$(basename "$0")
+ctl="${FAKE_BIN_CONTROL:?FAKE_BIN_CONTROL is not set}"
+mkdir -p "$ctl"
+n=$(( $(cat "$ctl/count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$ctl/count"
+{ printf '%s' "$name"; for a in "$@"; do printf '\t%s' "$a"; done; printf '\n'; } >> "$ctl/calls.log"
+
+if [ "$1" = "--version" ]; then
+  if [ -f "$ctl/$name.version" ]; then
+    cat "$ctl/$name.version"
+  else
+    case "$name" in
+      pg_dump|pg_restore) echo "$name (PostgreSQL) 15.4" ;;
+      mysqldump|mysql) echo "$name  Ver 8.0.36 for Linux on x86_64" ;;
+    esac
+  fi
+  exit 0
+fi
+
+case "$name" in
+  mysql|pg_restore)
+    cat > "$ctl/$name.stdin.$n"
+    ;;
+  npm)
+    # 作業ディレクトリの内容(コピーされたソース)を記録する。
+    (cd . && find . -mindepth 1 | sort) > "$ctl/npm.cwd.$n"
+    ;;
+  npx)
+    # VSCode拡張のビルド(npx vsce package --out <path>)。<name>.sleep があればその秒数だけ時間をかける。
+    if [ -f "$ctl/npx.sleep" ]; then sleep "$(cat "$ctl/npx.sleep")"; fi
+    ;;
+esac
+
+if [ -f "$ctl/$name.fail" ]; then
+  cat "$ctl/$name.fail" 1>&2
+  exit 1
+fi
+
+case "$name" in
+  npx)
+    # --out の次の引数が成果物のパス。npx.nooutput があれば成功扱いで何も書かない。
+    out=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--out" ]; then out="$a"; fi
+      prev="$a"
+    done
+    if [ -n "$out" ] && [ ! -f "$ctl/npx.nooutput" ]; then
+      mkdir -p "$(dirname "$out")"
+      echo "fake vsix" > "$out"
+    fi
+    ;;
+  mysqldump|pg_dump)
+    if [ -f "$ctl/$name.out" ]; then
+      cat "$ctl/$name.out"
+    else
+      for last; do :; done
+      echo "-- $name $last"
+    fi
+    ;;
+esac
+exit 0

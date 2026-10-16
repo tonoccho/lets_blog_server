@@ -1,5 +1,8 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.platform.testsupport.FakeHttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -17,11 +20,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("platform-service: RabbitMQのキュー滞留・DLQ滞留の判定(issue #589)")
 class RabbitMqQueueStatusServiceTest {
 
-    /** Management API の応答を差し替えられるよう、判定部分だけを取り出して検証する。 */
+    private FakeHttpServer http;
+    private RabbitMqQueueStatusService service;
+
+    @BeforeEach
+    void setUp() {
+        http = new FakeHttpServer();
+        service = new RabbitMqQueueStatusService(http.baseUrl(), "guest", "secret");
+    }
+
+    @AfterEach
+    void tearDown() {
+        http.close();
+    }
+
+    /** Management APIの応答はHTTPのサーバー側フェイクで返し、判定は実物のサービスで行う(issue #1825)。 */
     private RabbitMqQueueStatusService.QueueStatus judge(String queuesJson) {
-        // 実際のHTTP往復は MockRestServiceServer を使う統合的な検証の対象で、
-        // ここでは「どの滞留をどう扱うか」だけを見る。
-        return new StubbedService(queuesJson).check();
+        http.json("GET", "/api/queues", queuesJson);
+        return service.check();
     }
 
     @Test
@@ -71,23 +87,71 @@ class RabbitMqQueueStatusServiceTest {
         assertTrue(status.ok());
     }
 
-    /** {@code check()} の判定だけを検証するため、HTTP取得部分を固定値へ差し替えたサブクラス。 */
-    private static final class StubbedService extends RabbitMqQueueStatusService {
+    @Test
+    @DisplayName("管理APIへBasic認証で問い合わせ、対象URLを返す")
+    void 管理APIへBasic認証で問い合わせる() {
+        var status = judge("[]");
 
-        private final String queuesJson;
+        assertTrue(status.ok());
+        assertEquals(http.baseUrl() + "/api/queues", status.targetUrl());
+        assertEquals(http.baseUrl() + "/api/queues", service.targetUrl());
+        // guest:secret のBase64
+        assertEquals("Basic Z3Vlc3Q6c2VjcmV0", http.last().header("Authorization"));
+    }
 
-        StubbedService(String queuesJson) {
-            super("http://rabbitmq:15672", "guest", "guest");
-            this.queuesJson = queuesJson;
-        }
+    @Test
+    @DisplayName("DLQと滞留が両方あるときはDLQ(ERROR)を優先する")
+    void dlqを優先する() {
+        var status = judge("""
+                [{"name":"a.queue","messages":500},{"name":"a.queue.dlq","messages":1}]
+                """);
 
-        @Override
-        protected com.fasterxml.jackson.databind.JsonNode fetchQueues() {
-            try {
-                return new com.fasterxml.jackson.databind.ObjectMapper().readTree(queuesJson);
-            } catch (Exception e) {
-                throw new IllegalStateException(e);
-            }
-        }
+        assertFalse(status.ok());
+        assertFalse(status.warning());
+        assertTrue(status.message().contains("a.queue.dlq=1"));
+    }
+
+    @Test
+    @DisplayName("管理APIがエラーを返せば、滞留を判定できないWARNINGにする")
+    void 管理APIのエラーは判定不能の警告() {
+        http.status("GET", "/api/queues", 500, "{}");
+
+        var status = service.check();
+
+        assertFalse(status.ok());
+        assertTrue(status.warning());
+        assertTrue(status.message().contains("到達できず"), status.message());
+    }
+
+    @Test
+    @DisplayName("管理APIへ接続できなければ、滞留を判定できないWARNINGにする")
+    void 接続できなければ警告() {
+        var unreachable = new RabbitMqQueueStatusService("http://127.0.0.1:1", "guest", "guest");
+
+        var status = unreachable.check();
+
+        assertTrue(status.warning());
+        assertTrue(status.message().contains("到達できず"), status.message());
+    }
+
+    @Test
+    @DisplayName("応答が配列でなければ、解釈できないWARNINGにする")
+    void 配列でない応答は警告() {
+        var status = judge("{\"error\":\"x\"}");
+
+        assertFalse(status.ok());
+        assertTrue(status.warning());
+        assertEquals("RabbitMQ Management APIの応答を解釈できません", status.message());
+    }
+
+    @Test
+    @DisplayName("応答の本文が空でも、解釈できないWARNINGにする")
+    void 空の応答は警告() {
+        http.on("GET", "/api/queues", FakeHttpServer.Response.empty(200));
+
+        var status = service.check();
+
+        assertTrue(status.warning());
+        assertEquals("RabbitMQ Management APIの応答を解釈できません", status.message());
     }
 }

@@ -1,14 +1,15 @@
 package com.letsblog.platform.controller;
 
+import com.letsblog.platform.config.GlobalExceptionHandler;
 import com.letsblog.platform.service.VscodeExtensionBuildService;
+import com.letsblog.platform.testsupport.FakeBin;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,43 +17,49 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * legacy-apiのVscodeExtensionControllerTestと同じ観点をplatform-serviceへ移設したもの
  * (issue #696、C10-4)。
+ *
+ * <p>issue #1825: コントローラとVscodeExtensionBuildServiceは実物で、Springの{@link MockMvc}(スタンドアロン)で
+ * ダウンロードする。ビルドで呼ばれるnpm / npxだけが{@code src/test/fake-bin}の代役の実行ファイル。
  */
-@ExtendWith(MockitoExtension.class)
 class VscodeExtensionControllerTest {
-
-    @Mock
-    private VscodeExtensionBuildService vscodeExtensionBuildService;
 
     @TempDir
     Path tempDir;
 
+    private VscodeExtensionBuildService service;
+    private MockMvc mvc;
+    private Path buildDir;
+
+    @BeforeEach
+    void setUp() throws IOException {
+        FakeBin.reset();
+        Path source = tempDir.resolve("source");
+        buildDir = tempDir.resolve("build");
+        Files.createDirectories(source);
+        Files.writeString(source.resolve("package.json"), "{\"name\":\"letsblog-vscode\",\"version\":\"1.0.0\"}");
+        service = new VscodeExtensionBuildService(source.toString(), buildDir.toString());
+        mvc = MockMvcBuilders.standaloneSetup(new VscodeExtensionController(service))
+                .setControllerAdvice(new GlobalExceptionHandler(
+                        new org.springframework.boot.servlet.autoconfigure.MultipartProperties()))
+                .build();
+    }
+
     @Test
-    void download_ビルド結果をattachmentとして返す() throws IOException {
-        Path requestDir = tempDir.resolve("req-1");
-        Files.createDirectories(requestDir);
-        Path vsix = requestDir.resolve("letsblog-vscode-1.0.0.vsix");
-        Files.writeString(vsix, "dummy vsix content");
-        when(vscodeExtensionBuildService.buildAndGetVsix()).thenReturn(
-                new VscodeExtensionBuildService.BuiltExtension(vsix, "letsblog-vscode-1.0.0.vsix", requestDir));
+    void download_ビルド結果をattachmentとして返す() throws Exception {
+        MvcResult result = mvc.perform(get("/api/system/vscode-extension")).andExpect(status().isOk()).andReturn();
 
-        VscodeExtensionController controller = new VscodeExtensionController(vscodeExtensionBuildService);
-        ResponseEntity<?> response = controller.download();
-
-        assertEquals(200, response.getStatusCode().value());
-        String contentDisposition = response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
+        String contentDisposition = result.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
         assertTrue(contentDisposition != null && contentDisposition.contains("letsblog-vscode-1.0.0.vsix"));
+        assertEquals("fake vsix\n", result.getResponse().getContentAsString());
     }
 
     /**
@@ -63,26 +70,32 @@ class VscodeExtensionControllerTest {
      */
     @Test
     void download_レスポンス本文を読み終えるまで後片付けされない() throws IOException {
-        Path requestDir = tempDir.resolve("req-2");
-        Files.createDirectories(requestDir);
-        Path vsix = requestDir.resolve("letsblog-vscode-1.0.0.vsix");
-        byte[] content = "dummy vsix content".getBytes(StandardCharsets.UTF_8);
-        Files.write(vsix, content);
-        VscodeExtensionBuildService.BuiltExtension built =
-                new VscodeExtensionBuildService.BuiltExtension(vsix, "letsblog-vscode-1.0.0.vsix", requestDir);
-        when(vscodeExtensionBuildService.buildAndGetVsix()).thenReturn(built);
-
-        VscodeExtensionController controller = new VscodeExtensionController(vscodeExtensionBuildService);
-        ResponseEntity<Resource> response = controller.download();
-        Resource resource = response.getBody();
+        var controller = new VscodeExtensionController(service);
+        var response = controller.download();
+        var resource = response.getBody();
+        Path vsix = resource.getFile().toPath();
+        Path requestDir = vsix.getParent();
 
         try (InputStream in = resource.getInputStream()) {
-            verify(vscodeExtensionBuildService, never()).cleanupAfterDownload(built);
+            assertTrue(Files.exists(requestDir), "読み取り前に削除されない");
             byte[] actual = in.readAllBytes();
-            assertArrayEquals(content, actual);
-            verify(vscodeExtensionBuildService, never()).cleanupAfterDownload(built);
+            assertEquals("fake vsix\n", new String(actual, StandardCharsets.UTF_8));
+            assertTrue(Files.exists(requestDir), "読み取り中は削除されない");
         }
 
-        verify(vscodeExtensionBuildService, times(1)).cleanupAfterDownload(built);
+        assertFalse(Files.exists(requestDir), "読み取りを終えて閉じたら後片付けされる");
+    }
+
+    @Test
+    void ビルドが失敗したら出力先を残さず例外が伝わる() throws Exception {
+        FakeBin.fail("npm", "npm ERR! boom");
+
+        // VscodeExtensionBuildExceptionは専用のハンドラが無いため、例外がそのまま伝わる。
+        Exception thrown = org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
+                () -> mvc.perform(get("/api/system/vscode-extension")));
+
+        assertTrue(thrown.getCause() instanceof VscodeExtensionBuildService.VscodeExtensionBuildException,
+                String.valueOf(thrown));
+        assertFalse(Files.exists(buildDir.resolve("output")) && Files.list(buildDir.resolve("output")).findAny().isPresent());
     }
 }

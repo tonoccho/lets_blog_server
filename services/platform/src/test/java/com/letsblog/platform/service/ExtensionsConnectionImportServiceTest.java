@@ -1,12 +1,14 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.crypto.CredentialCipher;
+import com.letsblog.common.net.ConnectionDestinationGuard;
+import com.letsblog.platform.domain.SystemSetting;
+import com.letsblog.platform.testsupport.InMemoryRepositories;
+import com.letsblog.platform.testsupport.PlatformWorld;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -21,17 +23,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
 
 /**
  * extensions のポータルから接続先を取り込む(issue #1783)。ポータルは実HTTPサーバー(loopback)で立てる。
  * 接続先の検査(ExtensionsPortalUrlPolicy)は名前解決を差し替えて通し、検査自体は別テストで固定している。
  */
-@ExtendWith(MockitoExtension.class)
 class ExtensionsConnectionImportServiceTest {
 
     private static final String DEFAULT_BODY = "["
@@ -48,10 +44,12 @@ class ExtensionsConnectionImportServiceTest {
                 + "\"" + (openai == null ? "" : ",\"openaiBaseUrl\":\"" + openai + "\"") + "}";
     }
 
-    @Mock
+    /** identity-serviceはHTTPのフェイクで模し、AdminAuthorizationService・AppSettingServiceは実物を通す(issue #1825)。既定はadmin。 */
+    private final PlatformWorld world = new PlatformWorld().actingAsAdmin(1L);
+    private final AdminAuthorizationService adminAuthorizationService = world.adminAuthorizationService;
+    private final Map<String, SystemSetting> store = new java.util.HashMap<>();
+    private final CredentialCipher cipher = world.credentialCipher;
     private AppSettingService appSettingService;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
 
     private HttpServer server;
     private final AtomicInteger requests = new AtomicInteger();
@@ -85,22 +83,37 @@ class ExtensionsConnectionImportServiceTest {
         portalUrl = "http://127.0.0.1:" + server.getAddress().getPort();
         ExtensionsPortalUrlPolicy permissive = new ExtensionsPortalUrlPolicy(
                 host -> new InetAddress[] {InetAddress.getByName("192.168.1.20")});
+        appSettingService = new AppSettingService(
+                InMemoryRepositories.systemSettings(store), cipher, adminAuthorizationService,
+                "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
+                "OPENAI", "claude-3-5-haiku-20241022", "qwen2.5:7b-instruct",
+                "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
+                "http://localhost:3000", "10", "wp-admin");
+        // 保存時の検査は、ループバックなどの禁止アドレスを拒否する実物のガード・ポリシー(名前解決だけを固定)。
+        appSettingService.useDestinationGuard(new ConnectionDestinationGuard(
+                h -> new InetAddress[] {InetAddress.getByName(h.matches("[0-9.]+") ? h : "192.168.1.50")},
+                List::of, () -> false));
+        appSettingService.usePortalUrlPolicy(new ExtensionsPortalUrlPolicy(
+                h -> new InetAddress[] {InetAddress.getByName(h.matches("[0-9.]+") ? h : "172.20.0.9")}));
         service = new ExtensionsConnectionImportService(
                 appSettingService, adminAuthorizationService, permissive, Duration.ofMillis(400));
-        lenient().when(appSettingService.getAllSettings()).thenReturn(List.of(
-                status("llm_ollama_base_url", "Ollama ベースURL(OLLAMA用。OpenAI互換の /v1 まで含める)", "http://before:11434/v1"),
-                status("comfyui_base_url", "ComfyUI ベースURL", null),
-                status("penpot_base_url", "Penpot ベースURL", "http://192.168.77.10:3000")));
+        stored("llm_ollama_base_url", "http://before:11434/v1");
+        stored("penpot_base_url", "http://192.168.77.10:3000");
+    }
+
+    private void stored(String key, String value) {
+        store.put(key, new SystemSetting(key, cipher.encrypt(value)));
+    }
+
+    private String storedValue(String key) {
+        SystemSetting setting = store.get(key);
+        return setting == null ? null : cipher.decrypt(setting.getSettingValueEncrypted());
     }
 
     @AfterEach
     void tearDown() {
         server.stop(0);
-    }
-
-    private static AppSettingService.SettingStatus status(String key, String label, String value) {
-        return new AppSettingService.SettingStatus(key, label, false, value != null,
-                value != null ? AppSettingService.SettingSource.DATABASE : AppSettingService.SettingSource.NONE, value);
+        world.close();
     }
 
     private static Map<String, String> candidates(ExtensionsConnectionImportService.FetchResult result) {
@@ -165,7 +178,8 @@ class ExtensionsConnectionImportServiceTest {
     void 取得はシステム設定を一切書き換えない() {
         service.fetch(portalUrl, ExtensionsConnectionImportService.Route.SAME_PC);
 
-        verify(appSettingService, never()).updateSettings(anyMap());
+        assertEquals(2, store.size());
+        assertEquals("http://before:11434/v1", storedValue("llm_ollama_base_url"));
     }
 
     @Test
@@ -271,7 +285,7 @@ class ExtensionsConnectionImportServiceTest {
 
     @Test
     void 管理者でなければ取得は拒否され要求を出さない() {
-        doThrow(new ForbiddenException("管理者のみ")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
         assertThrows(ForbiddenException.class,
                 () -> service.fetch(portalUrl, ExtensionsConnectionImportService.Route.SAME_PC));
@@ -282,8 +296,6 @@ class ExtensionsConnectionImportServiceTest {
 
     @Test
     void 反映は検証で拒否されたキーだけ保存せず理由を返し_他は保存する() {
-        doThrow(new IllegalArgumentException("penpot_base_url に指定できない接続先です。理由X"))
-                .when(appSettingService).updateSettings(Map.of("penpot_base_url", "http://127.0.0.1:3000"));
         Map<String, String> values = new LinkedHashMap<>();
         values.put("llm_ollama_base_url", "http://lbx-ollama:11434/v1");
         values.put("penpot_base_url", "http://127.0.0.1:3000");
@@ -294,22 +306,23 @@ class ExtensionsConnectionImportServiceTest {
         assertEquals(List.of("extensions_portal_url", "llm_ollama_base_url", "comfyui_base_url"), result.saved());
         assertEquals(1, result.rejected().size());
         assertEquals("penpot_base_url", result.rejected().get(0).key());
-        assertEquals("penpot_base_url に指定できない接続先です。理由X", result.rejected().get(0).reason());
-        verify(appSettingService).updateSettings(Map.of("extensions_portal_url", "http://lbx-portal:3100"));
-        verify(appSettingService).updateSettings(Map.of("llm_ollama_base_url", "http://lbx-ollama:11434/v1"));
-        verify(appSettingService).updateSettings(Map.of("comfyui_base_url", "http://lbx-comfyui:8188"));
+        assertTrue(result.rejected().get(0).reason().startsWith("penpot_base_url に指定できない接続先です。"),
+                result.rejected().get(0).reason());
+        assertEquals("http://lbx-portal:3100", storedValue("extensions_portal_url"));
+        assertEquals("http://lbx-ollama:11434/v1", storedValue("llm_ollama_base_url"));
+        assertEquals("http://lbx-comfyui:8188", storedValue("comfyui_base_url"));
+        assertEquals("http://192.168.77.10:3000", storedValue("penpot_base_url"));
     }
 
     @Test
     void 反映でポータルのURLが拒否されてもそのキーとして返し_他の保存は続ける() {
-        doThrow(new IllegalArgumentException("extensions_portal_url は不可"))
-                .when(appSettingService).updateSettings(Map.of("extensions_portal_url", "http://127.0.0.1:3100"));
-
         ExtensionsConnectionImportService.ApplyResult result = service.apply(
                 "http://127.0.0.1:3100", Map.of("comfyui_base_url", "http://lbx-comfyui:8188"));
 
         assertEquals(List.of("comfyui_base_url"), result.saved());
         assertEquals("extensions_portal_url", result.rejected().get(0).key());
+        assertEquals(null, storedValue("extensions_portal_url"));
+        assertEquals("http://lbx-comfyui:8188", storedValue("comfyui_base_url"));
     }
 
     @Test
@@ -326,7 +339,8 @@ class ExtensionsConnectionImportServiceTest {
                 result.rejected().stream().map(ExtensionsConnectionImportService.Rejection::key).toList());
         assertTrue(result.rejected().get(0).reason().contains("対象外"), result.rejected().get(0).reason());
         assertTrue(result.rejected().get(1).reason().contains("空"), result.rejected().get(1).reason());
-        verify(appSettingService, never()).updateSettings(anyMap());
+        assertEquals(null, storedValue("mail_host"));
+        assertEquals("http://192.168.77.10:3000", storedValue("penpot_base_url"));
     }
 
     @Test
@@ -335,16 +349,16 @@ class ExtensionsConnectionImportServiceTest {
                 "", Map.of("comfyui_base_url", "http://lbx-comfyui:8188"));
 
         assertEquals(List.of("comfyui_base_url"), result.saved());
-        verify(appSettingService, never()).updateSettings(Map.of("extensions_portal_url", ""));
+        assertEquals(null, storedValue("extensions_portal_url"));
     }
 
     @Test
     void 管理者でなければ反映は拒否され何も保存しない() {
-        doThrow(new ForbiddenException("管理者のみ")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
         assertThrows(ForbiddenException.class,
                 () -> service.apply("http://lbx-portal:3100", Map.of("comfyui_base_url", "http://x")));
-        verify(appSettingService, never()).updateSettings(anyMap());
+        assertEquals(2, store.size());
     }
 
     @Test
@@ -353,6 +367,36 @@ class ExtensionsConnectionImportServiceTest {
 
         assertEquals(List.of(), result.saved());
         assertEquals(List.of(), result.rejected());
-        verify(appSettingService, never()).updateSettings(anyMap());
+        assertEquals(2, store.size());
+    }
+
+    @Test
+    void idが空文字だと必須項目の欠落エラー() {
+        body = "[{\"id\":\"\"}]";
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> service.fetch(portalUrl, ExtensionsConnectionImportService.Route.SAME_PC));
+
+        assertTrue(e.getMessage().contains("「id」"), e.getMessage());
+    }
+
+    @Test
+    void URLの項目が文字列でないと必須項目の欠落エラー() {
+        body = "[{\"id\":\"penpot\",\"publicUrl\":5}]";
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> service.fetch(portalUrl, ExtensionsConnectionImportService.Route.SAME_PC));
+
+        assertEquals("ポータルの応答の「penpot」に「publicUrl」がありません", e.getMessage());
+    }
+
+    @Test
+    void 本文が空ならJSONではあるが配列ではないエラー() {
+        body = "";
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> service.fetch(portalUrl, ExtensionsConnectionImportService.Route.SAME_PC));
+
+        assertEquals("ポータルの応答が配列ではありません", e.getMessage());
     }
 }

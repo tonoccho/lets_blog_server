@@ -7,6 +7,7 @@ import com.letsblog.platform.domain.PluginKind;
 import com.letsblog.platform.domain.ProjectPluginRegistration;
 import com.letsblog.platform.repository.ProjectPluginRegistrationRepository;
 import com.letsblog.platform.service.ProjectPluginRegistrationService.ProjectRegistrationView;
+import com.letsblog.platform.testsupport.PlatformWorld;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -42,8 +42,14 @@ class ProjectPluginRegistrationServiceTest {
 
     @Mock
     private ProjectPluginRegistrationRepository repository;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    /** identity-serviceはHTTPのフェイクで模し、AdminAuthorizationServiceは実物を通す(issue #1825)。既定はadmin。 */
+    private final PlatformWorld world = new PlatformWorld().actingAsAdmin(1L);
+    private final AdminAuthorizationService adminAuthorizationService = world.adminAuthorizationService;
+
+    @org.junit.jupiter.api.AfterEach
+    void closeWorld() {
+        world.close();
+    }
 
     private final CredentialCipher cipher = new CredentialCipher(Base64.getEncoder().encodeToString(new byte[32]));
     private ProjectPluginRegistrationService service;
@@ -90,7 +96,7 @@ class ProjectPluginRegistrationServiceTest {
         ProjectRegistrationView view =
                 service.create(PROJECT, "LLM", " 社内のOllama ", "http://gpu-pc.example:11434/v1", null, "sk-secret");
 
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT);
+        assertEquals(1, world.http.requests("GET", "/api/identity/me").size());
         assertEquals(new ProjectRegistrationView(1L, "LLM", "社内のOllama", "http://gpu-pc.example:11434/v1", false, null, true), view);
         org.mockito.ArgumentCaptor<ProjectPluginRegistration> saved = org.mockito.ArgumentCaptor.forClass(ProjectPluginRegistration.class);
         verify(repository).save(saved.capture());
@@ -109,7 +115,7 @@ class ProjectPluginRegistrationServiceTest {
 
     @Test
     void メンバーでなければ何も保存せず_リポジトリにも触れない() {
-        doThrow(new ForbiddenException("メンバーが必要です")).when(adminAuthorizationService).requireProjectMemberOrAdmin(PROJECT);
+        world.actingAsUser(2L).projectMember(PROJECT, 2L, false);
 
         assertThrows(ForbiddenException.class, () -> service.create(PROJECT, "LLM", "a", "http://gpu-pc.example:1", null, null));
         assertThrows(ForbiddenException.class, () -> service.list(PROJECT));
@@ -278,5 +284,15 @@ class ProjectPluginRegistrationServiceTest {
         when(repository.findByIdAndProjectId(4L, PROJECT)).thenReturn(Optional.of(existing(4, PluginKind.DIAGRAM_RENDERER, "図", false)));
 
         assertTrue(assertThrows(IllegalArgumentException.class, () -> service.activate(PROJECT, 4L)).getMessage().contains("使用中"));
+    }
+
+    @Test
+    void drawioUrlのホストが無い_解釈できないURLは理由つきで拒否する() {
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> service.create(
+                PROJECT, "DIAGRAM_RENDERER", "図", "http://gpu-pc.example:8085", "http:///no-host", null))
+                .getMessage().contains("ホストがありません"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> service.create(
+                PROJECT, "DIAGRAM_RENDERER", "図", "http://gpu-pc.example:8085", "http://a b", null))
+                .getMessage().contains("解釈できません"));
     }
 }

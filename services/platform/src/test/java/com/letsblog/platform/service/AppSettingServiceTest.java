@@ -4,6 +4,7 @@ import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.common.crypto.CredentialCipher;
 import com.letsblog.platform.domain.SystemSetting;
 import com.letsblog.platform.repository.SystemSettingRepository;
+import com.letsblog.platform.testsupport.PlatformWorld;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,7 +21,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -36,8 +36,14 @@ class AppSettingServiceTest {
 
     @Mock
     private SystemSettingRepository repository;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    /** identity-serviceはHTTPのフェイクで模し、AdminAuthorizationServiceは実物を通す(issue #1825)。既定はadmin。 */
+    private final PlatformWorld world = new PlatformWorld().actingAsAdmin(1L);
+    private final AdminAuthorizationService adminAuthorizationService = world.adminAuthorizationService;
+
+    @org.junit.jupiter.api.AfterEach
+    void closeWorld() {
+        world.close();
+    }
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));
@@ -209,7 +215,7 @@ class AppSettingServiceTest {
     @Test
     void getAllSettings_admin権限がなければForbidden() {
         AppSettingService service = service();
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
         assertThrows(ForbiddenException.class, service::getAllSettings);
     }
@@ -236,7 +242,7 @@ class AppSettingServiceTest {
     @Test
     void updateSettings_admin権限がなければForbidden() {
         AppSettingService service = service();
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です")).when(adminAuthorizationService).requireAdmin();
+        world.actingAsUser(2L);
 
         assertThrows(ForbiddenException.class, () -> service.updateSettings(Map.of("mail_password", "new-key")));
     }
@@ -745,16 +751,15 @@ class AppSettingServiceTest {
         AppSettingService service = service();
         when(repository.findById("site_admin_path")).thenReturn(Optional.empty());
 
-        service.getSiteAdminPath();
+        world.actingAsUser(3L);
 
-        verify(adminAuthorizationService).requireAuthenticated();
-        verify(adminAuthorizationService, never()).requireAdmin();
+        assertEquals("wp-admin", service.getSiteAdminPath());
     }
 
     @Test
     void getSiteAdminPath_未認証ならForbiddenやUnauthorizedをそのまま伝える() {
         AppSettingService service = service();
-        doThrow(new ForbiddenException("認証が必要です")).when(adminAuthorizationService).requireAuthenticated();
+        world.anonymous();
 
         assertThrows(ForbiddenException.class, service::getSiteAdminPath);
     }
@@ -961,8 +966,10 @@ class AppSettingServiceTest {
         AppSettingService service = service();
         lenient().when(repository.findById(any())).thenReturn(Optional.empty());
 
+        world.anonymous();
+
         service.comfyUiBaseUrlSource();
 
-        verify(adminAuthorizationService, never()).requireAdmin();
+        assertTrue(world.http.requests().isEmpty());
     }
 }

@@ -479,4 +479,57 @@ class ContainerStatusServiceTest {
         assertEquals(Status.ERROR, find(containers, "comfyui").status());
         assertEquals("standby", find(containers, "ollama-cpu").state());
     }
+
+    // ---- issue #1825: 分岐の網羅 ----
+
+    @Test
+    void testListAll_応答の本文が空なら空リスト() {
+        server.expect(requestTo(DOCKER_URL + "/containers/json?all=true")).andRespond(withSuccess());
+
+        assertEquals(List.of(), service.listAll());
+    }
+
+    @Test
+    void testListAll_Namesが無い_配列でない_空のコンテナは対象にしない() {
+        expectList("[{\"State\":\"running\"},{\"Names\":\"/lbs-api\",\"State\":\"running\"},"
+                + "{\"Names\":[],\"State\":\"running\"},{\"Names\":[\"/lbs-mysql\"],\"State\":\"running\","
+                + "\"Status\":\"Up 1 hour\"}]");
+
+        List<ContainerStatusResponse> containers = service.listAll();
+
+        assertEquals(1, containers.size());
+        assertEquals("mysql", containers.get(0).name());
+    }
+
+    @Test
+    void testListAll_先頭のスラッシュが無い名前も扱う() {
+        expectList("[{\"Names\":[\"lbs-api\"],\"State\":\"running\",\"Status\":\"Up 1 hour\"}]");
+
+        assertEquals("api", service.listAll().get(0).name());
+    }
+
+    @Test
+    void testListAll_ヘルスチェック開始中のrunningは警告() {
+        expectList("[{\"Names\":[\"/lbs-api\"],\"State\":\"running\",\"Status\":\"Up 5 seconds (health: starting)\"}]");
+
+        assertEquals(Status.WARNING, service.listAll().get(0).status());
+    }
+
+    @Test
+    void testListAll_詳細の本文が空ならエラーのまま() {
+        expectList("[{\"Id\":\"zzz\",\"Names\":[\"/lbs-job\"],\"State\":\"exited\",\"Status\":\"Exited (0) 1 hour ago\"}]");
+        server.expect(requestTo(DOCKER_URL + "/containers/zzz/json")).andRespond(withSuccess());
+
+        assertEquals(Status.ERROR, service.listAll().get(0).status());
+    }
+
+    @Test
+    void コンストラクタ_プロジェクト名がnullなら絞り込まない() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(DOCKER_URL);
+        server = MockRestServiceServer.bindTo(builder).build();
+        ContainerStatusService unscoped = new ContainerStatusService(builder, null);
+        expectList("[" + container("lbs-api", "any-project") + "]");
+
+        assertEquals(1, unscoped.listAll().size());
+    }
 }

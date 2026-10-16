@@ -1,11 +1,9 @@
 package com.letsblog.platform.service;
 
-import com.letsblog.platform.ai.AiProvider;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.render.PlantUmlEncoder;
-import com.letsblog.platform.service.SystemSettingService.BraveSearchApiKeyStatus;
-import com.letsblog.platform.service.SystemSettingService.SettingSource;
+import com.letsblog.platform.testsupport.StatusFixture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,7 +23,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -44,14 +41,8 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
     private DataSource dataSource;
     @Mock
     private Connection connection;
-    @Mock
-    private SystemSettingService systemSettingService;
-    @Mock
-    private AppSettingService appSettingService;
-    @Mock
-    private LetsBlogServiceStatusService letsBlogServiceStatusService;
-    @Mock
-    private RabbitMqQueueStatusService rabbitMqQueueStatusService;
+    /** 設定サービス・gateway・RabbitMQ管理APIは実物(HTTPはフェイク、DBはメモリ上のリポジトリ)。issue #1825 */
+    private StatusFixture fixture;
 
     private MockRestServiceServer comfyUiServer;
     private MockRestServiceServer plantUmlServer;
@@ -61,15 +52,10 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        lenient().when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of());
-        lenient().when(letsBlogServiceStatusService.targetUrl()).thenReturn("http://gateway:8080/actuator/health");
-        lenient().when(rabbitMqQueueStatusService.check()).thenReturn(
-                new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
-        lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OPENAI);
+        fixture = new StatusFixture();
         lenient().when(dataSource.getConnection()).thenReturn(connection);
         lenient().when(connection.isValid(3)).thenReturn(true);
-        lenient().when(systemSettingService.getBraveSearchApiKeyStatusInternal())
-                .thenReturn(new BraveSearchApiKeyStatus(true, SettingSource.DATABASE));
+        fixture.braveKey(true);
 
         RestClient.Builder comfyUiBuilder = RestClient.builder();
         RestClient.Builder plantUmlBuilder = RestClient.builder().baseUrl(PLANTUML_URL);
@@ -90,9 +76,14 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
                 },
                 plantUmlBuilder, PLANTUML_URL,
                 wordpressBuilder, WORDPRESS_URL,
-                systemSettingService, appSettingService,
-                letsBlogServiceStatusService, rabbitMqQueueStatusService,
+                fixture.systemSettingService, fixture.appSettingService,
+                fixture.letsBlogServiceStatusService, fixture.rabbitMqQueueStatusService,
                 baseUrl -> RestClient.builder().baseUrl(baseUrl));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        fixture.close();
     }
 
     private ConnectedServiceStatusDetailResponse comfyUiRow() {
@@ -102,7 +93,7 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
 
     @Test
     void ComfyUI行はDBで解決した接続先のsystem_statsへ疎通確認する() {
-        when(appSettingService.getComfyUiBaseUrl()).thenReturn(DB_COMFYUI_URL);
+        fixture.setting("comfyui_base_url", DB_COMFYUI_URL);
         comfyUiServer.expect(requestTo(DB_COMFYUI_URL + "/system_stats")).andRespond(withSuccess());
 
         ConnectedServiceStatusDetailResponse row = comfyUiRow();
@@ -115,8 +106,6 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
 
     @Test
     void ComfyUI行は接続先が未設定なら接続を試みず設定を促す警告になる() {
-        when(appSettingService.getComfyUiBaseUrl()).thenReturn("");
-
         ConnectedServiceStatusDetailResponse row = comfyUiRow();
 
         assertEquals(Status.WARNING, row.status());
@@ -127,15 +116,8 @@ class ConnectedServiceStatusServiceComfyUiUrlTest {
     }
 
     @Test
-    void ComfyUI行は接続先がnullでも未設定として扱う() {
-        when(appSettingService.getComfyUiBaseUrl()).thenReturn(null);
-
-        assertEquals(Status.WARNING, comfyUiRow().status());
-    }
-
-    @Test
     void ComfyUI行は接続先が空白だけでも未設定として扱う() {
-        when(appSettingService.getComfyUiBaseUrl()).thenReturn("   ");
+        fixture.setting("comfyui_base_url", "   ");
 
         assertEquals(Status.WARNING, comfyUiRow().status());
     }

@@ -1,62 +1,112 @@
 package com.letsblog.platform.controller;
 
+import com.letsblog.platform.config.GlobalExceptionHandler;
 import com.letsblog.platform.service.ExtensionsConnectionImportService;
-import com.letsblog.platform.service.ExtensionsConnectionImportService.ApplyResult;
-import com.letsblog.platform.service.ExtensionsConnectionImportService.FetchResult;
-import com.letsblog.platform.service.ExtensionsConnectionImportService.Route;
+import com.letsblog.platform.service.ExtensionsPortalUrlPolicy;
+import com.letsblog.platform.testsupport.FakeHttpServer;
+import com.letsblog.platform.testsupport.StatusFixture;
+import java.net.InetAddress;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** ExtensionsImportController(issue #1783)。認可はサービス層(requireAdmin)が担い、ここは委譲と入力の解釈だけを持つ。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * ExtensionsImportController(issue #1783)。認可はサービス層(requireAdmin)が担い、ここは委譲と入力の解釈を持つ。
+ *
+ * <p>issue #1825: コントローラ・ExtensionsConnectionImportService・AppSettingService・AdminAuthorizationServiceは実物で、
+ * Springの{@link MockMvc}(スタンドアロン)を通す。外部との通信は、ポータルのHTTP(サーバー側のフェイク)、
+ * identity-serviceのHTTP(同)、system_settingsのDB(メモリ上のリポジトリ)だけを差し替える。
+ */
 class ExtensionsImportControllerTest {
 
-    @Mock
-    private ExtensionsConnectionImportService importService;
+    private static final String BASE = "/api/system-settings/app-settings/extensions-import";
 
-    @Test
-    void fetchは経路を解釈してサービスへ委譲する() {
-        FetchResult expected = new FetchResult(List.of(), List.of());
-        when(importService.fetch("http://lbx-portal:3100", Route.SAME_PC)).thenReturn(expected);
-        when(importService.fetch("http://lbx-portal:3100", Route.OTHER_HOST)).thenReturn(expected);
-        ExtensionsImportController controller = new ExtensionsImportController(importService);
+    private StatusFixture fixture;
+    private FakeHttpServer portal;
+    private ExtensionsImportController controller;
+    private MockMvc mvc;
 
-        assertSame(expected, controller.fetch(new ExtensionsImportController.FetchRequest("http://lbx-portal:3100", "SAME_PC")));
-        assertSame(expected, controller.fetch(new ExtensionsImportController.FetchRequest("http://lbx-portal:3100", "OTHER_HOST")));
+    @BeforeEach
+    void setUp() {
+        fixture = new StatusFixture();
+        portal = new FakeHttpServer();
+        portal.json("GET", "/api/connections", "[{\"id\":\"comfyui\",\"publicUrl\":\"https://comfyui.lbx.localhost:8443\","
+                + "\"internalUrl\":\"http://lbx-comfyui:8188\"}]");
+        ExtensionsPortalUrlPolicy permissive = new ExtensionsPortalUrlPolicy(
+                host -> new InetAddress[] {InetAddress.getByName("192.168.1.20")});
+        ExtensionsConnectionImportService service = new ExtensionsConnectionImportService(
+                fixture.appSettingService, fixture.world.adminAuthorizationService, permissive,
+                com.letsblog.common.auth.ToolsTokenProvider.disabled());
+        controller = new ExtensionsImportController(service);
+        mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler(
+                        new org.springframework.boot.servlet.autoconfigure.MultipartProperties()))
+                .build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        portal.close();
+        fixture.close();
     }
 
     @Test
-    void fetchの経路が不明なら例外でサービスを呼ばない() {
-        ExtensionsImportController controller = new ExtensionsImportController(importService);
+    void fetchは経路を解釈してポータルの接続先を候補にする() throws Exception {
+        String body = "{\"portalUrl\":\"" + portal.baseUrl() + "\",\"route\":\"%s\"}";
 
+        mvc.perform(post(BASE + "/fetch").contentType(MediaType.APPLICATION_JSON).content(body.formatted("SAME_PC")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates[0].key").value("comfyui_base_url"))
+                .andExpect(jsonPath("$.candidates[0].candidateValue").value("http://lbx-comfyui:8188"));
+        mvc.perform(post(BASE + "/fetch").contentType(MediaType.APPLICATION_JSON).content(body.formatted("OTHER_HOST")))
+                .andExpect(jsonPath("$.candidates[0].candidateValue").value("https://comfyui.lbx.localhost:8443"));
+    }
+
+    @Test
+    void fetchの経路が不明なら例外でポータルへ問い合わせない() {
         for (String route : new String[] {null, "", "ELSEWHERE"}) {
             IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                    () -> controller.fetch(new ExtensionsImportController.FetchRequest("http://lbx-portal:3100", route)));
+                    () -> controller.fetch(new ExtensionsImportController.FetchRequest(portal.baseUrl(), route)));
             assertTrue(e.getMessage().contains("経路"), e.getMessage());
         }
-        verifyNoInteractions(importService);
+        assertTrue(portal.requests().isEmpty());
     }
 
     @Test
-    void applyはサービスへ委譲する() {
-        ApplyResult expected = new ApplyResult(List.of("comfyui_base_url"), List.of());
-        Map<String, String> values = Map.of("comfyui_base_url", "http://lbx-comfyui:8188");
-        when(importService.apply("http://lbx-portal:3100", values)).thenReturn(expected);
-        ExtensionsImportController controller = new ExtensionsImportController(importService);
+    void fetchの経路が不明ならHTTPでは409() throws Exception {
+        mvc.perform(post(BASE + "/fetch").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"portalUrl\":\"" + portal.baseUrl() + "\",\"route\":\"ELSEWHERE\"}"))
+                .andExpect(status().isConflict());
+    }
 
-        assertSame(expected, controller.apply(new ExtensionsImportController.ApplyRequest("http://lbx-portal:3100", values)));
-        verify(importService).apply("http://lbx-portal:3100", values);
+    @Test
+    void applyは値を保存して結果を返す() throws Exception {
+        mvc.perform(post(BASE + "/apply").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"portalUrl\":null,\"values\":{\"comfyui_base_url\":\"http://lbx-comfyui:8188\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.saved[0]").value("comfyui_base_url"))
+                .andExpect(jsonPath("$.rejected").isEmpty());
+
+        assertEquals("http://lbx-comfyui:8188", fixture.appSettingService.getComfyUiBaseUrl());
+    }
+
+    @Test
+    void 管理者でなければ403() throws Exception {
+        fixture.world.actingAsUser(2L);
+
+        mvc.perform(post(BASE + "/apply").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"portalUrl\":null,\"values\":{}}"))
+                .andExpect(status().isForbidden());
+        assertTrue(portal.requests().isEmpty());
     }
 }

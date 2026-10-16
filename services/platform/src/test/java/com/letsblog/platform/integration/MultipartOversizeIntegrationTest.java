@@ -5,6 +5,10 @@ import com.letsblog.platform.service.BackupService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import com.letsblog.platform.testsupport.FakeBin;
+import com.letsblog.platform.testsupport.SharedIdentityFake;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -18,7 +22,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -41,7 +44,7 @@ import static org.mockito.Mockito.when;
         })
 @ActiveProfiles("test")
 @DisplayName("platform-service: multipart上限超過は413を返す(issue #1061)")
-class MultipartOversizeIntegrationTest {
+class MultipartOversizeIntegrationTest extends IdentityFakeIntegrationTestBase {
 
     private static final long MAX_FILE_SIZE_BYTES = 64L * 1024;
     private static final long MAX_REQUEST_SIZE_BYTES = 128L * 1024;
@@ -52,13 +55,15 @@ class MultipartOversizeIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
+    @Autowired
     private BackupService backupService;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
     @BeforeEach
     void setUp() {
+        FakeBin.reset();
+        SharedIdentityFake.reset();
         when(jwtDecoder.decode("test-token")).thenReturn(JwtTestFixtures.jwt("sub-1061", "admin"));
     }
 
@@ -75,7 +80,7 @@ class MultipartOversizeIntegrationTest {
         assertThat(response.body())
                 .contains(String.valueOf(MAX_FILE_SIZE_BYTES))
                 .contains(String.valueOf(MAX_REQUEST_SIZE_BYTES));
-        verifyNoInteractions(backupService);
+        assertNoRestoreAttempted();
     }
 
     /**
@@ -98,7 +103,14 @@ class MultipartOversizeIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(413);
         assertThat(response.body()).contains(String.valueOf(MAX_FILE_SIZE_BYTES));
-        verifyNoInteractions(backupService);
+        assertNoRestoreAttempted();
+    }
+
+    /** 実物のBackupServiceは呼ばれていない: 権限の確認(identity-serviceへの問い合わせ)も外部プロセスの起動も起きていない。 */
+    private void assertNoRestoreAttempted() {
+        assertThat(backupService).isNotNull();
+        assertThat(SharedIdentityFake.lookups()).isEmpty();
+        assertThat(FakeBin.calls()).isEmpty();
     }
 
     private HttpResponse<String> post(String path, MultipartBodyBuilder body) throws IOException, InterruptedException {

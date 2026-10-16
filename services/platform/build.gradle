@@ -53,6 +53,11 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // BackupServiceが起動する外部プロセス(mysqldump / mysql / pg_dump / pg_restore)の代役
+    // (src/test/fake-bin、issue #1825)をPATHの先頭に置く。BackupServiceの実物がProcessBuilderで起動したまま、
+    // 本物のDBではなく代役と話す(テスト専用。本番の起動には影響しない)。
+    environment 'PATH', file('src/test/fake-bin').absolutePath + File.pathSeparator + System.getenv('PATH')
+    environment 'FAKE_BIN_CONTROL', layout.buildDirectory.dir('fake-bin-control').get().asFile.absolutePath
     finalizedBy jacocoTestReport
 }
 

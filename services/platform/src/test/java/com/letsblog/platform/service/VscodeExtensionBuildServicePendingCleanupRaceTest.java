@@ -1,6 +1,7 @@
 package com.letsblog.platform.service;
 
 import com.letsblog.platform.service.VscodeExtensionBuildService.VscodeExtensionBuildException;
+import com.letsblog.platform.testsupport.FakeBin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -60,7 +61,10 @@ class VscodeExtensionBuildServicePendingCleanupRaceTest {
         Files.writeString(sourceDir.resolve("package.json"),
                 "{\"name\":\"letsblog-vscode\",\"version\":\"9.9.9\"}");
 
-        FailingBuildService service = new FailingBuildService(sourceDir.toString(), buildDir.toString());
+        // 実物のサービス。ビルドの最初の手順(npm ci)は、代役のnpmが失敗する(src/test/fake-bin)ので常に既知の例外で失敗する。
+        FakeBin.reset();
+        FakeBin.fail("npm", "npm ERR! simulated failure");
+        VscodeExtensionBuildService service = new VscodeExtensionBuildService(sourceDir.toString(), buildDir.toString());
 
         CountDownLatch removalStarted = new CountDownLatch(1);
         CountDownLatch resumeRemoval = new CountDownLatch(1);
@@ -129,18 +133,6 @@ class VscodeExtensionBuildServicePendingCleanupRaceTest {
         Field field = VscodeExtensionBuildService.class.getDeclaredField("pendingCleanupCounts");
         field.setAccessible(true);
         field.set(service, replacement);
-    }
-
-    /** 常に既知の例外型を即座に投げる、実ビルドを使わないフェイク。 */
-    private static final class FailingBuildService extends VscodeExtensionBuildService {
-        FailingBuildService(String sourceDir, String buildDir) {
-            super(sourceDir, buildDir);
-        }
-
-        @Override
-        void build(Path outputDir, String filename) {
-            throw new VscodeExtensionBuildException("模擬ビルド失敗(issue #1190レビュー指摘のTOCTOU再現用)");
-        }
     }
 
     /**

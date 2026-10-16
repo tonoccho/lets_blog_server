@@ -3,10 +3,11 @@ package com.letsblog.platform.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.lenient;
 
 import com.letsblog.common.auth.ServiceTokenUnavailableException;
 import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.platform.testsupport.InMemoryRepositories;
+import com.letsblog.platform.testsupport.PlatformWorld;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -19,21 +20,22 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * ポータルからの取り込み(JDKのHttpClientを直接使う経路)で付けるトークン(#1804)。
  * 取り込みは管理者だけが実行でき、ポータルのURLは接続先の検査(ExtensionsPortalUrlPolicy)を通ったものだけを呼ぶ。
  */
-@ExtendWith(MockitoExtension.class)
 class ExtensionsConnectionImportServiceToolsTokenTest {
 
-    @Mock
-    private AppSettingService appSettingService;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    /** identity-serviceはHTTPのフェイクで模し、AdminAuthorizationService・AppSettingServiceは実物を通す(issue #1825)。 */
+    private final PlatformWorld world = new PlatformWorld().actingAsAdmin(1L);
+    private final AdminAuthorizationService adminAuthorizationService = world.adminAuthorizationService;
+    private final AppSettingService appSettingService = new AppSettingService(
+            InMemoryRepositories.systemSettings(), world.credentialCipher, adminAuthorizationService,
+            "gpt-4o-mini", "gpt-4o-mini,gpt-4o", "120",
+            "OPENAI", "claude-3-5-haiku-20241022", "qwen2.5:7b-instruct",
+            "smtp.example.com", "587", "env-user", "env-pass", "noreply@example.com",
+            "http://localhost:3000", "10", "wp-admin");
 
     private HttpServer server;
     private String portalUrl;
@@ -52,12 +54,12 @@ class ExtensionsConnectionImportServiceToolsTokenTest {
         });
         server.start();
         portalUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        lenient().when(appSettingService.getAllSettings()).thenReturn(List.of());
     }
 
     @AfterEach
     void tearDown() {
         server.stop(0);
+        world.close();
     }
 
     private ExtensionsConnectionImportService service(ToolsTokenProvider tools) {

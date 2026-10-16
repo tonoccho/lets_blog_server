@@ -1,35 +1,75 @@
 package com.letsblog.platform.controller;
 
-import com.letsblog.platform.service.PluginRegistrationService;
-import com.letsblog.platform.service.PluginRegistrationService.ResolvedRegistration;
+import com.letsblog.platform.config.GlobalExceptionHandler;
+import com.letsblog.platform.service.PluginFixture;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** 内部の解決API(issue #1807)。種類を指定して使用中の登録(または未接続)を返す。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * 内部の解決API(issue #1807 / #1808)。種類を指定して使用中の登録(または未接続)を返す。
+ *
+ * <p>issue #1825: コントローラと、システム全体・プロジェクト単位の登録サービスは実物で、登録は(メモリ上の)リポジトリに
+ * 保存して解決する。Springの{@link MockMvc}(スタンドアロン)を通す。
+ */
 class InternalPluginRegistrationControllerTest {
 
-    @Mock
-    private PluginRegistrationService service;
+    private static final String RESOLVE = "/api/internal/platform/plugin-registrations/resolve";
 
-    @Test
-    void 種類を指定して解決をサービスへ委譲する() {
-        ResolvedRegistration resolved = new ResolvedRegistration(false, null, null, null, null, null, null);
-        when(service.resolve("LLM", null)).thenReturn(resolved);
+    private PluginFixture fixture;
+    private MockMvc mvc;
 
-        assertSame(resolved, new InternalPluginRegistrationController(service).resolve("LLM", null));
+    @BeforeEach
+    void setUp() {
+        fixture = new PluginFixture();
+        mvc = MockMvcBuilders.standaloneSetup(new InternalPluginRegistrationController(fixture.systemService))
+                .setControllerAdvice(new GlobalExceptionHandler(
+                        new org.springframework.boot.servlet.autoconfigure.MultipartProperties()))
+                .build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        fixture.close();
     }
 
     @Test
-    void プロジェクトIDを任意で受け取り_解決へ渡す() {
-        ResolvedRegistration resolved = new ResolvedRegistration(true, 2L, "本命", "http://gpu-pc:1", "PROJECT", null, "sk");
-        when(service.resolve("LLM", 10L)).thenReturn(resolved);
+    void 登録が無ければ未接続を返す() throws Exception {
+        mvc.perform(get(RESOLVE).param("kind", "LLM"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.connected").value(false));
+    }
 
-        assertSame(resolved, new InternalPluginRegistrationController(service).resolve("LLM", 10L));
+    @Test
+    void 種類を指定して使用中の登録を解決する() throws Exception {
+        var created = fixture.systemService.create("LLM", "社内", "http://lbx-ollama:11434/v1", null);
+        fixture.systemService.activate(created.id());
+
+        mvc.perform(get(RESOLVE).param("kind", "LLM"))
+                .andExpect(jsonPath("$.connected").value(true))
+                .andExpect(jsonPath("$.name").value("社内"))
+                .andExpect(jsonPath("$.scope").value("SYSTEM"));
+    }
+
+    @Test
+    void プロジェクトIDを任意で受け取り_上書きがあればそれを解決する() throws Exception {
+        var override = fixture.projectService.create(10L, "LLM", "本命", "http://gpu-pc.example:1", null, "sk");
+        fixture.projectService.activate(10L, override.id());
+
+        mvc.perform(get(RESOLVE).param("kind", "LLM").param("projectId", "10"))
+                .andExpect(jsonPath("$.name").value("本命"))
+                .andExpect(jsonPath("$.scope").value("PROJECT"))
+                .andExpect(jsonPath("$.credential").value("sk"));
+    }
+
+    @Test
+    void 不明な種類は409() throws Exception {
+        mvc.perform(get(RESOLVE).param("kind", "BOGUS")).andExpect(status().isConflict());
     }
 }

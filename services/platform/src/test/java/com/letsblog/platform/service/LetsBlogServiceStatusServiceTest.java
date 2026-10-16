@@ -138,4 +138,49 @@ class LetsBlogServiceStatusServiceTest {
         assertFalse(result.get("publishingService").up());
         assertTrue(result.get("publishingService").detail().contains("追加漏れ"));
     }
+
+    @Test
+    @DisplayName("集約ヘルスの本文が空なら、componentsが無いものとして全件判定不能にする")
+    void 本文が空なら全件判定不能() {
+        LetsBlogServiceStatusService service = buildService();
+        server.expect(requestTo(GATEWAY_URL + "/actuator/health")).andRespond(withSuccess());
+
+        var result = service.checkAll();
+
+        assertEquals(9, result.size());
+        assertTrue(result.stream().noneMatch(LetsBlogServiceStatusService.ServiceHealth::up));
+        assertTrue(result.get(0).detail().contains("components がありません"));
+    }
+
+    @Test
+    @DisplayName("componentsが無い応答は全件判定不能にする")
+    void componentsが無ければ全件判定不能() {
+        LetsBlogServiceStatusService service = buildService();
+        server.expect(requestTo(GATEWAY_URL + "/actuator/health"))
+                .andRespond(withSuccess("{\"status\":\"UP\"}", MediaType.APPLICATION_JSON));
+
+        var result = service.checkAll();
+
+        assertTrue(result.stream().noneMatch(LetsBlogServiceStatusService.ServiceHealth::up));
+        assertTrue(result.get(0).detail().contains("components がありません"));
+    }
+
+    @Test
+    @DisplayName("statusが無いコンポーネントは『(不明)』として不健全にする")
+    void statusが無ければ不明() {
+        LetsBlogServiceStatusService service = buildService();
+        server.expect(requestTo(GATEWAY_URL + "/actuator/health"))
+                .andRespond(withSuccess("{\"components\":{\"identityService\":{}}}", MediaType.APPLICATION_JSON));
+
+        var result = byId(service.checkAll());
+
+        assertFalse(result.get("identityService").up());
+        assertEquals("status=(不明)", result.get("identityService").detail());
+    }
+
+    @Test
+    @DisplayName("チェック対象URLはgatewayの/actuator/healthを指す")
+    void 対象URL() {
+        assertEquals(GATEWAY_URL + "/actuator/health", buildService().targetUrl());
+    }
 }

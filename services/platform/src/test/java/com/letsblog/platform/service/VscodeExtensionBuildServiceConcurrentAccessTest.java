@@ -2,6 +2,8 @@ package com.letsblog.platform.service;
 
 import com.letsblog.platform.service.VscodeExtensionBuildService.BuiltExtension;
 import com.letsblog.platform.service.VscodeExtensionBuildService.VscodeExtensionBuildException;
+import com.letsblog.platform.testsupport.FakeBin;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -33,8 +36,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * (2026-09-19のリリース検証・2026-09-22のレビューで確認済み)。修正後は、
  * 進行中のビルドがあるとき後続をそのビルドに<b>合流</b>させ、同じ成果物を共有する。
  *
- * <p>実際のnpm/vsceは呼ばず、{@link VscodeExtensionBuildService#build(Path, String)}
- * (package-private)を差し替え可能な{@link FakeBuildService}で置き換えて検証する。
+ * <p>issue #1825: npm / npx は{@code src/test/fake-bin}の代役の実行ファイル(npxが指定秒数かかる)で、
+ * {@link VscodeExtensionBuildService}の実物(ProcessBuilderでの起動を含む)がそのまま呼ぶ。
+ * サービスを継承して{@code build}を差し替えることはしない。実ビルドの回数は、代役の{@code npx}の起動回数で数える。
  */
 class VscodeExtensionBuildServiceConcurrentAccessTest {
 
@@ -44,17 +48,23 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
     private Path sourceDir;
     private Path buildDir;
 
-    private FakeBuildService service(long buildDurationMillis) throws IOException {
-        return service(buildDurationMillis, FakeBuildService.Mode.SUCCESS);
+    @BeforeEach
+    void resetFakeBin() {
+        FakeBin.reset();
     }
 
-    private FakeBuildService service(long buildDurationMillis, FakeBuildService.Mode mode) throws IOException {
+    private VscodeExtensionBuildService service(long buildDurationMillis) throws IOException {
         sourceDir = tempDir.resolve("source");
         buildDir = tempDir.resolve("build");
         Files.createDirectories(sourceDir);
         Files.writeString(sourceDir.resolve("package.json"),
                 "{\"name\":\"letsblog-vscode\",\"version\":\"9.9.9\"}");
-        return new FakeBuildService(sourceDir.toString(), buildDir.toString(), buildDurationMillis, mode);
+        FakeBin.npxSleepSeconds(String.valueOf(buildDurationMillis / 1000.0));
+        return new VscodeExtensionBuildService(sourceDir.toString(), buildDir.toString());
+    }
+
+    private static int buildCalls() {
+        return (int) FakeBin.calls().stream().filter(c -> c.get(0).equals("npx")).count();
     }
 
     /**
@@ -64,7 +74,7 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
     @Test
     void 複数リクエストが同時に来ても実ビルドは1回だけ_応答時間も1回分で済む() throws Exception {
         long buildDurationMillis = 300;
-        FakeBuildService service = service(buildDurationMillis);
+        VscodeExtensionBuildService service = service(buildDurationMillis);
         int concurrency = 5;
 
         ExecutorService pool = Executors.newFixedThreadPool(concurrency);
@@ -89,9 +99,9 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
         long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
         pool.shutdown();
 
-        assertEquals(1, service.buildCallCount.get(),
+        assertEquals(1, buildCalls(),
                 concurrency + "並列でも進行中のビルドに合流するはずなので、実ビルド呼び出しは1回だけのはず"
-                        + "(実際には" + service.buildCallCount.get() + "回)");
+                        + "(実際には" + buildCalls() + "回)");
 
         Path firstDir = results.get(0).requestOutputDir();
         for (BuiltExtension result : results) {
@@ -111,7 +121,7 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
     @Test
     void 合流した全員が読み終えるまで共有した出力先ディレクトリは削除されない() throws Exception {
         long buildDurationMillis = 300;
-        FakeBuildService service = service(buildDurationMillis);
+        VscodeExtensionBuildService service = service(buildDurationMillis);
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         CountDownLatch ready = new CountDownLatch(2);
@@ -150,19 +160,20 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
      */
     @Test
     void ビルド完了後の次のリクエストは新しいビルドを行い古い成果物に合流しない() throws Exception {
-        FakeBuildService service = service(10);
+        VscodeExtensionBuildService service = service(10);
 
         BuiltExtension first = service.buildAndGetVsix();
         BuiltExtension second = service.buildAndGetVsix();
 
-        assertEquals(2, service.buildCallCount.get(), "逐次リクエストはそれぞれ新規にビルドされるはず");
+        assertEquals(2, buildCalls(), "逐次リクエストはそれぞれ新規にビルドされるはず");
         assertNotEquals(first.requestOutputDir(), second.requestOutputDir());
     }
 
     /** ビルド自体は成功として扱われても、出力ファイルが無ければ例外を投げる(既存の防御)。 */
     @Test
     void ビルドが成功しても出力ファイルが無ければ例外を投げる() throws Exception {
-        FakeBuildService service = service(0, FakeBuildService.Mode.MISSING_OUTPUT);
+        VscodeExtensionBuildService service = service(0);
+        FakeBin.npxWritesNoOutput();
 
         VscodeExtensionBuildException exception =
                 assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
@@ -175,10 +186,11 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
      */
     @Test
     void リーダーのビルドが失敗すると合流者にも同じ例外が伝播する() throws Exception {
-        FakeBuildService service = service(300, FakeBuildService.Mode.THROW_BUILD_EXCEPTION);
+        VscodeExtensionBuildService service = service(300);
+        FakeBin.fail("npx", "vsce: packaging failed");
         List<Throwable> causes = runConcurrentlyAndCollectFailures(service, 2);
 
-        assertEquals(1, service.buildCallCount.get(), "合流していれば実ビルドは1回だけ試みられるはず");
+        assertEquals(1, buildCalls(), "合流していれば実ビルドは1回だけ試みられるはず");
         for (Throwable cause : causes) {
             assertTrue(cause instanceof VscodeExtensionBuildException,
                     "合流者にもリーダーと同じ例外型が伝播するはず: " + cause);
@@ -186,27 +198,82 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
     }
 
     /**
-     * リーダーのビルドが{@link VscodeExtensionBuildException}以外を投げた場合、リーダー自身は
-     * 元の例外をそのまま受け取るが、合流者は{@link VscodeExtensionBuildException}でラップされて
-     * 受け取る(issue #1190、症状B)。
+     * 進行中のビルドが{@link VscodeExtensionBuildException}以外の例外で失敗したとき、合流者は
+     * {@link VscodeExtensionBuildException}でラップされて受け取る(issue #1190、症状B)。
+     *
+     * <p>実ビルドは{@link VscodeExtensionBuildException}しか投げないので、「リーダーが別の型の例外で失敗した」状態を
+     * 作るには、進行中のビルド({@code currentBuild})をリフレクションで組み立てて失敗させておく。
+     * 合流者の実コード({@code buildAndGetVsix} → {@code awaitJoinedBuild})は実物のまま通す。
      */
     @Test
-    void リーダーのビルドが未知の例外を投げても合流者はVscodeExtensionBuildExceptionでラップされて受け取る()
+    void リーダーのビルドが未知の例外で失敗しても合流者はVscodeExtensionBuildExceptionでラップされて受け取る()
             throws Exception {
-        FakeBuildService service = service(300, FakeBuildService.Mode.THROW_GENERIC_EXCEPTION);
-        List<Throwable> causes = runConcurrentlyAndCollectFailures(service, 2);
+        VscodeExtensionBuildService service = service(0);
+        IllegalStateException original = new IllegalStateException("想定外の失敗");
+        installInFlightBuild(service).completeExceptionally(original);
 
-        assertEquals(1, service.buildCallCount.get(), "合流していれば実ビルドは1回だけ試みられるはず");
-        long rawCount = causes.stream().filter(c -> c instanceof IllegalStateException).count();
-        long wrappedCount = causes.stream().filter(c -> c instanceof VscodeExtensionBuildException).count();
-        assertEquals(1, rawCount, "リーダー自身は元の例外をそのまま受け取るはず: " + causes);
-        assertEquals(1, wrappedCount, "合流者はVscodeExtensionBuildExceptionでラップされて受け取るはず: " + causes);
+        VscodeExtensionBuildException wrapped =
+                assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
 
-        IllegalStateException original = (IllegalStateException) causes.stream()
-                .filter(c -> c instanceof IllegalStateException).findFirst().orElseThrow();
-        VscodeExtensionBuildException wrapped = (VscodeExtensionBuildException) causes.stream()
-                .filter(c -> c instanceof VscodeExtensionBuildException).findFirst().orElseThrow();
+        assertTrue(wrapped.getMessage().contains("合流したビルドが失敗しました"), wrapped.getMessage());
         assertEquals(original, wrapped.getCause(), "ラップした例外のcauseは元の例外と同じはず");
+        assertEquals(0, buildCalls(), "合流者は自分では実ビルドしない");
+    }
+
+    /** 進行中のビルドが{@link VscodeExtensionBuildException}で失敗していれば、合流者はその例外をそのまま受け取る。 */
+    @Test
+    void リーダーのビルドが既知の例外で失敗していれば合流者は同じ例外を受け取る() throws Exception {
+        VscodeExtensionBuildService service = service(0);
+        VscodeExtensionBuildException original = new VscodeExtensionBuildException("npm ci が失敗しました");
+        installInFlightBuild(service).completeExceptionally(original);
+
+        VscodeExtensionBuildException received =
+                assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
+
+        assertSame(original, received);
+    }
+
+    /** 進行中のビルドの完了を待つ合流者が割り込まれたら、中断の例外にして割り込み状態を戻す。 */
+    @Test
+    void 合流して待っている最中に割り込まれたら中断の例外にして割り込み状態を戻す() throws Exception {
+        VscodeExtensionBuildService service = service(0);
+        installInFlightBuild(service); // 完了させない = 合流者はずっと待つ
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread joiner = new Thread(() -> {
+            try {
+                service.buildAndGetVsix();
+            } catch (Throwable t) {
+                thrown.set(t);
+                interrupted.set(Thread.currentThread().isInterrupted());
+            }
+        });
+
+        joiner.start();
+        Thread.sleep(200);
+        joiner.interrupt();
+        joiner.join(10_000);
+
+        assertFalse(joiner.isAlive());
+        assertTrue(thrown.get() instanceof VscodeExtensionBuildException, String.valueOf(thrown.get()));
+        assertTrue(thrown.get().getMessage().contains("合流待ちに失敗"), thrown.get().getMessage());
+        assertTrue(interrupted.get(), "割り込み状態を戻してから例外を伝える");
+    }
+
+    /** 進行中のビルド(InFlightBuild)を組み立てて{@code currentBuild}に据え、その完了待ちのfutureを返す。 */
+    @SuppressWarnings("unchecked")
+    private java.util.concurrent.CompletableFuture<BuiltExtension> installInFlightBuild(
+            VscodeExtensionBuildService service) throws ReflectiveOperationException {
+        Class<?> inFlight = Class.forName(VscodeExtensionBuildService.class.getName() + "$InFlightBuild");
+        java.lang.reflect.Constructor<?> constructor = inFlight.getDeclaredConstructor(Path.class, String.class);
+        constructor.setAccessible(true);
+        Object build = constructor.newInstance(buildDir.resolve("output").resolve("in-flight"), "letsblog-vscode-9.9.9.vsix");
+        java.lang.reflect.Field future = inFlight.getDeclaredField("future");
+        future.setAccessible(true);
+        java.lang.reflect.Field current = VscodeExtensionBuildService.class.getDeclaredField("currentBuild");
+        current.setAccessible(true);
+        current.set(service, build);
+        return (java.util.concurrent.CompletableFuture<BuiltExtension>) future.get(build);
     }
 
     /**
@@ -214,7 +281,7 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
      * 全員が例外で終わることを確認したうえで、それぞれの例外の原因({@link ExecutionException#getCause()}相当)
      * を集めて返す。
      */
-    private static List<Throwable> runConcurrentlyAndCollectFailures(FakeBuildService service, int concurrency)
+    private static List<Throwable> runConcurrentlyAndCollectFailures(VscodeExtensionBuildService service, int concurrency)
             throws InterruptedException {
         ExecutorService pool = Executors.newFixedThreadPool(concurrency);
         CountDownLatch ready = new CountDownLatch(concurrency);
@@ -250,58 +317,6 @@ class VscodeExtensionBuildServiceConcurrentAccessTest {
             latch.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    /**
-     * 実際のnpm ci/npm run compile/npx vsce packageを呼ばずに、指定した時間だけ
-     * かかる「ビルド」を模擬する。{@link VscodeExtensionBuildService#build}は
-     * このテストのために合流の検証ができるよう差し替え可能にした(package-private、非final)。
-     */
-    private static final class FakeBuildService extends VscodeExtensionBuildService {
-
-        /** 模擬ビルドの結末。 */
-        enum Mode {
-            /** 出力ファイルを書いて正常終了する。 */
-            SUCCESS,
-            /** 例外を投げずに終わるが、出力ファイルを書かない(#1190レビュー指摘の防御分岐の検証用)。 */
-            MISSING_OUTPUT,
-            /** {@link VscodeExtensionBuildException}(既知の例外型)を投げる。 */
-            THROW_BUILD_EXCEPTION,
-            /** {@link VscodeExtensionBuildException}以外の例外を投げる(ラップ経路の検証用)。 */
-            THROW_GENERIC_EXCEPTION
-        }
-
-        private final AtomicInteger buildCallCount = new AtomicInteger(0);
-        private final long buildDurationMillis;
-        private final Mode mode;
-
-        FakeBuildService(String sourceDir, String buildDir, long buildDurationMillis, Mode mode) {
-            super(sourceDir, buildDir);
-            this.buildDurationMillis = buildDurationMillis;
-            this.mode = mode;
-        }
-
-        @Override
-        void build(Path outputDir, String filename) {
-            buildCallCount.incrementAndGet();
-            try {
-                Files.createDirectories(outputDir);
-                Thread.sleep(buildDurationMillis);
-                switch (mode) {
-                    case MISSING_OUTPUT -> { /* 意図的に出力ファイルを書かない */ }
-                    case THROW_BUILD_EXCEPTION ->
-                            throw new VscodeExtensionBuildException("模擬ビルド失敗(既知の例外型)");
-                    case THROW_GENERIC_EXCEPTION ->
-                            throw new IllegalStateException("模擬ビルド失敗(未知の例外型)");
-                    default -> Files.writeString(outputDir.resolve(filename), "dummy-vsix-content");
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new VscodeExtensionBuildException("模擬ビルドが中断されました", e);
-            } catch (IOException e) {
-                throw new VscodeExtensionBuildException("模擬ビルドの準備に失敗しました: " + e.getMessage(), e);
-            }
         }
     }
 }

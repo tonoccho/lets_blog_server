@@ -5,6 +5,7 @@ import com.letsblog.common.net.ConnectionDestinationGuard;
 import com.letsblog.platform.domain.SystemSetting;
 import com.letsblog.platform.repository.SystemSettingRepository;
 import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.platform.testsupport.PlatformWorld;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -35,8 +36,14 @@ class AppSettingServicePenpotUrlTest {
 
     @Mock
     private SystemSettingRepository repository;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    /** identity-serviceはHTTPのフェイクで模し、AdminAuthorizationServiceは実物を通す(issue #1825)。既定はadmin。 */
+    private final PlatformWorld world = new PlatformWorld().actingAsAdmin(1L);
+    private final AdminAuthorizationService adminAuthorizationService = world.adminAuthorizationService;
+
+    @org.junit.jupiter.api.AfterEach
+    void closeWorld() {
+        world.close();
+    }
 
     private final CredentialCipher credentialCipher = new CredentialCipher(
             java.util.Base64.getEncoder().encodeToString(new byte[32]));

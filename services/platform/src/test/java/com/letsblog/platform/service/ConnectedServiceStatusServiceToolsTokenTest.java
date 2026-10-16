@@ -9,12 +9,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.letsblog.common.auth.ServiceTokenUnavailableException;
 import com.letsblog.common.auth.ToolsTokenProvider;
-import com.letsblog.platform.ai.AiProvider;
-import com.letsblog.platform.service.SystemSettingService.BraveSearchApiKeyStatus;
-import com.letsblog.platform.service.SystemSettingService.SettingSource;
 import com.letsblog.platform.dto.ConnectedServiceStatusDetailResponse;
 import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.render.PlantUmlEncoder;
+import com.letsblog.platform.testsupport.StatusFixture;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
@@ -48,14 +46,8 @@ class ConnectedServiceStatusServiceToolsTokenTest {
     private DataSource dataSource;
     @Mock
     private Connection connection;
-    @Mock
-    private SystemSettingService systemSettingService;
-    @Mock
-    private AppSettingService appSettingService;
-    @Mock
-    private LetsBlogServiceStatusService letsBlogServiceStatusService;
-    @Mock
-    private RabbitMqQueueStatusService rabbitMqQueueStatusService;
+    /** 設定サービス・gateway・RabbitMQ管理APIは実物(HTTPはフェイク、DBはメモリ上のリポジトリ)。issue #1825 */
+    private StatusFixture fixture;
 
     private MockRestServiceServer comfyUiServer;
     private MockRestServiceServer plantUmlServer;
@@ -63,16 +55,18 @@ class ConnectedServiceStatusServiceToolsTokenTest {
 
     @BeforeEach
     void setUp() throws SQLException {
-        lenient().when(letsBlogServiceStatusService.checkAll()).thenReturn(List.of());
-        lenient().when(rabbitMqQueueStatusService.check())
-                .thenReturn(new RabbitMqQueueStatusService.QueueStatus(true, false, null, "http://rabbitmq:15672/api/queues"));
+        fixture = new StatusFixture();
         lenient().when(dataSource.getConnection()).thenReturn(connection);
         lenient().when(connection.isValid(3)).thenReturn(true);
-        lenient().when(appSettingService.getLlmProvider()).thenReturn(AiProvider.OLLAMA);
-        lenient().when(appSettingService.getLlmOllamaBaseUrl()).thenReturn(OLLAMA_URL);
-        lenient().when(appSettingService.getComfyUiBaseUrl()).thenReturn(COMFYUI_URL);
-        lenient().when(systemSettingService.getBraveSearchApiKeyStatusInternal())
-                .thenReturn(new BraveSearchApiKeyStatus(true, SettingSource.DATABASE));
+        fixture.llmProvider("OLLAMA");
+        fixture.setting("llm_ollama_base_url", OLLAMA_URL);
+        fixture.setting("comfyui_base_url", COMFYUI_URL);
+        fixture.braveKey(true);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        fixture.close();
     }
 
     private List<ConnectedServiceStatusDetailResponse> check(
@@ -94,7 +88,8 @@ class ConnectedServiceStatusServiceToolsTokenTest {
         }
         return new ConnectedServiceStatusService(
                 dataSource, baseUrl -> comfyUi, plantUml, PLANTUML_URL, wordpress, WORDPRESS_URL,
-                systemSettingService, appSettingService, letsBlogServiceStatusService, rabbitMqQueueStatusService,
+                fixture.systemSettingService, fixture.appSettingService, fixture.letsBlogServiceStatusService,
+                fixture.rabbitMqQueueStatusService,
                 baseUrl -> ollama,
                 tools).checkAllDetailed();
     }

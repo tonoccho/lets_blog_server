@@ -1,12 +1,15 @@
 package com.letsblog.platform.service;
 
 import com.letsblog.platform.service.VscodeExtensionBuildService.VscodeExtensionBuildException;
+import com.letsblog.platform.testsupport.FakeBin;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,13 +19,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * legacy-apiのVscodeExtensionBuildServiceTestと同じ観点をplatform-serviceへ移設したもの
- * (issue #696、C10-4)。実際のnpm/vsce呼び出しはビルド環境依存のため単体テストでは検証しない。
- * ここではソース未検出時のエラーハンドリングと、キャッシュを使わず必ず再ビルドを試みることを検証する。
+ * (issue #696、C10-4)。ソース未検出時のエラーハンドリングと、キャッシュを使わず必ず再ビルドすることを検証する。
+ *
+ * <p>issue #1825: npm / npx は{@code src/test/fake-bin}の代役の実行ファイルで、{@code VscodeExtensionBuildService}の実物
+ * (ProcessBuilderでの起動を含む)がそのまま呼ぶ。サービスをスパイしたり継承して差し替えたりはしない。
  */
 class VscodeExtensionBuildServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @BeforeEach
+    void resetFakeBin() {
+        FakeBin.reset();
+    }
 
     private Path sourceDir;
     private Path buildDir;
@@ -39,7 +49,7 @@ class VscodeExtensionBuildServiceTest {
     }
 
     @Test
-    void buildAndGetVsix_古いvsixが残っていてもキャッシュせず再ビルドを試みる() throws IOException {
+    void buildAndGetVsix_古いvsixが残っていてもキャッシュせず再ビルドする() throws IOException {
         VscodeExtensionBuildService service = service();
         writePackageJson("1.2.3");
         Path outputDir = buildDir.resolve("output");
@@ -47,11 +57,95 @@ class VscodeExtensionBuildServiceTest {
         Path stale = outputDir.resolve("letsblog-vscode-1.2.3.vsix");
         Files.writeString(stale, "stale-dummy-content");
 
-        // sourceDirはpackage.jsonのみの最小構成のため、実際のnpm ci等は失敗する。
-        // ここでは「古いvsixをそのまま返さず、実際にビルドを試みて失敗する」ことを確認できればよい
-        // (もしキャッシュヒットのショートカットが復活していたら、この呼び出しは例外を投げず
-        // staleな内容をそのまま返してしまう)。
-        assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
+        VscodeExtensionBuildService.BuiltExtension built = service.buildAndGetVsix();
+
+        // もしキャッシュヒットのショートカットが復活していたら、npmは呼ばれず古い内容がそのまま返る。
+        assertEquals(List.of(
+                List.of("npm", "ci", "--no-audit", "--no-fund"),
+                List.of("npm", "run", "compile"),
+                List.of("npx", "vsce", "package", "--allow-missing-repository", "--out",
+                        built.vsixPath().toString())), FakeBin.calls());
+        assertEquals("letsblog-vscode-1.2.3.vsix", built.filename());
+        assertEquals("fake vsix\n", Files.readString(built.vsixPath()));
+        assertEquals("stale-dummy-content", Files.readString(stale), "古いファイルには触れない");
+    }
+
+    @Test
+    void buildAndGetVsix_ソースをコピーして_node_modulesとoutは除く() throws IOException {
+        VscodeExtensionBuildService service = service();
+        writePackageJson("1.0.0");
+        Files.createDirectories(sourceDir.resolve("src"));
+        Files.writeString(sourceDir.resolve("src/extension.ts"), "export {}");
+        Files.createDirectories(sourceDir.resolve("node_modules/dep"));
+        Files.writeString(sourceDir.resolve("node_modules/dep/index.js"), "x");
+        Files.createDirectories(sourceDir.resolve("out"));
+        Files.writeString(sourceDir.resolve("out/extension.js"), "x");
+
+        VscodeExtensionBuildService.BuiltExtension built = service.buildAndGetVsix();
+
+        String copied = FakeBin.npmWorkingDirectories().get(0);
+        assertTrue(copied.contains("./package.json"), copied);
+        assertTrue(copied.contains("./src/extension.ts"), copied);
+        assertFalse(copied.contains("node_modules"), copied);
+        assertFalse(copied.contains("out"), copied);
+        assertFalse(Files.exists(buildDir.resolve("workspace")), "作業ディレクトリはビルド後に片付ける");
+        assertTrue(Files.exists(built.vsixPath()));
+    }
+
+    @Test
+    void buildAndGetVsix_npmが失敗したら終了コードと出力つきの例外() throws IOException {
+        VscodeExtensionBuildService service = service();
+        writePackageJson("1.2.3");
+        FakeBin.fail("npm", "npm ERR! code E404");
+
+        VscodeExtensionBuildException exception =
+                assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
+
+        assertTrue(exception.getMessage().contains("npm ci --no-audit --no-fund が失敗しました(exit=1)"),
+                exception.getMessage());
+        assertTrue(exception.getMessage().contains("E404"), exception.getMessage());
+    }
+
+    @Test
+    void buildAndGetVsix_ビルド中に割り込まれたら中断の例外にして割り込み状態を戻す() throws Exception {
+        VscodeExtensionBuildService service = service();
+        writePackageJson("1.2.3");
+        FakeBin.npxSleepSeconds("5");
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread worker = new Thread(() -> {
+            try {
+                service.buildAndGetVsix();
+            } catch (Throwable t) {
+                thrown.set(t);
+                interrupted.set(Thread.currentThread().isInterrupted());
+            }
+        });
+
+        worker.start();
+        // npx が起動する(=待機に入る)まで待ってから割り込む。
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (FakeBin.calls().stream().noneMatch(c -> c.get(0).equals("npx")) && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
+        worker.interrupt();
+        worker.join(10_000);
+
+        assertFalse(worker.isAlive());
+        assertTrue(thrown.get() instanceof VscodeExtensionBuildException, String.valueOf(thrown.get()));
+        assertTrue(interrupted.get(), "割り込み状態を戻してから例外を伝える");
+    }
+
+    @Test
+    void buildAndGetVsix_package_jsonを読めなければ例外() throws IOException {
+        VscodeExtensionBuildService service = service();
+        // package.json という名前のディレクトリは存在するが、ファイルとして読めない。
+        Files.createDirectories(sourceDir.resolve("package.json"));
+
+        VscodeExtensionBuildException exception =
+                assertThrows(VscodeExtensionBuildException.class, service::buildAndGetVsix);
+
+        assertTrue(exception.getMessage().contains("読み込みに失敗"), exception.getMessage());
     }
 
     @Test

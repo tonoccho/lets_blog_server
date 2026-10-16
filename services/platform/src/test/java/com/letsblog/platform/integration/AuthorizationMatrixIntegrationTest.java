@@ -1,6 +1,5 @@
 package com.letsblog.platform.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -40,23 +39,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>ロール単位の認可(admin限定操作の403)は{@link AdminAuthorizationIntegrationTest}が担当し、
  * ここでは重複させない。
  *
- * <p>identity-serviceは外部境界のため{@link IdentityClient}を{@code @MockitoBean}で置き換える
- * (ADR-0006のモック方針)。
+ * <p>この表のリクエストはAuthorizationヘッダーを持たないか不正なJWTなので、認証ゲートで弾かれ、
+ * identity-serviceへは問い合わせない(issue #1825: IdentityClientは実物で、モックしない)。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DisplayName("platform-service: 認証ゲートの認可マトリクス統合テスト(issue #705)")
-class AuthorizationMatrixIntegrationTest {
+class AuthorizationMatrixIntegrationTest extends IdentityFakeIntegrationTestBase {
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
 
     /**
      * platform-serviceがgateway経由で外部へ公開している全エンドポイント

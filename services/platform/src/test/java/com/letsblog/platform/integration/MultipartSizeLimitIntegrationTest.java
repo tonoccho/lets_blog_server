@@ -2,6 +2,8 @@ package com.letsblog.platform.integration;
 
 import com.letsblog.common.testfixtures.JwtTestFixtures;
 import com.letsblog.platform.service.BackupService;
+import com.letsblog.platform.testsupport.FakeBin;
+import com.letsblog.platform.testsupport.SharedIdentityFake;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,17 +16,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 /**
@@ -46,7 +45,7 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @DisplayName("platform-service: バックアップ復元のmultipart上限(issue #1061)")
-class MultipartSizeLimitIntegrationTest {
+class MultipartSizeLimitIntegrationTest extends IdentityFakeIntegrationTestBase {
 
     /** Spring Bootの既定 max-file-size(1MB)/ max-request-size(10MB)をいずれも超えるサイズ。 */
     private static final int ARCHIVE_BYTES = 12 * 1024 * 1024;
@@ -57,38 +56,60 @@ class MultipartSizeLimitIntegrationTest {
     @Autowired
     private MultipartProperties multipartProperties;
 
+    @org.springframework.beans.factory.annotation.Value("${app.generated-images-storage-path}")
+    private String imagesPath;
+
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
+    @Autowired
     private BackupService backupService;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
     @BeforeEach
     void setUp() {
+        FakeBin.reset();
+        SharedIdentityFake.reset();
+        SharedIdentityFake.profile("Bearer test-token", 1L, "admin");
         when(jwtDecoder.decode("test-token")).thenReturn(JwtTestFixtures.jwt("sub-1061", "admin"));
     }
 
     @Test
     @DisplayName("既定上限を超えるバックアップアーカイブの復元が成功する")
     void バックアップ復元は10mbを超えるアーカイブを受け取れる() throws Exception {
-        final AtomicLong received = new AtomicLong();
-        doAnswer(invocation -> {
-            final InputStream in = invocation.getArgument(0);
-            received.set(in.readAllBytes().length);
-            return null;
-        }).when(backupService).restoreBackup(any(), anyBoolean(), anyBoolean());
+        // 実物のBackupService#restoreBackupが12MBのアーカイブを読み切り、生成画像として書き戻すところまで通す。
+        // ダンプ(MySQL / PostgreSQL)は含めず(許可リスト外のスキーマ1件だけ)、外部プロセスは起動されない。
+        byte[] image = new byte[ARCHIVE_BYTES];
+        new java.util.Random(1061).nextBytes(image);
+        java.io.ByteArrayOutputStream zipBytes = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(zipBytes)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("mysql/not-an-allowed-schema.sql"));
+            zip.write("SELECT 1;".getBytes());
+            zip.closeEntry();
+            zip.putNextEntry(new java.util.zip.ZipEntry("generated-images/size-limit-test.bin"));
+            zip.write(image);
+            zip.closeEntry();
+        }
+        Path restored = Path.of(imagesPath).resolve("size-limit-test.bin");
+        Files.deleteIfExists(restored);
 
-        final MultipartBodyBuilder body = new MultipartBodyBuilder()
-                .field("confirm", "true")
-                .field("acknowledgeKeyMismatch", "false")
-                .file("file", "lets-blog-backup.zip", "application/zip", filler(ARCHIVE_BYTES));
+        try {
+            final MultipartBodyBuilder body = new MultipartBodyBuilder()
+                    .field("confirm", "true")
+                    .field("acknowledgeKeyMismatch", "false")
+                    .file("file", "lets-blog-backup.zip", "application/zip", zipBytes.toByteArray());
 
-        final HttpResponse<String> response = post("/api/backup/restore", body);
+            final HttpResponse<String> response = post("/api/backup/restore", body);
 
-        assertThat(response.statusCode()).isEqualTo(204);
-        assertThat(received.get()).isEqualTo(ARCHIVE_BYTES);
+            assertThat(response.statusCode()).isEqualTo(204);
+            assertThat(zipBytes.size()).isGreaterThan(10 * 1024 * 1024);
+            assertThat(Files.size(restored)).isEqualTo(ARCHIVE_BYTES);
+            assertThat(FakeBin.calls()).isEmpty();
+            assertThat(backupService).isNotNull();
+        } finally {
+            Files.deleteIfExists(restored);
+        }
     }
 
     /**
