@@ -1,97 +1,42 @@
 package com.letsblog.media.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.media.ai.ChatGptImageClient;
-import com.letsblog.media.ai.ComfyUiClient;
-import com.letsblog.media.ai.ComfyUiImage;
-import com.letsblog.media.ai.ImageProvider;
-import com.letsblog.media.ai.SeedResolver;
-import com.letsblog.media.client.AiGenerationClient;
-import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.service.ImageGenerationService.BatchOutcome;
-import jakarta.servlet.http.HttpServletRequest;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
-import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.media.ai.ImageProvider;
+import com.letsblog.media.testsupport.FakeHttpServer;
+import com.letsblog.media.testsupport.MediaWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
- * 非同期ジョブから使う「ジョブ管理を含まない」生成本体(issue #1405)。
- * 同期経路{@code generateImage}が自前でジョブを作るのに対し、こちらは既に作られたジョブの
+ * 生成本体{@code generateBatch}(issue #1405)。非同期ジョブランナーが、受理時に作られたジョブの中で呼ぶ。
+ *
+ * <p>同期経路{@code generateImage}が自前でジョブを作るのに対し、こちらは既に作られたジョブの
  * 中で動くため、ジョブを作らず、Base64を保持せず、リピート完了を通知する。
+ *
+ * <p>issue #1819: {@code ImageGenerationService}とその協力者はすべて実物で、ComfyUI・ChatGPT画像API・ai-service・
+ * platform-serviceをフェイクHTTPサーバー、DBをリポジトリのmockが演じる({@code ImageGenerationServiceTest}と同じ世界)。
  */
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("media-service: 生成本体generateBatch(issue #1405)")
 class ImageGenerationServiceBatchTest {
 
-    @Mock
-    private AiGenerationClient aiGenerationClient;
-    @Mock
-    private ComfyUiClient comfyUiClient;
-    @Mock
-    private ChatGptImageClient chatGptImageClient;
-    @Mock
-    private ImageModelService imageModelService;
-    @Mock
-    private ComfyUiModelService comfyUiModelService;
-    @Mock
-    private GeneratedImageCreationService generatedImageCreationService;
-    @Mock
-    private GenerationJobClient generationJobClient;
-    @Mock
-    private ProjectImageDefaultsResolver defaultsResolver;
-    @Mock
-    private ProhibitedContentFilterService prohibitedContentFilterService;
-    @Mock
-    private ReferenceImageService referenceImageService;
-    @Mock
-    private HttpServletRequest request;
+    private final MediaWorld world = new MediaWorld();
+    private final ImageGenerationService service = world.imageGenerationService;
 
-    private ImageGenerationService service;
-
-    @BeforeEach
-    void setUp() {
-        service = new ImageGenerationService(
-                aiGenerationClient, comfyUiClient, chatGptImageClient, imageModelService, comfyUiModelService,
-                generatedImageCreationService, generationJobClient, new ObjectMapper(), defaultsResolver,
-                prohibitedContentFilterService, new SafetyNegativePromptService("a", "b", "c"),
-                new SeedResolver(), referenceImageService, request);
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
-        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("g.safetensors");
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":[]}");
-        AtomicLong ids = new AtomicLong(100);
-        when(generatedImageCreationService.create(any())).thenAnswer(inv -> {
-            GeneratedImage saved = new GeneratedImage();
-            saved.setId(ids.incrementAndGet());
-            return saved;
-        });
-    }
-
-    private static List<ComfyUiImage> images(int count) {
-        return java.util.stream.IntStream.range(0, count)
-                .mapToObj(i -> new ComfyUiImage("i" + i + ".png", new byte[] {1}, "image/png"))
-                .toList();
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     private static AiImageRequest repeated(int batchSize, int batchCount) {
@@ -101,22 +46,20 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void ジョブを作らず保存した画像のIDを返す() {
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> images(2));
+        world.comfyReturns(2);
 
         BatchOutcome outcome = service.generateBatch(repeated(2, 1), false, (done, total) -> { });
 
-        assertEquals(List.of(101L, 102L), outcome.images().stream().map(i -> i.id()).toList());
+        assertEquals(List.of(100L, 101L), outcome.images().stream().map(i -> i.id()).toList());
         assertEquals(1, outcome.succeededRepeats());
         assertEquals(0, outcome.failedRepeats());
         assertEquals(false, outcome.aborted());
-        verify(generationJobClient, never()).create(anyString(), anyString(), any());
-        verify(generationJobClient, never()).updateStatus(any(), anyString(), anyString());
+        assertTrue(world.jobCreates().isEmpty());
+        assertTrue(world.jobUpdates().isEmpty());
     }
 
     @Test
     void includeImageDataがfalseならBase64を保持しない() {
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> images(1));
-
         BatchOutcome outcome = service.generateBatch(repeated(1, 1), false, (done, total) -> { });
 
         assertNull(outcome.images().get(0).dataBase64());
@@ -124,8 +67,6 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void includeImageDataがtrueならBase64を返す() {
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> images(1));
-
         BatchOutcome outcome = service.generateBatch(repeated(1, 1), true, (done, total) -> { });
 
         assertNotNull(outcome.images().get(0).dataBase64());
@@ -133,7 +74,6 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void リピートが終わるたびに完了数と総数を通知する() {
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> images(1));
         List<String> seen = new ArrayList<>();
 
         service.generateBatch(repeated(1, 3), false, (done, total) -> seen.add(done + "/" + total));
@@ -143,10 +83,8 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void 途中で失敗しても成功分を返し失敗も通知に含める() {
-        when(comfyUiClient.generateImage(any()))
-                .thenAnswer(inv -> images(1))
-                .thenThrow(new IllegalStateException("x"))
-                .thenAnswer(inv -> images(1));
+        world.http.on("POST", "/prompt", req -> world.http.requests("POST", "/prompt").size() == 2
+                ? FakeHttpServer.Response.json(500, "{\"error\":\"x\"}") : null);
         List<String> seen = new ArrayList<>();
 
         BatchOutcome outcome = service.generateBatch(repeated(1, 3), false, (done, total) -> seen.add(done + "/" + total));
@@ -159,24 +97,27 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void 全リピートが失敗したら最初の失敗を投げる() {
-        when(comfyUiClient.generateImage(any())).thenThrow(new IllegalStateException("first"));
+        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
+        world.http.on("POST", "/prompt", req -> FakeHttpServer.Response.json(
+                500, "{\"error\":\"" + (call.incrementAndGet() == 1 ? "first" : "second") + "\"}"));
 
-        IllegalStateException e = assertThrows(IllegalStateException.class,
+        RuntimeException e = assertThrows(RuntimeException.class,
                 () -> service.generateBatch(repeated(1, 2), false, (done, total) -> { }));
 
-        assertEquals("first", e.getMessage());
+        assertTrue(e.getMessage().contains("first"), e.getMessage());
+        assertFalse(e.getMessage().contains("second"));
     }
 
     @Test
     void 禁止コンテンツは生成前にそのまま投げる() {
-        org.mockito.Mockito.doThrow(new ProhibitedContentException("禁止"))
-                .when(prohibitedContentFilterService).check(anyString(), org.mockito.ArgumentMatchers.anyBoolean(),
-                        org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean());
+        world.settingsFor(1L).setBlockSexualContent(true);
+        AiImageRequest nude = new AiImageRequest(
+                "a nude woman", null, null, null, null, null, 1L, null, null, 1, 1, null, null, null, 1L);
 
         assertThrows(ProhibitedContentException.class,
-                () -> service.generateBatch(repeated(1, 1), false, (done, total) -> { }));
+                () -> service.generateBatch(nude, false, (done, total) -> { }));
 
-        verify(comfyUiClient, never()).generateImage(any());
+        assertTrue(world.comfyWorkflows().isEmpty());
     }
 
     @Test
@@ -186,10 +127,12 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void requireAcceptableはプロバイダの上限を超える枚数を拒否する() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        world.providerIs(1L, "CHATGPT");
+        AiImageRequest tooMany = new AiImageRequest(
+                "a cat", null, null, null, null, null, 1L, null, null, 11, 1, null, null, null, 1L);
 
         UnsupportedBatchSizeException e = assertThrows(UnsupportedBatchSizeException.class,
-                () -> service.requireAcceptable(repeated(11, 1)));
+                () -> service.requireAcceptable(tooMany));
 
         assertTrue(e.getMessage().contains("CHATGPT"));
     }
@@ -201,10 +144,8 @@ class ImageGenerationServiceBatchTest {
 
     @Test
     void 連続して失敗したら残りを打ち切りabortedを立てる() {
-        when(comfyUiClient.generateImage(any()))
-                .thenAnswer(inv -> images(1))
-                .thenThrow(new IllegalStateException("x"))
-                .thenThrow(new IllegalStateException("y"));
+        world.http.on("POST", "/prompt", req -> world.http.requests("POST", "/prompt").size() >= 2
+                ? FakeHttpServer.Response.json(500, "{\"error\":\"x\"}") : null);
 
         BatchOutcome outcome = service.generateBatch(repeated(1, 4), false, (done, total) -> { });
 

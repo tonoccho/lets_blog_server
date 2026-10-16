@@ -1,79 +1,66 @@
 package com.letsblog.media.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
-import java.util.concurrent.atomic.AtomicBoolean;
-import org.junit.jupiter.api.BeforeEach;
+import com.letsblog.media.testsupport.BrokenObjectMapper;
+import com.letsblog.media.testsupport.MediaWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
- * 実行中・待機中の画像生成ジョブのハートビート(issue #1405 レビュー指摘)。
+ * 画像生成ジョブのハートビート(issue #1405)。
  *
- * <p>ai-serviceの{@code StaleGenerationJobSweepService}は{@code running}のまま15分間
- * {@code updated_at}が動かないジョブをfailedにする。画像生成ジョブは(a)専用Executorの待ち行列で
- * 待つ間と(b)1リピートのポーリング中(最大約3300秒)に進捗を書かないため、生きていても回収される。
- * media-serviceが生きている間だけ、追跡中のジョブの{@code updated_at}を定期的に進める。
- * 内容が同じ更新はJPAのdirty checkで{@code updated_at}を動かさないので、毎回{@code heartbeatAt}を変える。
+ * <p>待ち行列で待っているジョブと実行中のジョブの両方に、一定間隔で{@code running}の更新を書く。
+ * ai-service側のstale回収は更新時刻で判定するため、更新が止まったジョブは回収される。終端通知(done/failed)の後に
+ * ハートビートが{@code running}を上書きしないことが、このクラスの主な責務。
+ *
+ * <p>issue #1819: {@code GenerationJobClient}・{@code ObjectMapper}は実物で、ai-serviceをフェイクHTTPサーバーが演じる。
  */
-@ExtendWith(MockitoExtension.class)
 @DisplayName("media-service: 画像生成ジョブのハートビート(issue #1405)")
 class ImageGenerationJobTrackerTest {
 
-    @Mock
-    private GenerationJobClient generationJobClient;
+    private final MediaWorld world = new MediaWorld();
+    private final ImageGenerationJobTracker tracker = world.tracker;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    private ImageGenerationJobTracker tracker;
-
-    @BeforeEach
-    void setUp() {
-        tracker = new ImageGenerationJobTracker(generationJobClient, objectMapper);
+    @AfterEach
+    void close() {
+        world.close();
     }
 
-    private JsonNode lastPayload(int times) throws Exception {
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient, times(times)).updateStatus(eq(7L), eq("running"), payload.capture());
-        return objectMapper.readTree(payload.getValue());
+    private List<MediaWorld.JobUpdate> heartbeats() {
+        return world.jobUpdates("running");
     }
 
     @Test
-    void 待機中のジョブにもqueuedの進捗でハートビートを書く() throws Exception {
+    void 待機中のジョブにもqueuedの進捗でハートビートを書く() {
         tracker.track(7L);
 
         tracker.heartbeat();
 
-        JsonNode payload = lastPayload(1);
+        assertEquals(1, heartbeats().size());
+        assertEquals(7L, heartbeats().get(0).jobId());
+        JsonNode payload = heartbeats().get(0).payload();
         assertEquals("queued", payload.get("phase").asText());
         assertEquals(0, payload.get("percent").asInt());
         assertTrue(payload.has("heartbeatAt"));
     }
 
     @Test
-    void 実行中は直近の進捗を保ったままハートビートを書く() throws Exception {
+    void 実行中は直近の進捗を保ったままハートビートを書く() {
         tracker.track(7L);
         tracker.update(7L, "generating", 50);
 
         tracker.heartbeat();
 
-        JsonNode payload = lastPayload(1);
+        JsonNode payload = heartbeats().get(0).payload();
         assertEquals("generating", payload.get("phase").asText());
         assertEquals(50, payload.get("percent").asInt());
     }
@@ -85,16 +72,15 @@ class ImageGenerationJobTrackerTest {
         Thread.sleep(5);
         tracker.heartbeat();
 
-        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient, times(2)).updateStatus(eq(7L), eq("running"), payload.capture());
-        assertNotEquals(payload.getAllValues().get(0), payload.getAllValues().get(1));
+        assertEquals(2, heartbeats().size());
+        assertNotEquals(heartbeats().get(0).payload(), heartbeats().get(1).payload());
     }
 
     @Test
     void 追跡中のジョブが無ければ何も書かない() {
         tracker.heartbeat();
 
-        verifyNoInteractions(generationJobClient);
+        assertTrue(world.jobUpdates().isEmpty());
     }
 
     @Test
@@ -107,7 +93,7 @@ class ImageGenerationJobTrackerTest {
 
         assertTrue(terminalWritten.get());
         assertFalse(tracker.isTracked(7L));
-        verify(generationJobClient, never()).updateStatus(anyLong(), anyString(), anyString());
+        assertTrue(world.jobUpdates().isEmpty());
     }
 
     @Test
@@ -124,20 +110,49 @@ class ImageGenerationJobTrackerTest {
 
         tracker.heartbeat();
 
-        verify(generationJobClient).updateStatus(eq(7L), eq("running"), anyString());
-        verify(generationJobClient).updateStatus(eq(8L), eq("running"), anyString());
+        assertEquals(List.of(7L, 8L), heartbeats().stream().map(MediaWorld.JobUpdate::jobId).sorted().toList());
     }
 
     @Test
-    void JSON化に失敗しても空オブジェクトで書く() throws Exception {
-        ObjectMapper broken = org.mockito.Mockito.mock(ObjectMapper.class);
-        org.mockito.Mockito.when(broken.writeValueAsString(org.mockito.ArgumentMatchers.any()))
-                .thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("x") { });
-        ImageGenerationJobTracker brokenTracker = new ImageGenerationJobTracker(generationJobClient, broken);
+    void JSON化に失敗しても空オブジェクトで書く() {
+        ImageGenerationJobTracker brokenTracker =
+                new ImageGenerationJobTracker(world.generationJobClient, BrokenObjectMapper.create());
         brokenTracker.track(7L);
 
         brokenTracker.heartbeat();
 
-        verify(generationJobClient).updateStatus(7L, "running", "{}");
+        var request = world.http.requests("PATCH", "/api/internal/ai/generation-jobs/7").get(0);
+        assertEquals("running", world.bodyOf(request).get("status").asText());
+        assertEquals("{}", world.bodyOf(request).get("resultPayload").asText());
+    }
+
+    /**
+     * 周回の途中で終端になったジョブにはハートビートを書かない。ロックを持つ側が終端の書き込みの中で
+     * 別スレッドの{@code heartbeat()}が待ち状態(BLOCKED)になるのを確かめてから、再入できるロックでそのジョブを終端にする。
+     * 待ち合わせはスレッドの状態で行うので、タイミングに依らず決定的。
+     */
+    @Test
+    void 周回の途中で終端になったジョブにはハートビートを書かない() throws Exception {
+        tracker.track(7L);
+        tracker.track(8L);
+        Thread[] heartbeatThread = new Thread[1];
+
+        tracker.complete(8L, () -> {
+            heartbeatThread[0] = new Thread(tracker::heartbeat, "heartbeat");
+            heartbeatThread[0].start();
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (heartbeatThread[0].getState() != Thread.State.BLOCKED) {
+                if (System.currentTimeMillis() > deadline) {
+                    throw new IllegalStateException("heartbeat thread did not block on the lock");
+                }
+                Thread.onSpinWait();
+            }
+            // 7は周回のキーに入っているが、ロックを待つ間に終端になる。
+            tracker.complete(7L, () -> { });
+        });
+        heartbeatThread[0].join(10_000);
+
+        assertFalse(heartbeatThread[0].isAlive());
+        assertTrue(world.jobUpdates().isEmpty(), "終端になったジョブにはrunningを書かない");
     }
 }

@@ -135,4 +135,13 @@ class SafetyNegativePromptServiceTest {
 
         assertEquals("blurry,, NSFW", result);
     }
+
+    @Test
+    void 設定値がnullや空白だけでもそのカテゴリは連結しない() {
+        SafetyNegativePromptService service = service(null, "   ", null);
+
+        String result = service.appendSafetyWords("blurry", true, true, true);
+
+        assertEquals("blurry", result);
+    }
 }

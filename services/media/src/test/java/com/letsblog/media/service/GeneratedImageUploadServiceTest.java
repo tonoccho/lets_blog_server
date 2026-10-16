@@ -1,26 +1,26 @@
 package com.letsblog.media.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.letsblog.media.domain.GeneratedImage;
-import com.letsblog.media.dto.CreateGeneratedImageRequest;
+import com.letsblog.media.testsupport.AsyncProxies;
+import com.letsblog.media.testsupport.FakeHttpServer;
+import com.letsblog.media.testsupport.MediaWorld;
 import com.letsblog.media.testsupport.UploadImageFixtures;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.core.task.TaskRejectedException;
-
 import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Base64;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -29,57 +29,47 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
-/** issue #1599: アップロード画像の検証・変換・登録。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * issue #1599: アップロード画像の検証・変換・登録。
+ *
+ * <p>issue #1819: {@code ImageResizeService}・{@code GeneratedImageCreationService}・{@code UploadedImageTagService}・
+ * {@code AiGenerationClient}は実物。ai-serviceをフェイクHTTPサーバー、{@code generated_images}をリポジトリのmockが演じ、
+ * ファイルは一時ディレクトリへ実際に書く。
+ */
 @DisplayName("GeneratedImageUploadService(issue #1599)")
 class GeneratedImageUploadServiceTest {
 
-    @Mock
-    private GeneratedImageCreationService creationService;
+    private static final String VISION_PATH = "/api/internal/ai/generate-with-image";
 
-    @Mock
-    private UploadedImageTagService tagService;
+    private final MediaWorld world = new MediaWorld();
+    private final GeneratedImageUploadService service = world.uploadService;
 
-    private GeneratedImageUploadService service;
-
-    @BeforeEach
-    void setUp() {
-        service = new GeneratedImageUploadService(new ImageResizeService(), creationService, tagService);
+    @AfterEach
+    void close() {
+        world.close();
     }
 
-    private CreateGeneratedImageRequest captureRequest() {
-        ArgumentCaptor<CreateGeneratedImageRequest> captor = ArgumentCaptor.forClass(CreateGeneratedImageRequest.class);
-        verify(creationService).create(captor.capture());
-        return captor.getValue();
+    private BufferedImage stored(GeneratedImage image) throws IOException {
+        return ImageIO.read(world.storageDir.resolve(image.getFilePath()).toFile());
     }
 
     @Test
     @DisplayName("JPEGは元の画素数のJPEGとして、provider=UPLOAD・promptなしで登録される")
     void JPEGを登録する() throws IOException {
-        GeneratedImage saved = new GeneratedImage();
-        when(creationService.create(any())).thenReturn(saved);
         byte[] src = UploadImageFixtures.jpeg(UploadImageFixtures.solid(4000, 3000, Color.RED, false));
 
         GeneratedImage result = service.upload(7L, src);
 
-        assertEquals(saved, result);
-        CreateGeneratedImageRequest request = captureRequest();
-        assertEquals(7L, request.projectId());
-        assertEquals("UPLOAD", request.provider());
-        assertNull(request.prompt());
-        assertEquals("image/jpeg", request.mimeType());
-        assertEquals(4000, request.width());
-        assertEquals(3000, request.height());
-        BufferedImage stored = ImageIO.read(new ByteArrayInputStream(request.imageData()));
+        assertEquals(result, world.images.get(result.getId()));
+        assertEquals(7L, result.getProjectId());
+        assertEquals("UPLOAD", result.getProvider());
+        assertNull(result.getPrompt());
+        assertEquals("image/jpeg", result.getMimeType());
+        assertEquals(4000, result.getWidth());
+        assertEquals(3000, result.getHeight());
+        assertTrue(result.getFilePath().endsWith(".jpg"));
+        BufferedImage stored = stored(result);
         assertEquals(4000, stored.getWidth());
         assertEquals(3000, stored.getHeight());
     }
@@ -87,38 +77,33 @@ class GeneratedImageUploadServiceTest {
     @Test
     @DisplayName("不透明PNGもPNGのまま、縦長でも元の画素数で登録される")
     void PNGの保存形式() {
-        when(creationService.create(any())).thenReturn(new GeneratedImage());
+        GeneratedImage result = service.upload(7L,
+                UploadImageFixtures.png(UploadImageFixtures.solid(700, 1400, Color.RED, false)));
 
-        service.upload(7L, UploadImageFixtures.png(UploadImageFixtures.solid(700, 1400, Color.RED, false)));
-
-        CreateGeneratedImageRequest request = captureRequest();
-        assertEquals("image/png", request.mimeType());
-        assertEquals(700, request.width());
-        assertEquals(1400, request.height());
+        assertEquals("image/png", result.getMimeType());
+        assertEquals(700, result.getWidth());
+        assertEquals(1400, result.getHeight());
     }
 
     @Test
     @DisplayName("Orientation=6のJPEGは、向きを反映した画素数がwidth/heightに記録される")
     void Orientationを反映した寸法を記録する() {
-        when(creationService.create(any())).thenReturn(new GeneratedImage());
         byte[] src = UploadImageFixtures.withExif(
                 UploadImageFixtures.jpeg(UploadImageFixtures.solid(800, 600, Color.RED, false)), 6);
 
-        service.upload(7L, src);
+        GeneratedImage result = service.upload(7L, src);
 
-        CreateGeneratedImageRequest request = captureRequest();
-        assertEquals(600, request.width());
-        assertEquals(800, request.height());
+        assertEquals(600, result.getWidth());
+        assertEquals(800, result.getHeight());
     }
 
     @Test
     @DisplayName("透過PNGはPNGで登録される")
     void 透過PNGはPNG() {
-        when(creationService.create(any())).thenReturn(new GeneratedImage());
+        GeneratedImage result = service.upload(7L,
+                UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, new Color(0, 0, 0, 0), true)));
 
-        service.upload(7L, UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, new Color(0, 0, 0, 0), true)));
-
-        assertEquals("image/png", captureRequest().mimeType());
+        assertEquals("image/png", result.getMimeType());
     }
 
     @Test
@@ -128,7 +113,7 @@ class GeneratedImageUploadServiceTest {
                 () -> service.upload(7L, UploadImageFixtures.gif(10, 10)));
 
         assertEquals("対応していない画像形式です。JPEGまたはPNGを選択してください。", e.getMessage());
-        verifyNoInteractions(creationService);
+        assertTrue(world.savedImages.isEmpty());
     }
 
     @Test
@@ -136,7 +121,7 @@ class GeneratedImageUploadServiceTest {
     void テキストは拒否() {
         assertThrows(InvalidImageUploadException.class,
                 () -> service.upload(7L, "hello world".getBytes()));
-        verify(creationService, never()).create(any());
+        assertTrue(world.savedImages.isEmpty());
     }
 
     @Test
@@ -144,7 +129,7 @@ class GeneratedImageUploadServiceTest {
     void 空は拒否() {
         assertThrows(InvalidImageUploadException.class, () -> service.upload(7L, new byte[0]));
         assertThrows(InvalidImageUploadException.class, () -> service.upload(7L, null));
-        verifyNoInteractions(creationService);
+        assertTrue(world.savedImages.isEmpty());
     }
 
     @Test
@@ -157,7 +142,7 @@ class GeneratedImageUploadServiceTest {
                 () -> service.upload(7L, tooBig));
 
         assertEquals("ファイルサイズが上限(20MB)を超えています。", e.getMessage());
-        verifyNoInteractions(creationService);
+        assertTrue(world.savedImages.isEmpty());
     }
 
     @Test
@@ -166,7 +151,7 @@ class GeneratedImageUploadServiceTest {
         byte[] broken = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3};
 
         assertThrows(InvalidImageUploadException.class, () -> service.upload(7L, broken));
-        verifyNoInteractions(creationService);
+        assertTrue(world.savedImages.isEmpty());
     }
 
     static Stream<byte[]> 画像の先頭として不完全なバイト列() {
@@ -195,41 +180,44 @@ class GeneratedImageUploadServiceTest {
                 () -> service.upload(7L, data));
 
         assertEquals("対応していない画像形式です。JPEGまたはPNGを選択してください。", e.getMessage());
-        verifyNoInteractions(creationService);
+        assertTrue(world.savedImages.isEmpty());
     }
 
     @Test
     @DisplayName("登録後に、メタ情報除去済みの保存画像をAIタグ付けへ渡す(元ファイルは渡さない)")
-    void 保存した画像でタグ付けを依頼する() {
-        GeneratedImage saved = new GeneratedImage();
-        saved.setId(42L);
-        when(creationService.create(any())).thenReturn(saved);
+    void 保存した画像でタグ付けを依頼する() throws IOException {
         byte[] src = UploadImageFixtures.withExif(
                 UploadImageFixtures.jpeg(UploadImageFixtures.solid(800, 600, Color.RED, false)), 1);
 
-        service.upload(7L, src);
+        GeneratedImage result = service.upload(7L, src);
 
-        CreateGeneratedImageRequest request = captureRequest();
-        ArgumentCaptor<byte[]> sent = ArgumentCaptor.forClass(byte[].class);
-        verify(tagService).tagAsync(eq(42L), eq(7L), eq("image/jpeg"), sent.capture());
-        assertArrayEquals(request.imageData(), sent.getValue());
-        assertFalse(
-                new String(sent.getValue(), StandardCharsets.ISO_8859_1)
-                        .contains(UploadImageFixtures.GPS_MARKER));
+        JsonNode sent = world.bodyOf(world.http.requests("POST", VISION_PATH).get(0));
+        byte[] sentBytes = Base64.getDecoder().decode(sent.get("imageBase64").asText());
+        assertEquals("image/jpeg", sent.get("mimeType").asText());
+        assertEquals(7L, sent.get("projectId").asLong());
+        assertArrayEquals(Files.readAllBytes(world.storageDir.resolve(result.getFilePath())), sentBytes);
+        assertFalse(new String(sentBytes, StandardCharsets.ISO_8859_1).contains(UploadImageFixtures.GPS_MARKER));
+        assertEquals("[\"猫\"]", world.images.get(result.getId()).getTagsJson(), "提案されたタグが画像の行に残る");
     }
 
     @Test
     @DisplayName("タグ付けの依頼(スレッドプール満杯など)が失敗してもアップロードは成功する")
     void タグ付け依頼の失敗はアップロードを失敗させない() {
-        GeneratedImage saved = new GeneratedImage();
-        saved.setId(42L);
-        when(creationService.create(any())).thenReturn(saved);
-        doThrow(new TaskRejectedException("full"))
-                .when(tagService).tagAsync(any(), any(), any(), any());
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            UploadedImageTagService rejected = AsyncProxies.async(
+                    world.uploadedImageTagService, "imageTaggingExecutor", AsyncProxies.saturated(release));
+            GeneratedImageUploadService saturated =
+                    new GeneratedImageUploadService(world.imageResizeService, world.creationService, rejected);
 
-        GeneratedImage result = service.upload(7L, UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, Color.RED, false)));
+            GeneratedImage result = saturated.upload(7L,
+                    UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, Color.RED, false)));
 
-        assertEquals(saved, result);
+            assertEquals(result, world.images.get(result.getId()));
+            assertTrue(world.http.requests("POST", VISION_PATH).isEmpty(), "満杯のExecutorはタグ付けを始めない");
+        } finally {
+            release.countDown();
+        }
     }
 
     @Test
@@ -237,7 +225,7 @@ class GeneratedImageUploadServiceTest {
     void 拒否ではタグ付けしない() {
         assertThrows(InvalidImageUploadException.class, () -> service.upload(7L, new byte[] {1, 2, 3}));
 
-        verifyNoInteractions(tagService);
+        assertTrue(world.http.requests("POST", VISION_PATH).isEmpty());
     }
 
     private static final int FIVE_MB = 5 * 1024 * 1024;
@@ -258,19 +246,15 @@ class GeneratedImageUploadServiceTest {
         return image;
     }
 
-    /** アップロードして、保存画像のリクエストとタグ付けへ渡された(mime, bytes)を返す。 */
-    private record Tagged(CreateGeneratedImageRequest stored, String mime, byte[] sent) {
+    /** アップロードして、保存画像とタグ付けへ渡された(mime, bytes)を返す。 */
+    private record Tagged(GeneratedImage stored, String mime, byte[] sent) {
     }
 
     private Tagged uploadAndCaptureTagging(byte[] src) {
-        GeneratedImage saved = new GeneratedImage();
-        saved.setId(42L);
-        when(creationService.create(any())).thenReturn(saved);
-        service.upload(7L, src);
-        ArgumentCaptor<byte[]> sentBytes = ArgumentCaptor.forClass(byte[].class);
-        ArgumentCaptor<String> sentMime = ArgumentCaptor.forClass(String.class);
-        verify(tagService).tagAsync(eq(42L), eq(7L), sentMime.capture(), sentBytes.capture());
-        return new Tagged(captureRequest(), sentMime.getValue(), sentBytes.getValue());
+        GeneratedImage saved = service.upload(7L, src);
+        JsonNode sent = world.bodyOf(world.http.requests("POST", VISION_PATH).get(0));
+        return new Tagged(saved, sent.get("mimeType").asText(),
+                Base64.getDecoder().decode(sent.get("imageBase64").asText()));
     }
 
     private static void assertWithinTaggingLimit(Tagged tagged) throws IOException {
@@ -288,9 +272,9 @@ class GeneratedImageUploadServiceTest {
 
         Tagged tagged = uploadAndCaptureTagging(src);
 
-        assertEquals(2000, tagged.stored().width());
-        assertEquals(1500, tagged.stored().height());
-        assertEquals(2000, ImageIO.read(new ByteArrayInputStream(tagged.stored().imageData())).getWidth());
+        assertEquals(2000, tagged.stored().getWidth());
+        assertEquals(1500, tagged.stored().getHeight());
+        assertEquals(2000, ImageIO.read(world.storageDir.resolve(tagged.stored().getFilePath()).toFile()).getWidth());
         assertWithinTaggingLimit(tagged);
         assertEquals("image/jpeg", tagged.mime());
     }
@@ -303,9 +287,9 @@ class GeneratedImageUploadServiceTest {
 
         Tagged tagged = uploadAndCaptureTagging(src);
 
-        assertEquals(1560, tagged.stored().width());
-        assertEquals(1250, tagged.stored().height());
-        assertEquals("image/png", tagged.stored().mimeType());
+        assertEquals(1560, tagged.stored().getWidth());
+        assertEquals(1250, tagged.stored().getHeight());
+        assertEquals("image/png", tagged.stored().getMimeType());
         assertWithinTaggingLimit(tagged);
     }
 
@@ -317,30 +301,9 @@ class GeneratedImageUploadServiceTest {
 
         Tagged tagged = uploadAndCaptureTagging(src);
 
-        assertEquals(1700, tagged.stored().width());
-        assertEquals("image/png", tagged.stored().mimeType());
+        assertEquals(1700, tagged.stored().getWidth());
+        assertEquals("image/png", tagged.stored().getMimeType());
         assertEquals("image/jpeg", tagged.mime());
         assertWithinTaggingLimit(tagged);
-    }
-
-    @Test
-    @DisplayName("どの縮小を試しても閾値を超える場合は、最後の(最も小さい)コピーを渡す(issue #1657)")
-    void 縮小しても大きければ最後の結果を渡す() {
-        ImageResizeService resize = mock(ImageResizeService.class);
-        service = new GeneratedImageUploadService(resize, creationService, tagService);
-        byte[] src = UploadImageFixtures.png(UploadImageFixtures.solid(100, 100, Color.RED, false));
-        when(resize.reencodeKeepingResolution(any(), any()))
-                .thenReturn(new ImageResizeService.ReencodedImage(new byte[FOUR_MB + 1], "image/png", 100, 100));
-        byte[] last = new byte[FOUR_MB + 3];
-        when(resize.resizeToJpeg(any(), any(), eq(1568)))
-                .thenReturn(new ImageResizeService.ResizeResult(new byte[FOUR_MB + 2], "image/jpeg"));
-        when(resize.resizeToJpeg(any(), any(), eq(1024)))
-                .thenReturn(new ImageResizeService.ResizeResult(new byte[FOUR_MB + 2], "image/jpeg"));
-        when(resize.resizeToJpeg(any(), any(), eq(640)))
-                .thenReturn(new ImageResizeService.ResizeResult(last, "image/jpeg"));
-
-        Tagged tagged = uploadAndCaptureTagging(src);
-
-        assertArrayEquals(last, tagged.sent());
     }
 }

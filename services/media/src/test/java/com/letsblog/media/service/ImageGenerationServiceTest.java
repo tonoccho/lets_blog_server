@@ -1,45 +1,33 @@
 package com.letsblog.media.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.media.ai.ChatGptImageClient;
-import com.letsblog.media.ai.ComfyUiClient;
-import com.letsblog.media.ai.ComfyUiGenerationParams;
-import com.letsblog.media.ai.ComfyUiImage;
-import com.letsblog.media.ai.ImageProvider;
+import com.letsblog.media.ai.AiServiceException;
 import com.letsblog.media.ai.SeedResolver;
-import com.letsblog.media.client.AiGenerationClient;
-import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.common.client.GenerationJobSummary;
 import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.dto.AiImageBatchResponse;
 import com.letsblog.media.dto.AiImageRequest;
 import com.letsblog.media.dto.AiImageResponse;
-import com.letsblog.media.dto.CreateGeneratedImageRequest;
 import com.letsblog.media.dto.ImageGenerationOptionsResponse;
-import jakarta.servlet.http.HttpServletRequest;
-import java.util.List;
+import com.letsblog.media.testsupport.BrokenObjectMapper;
+import com.letsblog.media.testsupport.FakeHttpServer;
+import com.letsblog.media.testsupport.MediaWorld;
+import com.letsblog.media.testsupport.MediaWorld.ComfyParams;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
+
+import java.util.Base64;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 画像生成のオーケストレーション(issue #1101)。
@@ -48,7 +36,7 @@ import static org.mockito.Mockito.when;
  * このテストは決定が呼び出し側へ移ったこと — すなわち
  *
  * <ul>
- *   <li>COMFYUIへ渡す{@code ComfyUiGenerationParams.seed()}が常に非nullであること</li>
+ *   <li>COMFYUIへ渡す生成パラメータのseedが常に非nullであること</li>
  *   <li>その実値が保存要求とAPIレスポンスの両方に載ること</li>
  *   <li>バッチ内の位置{@code batchIndex}が0起点で振られること</li>
  *   <li>seedを持たないCHATGPTではseedがNULLのままであること</li>
@@ -64,93 +52,49 @@ import static org.mockito.Mockito.when;
  * ComfyUIはGPU必須の任意サービスで、{@code infra/e2e-stubs/}にスタブも無く、
  * OpenAI画像スタブはseedの概念を持たない。CLAUDE.md → Test-First Implementation が
  * 認める「文書化された例外」として、ここで表現する(#1106でATから到達可能になる)。
+ *
+ * <p>issue #1819: {@code ImageGenerationService}とその協力者({@code ComfyUiClient}・{@code ChatGptImageClient}・
+ * {@code AiGenerationClient}・{@code GenerationJobClient}・{@code ImageModelService}・{@code ComfyUiModelService}・
+ * {@code ProjectImageDefaultsResolver}・{@code ProhibitedContentFilterService}・{@code GeneratedImageCreationService}など)は
+ * すべて実物。ComfyUI・ChatGPT画像API・ai-service・platform-service・project-serviceをフェイクHTTPサーバー、
+ * {@code generated_images}・{@code project_image_settings}をリポジトリのmock(メモリ上の行)が演じ、ファイルは
+ * 一時ディレクトリへ実際に書く。ComfyUIへ渡ったパラメータは、投入されたワークフロー(JSON)から読み取る。
  */
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("media-service: 画像生成のseedとバッチ内位置(issue #1101)")
 class ImageGenerationServiceTest {
 
-    @Mock
-    private AiGenerationClient aiGenerationClient;
-    @Mock
-    private ComfyUiClient comfyUiClient;
-    @Mock
-    private ChatGptImageClient chatGptImageClient;
-    @Mock
-    private ImageModelService imageModelService;
-    @Mock
-    private ComfyUiModelService comfyUiModelService;
-    @Mock
-    private GeneratedImageCreationService generatedImageCreationService;
-    @Mock
-    private GenerationJobClient generationJobClient;
-    @Mock
-    private ProjectImageDefaultsResolver defaultsResolver;
-    @Mock
-    private ProhibitedContentFilterService prohibitedContentFilterService;
-    @Mock
-    private ReferenceImageService referenceImageService;
-    @Mock
-    private HttpServletRequest request;
-
-    /**
-     * issue #1085: 実際の連結ロジックを確かめたいので、モックではなく実インスタンスを使う
-     * ({@link ProjectImageDefaultsResolver}等の他の依存はオーケストレーション順序の検証が
-     * 目的のためモックのままでよいが、安全側ネガティブプロンプトの連結結果そのものが
-     * このテストの受け入れ基準の対象であるため)。
-     */
-    private final SafetyNegativePromptService safetyNegativePromptService =
-            new SafetyNegativePromptService("nsfw, nude", "gore", "nazi symbol");
-
-    private ImageGenerationService service;
+    private final MediaWorld world = new MediaWorld();
+    private final ImageGenerationService service = world.imageGenerationService;
 
     @BeforeEach
     void setUp() {
-        service = new ImageGenerationService(
-                aiGenerationClient, comfyUiClient, chatGptImageClient, imageModelService, comfyUiModelService,
-                generatedImageCreationService, generationJobClient, new ObjectMapper(), defaultsResolver,
-                prohibitedContentFilterService, safetyNegativePromptService, new SeedResolver(),
-                referenceImageService, request);
-
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
-        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("global.safetensors");
-        when(defaultsResolver.resolveDefaultNegativePrompt(any())).thenReturn("default negative");
-        when(defaultsResolver.resolveDefaultQualityPrompt(any())).thenReturn("masterpiece");
-        when(defaultsResolver.resolveDefaultGeneratedImageWidth(any())).thenReturn(1024);
-        when(defaultsResolver.resolveDefaultGeneratedImageHeight(any())).thenReturn(768);
-        when(generationJobClient.create(anyString(), anyString(), any()))
-                .thenReturn(new GenerationJobSummary(9L, "comfyui_image", "running", null, null));
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":[\"猫\"]}");
-        when(request.getHeader(anyString())).thenReturn("Bearer token");
-        when(generatedImageCreationService.create(any())).thenAnswer(inv -> {
-            GeneratedImage saved = new GeneratedImage();
-            saved.setId(100L);
-            return saved;
-        });
+        world.request.addHeader("Authorization", "Bearer token");
+        // プロジェクト1の既定値(未指定の項目はここから補完される)。
+        var settings = world.settingsFor(1L);
+        settings.setDefaultNegativePrompt("default negative");
+        settings.setDefaultQualityPrompt("masterpiece");
+        settings.setDefaultGeneratedImageWidth(1024);
+        settings.setDefaultGeneratedImageHeight(768);
     }
 
-    private void comfyReturns(int count) {
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> images(count));
+    @AfterEach
+    void close() {
+        world.close();
     }
 
-    private static List<ComfyUiImage> images(int count) {
-        return java.util.stream.IntStream.range(0, count)
-                .mapToObj(i -> new ComfyUiImage("img" + i + ".png", new byte[]{(byte) i}, "image/png"))
-                .toList();
+    private ComfyParams comfy() {
+        assertEquals(1, world.comfyWorkflows().size(), "ComfyUIへの投入は1回");
+        return world.lastComfyParams();
     }
 
-    private ComfyUiGenerationParams capturedComfyParams() {
-        ArgumentCaptor<ComfyUiGenerationParams> captor =
-                ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
-        verify(comfyUiClient).generateImage(captor.capture());
-        return captor.getValue();
+    private GeneratedImage saved(int index) {
+        return world.savedImages.get(index);
     }
 
-    private List<CreateGeneratedImageRequest> capturedSaveRequests(int times) {
-        ArgumentCaptor<CreateGeneratedImageRequest> captor =
-                ArgumentCaptor.forClass(CreateGeneratedImageRequest.class);
-        verify(generatedImageCreationService, org.mockito.Mockito.times(times)).create(captor.capture());
-        return captor.getAllValues();
+    /** プロジェクトを指定しない要求(品質プロンプトにサーバー既定値だけが使われる)。 */
+    private static AiImageRequest withoutProject() {
+        return new AiImageRequest(
+                "a cat", null, null, null, null, null, 1L, null, null, null, null, null, null, null, null);
     }
 
     private static AiImageRequest requestWithSeed(Long seed) {
@@ -158,71 +102,64 @@ class ImageGenerationServiceTest {
                 "a cat", null, null, null, null, null, seed, null, null, null, null, null, null, null, 1L);
     }
 
-    // --- issue #1503: ComfyUI接続先のプロジェクト単位上書きのため、生成パラメータにprojectIdが載る ---
+    // --- issue #1503: ComfyUI接続先のプロジェクト単位上書きのため、生成にprojectIdが使われる ---
 
     @Test
-    void ComfyUIへ渡す生成パラメータにリクエストのprojectIdが載る() {
-        comfyReturns(1);
-
+    void ComfyUIの接続先はリクエストのprojectIdで引く() {
         service.generateImage(requestWithSeed(1L));
 
-        assertEquals(1L, capturedComfyParams().projectId());
+        assertEquals(1, world.http.requests("GET", "/api/internal/ai/projects/1/connections").size());
     }
 
     @Test
     void 画像生成オプションの一覧取得はプロジェクトの接続先を引く() {
-        when(comfyUiClient.listCheckpoints(42L)).thenReturn(List.of("p42.safetensors"));
-        when(comfyUiClient.listSamplers(42L)).thenReturn(List.of("euler"));
-        when(comfyUiClient.listSchedulers(42L)).thenReturn(List.of("normal"));
-        when(comfyUiClient.listLoras(42L)).thenReturn(List.of());
+        world.comfyObjectInfo(List.of("p42.safetensors"), List.of("euler"), List.of("normal"), List.of());
 
         ImageGenerationOptionsResponse options = service.getImageOptions(42L);
 
         assertEquals(List.of("p42.safetensors"), options.checkpoints());
+        assertTrue(world.http.requests("GET", "/api/internal/ai/projects/42/connections").size() >= 1);
     }
 
     // --- AC1 / AC2: seed未指定でも実値が返り、保存される ---
 
     @Test
     void seed未指定でも実値が決まりレスポンスと保存要求の両方に載る() {
-        comfyReturns(1);
+        world.comfyReturns(1);
 
         AiImageBatchResponse response = service.generateImage(requestWithSeed(null));
 
         Long seed = response.images().get(0).seed();
         assertNotNull(seed, "seed未指定でもレスポンスのseedは非nullでなければならない");
         assertTrue(seed >= 0, "seedは0以上でなければならない: " + seed);
-        assertEquals(seed, capturedComfyParams().seed(), "ComfyUIへ渡したseedと返したseedは同じ");
-        assertEquals(seed, capturedSaveRequests(1).get(0).seed(), "保存したseedと返したseedは同じ");
+        assertEquals(seed, comfy().seed(), "ComfyUIへ渡したseedと返したseedは同じ");
+        assertEquals(seed, saved(0).getSeed(), "保存したseedと返したseedは同じ");
     }
 
     @Test
     void COMFYUIへ渡すパラメータのseedは常に非nullになる() {
-        comfyReturns(1);
-
         service.generateImage(requestWithSeed(null));
 
-        assertNotNull(capturedComfyParams().seed());
+        JsonNode seed = world.lastComfyWorkflow().path("3").path("inputs").path("seed");
+        assertTrue(seed.isIntegralNumber(), "ComfyUIへ投入するワークフローのseedは整数の実値: " + seed);
     }
 
     // --- AC4: 明示指定したseedはそのまま ---
 
     @Test
     void 明示指定したseedはそのままレスポンスに返る() {
-        comfyReturns(1);
-
         AiImageBatchResponse response = service.generateImage(requestWithSeed(555L));
 
         assertEquals(555L, response.images().get(0).seed());
-        assertEquals(555L, capturedComfyParams().seed());
-        assertEquals(555L, capturedSaveRequests(1).get(0).seed());
+        assertEquals(555L, comfy().seed());
+        assertEquals(555L, saved(0).getSeed());
     }
 
     // --- AC5: バッチ内位置 ---
 
     @Test
     void batchSize2で生成するとbatchIndexが0と1になる() {
-        comfyReturns(2);
+        world.comfyReturns(2);
 
         AiImageBatchResponse response = service.generateImage(new AiImageRequest(
                 "a cat", null, null, null, null, null, 7L, null, null, 2, null, null, null, null, 1L));
@@ -231,54 +168,65 @@ class ImageGenerationServiceTest {
         assertEquals(0, response.images().get(0).batchIndex());
         assertEquals(1, response.images().get(1).batchIndex());
 
-        List<CreateGeneratedImageRequest> saved = capturedSaveRequests(2);
-        assertEquals(0, saved.get(0).batchIndex());
-        assertEquals(1, saved.get(1).batchIndex());
-        assertEquals(7L, saved.get(0).seed());
-        assertEquals(7L, saved.get(1).seed());
+        assertEquals(2, world.savedImages.size());
+        assertEquals(0, saved(0).getBatchIndex());
+        assertEquals(1, saved(1).getBatchIndex());
+        assertEquals(7L, saved(0).getSeed());
+        assertEquals(7L, saved(1).getSeed());
     }
 
     // --- AC6: CHATGPTはseedを持たない ---
 
     @Test
     void CHATGPTで生成した画像のseedはNULLのまま保存される() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> images(1));
+        world.providerIs(1L, "CHATGPT");
 
         AiImageBatchResponse response = service.generateImage(requestWithSeed(null));
 
         assertNull(response.images().get(0).seed());
-        assertNull(capturedSaveRequests(1).get(0).seed());
-        assertEquals("CHATGPT", capturedSaveRequests(1).get(0).provider());
-        verify(comfyUiClient, never()).generateImage(any());
-        verify(generationJobClient).create(eq("chatgpt_image"), anyString(), any());
+        assertNull(saved(0).getSeed());
+        assertEquals("CHATGPT", saved(0).getProvider());
+        assertTrue(world.comfyWorkflows().isEmpty());
+        assertEquals("chatgpt_image", world.jobCreates().get(0).type());
     }
 
     @Test
     void CHATGPTではseedを明示しても保存はNULLになる() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> images(1));
+        world.providerIs(1L, "CHATGPT");
 
         AiImageBatchResponse response = service.generateImage(requestWithSeed(999L));
 
         assertNull(response.images().get(0).seed());
-        assertNull(capturedSaveRequests(1).get(0).seed());
+        assertNull(saved(0).getSeed());
+    }
+
+    @Test
+    void CHATGPTの画像APIにはAPIキーとプロンプトと枚数が渡る() {
+        world.providerIs(1L, "CHATGPT");
+
+        service.generateImage(new AiImageRequest(
+                "a cat", null, null, null, null, null, null, 1024, 1024, 3, null, null, null, null, 1L));
+
+        var call = world.http.requests("POST", "/images/generations").get(0);
+        assertEquals("Bearer sk-test", call.header("Authorization"));
+        JsonNode body = world.bodyOf(call);
+        assertEquals("a cat, masterpiece", body.get("prompt").asText());
+        assertEquals(3, body.get("n").asInt());
+        assertEquals("1024x1024", body.get("size").asText());
     }
 
     // --- AC7: 既存挙動の回帰 ---
 
     @Test
     void 未指定のパラメータはプロジェクト既定値とサーバー既定値で補完する() {
-        comfyReturns(1);
-
         service.generateImage(requestWithSeed(1L));
 
-        ComfyUiGenerationParams params = capturedComfyParams();
+        ComfyParams params = comfy();
         assertEquals("a cat, masterpiece", params.prompt());
         assertEquals("default negative", params.negativePrompt());
         assertEquals(20, params.steps());
-        assertEquals(7.0, params.cfgScale());
-        assertEquals("euler", params.samplerName());
+        assertEquals(7.0, params.cfg());
+        assertEquals("euler", params.sampler());
         assertEquals("normal", params.scheduler());
         assertEquals(1024, params.width());
         assertEquals(768, params.height());
@@ -288,57 +236,65 @@ class ImageGenerationServiceTest {
 
     @Test
     void 明示指定したパラメータは既定値で上書きされない() {
-        comfyReturns(1);
+        world.comfyReturns(2);
 
         service.generateImage(new AiImageRequest(
                 "a dog", "ugly", 30, 9.5, "dpmpp_2m", "karras", 3L, 640, 640, 2, null,
                 "mine.safetensors", "lora.safetensors", 0.4, 1L));
 
-        ComfyUiGenerationParams params = capturedComfyParams();
+        ComfyParams params = comfy();
         assertEquals("a dog, masterpiece", params.prompt());
         assertEquals("ugly", params.negativePrompt());
         assertEquals(30, params.steps());
-        assertEquals(9.5, params.cfgScale());
-        assertEquals("dpmpp_2m", params.samplerName());
+        assertEquals(9.5, params.cfg());
+        assertEquals("dpmpp_2m", params.sampler());
         assertEquals("karras", params.scheduler());
         assertEquals(640, params.width());
         assertEquals(640, params.height());
         assertEquals(2, params.batchSize());
         assertEquals("mine.safetensors", params.checkpoint());
-        assertEquals("lora.safetensors", params.loraName());
+        assertEquals("lora.safetensors", params.lora());
         assertEquals(0.4, params.loraWeight());
     }
 
     @Test
     void 空白のcheckpointとnegativePromptは既定値へフォールバックする() {
-        comfyReturns(1);
-
         service.generateImage(new AiImageRequest(
                 "a cat", "   ", null, null, null, null, 1L, null, null, null, null, "  ", null, null, 1L));
 
-        ComfyUiGenerationParams params = capturedComfyParams();
+        ComfyParams params = comfy();
         assertEquals("global.safetensors", params.checkpoint());
         assertEquals("default negative", params.negativePrompt());
     }
 
     @Test
+    void プロジェクト未指定の生成はサーバー既定値で補完しプロジェクトを引かない() {
+        service.generateImage(new AiImageRequest(
+                "a cat", null, null, null, null, null, 1L, null, null, null, null, null, null, null, null));
+
+        ComfyParams params = comfy();
+        assertEquals("a cat, " + MediaWorld.GLOBAL_QUALITY, params.prompt());
+        assertEquals(MediaWorld.GLOBAL_NEGATIVE, params.negativePrompt());
+        assertEquals(1024, params.width());
+        assertEquals(768, params.height());
+        assertEquals(MediaWorld.GLOBAL_CHECKPOINT, params.checkpoint());
+        assertTrue(world.http.requests("GET", "/api/internal/project/.*").isEmpty());
+    }
+
+    @Test
     void 品質プロンプトが空ならプロンプトへ何も足さない() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveDefaultQualityPrompt(any())).thenReturn("   ");
-
-        service.generateImage(requestWithSeed(1L));
-
-        assertEquals("a cat", capturedComfyParams().prompt());
+        try (MediaWorld blankQuality = new MediaWorld("   ")) {
+            blankQuality.imageGenerationService.generateImage(withoutProject());
+            assertEquals("a cat", blankQuality.lastComfyParams().prompt());
+        }
     }
 
     @Test
     void 品質プロンプトがnullならプロンプトへ何も足さない() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveDefaultQualityPrompt(any())).thenReturn(null);
-
-        service.generateImage(requestWithSeed(1L));
-
-        assertEquals("a cat", capturedComfyParams().prompt());
+        try (MediaWorld nullQuality = new MediaWorld(null)) {
+            nullQuality.imageGenerationService.generateImage(withoutProject());
+            assertEquals("a cat", nullQuality.lastComfyParams().prompt());
+        }
     }
 
     // ------------------------------------------------------------------
@@ -347,117 +303,129 @@ class ImageGenerationServiceTest {
 
     @Test
     void 性的ブロックがONならnegativePrompt未指定でも安全側の抑制語が連結される() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+        world.settingsFor(1L).setBlockSexualContent(true);
 
         service.generateImage(requestWithSeed(1L));
 
-        assertEquals("default negative, nsfw, nude", capturedComfyParams().negativePrompt());
+        assertEquals("default negative, nsfw, nude", comfy().negativePrompt());
     }
 
     @Test
     void 性的ブロックがONならユーザー指定のnegativePromptと抑制語の両方が残る() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+        world.settingsFor(1L).setBlockSexualContent(true);
 
         service.generateImage(new AiImageRequest(
                 "a cat", "cat", null, null, null, null, 1L, null, null, null, null, null, null, null, 1L));
 
-        assertEquals("cat, nsfw, nude", capturedComfyParams().negativePrompt());
+        assertEquals("cat, nsfw, nude", comfy().negativePrompt());
     }
 
     @Test
     void 性的ブロックがOFFなら安全側の抑制語は連結されない() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(false);
+        world.settingsFor(1L).setBlockSexualContent(false);
 
         service.generateImage(requestWithSeed(1L));
 
-        assertEquals("default negative", capturedComfyParams().negativePrompt());
+        assertEquals("default negative", comfy().negativePrompt());
     }
 
     @Test
     void 暴力的ブロックと差別的ブロックはカテゴリごとに独立して反映される() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(true);
-        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(false);
+        world.settingsFor(1L).setBlockViolentContent(true);
+        world.settingsFor(1L).setBlockDiscriminatoryContent(false);
 
         service.generateImage(requestWithSeed(1L));
 
-        String negativePrompt = capturedComfyParams().negativePrompt();
+        String negativePrompt = comfy().negativePrompt();
         assertTrue(negativePrompt.contains("gore"), negativePrompt);
-        assertTrue(!negativePrompt.contains("nazi symbol"), negativePrompt);
+        assertFalse(negativePrompt.contains("nazi symbol"), negativePrompt);
     }
 
     @Test
     void 差別的ブロックのみONなら差別側の抑制語だけが連結される() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+        world.settingsFor(1L).setBlockDiscriminatoryContent(true);
 
         service.generateImage(requestWithSeed(1L));
 
-        String negativePrompt = capturedComfyParams().negativePrompt();
+        String negativePrompt = comfy().negativePrompt();
         assertTrue(negativePrompt.contains("nazi symbol"), negativePrompt);
-        assertTrue(!negativePrompt.contains("gore"), negativePrompt);
+        assertFalse(negativePrompt.contains("gore"), negativePrompt);
     }
 
     @Test
     void ユーザー指定のnegativePromptに既に同じ抑制語が含まれていれば大小文字無視で重複させない() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
+        world.settingsFor(1L).setBlockSexualContent(true);
 
         service.generateImage(new AiImageRequest(
                 "a cat", "NSFW", null, null, null, null, 1L, null, null, null, null, null, null, null, 1L));
 
-        assertEquals("NSFW, nude", capturedComfyParams().negativePrompt());
+        assertEquals("NSFW, nude", comfy().negativePrompt());
     }
 
     @Test
     void 安全側ネガティブプロンプトの連結有無にかかわらずpositive側プロンプトは変わらない() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
-        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(true);
-        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+        var settings = world.settingsFor(1L);
+        settings.setBlockSexualContent(true);
+        settings.setBlockViolentContent(true);
+        settings.setBlockDiscriminatoryContent(true);
 
         service.generateImage(requestWithSeed(1L));
 
-        assertEquals("a cat, masterpiece", capturedComfyParams().prompt());
+        assertEquals("a cat, masterpiece", comfy().prompt());
     }
 
     @Test
     void CHATGPT経路では性的ブロックがONでも安全側の抑制語を保存しない() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> images(1));
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
-        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(true);
-        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+        world.providerIs(1L, "CHATGPT");
+        var settings = world.settingsFor(1L);
+        settings.setBlockSexualContent(true);
+        settings.setBlockViolentContent(true);
+        settings.setBlockDiscriminatoryContent(true);
 
         service.generateImage(requestWithSeed(1L));
 
-        String savedNegativePrompt = capturedSaveRequests(1).get(0).negativePrompt();
-        assertEquals("default negative", savedNegativePrompt,
+        assertEquals("default negative", saved(0).getNegativePrompt(),
                 "ChatGPT経路では安全側ネガティブプロンプトの連結を行わない(#1085 Requirement 6)");
     }
 
     @Test
     void 禁止コンテンツの検査は解決済みプロンプトに対して行う() {
-        comfyReturns(1);
-        when(defaultsResolver.resolveBlockSexualContent(1L)).thenReturn(true);
-        when(defaultsResolver.resolveBlockViolentContent(1L)).thenReturn(false);
-        when(defaultsResolver.resolveBlockDiscriminatoryContent(1L)).thenReturn(true);
+        // 利用者のプロンプトには禁止語が無く、プロジェクト既定の品質プロンプトにだけ含まれる。
+        var settings = world.settingsFor(1L);
+        settings.setDefaultQualityPrompt("nude");
+        settings.setBlockSexualContent(true);
+        settings.setBlockViolentContent(false);
+        settings.setBlockDiscriminatoryContent(true);
+
+        assertThrows(ProhibitedContentException.class, () -> service.generateImage(requestWithSeed(1L)));
+
+        assertTrue(world.comfyWorkflows().isEmpty(), "ブロックされたら生成しない");
+    }
+
+    @Test
+    void 禁止コンテンツの検査はONのカテゴリだけが対象になる() {
+        var settings = world.settingsFor(1L);
+        settings.setDefaultQualityPrompt("gore");
+        settings.setBlockSexualContent(true);
+        settings.setBlockViolentContent(false);
+        settings.setBlockDiscriminatoryContent(true);
 
         service.generateImage(requestWithSeed(1L));
 
-        verify(prohibitedContentFilterService).check("a cat, masterpiece", true, false, true);
+        assertEquals(1, world.comfyWorkflows().size(), "暴力のブロックがOFFなら通る");
     }
 
     @Test
     void 生成に失敗したらジョブを失敗として記録し例外を投げ直す() {
-        when(comfyUiClient.generateImage(any())).thenThrow(new IllegalStateException("boom"));
+        world.http.status("POST", "/prompt", 500, "{\"error\":\"boom\"}");
 
-        assertThrows(IllegalStateException.class, () -> service.generateImage(requestWithSeed(1L)));
+        AiServiceException e = assertThrows(AiServiceException.class, () -> service.generateImage(requestWithSeed(1L)));
 
-        verify(generationJobClient).updateStatus(eq(9L), eq("failed"), anyString());
+        assertTrue(e.getMessage().contains("boom"));
+        List<MediaWorld.JobUpdate> failed = world.jobUpdates("failed");
+        assertEquals(1, failed.size());
+        assertEquals(9L, failed.get(0).jobId());
+        assertTrue(failed.get(0).payload().get("error").asText().contains("boom"));
     }
 
     /**
@@ -468,119 +436,120 @@ class ImageGenerationServiceTest {
      */
     @Test
     void 生成に成功したらジョブを完了として総枚数と成功失敗リピート数を記録する() {
-        comfyReturns(2);
+        world.comfyReturns(2);
 
         service.generateImage(requestFromJson(
                 "{\"prompt\":\"a cat\",\"seed\":1,\"batchSize\":2,\"projectId\":1}"));
 
-        com.fasterxml.jackson.databind.JsonNode result = capturedJobResult("done");
+        JsonNode result = jobResult("done");
         assertEquals("2", result.path("count").asText());
         assertEquals("1", result.path("succeededRepeats").asText());
         assertEquals("0", result.path("failedRepeats").asText());
+    }
+
+    @Test
+    void ジョブの履歴をJSON化できなくても空のJSONで記録して生成は成功する() {
+        ImageGenerationService broken = new ImageGenerationService(
+                world.aiGenerationClient, world.comfyUiClient, world.chatGptImageClient, world.imageModelService,
+                world.comfyUiModelService, world.creationService, world.generationJobClient,
+                BrokenObjectMapper.create(), world.defaultsResolver, world.prohibitedContentFilterService,
+                world.safetyNegativePromptService, new SeedResolver(), world.referenceImageService, world.request);
+
+        AiImageBatchResponse response = broken.generateImage(requestWithSeed(1L));
+
+        assertEquals(1, response.images().size());
+        var create = world.bodyOf(world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0));
+        assertEquals("{}", create.get("requestPayload").asText());
+        assertNull(saved(0).getTagsJson(), "タグのJSON化に失敗してもタグなしで保存を続ける");
     }
 
     // --- タグ提案(issue #281 の回帰) ---
 
     @Test
     void タグ提案のJSONを保存要求へ渡す() {
-        comfyReturns(1);
-
         service.generateImage(requestWithSeed(1L));
 
-        assertEquals("[\"猫\"]", capturedSaveRequests(1).get(0).tagsJson());
+        assertEquals("[\"猫\"]", saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案が前後に文章を含んでもJSON部分だけを取り出す() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any()))
-                .thenReturn("はい、こちらです。{\"tags\":[\"犬\",\"散歩\"]} 以上です。");
+        world.llmReturns("はい、こちらです。{\"tags\":[\"犬\",\"散歩\"]} 以上です。");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertEquals("[\"犬\",\"散歩\"]", capturedSaveRequests(1).get(0).tagsJson());
+        assertEquals("[\"犬\",\"散歩\"]", saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案がJSONでなければタグなしで保存する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("すみません、わかりません");
+        world.llmReturns("すみません、わかりません");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案の閉じ括弧が無ければタグなしで保存する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":[\"猫\"]");
+        world.llmReturns("{\"tags\":[\"猫\"]");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案の括弧の順序が逆ならタグなしで保存する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("} これは壊れています {");
+        world.llmReturns("} これは壊れています {");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案が空配列ならタグなしで保存する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":[]}");
+        world.llmReturns("{\"tags\":[]}");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案の応答にtagsが無ければタグなしで保存する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"other\":1}");
+        world.llmReturns("{\"other\":1}");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案のtagsが配列でなければタグなしで保存する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":\"猫\"}");
+        world.llmReturns("{\"tags\":\"猫\"}");
 
         service.generateImage(requestWithSeed(1L));
 
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     @Test
     void タグ提案のLLM呼び出しが失敗しても画像生成は成功する() {
-        comfyReturns(1);
-        when(aiGenerationClient.generate(any(), anyString(), any()))
-                .thenThrow(new IllegalStateException("LLM down"));
+        world.http.status("POST", "/api/internal/ai/generate", 400, "{\"error\":\"LLM down\"}");
 
         AiImageBatchResponse response = service.generateImage(requestWithSeed(1L));
 
         assertEquals(1, response.images().size());
-        assertNull(capturedSaveRequests(1).get(0).tagsJson());
+        assertNull(saved(0).getTagsJson());
     }
 
     // --- 画像生成オプション ---
 
     @Test
     void 画像生成オプションを組み立てて返す() {
-        when(comfyUiClient.listCheckpoints(1L)).thenReturn(List.of("a.safetensors"));
-        when(comfyUiClient.listSamplers(1L)).thenReturn(List.of("euler"));
-        when(comfyUiClient.listSchedulers(1L)).thenReturn(List.of("normal"));
-        when(comfyUiClient.listLoras(1L)).thenReturn(List.of("anime.safetensors"));
+        world.comfyObjectInfo(List.of("a.safetensors"), List.of("euler"), List.of("normal"), List.of("anime.safetensors"));
 
         ImageGenerationOptionsResponse options = service.getImageOptions(1L);
 
@@ -597,12 +566,9 @@ class ImageGenerationServiceTest {
 
     @Test
     void 画像はBase64で返す() {
-        comfyReturns(1);
-
         AiImageBatchResponse response = service.generateImage(requestWithSeed(1L));
 
-        assertEquals(java.util.Base64.getEncoder().encodeToString(new byte[]{0}),
-                response.images().get(0).dataBase64());
+        assertEquals(Base64.getEncoder().encodeToString(new byte[]{0}), response.images().get(0).dataBase64());
         assertEquals("img0.png", response.images().get(0).fileName());
         assertEquals(100L, response.images().get(0).id());
         assertEquals("image/png", response.images().get(0).mimeType());
@@ -610,12 +576,14 @@ class ImageGenerationServiceTest {
 
     @Test
     void ジョブ記録のペイロードにはプロンプトを含める() {
-        comfyReturns(1);
-
         service.generateImage(requestWithSeed(1L));
 
-        verify(generationJobClient).create(eq("comfyui_image"), eq("{\"prompt\":\"a cat\"}"), eq("Bearer token"));
-        verify(imageModelService).getSelectedProvider(anyLong());
+        MediaWorld.JobCreate created = world.jobCreates().get(0);
+        assertEquals("comfyui_image", created.type());
+        assertEquals("a cat", created.requestPayload().get("prompt").asText());
+        assertEquals(1, created.requestPayload().size());
+        assertEquals("Bearer token", world.http.requests("POST", "/api/internal/ai/generation-jobs").get(0)
+                .header("Authorization"), "呼び出し元のBearerトークンを転送する");
     }
 
     // ------------------------------------------------------------------
@@ -641,43 +609,37 @@ class ImageGenerationServiceTest {
      * 明確な失敗として報告できるようにするため。
      */
     private static int failedRepeats(AiImageBatchResponse response) {
-        com.fasterxml.jackson.databind.JsonNode node =
-                new ObjectMapper().valueToTree(response).get("failedRepeats");
+        JsonNode node = new ObjectMapper().valueToTree(response).get("failedRepeats");
         assertNotNull(node, "レスポンスに failedRepeats がありません(失敗したリピート数を示せていない)");
         return node.asInt();
     }
 
-    /** 各リピートでComfyUIへ渡されたパラメータを、呼ばれた順に返す。 */
-    private List<ComfyUiGenerationParams> capturedComfyParams(int times) {
-        ArgumentCaptor<ComfyUiGenerationParams> captor =
-                ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
-        verify(comfyUiClient, org.mockito.Mockito.times(times)).generateImage(captor.capture());
-        return captor.getAllValues();
+    /** generation_jobs へ記録した結果ペイロード(JSON)。 */
+    private JsonNode jobResult(String status) {
+        List<MediaWorld.JobUpdate> updates = world.jobUpdates(status);
+        assertEquals(1, updates.size());
+        assertEquals(9L, updates.get(0).jobId());
+        return updates.get(0).payload();
     }
 
-    /** generation_jobs へ記録した結果ペイロード(JSON)。 */
-    private com.fasterxml.jackson.databind.JsonNode capturedJobResult(String status) {
-        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(generationJobClient).updateStatus(eq(9L), eq(status), captor.capture());
-        try {
-            return new ObjectMapper().readTree(captor.getValue());
-        } catch (Exception e) {
-            throw new IllegalStateException("ジョブ結果ペイロードがJSONではありません: " + captor.getValue(), e);
-        }
+    /** n回目(1起点)の/prompt投入だけを失敗させる。 */
+    private void failPromptOn(java.util.function.IntPredicate failing, int status) {
+        world.http.on("POST", "/prompt", req -> failing.test(world.http.requests("POST", "/prompt").size())
+                ? FakeHttpServer.Response.json(status, "{\"error\":\"VRAM\"}") : null);
     }
 
     // --- AC1: batchSize × batchCount 枚が1リクエストで返る ---
 
     @Test
     void batchSize2かつbatchCount3なら6枚返り3リピート実行される() {
-        comfyReturns(2);
+        world.comfyReturns(2);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":2,\"batchCount\":3,\"projectId\":1}"));
 
         assertEquals(6, response.images().size(), "batchSize × batchCount 枚が返らなければならない");
-        assertEquals(3, capturedComfyParams(3).size(), "プロバイダ呼び出しはリピート回数ぶん");
-        assertEquals(6, capturedSaveRequests(6).size(), "生成した全画像が1行ずつ保存される");
+        assertEquals(3, world.comfyWorkflows().size(), "プロバイダ呼び出しはリピート回数ぶん");
+        assertEquals(6, world.savedImages.size(), "生成した全画像が1行ずつ保存される");
         assertEquals(0, failedRepeats(response));
     }
 
@@ -685,7 +647,7 @@ class ImageGenerationServiceTest {
 
     @Test
     void 同一リピート内は同じseedで異なるbatchIndexになりリピート間はseedが異なる() {
-        comfyReturns(2);
+        world.comfyReturns(2);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":2,\"batchCount\":3,\"projectId\":1}"));
@@ -706,15 +668,10 @@ class ImageGenerationServiceTest {
 
     @Test
     void seed指定時はリピートごとにseedが1ずつ増える() {
-        comfyReturns(1);
-
         AiImageBatchResponse response = service.generateImage(requestFromJson(
                 "{\"prompt\":\"a cat\",\"seed\":12345,\"batchCount\":3,\"projectId\":1}"));
 
-        List<ComfyUiGenerationParams> params = capturedComfyParams(3);
-        assertEquals(12345L, params.get(0).seed());
-        assertEquals(12346L, params.get(1).seed());
-        assertEquals(12347L, params.get(2).seed());
+        assertEquals(List.of(12345L, 12346L, 12347L), world.allComfyParams().stream().map(ComfyParams::seed).toList());
         assertEquals(List.of(12345L, 12346L, 12347L),
                 response.images().stream().map(AiImageResponse::seed).toList());
     }
@@ -723,8 +680,6 @@ class ImageGenerationServiceTest {
 
     @Test
     void seed未指定時はリピートごとに異なるランダムseedを引く() {
-        comfyReturns(1);
-
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":3,\"projectId\":1}"));
 
@@ -737,33 +692,33 @@ class ImageGenerationServiceTest {
 
     @Test
     void batchCount省略時は従来どおり1リピートだけ実行する() {
-        comfyReturns(2);
+        world.comfyReturns(2);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":2,\"projectId\":1}"));
 
         assertEquals(2, response.images().size());
-        assertEquals(1, capturedComfyParams(1).size());
+        assertEquals(1, world.comfyWorkflows().size());
     }
 
     // --- AC6: batchSize=16(COMFYUI) ---
 
     @Test
     void COMFYUIではbatchSize16を1リピートで生成する() {
-        comfyReturns(16);
+        world.comfyReturns(16);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":16,\"projectId\":1}"));
 
         assertEquals(16, response.images().size());
-        assertEquals(16, capturedComfyParams(1).get(0).batchSize());
+        assertEquals(16, comfy().batchSize());
     }
 
     // --- AC10: CHATGPTはプロバイダ別上限(n ≤ 10) ---
 
     @Test
     void CHATGPTでbatchSizeが10を超えると生成を開始せず失敗する() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        world.providerIs(1L, "CHATGPT");
 
         AiImageRequest imageRequest =
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":11,\"projectId\":1}");
@@ -774,15 +729,15 @@ class ImageGenerationServiceTest {
                 "エラーメッセージにプロバイダ名を含める: " + e.getMessage());
         assertTrue(e.getMessage().contains("10"),
                 "エラーメッセージに上限値を含める: " + e.getMessage());
-        verify(chatGptImageClient, never()).generateImage(any());
-        verify(generatedImageCreationService, never()).create(any());
-        verify(generationJobClient, never()).create(anyString(), anyString(), any());
+        assertTrue(world.http.requests("POST", "/images/generations").isEmpty());
+        assertTrue(world.savedImages.isEmpty());
+        assertTrue(world.jobCreates().isEmpty());
     }
 
     @Test
     void CHATGPTでもbatchSize10までは生成する() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> images(10));
+        world.providerIs(1L, "CHATGPT");
+        world.chatGptReturns(10);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":10,\"projectId\":1}"));
@@ -792,7 +747,7 @@ class ImageGenerationServiceTest {
 
     @Test
     void COMFYUIではbatchSize11でも上限に触れない() {
-        comfyReturns(11);
+        world.comfyReturns(11);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchSize\":11,\"projectId\":1}"));
@@ -804,7 +759,7 @@ class ImageGenerationServiceTest {
 
     @Test
     void batchSize16かつbatchCount16は拒否せず受理する() {
-        comfyReturns(16);
+        world.comfyReturns(16);
 
         AiImageBatchResponse response = service.generateImage(requestFromJson(
                 "{\"prompt\":\"a cat\",\"batchSize\":16,\"batchCount\":16,\"projectId\":1}"));
@@ -816,36 +771,25 @@ class ImageGenerationServiceTest {
 
     @Test
     void 途中のリピートが失敗しても成功分を返し失敗リピート数を示す() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            if (call.incrementAndGet() == 2) {
-                throw new IllegalStateException("2リピート目でVRAM不足");
-            }
-            return images(1);
-        });
+        failPromptOn(n -> n == 2, 500);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":3,\"projectId\":1}"));
 
         assertEquals(2, response.images().size(), "成功したリピートの画像は捨てない");
         assertEquals(1, failedRepeats(response), "失敗したリピート数を結果に示す");
-        assertEquals(2, capturedSaveRequests(2).size());
+        assertEquals(2, world.savedImages.size());
     }
 
     @Test
     void 部分失敗でもジョブは完了として成功数と失敗数を記録する() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            if (call.incrementAndGet() == 2) {
-                throw new IllegalStateException("2リピート目でVRAM不足");
-            }
-            return images(2);
-        });
+        world.comfyReturns(2);
+        failPromptOn(n -> n == 2, 500);
 
         service.generateImage(requestFromJson(
                 "{\"prompt\":\"a cat\",\"batchSize\":2,\"batchCount\":3,\"projectId\":1}"));
 
-        com.fasterxml.jackson.databind.JsonNode result = capturedJobResult("done");
+        JsonNode result = jobResult("done");
         assertEquals("4", result.path("count").asText(), "countは総枚数");
         assertEquals("2", result.path("succeededRepeats").asText());
         assertEquals("1", result.path("failedRepeats").asText());
@@ -853,15 +797,15 @@ class ImageGenerationServiceTest {
 
     @Test
     void 全リピートが失敗したらジョブを失敗として記録し例外を投げ直す() {
-        when(comfyUiClient.generateImage(any())).thenThrow(new IllegalStateException("boom"));
+        world.http.status("POST", "/prompt", 500, "{\"error\":\"boom\"}");
 
         AiImageRequest imageRequest =
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":3,\"projectId\":1}");
 
-        assertThrows(IllegalStateException.class, () -> service.generateImage(imageRequest));
+        assertThrows(AiServiceException.class, () -> service.generateImage(imageRequest));
 
-        verify(generationJobClient).updateStatus(eq(9L), eq("failed"), anyString());
-        verify(generatedImageCreationService, never()).create(any());
+        assertEquals(1, world.jobUpdates("failed").size());
+        assertTrue(world.savedImages.isEmpty());
     }
 
     // --- レビュー指摘(IMPORTANT): 決定的な失敗をbatchCount回リトライしない ---
@@ -876,15 +820,14 @@ class ImageGenerationServiceTest {
      */
     @Test
     void 同じ原因で連続して失敗したら残りのリピートを打ち切る() {
-        when(comfyUiClient.generateImage(any()))
-                .thenThrow(new IllegalStateException("checkpoint not found: x.safetensors"));
+        world.http.status("POST", "/prompt", 500, "{\"error\":\"checkpoint not found: x.safetensors\"}");
 
         AiImageRequest imageRequest =
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":16,\"projectId\":1}");
 
-        assertThrows(IllegalStateException.class, () -> service.generateImage(imageRequest));
+        assertThrows(AiServiceException.class, () -> service.generateImage(imageRequest));
 
-        verify(comfyUiClient, org.mockito.Mockito.times(2)).generateImage(any());
+        assertEquals(2, world.http.requests("POST", "/prompt").size());
     }
 
     /**
@@ -894,13 +837,7 @@ class ImageGenerationServiceTest {
      */
     @Test
     void 打ち切っても成功分は返し打ち切ったリピートも失敗として数える() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            if (call.incrementAndGet() >= 2) {
-                throw new IllegalStateException("ComfyUIの認証に失敗しました");
-            }
-            return images(1);
-        });
+        failPromptOn(n -> n >= 2, 500);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":8,\"projectId\":1}"));
@@ -908,24 +845,18 @@ class ImageGenerationServiceTest {
         assertEquals(1, response.images().size(), "成功した1リピート分の画像は返す");
         assertEquals(7, failedRepeats(response),
                 "打ち切った5回を含め、成功しなかった7リピートを失敗として数える");
-        verify(comfyUiClient, org.mockito.Mockito.times(3)).generateImage(any());
+        assertEquals(3, world.http.requests("POST", "/prompt").size());
     }
 
     /** 打ち切ったことと、実際に何回試したのかがジョブ履歴から追えること。 */
     @Test
     void 打ち切りはジョブ履歴に試行回数と打ち切りの事実として残る() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            if (call.incrementAndGet() >= 2) {
-                throw new IllegalStateException("ComfyUIの認証に失敗しました");
-            }
-            return images(1);
-        });
+        failPromptOn(n -> n >= 2, 500);
 
         service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":8,\"projectId\":1}"));
 
-        com.fasterxml.jackson.databind.JsonNode result = capturedJobResult("done");
+        JsonNode result = jobResult("done");
         assertEquals("1", result.path("succeededRepeats").asText());
         assertEquals("7", result.path("failedRepeats").asText());
         assertEquals("3", result.path("attemptedRepeats").asText(),
@@ -937,22 +868,15 @@ class ImageGenerationServiceTest {
     /** 単発の失敗は打ち切りにしない(連続でなければ一過性の可能性がある)。 */
     @Test
     void 失敗が連続しなければ打ち切らない() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            if (call.incrementAndGet() % 2 == 0) {
-                throw new IllegalStateException("一過性のVRAM不足");
-            }
-            return images(1);
-        });
+        failPromptOn(n -> n % 2 == 0, 500);
 
         AiImageBatchResponse response = service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":6,\"projectId\":1}"));
 
         assertEquals(3, response.images().size(), "奇数回目は成功しているので3枚返る");
         assertEquals(3, failedRepeats(response));
-        verify(comfyUiClient, org.mockito.Mockito.times(6)).generateImage(any());
-        com.fasterxml.jackson.databind.JsonNode result = capturedJobResult("done");
-        assertEquals("false", result.path("aborted").asText(), "打ち切っていない");
+        assertEquals(6, world.http.requests("POST", "/prompt").size());
+        assertEquals("false", jobResult("done").path("aborted").asText(), "打ち切っていない");
     }
 
     /**
@@ -963,18 +887,16 @@ class ImageGenerationServiceTest {
      */
     @Test
     void 全リピートが失敗したら最初の失敗を投げる() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            throw new IllegalStateException("失敗" + call.incrementAndGet());
-        });
+        AtomicInteger call = new AtomicInteger();
+        world.http.on("POST", "/prompt", req -> FakeHttpServer.Response.json(
+                500, "{\"error\":\"失敗" + call.incrementAndGet() + "\"}"));
 
         AiImageRequest imageRequest =
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":4,\"projectId\":1}");
 
-        IllegalStateException e =
-                assertThrows(IllegalStateException.class, () -> service.generateImage(imageRequest));
+        AiServiceException e = assertThrows(AiServiceException.class, () -> service.generateImage(imageRequest));
 
-        assertEquals("失敗1", e.getMessage(), "最初の失敗を投げる(最後ではない)");
+        assertTrue(e.getMessage().contains("失敗1"), "最初の失敗を投げる(最後ではない): " + e.getMessage());
     }
 
     /**
@@ -983,19 +905,17 @@ class ImageGenerationServiceTest {
      */
     @Test
     void 異なる原因の失敗は最初の例外に添えて失われないようにする() {
-        java.util.concurrent.atomic.AtomicInteger call = new java.util.concurrent.atomic.AtomicInteger();
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> {
-            throw new IllegalStateException("失敗" + call.incrementAndGet());
-        });
+        AtomicInteger call = new AtomicInteger();
+        world.http.on("POST", "/prompt", req -> FakeHttpServer.Response.json(
+                500, "{\"error\":\"失敗" + call.incrementAndGet() + "\"}"));
 
         AiImageRequest imageRequest =
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":4,\"projectId\":1}");
 
-        IllegalStateException e =
-                assertThrows(IllegalStateException.class, () -> service.generateImage(imageRequest));
+        AiServiceException e = assertThrows(AiServiceException.class, () -> service.generateImage(imageRequest));
 
         assertEquals(1, e.getSuppressed().length, "2件目の失敗が添えられている");
-        assertEquals("失敗2", e.getSuppressed()[0].getMessage());
+        assertTrue(e.getSuppressed()[0].getMessage().contains("失敗2"));
     }
 
     // --- レビュー指摘(SUGGESTION): リピート間で変わらない既定値は1回だけ引く ---
@@ -1007,32 +927,34 @@ class ImageGenerationServiceTest {
      *
      * <p>品質プロンプトは元の実装で最も回数が多く、{@code batchCount=16}のとき
      * 18回(禁止コンテンツ検査1 + タグ提案1 + リピート16)引いていた。
+     * 解決のたびにproject-serviceへの存在確認とDBの読み出しが起きるので、その回数が
+     * リピート回数に依らないことで確かめる。
      */
     @Test
     void リピート間で変わらない既定値はリピート回数によらず1回だけ引く() {
-        comfyReturns(1);
+        service.generateImage(requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":1,\"projectId\":1}"));
+        int singleRepeat = world.http.requests("GET", "/api/internal/project/projects/1").size();
 
-        service.generateImage(
-                requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":16,\"projectId\":1}"));
+        try (MediaWorld sixteen = new MediaWorld()) {
+            sixteen.settingsFor(1L);
+            sixteen.imageGenerationService.generateImage(
+                    requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":16,\"projectId\":1}"));
 
-        verify(defaultsResolver, org.mockito.Mockito.times(1)).resolveDefaultQualityPrompt(any());
-        verify(defaultsResolver, org.mockito.Mockito.times(1)).resolveDefaultNegativePrompt(any());
-        verify(defaultsResolver, org.mockito.Mockito.times(1)).resolveDefaultGeneratedImageWidth(any());
-        verify(defaultsResolver, org.mockito.Mockito.times(1)).resolveDefaultGeneratedImageHeight(any());
-        verify(comfyUiModelService, org.mockito.Mockito.times(1))
-                .getSelectedCheckpointOrGlobalDefault(any());
+            assertEquals(singleRepeat, sixteen.http.requests("GET", "/api/internal/project/projects/1").size(),
+                    "既定値の解決回数はbatchCountに依らない");
+            assertEquals(16, sixteen.comfyWorkflows().size());
+        }
     }
 
     /** 1回だけ引くようにしても、リピートごとに変わるseed以外は全リピートで同じ値になる。 */
     @Test
     void 既定値を1回だけ引いても全リピートに同じ値が渡る() {
-        comfyReturns(1);
-
         service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"seed\":100,\"batchCount\":3,\"projectId\":1}"));
 
-        List<ComfyUiGenerationParams> params = capturedComfyParams(3);
-        for (ComfyUiGenerationParams p : params) {
+        List<ComfyParams> params = world.allComfyParams();
+        assertEquals(3, params.size());
+        for (ComfyParams p : params) {
             assertEquals("a cat, masterpiece", p.prompt());
             assertEquals("default negative", p.negativePrompt());
             assertEquals(1024, p.width());
@@ -1048,11 +970,29 @@ class ImageGenerationServiceTest {
 
     @Test
     void タグ提案はリピート回数によらず1回だけ呼ぶ() {
-        comfyReturns(1);
-
         service.generateImage(
                 requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":3,\"projectId\":1}"));
 
-        verify(aiGenerationClient, org.mockito.Mockito.times(1)).generate(any(), anyString(), any());
+        assertEquals(1, world.http.requests("POST", "/api/internal/ai/generate").size());
+    }
+
+    /**
+     * 同じ例外インスタンスを自分自身に添えると{@link IllegalArgumentException}になるため、2件目以降の失敗は
+     * 最初の失敗と別のインスタンスのときだけ添える。DB(リポジトリ)が毎回同じ例外インスタンスを投げる状態で、
+     * 最初の失敗に自分自身が添えられずに、元の例外がそのまま投げ直されることを確かめる。
+     */
+    @Test
+    void 同じ例外インスタンスが続けて投げられても自分自身を添えずに最初の失敗を投げる() {
+        IllegalStateException sameFailure = new IllegalStateException("DBが落ちている");
+        org.mockito.Mockito.when(world.generatedImageRepository.save(org.mockito.ArgumentMatchers.any(GeneratedImage.class)))
+                .thenThrow(sameFailure);
+        AiImageRequest imageRequest =
+                requestFromJson("{\"prompt\":\"a cat\",\"batchCount\":3,\"projectId\":1}");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> service.generateImage(imageRequest));
+
+        assertTrue(e == sameFailure, "最初の失敗がそのまま投げられる");
+        assertEquals(0, e.getSuppressed().length, "自分自身は添えない");
+        assertEquals(2, world.http.requests("POST", "/prompt").size(), "2回続けて失敗したので打ち切る");
     }
 }

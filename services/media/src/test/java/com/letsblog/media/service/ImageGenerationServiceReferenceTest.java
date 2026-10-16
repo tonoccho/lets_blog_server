@@ -1,42 +1,23 @@
 package com.letsblog.media.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.letsblog.common.client.GenerationJobClient;
-import com.letsblog.common.client.GenerationJobSummary;
-import com.letsblog.media.ai.ChatGptImageClient;
-import com.letsblog.media.ai.ComfyUiClient;
-import com.letsblog.media.ai.ComfyUiGenerationParams;
-import com.letsblog.media.ai.ComfyUiImage;
 import com.letsblog.media.ai.ImageProvider;
-import com.letsblog.media.ai.ReferenceImage;
-import com.letsblog.media.ai.SeedResolver;
-import com.letsblog.media.client.AiGenerationClient;
-import com.letsblog.media.domain.GeneratedImage;
 import com.letsblog.media.dto.AiImageRequest;
-import com.letsblog.media.dto.CreateGeneratedImageRequest;
-import jakarta.servlet.http.HttpServletRequest;
-import java.util.List;
+import com.letsblog.media.testsupport.FakeHttpServer;
+import com.letsblog.media.testsupport.MediaWorld;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 参照画像付き(img2img)生成のオーケストレーション(issue #1601)。
@@ -47,61 +28,27 @@ import static org.mockito.Mockito.when;
  *
  * <p>Gherkin側(media/image-reference-generation.feature)が画面とAPIから同じ受け入れ基準を見る。
  * ここは分岐(プロバイダ・同期/非同期・リピート)を網羅する。
+ *
+ * <p>issue #1819: {@code ImageGenerationService}・{@code ReferenceImageService}・{@code GeneratedImageStorageService}と
+ * その協力者はすべて実物。参照画像のファイルは一時ディレクトリに実際に置き、ComfyUI・ChatGPT画像APIはフェイクHTTPサーバーが演じる。
+ * ComfyUIへ渡った参照画像は{@code /upload/image}の要求本文(マルチパート)とワークフロー(LoadImageノード・denoise)から確かめる。
  */
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("media-service: 参照画像付き生成(issue #1601)")
 class ImageGenerationServiceReferenceTest {
 
-    @Mock
-    private AiGenerationClient aiGenerationClient;
-    @Mock
-    private ComfyUiClient comfyUiClient;
-    @Mock
-    private ChatGptImageClient chatGptImageClient;
-    @Mock
-    private ImageModelService imageModelService;
-    @Mock
-    private ComfyUiModelService comfyUiModelService;
-    @Mock
-    private GeneratedImageCreationService generatedImageCreationService;
-    @Mock
-    private GenerationJobClient generationJobClient;
-    @Mock
-    private ProjectImageDefaultsResolver defaultsResolver;
-    @Mock
-    private ProhibitedContentFilterService prohibitedContentFilterService;
-    @Mock
-    private ReferenceImageService referenceImageService;
-    @Mock
-    private HttpServletRequest request;
+    private static final byte[] REFERENCE_BYTES = {4, 5, 6, 7, 8, 9};
 
-    private ImageGenerationService service;
-
-    private static final ReferenceImage REFERENCE = new ReferenceImage(new byte[] {4, 5, 6}, "image/png");
+    private final MediaWorld world = new MediaWorld();
+    private final ImageGenerationService service = world.imageGenerationService;
 
     @BeforeEach
     void setUp() {
-        service = new ImageGenerationService(
-                aiGenerationClient, comfyUiClient, chatGptImageClient, imageModelService, comfyUiModelService,
-                generatedImageCreationService, generationJobClient, new ObjectMapper(), defaultsResolver,
-                prohibitedContentFilterService, new SafetyNegativePromptService("a", "b", "c"),
-                new SeedResolver(), referenceImageService, request);
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.COMFYUI);
-        when(comfyUiModelService.getSelectedCheckpointOrGlobalDefault(any())).thenReturn("g.safetensors");
-        when(defaultsResolver.resolveDefaultGeneratedImageWidth(any())).thenReturn(512);
-        when(defaultsResolver.resolveDefaultGeneratedImageHeight(any())).thenReturn(512);
-        when(aiGenerationClient.generate(any(), anyString(), any())).thenReturn("{\"tags\":[]}");
-        when(generationJobClient.create(anyString(), anyString(), any()))
-                .thenReturn(new GenerationJobSummary(9L, "comfyui_image", "running", null, null));
-        when(generatedImageCreationService.create(any())).thenAnswer(inv -> {
-            GeneratedImage saved = new GeneratedImage();
-            saved.setId(100L);
-            return saved;
-        });
-        when(comfyUiClient.generateImage(any())).thenAnswer(inv -> List.of(
-                new ComfyUiImage("a.png", new byte[] {1}, "image/png")));
-        when(referenceImageService.load(1L, 5L)).thenReturn(REFERENCE);
+        world.existingImage(5L, 1L, REFERENCE_BYTES, "image/png");
+    }
+
+    @AfterEach
+    void close() {
+        world.close();
     }
 
     private static AiImageRequest withReference(Long projectId, Long referenceImageId, Double denoise) {
@@ -110,100 +57,98 @@ class ImageGenerationServiceReferenceTest {
                 projectId, referenceImageId, denoise);
     }
 
-    private ComfyUiGenerationParams comfyParams() {
-        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
-        verify(comfyUiClient).generateImage(captor.capture());
-        return captor.getValue();
+    private static boolean contains(byte[] haystack, byte[] needle) {
+        outer:
+        for (int i = 0; i + needle.length <= haystack.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
-    private CreateGeneratedImageRequest savedRequest() {
-        ArgumentCaptor<CreateGeneratedImageRequest> captor =
-                ArgumentCaptor.forClass(CreateGeneratedImageRequest.class);
-        verify(generatedImageCreationService).create(captor.capture());
-        return captor.getValue();
+    private FakeHttpServer.Request upload() {
+        return world.http.requests("POST", "/upload/image").get(0);
+    }
+
+    private void assertReferenceUploaded() {
+        assertTrue(contains(upload().body(), REFERENCE_BYTES), "参照画像のバイト列がComfyUIへ送られる");
     }
 
     @Test
     void 同期生成は参照画像のバイト列とdenoiseをComfyUIへ渡し参照元IDを保存する() {
         service.generateImage(withReference(1L, 5L, 0.3));
 
-        ComfyUiGenerationParams params = comfyParams();
-        assertSame(REFERENCE, params.referenceImage());
+        assertReferenceUploaded();
+        MediaWorld.ComfyParams params = world.lastComfyParams();
+        assertTrue(params.img2img());
         assertEquals(0.3, params.denoise());
-        assertEquals(5L, savedRequest().sourceImageId());
-        verify(referenceImageService).requireUsable(1L, 5L);
+        assertEquals(5L, world.savedImages.get(world.savedImages.size() - 1).getSourceImageId());
+        assertEquals("uploaded.png", world.lastComfyWorkflow().path("11").path("inputs").path("image").asText());
     }
 
     @Test
-    void denoise未指定ならそのままnullを渡しComfyUIClientの既定に任せる() {
+    void denoise未指定ならComfyUIClientの既定に任せる() {
         service.generateImage(withReference(1L, 5L, null));
 
-        assertNull(comfyParams().denoise());
+        assertEquals(0.6, world.lastComfyParams().denoise());
     }
 
     @Test
     void 参照画像が無い要求は従来どおり参照もdenoiseも空で保存にも参照元は無い() {
         service.generateImage(withReference(1L, null, null));
 
-        ComfyUiGenerationParams params = comfyParams();
-        assertNull(params.referenceImage());
-        assertNull(params.denoise());
-        assertNull(savedRequest().sourceImageId());
-        verify(referenceImageService, never()).requireUsable(any(), any());
-        verify(referenceImageService, never()).load(any(), any());
+        MediaWorld.ComfyParams params = world.lastComfyParams();
+        assertFalse(params.img2img());
+        assertEquals(1.0, params.denoise());
+        assertTrue(world.http.requests("POST", "/upload/image").isEmpty());
+        assertNull(world.savedImages.get(world.savedImages.size() - 1).getSourceImageId());
     }
 
     @Test
     void 参照画像が使えない要求はジョブを作らず生成もしない_同期() {
-        when(referenceImageService.requireUsable(1L, 5L)).thenThrow(new InvalidReferenceImageException("x"));
-
         assertThrows(InvalidReferenceImageException.class,
-                () -> service.generateImage(withReference(1L, 5L, null)));
+                () -> service.generateImage(withReference(1L, 99L, null)));
 
-        verify(generationJobClient, never()).create(anyString(), anyString(), any());
-        verify(comfyUiClient, never()).generateImage(any());
+        assertTrue(world.jobCreates().isEmpty());
+        assertTrue(world.comfyWorkflows().isEmpty());
     }
 
     @Test
     void ChatGPTでの参照画像付き要求は拒否せず参照画像のバイト列をChatGPTへ渡し参照元IDを保存する_同期() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> List.of(
-                new ComfyUiImage("chatgpt_1.png", new byte[] {1}, "image/png")));
+        world.providerIs(1L, "CHATGPT");
 
         service.generateImage(withReference(1L, 5L, null));
 
-        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
-        verify(chatGptImageClient).generateImage(captor.capture());
-        assertSame(REFERENCE, captor.getValue().referenceImage());
-        assertEquals(5L, savedRequest().sourceImageId());
-        verify(referenceImageService).requireUsable(1L, 5L);
-        verify(comfyUiClient, never()).generateImage(any());
+        var edit = world.http.requests("POST", "/images/edits").get(0);
+        assertTrue(contains(edit.body(), REFERENCE_BYTES), "参照画像のバイト列がimages/editsへ送られる");
+        assertTrue(world.http.requests("POST", "/images/generations").isEmpty());
+        assertEquals(5L, world.savedImages.get(world.savedImages.size() - 1).getSourceImageId());
+        assertTrue(world.comfyWorkflows().isEmpty());
     }
 
     @Test
     void ChatGPTでも使えない参照画像はジョブを作らず拒否する_同期() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(referenceImageService.requireUsable(1L, 5L)).thenThrow(new InvalidReferenceImageException("x"));
+        world.providerIs(1L, "CHATGPT");
 
         assertThrows(InvalidReferenceImageException.class,
-                () -> service.generateImage(withReference(1L, 5L, null)));
+                () -> service.generateImage(withReference(1L, 99L, null)));
 
-        verify(generationJobClient, never()).create(anyString(), anyString(), any());
-        verify(chatGptImageClient, never()).generateImage(any());
+        assertTrue(world.jobCreates().isEmpty());
+        assertTrue(world.http.requests("POST", "/images/.*").isEmpty());
     }
 
     @Test
     void ChatGPTで参照画像が無い要求は従来どおり参照画像を読み込まない() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
-        when(chatGptImageClient.generateImage(any())).thenAnswer(inv -> List.of(
-                new ComfyUiImage("chatgpt_1.png", new byte[] {1}, "image/png")));
+        world.providerIs(1L, "CHATGPT");
 
         service.generateImage(withReference(1L, null, null));
 
-        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
-        verify(chatGptImageClient).generateImage(captor.capture());
-        assertNull(captor.getValue().referenceImage());
-        verify(referenceImageService, never()).load(any(), any());
+        assertEquals(1, world.http.requests("POST", "/images/generations").size());
+        assertTrue(world.http.requests("POST", "/images/edits").isEmpty());
     }
 
     @Test
@@ -211,56 +156,70 @@ class ImageGenerationServiceReferenceTest {
         ImageProvider provider = service.requireAcceptable(withReference(1L, 5L, null));
 
         assertEquals(ImageProvider.COMFYUI, provider);
-        verify(referenceImageService).requireUsable(1L, 5L);
     }
 
     @Test
     void 非同期の受理前検証で他プロジェクトの参照画像は拒否する() {
-        when(referenceImageService.requireUsable(1L, 5L)).thenThrow(new InvalidReferenceImageException("x"));
+        world.existingImage(6L, 2L, REFERENCE_BYTES, "image/png");
 
         assertThrows(InvalidReferenceImageException.class,
-                () -> service.requireAcceptable(withReference(1L, 5L, null)));
+                () -> service.requireAcceptable(withReference(1L, 6L, null)));
     }
 
     @Test
     void 非同期の受理前検証でChatGPTの参照画像付き要求も参照画像を確かめて受理する() {
-        when(imageModelService.getSelectedProvider(any())).thenReturn(ImageProvider.CHATGPT);
+        world.providerIs(1L, "CHATGPT");
 
         ImageProvider provider = service.requireAcceptable(withReference(1L, 5L, null));
 
         assertEquals(ImageProvider.CHATGPT, provider);
-        verify(referenceImageService).requireUsable(1L, 5L);
+        assertThrows(InvalidReferenceImageException.class,
+                () -> service.requireAcceptable(withReference(1L, 99L, null)));
     }
 
     @Test
     void 非同期の受理前検証は参照画像が無ければ何も確かめない() {
-        service.requireAcceptable(withReference(1L, null, null));
-
-        verify(referenceImageService, never()).requireUsable(any(), any());
+        // 参照画像IDが無ければ、存在しないプロジェクト扱いの要求でも参照画像の検証では落ちない。
+        assertEquals(ImageProvider.COMFYUI, service.requireAcceptable(withReference(1L, null, null)));
     }
 
     @Test
     void 非同期のgenerateBatchでも参照画像とdenoiseを渡し参照元IDを残す() {
         service.generateBatch(withReference(1L, 5L, 0.9), false, (done, total) -> { });
 
-        assertSame(REFERENCE, comfyParams().referenceImage());
-        assertEquals(0.9, comfyParams().denoise());
-        assertEquals(5L, savedRequest().sourceImageId());
+        assertReferenceUploaded();
+        assertEquals(0.9, world.lastComfyParams().denoise());
+        assertEquals(5L, world.savedImages.get(world.savedImages.size() - 1).getSourceImageId());
     }
 
     @Test
-    void 参照画像はリピートの数によらず1回だけ読み込み全リピートへ渡す() {
+    void 参照画像はリピートの数によらず1回だけ読み込み全リピートへ渡す() throws IOException {
+        // 最初のアップロードを受けた時点で保存先のファイルを消す。リピートごとに読み込み直すと、
+        // 2回目以降は読み込みに失敗する。1回だけ読み込んで使い回していれば3回とも同じバイト列が送られる。
+        AtomicBoolean deleted = new AtomicBoolean();
+        world.http.on("POST", "/upload/image", req -> {
+            if (deleted.compareAndSet(false, true)) {
+                try {
+                    Files.delete(world.storageDir.resolve(world.images.get(5L).getFilePath()));
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+            return null;
+        });
         AiImageRequest repeated = new AiImageRequest(
                 "a cat", null, null, null, null, null, 1L, null, null, null, 3, null, null, null,
                 1L, 5L, 0.4);
 
         service.generateBatch(repeated, false, (done, total) -> { });
 
-        verify(referenceImageService, times(1)).load(1L, 5L);
-        ArgumentCaptor<ComfyUiGenerationParams> captor = ArgumentCaptor.forClass(ComfyUiGenerationParams.class);
-        verify(comfyUiClient, times(3)).generateImage(captor.capture());
-        for (ComfyUiGenerationParams params : captor.getAllValues()) {
-            assertSame(REFERENCE, params.referenceImage());
+        var uploads = world.http.requests("POST", "/upload/image");
+        assertEquals(3, uploads.size());
+        for (var upload : uploads) {
+            assertTrue(contains(upload.body(), REFERENCE_BYTES));
+        }
+        assertEquals(3, world.comfyWorkflows().size());
+        for (MediaWorld.ComfyParams params : world.allComfyParams()) {
             assertEquals(0.4, params.denoise());
         }
     }
