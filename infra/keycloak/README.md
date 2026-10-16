@@ -114,6 +114,53 @@ proxy 側が `admin` を確かめる。
 (重ねれば `.env` の値になる)。既存の realm には後から効かないので、公開 secret のまま使わないなら、
 初回から `docker-compose.extensions.yml` を重ねるか、上の docs の kcadm 手順で secret を設定し直す。
 
+## extensions のツール用クライアント(#1804)
+
+`realm-export.json` の `letsblog-tools-client` は、lets_blog が extensions のツール(Ollama・ComfyUI・PlantUML・ポータル)を
+呼ぶときに付ける client credentials トークン専用の confidential クライアントである。`letsblog-services` のサービスアカウントは
+`realm-management` の `manage-users` / `view-users` / `manage-realm` を持つので、外部へ送るトークンには使えない。
+
+- service accounts だけを有効にし、standard flow・direct grant・implicit は無効にする。
+- ロールを持たない: `fullScopeAllowed=false`、`roles` スコープを付けない。トークンに `admin` / `editor` / `viewer` も
+  `realm-management` のロールも載らない(受け入れテスト `auth/tools-client-token.feature` が Admin REST API の 403 で確かめる)。
+- audience は固定の `lbx-tools`(`oidc-audience-mapper`)。
+- secret は `${KEYCLOAK_TOOLS_CLIENT_SECRET:dev-only-letsblog-tools-secret-change-me}`。`setup.sh` が `.env` へランダム値を書き、
+  `docker-compose.yml` が keycloak と ai / media / platform へ同じ値を渡す。
+
+**既存の Keycloak には realm の import が効かない**(既存の realm を上書きしない)。次の kcadm の手順で足す。
+**この手順は利用者が内容を確かめてから実行する。** 実装者・自動化は、稼働中の Keycloak へ実行しない。
+
+```bash
+# 1. 管理者でログインする
+docker exec -it lbs-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://localhost:8080/auth --realm master --user "<KEYCLOAK_ADMIN_USERNAME>"
+
+# 2. クライアントを作る(<…> は .env の KEYCLOAK_TOOLS_CLIENT_SECRET の値)。ロールのスコープを持たせない
+docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh create clients -r letsblog \
+  -s clientId=letsblog-tools-client -s enabled=true -s publicClient=false \
+  -s standardFlowEnabled=false -s implicitFlowEnabled=false -s directAccessGrantsEnabled=false \
+  -s serviceAccountsEnabled=true -s fullScopeAllowed=false \
+  -s secret="<KEYCLOAK_TOOLS_CLIENT_SECRET>"
+
+# 3. audience(lbx-tools)を access token に載せるマッパーを足す
+id=$(docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh get clients -r letsblog \
+      -q clientId=letsblog-tools-client --fields id --format csv --noquotes)
+docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh create clients/$id/protocol-mappers/models -r letsblog \
+  -s name='lbx-tools audience' -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper \
+  -s 'config."included.custom.audience"=lbx-tools' -s 'config."access.token.claim"=true' \
+  -s 'config."id.token.claim"=false' -s 'config."introspection.token.claim"=true'
+
+# 4. 既定のクライアントスコープから roles を外す(クライアント作成時に付く roles スコープが realm ロールを載せるため)
+scope=$(docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh get client-scopes -r letsblog \
+         -q name=roles --fields id --format csv --noquotes)
+docker exec lbs-keycloak /opt/keycloak/bin/kcadm.sh delete clients/$id/default-client-scopes/$scope -r letsblog
+```
+
+その後 `.env` に `KEYCLOAK_TOOLS_CLIENT_SECRET` を足し(無ければ `bash scripts/check-env.sh` が名前を示す)、
+`docker compose up -d ai media platform` で再作成する。値が空のままなら、トークンは付かない(従来どおり)。
+確認: ロールが無いことは、`docker exec lbs-ai sh -c 'curl ... client_id=letsblog-tools-client ...'` で取ったトークンで
+`/auth/admin/realms/letsblog/users` を呼ぶと 403 になることで確かめる。
+
 ## 動作確認
 
 ```bash

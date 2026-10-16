@@ -1204,6 +1204,59 @@
         "organization",
         "microprofile-jwt"
       ]
+    },
+    {
+      "id": "de57efe9-2106-514c-833e-6207d8bde7d8",
+      "clientId": "letsblog-tools-client",
+      "name": "Extensions Tools API (no roles)",
+      "description": "lets_blog から extensions のツールを呼ぶ client credentials 専用。ロールを持たない",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_TOOLS_CLIENT_SECRET:dev-only-letsblog-tools-secret-change-me}",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": false,
+      "nodeReRegistrationTimeout": -1,
+      "protocolMappers": [
+        {
+          "id": "13784702-6eec-5150-9204-1b73d6fd8832",
+          "name": "lbx-tools audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "lbx-tools",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "service_account",
+        "acr",
+        "basic"
+      ],
+      "optionalClientScopes": []
     }
   ],
   "users": [

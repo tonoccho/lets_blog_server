@@ -1,11 +1,12 @@
 # Keycloak クライアントシークレットのローテーション(#1551)
 
-対象は `.env` の次の2つ。
+対象は `.env` の次の3つ。
 
 | キー | Keycloak のクライアント | 使うサービス |
 | --- | --- | --- |
 | `KEYCLOAK_SERVICES_CLIENT_SECRET` | `letsblog-services` | identity / media / platform / publishing |
 | `KEYCLOAK_WEB_CLIENT_SECRET` | `letsblog-web` | web |
+| `KEYCLOAK_TOOLS_CLIENT_SECRET` | `letsblog-tools-client` | ai / media / platform(extensions のツールを呼ぶとき。#1804) |
 
 ## 背景
 
@@ -78,6 +79,18 @@
 `invalid_client` / `unauthorized_client` は `.env` と Keycloak の secret の食い違いである。
 Keycloak 側の Credentials タブの値と `.env` を突き合わせ、手順2か3をやり直す。
 元の値に戻す場合は、控えておいた旧値で手順2・3を行う。
+
+## `letsblog-tools-client` を既存の Keycloak に足す(#1804)
+
+`--import-realm` は既存の realm を上書きしないので、`letsblog-tools-client`(extensions のツールを呼ぶ専用クライアント。
+ロール無し、audience は `lbx-tools`)は、稼働中の Keycloak には手で足す。kcadm の手順(`kcadm.sh create clients` ほか)は
+[infra/keycloak/README.md](../infra/keycloak/README.md) の「extensions のツール用クライアント(#1804)」に書いた。
+**手順は利用者が内容を確かめてから実行する。** 実装者・自動化は、稼働中の Keycloak へ実行しない。
+
+secret を変えるときは上の手順と同じく、Keycloak 側(`kcadm.sh update clients/<id> -s secret=<新しい値>`)と `.env` の両方を揃え、
+`docker compose up -d ai media platform` で再作成する。`KEYCLOAK_TOOLS_CLIENT_SECRET` を空にすると、トークンを付けない状態へ戻る。
+設定したのに取得できないとき(クライアントが Keycloak に無い・secret の食い違い)は、ヘッダー無しで続けず、
+連携サービスの状況・接続テスト・各機能のエラーに理由(`KEYCLOAK_TOOLS_CLIENT_SECRET` とクライアント ID)が出る。
 
 ## 関連
 

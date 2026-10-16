@@ -420,6 +420,8 @@ class EnvGeneration(SetupShTestCase):
         "KEYCLOAK_GITLAB_CLIENT_SECRET",
         "KEYCLOAK_PENPOT_CLIENT_SECRET",
         "KEYCLOAK_PROXY_CLIENT_SECRET",
+        # #1804: extensions のツールを呼ぶ専用クライアントも同じ。
+        "KEYCLOAK_TOOLS_CLIENT_SECRET",
     )
 
     def _read_env(self, path):

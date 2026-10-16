@@ -1,5 +1,7 @@
 package com.letsblog.ai.service;
 
+import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.common.auth.ToolsTokenUnavailableException;
 import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.letsblog.common.scheduling.MdcPropagation;
 import com.letsblog.ai.client.PlatformServiceClient;
@@ -12,10 +14,12 @@ import com.letsblog.ai.dto.AiConnectionResponse.Status;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -50,13 +54,14 @@ public class AiConnectionService {
     private final ProjectAiSettingsService projectAiSettingsService;
     private final Function<String, RestClient.Builder> clientBuilderFactory;
     private final Duration timeout;
+    private final ToolsTokenProvider toolsTokenProvider;
 
     @Autowired
     public AiConnectionService(
             PlatformServiceClient platformServiceClient, CurrentActorService currentActorService,
-            ProjectAiSettingsService projectAiSettingsService) {
+            ProjectAiSettingsService projectAiSettingsService, ToolsTokenProvider toolsTokenProvider) {
         this(platformServiceClient, currentActorService, projectAiSettingsService,
-                AiConnectionService::builderWithTimeout, DEFAULT_TIMEOUT);
+                AiConnectionService::builderWithTimeout, DEFAULT_TIMEOUT, toolsTokenProvider);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderの生成とタイムアウトを差し替える。 */
@@ -66,6 +71,19 @@ public class AiConnectionService {
             ProjectAiSettingsService projectAiSettingsService,
             Function<String, RestClient.Builder> clientBuilderFactory,
             Duration timeout) {
+        this(platformServiceClient, currentActorService, projectAiSettingsService, clientBuilderFactory, timeout,
+                ToolsTokenProvider.disabled());
+    }
+
+    /** テスト専用: extensionsのツールのトークンも差し替える(#1804)。 */
+    AiConnectionService(
+            PlatformServiceClient platformServiceClient,
+            CurrentActorService currentActorService,
+            ProjectAiSettingsService projectAiSettingsService,
+            Function<String, RestClient.Builder> clientBuilderFactory,
+            Duration timeout,
+            ToolsTokenProvider toolsTokenProvider) {
+        this.toolsTokenProvider = toolsTokenProvider;
         this.platformServiceClient = platformServiceClient;
         this.currentActorService = currentActorService;
         this.projectAiSettingsService = projectAiSettingsService;
@@ -122,8 +140,12 @@ public class AiConnectionService {
         }
         String targetUrl = baseUrl + path;
         try {
-            ResponseEntity<Void> response =
-                    clientBuilderFactory.apply(baseUrl).build().get().uri(path).retrieve().toBodilessEntity();
+            // システム設定(DB・環境変数)の接続先にだけ、extensionsのツール用トークンを付ける。プロジェクトの上書き先には付けない(#1804)。
+            // 有効なのに取れないときは、送らずにERRORとして理由を結果に出す。
+            Optional<String> authorization = source == Source.PROJECT ? Optional.empty() : toolsTokenProvider.authorization();
+            ResponseEntity<Void> response = clientBuilderFactory.apply(baseUrl).build().get().uri(path)
+                    .headers(headers -> authorization.ifPresent(value -> headers.set(HttpHeaders.AUTHORIZATION, value)))
+                    .retrieve().toBodilessEntity();
             return new AiConnectionResponse(provider, displayName, targetUrl, source, Status.NORMAL, null, true);
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().is5xxServerError()) {
@@ -131,7 +153,7 @@ public class AiConnectionService {
                         provider, displayName, targetUrl, source, Status.WARNING, e.getMessage(), true);
             }
             return new AiConnectionResponse(provider, displayName, targetUrl, source, Status.NORMAL, null, true);
-        } catch (RestClientException e) {
+        } catch (RestClientException | ToolsTokenUnavailableException e) {
             return new AiConnectionResponse(
                     provider, displayName, targetUrl, source, Status.ERROR, e.getMessage(), true);
         }

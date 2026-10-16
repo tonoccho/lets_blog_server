@@ -141,3 +141,10 @@ app:
 keycloak:
   jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/certs}
   issuer: ${KEYCLOAK_ISSUER:https://localhost/auth/realms/letsblog}
+  # extensionsのツール(Ollama・ComfyUI・PlantUML・ポータル)を呼ぶときに付ける専用クライアント
+  # letsblog-tools-client(ロール無し、audience lbx-tools)の client credentials(#1804)。
+  # client-secretが空ならトークンを付けない(従来どおり)。設定したのに取得できないときは理由の分かるエラーにする。
+  tools:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_TOOLS_CLIENT_ID:letsblog-tools-client}
+    client-secret: ${KEYCLOAK_TOOLS_CLIENT_SECRET:}

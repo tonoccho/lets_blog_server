@@ -1,5 +1,7 @@
 package com.letsblog.platform.service;
 
+import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.common.auth.ToolsTokenUnavailableException;
 import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.letsblog.common.scheduling.MdcPropagation;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -11,6 +13,7 @@ import com.letsblog.platform.dto.ConnectedServiceStatusResponse.Status;
 import com.letsblog.platform.render.PlantUmlEncoder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
@@ -26,6 +29,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -73,6 +77,11 @@ public class ConnectedServiceStatusService {
     private final PenpotReachabilityChecker penpotReachabilityChecker;
     /** GitLabの到達性(issue #1796)。接続先はシステム設定(DB)で実行時に解決する。 */
     private final GitLabReachabilityChecker gitLabReachabilityChecker;
+    /**
+     * extensionsのツール(Ollama・ComfyUI・PlantUML)の疎通確認に付けるトークン(#1804)。これらの接続先はいずれも
+     * システム設定(と{@code PLANTUML_BASE_URL})なので、有効なら必ず付ける。取れないときは送らずに行をERRORにして理由を出す。
+     */
+    private final ToolsTokenProvider toolsTokenProvider;
 
     @Autowired
     public ConnectedServiceStatusService(
@@ -84,7 +93,8 @@ public class ConnectedServiceStatusService {
             LetsBlogServiceStatusService letsBlogServiceStatusService,
             RabbitMqQueueStatusService rabbitMqQueueStatusService,
             PenpotReachabilityChecker penpotReachabilityChecker,
-            GitLabReachabilityChecker gitLabReachabilityChecker) {
+            GitLabReachabilityChecker gitLabReachabilityChecker,
+            ToolsTokenProvider toolsTokenProvider) {
         this(dataSource,
                 ConnectedServiceStatusService::builderWithTimeout,
                 builderWithTimeout(plantUmlBaseUrl), plantUmlBaseUrl,
@@ -93,7 +103,8 @@ public class ConnectedServiceStatusService {
                 letsBlogServiceStatusService, rabbitMqQueueStatusService,
                 ConnectedServiceStatusService::builderWithTimeout,
                 penpotReachabilityChecker,
-                gitLabReachabilityChecker);
+                gitLabReachabilityChecker,
+                toolsTokenProvider);
     }
 
     /** テスト専用: Penpotの到達性チェッカーを既定のものにする。 */
@@ -110,7 +121,25 @@ public class ConnectedServiceStatusService {
         this(dataSource, comfyUiClientBuilderFactory, plantUmlBuilder, plantUmlBaseUrl,
                 wordpressBuilder, wordpressProvisionBaseUrl, systemSettingService, appSettingService,
                 letsBlogServiceStatusService, rabbitMqQueueStatusService, ollamaClientBuilderFactory,
-                new PenpotReachabilityChecker(), new GitLabReachabilityChecker());
+                ToolsTokenProvider.disabled());
+    }
+
+    /** テスト専用: Penpot・GitLabの到達性チェッカーを既定のものにし、extensionsのツールのトークンを差し替える(#1804)。 */
+    ConnectedServiceStatusService(
+            DataSource dataSource,
+            Function<String, RestClient.Builder> comfyUiClientBuilderFactory,
+            RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
+            RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
+            SystemSettingService systemSettingService,
+            AppSettingService appSettingService,
+            LetsBlogServiceStatusService letsBlogServiceStatusService,
+            RabbitMqQueueStatusService rabbitMqQueueStatusService,
+            Function<String, RestClient.Builder> ollamaClientBuilderFactory,
+            ToolsTokenProvider toolsTokenProvider) {
+        this(dataSource, comfyUiClientBuilderFactory, plantUmlBuilder, plantUmlBaseUrl,
+                wordpressBuilder, wordpressProvisionBaseUrl, systemSettingService, appSettingService,
+                letsBlogServiceStatusService, rabbitMqQueueStatusService, ollamaClientBuilderFactory,
+                new PenpotReachabilityChecker(), new GitLabReachabilityChecker(), toolsTokenProvider);
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -126,6 +155,27 @@ public class ConnectedServiceStatusService {
             Function<String, RestClient.Builder> ollamaClientBuilderFactory,
             PenpotReachabilityChecker penpotReachabilityChecker,
             GitLabReachabilityChecker gitLabReachabilityChecker) {
+        this(dataSource, comfyUiClientBuilderFactory, plantUmlBuilder, plantUmlBaseUrl,
+                wordpressBuilder, wordpressProvisionBaseUrl, systemSettingService, appSettingService,
+                letsBlogServiceStatusService, rabbitMqQueueStatusService, ollamaClientBuilderFactory,
+                penpotReachabilityChecker, gitLabReachabilityChecker, ToolsTokenProvider.disabled());
+    }
+
+    /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
+    ConnectedServiceStatusService(
+            DataSource dataSource,
+            Function<String, RestClient.Builder> comfyUiClientBuilderFactory,
+            RestClient.Builder plantUmlBuilder, String plantUmlBaseUrl,
+            RestClient.Builder wordpressBuilder, String wordpressProvisionBaseUrl,
+            SystemSettingService systemSettingService,
+            AppSettingService appSettingService,
+            LetsBlogServiceStatusService letsBlogServiceStatusService,
+            RabbitMqQueueStatusService rabbitMqQueueStatusService,
+            Function<String, RestClient.Builder> ollamaClientBuilderFactory,
+            PenpotReachabilityChecker penpotReachabilityChecker,
+            GitLabReachabilityChecker gitLabReachabilityChecker,
+            ToolsTokenProvider toolsTokenProvider) {
+        this.toolsTokenProvider = toolsTokenProvider;
         this.dataSource = dataSource;
         this.penpotReachabilityChecker = penpotReachabilityChecker;
         this.gitLabReachabilityChecker = gitLabReachabilityChecker;
@@ -254,12 +304,29 @@ public class ConnectedServiceStatusService {
     /** OLLAMA専用の接続先(issue #1086)へOpenAI互換のモデル一覧エンドポイントで疎通確認する。 */
     private CheckOutcome checkLlmOllama() {
         String baseUrl = appSettingService.getLlmOllamaBaseUrl();
-        RestClient client = ollamaClientBuilderFactory.apply(baseUrl).build();
-        CheckOutcome outcome = checkHttpService(client, baseUrl, "/models");
-        if (outcome.status() != Status.NORMAL) {
-            return outcome;
+        return withToolsToken(baseUrl + "/models", authorization -> {
+            RestClient client = ollamaClientBuilderFactory.apply(baseUrl).build();
+            CheckOutcome outcome = checkHttpService(client, baseUrl, "/models", null, authorization);
+            if (outcome.status() != Status.NORMAL) {
+                return outcome;
+            }
+            return outcome.withComputeDevice(resolveOllamaComputeDevice(baseUrl, authorization));
+        });
+    }
+
+    /**
+     * extensionsのツール(Ollama・ComfyUI・PlantUML)の疎通確認に付けるトークン(#1804)を引いてから確認する。
+     * 接続先はシステム設定(と{@code PLANTUML_BASE_URL})なので、有効なら必ず付く。有効なのに取れないときは、
+     * 確認の要求を送らずにERRORとして理由を出す(ヘッダー無しで続けない)。
+     */
+    private CheckOutcome withToolsToken(String targetUrl, Function<Optional<String>, CheckOutcome> check) {
+        Optional<String> authorization;
+        try {
+            authorization = toolsTokenProvider.authorization();
+        } catch (ToolsTokenUnavailableException e) {
+            return new CheckOutcome(Status.ERROR, null, e.getMessage(), targetUrl);
         }
-        return outcome.withComputeDevice(resolveOllamaComputeDevice(baseUrl));
+        return check.apply(authorization);
     }
 
     /**
@@ -267,11 +334,13 @@ public class ConnectedServiceStatusService {
      * {@code /api/ps}はOpenAI互換の{@code /v1}の外にあるため、ベースURLから{@code /v1}を除いて呼ぶ。
      * 付加情報なので、取得・解釈に失敗しても例外にせず{@code null}を返し、状態判定へは影響させない。
      */
-    private String resolveOllamaComputeDevice(String baseUrl) {
+    private String resolveOllamaComputeDevice(String baseUrl, Optional<String> authorization) {
         String root = baseUrl.replaceFirst("/+$", "").replaceFirst("/v1$", "");
         try {
             RestClient client = ollamaClientBuilderFactory.apply(root).build();
-            return ollamaComputeDeviceOf(client.get().uri("/api/ps").retrieve().body(String.class));
+            return ollamaComputeDeviceOf(client.get().uri("/api/ps")
+                    .headers(headers -> authorization.ifPresent(value -> headers.set(HttpHeaders.AUTHORIZATION, value)))
+                    .retrieve().body(String.class));
         } catch (RestClientException e) {
             return null;
         }
@@ -333,8 +402,9 @@ public class ConnectedServiceStatusService {
             return new CheckOutcome(Status.WARNING, null,
                     "ComfyUIの接続先が設定されていません(システム設定またはプロジェクト設定で設定してください)", null);
         }
-        return checkHttpService(comfyUiClientBuilderFactory.apply(baseUrl).build(), baseUrl, "/system_stats",
-                ConnectedServiceStatusService::comfyUiComputeDeviceOf);
+        return withToolsToken(baseUrl + "/system_stats", authorization ->
+                checkHttpService(comfyUiClientBuilderFactory.apply(baseUrl).build(), baseUrl, "/system_stats",
+                        ConnectedServiceStatusService::comfyUiComputeDeviceOf, authorization));
     }
 
     /**
@@ -375,8 +445,14 @@ public class ConnectedServiceStatusService {
     private CheckOutcome checkPlantUml() {
         String path = "/png/" + PlantUmlEncoder.encode(PLANTUML_HEALTHCHECK_SOURCE);
         String targetUrl = plantUmlBaseUrl + path;
+        return withToolsToken(targetUrl, authorization -> renderPlantUml(path, targetUrl, authorization));
+    }
+
+    private CheckOutcome renderPlantUml(String path, String targetUrl, Optional<String> authorization) {
         try {
-            ResponseEntity<byte[]> response = plantUmlClient.get().uri(path).retrieve().toEntity(byte[].class);
+            ResponseEntity<byte[]> response = plantUmlClient.get().uri(path)
+                    .headers(headers -> authorization.ifPresent(value -> headers.set(HttpHeaders.AUTHORIZATION, value)))
+                    .retrieve().toEntity(byte[].class);
             byte[] png = response.getBody();
             int httpStatus = response.getStatusCode().value();
             if (png != null && png.length > 0) {
@@ -396,7 +472,7 @@ public class ConnectedServiceStatusService {
      * 5xxはプロセスは生きているが異常応答のため警告、接続自体ができない場合はエラーとして扱う。
      */
     private CheckOutcome checkHttpService(RestClient client, String baseUrl, String path) {
-        return checkHttpService(client, baseUrl, path, null);
+        return checkHttpService(client, baseUrl, path, null, Optional.empty());
     }
 
     /**
@@ -404,14 +480,19 @@ public class ConnectedServiceStatusService {
      * リゾルバは例外を投げない前提で、解決結果は状態判定に使わない。
      */
     private CheckOutcome checkHttpService(
-            RestClient client, String baseUrl, String path, Function<String, String> deviceResolver) {
+            RestClient client, String baseUrl, String path, Function<String, String> deviceResolver,
+            Optional<String> authorization) {
         String targetUrl = baseUrl + path;
         try {
             if (deviceResolver == null) {
-                ResponseEntity<Void> response = client.get().uri(path).retrieve().toBodilessEntity();
+                ResponseEntity<Void> response = client.get().uri(path)
+                        .headers(headers -> authorization.ifPresent(value -> headers.set(HttpHeaders.AUTHORIZATION, value)))
+                        .retrieve().toBodilessEntity();
                 return new CheckOutcome(Status.NORMAL, response.getStatusCode().value(), null, targetUrl);
             }
-            ResponseEntity<String> response = client.get().uri(path).retrieve().toEntity(String.class);
+            ResponseEntity<String> response = client.get().uri(path)
+                    .headers(headers -> authorization.ifPresent(value -> headers.set(HttpHeaders.AUTHORIZATION, value)))
+                    .retrieve().toEntity(String.class);
             return new CheckOutcome(Status.NORMAL, response.getStatusCode().value(), null, targetUrl,
                     deviceResolver.apply(response.getBody()));
         } catch (RestClientResponseException e) {

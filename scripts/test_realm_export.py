@@ -208,6 +208,117 @@ class RealmExportExtensionsClientsTest(unittest.TestCase):
         )
 
 
+class RealmExportToolsClientTest(unittest.TestCase):
+    """#1804: lets_blog から extensions のツール(Ollama・ComfyUI・PlantUML・ポータル)を呼ぶための専用クライアント。
+
+    `letsblog-services` のサービスアカウントは `realm-management` の管理ロールを持つので、
+    外部へ送るトークンには使えない。専用クライアントはロールを一切持たず、audience を固定する。
+    Web UI から到達できない realm / compose の設定なのでここで表現する
+    (ロールが無いことの実測は受け入れテスト `@api` の `auth/tools-client-token.feature`)。
+    """
+
+    CLIENT_ID = "letsblog-tools-client"
+    VAR = "KEYCLOAK_TOOLS_CLIENT_SECRET"
+    AUDIENCE = "lbx-tools"
+
+    def setUp(self):
+        with open(REALM_EXPORT, encoding="utf-8") as f:
+            self.realm = json.load(f)
+        self.by_id = {c["clientId"]: c for c in self.realm["clients"]}
+        self.example = {}
+        with open(os.path.join(REPO_ROOT, ".env.example"), encoding="utf-8") as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.rstrip("\n").split("=", 1)
+                    self.example[k] = v
+
+    def _client(self):
+        self.assertIn(self.CLIENT_ID, self.by_id)
+        return self.by_id[self.CLIENT_ID]
+
+    def test_client_is_a_confidential_service_account_only_client(self):
+        c = self._client()
+        self.assertIs(c["enabled"], True)
+        self.assertIs(c["publicClient"], False)
+        self.assertEqual("client-secret", c["clientAuthenticatorType"])
+        self.assertIs(c["serviceAccountsEnabled"], True)
+        self.assertIs(c["standardFlowEnabled"], False)
+        self.assertIs(c["directAccessGrantsEnabled"], False)
+        self.assertIs(c["implicitFlowEnabled"], False)
+        self.assertEqual([], c["redirectUris"])
+
+    def test_secret_is_an_env_placeholder_defaulting_to_the_example_value(self):
+        self.assertEqual("${%s:%s}" % (self.VAR, self.example[self.VAR]), self._client()["secret"])
+        self.assertTrue(self.example[self.VAR].startswith("dev-only-"))
+
+    def test_access_token_carries_the_fixed_audience(self):
+        mappers = [
+            m for m in self._client().get("protocolMappers") or []
+            if m["protocolMapper"] == "oidc-audience-mapper"
+        ]
+        self.assertEqual(1, len(mappers))
+        cfg = mappers[0]["config"]
+        self.assertEqual(self.AUDIENCE, cfg["included.custom.audience"])
+        self.assertEqual("true", cfg["access.token.claim"])
+
+    def test_client_cannot_receive_any_realm_or_realm_management_role(self):
+        c = self._client()
+        # fullScope を切ると、ユーザー(サービスアカウント)の持つロールはスコープに入らない限りトークンに載らない。
+        self.assertIs(c["fullScopeAllowed"], False)
+        # `roles` スコープ(realm_access / resource_access のマッパー)を付けない。
+        self.assertNotIn("roles", c["defaultClientScopes"])
+        self.assertNotIn("roles", c["optionalClientScopes"])
+        # このクライアントへのロールのスコープ割り当てが無い。
+        mappings = self.realm.get("clientScopeMappings", {})
+        for client, entries in mappings.items():
+            for entry in entries:
+                self.assertNotEqual(self.CLIENT_ID, entry.get("client"), client)
+        # サービスアカウントのユーザーを realm に明示して、ロールを持たせない。
+        users = [u for u in self.realm.get("users", []) if u.get("serviceAccountClientId") == self.CLIENT_ID]
+        for u in users:
+            self.assertFalse(u.get("realmRoles"))
+            self.assertFalse(u.get("clientRoles"))
+
+    def test_realm_default_role_does_not_include_the_application_roles(self):
+        default = next(r for r in self.realm["roles"]["realm"] if r["name"] == "default-roles-letsblog")
+        for role in ("admin", "editor", "viewer"):
+            self.assertNotIn(role, default["composites"]["realm"])
+        self.assertNotIn("realm-management", default["composites"].get("client", {}))
+
+    def test_existing_services_client_is_untouched(self):
+        c = self.by_id["letsblog-services"]
+        self.assertEqual(
+            "${KEYCLOAK_SERVICES_CLIENT_SECRET:%s}" % self.example["KEYCLOAK_SERVICES_CLIENT_SECRET"], c["secret"]
+        )
+
+    def _block(self, service):
+        with open(os.path.join(REPO_ROOT, "docker-compose.yml"), encoding="utf-8") as f:
+            text = f.read()
+        start = text.index("\n  %s:\n" % service)
+        m = re.search(r"\n  [a-z][a-z0-9-]*:\n", text[start + 1 :])
+        return text[start : start + 1 + m.start()] if m else text[start:]
+
+    def test_compose_passes_the_secret_to_keycloak_and_to_ai_media_and_platform(self):
+        for service in ("keycloak", "ai", "media", "platform"):
+            with self.subTest(service=service):
+                self.assertIn("%s: ${%s}" % (self.VAR, self.VAR), self._block(service))
+
+    def test_compose_does_not_pass_the_secret_to_services_that_do_not_call_the_tools(self):
+        for service in ("content", "project", "publishing", "identity", "analytics", "web", "gateway"):
+            with self.subTest(service=service):
+                self.assertNotIn(self.VAR, self._block(service))
+
+    def test_documents_the_kcadm_procedure_without_running_it(self):
+        for rel in ("infra/keycloak/README.md", "docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md"):
+            with self.subTest(doc=rel):
+                with open(os.path.join(REPO_ROOT, rel), encoding="utf-8") as f:
+                    text = f.read()
+                self.assertIn(self.CLIENT_ID, text)
+                self.assertIn("kcadm.sh create clients", text)
+                self.assertIn(self.AUDIENCE, text)
+                self.assertIn("利用者が", text)
+
+
 class RealmExportOfflineSessionPolicyTest(unittest.TestCase):
     """offline session の寿命方針(#1100)。Web UI から到達できない realm 設定のため、
     Gherkin ではなくここで表現する(上記 docstring の文書化された例外)。

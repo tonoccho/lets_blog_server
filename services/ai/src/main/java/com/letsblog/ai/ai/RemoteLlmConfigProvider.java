@@ -190,6 +190,12 @@ public class RemoteLlmConfigProvider implements LlmConfigProvider {
         return destinationGuard.check("Ollama", projectOverride);
     }
 
+    /** OLLAMAでプロジェクトの上書きが無い(=システム設定の接続先)ときだけ、extensionsのツールのトークンを付けてよい(#1804)。 */
+    @Override
+    public boolean toolsAuthorized(AiProvider provider) {
+        return provider == AiProvider.OLLAMA && ollamaOverrideOfCurrentProject() == null;
+    }
+
     /** {@link #useProject}で宣言されたプロジェクトのOllama接続先の上書き。無い(null/空)ならnull(issue #1503)。 */
     private String ollamaOverrideOfCurrentProject() {
         Long projectId = (Long) request.getAttribute(PROJECT_ATTR);

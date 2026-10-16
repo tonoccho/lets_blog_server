@@ -24,6 +24,14 @@ public interface ImageGenerationConfigProvider {
     }
 
     /**
+     * extensionsのツールへ付けるトークン(#1804)を、このプロジェクトのComfyUI接続先へ付けてよいか。付けてよいのは
+     * システム設定で決まる接続先だけで、プロジェクト単位の上書き先には付けない。既定は付けない。
+     */
+    default boolean comfyUiToolsAuthorized(Long projectId) {
+        return false;
+    }
+
+    /**
      * ChatGPT画像生成のAPIキー。そのプロジェクトに設定されたキーだけを返し、無ければ(または
      * {@code projectId}がnullなら)null。システム設定・環境変数へはフォールバックしない(issue #1521)。
      */

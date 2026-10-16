@@ -75,6 +75,8 @@ class ExternalCallLoggingWiringContractTest {
                 "wordpress-bulk");
         add("packages/lbs-common/src/main/java/com/letsblog/common/auth/ServiceTokenClientConfig.java",
                 "keycloak-token");
+        add("packages/lbs-common/src/main/java/com/letsblog/common/auth/ToolsTokenProviderConfig.java",
+                "keycloak-token");
         // 注入Builderをcloneして外部へ呼ぶクライアント(RestClient.builder()は無い)
         ALLOWLIST.put("services/ai/src/main/java/com/letsblog/ai/github/GithubClient.java",
                 new Site(0, List.of("github")));

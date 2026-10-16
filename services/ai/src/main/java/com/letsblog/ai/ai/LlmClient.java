@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.ai.config.LegacyJacksonRestClientConfig;
 import com.letsblog.common.net.ForbiddenDestinationException;
 import com.letsblog.common.net.GuardedTarget;
+import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.common.auth.ToolsTokenUnavailableException;
 import com.letsblog.common.net.PinnedHttpClients;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -64,14 +66,22 @@ public class LlmClient {
     private static final Pattern THINK_BLOCK_PATTERN = Pattern.compile("(?s)<think>.*?</think>");
 
     private final LlmConfigProvider configProvider;
+    private final ToolsTokenProvider toolsTokenProvider;
 
     @Autowired
-    public LlmClient(LlmConfigProvider configProvider) {
+    public LlmClient(LlmConfigProvider configProvider, ToolsTokenProvider toolsTokenProvider) {
         this.configProvider = configProvider;
+        this.toolsTokenProvider = toolsTokenProvider;
+    }
+
+    /** extensionsのツールのトークンを付けない(従来どおり)。 */
+    public LlmClient(LlmConfigProvider configProvider) {
+        this(configProvider, ToolsTokenProvider.disabled());
     }
 
     /** テスト専用: stripThinkingBlocksのロジックのみを固定値で検証するためのコンストラクタ。 */
     LlmClient(String baseUrl, String apiKey, String model, long requestTimeoutSeconds) {
+        this.toolsTokenProvider = ToolsTokenProvider.disabled();
         this.configProvider = new LlmConfigProvider() {
             @Override
             public String baseUrl() {
@@ -181,7 +191,22 @@ public class LlmClient {
         if (provider == AiProvider.OLLAMA && (target.baseUrl() == null || target.baseUrl().isBlank())) {
             throw new AiServiceException(OLLAMA_URL_REQUIRED, null);
         }
-        return generateWithOpenAiCompatible(prompt, image, model, apiKey, target, provider);
+        return generateWithOpenAiCompatible(prompt, image, model, apiKey, target, provider, toolsAuthorization(provider));
+    }
+
+    /**
+     * システム設定のOllamaへ付ける、extensionsのツール用トークン(#1804)。無効、または付けない宛先(プロジェクトの
+     * 上書き先、OLLAMA以外)ならnull。有効なのに取れないときは、送らずに理由の分かるエラーにする。
+     */
+    private String toolsAuthorization(AiProvider provider) {
+        if (provider != AiProvider.OLLAMA || !configProvider.toolsAuthorized(provider)) {
+            return null;
+        }
+        try {
+            return toolsTokenProvider.authorization().orElse(null);
+        } catch (ToolsTokenUnavailableException e) {
+            throw new AiServiceException(e.getMessage(), e);
+        }
     }
 
     /** LLMへ添える画像(変換済みのバイト列とそのMIME)。 */
@@ -218,7 +243,7 @@ public class LlmClient {
 
     private String generateWithOpenAiCompatible(
             String prompt, ImageInput image, String modelName, String apiKey, GuardedTarget target,
-            AiProvider provider) {
+            AiProvider provider, String toolsAuthorization) {
         try {
             ArrayNode messages = JsonNodeFactory.instance.arrayNode();
             messages.add(openAiUserMessage(prompt, image));
@@ -229,7 +254,7 @@ public class LlmClient {
 
             // OLLAMAは自ホスト上のコンテナで認証を持たない。APIキーはそもそも解決されない(空)ため、
             // Authorizationヘッダ自体を付けない(issue #1086 / R4)。
-            JsonNode response = buildClient(target, provider == AiProvider.OLLAMA ? null : apiKey).post()
+            JsonNode response = buildClient(target, provider == AiProvider.OLLAMA ? null : apiKey, toolsAuthorization).post()
                     .uri("/chat/completions")
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -310,8 +335,11 @@ public class LlmClient {
                 + "Ollamaのあるホストで ollama pull " + modelName + " を実行してモデルを取得してください。";
     }
 
-    /** apiKeyがnullの場合はAuthorizationヘッダを付けない(認証を持たないOLLAMA向け、issue #1086)。 */
-    private RestClient buildClient(GuardedTarget target, String apiKey) {
+    /**
+     * apiKeyがnullの場合はAPIキーのAuthorizationヘッダを付けない(認証を持たないOLLAMA向け、issue #1086)。
+     * 代わりに{@code toolsAuthorization}(extensionsのツール用トークン、#1804)があればそれを付ける。
+     */
+    private RestClient buildClient(GuardedTarget target, String apiKey, String toolsAuthorization) {
         Duration requestTimeout = Duration.ofSeconds(configProvider.requestTimeoutSeconds());
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(
                 PinnedHttpClients.builder(target.sniHost(), requestTimeout).build());
@@ -321,6 +349,8 @@ public class LlmClient {
                 .requestFactory(requestFactory);
         if (apiKey != null) {
             builder.defaultHeader("Authorization", "Bearer " + apiKey);
+        } else if (toolsAuthorization != null) {
+            builder.defaultHeader("Authorization", toolsAuthorization);
         }
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         return builder.build();

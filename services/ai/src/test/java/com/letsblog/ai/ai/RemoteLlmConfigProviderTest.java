@@ -270,4 +270,41 @@ class RemoteLlmConfigProviderTest {
         verify(projectSettings, never()).getOpenAiApiKeyEncrypted(7L);
         verify(projectSettings, never()).getClaudeApiKeyEncrypted(7L);
     }
+
+    // ---- extensionsのツールへのトークンを付ける宛先(#1804) ----
+
+    @Test
+    void toolsAuthorized_OLLAMAでプロジェクトの上書きが無ければ付ける() {
+        stubSystemConfig("OLLAMA", "http://ollama:11434/v1");
+        provider.useProject(7L);
+
+        assertTrue(provider.toolsAuthorized(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void toolsAuthorized_プロジェクト指定が無い呼び出しはシステム設定の宛先なので付ける() {
+        assertTrue(provider.toolsAuthorized(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void toolsAuthorized_OLLAMAでプロジェクトの上書きがあれば付けない() {
+        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn("http://gpu:11434/v1");
+        provider.useProject(7L);
+
+        assertFalse(provider.toolsAuthorized(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void toolsAuthorized_上書きが空文字ならシステム設定の宛先として付ける() {
+        when(projectSettings.getOllamaBaseUrl(7L)).thenReturn(" ");
+        provider.useProject(7L);
+
+        assertTrue(provider.toolsAuthorized(AiProvider.OLLAMA));
+    }
+
+    @Test
+    void toolsAuthorized_OLLAMA以外には付けない() {
+        assertFalse(provider.toolsAuthorized(AiProvider.OPENAI));
+        assertFalse(provider.toolsAuthorized(AiProvider.CLAUDE));
+    }
 }

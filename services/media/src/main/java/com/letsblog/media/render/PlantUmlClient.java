@@ -1,9 +1,13 @@
 package com.letsblog.media.render;
 
+import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.common.auth.ToolsTokenUnavailableException;
 import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.letsblog.media.ai.AiServiceException;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -22,18 +26,35 @@ public class PlantUmlClient {
     private static final Pattern CONTROL_CHARS = Pattern.compile("\\p{Cntrl}");
 
     private final RestClient client;
+    private final ToolsTokenProvider toolsTokenProvider;
 
-    public PlantUmlClient(@Value("${app.plantuml-base-url}") String baseUrl) {
+    /**
+     * 接続先は{@code PLANTUML_BASE_URL}(システムの設定。プロジェクト単位の上書きは無い)なので、有効なら必ず
+     * extensionsのツール用トークン(#1804)を付ける。
+     */
+    @Autowired
+    public PlantUmlClient(@Value("${app.plantuml-base-url}") String baseUrl, ToolsTokenProvider toolsTokenProvider) {
         this.client = RestClient.builder().requestInterceptor(new ExternalCallLoggingInterceptor("plantuml")).baseUrl(baseUrl).build();
+        this.toolsTokenProvider = toolsTokenProvider;
+    }
+
+    /** extensionsのツールのトークンを付けない(従来どおり)。 */
+    public PlantUmlClient(String baseUrl) {
+        this(baseUrl, ToolsTokenProvider.disabled());
     }
 
     public byte[] renderPng(String plantUmlSource) {
         String encoded = PlantUmlEncoder.encode(plantUmlSource);
         try {
+            // 有効なのに取れないときは、送らずに理由の分かるエラーにする(ヘッダー無しで続けない)。
+            java.util.Optional<String> authorization = toolsTokenProvider.authorization();
             return client.get()
                     .uri("/png/" + encoded)
+                    .headers(headers -> authorization.ifPresent(value -> headers.set(HttpHeaders.AUTHORIZATION, value)))
                     .retrieve()
                     .body(byte[].class);
+        } catch (ToolsTokenUnavailableException e) {
+            throw new AiServiceException(e.getMessage(), e);
         } catch (RestClientResponseException e) {
             throw new PlantUmlRenderRejectedException("PlantUML が図を描けませんでした: " + rejectionDetail(e), e);
         } catch (RestClientException e) {

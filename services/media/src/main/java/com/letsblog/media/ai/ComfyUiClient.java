@@ -1,5 +1,7 @@
 package com.letsblog.media.ai;
 
+import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.common.auth.ToolsTokenUnavailableException;
 import com.letsblog.common.client.ExternalCallLoggingInterceptor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -121,15 +123,24 @@ public class ComfyUiClient implements ImageGenerationProvider {
     static final int MIN_POLL_ATTEMPTS = 120;
 
     private final RestClient client;
+    /** システム設定の接続先用。extensionsのツール用トークン(#1804)を、リクエストごとに付ける(無効なら素通し)。 */
+    private final RestClient toolsClient;
     private final RestClient.Builder builderTemplate;
+    private final ToolsTokenProvider toolsTokenProvider;
     private final ImageGenerationConfigProvider configProvider;
     private final String checkpointName;
     private final int pollIntervalMs;
 
     @Autowired
     public ComfyUiClient(ImageGenerationConfigProvider configProvider,
-                          @Value("${app.comfyui-checkpoint}") String checkpointName) {
-        this(RestClient.builder(), configProvider, checkpointName);
+                          @Value("${app.comfyui-checkpoint}") String checkpointName,
+                          ToolsTokenProvider toolsTokenProvider) {
+        this(RestClient.builder(), configProvider, checkpointName, POLL_INTERVAL_MS, toolsTokenProvider);
+    }
+
+    /** extensionsのツールのトークンを付けない(従来どおり)。 */
+    public ComfyUiClient(ImageGenerationConfigProvider configProvider, String checkpointName) {
+        this(configProvider, checkpointName, ToolsTokenProvider.disabled());
     }
 
     /** テスト専用: MockRestServiceServerを介せるようRestClient.Builderを直接受け取るコンストラクタ。 */
@@ -140,9 +151,17 @@ public class ComfyUiClient implements ImageGenerationProvider {
     /** テスト専用: ポーリング間隔を詰めて、タイムアウトの検証を実時間を掛けずに行うためのコンストラクタ。 */
     ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider,
                   String checkpointName, int pollIntervalMs) {
+        this(builder, configProvider, checkpointName, pollIntervalMs, ToolsTokenProvider.disabled());
+    }
+
+    /** テスト専用: extensionsのツールのトークンも差し替える(#1804)。 */
+    ComfyUiClient(RestClient.Builder builder, ImageGenerationConfigProvider configProvider,
+                  String checkpointName, int pollIntervalMs, ToolsTokenProvider toolsTokenProvider) {
         LegacyJacksonRestClientConfig.preferJackson2(builder);
         builder.requestInterceptor(new ExternalCallLoggingInterceptor("comfyui"));
+        this.toolsTokenProvider = toolsTokenProvider;
         this.builderTemplate = builder.clone();
+        this.toolsClient = builder.clone().requestInterceptor(toolsTokenProvider.interceptor()).build();
         this.client = builder.build();
         this.configProvider = configProvider;
         this.checkpointName = checkpointName;
@@ -167,14 +186,30 @@ public class ComfyUiClient implements ImageGenerationProvider {
         return target;
     }
 
-    /** httpsで元がホスト名だったときだけ、SNIに元のホスト名を載せた専用のクライアントで接続する。 */
-    private RestClient clientFor(GuardedTarget target) {
+    /**
+     * httpsで元がホスト名だったときだけ、SNIに元のホスト名を載せた専用のクライアントで接続する。
+     * システム設定の接続先(プロジェクトの上書きが無いとき)には、extensionsのツール用トークン(#1804)を
+     * リクエストごとに付けるクライアントを使う。有効なのに取れないときは、接続せずに理由の分かるエラーにする。
+     */
+    private RestClient clientFor(GuardedTarget target, Long projectId) {
+        boolean withToken = toolsTokenProvider.enabled() && configProvider.comfyUiToolsAuthorized(projectId);
+        if (withToken) {
+            try {
+                toolsTokenProvider.authorization();
+            } catch (ToolsTokenUnavailableException e) {
+                throw new AiServiceException(e.getMessage(), e);
+            }
+        }
         if (target.sniHost() == null) {
-            return client;
+            return withToken ? toolsClient : client;
         }
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
                 PinnedHttpClients.builder(target.sniHost(), Duration.ofSeconds(10)).build());
-        return builderTemplate.clone().requestFactory(factory).build();
+        RestClient.Builder builder = builderTemplate.clone().requestFactory(factory);
+        if (withToken) {
+            builder.requestInterceptor(toolsTokenProvider.interceptor());
+        }
+        return builder.build();
     }
 
     /**
@@ -213,7 +248,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
         }
         GuardedTarget target = targetOf(params.projectId());
         String baseUrl = target.baseUrl();
-        RestClient http = clientFor(target);
+        RestClient http = clientFor(target, params.projectId());
         try {
             return submitAndCollect(http, baseUrl, params);
         } catch (ResourceAccessException e) {
@@ -343,7 +378,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
     public List<String> listCheckpoints(Long projectId) {
         GuardedTarget target = targetOf(projectId);
         String baseUrl = target.baseUrl();
-        RestClient http = clientFor(target);
+        RestClient http = clientFor(target, projectId);
         try {
             JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/CheckpointLoaderSimple")
@@ -371,7 +406,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
     public List<String> listSamplers(Long projectId) {
         GuardedTarget target = targetOf(projectId);
         String baseUrl = target.baseUrl();
-        RestClient http = clientFor(target);
+        RestClient http = clientFor(target, projectId);
         try {
             JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/KSampler")
@@ -399,7 +434,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
     public List<String> listSchedulers(Long projectId) {
         GuardedTarget target = targetOf(projectId);
         String baseUrl = target.baseUrl();
-        RestClient http = clientFor(target);
+        RestClient http = clientFor(target, projectId);
         try {
             JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/KSampler")
@@ -428,7 +463,7 @@ public class ComfyUiClient implements ImageGenerationProvider {
     public List<String> listLoras(Long projectId) {
         GuardedTarget target = targetOf(projectId);
         String baseUrl = target.baseUrl();
-        RestClient http = clientFor(target);
+        RestClient http = clientFor(target, projectId);
         try {
             JsonNode response = http.get()
                     .uri(baseUrl + "/object_info/LoraLoader")

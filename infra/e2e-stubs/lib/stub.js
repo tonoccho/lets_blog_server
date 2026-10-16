@@ -40,6 +40,13 @@
  * 互いの仕込みを奪い合う。該当シナリオには `@mode:serial` を付け、同じスタブを触る
  * feature を分散させないこと(docs/ACCEPTANCE_TESTING.md に明記した)。
  *
+ * ## 受けた Authorization の記録(issue #1804)
+ *
+ * lets_blog が extensions のツールへ付ける Keycloak のトークンを、受け入れテストのステップが検証できるように、
+ * 受けた `Authorization` ヘッダーを `METHOD /path` ごとに `/__control/state` の `authorizationsByPath` へ残す
+ * (1パスにつき直近 100 件。付いていない要求は `(none)`)。スタブ自身は検証しない。検証(JWT の署名・`iss`・`azp`・`aud`)は
+ * ステップが行う。**値はスタブのログにも、制御以外の応答の本文・ヘッダーにも出さない。** 制御の `state` だけが見せる。
+ *
  * 受信件数(`requests`)はシナリオが「サービスが実際に外部を呼んだか」を確かめるために使う。
  * `requestsByPath` は同じ件数を `METHOD /path` ごとに分けたもの(#1781)。
  * 応答には含めない(決定性を壊すため)。`/__control/state` からのみ読める。
@@ -79,6 +86,15 @@ function sendBinary(res, status, buffer, contentType) {
   res.end(buffer);
 }
 
+/** 1パスに残す Authorization の件数。長く動かしてもメモリが増え続けないようにする。 */
+const MAX_RECORDED_AUTHORIZATIONS = 100;
+
+function recordAuthorization(state, pathKey, authorization) {
+  const list = (state.authorizationsByPath[pathKey] ??= []);
+  list.push(authorization ?? '(none)');
+  if (list.length > MAX_RECORDED_AUTHORIZATIONS) list.shift();
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -110,6 +126,8 @@ function createStub({ name, port, handle, errorBody, onReset, extraState, contro
     requests: 0,
     /** `METHOD /path` ごとの受信件数。生成の依頼だけを数えたいテストが使う(#1781)。 */
     requestsByPath: {},
+    /** `METHOD /path` ごとに受けた Authorization(直近 MAX_RECORDED_AUTHORIZATIONS 件。無ければ `(none)`)。値はログに出さない。 */
+    authorizationsByPath: {},
   };
 
   const defaultErrorBody = (status) => ({
@@ -139,6 +157,7 @@ function createStub({ name, port, handle, errorBody, onReset, extraState, contro
     state.requests += 1;
     const pathKey = `${req.method} ${pathname}`;
     state.requestsByPath[pathKey] = (state.requestsByPath[pathKey] ?? 0) + 1;
+    recordAuthorization(state, pathKey, req.headers.authorization);
 
     // 経路1: ヘッダによる単発注入。状態を変えないので並列実行に干渉しない。
     const headerStatus = req.headers['x-e2e-stub-force-status'];
@@ -210,6 +229,7 @@ async function handleControl(req, res, pathname, state, name, onReset, extraStat
       forced: state.forced,
       requests: state.requests,
       requestsByPath: state.requestsByPath,
+      authorizationsByPath: state.authorizationsByPath,
       ...(extraState ? extraState() : {}),
     });
     return;
@@ -218,8 +238,11 @@ async function handleControl(req, res, pathname, state, name, onReset, extraStat
     state.forced = null;
     state.requests = 0;
     state.requestsByPath = {};
+    state.authorizationsByPath = {};
     if (onReset) onReset();
-    sendJson(res, 200, { name, forced: null, requests: 0, requestsByPath: {}, ...(extraState ? extraState() : {}) });
+    sendJson(res, 200, {
+      name, forced: null, requests: 0, requestsByPath: {}, authorizationsByPath: {}, ...(extraState ? extraState() : {}),
+    });
     return;
   }
   if (req.method === 'POST' && pathname === `${CONTROL_PREFIX}/force`) {

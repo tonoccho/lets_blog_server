@@ -302,7 +302,7 @@ external call: target=brave-search host=api.search.brave.com method=GET path=/re
 | `github` | ai `github/GithubClient`, publishing `github/GithubPullRequestClient` |
 | `google-analytics` / `google-adsense` | analytics `analytics/GoogleAnalyticsClient`, `adsense/AdSenseClient` |
 | `keycloak-admin` | identity and platform `keycloak/KeycloakAdminClientConfig` (also the token calls made through the same builder) |
-| `keycloak-token` | identity `config/ServiceTokenClientConfig`, `packages/lbs-common` `auth/ServiceTokenClientConfig` |
+| `keycloak-token` | identity `config/ServiceTokenClientConfig`, `packages/lbs-common` `auth/ServiceTokenClientConfig`, `auth/ToolsTokenProviderConfig`(extensions のツール用トークン、#1804) |
 | `openai-image` / `comfyui` / `plantuml` | media `ai/ChatGptImageClient`, `ai/ComfyUiClient`, `render/PlantUmlClient` |
 | `container-status` / `rabbitmq-management` / `gateway-status` / `connected-service-status` | platform `service/ContainerStatusService`, `RabbitMqQueueStatusService`, `LetsBlogServiceStatusService`, `ConnectedServiceStatusService`, `PenpotReachabilityChecker`, `GitLabReachabilityChecker` |
 | `wordpress-agent` / `wordpress-bulk` | project `provisioning/AgentRestClients`, publishing `cms/agent/WordPressAgentOperations`, `provisioning/WordPressBulkManagementClient` |

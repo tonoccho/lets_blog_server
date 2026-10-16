@@ -143,6 +143,12 @@ public class PlatformServiceClient implements ImageGenerationConfigProvider {
         return destinationGuard.check("ComfyUI", override);
     }
 
+    /** プロジェクトの上書きが無い(=システム設定の接続先)ときだけ、extensionsのツールのトークンを付けてよい(#1804)。 */
+    @Override
+    public boolean comfyUiToolsAuthorized(Long projectId) {
+        return projectId == null || aiServiceConnectionClient.comfyUiBaseUrlOverride(projectId) == null;
+    }
+
     /** プロジェクトのキー(ai-service所有、issue #1521)だけ。無い・projectId未指定ならnullで、システム設定へは落とさない。 */
     @Override
     public String chatGptApiKey(Long projectId) {

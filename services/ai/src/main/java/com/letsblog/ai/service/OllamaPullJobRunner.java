@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.letsblog.ai.repository.GenerationJobRepository;
+import com.letsblog.common.auth.ToolsTokenProvider;
 import com.letsblog.common.net.ConnectionDestinationGuard;
 import com.letsblog.common.net.GuardedTarget;
 import com.letsblog.common.net.PinnedHttpClients;
@@ -61,11 +62,14 @@ public class OllamaPullJobRunner {
     private final ConnectionDestinationGuard destinationGuard;
     private final LongSupplier clockMillis;
     private final Duration idleTimeout;
+    private final ToolsTokenProvider toolsTokenProvider;
 
     @Autowired
-    public OllamaPullJobRunner(GenerationJobRepository generationJobRepository, ObjectMapper objectMapper) {
+    public OllamaPullJobRunner(
+            GenerationJobRepository generationJobRepository, ObjectMapper objectMapper,
+            ToolsTokenProvider toolsTokenProvider) {
         this(generationJobRepository, objectMapper, ConnectionDestinationGuard.system(), System::currentTimeMillis,
-                STREAM_IDLE_TIMEOUT);
+                STREAM_IDLE_TIMEOUT, toolsTokenProvider);
     }
 
     /** テスト専用: 宛先検査と時計を差し替える。 */
@@ -79,6 +83,16 @@ public class OllamaPullJobRunner {
     OllamaPullJobRunner(
             GenerationJobRepository generationJobRepository, ObjectMapper objectMapper,
             ConnectionDestinationGuard destinationGuard, LongSupplier clockMillis, Duration idleTimeout) {
+        this(generationJobRepository, objectMapper, destinationGuard, clockMillis, idleTimeout,
+                ToolsTokenProvider.disabled());
+    }
+
+    /** テスト専用: extensionsのツールのトークンも差し替える(#1804)。 */
+    OllamaPullJobRunner(
+            GenerationJobRepository generationJobRepository, ObjectMapper objectMapper,
+            ConnectionDestinationGuard destinationGuard, LongSupplier clockMillis, Duration idleTimeout,
+            ToolsTokenProvider toolsTokenProvider) {
+        this.toolsTokenProvider = toolsTokenProvider;
         this.idleTimeout = idleTimeout;
         this.generationJobRepository = generationJobRepository;
         this.objectMapper = objectMapper;
@@ -119,12 +133,17 @@ public class OllamaPullJobRunner {
         GuardedTarget target = projectOverride
                 ? destinationGuard.check("Ollama", root) : new GuardedTarget(root, null);
         HttpClient client = PinnedHttpClients.builder(target.sniHost(), CONNECT_TIMEOUT).build();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(target.baseUrl() + "/api/pull"))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(target.baseUrl() + "/api/pull"))
                 .timeout(RESPONSE_START_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(
-                        objectMapper.createObjectNode().put("model", model).put("stream", true).toString()))
-                .build();
+                        objectMapper.createObjectNode().put("model", model).put("stream", true).toString()));
+        // システム設定の接続先にだけ、extensionsのツール用トークンを付ける(プロジェクトの上書き先には付けない。#1804)。
+        // 有効なのに取れないときは例外になり、送らずにジョブをfailedにする(run()のRuntimeExceptionの経路)。
+        if (!projectOverride) {
+            toolsTokenProvider.authorization().ifPresent(value -> builder.header("Authorization", value));
+        }
+        HttpRequest request = builder.build();
         HttpResponse<Stream<String>> response = client.send(request, HttpResponse.BodyHandlers.ofLines());
         try (Stream<String> lines = response.body()) {
             if (response.statusCode() / 100 != 2) {

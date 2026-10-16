@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.letsblog.ai.ai.AiProvider;
 import com.letsblog.ai.ai.LlmClient;
 import com.letsblog.ai.ai.LlmConfigProvider;
+import com.letsblog.common.auth.ToolsTokenProvider;
 import com.letsblog.common.net.GuardedTarget;
 import com.letsblog.common.net.PinnedHttpClients;
 import java.net.URI;
@@ -56,16 +57,23 @@ public class ProviderModelCatalog {
 
     private final LlmConfigProvider configProvider;
     private final Duration timeout;
+    private final ToolsTokenProvider toolsTokenProvider;
 
     @Autowired
-    public ProviderModelCatalog(LlmConfigProvider configProvider) {
-        this(configProvider, DEFAULT_TIMEOUT);
+    public ProviderModelCatalog(LlmConfigProvider configProvider, ToolsTokenProvider toolsTokenProvider) {
+        this(configProvider, DEFAULT_TIMEOUT, toolsTokenProvider);
     }
 
-    /** テスト専用: タイムアウトを差し替える。 */
+    /** テスト専用: タイムアウトを差し替える。extensionsのツールのトークンは付けない。 */
     ProviderModelCatalog(LlmConfigProvider configProvider, Duration timeout) {
+        this(configProvider, timeout, ToolsTokenProvider.disabled());
+    }
+
+    /** テスト専用: タイムアウトとextensionsのツールのトークンを差し替える(#1804)。 */
+    ProviderModelCatalog(LlmConfigProvider configProvider, Duration timeout, ToolsTokenProvider toolsTokenProvider) {
         this.configProvider = configProvider;
         this.timeout = timeout;
+        this.toolsTokenProvider = toolsTokenProvider;
     }
 
     /** 取得できたモデルの一覧(0件でもよい)。取得に失敗したら空のOptional。 */
@@ -107,6 +115,11 @@ public class ProviderModelCatalog {
         String nameField;
         switch (provider) {
             case OLLAMA -> {
+                // システム設定のOllama(プロジェクトの上書き先ではない)にだけ、extensionsのツール用トークンを付ける(#1804)。
+                // 有効なのに取れないときは例外になり、問い合わせずに空を返す(理由はfetchがログに残す)。
+                if (configProvider.toolsAuthorized(provider)) {
+                    toolsTokenProvider.authorization().ifPresent(value -> request.header("Authorization", value));
+                }
                 request.uri(URI.create(withoutV1(baseUrl) + "/api/tags"));
                 listField = "models";
                 nameField = "name";

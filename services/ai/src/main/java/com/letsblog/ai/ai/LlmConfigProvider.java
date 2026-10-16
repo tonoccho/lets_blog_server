@@ -45,6 +45,15 @@ public interface LlmConfigProvider {
     default void useProject(Long projectId) {
     }
 
+    /**
+     * extensionsのツールへ付けるトークン(#1804)を、このproviderの接続先へ付けてよいか。付けてよいのは
+     * システム設定で決まる接続先(OLLAMAでプロジェクトの上書きが無いとき)だけで、プロジェクト単位の上書き先には付けない。
+     * 既定は付けない。
+     */
+    default boolean toolsAuthorized(AiProvider provider) {
+        return false;
+    }
+
     /** プロジェクト画面のモデル選択ドロップダウンに表示する、選択可能なモデル名の一覧。 */
     List<String> availableModels();
 

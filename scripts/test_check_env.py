@@ -359,6 +359,43 @@ class CheckEnvHandlesExtensionsClientSecrets(unittest.TestCase):
         self.assertEqual(0, r.returncode, out)
 
 
+class CheckEnvHandlesToolsClientSecret(unittest.TestCase):
+    """#1804: extensions のツールを呼ぶ専用クライアントのシークレット。欠けると検出し、既定値のままなら警告する。"""
+
+    KEY = "KEYCLOAK_TOOLS_CLIENT_SECRET"
+    VALID_ENCRYPTION_KEY = CheckEnvDetectsAppEncryptionKeyProblems.VALID_ENCRYPTION_KEY
+    setUp = CheckEnvDetectsAppEncryptionKeyProblems.setUp
+    tearDown = CheckEnvDetectsAppEncryptionKeyProblems.tearDown
+    env_from_example = CheckEnvDetectsAppEncryptionKeyProblems.env_from_example
+    run_check = CheckEnvDetectsAppEncryptionKeyProblems.run_check
+
+    def test_example_defines_the_key_once_with_a_dev_only_default(self):
+        self.assertEqual(1, keys_of(EXAMPLE).count(self.KEY))
+        with open(EXAMPLE, encoding="utf-8") as f:
+            text = f.read()
+        self.assertRegex(text, r"(?m)^%s=dev-only-.*-change-me$" % self.KEY)
+
+    def test_missing_secret_is_detected_by_name(self):
+        target = self.env_from_example(overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY})
+        with open(target, encoding="utf-8") as f:
+            kept = [l for l in f.read().splitlines() if not l.startswith(self.KEY + "=")]
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("\n".join(kept) + "\n")
+        r = self.run_check(target)
+        self.assertNotEqual(0, r.returncode, r.stdout)
+        self.assertIn(self.KEY, r.stdout + r.stderr)
+
+    def test_default_value_warns_without_failing(self):
+        r = self.run_check(self.env_from_example(overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY}))
+        self.assertIn(self.KEY, r.stdout + r.stderr)
+        self.assertEqual(0, r.returncode, r.stdout)
+
+    def test_unique_value_does_not_warn(self):
+        r = self.run_check(self.env_from_example(
+            overrides={"APP_ENCRYPTION_KEY": self.VALID_ENCRYPTION_KEY, self.KEY: "d" * 64}))
+        self.assertNotIn(self.KEY, r.stdout + r.stderr)
+
+
 class CheckEnvIsLocaleIndependent(unittest.TestCase):
     """#1591: sort と comm の照合順がロケールで食い違わないこと。
 

@@ -3,6 +3,8 @@ package com.letsblog.platform.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.letsblog.common.auth.ToolsTokenProvider;
+import com.letsblog.common.auth.ToolsTokenUnavailableException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -60,13 +62,20 @@ public class ExtensionsConnectionImportService {
     private final ExtensionsPortalUrlPolicy portalUrlPolicy;
     private final Duration timeout;
     private final HttpClient client;
+    /**
+     * ポータルへ付けるextensionsのツール用トークン(#1804)。JDKのHttpClientを直接使うのでRestClientの
+     * インターセプターでは届かず、ここでヘッダーを直接付ける。取り込みは管理者だけが実行でき、ポータルのURLは
+     * {@link ExtensionsPortalUrlPolicy}の検査を通ったものだけを呼ぶ。
+     */
+    private final ToolsTokenProvider toolsTokenProvider;
 
     @Autowired
     public ExtensionsConnectionImportService(
             AppSettingService appSettingService,
             AdminAuthorizationService adminAuthorizationService,
-            ExtensionsPortalUrlPolicy portalUrlPolicy) {
-        this(appSettingService, adminAuthorizationService, portalUrlPolicy, DEFAULT_TIMEOUT);
+            ExtensionsPortalUrlPolicy portalUrlPolicy,
+            ToolsTokenProvider toolsTokenProvider) {
+        this(appSettingService, adminAuthorizationService, portalUrlPolicy, DEFAULT_TIMEOUT, toolsTokenProvider);
     }
 
     ExtensionsConnectionImportService(
@@ -74,6 +83,16 @@ public class ExtensionsConnectionImportService {
             AdminAuthorizationService adminAuthorizationService,
             ExtensionsPortalUrlPolicy portalUrlPolicy,
             Duration timeout) {
+        this(appSettingService, adminAuthorizationService, portalUrlPolicy, timeout, ToolsTokenProvider.disabled());
+    }
+
+    ExtensionsConnectionImportService(
+            AppSettingService appSettingService,
+            AdminAuthorizationService adminAuthorizationService,
+            ExtensionsPortalUrlPolicy portalUrlPolicy,
+            Duration timeout,
+            ToolsTokenProvider toolsTokenProvider) {
+        this.toolsTokenProvider = toolsTokenProvider;
         this.appSettingService = appSettingService;
         this.adminAuthorizationService = adminAuthorizationService;
         this.portalUrlPolicy = portalUrlPolicy;
@@ -141,11 +160,17 @@ public class ExtensionsConnectionImportService {
     }
 
     private JsonNode readConnections(String portalUrl) {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(trimSlash(portalUrl) + "/api/connections"))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(trimSlash(portalUrl) + "/api/connections"))
                 .timeout(timeout)
                 .header("Accept", "application/json")
-                .GET()
-                .build();
+                .GET();
+        try {
+            toolsTokenProvider.authorization().ifPresent(value -> builder.header("Authorization", value));
+        } catch (ToolsTokenUnavailableException e) {
+            // 有効なのに取れないときは、ヘッダー無しで送らず、理由の分かるエラーにする。
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+        HttpRequest request = builder.build();
         HttpResponse<String> response;
         try {
             response = client.send(request, HttpResponse.BodyHandlers.ofString());

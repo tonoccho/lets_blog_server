@@ -466,6 +466,26 @@ AT のスタックは、extensions のツールの実物(イメージ)を 1 つ�
 実装は `infra/e2e-stubs/<name>/server.js`、共通土台は `infra/e2e-stubs/lib/stub.js`。
 `node:22-alpine` にソースをマウントするだけなので、イメージのビルドは要らない。
 
+### スタブが受けた Authorization と、専用クライアントのトークンの検証(#1804)
+
+lets_blog は extensions のツールを呼ぶとき、`KEYCLOAK_TOOLS_CLIENT_SECRET` が設定されていれば、専用クライアント
+`letsblog-tools-client`(ロール無し、audience `lbx-tools`)の client credentials トークンを付ける。付ける宛先は
+システム設定の接続先(Ollama・ComfyUI・ポータル)と `PLANTUML_BASE_URL` だけで、プロジェクト単位の上書き先には付けない。
+
+共通土台(`infra/e2e-stubs/lib/stub.js`)は、受けた `Authorization` を `METHOD /path` ごとに(直近 100 件、付いていない要求は
+`(none)`)`GET /__control/state` の `authorizationsByPath` へ残す。**スタブ自身は検証しない。** 値はスタブのログにも、
+制御以外の応答の本文・ヘッダーにも出さない。検証は受け入れテストのステップ(`steps/toolsClientToken.steps.ts`、
+`support/toolsJwt.ts`)が、Keycloak の JWKS で署名を確かめ、`iss`・`azp`(`letsblog-tools-client`)・`aud`(`lbx-tools`)を確かめる。
+
+- `features/stubs/tools-client-token.feature`(`@stub @destructive`): LLM の生成・モデルの一覧・pull・接続テスト・ComfyUI の画像生成・
+  PlantUML の描画・連携サービスの状況・ポータルからの取り込みで、スタブが受けた Authorization が専用クライアントのトークンである。
+  スタブの受信履歴をリセットするので、他のスタブのシナリオと並列に走らせない。
+- `features/auth/tools-client-token.feature`(`@api`): そのトークンで Keycloak の Admin REST API を呼ぶと 403 になる。トークンに
+  `admin` / `editor` / `viewer` も `realm-management` のロールも無い。シークレットは `lbs-ai` コンテナの環境変数にだけ置く。
+
+**前提**: Keycloak に `letsblog-tools-client` がある。新規構築は realm import で作られる。既存の Keycloak には import が効かないので、
+`infra/keycloak/README.md` の kcadm の手順で足す(利用者が実行する)。無いまま上の2本を流すと、トークンを取れず失敗する。
+
 ### extensions のポータルのスタブ(`portal-stub`、issue #1782)
 
 lets_blog_server_extensions のポータルが返す `GET /api/connections` を模す。接続先を `/api/connections` から取り込む機能(#1783)を、

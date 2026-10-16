@@ -215,6 +215,13 @@ keycloak:
     admin-base-uri: ${KEYCLOAK_ADMIN_BASE_URI:http://keycloak:8080/auth/admin/realms/letsblog}
     client-id: ${KEYCLOAK_SERVICES_CLIENT_ID:letsblog-services}
     client-secret: ${KEYCLOAK_SERVICES_CLIENT_SECRET:}
+  # extensionsのツール(Ollama・ComfyUI・PlantUML・ポータル)を呼ぶときに付ける専用クライアント
+  # letsblog-tools-client(ロール無し、audience lbx-tools)の client credentials(#1804)。
+  # client-secretが空ならトークンを付けない(従来どおり)。設定したのに取得できないときは理由の分かるエラーにする。
+  tools:
+    token-uri: ${KEYCLOAK_TOKEN_URI:http://keycloak:8080/auth/realms/letsblog/protocol/openid-connect/token}
+    client-id: ${KEYCLOAK_TOOLS_CLIENT_ID:letsblog-tools-client}
+    client-secret: ${KEYCLOAK_TOOLS_CLIENT_SECRET:}
 
 ---
 # admin-password-resetプロファイル専用設定(issue #697)。AdminPasswordResetRunnerは

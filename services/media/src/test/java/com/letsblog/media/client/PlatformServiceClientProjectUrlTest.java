@@ -110,4 +110,27 @@ class PlatformServiceClientProjectUrlTest {
 
         verify(aiConnections, never()).openAiApiKey(org.mockito.ArgumentMatchers.any());
     }
+
+    // ---- extensionsのツールへのトークンを付ける宛先(#1804) ----
+
+    @Test
+    void システム設定の接続先は上書きが無ければトークンを付ける() {
+        when(aiConnections.comfyUiBaseUrlOverride(8L)).thenReturn(null);
+
+        assertThat(client.comfyUiToolsAuthorized(8L)).isTrue();
+    }
+
+    @Test
+    void projectIdが無ければai_serviceへ問い合わせずトークンを付ける() {
+        assertThat(client.comfyUiToolsAuthorized(null)).isTrue();
+
+        verify(aiConnections, never()).comfyUiBaseUrlOverride(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void プロジェクトの上書き先にはトークンを付けない() {
+        when(aiConnections.comfyUiBaseUrlOverride(7L)).thenReturn("http://gpu:8188");
+
+        assertThat(client.comfyUiToolsAuthorized(7L)).isFalse();
+    }
 }

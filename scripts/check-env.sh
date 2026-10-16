@@ -154,7 +154,8 @@ fi
 # Keycloak 側の secret も揃える必要があり、手順は docs/KEYCLOAK_CLIENT_SECRET_ROTATION.md。
 default_secret_keys=""
 for var in KEYCLOAK_SERVICES_CLIENT_SECRET KEYCLOAK_WEB_CLIENT_SECRET \
-    KEYCLOAK_GITLAB_CLIENT_SECRET KEYCLOAK_PENPOT_CLIENT_SECRET KEYCLOAK_PROXY_CLIENT_SECRET; do
+    KEYCLOAK_GITLAB_CLIENT_SECRET KEYCLOAK_PENPOT_CLIENT_SECRET KEYCLOAK_PROXY_CLIENT_SECRET \
+    KEYCLOAK_TOOLS_CLIENT_SECRET; do
     grep -qE "^${var}=" "$TARGET" || continue
     secret_value="$(value_of_key "$var" "$TARGET")"
     example_secret="$(value_of_key "$var" "$EXAMPLE" 2>/dev/null || true)"

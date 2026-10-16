@@ -175,6 +175,10 @@ services:
       # この宣言が無いと application.yml の既定値(空文字)が使われ、Keycloak が
       # unauthorized_client で拒否し、画像生成に関わる公開APIが全滅する(#998)。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # extensions のツール(Ollama・ComfyUI・PlantUML・ポータル)を呼ぶときに付ける、専用クライアント
+      # letsblog-tools-client(ロール無し、audience lbx-tools)のシークレット(#1804)。空なら付けない。
+      # 設定したのに取得できないときは、ヘッダーを付けずに続けず理由の分かるエラーにする。
+      KEYCLOAK_TOOLS_CLIENT_SECRET: ${KEYCLOAK_TOOLS_CLIENT_SECRET}
       COMFYUI_CHECKPOINT: ${COMFYUI_CHECKPOINT:-v1-5-pruned-emaonly.safetensors}
       PLANTUML_BASE_URL: http://lbx-plantuml:8080
       GENERATED_IMAGES_STORAGE_PATH: /app/data/generated-images
@@ -257,6 +261,10 @@ services:
       # 以前はlegacy-apiのAiBridgeController経由だったが、その実装はplatform-serviceへの
       # 単純な中継だったため直接呼ぶよう切り替えた。
       PLATFORM_SERVICE_URI: http://platform:8080
+      # extensions のツール(Ollama・ComfyUI・PlantUML・ポータル)を呼ぶときに付ける、専用クライアント
+      # letsblog-tools-client(ロール無し、audience lbx-tools)のシークレット(#1804)。空なら付けない。
+      # 設定したのに取得できないときは、ヘッダーを付けずに続けず理由の分かるエラーにする。
+      KEYCLOAK_TOOLS_CLIENT_SECRET: ${KEYCLOAK_TOOLS_CLIENT_SECRET}
       <<: *rabbitmq-env
     depends_on:
       mysql:
@@ -434,6 +442,10 @@ services:
       # AdminPasswordResetRunner(緊急パスワードリセット)がKeycloak Admin REST APIを呼び出すための
       # letsblog-servicesクライアントのシークレット(legacy-api/identity-serviceと同じ値、issue #681由来)。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
+      # extensions のツール(Ollama・ComfyUI・PlantUML・ポータル)を呼ぶときに付ける、専用クライアント
+      # letsblog-tools-client(ロール無し、audience lbx-tools)のシークレット(#1804)。空なら付けない。
+      # 設定したのに取得できないときは、ヘッダーを付けずに続けず理由の分かるエラーにする。
+      KEYCLOAK_TOOLS_CLIENT_SECRET: ${KEYCLOAK_TOOLS_CLIENT_SECRET}
       # BackupService(issue #694)が生成画像ファイルをバックアップ/リストアする際の保存先。
       # legacy-apiのapiコンテナが持っていた同名の環境変数と同じ(バックアップ機能の移設に伴い、
       # 実体を書き込むmedia-serviceと共有するgenerated_images volumeをこちらへ付け替えた)。
@@ -913,6 +925,8 @@ services:
       # 既存の realm には効かない(--import-realm は既存 realm を上書きしない)。
       KEYCLOAK_SERVICES_CLIENT_SECRET: ${KEYCLOAK_SERVICES_CLIENT_SECRET}
       KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET}
+      # extensions のツール用の専用クライアント letsblog-tools-client(#1804)。同じ値を ai / media / platform へ渡す。
+      KEYCLOAK_TOOLS_CLIENT_SECRET: ${KEYCLOAK_TOOLS_CLIENT_SECRET}
     volumes:
       - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     depends_on:
