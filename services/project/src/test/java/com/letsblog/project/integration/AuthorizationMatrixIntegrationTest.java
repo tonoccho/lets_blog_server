@@ -3,7 +3,8 @@ package com.letsblog.project.integration;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.project.client.IdentityClient;
+import com.letsblog.project.testsupport.FakeHttpServer;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,6 +17,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -47,8 +50,21 @@ class AuthorizationMatrixIntegrationTest {
     @MockitoBean
     private JwtDecoder jwtDecoder;
 
-    @MockitoBean
-    private IdentityClient identityClient;
+    /**
+     * identity-service(IdentityClient・IdentityBridgeClientの向き先)の代わりのフェイクHTTPサーバー。
+     * 自前のクライアントは実物で、HTTPの向こうだけを差し替える(issue #1818)。
+     */
+    private static final FakeHttpServer IDENTITY = new FakeHttpServer();
+
+    @DynamicPropertySource
+    static void identityServiceUri(DynamicPropertyRegistry registry) {
+        registry.add("app.identity-service-uri", IDENTITY::baseUrl);
+    }
+
+    @AfterAll
+    static void stopIdentity() {
+        IDENTITY.close();
+    }
 
     /**
      * project-serviceがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code project}

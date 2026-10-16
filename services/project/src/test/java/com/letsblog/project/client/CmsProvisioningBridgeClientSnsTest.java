@@ -2,7 +2,9 @@ package com.letsblog.project.client;
 
 import com.letsblog.project.cms.LetsblogSnsResult;
 import com.sun.net.httpserver.HttpServer;
-import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
@@ -16,8 +18,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /** SNS 告知の wp-cli 実行(接続・状態・テスト投稿・履歴)を publishing-service のブリッジへ依頼する(issue #1574)。 */
 class CmsProvisioningBridgeClientSnsTest {
@@ -25,9 +25,11 @@ class CmsProvisioningBridgeClientSnsTest {
     private HttpServer server;
     private final AtomicReference<String> body = new AtomicReference<>();
     private final AtomicReference<String> path = new AtomicReference<>();
+    private final AtomicReference<String> auth = new AtomicReference<>();
 
     @AfterEach
     void tearDown() {
+        RequestContextHolder.resetRequestAttributes();
         if (server != null) {
             server.stop(0);
         }
@@ -38,6 +40,7 @@ class CmsProvisioningBridgeClientSnsTest {
         server.createContext("/", exchange -> {
             body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             path.set(exchange.getRequestURI().getPath());
+            auth.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
@@ -47,11 +50,13 @@ class CmsProvisioningBridgeClientSnsTest {
             exchange.close();
         });
         server.start();
-        HttpServletRequest request = mock(HttpServletRequest.class);
-        when(request.getHeader("Authorization")).thenReturn("Bearer req");
-        return new CmsProvisioningBridgeClient(
-                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), request,
-                mock(com.letsblog.common.auth.ServiceTokenClient.class));
+        // リクエスト処理中の呼び出し(利用者のBearerを転送する)。サービス自身のトークンは使われないが、実物を渡す。
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer req");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        String base = "http://localhost:" + server.getAddress().getPort();
+        return new CmsProvisioningBridgeClient(RestClient.builder(), base, request,
+                new com.letsblog.common.auth.ServiceTokenClient(RestClient.builder(), base + "/token", "project-service", "secret"));
     }
 
     @Test
@@ -63,6 +68,7 @@ class CmsProvisioningBridgeClientSnsTest {
 
         assertEquals("{\"status\":\"接続済み\"}", result.stdout());
         assertEquals("/api/internal/project/cms/letsblog-sns", path.get());
+        assertEquals("Bearer req", auth.get());
         assertTrue(body.get().contains("\"command\":\"config-set\""));
         assertTrue(body.get().contains("\"sns\":\"x\""));
         assertTrue(body.get().contains("\"stdin\":\"{\\\"sns\\\":\\\"x\\\"}\""));

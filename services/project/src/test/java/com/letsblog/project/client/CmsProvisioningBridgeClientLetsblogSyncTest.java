@@ -2,7 +2,7 @@ package com.letsblog.project.client;
 
 import com.letsblog.project.cms.LetsblogSyncResult;
 import com.sun.net.httpserver.HttpServer;
-import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
@@ -16,8 +16,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /** プラグインへの同期(wp-cliだけ)を publishing-service のブリッジへ依頼する(issue #1558)。 */
 class CmsProvisioningBridgeClientLetsblogSyncTest {
@@ -35,7 +33,7 @@ class CmsProvisioningBridgeClientLetsblogSyncTest {
         }
     }
 
-    private CmsProvisioningBridgeClient client(int status, String response, HttpServletRequest request)
+    private CmsProvisioningBridgeClient client(int status, String response, MockHttpServletRequest request)
             throws IOException {
         server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
         server.createContext("/", exchange -> {
@@ -51,14 +49,16 @@ class CmsProvisioningBridgeClientLetsblogSyncTest {
             exchange.close();
         });
         server.start();
-        return new CmsProvisioningBridgeClient(
-                RestClient.builder(), "http://localhost:" + server.getAddress().getPort(), request,
-                mock(com.letsblog.common.auth.ServiceTokenClient.class));
+        String base = "http://localhost:" + server.getAddress().getPort();
+        return new CmsProvisioningBridgeClient(RestClient.builder(), base, request,
+                new com.letsblog.common.auth.ServiceTokenClient(RestClient.builder(), base + "/token", "project-service", "secret"));
     }
 
-    private HttpServletRequest requestWithBearer(String bearer) {
-        HttpServletRequest request = mock(HttpServletRequest.class);
-        when(request.getHeader("Authorization")).thenReturn(bearer);
+    private MockHttpServletRequest requestWithBearer(String bearer) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        if (bearer != null) {
+            request.addHeader("Authorization", bearer);
+        }
         // リクエスト処理中の呼び出しを模す。リクエスト外はジョブのスレッド扱い(サービス自身のトークン。#1723)。
         org.springframework.web.context.request.RequestContextHolder.setRequestAttributes(
                 new org.springframework.web.context.request.ServletRequestAttributes(request));
@@ -81,8 +81,8 @@ class CmsProvisioningBridgeClientLetsblogSyncTest {
 
     @Test
     void 取り置いたトークンがあればリクエストが無くてもそれを使う() throws IOException {
-        HttpServletRequest noRequest = mock(HttpServletRequest.class);
-        when(noRequest.getHeader("Authorization")).thenThrow(new IllegalStateException("No thread-bound request"));
+        // リクエストにバインドされていないスレッド(リクエストの束縛なし)。取り置きのトークンが優先される。
+        MockHttpServletRequest noRequest = new MockHttpServletRequest();
         CmsProvisioningBridgeClient client = client(200, "{\"syncHash\":\"h1\"}", noRequest);
 
         BearerScope.call("Bearer scoped", () ->

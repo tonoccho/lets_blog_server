@@ -1,22 +1,24 @@
 package com.letsblog.project.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.letsblog.project.cms.LetsblogPluginStatus.State;
 import com.letsblog.project.config.GlobalExceptionHandler;
-import com.letsblog.project.dto.SnsTemplatesView;
-import com.letsblog.project.service.AdminAuthorizationService;
-import com.letsblog.project.service.ForbiddenException;
-import com.letsblog.project.service.SnsTemplateService;
+import com.letsblog.project.domain.Project;
+import com.letsblog.project.domain.ProjectSnsTemplate;
+import com.letsblog.project.testsupport.ProjectApp;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import static org.mockito.Mockito.doThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -24,97 +26,155 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** プロジェクト設定画面の告知文テンプレートの API(issue #1583)。読むのはメンバーかadmin、保存と再送はadminだけ。 */
-@ExtendWith(MockitoExtension.class)
+/**
+ * プロジェクト設定画面の告知文テンプレートの API(issue #1583)。読むのはメンバーかadmin、保存と再送はadminだけ。
+ *
+ * <p>issue #1818: SnsTemplateService・AdminAuthorizationService・SiteService は実物。identity-service・CMS ブリッジの
+ * 代わりにフェイクHTTPサーバーが応答し、差し替えるのはDBのリポジトリだけ。
+ */
 class ProjectSnsTemplateControllerTest {
 
-    @Mock
-    private SnsTemplateService snsTemplateService;
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    private static final String MEMBER = "/api/internal/identity/projects/7/members/5";
 
+    private final ProjectApp app = new ProjectApp();
+    private ProjectSnsTemplate stored;
     private MockMvc mockMvc;
-
-    private final SnsTemplatesView view = new SnsTemplatesView("【新着】{title} {url}", "{threshold}PV",
-            new SnsTemplatesView.Send("SENT", null, "2026-10-06T00:00:00Z"));
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new ProjectSnsTemplateController(snsTemplateService, adminAuthorizationService))
+                .standaloneSetup(new ProjectSnsTemplateController(app.snsTemplateService, app.world.adminAuthorizationService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+        when(app.snsTemplateRepository.findById(7L)).thenAnswer(i -> Optional.ofNullable(stored));
+        when(app.snsTemplateRepository.save(any(ProjectSnsTemplate.class))).thenAnswer(i -> {
+            stored = i.getArgument(0);
+            return stored;
+        });
+    }
+
+    @AfterEach
+    void close() {
+        app.close();
+    }
+
+    private void productionSiteReady() {
+        Project project = new Project();
+        project.setId(7L);
+        project.setProductionSiteId(3L);
+        when(app.projectRepository.findById(7L)).thenReturn(Optional.of(project));
+        app.world.addSite(3L, "本番サイト");
+        app.world.pluginState(State.INSTALLED);
+        app.world.letsblogSns("templates-set", null, "{}");
+    }
+
+    private void asNonMember() {
+        app.world.actingAsUser(5L);
+        app.world.http.json("GET", MEMBER, "false");
+    }
+
+    private boolean sentToSite() {
+        return !app.world.snsRequests("templates-set").isEmpty();
     }
 
     @Test
     void テンプレートと送信状態を返す() throws Exception {
-        when(snsTemplateService.view(7L)).thenReturn(view);
+        app.world.actingAsAdmin(1L);
+        productionSiteReady();
+        ProjectSnsTemplate row = new ProjectSnsTemplate();
+        row.setProjectId(7L);
+        row.setPublishTemplate("【新着】{title} {url}");
+        row.setPvTemplate("{threshold}PV");
+        row.setSyncState("SENT");
+        row.setSentAt(java.time.Instant.parse("2026-10-06T00:00:00Z"));
+        stored = row;
 
         mockMvc.perform(get("/api/projects/7/sns/templates"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.publishTemplate").value("【新着】{title} {url}"))
                 .andExpect(jsonPath("$.pvTemplate").value("{threshold}PV"))
-                .andExpect(jsonPath("$.send.state").value("SENT"));
-        verify(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+                .andExpect(jsonPath("$.send.state").value("SENT"))
+                .andExpect(jsonPath("$.send.at").value("2026-10-06T00:00:00Z"));
     }
 
     @Test
     void メンバーでもadminでもなければ読めない() throws Exception {
-        doThrow(new ForbiddenException("権限がありません")).when(adminAuthorizationService).requireProjectMemberOrAdmin(7L);
+        asNonMember();
+        productionSiteReady();
 
         mockMvc.perform(get("/api/projects/7/sns/templates")).andExpect(status().isForbidden());
 
-        verifyNoInteractions(snsTemplateService);
+        verify(app.snsTemplateRepository, never()).findById(any());
     }
 
     @Test
     void 公開時とPV達成時のテンプレートを保存する() throws Exception {
-        when(snsTemplateService.save(7L, "【新着】{title} {url}", "{threshold}PV")).thenReturn(view);
+        app.world.actingAsAdmin(1L);
+        productionSiteReady();
 
         mockMvc.perform(put("/api/projects/7/sns/templates").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"publishTemplate\":\"【新着】{title} {url}\",\"pvTemplate\":\"{threshold}PV\"}"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.publishTemplate").value("【新着】{title} {url}"))
                 .andExpect(jsonPath("$.send.state").value("SENT"));
-        verify(adminAuthorizationService).requireAdmin();
+        assertEquals("【新着】{title} {url}", stored.getPublishTemplate());
+        assertEquals("{threshold}PV", stored.getPvTemplate());
+        JsonNode payload = app.world.objectMapper.readTree(app.world.snsRequests("templates-set").get(0).path("stdin").asText());
+        assertEquals("【新着】{title} {url}", payload.get("publish").asText());
     }
 
     @Test
     void 欄が欠けていても空として保存へ渡す() throws Exception {
-        when(snsTemplateService.save(7L, null, null)).thenReturn(view);
+        app.world.actingAsAdmin(1L);
+        productionSiteReady();
 
         mockMvc.perform(put("/api/projects/7/sns/templates").contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.publishTemplate").value(""))
+                .andExpect(jsonPath("$.pvTemplate").value(""));
+        assertEquals("", stored.getPublishTemplate());
+        assertEquals("", stored.getPvTemplate());
     }
 
     @Test
     void サービスの拒否は409で理由を返す() throws Exception {
-        when(snsTemplateService.save(7L, "{period}", ""))
-                .thenThrow(new IllegalArgumentException("公開時のテンプレートに {period} は使えません"));
+        app.world.actingAsAdmin(1L);
+        productionSiteReady();
 
         mockMvc.perform(put("/api/projects/7/sns/templates").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"publishTemplate\":\"{period}\",\"pvTemplate\":\"\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error").value("公開時のテンプレートに {period} は使えません"));
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("{period}")));
+        assertTrue(!sentToSite());
     }
 
     @Test
     void 再送する() throws Exception {
-        when(snsTemplateService.resend(7L)).thenReturn(view);
+        app.world.actingAsAdmin(1L);
+        productionSiteReady();
+        ProjectSnsTemplate row = new ProjectSnsTemplate();
+        row.setProjectId(7L);
+        row.setPublishTemplate("a");
+        row.setPvTemplate("b");
+        row.setSyncState("FAILED");
+        stored = row;
 
         mockMvc.perform(post("/api/projects/7/sns/templates/resend"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.send.state").value("SENT"));
-        verify(adminAuthorizationService).requireAdmin();
+        assertTrue(sentToSite());
     }
 
     @Test
     void 保存と再送は管理者だけで_メンバーは拒否し何も実行しない() throws Exception {
-        doThrow(new ForbiddenException("権限がありません")).when(adminAuthorizationService).requireAdmin();
+        asNonMember();
+        productionSiteReady();
 
         mockMvc.perform(put("/api/projects/7/sns/templates").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"publishTemplate\":\"a\",\"pvTemplate\":\"b\"}")).andExpect(status().isForbidden());
         mockMvc.perform(post("/api/projects/7/sns/templates/resend")).andExpect(status().isForbidden());
 
-        verifyNoInteractions(snsTemplateService);
+        assertTrue(!sentToSite());
+        verify(app.snsTemplateRepository, never()).save(any());
     }
 }
