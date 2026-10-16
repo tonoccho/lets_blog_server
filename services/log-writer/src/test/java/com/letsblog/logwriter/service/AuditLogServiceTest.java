@@ -1,81 +1,82 @@
 package com.letsblog.logwriter.service;
 
-import com.letsblog.logwriter.repository.AuditLogRepository;
+import com.letsblog.logwriter.domain.AuditLog;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
-class AuditLogServiceTest {
+/** AuditLogService(issue #1829で書き直し)。リポジトリは実物(実 MySQL)。区切り削除が複数回に分かれる場合は LogRetentionDeletionIntegrationTest が通す。 */
+class AuditLogServiceTest extends LogWriterIntegrationTestBase {
 
-    @Mock
-    private AuditLogRepository repository;
+    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 1, 0, 0);
+    private static final PageRequest PAGE = PageRequest.of(0, 20);
 
+    @Autowired
     private AuditLogService service;
 
-    @Test
-    void findByUserId_リポジトリへ委譲する() {
-        service = new AuditLogService(repository);
-        PageRequest pageable = PageRequest.of(0, 20);
-
-        service.findByUserId(1L, pageable);
-
-        verify(repository).findByUserIdOrderByCreatedAtDesc(1L, pageable);
+    private List<String> actions(org.springframework.data.domain.Page<AuditLog> page) {
+        return page.map(AuditLog::getAction).getContent();
     }
 
     @Test
-    void findByAction_リポジトリへ委譲する() {
-        service = new AuditLogService(repository);
-        PageRequest pageable = PageRequest.of(0, 20);
+    void findByUserId_そのユーザーの行だけを新しい順に返す() {
+        saveAudit(1L, "A_OLD", "USER", 1L, null, AT);
+        saveAudit(1L, "A_NEW", "USER", 1L, null, AT.plusMinutes(1));
+        saveAudit(2L, "B", "USER", 1L, null, AT);
 
-        service.findByAction("USER_CREATED", pageable);
-
-        verify(repository).findByActionOrderByCreatedAtDesc("USER_CREATED", pageable);
+        assertEquals(List.of("A_NEW", "A_OLD"), actions(service.findByUserId(1L, PAGE)));
     }
 
     @Test
-    void deleteOldLogs_区切り件数ずつ端数の回で止まるまで削除する() {
-        service = new AuditLogService(repository);
-        int batch = AuditLogService.DEFAULT_DELETE_BATCH_SIZE;
-        when(repository.deleteBatchBefore(any(LocalDateTime.class), eq(batch))).thenReturn(batch, batch, 3);
+    void findByAction_そのactionの行だけを返す() {
+        saveAudit(1L, "USER_CREATED", "USER", 1L, null, AT);
+        saveAudit(1L, "USER_DELETED", "USER", 1L, null, AT);
+
+        assertEquals(List.of("USER_CREATED"), actions(service.findByAction("USER_CREATED", PAGE)));
+    }
+
+    @Test
+    void findByDateRange_期間内の行だけを返す() {
+        saveAudit(1L, "BEFORE", "USER", 1L, null, AT.minusDays(1));
+        saveAudit(1L, "INSIDE", "USER", 1L, null, AT.plusHours(1));
+        saveAudit(1L, "AFTER", "USER", 1L, null, AT.plusDays(2));
+
+        assertEquals(List.of("INSIDE"), actions(service.findByDateRange(AT, AT.plusDays(1), PAGE)));
+    }
+
+    @Test
+    void findAll_全件を新しい順に返す() {
+        saveAudit(1L, "FIRST", "USER", 1L, null, AT);
+        saveAudit(2L, "SECOND", "USER", 1L, null, AT.plusMinutes(1));
+
+        assertEquals(List.of("SECOND", "FIRST"), actions(service.findAll(PAGE)));
+    }
+
+    @Test
+    void deleteOldLogs_365日より古い行だけを削除する() {
+        LocalDateTime now = LocalDateTime.now();
+        saveAudit(1L, "OLD", "USER", 1L, null, now.minusDays(366));
+        saveAudit(1L, "NEW", "USER", 1L, null, now.minusDays(364));
 
         service.deleteOldLogs();
 
-        verify(repository, times(3)).deleteBatchBefore(any(LocalDateTime.class), eq(batch));
+        assertEquals(List.of("NEW"), auditLogRepository.findAll().stream().map(AuditLog::getAction).toList());
     }
 
     @Test
-    void deleteOldLogs_対象が無ければ1回で止まる() {
-        service = new AuditLogService(repository);
-        when(repository.deleteBatchBefore(any(LocalDateTime.class), anyInt())).thenReturn(0);
+    void deleteOldLogs_対象が無ければ何も消さない() {
+        saveAudit(1L, "NEW", "USER", 1L, null, LocalDateTime.now());
 
         service.deleteOldLogs();
 
-        verify(repository, times(1)).deleteBatchBefore(any(LocalDateTime.class), anyInt());
-    }
-
-    @Test
-    void deleteOldLogs_全件をメモリに読み込まない() {
-        service = new AuditLogService(repository);
-        when(repository.deleteBatchBefore(any(LocalDateTime.class), anyInt())).thenReturn(0);
-
-        service.deleteOldLogs();
-
-        verify(repository, never()).findAll();
+        assertEquals(1, auditLogRepository.count());
     }
 
     @Test

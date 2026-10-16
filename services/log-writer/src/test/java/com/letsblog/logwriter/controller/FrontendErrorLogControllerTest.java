@@ -1,115 +1,119 @@
 package com.letsblog.logwriter.controller;
 
-import com.letsblog.logwriter.domain.FrontendErrorLog;
-import com.letsblog.logwriter.dto.FrontendErrorLogRequest;
-import com.letsblog.logwriter.service.AdminAuthorizationService;
-import com.letsblog.logwriter.service.ForbiddenException;
-import com.letsblog.logwriter.service.FrontendErrorLogService;
+import com.letsblog.common.messaging.ErrorLogMessage;
+import com.letsblog.common.messaging.LogExchanges;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import java.time.LocalDateTime;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.ResultActions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.times;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@ExtendWith(MockitoExtension.class)
-class FrontendErrorLogControllerTest {
+/** /api/logs/errors(issue #1829で書き直し)。コントローラ・サービス・認可・リポジトリは実物で、外部との通信は MQ への発行(RabbitTemplate)だけ。 */
+class FrontendErrorLogControllerTest extends LogWriterIntegrationTestBase {
 
-    @Mock
-    private FrontendErrorLogService service;
+    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 1, 0, 0);
 
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    @BeforeEach
+    void users() {
+        login("admin", "sub-admin", 1L, "admin");
+        login("user", "sub-user", 2L, "editor");
+    }
 
-    private FrontendErrorLogController controller() {
-        return new FrontendErrorLogController(service, adminAuthorizationService);
+    private ResultActions getErrors(String token, String query) throws Exception {
+        return mockMvc.perform(get("/api/logs/errors" + query).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+    }
+
+    private ResultActions postError(String body) throws Exception {
+        return mockMvc.perform(post("/api/logs/errors")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer user")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
     }
 
     @Test
-    void logError_登録できる() {
-        FrontendErrorLogRequest request = new FrontendErrorLogRequest(
-                "boom", null, null, "error", null, "https://example.com", "agent", null);
+    void logError_登録できる() throws Exception {
+        postError("{\"message\":\"boom\",\"level\":\"error\",\"url\":\"https://example.com\",\"userAgent\":\"agent\"}")
+                .andExpect(status().isCreated());
 
-        ResponseEntity<Void> response = controller().logError(request);
-
-        assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        ArgumentCaptor<FrontendErrorLog> captor = ArgumentCaptor.forClass(FrontendErrorLog.class);
-        verify(service, times(1)).logError(captor.capture());
-        assertEquals("boom", captor.getValue().getMessage());
+        ArgumentCaptor<ErrorLogMessage> captor = ArgumentCaptor.forClass(ErrorLogMessage.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.ERROR_LOG_ROUTING_KEY), captor.capture());
+        assertEquals("boom", captor.getValue().message());
+        assertEquals("ERROR", captor.getValue().level());
+        assertEquals(2L, captor.getValue().userId());
+        assertEquals("sub-user", captor.getValue().actorKeycloakSub());
+        assertNotNull(captor.getValue().timestamp());
     }
 
     @Test
-    void getErrors_admin以外はForbidden() {
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireAdmin();
+    void logError_levelが不正なら400でキューへ発行しない() throws Exception {
+        postError("{\"message\":\"boom\",\"level\":\"FATAL\"}").andExpect(status().isBadRequest());
 
-        assertThrows(ForbiddenException.class,
-                () -> controller().getErrors(null, null, null, null, PageRequest.of(0, 20)));
+        verifyNoInteractions(rabbitTemplate);
     }
 
     @Test
-    void getErrors_level指定でfindByLevelへ委譲する() {
-        Pageable pageable = PageRequest.of(0, 20);
-        when(service.findByLevel("ERROR", pageable)).thenReturn(Page.empty());
-
-        controller().getErrors("error", null, null, null, pageable);
-
-        verify(service).findByLevel("ERROR", pageable);
+    void getErrors_admin以外はForbidden() throws Exception {
+        getErrors("user", "").andExpect(status().isForbidden());
     }
 
     @Test
-    void getErrors_startDateとendDateが両方あればfindByDateRangeへ委譲する() {
-        Pageable pageable = PageRequest.of(0, 20);
-        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
-        LocalDateTime end = LocalDateTime.of(2026, 1, 2, 0, 0);
-        when(service.findByDateRange(start, end, pageable)).thenReturn(Page.empty());
+    void getErrors_level指定は大文字化して絞る() throws Exception {
+        saveError("e1", "ERROR", "https://a.example", AT);
+        saveError("e2", "WARN", "https://a.example", AT);
 
-        controller().getErrors(null, start, end, null, pageable);
-
-        verify(service).findByDateRange(start, end, pageable);
+        getErrors("admin", "?level=warn").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].message").value("e2"));
     }
 
     @Test
-    void getErrors_startDateのみではfindByDateRangeへ委譲しない() {
-        Pageable pageable = PageRequest.of(0, 20);
-        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
-        when(service.findAll(pageable)).thenReturn(Page.empty());
+    void getErrors_startDateとendDateが両方あれば期間で絞る() throws Exception {
+        saveError("inside", "ERROR", "u", AT.plusHours(1));
+        saveError("outside", "ERROR", "u", AT.plusDays(5));
 
-        controller().getErrors(null, start, null, null, pageable);
-
-        verify(service, times(0)).findByDateRange(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        verify(service).findAll(pageable);
+        getErrors("admin", "?startDate=2026-10-01T00:00:00&endDate=2026-10-02T00:00:00").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].message").value("inside"));
     }
 
     @Test
-    void getErrors_url指定でfindByUrlへ委譲する() {
-        Pageable pageable = PageRequest.of(0, 20);
-        when(service.findByUrl("https://example.com", pageable)).thenReturn(Page.empty());
+    void getErrors_startDateのみでは期間で絞らず全件を返す() throws Exception {
+        saveError("e1", "ERROR", "u", AT);
+        saveError("e2", "ERROR", "u", AT.plusDays(5));
 
-        controller().getErrors(null, null, null, "https://example.com", pageable);
-
-        verify(service).findByUrl("https://example.com", pageable);
+        getErrors("admin", "?startDate=2026-10-03T00:00:00").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
     }
 
     @Test
-    void getErrors_条件無しならfindAllへ委譲する() {
-        Pageable pageable = PageRequest.of(0, 20);
-        when(service.findAll(pageable)).thenReturn(Page.empty());
+    void getErrors_url指定で絞る() throws Exception {
+        saveError("e1", "ERROR", "https://a.example", AT);
+        saveError("e2", "ERROR", "https://b.example", AT);
 
-        controller().getErrors(null, null, null, null, pageable);
+        getErrors("admin", "?url=https://b.example").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].message").value("e2"));
+    }
 
-        verify(service).findAll(pageable);
+    @Test
+    void getErrors_条件無しなら全件を返す() throws Exception {
+        saveError("e1", "ERROR", "u", AT);
+        saveError("e2", "WARN", "u", AT);
+
+        getErrors("admin", "").andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
     }
 }

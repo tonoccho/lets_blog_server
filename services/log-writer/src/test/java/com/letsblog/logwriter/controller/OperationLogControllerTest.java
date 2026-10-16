@@ -1,176 +1,162 @@
 package com.letsblog.logwriter.controller;
 
-import com.letsblog.logwriter.domain.OperationLog;
-import com.letsblog.logwriter.dto.OperationLogRequest;
-import com.letsblog.logwriter.dto.OperationLogResponse;
-import com.letsblog.logwriter.dto.UnifiedLogEntryResponse;
-import com.letsblog.logwriter.service.CurrentActorService;
-import com.letsblog.logwriter.service.ForbiddenException;
-import com.letsblog.logwriter.service.OperationLogService;
-import com.letsblog.logwriter.service.UnifiedOperationLogService;
+import com.letsblog.common.messaging.LogExchanges;
+import com.letsblog.common.messaging.OperationLogMessage;
+import com.letsblog.common.testfixtures.JwtTestFixtures;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import java.time.LocalDateTime;
-import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.ResultActions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@ExtendWith(MockitoExtension.class)
-class OperationLogControllerTest {
+/**
+ * /api/operation-logs(issue #1829で書き直し)。コントローラ・各サービス・認可・リポジトリは実物(実 MySQL)で、
+ * 外部との通信は identity-service と ai-service(HTTP のフェイク)、MQ への発行(RabbitTemplate)、JWT の復号(JwtDecoder)だけ。
+ */
+class OperationLogControllerTest extends LogWriterIntegrationTestBase {
 
-    @Mock
-    private OperationLogService service;
+    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 1, 0, 0);
 
-    @Mock
-    private UnifiedOperationLogService unifiedOperationLogService;
+    @BeforeEach
+    void users() {
+        login("admin", "sub-admin", 1L, "admin");
+        login("user", "sub-user", 2L, "editor");
+        // JWT は有効だが identity-service が操作者を解決できない(未登録のトークン = 401)ユーザー。
+        when(jwtDecoder.decode("ghost")).thenReturn(JwtTestFixtures.jwt("sub-ghost", "editor"));
+        HTTP.json("GET", "/api/generation-jobs", "[]");
+    }
 
-    @Mock
-    private CurrentActorService currentActorService;
+    private ResultActions fetch(String token, String path) throws Exception {
+        return mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+    }
 
-    private OperationLogController controller() {
-        return new OperationLogController(service, unifiedOperationLogService, currentActorService);
+    private ResultActions record(String token) throws Exception {
+        return mockMvc.perform(post("/api/operation-logs")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"operationId\":\"op-1\",\"method\":\"GET\",\"path\":\"/api/sites\","
+                        + "\"statusCode\":200,\"durationMs\":42,\"success\":true}"));
     }
 
     @Test
-    void record_actorが解決できればuserIdで保存する() {
-        OperationLogController controller = controller();
-        when(currentActorService.tryGetCurrentActorId()).thenReturn(1L);
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
-        OperationLogRequest request = new OperationLogRequest("op-1", "GET", "/api/sites", 200, 42L, true, null);
+    void record_actorが解決できればuserIdで記録する() throws Exception {
+        record("user").andExpect(status().isCreated());
 
-        ResponseEntity<Void> response = controller.record(request);
-
-        assertEquals(HttpStatus.CREATED, response.getStatusCode());
-        ArgumentCaptor<OperationLog> captor = ArgumentCaptor.forClass(OperationLog.class);
-        verify(service, times(1)).record(captor.capture());
-        assertEquals(1L, captor.getValue().getUserId());
-        assertEquals("keycloak-sub-1", captor.getValue().getActorKeycloakSub());
-        assertEquals("op-1", captor.getValue().getOperationId());
+        ArgumentCaptor<OperationLogMessage> captor = ArgumentCaptor.forClass(OperationLogMessage.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.OPERATION_LOG_ROUTING_KEY), captor.capture());
+        assertEquals(2L, captor.getValue().userId());
+        assertEquals("sub-user", captor.getValue().actorKeycloakSub());
+        assertEquals("op-1", captor.getValue().operationId());
+        assertEquals(42L, captor.getValue().durationMs());
     }
 
     @Test
-    void record_未ログインならUnauthorizedを返す() {
-        OperationLogController controller = controller();
-        when(currentActorService.tryGetCurrentActorId()).thenReturn(null);
-        OperationLogRequest request = new OperationLogRequest("op-1", "GET", "/api/sites", 200, 42L, true, null);
+    void record_所要時間が無ければ0で記録する() throws Exception {
+        mockMvc.perform(post("/api/operation-logs")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"operationId\":\"op-2\",\"method\":\"GET\",\"path\":\"/api/x\",\"success\":false}"))
+                .andExpect(status().isCreated());
 
-        ResponseEntity<Void> response = controller.record(request);
-
-        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        ArgumentCaptor<OperationLogMessage> captor = ArgumentCaptor.forClass(OperationLogMessage.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.OPERATION_LOG_ROUTING_KEY), captor.capture());
+        assertEquals(0L, captor.getValue().durationMs());
     }
 
     @Test
-    void list_本人のログのみ取得する() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
-        Pageable pageable = PageRequest.of(0, 20);
-        Page<OperationLog> page = new PageImpl<>(List.of(new OperationLog()));
-        when(service.findByUser(1L, pageable)).thenReturn(page);
+    void record_操作者を解決できなければUnauthorizedで記録しない() throws Exception {
+        record("ghost").andExpect(status().isUnauthorized());
 
-        Page<OperationLogResponse> result = controller.list(pageable);
-
-        assertEquals(1, result.getTotalElements());
-        verify(service).findByUser(1L, pageable);
+        verifyNoInteractions(rabbitTemplate);
     }
 
     @Test
-    void list_未ログインならForbidden() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(null);
-        Pageable pageable = PageRequest.of(0, 20);
+    void list_本人のログのみ取得する() throws Exception {
+        saveOperation(2L, "mine", "GET", "/a", 1L, AT);
+        saveOperation(1L, "theirs", "GET", "/b", 1L, AT);
 
-        assertThrows(ForbiddenException.class, () -> controller.list(pageable));
+        fetch("user", "/api/operation-logs").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].operationId").value("mine"));
     }
 
     @Test
-    void trace_operationIdに紐づくログを昇順で取得する() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
-        when(service.findTrace(1L, "op-1")).thenReturn(List.of(new OperationLog()));
-
-        List<OperationLogResponse> result = controller.trace("op-1");
-
-        assertEquals(1, result.size());
-        verify(service).findTrace(1L, "op-1");
+    void list_操作者を解決できなければForbidden() throws Exception {
+        fetch("ghost", "/api/operation-logs").andExpect(status().isForbidden());
     }
 
     @Test
-    void trace_adminなら利用者を問わずoperationIdの全行を取得する() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
-        when(currentActorService.isAdmin()).thenReturn(true);
-        when(service.findTraceAsAdmin("op-other")).thenReturn(List.of(new OperationLog(), new OperationLog()));
+    void trace_operationIdに紐づく本人のログを昇順で取得する() throws Exception {
+        saveOperation(2L, "op-1", "POST", "/second", 1L, AT.plusSeconds(1));
+        saveOperation(2L, "op-1", "GET", "/first", 1L, AT);
+        saveOperation(1L, "op-1", "GET", "/theirs", 1L, AT);
 
-        List<OperationLogResponse> result = controller.trace("op-other");
-
-        assertEquals(2, result.size());
-        verify(service).findTraceAsAdmin("op-other");
-        verify(service, never()).findTrace(any(), any());
+        fetch("user", "/api/operation-logs/op-1").andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].path").value("/first"))
+                .andExpect(jsonPath("$[1].path").value("/second"));
     }
 
     @Test
-    void trace_未ログインならForbidden() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(null);
+    void trace_adminなら利用者を問わずoperationIdの全行を取得する() throws Exception {
+        saveOperation(2L, "op-other", "GET", "/a", 1L, AT);
+        saveOperation(3L, "op-other", "GET", "/b", 1L, AT.plusSeconds(1));
 
-        assertThrows(ForbiddenException.class, () -> controller.trace("op-1"));
+        fetch("admin", "/api/operation-logs/op-other").andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
     }
 
     @Test
-    void listUnified_ログイン中ユーザーのadmin区分を渡して統合サービスへ委譲する() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
-        when(currentActorService.isAdmin()).thenReturn(true);
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer test-token");
-        Pageable pageable = PageRequest.of(0, 20);
-        Page<UnifiedLogEntryResponse> page = new PageImpl<>(List.of());
-        when(unifiedOperationLogService.list(1L, true, "AI_JOB", "draft", null, null, pageable, "Bearer test-token"))
-                .thenReturn(page);
-
-        Page<UnifiedLogEntryResponse> result = controller.listUnified("AI_JOB", "draft", null, null, pageable);
-
-        assertEquals(page, result);
+    void trace_操作者を解決できなければForbidden() throws Exception {
+        fetch("ghost", "/api/operation-logs/op-1").andExpect(status().isForbidden());
     }
 
     @Test
-    void listUnified_未ログインならForbidden() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(null);
-        Pageable pageable = PageRequest.of(0, 20);
+    void listUnified_ログイン中ユーザーのadmin区分に従い呼び出し元のトークンをai_serviceへ転送する() throws Exception {
+        saveOperation(1L, "op-a", "GET", "/api/draft", 1L, AT);
+        saveAudit(9L, "LOGIN", null, null, "127.0.0.1", AT.plusMinutes(1));
+        HTTP.json("GET", "/api/generation-jobs",
+                "[{\"id\":5,\"type\":\"draft\",\"status\":\"done\",\"createdAt\":\"2026-10-01T00:02:00\",\"updatedAt\":null}]");
 
-        assertThrows(ForbiddenException.class, () -> controller.listUnified(null, null, null, null, pageable));
+        fetch("admin", "/api/operation-logs/unified?type=AI_JOB&q=draft").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].sourceType").value("AI_JOB"));
+        fetch("admin", "/api/operation-logs/unified").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+        fetch("user", "/api/operation-logs/unified").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        assertEquals("Bearer admin", HTTP.requests("GET", "/api/generation-jobs").get(0).header("Authorization"));
     }
 
     @Test
-    void listUnified_日時の範囲をサービスへそのまま渡す() {
-        OperationLogController controller = controller();
-        when(currentActorService.getCurrentActorId()).thenReturn(1L);
-        when(currentActorService.isAdmin()).thenReturn(false);
-        when(currentActorService.getAuthorizationHeader()).thenReturn("Bearer test-token");
-        Pageable pageable = PageRequest.of(0, 20);
-        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
-        LocalDateTime end = LocalDateTime.of(2026, 1, 2, 0, 0);
-        Page<UnifiedLogEntryResponse> page = new PageImpl<>(List.of());
-        when(unifiedOperationLogService.list(1L, false, null, null, start, end, pageable, "Bearer test-token"))
-                .thenReturn(page);
+    void listUnified_操作者を解決できなければForbidden() throws Exception {
+        fetch("ghost", "/api/operation-logs/unified").andExpect(status().isForbidden());
+    }
 
-        Page<UnifiedLogEntryResponse> result = controller.listUnified(null, null, start, end, pageable);
+    @Test
+    void listUnified_日時の範囲で絞る() throws Exception {
+        saveOperation(2L, "in", "GET", "/in", 1L, AT.plusHours(1));
+        saveOperation(2L, "out", "GET", "/out", 1L, AT.plusDays(3));
 
-        assertEquals(page, result);
+        fetch("user", "/api/operation-logs/unified?startDate=2026-10-01T00:00:00&endDate=2026-10-02T00:00:00")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("GET /in"));
     }
 }

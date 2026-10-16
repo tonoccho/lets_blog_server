@@ -1,6 +1,5 @@
 package com.letsblog.logwriter.integration;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract;
 import com.letsblog.common.testfixtures.AuthorizationMatrixContract.Endpoint;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
@@ -54,9 +53,6 @@ class AuthorizationMatrixIntegrationTest {
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
 
     /**
      * log-writerがgateway経由で外部へ公開している全エンドポイント(gatewayの{@code log}ルート:

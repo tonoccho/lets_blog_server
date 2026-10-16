@@ -1,55 +1,71 @@
 package com.letsblog.logwriter.service;
 
+import com.letsblog.logwriter.domain.OperationLog;
 import com.letsblog.logwriter.dto.OperationStat;
-import com.letsblog.logwriter.dto.RouteDurationRow;
 import com.letsblog.logwriter.dto.RouteStat;
-import com.letsblog.logwriter.repository.OperationLogRepository;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
-/** issue #1471: 操作ログの集計(ルート別・操作別)。 */
-@ExtendWith(MockitoExtension.class)
-class OperationLogStatsServiceTest {
+/**
+ * issue #1471: 操作ログの集計(ルート別・操作別)。issue #1829で、リポジトリのモックをやめて実 MySQL の行を集計する形にした
+ * (期間の絞り込みと GROUP BY は実際の JPQL が行う)。
+ */
+class OperationLogStatsServiceTest extends LogWriterIntegrationTestBase {
 
     private static final LocalDateTime START = LocalDateTime.of(2026, 10, 1, 0, 0);
     private static final LocalDateTime END = LocalDateTime.of(2026, 10, 2, 0, 0);
     private static final String UUID_A = "123e4567-e89b-12d3-a456-426614174000";
 
-    @Mock
-    private OperationLogRepository repository;
-
+    @Autowired
     private OperationLogStatsService service;
 
-    @BeforeEach
-    void setUp() {
-        service = new OperationLogStatsService(repository);
-    }
+    private int rowSeq;
 
-    private static RouteDurationRow row(String method, String path, long ms) {
-        return new RouteDurationRow(method, path, ms);
-    }
-
-    private static List<RouteDurationRow> rows(String method, String path, long... durations) {
-        List<RouteDurationRow> list = new ArrayList<>();
+    /** START〜END の中に、同じ method/path で各 duration の行を入れる(operationId は行ごとに別)。 */
+    private void rows(String method, String path, long... durations) {
+        List<OperationLog> rows = new ArrayList<>();
         for (long d : durations) {
-            list.add(row(method, path, d));
+            OperationLog row = new OperationLog();
+            row.setOperationId("row-" + rowSeq++);
+            row.setUserId(1L);
+            row.setMethod(method);
+            row.setPath(path);
+            row.setStatusCode(200);
+            row.setDurationMs(d);
+            row.setSuccess(true);
+            row.setCreatedAt(START.plusHours(1));
+            rows.add(row);
         }
-        return list;
+        operationLogRepository.saveAll(rows);
     }
 
-    private static OperationStat op(String id, long total, long calls, int minute, Long userId) {
-        return new OperationStat(id, total, calls, START.plusMinutes(minute), userId);
+    /**
+     * operationId が id の行を calls 行入れる。durationMs の合計が total、最初の行の時刻が START+minute 分、
+     * userId が userId になる(1 行目に残りの時間を載せ、他は 1ms)。
+     */
+    private void op(String id, long total, long calls, int minute, Long userId) {
+        List<OperationLog> rows = new ArrayList<>();
+        for (int i = 0; i < calls; i++) {
+            OperationLog row = new OperationLog();
+            row.setOperationId(id);
+            row.setUserId(userId);
+            row.setMethod("GET");
+            row.setPath("/p");
+            row.setStatusCode(200);
+            row.setDurationMs(i == 0 ? total - (calls - 1) : 1L);
+            row.setSuccess(true);
+            row.setCreatedAt(START.plusMinutes(minute).plusSeconds(i));
+            rows.add(row);
+        }
+        operationLogRepository.saveAll(rows);
     }
 
     // ---- normalizePath ----
@@ -105,10 +121,8 @@ class OperationLogStatsServiceTest {
 
     @Test
     void routeStats_正規化したルートごとに件数とp50とp95と最大を返す() {
-        List<RouteDurationRow> all = new ArrayList<>();
-        all.addAll(rows("GET", "/api/projects/12/posts?page=2", 40, 10));
-        all.addAll(rows("GET", "/api/projects/34/posts", 30, 20));
-        when(repository.findRouteDurations(START, END)).thenReturn(all);
+        rows("GET", "/api/projects/12/posts?page=2", 40, 10);
+        rows("GET", "/api/projects/34/posts", 30, 20);
 
         List<RouteStat> result = service.routeStats(START, END, null, null, null);
 
@@ -124,21 +138,17 @@ class OperationLogStatsServiceTest {
 
     @Test
     void routeStats_methodが違えば別の行になる() {
-        List<RouteDurationRow> all = new ArrayList<>();
-        all.addAll(rows("GET", "/api/sites", 10));
-        all.addAll(rows("POST", "/api/sites", 20));
-        when(repository.findRouteDurations(START, END)).thenReturn(all);
+        rows("GET", "/api/sites", 10);
+        rows("POST", "/api/sites", 20);
 
         assertEquals(2, service.routeStats(START, END, null, null, null).size());
     }
 
     private void stubThreeRoutes() {
-        List<RouteDurationRow> all = new ArrayList<>();
-        all.addAll(rows("GET", "/a", 100));          // p95=100 count=1
-        all.addAll(rows("GET", "/b", 100, 100));     // p95=100 count=2
-        all.addAll(rows("GET", "/c", 300));          // p95=300 count=1
-        all.addAll(rows("GET", "/d", 5, 5, 5));      // p95=5   count=3
-        when(repository.findRouteDurations(START, END)).thenReturn(all);
+        rows("GET", "/a", 100);          // p95=100 count=1
+        rows("GET", "/b", 100, 100);     // p95=100 count=2
+        rows("GET", "/c", 300);          // p95=300 count=1
+        rows("GET", "/d", 5, 5, 5);      // p95=5   count=3
     }
 
     @Test
@@ -152,11 +162,9 @@ class OperationLogStatsServiceTest {
 
     @Test
     void routeStats_同値で件数も同じならmethodとパスの昇順() {
-        List<RouteDurationRow> all = new ArrayList<>();
-        all.addAll(rows("POST", "/x", 10));
-        all.addAll(rows("GET", "/z", 10));
-        all.addAll(rows("GET", "/y", 10));
-        when(repository.findRouteDurations(START, END)).thenReturn(all);
+        rows("POST", "/x", 10);
+        rows("GET", "/z", 10);
+        rows("GET", "/y", 10);
 
         List<String> keys = service.routeStats(START, END, "p95", "desc", null).stream()
                 .map(s -> s.method() + " " + s.path()).toList();
@@ -175,10 +183,8 @@ class OperationLogStatsServiceTest {
 
     @Test
     void routeStats_p50と最大でも並べ替えられる() {
-        List<RouteDurationRow> all = new ArrayList<>();
-        all.addAll(rows("GET", "/low-p50-high-max", 1, 1, 1, 900));  // p50=1 max=900
-        all.addAll(rows("GET", "/high-p50-low-max", 50, 50, 50, 60)); // p50=50 max=60
-        when(repository.findRouteDurations(START, END)).thenReturn(all);
+        rows("GET", "/low-p50-high-max", 1, 1, 1, 900);  // p50=1 max=900
+        rows("GET", "/high-p50-low-max", 50, 50, 50, 60); // p50=50 max=60
 
         assertEquals("/high-p50-low-max", service.routeStats(START, END, "p50", "desc", null).get(0).path());
         assertEquals("/low-p50-high-max", service.routeStats(START, END, "max", "desc", null).get(0).path());
@@ -197,11 +203,9 @@ class OperationLogStatsServiceTest {
 
     @Test
     void routeStats_既定の上限は100行() {
-        List<RouteDurationRow> all = new ArrayList<>();
         for (int i = 0; i < 150; i++) {
-            all.add(row("GET", "/r" + i, i));
+            rows("GET", "/r" + i, i);
         }
-        when(repository.findRouteDurations(START, END)).thenReturn(all);
 
         assertEquals(100, service.routeStats(START, END, null, null, null).size());
     }
@@ -220,12 +224,11 @@ class OperationLogStatsServiceTest {
     // ---- operationStats ----
 
     private void stubOperations() {
-        when(repository.aggregateOperations(START, END)).thenReturn(List.of(
-                op("op-b", 500, 2, 5, 1L),
-                op("op-a", 500, 3, 5, 2L),
-                op("op-c", 500, 1, 9, 3L),
-                op("op-d", 900, 4, 1, 1L),
-                op("op-e", 100, 9, 2, null)));
+        op("op-b", 500, 2, 5, 1L);
+        op("op-a", 500, 3, 5, 2L);
+        op("op-c", 500, 1, 9, 3L);
+        op("op-d", 900, 4, 1, 1L);
+        op("op-e", 100, 9, 2, null);
     }
 
     @Test
@@ -259,11 +262,9 @@ class OperationLogStatsServiceTest {
 
     @Test
     void operationStats_既定の上限は100行() {
-        List<OperationStat> all = new ArrayList<>();
         for (int i = 0; i < 130; i++) {
-            all.add(op("op-" + i, i, 1, 0, 1L));
+            op("op-" + i, i, 1, 0, 1L);
         }
-        when(repository.aggregateOperations(START, END)).thenReturn(all);
 
         assertEquals(100, service.operationStats(START, END, null, null, null).size());
     }
@@ -275,5 +276,35 @@ class OperationLogStatsServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.operationStats(START, END, null, null, -1));
         assertThrows(IllegalArgumentException.class, () -> service.operationStats(END, START, null, null, null));
         assertThrows(IllegalArgumentException.class, () -> service.operationStats(null, null, null, null, null));
+    }
+
+    // ---- 期間の絞り込み(実 MySQL の between) ----
+
+    private void rowAt(String path, LocalDateTime at) {
+        saveOperation(1L, "edge-" + rowSeq++, "GET", path, 10L, at);
+    }
+
+    @Test
+    void routeStats_期間の端を含み_期間外の行は集計しない() {
+        rowAt("/edge-start", START);
+        rowAt("/edge-end", END);
+        rowAt("/before", START.minusSeconds(1));
+        rowAt("/after", END.plusSeconds(1));
+
+        List<String> paths = service.routeStats(START, END, "count", "asc", null).stream()
+                .map(RouteStat::path).sorted().toList();
+
+        assertEquals(List.of("/edge-end", "/edge-start"), paths);
+    }
+
+    @Test
+    void operationStats_期間外の行は集計しない() {
+        saveOperation(1L, "inside", "GET", "/a", 10L, START.plusHours(1));
+        saveOperation(1L, "outside", "GET", "/a", 10L, END.plusHours(1));
+
+        List<String> ids = service.operationStats(START, END, null, null, null).stream()
+                .map(OperationStat::operationId).toList();
+
+        assertEquals(List.of("inside"), ids);
     }
 }

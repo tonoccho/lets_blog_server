@@ -1,34 +1,22 @@
 package com.letsblog.logwriter.integration;
 
-import com.letsblog.common.client.ActorProfile;
-import com.letsblog.common.client.IdentityClient;
-import com.letsblog.common.testfixtures.JwtTestFixtures;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,11 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 受け入れ環境の{@code lbs_log}へ大量投入すると他シナリオと30日削除に干渉するため、
  * Gherkinではなくここで行う。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
 @DisplayName("操作ログ集計API: 認可と10,000行の性能(issue #1471)")
-class OperationLogStatsIntegrationTest {
+class OperationLogStatsIntegrationTest extends LogWriterIntegrationTestBase {
 
     private static final String PREFIX = "stats1471-";
     private static final String START = "2001-01-01T00:00:00";
@@ -51,30 +36,16 @@ class OperationLogStatsIntegrationTest {
     private static final int ROWS = 10_000;
     private static final long BUDGET_MS = 3_000;
 
-    @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private JdbcTemplate jdbc;
-
-    @Autowired
+    @org.springframework.beans.factory.annotation.Autowired
     private PlatformTransactionManager transactionManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
     @BeforeEach
     void seed() {
         // Authorizationヘッダーは認証フィルタ(JwtDecoder)とCurrentActorService(identity-service照会)の双方が読む。
-        when(jwtDecoder.decode("admin")).thenReturn(JwtTestFixtures.jwt("sub-admin", "admin"));
-        when(jwtDecoder.decode("user")).thenReturn(JwtTestFixtures.jwt("sub-user", "user"));
-        when(identityClient.lookupProfile("Bearer admin")).thenReturn(Optional.of(new ActorProfile(1L, "admin")));
-        when(identityClient.lookupProfile("Bearer user")).thenReturn(Optional.of(new ActorProfile(2L, "user")));
+        login("admin", "sub-admin", 1L, "admin");
+        login("user", "sub-user", 2L, "user");
         cleanup();
         String[] paths = {
                 "/api/projects/%d/posts?page=2", "/api/projects/%d/posts", "/api/sites/%d",

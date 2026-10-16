@@ -1,35 +1,46 @@
 package com.letsblog.logwriter.service;
 
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
-class AdminAuthorizationServiceTest {
+/** AdminAuthorizationService(issue #1829で書き直し)。CurrentActorService・IdentityClient は実物で、identity-service は HTTP のフェイク。 */
+class AdminAuthorizationServiceTest extends LogWriterIntegrationTestBase {
 
-    @Mock
-    private CurrentActorService currentActorService;
-
-    private AdminAuthorizationService service() {
-        return new AdminAuthorizationService(currentActorService);
-    }
+    @Autowired
+    private AdminAuthorizationService service;
 
     @Test
     void requireAdmin_adminなら例外を投げない() {
-        when(currentActorService.isAdmin()).thenReturn(true);
+        actor("admin-token", 1L, "admin");
+        asBearer("admin-token");
 
-        assertDoesNotThrow(() -> service().requireAdmin());
+        assertDoesNotThrow(() -> service.requireAdmin());
     }
 
     @Test
     void requireAdmin_admin以外はForbidden() {
-        when(currentActorService.isAdmin()).thenReturn(false);
+        actor("user-token", 2L, "editor");
+        asBearer("user-token");
 
-        assertThrows(ForbiddenException.class, () -> service().requireAdmin());
+        assertThrows(ForbiddenException.class, () -> service.requireAdmin());
+    }
+
+    @Test
+    void requireAdmin_未認証はForbidden() {
+        asBearer(null);
+
+        assertThrows(ForbiddenException.class, () -> service.requireAdmin());
+    }
+
+    @Test
+    void requireAdmin_identityService障害はForbiddenへ縮退させず伝播する() {
+        HTTP.status("GET", "/api/identity/me", 404, "{}");
+        asBearer("admin-token");
+
+        assertThrows(IdentityServiceUnavailableException.class, () -> service.requireAdmin());
     }
 }

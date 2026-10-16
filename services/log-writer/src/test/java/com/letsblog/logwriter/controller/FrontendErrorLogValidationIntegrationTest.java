@@ -1,23 +1,14 @@
 package com.letsblog.logwriter.controller;
 
-import com.letsblog.common.client.IdentityClient;
 import com.letsblog.common.testfixtures.JwtTestFixtures;
-import com.letsblog.logwriter.domain.FrontendErrorLog;
-import com.letsblog.logwriter.service.FrontendErrorLogService;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,25 +18,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 到達しないことを確認する。AuthorizationMatrixIntegrationTest(#772)と同じ、認証ゲート込みの
  * {@code @SpringBootTest}+MockMvcスタイル(このエンドポイントは認証必須・認可不要、issue #830参照)。
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
-class FrontendErrorLogValidationIntegrationTest {
-
-    @Autowired
-    private MockMvc mockMvc;
-
-    @MockitoBean
-    private JwtDecoder jwtDecoder;
-
-    @MockitoBean
-    private IdentityClient identityClient;
-
-    @MockitoBean
-    private FrontendErrorLogService frontendErrorLogService;
+class FrontendErrorLogValidationIntegrationTest extends LogWriterIntegrationTestBase {
 
     @Test
-    @DisplayName("issue #1059 AC1: messageが無いと400になり、サービス(≒キュー発行)に到達しない")
+    @DisplayName("issue #1059 AC1: messageが無いと400になり、キューへ発行されない")
     void messageが無いと400になりキューに到達しない() throws Exception {
         String body = "{\"level\":\"ERROR\"}";
 
@@ -55,11 +31,11 @@ class FrontendErrorLogValidationIntegrationTest {
                         .content(body))
                 .andExpect(status().isBadRequest());
 
-        verify(frontendErrorLogService, never()).logError(any(FrontendErrorLog.class));
+        verifyNoInteractions(rabbitTemplate);
     }
 
     @Test
-    @DisplayName("issue #1059 AC2: messageがTEXT上限を超えると400になり、サービス(≒キュー発行)に到達しない")
+    @DisplayName("issue #1059 AC2: messageがTEXT上限を超えると400になり、キューへ発行されない")
     void messageがTEXT上限を超えると400になりキューに到達しない() throws Exception {
         String tooLong = "a".repeat(65536);
         String body = "{\"level\":\"ERROR\",\"message\":\"" + tooLong + "\"}";
@@ -70,7 +46,7 @@ class FrontendErrorLogValidationIntegrationTest {
                         .content(body))
                 .andExpect(status().isBadRequest());
 
-        verify(frontendErrorLogService, never()).logError(any(FrontendErrorLog.class));
+        verifyNoInteractions(rabbitTemplate);
     }
 
     @Test
@@ -84,6 +60,6 @@ class FrontendErrorLogValidationIntegrationTest {
                         .content(body))
                 .andExpect(status().isCreated());
 
-        verify(frontendErrorLogService).logError(any(FrontendErrorLog.class));
+        verify(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
     }
 }

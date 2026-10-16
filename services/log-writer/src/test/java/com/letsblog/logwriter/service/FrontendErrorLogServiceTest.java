@@ -3,14 +3,14 @@ package com.letsblog.logwriter.service;
 import com.letsblog.common.messaging.ErrorLogMessage;
 import com.letsblog.common.messaging.LogExchanges;
 import com.letsblog.logwriter.domain.FrontendErrorLog;
-import com.letsblog.logwriter.repository.FrontendErrorLogRepository;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.AmqpException;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -18,23 +18,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
-class FrontendErrorLogServiceTest {
+/**
+ * FrontendErrorLogService(issue #1829で書き直し)。CurrentActorService・リポジトリは実物(実 MySQL)で、
+ * 外部との通信は RabbitMQ への発行({@code RabbitTemplate})と identity-service(HTTP のフェイク)だけ。
+ */
+class FrontendErrorLogServiceTest extends LogWriterIntegrationTestBase {
 
-    @Mock
-    private FrontendErrorLogRepository repository;
+    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 1, 12, 0);
 
-    @Mock
-    private RabbitTemplate rabbitTemplate;
-
-    @Mock
-    private CurrentActorService currentActorService;
-
+    @Autowired
     private FrontendErrorLogService service;
 
     private FrontendErrorLog errorLog() {
@@ -42,55 +36,114 @@ class FrontendErrorLogServiceTest {
         errorLog.setMessage("boom");
         errorLog.setLevel("ERROR");
         errorLog.setUrl("https://example.com/posts");
+        errorLog.setTimestamp(AT);
         return errorLog;
+    }
+
+    private ErrorLogMessage publishedMessage() {
+        ArgumentCaptor<ErrorLogMessage> captor = ArgumentCaptor.forClass(ErrorLogMessage.class);
+        verify(rabbitTemplate).convertAndSend(
+                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.ERROR_LOG_ROUTING_KEY), captor.capture());
+        return captor.getValue();
+    }
+
+    private void brokerDown() {
+        doThrow(new AmqpException("キュー接続エラー"))
+                .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
     }
 
     @Test
     void logError_キューへ発行できればDBへは直接書き込まない() {
-        service = new FrontendErrorLogService(repository, rabbitTemplate, currentActorService);
-        when(currentActorService.tryGetCurrentActorId()).thenReturn(null);
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn(null);
+        asBearer(null);
 
         service.logError(errorLog());
 
-        ArgumentCaptor<ErrorLogMessage> captor = ArgumentCaptor.forClass(ErrorLogMessage.class);
-        verify(rabbitTemplate).convertAndSend(
-                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.ERROR_LOG_ROUTING_KEY), captor.capture());
-        ErrorLogMessage message = captor.getValue();
+        ErrorLogMessage message = publishedMessage();
         assertEquals("boom", message.message());
         assertEquals("ERROR", message.level());
         assertNotNull(message.createdAt());
+        assertEquals(AT.toString(), message.timestamp());
         assertNull(message.userId());
-        verify(repository, never()).save(any());
+        assertNull(message.actorKeycloakSub());
+        assertEquals(0, frontendErrorLogRepository.count());
+    }
+
+    @Test
+    void logError_timestampが無ければメッセージのtimestampもnull() {
+        asBearer(null);
+        FrontendErrorLog errorLog = errorLog();
+        errorLog.setTimestamp(null);
+
+        service.logError(errorLog);
+
+        assertNull(publishedMessage().timestamp());
+    }
+
+    @Test
+    void logError_作成日時が設定済みならそのまま使う() {
+        asBearer(null);
+        FrontendErrorLog errorLog = errorLog();
+        errorLog.setCreatedAt(AT.minusDays(1));
+
+        service.logError(errorLog);
+
+        assertEquals(AT.minusDays(1).toString(), publishedMessage().createdAt());
     }
 
     @Test
     void logError_actorが解決できればuserIdとactorKeycloakSubを設定する() {
-        service = new FrontendErrorLogService(repository, rabbitTemplate, currentActorService);
-        when(currentActorService.tryGetCurrentActorId()).thenReturn(7L);
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn("keycloak-sub-1");
+        actor("tok", 7L, "editor");
+        asBearer("tok");
+        authenticateAs("keycloak-sub-1");
 
         service.logError(errorLog());
 
-        ArgumentCaptor<ErrorLogMessage> captor = ArgumentCaptor.forClass(ErrorLogMessage.class);
-        verify(rabbitTemplate).convertAndSend(
-                eq(LogExchanges.LOG_EXCHANGE), eq(LogExchanges.ERROR_LOG_ROUTING_KEY), captor.capture());
-        assertEquals(7L, captor.getValue().userId());
-        assertEquals("keycloak-sub-1", captor.getValue().actorKeycloakSub());
+        ErrorLogMessage message = publishedMessage();
+        assertEquals(7L, message.userId());
+        assertEquals("keycloak-sub-1", message.actorKeycloakSub());
+    }
+
+    @Test
+    void logError_identityServiceが落ちていてもuserIdがnullのまま発行する() {
+        HTTP.status("GET", "/api/identity/me", 404, "{}");
+        asBearer("tok");
+        authenticateAs("keycloak-sub-1");
+
+        service.logError(errorLog());
+
+        ErrorLogMessage message = publishedMessage();
+        assertNull(message.userId());
+        assertEquals("keycloak-sub-1", message.actorKeycloakSub());
     }
 
     @Test
     void logError_キュー発行に失敗したら同期DB書き込みへフォールバックする() {
-        service = new FrontendErrorLogService(repository, rabbitTemplate, currentActorService);
-        when(currentActorService.tryGetCurrentActorId()).thenReturn(null);
-        when(currentActorService.getCurrentActorKeycloakSub()).thenReturn(null);
-        doThrow(new AmqpException("キュー接続エラー"))
-                .when(rabbitTemplate).convertAndSend(any(String.class), any(String.class), any(Object.class));
+        actor("tok", 7L, "editor");
+        asBearer("tok");
+        authenticateAs("keycloak-sub-1");
+        brokerDown();
 
         service.logError(errorLog());
 
-        ArgumentCaptor<FrontendErrorLog> captor = ArgumentCaptor.forClass(FrontendErrorLog.class);
-        verify(repository, times(1)).save(captor.capture());
-        assertEquals("boom", captor.getValue().getMessage());
+        List<FrontendErrorLog> saved = frontendErrorLogRepository.findAll();
+        assertEquals(1, saved.size());
+        assertEquals("boom", saved.get(0).getMessage());
+        assertEquals(7L, saved.get(0).getUserId());
+        assertEquals("keycloak-sub-1", saved.get(0).getActorKeycloakSub());
+        assertNotNull(saved.get(0).getCreatedAt());
+    }
+
+    @Test
+    void 読み取り_全件_レベル_期間_URLで絞れる() {
+        saveError("e1", "ERROR", "https://a.example", AT);
+        saveError("e2", "WARN", "https://b.example", AT.plusDays(1));
+        saveError("e3", "ERROR", "https://b.example", AT.plusDays(2));
+        PageRequest page = PageRequest.of(0, 20);
+
+        assertEquals(3, service.findAll(page).getTotalElements());
+        assertEquals(2, service.findByLevel("ERROR", page).getTotalElements());
+        assertEquals(List.of("e2"), service.findByDateRange(AT.plusHours(1), AT.plusDays(1).plusHours(1), page)
+                .map(FrontendErrorLog::getMessage).getContent());
+        assertEquals(2, service.findByUrl("https://b.example", page).getTotalElements());
     }
 }

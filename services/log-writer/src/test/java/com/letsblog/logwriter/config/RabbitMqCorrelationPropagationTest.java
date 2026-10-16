@@ -23,6 +23,7 @@ import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFacto
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.boot.amqp.autoconfigure.RabbitProperties;
 import org.springframework.boot.amqp.autoconfigure.SimpleRabbitListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -53,7 +54,8 @@ class RabbitMqCorrelationPropagationTest {
 
         @Bean
         SimpleRabbitListenerContainerFactoryConfigurer configurer() {
-            return mock(SimpleRabbitListenerContainerFactoryConfigurer.class);
+            // Spring Boot の実物(既定のプロパティ)。ブローカーには接続しない。
+            return new SimpleRabbitListenerContainerFactoryConfigurer(new RabbitProperties());
         }
     }
 

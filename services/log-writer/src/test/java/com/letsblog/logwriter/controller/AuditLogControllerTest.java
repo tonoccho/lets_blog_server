@@ -1,66 +1,77 @@
 package com.letsblog.logwriter.controller;
 
-import com.letsblog.logwriter.domain.AuditLog;
-import com.letsblog.logwriter.dto.AuditLogResponse;
-import com.letsblog.logwriter.service.AdminAuthorizationService;
-import com.letsblog.logwriter.service.AuditLogService;
-import com.letsblog.logwriter.service.ForbiddenException;
-import java.util.List;
+import com.letsblog.logwriter.testsupport.LogWriterIntegrationTestBase;
+import java.time.LocalDateTime;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
+import org.springframework.test.web.servlet.ResultActions;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@ExtendWith(MockitoExtension.class)
-class AuditLogControllerTest {
+/** GET /api/audit-logs(issue #1829で書き直し)。コントローラ・サービス・認可・リポジトリは実物(実 MySQL)で、MockMvc 越しに呼ぶ。 */
+class AuditLogControllerTest extends LogWriterIntegrationTestBase {
 
-    @Mock
-    private AuditLogService auditLogService;
+    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 1, 0, 0);
 
-    @Mock
-    private AdminAuthorizationService adminAuthorizationService;
+    @BeforeEach
+    void users() {
+        login("admin", "sub-admin", 1L, "admin");
+        login("user", "sub-user", 2L, "editor");
+        saveAudit(1L, "USER_CREATED", "USER", 1L, null, AT);
+        saveAudit(2L, "USER_DELETED", "USER", 2L, null, AT.plusDays(1));
+        saveAudit(2L, "LOGIN", null, null, "127.0.0.1", AT.plusDays(2));
+    }
 
-    private AuditLogController controller() {
-        return new AuditLogController(auditLogService, adminAuthorizationService);
+    private ResultActions list(String token, String query) throws Exception {
+        return mockMvc.perform(get("/api/audit-logs" + query).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
     }
 
     @Test
-    void list_admin以外はForbidden() {
-        doThrow(new ForbiddenException("この操作にはadmin権限が必要です"))
-                .when(adminAuthorizationService).requireAdmin();
-
-        assertThrows(ForbiddenException.class, () -> controller().list(null, null, null, null, PageRequest.of(0, 20)));
+    void list_admin以外はForbidden() throws Exception {
+        list("user", "").andExpect(status().isForbidden());
     }
 
     @Test
-    void list_userId指定でfindByUserIdへ委譲する() {
-        Pageable pageable = PageRequest.of(0, 20);
-        Page<AuditLog> page = new PageImpl<>(List.of(new AuditLog()));
-        when(auditLogService.findByUserId(1L, pageable)).thenReturn(page);
-
-        Page<AuditLogResponse> result = controller().list(1L, null, null, null, pageable);
-
-        assertEquals(1, result.getTotalElements());
-        verify(auditLogService).findByUserId(1L, pageable);
+    void list_userId指定ならそのユーザーの行だけを新しい順に返す() throws Exception {
+        list("admin", "?userId=2").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].action").value("LOGIN"))
+                .andExpect(jsonPath("$.content[1].action").value("USER_DELETED"));
     }
 
     @Test
-    void list_フィルタ無指定ならfindAllへ委譲する() {
-        Pageable pageable = PageRequest.of(0, 20);
-        when(auditLogService.findAll(pageable)).thenReturn(Page.empty());
+    void list_action指定ならそのactionの行だけを返す() throws Exception {
+        list("admin", "?action=USER_CREATED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].userId").value(1));
+    }
 
-        controller().list(null, null, null, null, pageable);
+    @Test
+    void list_startDateとendDateが両方あれば期間で絞る() throws Exception {
+        list("admin", "?startDate=2026-10-02T00:00:00&endDate=2026-10-02T23:59:59").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].action").value("USER_DELETED"));
+    }
 
-        verify(auditLogService).findAll(pageable);
+    @Test
+    void list_startDateだけでは期間で絞らず全件を返す() throws Exception {
+        list("admin", "?startDate=2026-10-03T00:00:00").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
+    @Test
+    void list_endDateだけでも期間で絞らず全件を返す() throws Exception {
+        list("admin", "?endDate=2026-10-01T00:00:00").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
+    @Test
+    void list_フィルタ無指定なら全件を新しい順に返す() throws Exception {
+        list("admin", "").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.content[0].action").value("LOGIN"));
     }
 }
