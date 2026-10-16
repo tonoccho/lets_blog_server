@@ -53,4 +53,9 @@ describe('detectBodyCustomTagCompletionContext', () => {
     const result = detectBodyCustomTagCompletionContext(lines, 0, '本文[toc'.length);
     expect(result).toEqual({ prefix: 'toc', replaceStart: 3, replaceEnd: 6 });
   });
+
+  it('カーソル行が文書の行数を超えている場合は空行として扱い、判定しない', () => {
+    const lines = toLines('本文[toc');
+    expect(detectBodyCustomTagCompletionContext(lines, 5, 3)).toBeUndefined();
+  });
 });

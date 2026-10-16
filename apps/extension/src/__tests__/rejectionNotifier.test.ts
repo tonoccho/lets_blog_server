@@ -233,6 +233,24 @@ describe('RejectionPoller', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it('startしていない状態でdisposeしても例外にならず、確認も走らない', () => {
+    const run = jest.fn().mockResolvedValue(undefined);
+    const poller = new RejectionPoller(run, () => 1000);
+    poller.dispose();
+    jest.advanceTimersByTime(5000);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('startしていない状態でrestartすると、即時確認せず新しい間隔で確認を始める', () => {
+    const run = jest.fn().mockResolvedValue(undefined);
+    const poller = new RejectionPoller(run, () => 1000);
+    poller.restart();
+    expect(run).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1000);
+    expect(run).toHaveBeenCalledTimes(1);
+    poller.dispose();
+  });
+
   it('restartは新しい間隔でタイマーを張り直し、即時確認はしない', () => {
     let interval = 1000;
     const run = jest.fn().mockResolvedValue(undefined);

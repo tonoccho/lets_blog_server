@@ -59,4 +59,9 @@ describe('detectFrontMatterCompletionContext', () => {
     const lines = toLines('---\nstatus: draft\n本文');
     expect(detectFrontMatterCompletionContext(lines, 1, 8)).toBeUndefined();
   });
+
+  it('整数でない行番号(行が存在しない)は空行として扱い、判定しない', () => {
+    const lines = toLines('---\nstatus: draft\n---\n本文');
+    expect(detectFrontMatterCompletionContext(lines, 1.5, 3)).toBeUndefined();
+  });
 });

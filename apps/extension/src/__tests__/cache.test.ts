@@ -139,4 +139,10 @@ describe('LruCache', () => {
     cache.clear();
     expect(cache.size).toBe(0);
   });
+
+  it('キーが undefined で上限が 0 のとき、先頭キーを取り出せず破棄を打ち切る(無限ループにならない)', () => {
+    const cache = new LruCache<string>({ maxEntries: 0 });
+    cache.set(undefined as unknown as string, 'A');
+    expect(cache.size).toBe(1);
+  });
 });

@@ -54,6 +54,15 @@ describe('locateContentIssues', () => {
     expect(located[0].startOffset).not.toBe(located[1].startOffset);
   });
 
+  it('originalTextが空の指摘は位置を解決せず除外する(空文字は本文のどこにも一致させない)', () => {
+    const located = locateContentIssues('こんにちは世界', 0, [
+      issue({ originalText: '' }),
+      issue({ originalText: '世界' }),
+    ]);
+    expect(located).toHaveLength(1);
+    expect(located[0].startOffset).toBe('こんにちは'.length);
+  });
+
   it('本文中に存在しないoriginalTextの指摘は除外する', () => {
     const located = locateContentIssues('こんにちは世界', 0, [issue({ originalText: '本文に無い文字列' })]);
     expect(located).toEqual([]);

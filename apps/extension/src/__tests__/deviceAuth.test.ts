@@ -12,12 +12,24 @@ import {
   isRefreshTokenRevoked,
   DEVICE_CLIENT_ID,
 } from '../deviceAuth';
-import { httpRequest } from '../httpClient';
+import { LocalHttpServer, unreachableUrl } from './support/localHttpServer';
 import { ApiError, NetworkError, TimeoutError, isRetryable } from '../errorHandler';
 
-jest.mock('../httpClient', () => ({ httpRequest: jest.fn() }));
+/**
+ * HTTP はテスト内で実際に待ち受けるサーバー(support/localHttpServer.ts)へ通す。
+ * httpClient.ts は差し替えず実物を使う(issue #1839: 外部通信以外はモックしない)。
+ */
+let server: LocalHttpServer;
+let STACK: string;
 
-const mockedRequest = httpRequest as jest.MockedFunction<typeof httpRequest>;
+beforeAll(async () => {
+  server = await LocalHttpServer.start();
+  STACK = server.url;
+});
+
+afterAll(async () => {
+  await server.stop();
+});
 
 describe('realmBaseUrl', () => {
   it('letsBlog.serverUrlからKeycloakのrealmエンドポイントのベースを組み立てる', () => {
@@ -140,46 +152,20 @@ describe('computeExpiresAt', () => {
  * 実HTTPを介さずに(httpClientをモックして)観測する。
  */
 describe('トークンエンドポイントへ送るリクエスト(issue #1098)', () => {
-  interface Recorded {
-    url: string;
-    method: string;
-    body: string;
-  }
-
-  let recorded: Recorded[];
-
-  /** 指定のステータス/本文を返すhttpRequestを仕込み、送られたリクエストを記録する。 */
-  function respondWith(status: number, payload: unknown, text?: () => Promise<string>): void {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({ url, method: options.method, body: String(options.body ?? '') });
-      return {
-        status,
-        ok: status >= 200 && status < 300,
-        statusText: 'Service Unavailable',
-        header: () => undefined,
-        text: text ?? (async () => JSON.stringify(payload)),
-        json: async () => payload,
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
-    });
-  }
-
-  /** httpRequest自体が失敗する(サーバーへ到達できない)状況を仕込む。 */
-  function failWith(error: Error): void {
-    mockedRequest.mockImplementation(async () => {
-      throw error;
-    });
+  /** 指定のステータス/本文を返すよう仕込む。送られたリクエストは server.recorded に残る。 */
+  function respondWith(status: number, payload: unknown, brokenBody = false): void {
+    server.respondWith({ status, body: payload === undefined ? '' : JSON.stringify(payload), brokenBody });
   }
 
   const TOKEN_PAYLOAD = { access_token: 'access-1', refresh_token: 'refresh-1', expires_in: 300 };
 
   beforeEach(() => {
-    recorded = [];
-    mockedRequest.mockReset();
+    server.recorded.length = 0;
+    server.respondWith({ status: 200 });
   });
 
   function bodyOf(index: number): URLSearchParams {
-    return new URLSearchParams(recorded[index].body);
+    return new URLSearchParams(server.recorded[index].body);
   }
 
   describe('scopeの要求(R1)', () => {
@@ -192,9 +178,9 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
         interval: 5,
       });
 
-      await requestDeviceAuthorization('https://stack.test', false, new AbortController().signal);
+      await requestDeviceAuthorization(STACK, false, new AbortController().signal);
 
-      expect(recorded[0].url).toBe('https://stack.test/auth/realms/letsblog/protocol/openid-connect/auth/device');
+      expect(server.recorded[0].path).toBe('/auth/realms/letsblog/protocol/openid-connect/auth/device');
       expect(bodyOf(0).get('scope')).toBe('offline_access');
       expect(bodyOf(0).get('client_id')).toBe(DEVICE_CLIENT_ID);
     });
@@ -203,14 +189,14 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
       respondWith(500, undefined);
 
       await expect(
-        requestDeviceAuthorization('https://stack.test', false, new AbortController().signal)
+        requestDeviceAuthorization(STACK, false, new AbortController().signal)
       ).rejects.toThrow('デバイス認可のリクエストに失敗しました (HTTP 500)');
     });
 
     it('pollForTokenはscopeを送らない(RFC 8628 §3.4のパラメータのみ)', async () => {
       respondWith(200, TOKEN_PAYLOAD);
 
-      await pollForToken('https://stack.test', 'device-abc', false, new AbortController().signal);
+      await pollForToken(STACK, 'device-abc', false, new AbortController().signal);
 
       expect(bodyOf(0).has('scope')).toBe(false);
       expect(bodyOf(0).get('grant_type')).toBe('urn:ietf:params:oauth:grant-type:device_code');
@@ -221,7 +207,7 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
       respondWith(200, TOKEN_PAYLOAD);
 
       await expect(
-        refreshAccessToken('https://stack.test', 'refresh-old', false, new AbortController().signal)
+        refreshAccessToken(STACK, 'refresh-old', false, new AbortController().signal)
       ).resolves.toEqual({ accessToken: 'access-1', refreshToken: 'refresh-1', expiresIn: 300 });
 
       expect(bodyOf(0).has('scope')).toBe(false);
@@ -233,7 +219,7 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
 
   describe('リフレッシュ失敗の分類(R2)', () => {
     async function refreshFailure(): Promise<unknown> {
-      return refreshAccessToken('https://stack.test', 'refresh-old', false, new AbortController().signal).then(
+      return refreshAccessToken(STACK, 'refresh-old', false, new AbortController().signal).then(
         () => {
           throw new Error('例外が投げられませんでした');
         },
@@ -265,9 +251,7 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
     });
 
     it('本文を読めない失敗応答はstatusTextを本文として保持する', async () => {
-      respondWith(503, undefined, async () => {
-        throw new Error('body stream error');
-      });
+      respondWith(503, undefined, true);
 
       const error = await refreshFailure();
 
@@ -276,9 +260,12 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
     });
 
     it('サーバーへ到達できない場合はNetworkErrorを投げ、再試行対象になる', async () => {
-      failWith(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
-
-      const error = await refreshFailure();
+      const error = await refreshAccessToken(await unreachableUrl(), 'refresh-old', false, new AbortController().signal).then(
+        () => {
+          throw new Error('例外が投げられませんでした');
+        },
+        (e: unknown) => e
+      );
 
       expect(error).toBeInstanceOf(NetworkError);
       expect(isRetryable(error)).toBe(true);
@@ -287,14 +274,10 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
 
     it('AbortSignalによる中断はTimeoutErrorを投げ、再試行対象になる', async () => {
       const controller = new AbortController();
-      mockedRequest.mockImplementation(async () => {
-        controller.abort();
-        const aborted = new Error('The operation was aborted');
-        aborted.name = 'AbortError';
-        throw aborted;
-      });
+      server.respondWith({ status: 200, hang: true });
+      setTimeout(() => controller.abort(), 50);
 
-      const error = await refreshAccessToken('https://stack.test', 'refresh-old', false, controller.signal).then(
+      const error = await refreshAccessToken(STACK, 'refresh-old', false, controller.signal).then(
         () => {
           throw new Error('例外が投げられませんでした');
         },
@@ -314,88 +297,55 @@ describe('トークンエンドポイントへ送るリクエスト(issue #1098)
  * (Implementation Notes: 無効なトークンでも200が返る=冪等)。
  */
 describe('revokeRefreshToken(issue #1099)', () => {
-  interface Recorded {
-    url: string;
-    method: string;
-    body: string;
-  }
-
-  let recorded: Recorded[];
-
-  function respondWith(status: number, text?: () => Promise<string>): void {
-    mockedRequest.mockImplementation(async (url, options) => {
-      recorded.push({ url, method: options.method, body: String(options.body ?? '') });
-      return {
-        status,
-        ok: status >= 200 && status < 300,
-        statusText: 'Service Unavailable',
-        header: () => undefined,
-        text: text ?? (async () => ''),
-        json: async () => ({}),
-        arrayBuffer: async () => new ArrayBuffer(0),
-      };
-    });
-  }
-
-  function failWith(error: Error): void {
-    mockedRequest.mockImplementation(async () => {
-      throw error;
-    });
+  function respondWith(status: number, body = '', brokenBody = false): void {
+    server.respondWith({ status, body, brokenBody });
   }
 
   beforeEach(() => {
-    recorded = [];
-    mockedRequest.mockReset();
+    server.recorded.length = 0;
+    server.respondWith({ status: 200 });
   });
 
   it('revocation_endpointへclient_id/token/token_type_hintを送る', async () => {
     respondWith(200);
 
-    await revokeRefreshToken('https://stack.test', 'refresh-old', false, new AbortController().signal);
+    await revokeRefreshToken(STACK, 'refresh-old', false, new AbortController().signal);
 
-    expect(recorded[0].url).toBe('https://stack.test/auth/realms/letsblog/protocol/openid-connect/revoke');
-    const body = new URLSearchParams(recorded[0].body);
+    expect(server.recorded[0].path).toBe('/auth/realms/letsblog/protocol/openid-connect/revoke');
+    const body = new URLSearchParams(server.recorded[0].body);
     expect(body.get('client_id')).toBe(DEVICE_CLIENT_ID);
     expect(body.get('token')).toBe('refresh-old');
     expect(body.get('token_type_hint')).toBe('refresh_token');
   });
 
   it('失敗ステータスはApiErrorを投げる', async () => {
-    respondWith(500, async () => 'server error');
+    respondWith(500, 'server error');
 
     await expect(
-      revokeRefreshToken('https://stack.test', 'refresh-old', false, new AbortController().signal)
+      revokeRefreshToken(STACK, 'refresh-old', false, new AbortController().signal)
     ).rejects.toThrow('Keycloak');
   });
 
   it('サーバーへ到達できない場合はNetworkErrorを投げる', async () => {
-    failWith(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
-
     await expect(
-      revokeRefreshToken('https://stack.test', 'refresh-old', false, new AbortController().signal)
+      revokeRefreshToken(await unreachableUrl(), 'refresh-old', false, new AbortController().signal)
     ).rejects.toBeInstanceOf(NetworkError);
   });
 
   it('AbortSignalによる中断はTimeoutErrorを投げる', async () => {
     const controller = new AbortController();
-    mockedRequest.mockImplementation(async () => {
-      controller.abort();
-      const aborted = new Error('The operation was aborted');
-      aborted.name = 'AbortError';
-      throw aborted;
-    });
+    server.respondWith({ status: 200, hang: true });
+    setTimeout(() => controller.abort(), 50);
 
     await expect(
-      revokeRefreshToken('https://stack.test', 'refresh-old', false, controller.signal)
+      revokeRefreshToken(STACK, 'refresh-old', false, controller.signal)
     ).rejects.toBeInstanceOf(TimeoutError);
   });
 
   it('本文を読めない失敗応答はstatusTextを本文として保持する', async () => {
-    respondWith(503, async () => {
-      throw new Error('body stream error');
-    });
+    respondWith(503, '', true);
 
-    const error = await revokeRefreshToken('https://stack.test', 'refresh-old', false, new AbortController().signal).then(
+    const error = await revokeRefreshToken(STACK, 'refresh-old', false, new AbortController().signal).then(
       () => undefined,
       (e: unknown) => e
     );
