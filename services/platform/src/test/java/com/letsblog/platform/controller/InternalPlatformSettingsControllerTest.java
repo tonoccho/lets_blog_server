@@ -115,4 +115,37 @@ class InternalPlatformSettingsControllerTest {
         assertEquals("https://api.openai.com/v1", response.baseUrl());
         assertEquals("", response.apiKey());
     }
+
+    @Test
+    void gitLabConfig_設定済みなら値とconfiguredをtrueで返す() {
+        when(appSettingService.getGitLabBaseUrl()).thenReturn("https://gitlab.example.com");
+
+        var response = controller().gitLabConfig();
+
+        assertEquals("https://gitlab.example.com", response.baseUrl());
+        assertTrue(response.configured());
+    }
+
+    @Test
+    void gitLabConfig_空文字ならnullとconfiguredをfalseで返す() {
+        when(appSettingService.getGitLabBaseUrl()).thenReturn("");
+
+        var response = controller().gitLabConfig();
+
+        assertNull(response.baseUrl());
+        assertFalse(response.configured());
+    }
+
+    @Test
+    void gitLabConfig_nullまたは空白だけでも未設定として返す() {
+        when(appSettingService.getGitLabBaseUrl()).thenReturn(null, "  ");
+
+        var first = controller().gitLabConfig();
+        var second = controller().gitLabConfig();
+
+        assertNull(first.baseUrl());
+        assertFalse(first.configured());
+        assertNull(second.baseUrl());
+        assertFalse(second.configured());
+    }
 }

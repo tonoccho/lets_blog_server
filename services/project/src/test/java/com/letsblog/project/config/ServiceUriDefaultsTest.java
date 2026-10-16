@@ -35,6 +35,12 @@ class ServiceUriDefaultsTest {
     }
 
     @Test
+    @DisplayName("platform-service-uri の既定値は実在する platform-service を指す(issue #1858)")
+    void platformServiceUriDefaultsToPlatform() {
+        assertThat(load().getProperty("app.platform-service-uri")).isEqualTo("${PLATFORM_SERVICE_URI:http://platform:8080}");
+    }
+
+    @Test
     @DisplayName("どのサービスURIの既定値も撤去済みの legacy-api(api:8080)を指さない")
     void noUriDefaultsToLegacyApi() {
         load().forEach((key, value) -> {

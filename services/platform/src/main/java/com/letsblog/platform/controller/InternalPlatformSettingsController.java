@@ -93,6 +93,20 @@ public class InternalPlatformSettingsController {
         return new ImageGenerationConfigResponse(appSettingService.comfyUiBaseUrl());
     }
 
+    public record GitLabConfigResponse(String baseUrl, boolean configured) {
+    }
+
+    /**
+     * project-serviceのPlatformServiceClientが呼ぶ、GitLabのベースURL(システム設定gitlab_base_url、issue #1858)。
+     * 未設定(空)でも200で、baseUrl=null・configured=falseを返す。
+     */
+    @GetMapping("/api/internal/platform/gitlab-config")
+    public GitLabConfigResponse gitLabConfig() {
+        String baseUrl = appSettingService.getGitLabBaseUrl();
+        boolean configured = baseUrl != null && !baseUrl.isBlank();
+        return new GitLabConfigResponse(configured ? baseUrl : null, configured);
+    }
+
     /** 接続先URL(APIキー方式のプロバイダーはnull)・設定の出所・設定有無。APIキーの値は含まない。 */
     public record ProviderConnectionConfig(String baseUrl, String source, boolean configured) {
     }

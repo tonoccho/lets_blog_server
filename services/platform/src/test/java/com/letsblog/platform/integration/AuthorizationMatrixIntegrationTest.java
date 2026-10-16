@@ -77,6 +77,7 @@ class AuthorizationMatrixIntegrationTest {
                 new Endpoint("GET", "/api/internal/platform/llm-config"),
                 new Endpoint("GET", "/api/internal/platform/image-generation-config"),
                 new Endpoint("GET", "/api/internal/platform/ai-connections-config"),
+                new Endpoint("GET", "/api/internal/platform/gitlab-config"),
                 new Endpoint("GET", "/api/internal/platform/plugin-registrations/resolve"),
 
                 // -- VscodeExtensionController (1、issue #696) --
@@ -168,6 +169,7 @@ class AuthorizationMatrixIntegrationTest {
             "/api/internal/platform/llm-config",
             "/api/internal/platform/image-generation-config",
             "/api/internal/platform/ai-connections-config",
+            "/api/internal/platform/gitlab-config",
             "/api/internal/platform/plugin-registrations/resolve"
     })
     @DisplayName("内部ブリッジ /api/internal/platform/** は未認証なら401(issue #742)")

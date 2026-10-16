@@ -102,6 +102,8 @@ app:
   # 操作者解決(CurrentActorService)の呼び出し先。issue #583で project_users の所有権が
   # legacy-api から identity-service へ移ったため、legacy-api-uri は不要になった。
   identity-service-uri: ${IDENTITY_SERVICE_URI:http://identity:8080}
+  # システム設定(gitlab_base_url)を読む platform-service の内部ブリッジの呼び出し先(issue #1858)。
+  platform-service-uri: ${PLATFORM_SERVICE_URI:http://platform:8080}
   # 組み込みタグのデザインCSS/HTMLテンプレートのAI生成(TagDesignGenerationService)の呼び出し先。
   # 既定値を http://ai:8080 にしている理由(issue #825 / #1484): 撤去済みのlegacy-api(http://api:8080)を
   # 指したままだと、環境変数未設定時に呼び出しが静かに失敗する(#825で実際に起きた事象。#827により

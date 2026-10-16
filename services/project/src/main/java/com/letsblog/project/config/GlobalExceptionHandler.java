@@ -5,6 +5,7 @@ import com.letsblog.project.service.AiServiceGenerationException;
 import com.letsblog.project.service.ForbiddenException;
 import com.letsblog.project.service.GithubTokenNotConfiguredException;
 import com.letsblog.project.service.IdentityServiceUnavailableException;
+import com.letsblog.project.service.PlatformServiceUnavailableException;
 import com.letsblog.project.service.InvalidCustomTagContentException;
 import com.letsblog.project.service.InvalidSiteAdminPathException;
 import com.letsblog.project.service.InvalidSiteNameException;
@@ -127,6 +128,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleIdentityServiceUnavailable(IdentityServiceUnavailableException e) {
         log.warn("legacy-api/identity-serviceへのブリッジ呼び出しに失敗しました: {}", e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ErrorResponse.of(e.getMessage()));
+    }
+
+    /** platform-serviceに届かず設定値を読めない(issue #1858)。理由つきの503。 */
+    @ExceptionHandler(PlatformServiceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handlePlatformServiceUnavailable(PlatformServiceUnavailableException e) {
+        log.warn("platform-serviceの呼び出しに失敗しました: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ErrorResponse.of(e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
